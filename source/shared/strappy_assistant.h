@@ -12,6 +12,11 @@ char *strappy_assistant_send_prompt_and_store(const char *prompt,
                                              const char *env_path,
                                              const char *session_db_path,
                                              char **error_out);
+char *strappy_assistant_send_prompt_and_store_with_id(const char *prompt,
+                                                     const char *env_path,
+                                                     const char *session_db_path,
+                                                     long long *session_id_out,
+                                                     char **error_out);
 
 #ifdef __cplusplus
 }

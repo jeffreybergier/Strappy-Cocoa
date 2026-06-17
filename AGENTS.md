@@ -30,6 +30,10 @@ House style for Strappy source:
 6. `StrappySession.m` is the only Objective-C file that may directly import
    Strappy C headers such as `strappy_client.h` or `strappy_core.h`. Other
    Objective-C files should talk to the C layer through `StrappySession`.
+7. Platform and SDK compatibility `#if` / `#ifdef` checks must live in
+   `XPAppKit`, `XPUIKit`, or `XPFoundation`. Call sites should use XP-prefixed
+   macros, helpers, categories, or types instead of embedding compatibility
+   conditionals directly in feature code.
 
 The iOS App is a bit special because its not sandboxed. It must be installed via
 .deb file, not .ipa file so that it can scan the whole filesystem for SQLite

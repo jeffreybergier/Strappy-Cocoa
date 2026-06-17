@@ -1,6 +1,8 @@
 #import "AppDelegate.h"
 #import "XPUIKit.h"
 #import "AIFontAwesome.h"
+#import "StrappySession.h"
+#import <AltivecCore/AltivecCore.h>
 
 @implementation AppDelegate
 
@@ -9,6 +11,12 @@
 {
   (void)application;
   (void)launchOptions;
+
+  {
+    NSString *cacert = [AltivecCore certPath];
+    NSParameterAssert(cacert);
+    [StrappySession bootstrapProcessWithCACertPath:cacert];
+  }
 
   [AIFontAwesome registerBundledFonts];
 

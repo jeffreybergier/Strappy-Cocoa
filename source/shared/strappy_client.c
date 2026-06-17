@@ -13,6 +13,27 @@ typedef struct strappy_http_buffer {
 } strappy_http_buffer;
 
 static int strappy_curl_initialized = 0;
+static char *strappy_cainfo_path = NULL;
+
+int strappy_client_set_cainfo(const char *path, char **error_out)
+{
+  char *copy;
+
+  if ((path == NULL) || (path[0] == '\0')) {
+    strappy_set_error(error_out, "CA certificate path is not configured.");
+    return 0;
+  }
+
+  copy = strappy_string_duplicate(path);
+  if (copy == NULL) {
+    strappy_set_error(error_out, "Could not allocate CA certificate path.");
+    return 0;
+  }
+
+  free(strappy_cainfo_path);
+  strappy_cainfo_path = copy;
+  return 1;
+}
 
 static int strappy_client_ensure_curl_initialized(char **error_out)
 {
@@ -532,6 +553,9 @@ int strappy_client_send_prompt(const strappy_config *config,
   curl_easy_setopt(curl, CURLOPT_USERAGENT, "Strappy/0.1");
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+  if ((strappy_cainfo_path != NULL) && (strappy_cainfo_path[0] != '\0')) {
+    curl_easy_setopt(curl, CURLOPT_CAINFO, strappy_cainfo_path);
+  }
 
   code = curl_easy_perform(curl);
   if (code == CURLE_OK) {

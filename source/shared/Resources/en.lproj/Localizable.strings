@@ -2,6 +2,16 @@
 
 "Strappy" = "Strappy";
 "Ready to build." = "Ready to build.";
+"No session selected." = "No session selected.";
+"New Session" = "New Session";
+"Start a new conversation" = "Start a new conversation";
+"Untitled Session" = "Untitled Session";
+"Session is not selected." = "Session is not selected.";
+"You" = "You";
+"Agent" = "Agent";
+"Send" = "Send";
+"Sending prompt..." = "Sending prompt...";
+"Prompt failed." = "Prompt failed.";
 
 "About Strappy" = "About Strappy";
 "Hide Strappy" = "Hide Strappy";
@@ -16,6 +26,9 @@
 "Copy" = "Copy";
 "Paste" = "Paste";
 "Select All" = "Select All";
+
+"View" = "View";
+"Toggle Sidebar" = "Toggle Sidebar";
 
 "Window" = "Window";
 "Minimize" = "Minimize";

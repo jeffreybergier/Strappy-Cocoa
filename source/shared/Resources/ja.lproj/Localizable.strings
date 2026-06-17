@@ -2,6 +2,16 @@
 
 "Strappy" = "Strappy";
 "Ready to build." = "ビルド準備完了。";
+"No session selected." = "セッションが選択されていません。";
+"New Session" = "新規セッション";
+"Start a new conversation" = "新しい会話を開始";
+"Untitled Session" = "無題のセッション";
+"Session is not selected." = "セッションが選択されていません。";
+"You" = "あなた";
+"Agent" = "エージェント";
+"Send" = "送信";
+"Sending prompt..." = "プロンプトを送信中...";
+"Prompt failed." = "プロンプトに失敗しました。";
 
 "About Strappy" = "Strappy について";
 "Hide Strappy" = "Strappy を隠す";
@@ -16,6 +26,9 @@
 "Copy" = "コピー";
 "Paste" = "ペースト";
 "Select All" = "すべてを選択";
+
+"View" = "表示";
+"Toggle Sidebar" = "サイドバーの表示切り替え";
 
 "Window" = "ウインドウ";
 "Minimize" = "しまう";

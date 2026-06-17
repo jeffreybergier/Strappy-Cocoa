@@ -1,16 +1,18 @@
 # Altivec Intelligence - Strappy (Mac)
 APP_NAME = Strappy
-SOURCES = main.m AppDelegate.m XPAppKit.m
+SOURCES = main.m AppDelegate.m XPAppKit.m SessionWindowController.m \
+          SessionListViewController.m MessageListViewController.m \
+          PromptSendViewController.m
 INFO_PLIST = Info.plist
 
 SHARED_DIR = ../shared
 ALTIVECCORE_REQUIRED = 1
-ALTIVECCORE_LINKAGE = static
+ALTIVECCORE_LINKAGE = dynamic
 ALTIVECCOCOA_REQUIRED = 1
 ALTIVECCOCOA_LINKAGE = static
 SOURCE_DIRS = $(SHARED_DIR)
 vpath %.m $(SHARED_DIR)
-EXTRA_FLAGS = -I$(SHARED_DIR)
+EXTRA_FLAGS = -I$(SHARED_DIR) -I$(ALTIVECCORE_DIR)/include
 EXTRA_SOURCES = StrappySession.m strappy_core.c strappy_config.c strappy_client.c strappy_db.c strappy_assistant.c
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
 

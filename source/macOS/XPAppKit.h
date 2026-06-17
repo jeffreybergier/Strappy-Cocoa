@@ -2,8 +2,14 @@
 
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
   #define XPApplicationDelegate NSApplicationDelegate
+  #define XPTableViewDataSource NSTableViewDataSource
+  #define XPTableViewDelegate   NSTableViewDelegate
+  #define XPTextViewDelegate    NSTextViewDelegate
 #else
   @protocol XPApplicationDelegate @end
+  @protocol XPTableViewDataSource @end
+  @protocol XPTableViewDelegate   @end
+  @protocol XPTextViewDelegate    @end
 #endif
 
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101200
@@ -30,6 +36,26 @@
   #define XPImageScaleAxesIndependently NSImageScaleAxesIndependently
 #else
   #define XPImageScaleAxesIndependently NSScaleToFit
+#endif
+
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
+  #define XPBezelStyleRounded        NSBezelStyleRounded
+  #define XPButtonTypeMomentaryLight NSButtonTypeMomentaryLight
+#else
+  #define XPBezelStyleRounded        NSRoundedBezelStyle
+  #define XPButtonTypeMomentaryLight NSMomentaryLightButton
+#endif
+
+#if defined(MAC_OS_X_VERSION_MIN_REQUIRED) && MAC_OS_X_VERSION_MIN_REQUIRED >= 110000
+  #define XPColorWindowFrame [NSColor windowBackgroundColor]
+#else
+  #define XPColorWindowFrame [NSColor windowFrameColor]
+#endif
+
+#if defined(MAC_OS_X_VERSION_MIN_REQUIRED) && MAC_OS_X_VERSION_MIN_REQUIRED >= 101400
+  #define XPColorControlHighlight [NSColor separatorColor]
+#else
+  #define XPColorControlHighlight [NSColor controlHighlightColor]
 #endif
 
 @interface NSWindow (XPAppKit)

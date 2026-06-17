@@ -17,6 +17,7 @@ typedef struct strappy_chat_result {
 
 void strappy_chat_result_init(strappy_chat_result *result);
 void strappy_chat_result_destroy(strappy_chat_result *result);
+int strappy_client_set_cainfo(const char *path, char **error_out);
 int strappy_client_send_prompt(const strappy_config *config,
                                const char *prompt,
                                strappy_chat_result *result,

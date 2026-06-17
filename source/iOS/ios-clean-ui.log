@@ -1,0 +1,21 @@
+Cleaning build artifacts...
+--- Building Phone Debug (-O0) ---
+ [1/4] Compiling Files...
+  > main.m
+  > AppDelegate.m
+  > XPUIKit.m
+  > StrappySession.m
+  > strappy_core.c
+  > strappy_config.c
+  > strappy_client.c
+  > strappy_db.c
+  > strappy_assistant.c
+ [2/4] Linking Phone universal binary (armv7, arm64)...
+ [3/4] Building app package...
+  > copying binary
+  > copying Info.plist
+  > copying localizations from ../shared/Resources
+  > copying cacert.pem
+  > copying AltivecCocoa fonts
+  > extracting symbols
+ [4/4] Packaging IPA...

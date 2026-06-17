@@ -1,5 +1,7 @@
 #import "AppDelegate.h"
-#import "AIFontAwesome.h"
+#import "SessionWindowController.h"
+#import "StrappySession.h"
+#import <AltivecCore/AltivecCore.h>
 
 @interface AppDelegate (Private)
 - (void)setupMenu;
@@ -17,6 +19,11 @@
 - (void)applicationDidFinishLaunching:(NSNotification *)notification
 {
   (void)notification;
+  {
+    NSString *cacert = [AltivecCore certPath];
+    NSParameterAssert(cacert);
+    [StrappySession bootstrapProcessWithCACertPath:cacert];
+  }
   [self showMainWindow];
 }
 
@@ -95,6 +102,22 @@
                       action:@selector(selectAll:)
                keyEquivalent:@"a"];
 
+  NSMenuItem *viewMenuItem = [mainMenu addItemWithTitle:NSLocalizedString(@"View", nil)
+                                                 action:NULL
+                                          keyEquivalent:@""];
+  NSMenu *viewMenu = [[[NSMenu alloc]
+      initWithTitle:NSLocalizedString(@"View", nil)] autorelease];
+  [mainMenu setSubmenu:viewMenu forItem:viewMenuItem];
+  {
+    NSMenuItem *toggleSidebar =
+      [viewMenu addItemWithTitle:NSLocalizedString(@"Toggle Sidebar", nil)
+                          action:@selector(toggleSidebar:)
+                   keyEquivalent:@"s"];
+    [toggleSidebar setKeyEquivalentModifierMask:(XPEventModifierFlagCommand |
+                                                 XPEventModifierFlagOption)];
+    [toggleSidebar setTarget:nil];
+  }
+
   NSMenuItem *windowMenuItem = [mainMenu addItemWithTitle:NSLocalizedString(@"Window", nil)
                                                    action:NULL
                                             keyEquivalent:@""];
@@ -118,56 +141,18 @@
 
 - (void)showMainWindow
 {
-  if (_window != nil) {
-    [_window makeKeyAndOrderFront:self];
+  if (_windowController != nil) {
+    [_windowController showWindow:self];
     return;
   }
 
-  NSRect frame = NSMakeRect(0.0, 0.0, 480.0, 320.0);
-  _window = [[NSWindow alloc]
-      initWithContentRect:frame
-                styleMask:(XPWindowStyleMaskTitled |
-                           XPWindowStyleMaskClosable |
-                           XPWindowStyleMaskMiniaturizable)
-                  backing:NSBackingStoreBuffered
-                    defer:NO];
-  [_window XP_setTitle:NSLocalizedString(@"Strappy", nil)];
-  [_window center];
-
-  NSView *contentView = [_window contentView];
-  {
-    NSImage *image = [AIFontAwesome imageForIcon:AIFASeedling
-                                           style:AIFontAwesomeStyleSolid
-                                       pointSize:48.0
-                                           scale:[_window XP_backingScaleFactor]];
-    NSImageView *iconView = [[[NSImageView alloc]
-        initWithFrame:NSMakeRect(216.0, 188.0, 48.0, 48.0)] autorelease];
-    [iconView setImage:image];
-    [iconView setImageScaling:XPImageScaleAxesIndependently];
-    [iconView setAutoresizingMask:(NSViewMinXMargin | NSViewMaxXMargin |
-                                   NSViewMinYMargin | NSViewMaxYMargin)];
-    [contentView addSubview:iconView];
-  }
-
-  NSTextField *label = [[[NSTextField alloc]
-      initWithFrame:NSMakeRect(32.0, 112.0, 416.0, 48.0)] autorelease];
-  [label setStringValue:NSLocalizedString(@"Ready to build.", nil)];
-  [label setAlignment:XPTextAlignmentCenter];
-  [label setFont:[NSFont systemFontOfSize:24.0]];
-  [label setBezeled:NO];
-  [label setDrawsBackground:NO];
-  [label setEditable:NO];
-  [label setSelectable:NO];
-  [label setAutoresizingMask:(NSViewWidthSizable | NSViewMinYMargin |
-                              NSViewMaxYMargin)];
-  [contentView addSubview:label];
-
-  [_window makeKeyAndOrderFront:self];
+  _windowController = [[SessionWindowController alloc] init];
+  [_windowController showWindow:self];
 }
 
 - (void)dealloc
 {
-  [_window release];
+  [_windowController release];
   [super dealloc];
 }
 

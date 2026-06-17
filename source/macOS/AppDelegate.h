@@ -1,8 +1,10 @@
 #import "XPAppKit.h"
 
+@class SessionWindowController;
+
 @interface AppDelegate : NSObject <XPApplicationDelegate> {
  @private
-  NSWindow *_window;
+  SessionWindowController *_windowController;
 }
 
 - (void)showAboutWindow:(id)sender;
