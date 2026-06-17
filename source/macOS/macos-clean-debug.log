@@ -1,0 +1,56 @@
+Cleaning build artifacts...
+--- Building Mac Debug (-O0) ---
+ [1/7] Compiling ppc (sdk: 10.5, min: 10.4)...
+  > ppc: main.m
+  > ppc: AppDelegate.m
+  > ppc: XPAppKit.m
+  > ppc: StrappySession.m
+  > ppc: strappy_core.c
+  > ppc: strappy_config.c
+  > ppc: strappy_client.c
+  > ppc: strappy_db.c
+  > ppc: strappy_assistant.c
+  > linking ppc binary
+ [2/7] Compiling x86 (sdk: 10.5, min: 10.4)...
+  > x86: main.m
+  > x86: AppDelegate.m
+  > x86: XPAppKit.m
+  > x86: StrappySession.m
+  > x86: strappy_core.c
+  > x86: strappy_config.c
+  > x86: strappy_client.c
+  > x86: strappy_db.c
+  > x86: strappy_assistant.c
+  > linking x86 binary
+ [3/7] Compiling x64 (sdk: 11.3, min: 10.9)...
+  > x64: main.m
+  > x64: AppDelegate.m
+  > x64: XPAppKit.m
+  > x64: StrappySession.m
+  > x64: strappy_core.c
+  > x64: strappy_config.c
+  > x64: strappy_client.c
+  > x64: strappy_db.c
+  > x64: strappy_assistant.c
+  > linking x64 binary
+ [4/7] Compiling arm64 (sdk: 11.3, min: 11.0)...
+  > arm64: main.m
+  > arm64: AppDelegate.m
+  > arm64: XPAppKit.m
+  > arm64: StrappySession.m
+  > arm64: strappy_core.c
+  > arm64: strappy_config.c
+  > arm64: strappy_client.c
+  > arm64: strappy_db.c
+  > arm64: strappy_assistant.c
+  > linking arm64 binary
+ [5/7] Merging quad-fat binary (ppc, x86, x64, arm)...
+ [6/7] Building app package...
+  > copying binary
+  > copying Info.plist
+  > copying localizations from ../shared/Resources
+  > transcoding en.lproj/Localizable.strings to UTF-16 LE
+  > transcoding ja.lproj/Localizable.strings to UTF-16 LE
+  > copying AltivecCocoa fonts
+  > extracting symbols (x64, arm)
+ [7/7] Zipping package...

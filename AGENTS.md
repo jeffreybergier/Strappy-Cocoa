@@ -12,6 +12,25 @@ sure you capture all of the build output so you can see all the warnings. In
 certain cases, we also want to run Clang static analysis to be extra sure we are
 not leaking memory or dereferencing null pointers.
 
+House style for Strappy source:
+
+1. Objective-C classes use Objective-C naming conventions. The Objective-C class
+   that manages assistant sessions is `StrappySession`, implemented in
+   `StrappySession.h` and `StrappySession.m`.
+2. C source and header files use lowercase snake_case names, for example
+   `strappy_client.c` and `strappy_core.h`, so they are easy to distinguish from
+   Objective-C classes.
+3. C type and function names use lowercase snake_case. Public C functions use
+   the `strappy_` prefix.
+4. The shared SQLite storage module is named `strappy_db`. Do not name it
+   `session_store`; it will hold app-wide database responsibilities over time.
+5. C files must not import macOS-only framework headers such as
+   `CoreFoundation`. Shared C code must stay portable across the iOS and macOS
+   targets.
+6. `StrappySession.m` is the only Objective-C file that may directly import
+   Strappy C headers such as `strappy_client.h` or `strappy_core.h`. Other
+   Objective-C files should talk to the C layer through `StrappySession`.
+
 The iOS App is a bit special because its not sandboxed. It must be installed via
 .deb file, not .ipa file so that it can scan the whole filesystem for SQLite
 database. This is known to only work on Jailbroken iPhones and that is ok.

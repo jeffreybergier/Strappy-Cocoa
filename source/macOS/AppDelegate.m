@@ -1,5 +1,4 @@
 #import "AppDelegate.h"
-#import "StrappyShared.h"
 #import "AIFontAwesome.h"
 
 @interface AppDelegate (Private)
@@ -132,7 +131,7 @@
                            XPWindowStyleMaskMiniaturizable)
                   backing:NSBackingStoreBuffered
                     defer:NO];
-  [_window XP_setTitle:StrappyAppDisplayName()];
+  [_window XP_setTitle:NSLocalizedString(@"Strappy", nil)];
   [_window center];
 
   NSView *contentView = [_window contentView];
@@ -152,7 +151,7 @@
 
   NSTextField *label = [[[NSTextField alloc]
       initWithFrame:NSMakeRect(32.0, 112.0, 416.0, 48.0)] autorelease];
-  [label setStringValue:StrappyWelcomeMessage()];
+  [label setStringValue:NSLocalizedString(@"Ready to build.", nil)];
   [label setAlignment:XPTextAlignmentCenter];
   [label setFont:[NSFont systemFontOfSize:24.0]];
   [label setBezeled:NO];

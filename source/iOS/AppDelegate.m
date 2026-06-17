@@ -1,5 +1,4 @@
 #import "AppDelegate.h"
-#import "StrappyShared.h"
 #import "XPUIKit.h"
 #import "AIFontAwesome.h"
 
@@ -41,7 +40,7 @@
                            UIViewAutoresizingFlexibleHeight;
   label.backgroundColor = [UIColor clearColor];
   label.font = [UIFont boldSystemFontOfSize:24.0f];
-  label.text = StrappyWelcomeMessage();
+  label.text = NSLocalizedString(@"Ready to build.", nil);
   [label XP_setTextAlignmentCenter];
   label.numberOfLines = 0;
   [view addSubview:label];

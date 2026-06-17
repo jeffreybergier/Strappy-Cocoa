@@ -1,0 +1,5 @@
+--- Running Clang Static Analyzer (x86_64) ---
+  > writing report to build-analyze/analyze.txt
+  > analyzing app sources
+  > analyzing extra sources
+  > 0 warning(s), 0 error(s) - see build-analyze/analyze.txt

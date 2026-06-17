@@ -15,3 +15,6 @@ tarballs/
 .env
 __pycache__/
 *.py[cod]
+
+# Mac Junk
+.DS_Store
