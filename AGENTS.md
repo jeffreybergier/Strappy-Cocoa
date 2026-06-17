@@ -1,0 +1,29 @@
+AGENTS.md
+
+This project is an iOS app and macOS app built using Altivec Intelligence. The
+iOS app supports iOS 4.3 and higher and the macOS App supports Mac OS X and
+higher. The Altivec Intelligence toolchain does the hard work for you so don't
+worry.
+
+For this project, the iOS app is always built for arm64 and armv7 and the macOS
+app is always built for arm64, x64, x86, and PPC. After changing anything before
+you finish, please run a clean build to ensure there are no warnings. Also make
+sure you capture all of the build output so you can see all the warnings. In
+certain cases, we also want to run Clang static analysis to be extra sure we are
+not leaking memory or dereferencing null pointers.
+
+The iOS App is a bit special because its not sandboxed. It must be installed via
+.deb file, not .ipa file so that it can scan the whole filesystem for SQLite
+database. This is known to only work on Jailbroken iPhones and that is ok.
+
+Strappy is an OpenRouter based AI Assistant that has the following basic
+infrastructure:
+
+1. C based API client for OpenRouter/OpenAI API
+2. C based JSON parsing with cJSON
+3. C based networking with libcurl
+4. C based storage with sqlite
+5. Web based chat interface for showing the response from the model
+6. Filesystem search to search the host device for sqlite databases
+7. Tools that allow the Agent to discover the schema of a sqlite database found
+8. Tools that allow the Agent to answer questions the user asks from the personal context found in the sqlite databases

@@ -1,0 +1,23 @@
+/* Strappy English localization */
+
+"Strappy" = "Strappy";
+"Ready to build." = "Ready to build.";
+
+"About Strappy" = "About Strappy";
+"Hide Strappy" = "Hide Strappy";
+"Hide Others" = "Hide Others";
+"Show All" = "Show All";
+"Quit Strappy" = "Quit Strappy";
+
+"Edit" = "Edit";
+"Undo" = "Undo";
+"Redo" = "Redo";
+"Cut" = "Cut";
+"Copy" = "Copy";
+"Paste" = "Paste";
+"Select All" = "Select All";
+
+"Window" = "Window";
+"Minimize" = "Minimize";
+"Zoom" = "Zoom";
+"Bring All to Front" = "Bring All to Front";

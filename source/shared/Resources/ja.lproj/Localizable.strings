@@ -1,0 +1,23 @@
+/* Strappy Japanese localization */
+
+"Strappy" = "Strappy";
+"Ready to build." = "ビルド準備完了。";
+
+"About Strappy" = "Strappy について";
+"Hide Strappy" = "Strappy を隠す";
+"Hide Others" = "ほかを隠す";
+"Show All" = "すべてを表示";
+"Quit Strappy" = "Strappy を終了";
+
+"Edit" = "編集";
+"Undo" = "取り消す";
+"Redo" = "やり直す";
+"Cut" = "カット";
+"Copy" = "コピー";
+"Paste" = "ペースト";
+"Select All" = "すべてを選択";
+
+"Window" = "ウインドウ";
+"Minimize" = "しまう";
+"Zoom" = "拡大/縮小";
+"Bring All to Front" = "すべてを手前に移動";

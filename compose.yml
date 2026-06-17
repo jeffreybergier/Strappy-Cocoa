@@ -1,0 +1,20 @@
+services:
+  altivec-intelligence:
+    image: ghcr.io/jeffreybergier/altivec-intelligence:latest
+    stdin_open: true
+    tty: true
+    environment:
+      - IS_SANDBOX=1
+    volumes:
+      - ~/.altivec:/root
+      - .:/repo/Strappy
+    working_dir: /repo/Strappy
+    entrypoint: /bin/bash
+    command: -lc "altivec-chooser"
+
+  altivec:
+    image: ghcr.io/jeffreybergier/altivec-intelligence:latest
+    volumes:
+      - ~/.altivec:/root
+      - .:/repo/Strappy
+    working_dir: /repo/Strappy
