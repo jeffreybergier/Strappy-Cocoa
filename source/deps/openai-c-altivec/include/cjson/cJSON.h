@@ -1,0 +1,6 @@
+#ifndef STRAPPY_OPENAI_C_ALTIVEC_CJSON_H
+#define STRAPPY_OPENAI_C_ALTIVEC_CJSON_H
+
+#include <cJSON.h>
+
+#endif

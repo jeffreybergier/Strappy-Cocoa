@@ -1,0 +1,3 @@
+[submodule "source/deps/openai-c"]
+	path = source/deps/openai-c
+	url = https://github.com/LunaStev/openai-c.git
