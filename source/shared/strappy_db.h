@@ -27,7 +27,9 @@ typedef struct strappy_session_message_record {
   char *role;
   char *content;
   char *model;
-  char *metadata;
+  char *metadata_json;
+  char *message_json;
+  char *reasoning;
   char *created_at;
   long http_status;
 } strappy_session_message_record;
@@ -52,14 +54,18 @@ int strappy_db_save_exchange(const char *db_path,
                              const char *response,
                              const char *model,
                              long http_status,
-                             const char *metadata,
+                             const char *metadata_json,
+                             const char *message_json,
+                             const char *reasoning,
                              char **error_out);
 int strappy_db_save_exchange_with_id(const char *db_path,
                                      const char *prompt,
                                      const char *response,
                                      const char *model,
                                      long http_status,
-                                     const char *metadata,
+                                     const char *metadata_json,
+                                     const char *message_json,
+                                     const char *reasoning,
                                      long long *session_id_out,
                                      char **error_out);
 int strappy_db_list_sessions(const char *db_path,
@@ -75,7 +81,9 @@ int strappy_db_append_exchange_to_session(const char *db_path,
                                           const char *response,
                                           const char *model,
                                           long http_status,
-                                          const char *metadata,
+                                          const char *metadata_json,
+                                          const char *message_json,
+                                          const char *reasoning,
                                           char **error_out);
 int strappy_db_list_session_messages(const char *db_path,
                                      long long session_id,

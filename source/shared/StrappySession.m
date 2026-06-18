@@ -137,7 +137,11 @@ static int StrappySessionHandleStreamEvent(
   NSString *content;
   NSString *model;
   NSString *metadata;
+  NSString *metadataJSON;
+  NSString *messageJSON;
+  NSString *reasoning;
   NSString *createdAt;
+  char *metadataText;
 
   if (record == NULL) {
     return nil;
@@ -149,7 +153,16 @@ static int StrappySessionHandleStreamEvent(
   role = [StrappySession stringFromCStringOrEmpty:record->role];
   content = [StrappySession stringFromCStringOrEmpty:record->content];
   model = [StrappySession stringFromCStringOrEmpty:record->model];
-  metadata = [StrappySession stringFromCStringOrEmpty:record->metadata];
+  metadataJSON = [StrappySession stringFromCStringOrEmpty:record->metadata_json];
+  messageJSON = [StrappySession stringFromCStringOrEmpty:record->message_json];
+  reasoning = [StrappySession stringFromCStringOrEmpty:record->reasoning];
+  metadataText = strappy_client_metadata_text_from_json(record->metadata_json);
+  if (metadataText != NULL) {
+    metadata = [StrappySession stringFromCStringOrEmpty:metadataText];
+    strappy_free_string(metadataText);
+  } else {
+    metadata = @"";
+  }
   createdAt = [StrappySession stringFromCStringOrEmpty:record->created_at];
 
   return [NSDictionary dictionaryWithObjectsAndKeys:
@@ -159,6 +172,9 @@ static int StrappySessionHandleStreamEvent(
     content, @"text",
     model, @"model",
     metadata, @"metadata",
+    metadataJSON, @"metadata_json",
+    messageJSON, @"message_json",
+    reasoning, @"reasoning",
     httpStatus, @"http_status",
     createdAt, @"created_at",
     nil];

@@ -12,10 +12,12 @@ extern "C" {
 typedef struct strappy_chat_message {
   const char *role;
   const char *content;
+  const char *message_json;
 } strappy_chat_message;
 
 typedef struct strappy_chat_result {
   char *response_text;
+  char *message_json;
   char *raw_json;
   char *response_id;
   char *finish_reason;
@@ -26,7 +28,9 @@ typedef struct strappy_chat_result {
   char *system_fingerprint;
   char *usage_json;
   char *generation_metadata_json;
+  char *metadata_json;
   char *metadata_text;
+  char *reasoning_text;
   long http_status;
 } strappy_chat_result;
 
@@ -46,6 +50,7 @@ typedef int (*strappy_chat_stream_callback)(
 
 void strappy_chat_result_init(strappy_chat_result *result);
 void strappy_chat_result_destroy(strappy_chat_result *result);
+char *strappy_client_metadata_text_from_json(const char *metadata_json);
 int strappy_client_set_cainfo(const char *path, char **error_out);
 int strappy_client_send_prompt(const strappy_config *config,
                                const char *prompt,

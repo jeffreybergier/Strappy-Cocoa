@@ -214,6 +214,25 @@ static NSString *StrappyRequestMetadataHTML(NSDictionary *message)
   return html;
 }
 
+static NSString *StrappyReasoningHTML(NSString *reasoning)
+{
+  NSMutableString *html;
+
+  if (![reasoning isKindOfClass:[NSString class]] ||
+      ([reasoning length] == 0U)) {
+    return @"";
+  }
+
+  html = [NSMutableString string];
+  [html appendString:@"<div class=\"reasoning\">"];
+  [html appendFormat:@"<div class=\"reasoning-label\">%@</div>",
+    StrappyHTMLEscape(NSLocalizedString(@"Thinking", nil))];
+  [html appendFormat:@"<div class=\"reasoning-body\">%@</div>",
+    StrappyHTMLEscape(reasoning)];
+  [html appendString:@"</div>"];
+  return html;
+}
+
 static NSString *StrappyMessageHTML(NSDictionary *message,
                                     NSString *elementIdentifier,
                                     NSString *state,
@@ -222,12 +241,14 @@ static NSString *StrappyMessageHTML(NSDictionary *message,
   NSMutableString *html;
   NSString *role;
   NSString *text;
+  NSString *reasoning;
   NSString *createdAt;
   NSNumber *httpStatus;
   NSString *stateClass;
 
   role = [message objectForKey:@"role"];
   text = [message objectForKey:@"text"];
+  reasoning = [message objectForKey:@"reasoning"];
   createdAt = [message objectForKey:@"created_at"];
   httpStatus = [message objectForKey:@"http_status"];
 
@@ -263,6 +284,9 @@ static NSString *StrappyMessageHTML(NSDictionary *message,
     stateClass];
   [html appendFormat:@"<div class=\"role\">%@</div>",
     StrappyHTMLEscape(StrappyRoleLabel(role))];
+  if ([role isEqualToString:@"assistant"]) {
+    [html appendString:StrappyReasoningHTML(reasoning)];
+  }
   [html appendFormat:@"<div class=\"bubble\">%@</div>",
     StrappyHTMLEscape(text)];
   [html appendString:StrappyRequestMetadataHTML(message)];
@@ -370,12 +394,7 @@ static NSString *StrappyMessageHTMLWithReasoning(NSDictionary *message,
     StrappyHTMLEscape(StrappySavedMessageElementIdentifier(message))];
   [html appendFormat:@"<div class=\"role\">%@</div>",
     StrappyHTMLEscape(StrappyRoleLabel(@"assistant"))];
-  [html appendString:@"<div class=\"reasoning\">"];
-  [html appendFormat:@"<div class=\"reasoning-label\">%@</div>",
-    StrappyHTMLEscape(NSLocalizedString(@"Thinking", nil))];
-  [html appendFormat:@"<div class=\"reasoning-body\">%@</div>",
-    StrappyHTMLEscape(reasoning)];
-  [html appendString:@"</div>"];
+  [html appendString:StrappyReasoningHTML(reasoning)];
   [html appendFormat:@"<div class=\"bubble\">%@</div>", StrappyHTMLEscape(text)];
   [html appendString:StrappyRequestMetadataHTML(message)];
   if ([createdAt length] > 0U) {

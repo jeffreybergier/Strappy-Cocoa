@@ -45,7 +45,9 @@ static char *strappy_assistant_send_prompt_internal(const char *prompt,
                                         result.response_text,
                                         result.model,
                                         result.http_status,
-                                        result.metadata_text,
+                                        result.metadata_json,
+                                        result.message_json,
+                                        result.reasoning_text,
                                         session_id_out,
                                         error_out)) {
     strappy_chat_result_destroy(&result);
@@ -121,9 +123,11 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   for (index = 0U; index < message_list.count; index++) {
     messages[index].role = message_list.records[index].role;
     messages[index].content = message_list.records[index].content;
+    messages[index].message_json = message_list.records[index].message_json;
   }
   messages[message_list.count].role = "user";
   messages[message_list.count].content = prompt;
+  messages[message_list.count].message_json = NULL;
 
   if (!strappy_client_send_messages(&config,
                                     messages,
@@ -145,7 +149,9 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                              result.response_text,
                                              result.model,
                                              result.http_status,
-                                             result.metadata_text,
+                                             result.metadata_json,
+                                             result.message_json,
+                                             result.reasoning_text,
                                              error_out)) {
     strappy_chat_result_destroy(&result);
     strappy_config_destroy(&config);
@@ -205,7 +211,9 @@ static char *strappy_assistant_stream_prompt_internal(
                                         result.response_text,
                                         result.model,
                                         result.http_status,
-                                        result.metadata_text,
+                                        result.metadata_json,
+                                        result.message_json,
+                                        result.reasoning_text,
                                         session_id_out,
                                         error_out)) {
     strappy_chat_result_destroy(&result);
@@ -284,9 +292,11 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   for (index = 0U; index < message_list.count; index++) {
     messages[index].role = message_list.records[index].role;
     messages[index].content = message_list.records[index].content;
+    messages[index].message_json = message_list.records[index].message_json;
   }
   messages[message_list.count].role = "user";
   messages[message_list.count].content = prompt;
+  messages[message_list.count].message_json = NULL;
 
   if (!strappy_client_stream_messages(&config,
                                       messages,
@@ -310,7 +320,9 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
                                              result.response_text,
                                              result.model,
                                              result.http_status,
-                                             result.metadata_text,
+                                             result.metadata_json,
+                                             result.message_json,
+                                             result.reasoning_text,
                                              error_out)) {
     strappy_chat_result_destroy(&result);
     strappy_config_destroy(&config);
