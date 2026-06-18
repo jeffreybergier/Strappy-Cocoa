@@ -1,5 +1,8 @@
 #import "MessageListViewController.h"
 #import "StrappySession.h"
+#import "strappy_webview.h"
+
+#include <string.h>
 
 static const NSUInteger kStrappyInitialMessageLimit = 80U;
 static const NSUInteger kStrappyMessagePageSize = 40U;
@@ -80,74 +83,6 @@ static BOOL StrappyEnsureDirectory(NSString *path)
   return NO;
 }
 
-static NSString *StrappyHTMLEscape(NSString *input)
-{
-  NSMutableString *output;
-  NSUInteger index;
-
-  if (![input isKindOfClass:[NSString class]]) {
-    return @"";
-  }
-
-  output = [NSMutableString stringWithCapacity:[input length]];
-  for (index = 0U; index < [input length]; index++) {
-    unichar character = [input characterAtIndex:index];
-    if (character == '&') {
-      [output appendString:@"&amp;"];
-    } else if (character == '<') {
-      [output appendString:@"&lt;"];
-    } else if (character == '>') {
-      [output appendString:@"&gt;"];
-    } else if (character == '"') {
-      [output appendString:@"&quot;"];
-    } else {
-      [output appendFormat:@"%C", character];
-    }
-  }
-
-  return output;
-}
-
-static NSString *StrappyJavaScriptStringLiteral(NSString *input)
-{
-  NSMutableString *output;
-  NSUInteger index;
-
-  if (![input isKindOfClass:[NSString class]]) {
-    input = @"";
-  }
-
-  output = [NSMutableString stringWithString:@"'"];
-  for (index = 0U; index < [input length]; index++) {
-    unichar character = [input characterAtIndex:index];
-    if (character == '\\') {
-      [output appendString:@"\\\\"];
-    } else if (character == '\'') {
-      [output appendString:@"\\'"];
-    } else if (character == '\n') {
-      [output appendString:@"\\n"];
-    } else if (character == '\r') {
-      [output appendString:@"\\r"];
-    } else if (character == '\t') {
-      [output appendString:@"\\t"];
-    } else if (character < 32) {
-      [output appendFormat:@"\\u%04x", character];
-    } else {
-      [output appendFormat:@"%C", character];
-    }
-  }
-  [output appendString:@"'"];
-  return output;
-}
-
-static NSString *StrappyRoleLabel(NSString *role)
-{
-  if ([role isEqualToString:@"assistant"]) {
-    return NSLocalizedString(@"Agent", nil);
-  }
-  return NSLocalizedString(@"You", nil);
-}
-
 static long long StrappyMessageNumericIdentifier(NSDictionary *message)
 {
   NSNumber *identifier;
@@ -159,78 +94,83 @@ static long long StrappyMessageNumericIdentifier(NSDictionary *message)
   return [identifier longLongValue];
 }
 
-static NSString *StrappySavedMessageElementIdentifier(NSDictionary *message)
+static const char *StrappyCString(NSString *string)
 {
-  long long messageId;
-
-  messageId = StrappyMessageNumericIdentifier(message);
-  if (messageId <= 0LL) {
-    return @"saved-0";
+  if (![string isKindOfClass:[NSString class]]) {
+    return "";
   }
-  return [NSString stringWithFormat:@"saved-%lld", messageId];
+  return [string UTF8String];
+}
+
+static NSString *StrappyStringFromWebViewCString(char *value)
+{
+  NSString *string;
+
+  if (value == NULL) {
+    return @"";
+  }
+  string = [NSString stringWithUTF8String:value];
+  strappy_webview_free(value);
+  return (string != nil) ? string : @"";
+}
+
+static strappy_webview_labels StrappyWebViewLabels(void)
+{
+  strappy_webview_labels labels;
+
+  labels.agent = StrappyCString(NSLocalizedString(@"Agent", nil));
+  labels.you = StrappyCString(NSLocalizedString(@"You", nil));
+  labels.thinking = StrappyCString(NSLocalizedString(@"Thinking", nil));
+  labels.request_metadata =
+    StrappyCString(NSLocalizedString(@"Request Metadata", nil));
+  labels.retry = StrappyCString(NSLocalizedString(@"Retry", nil));
+  return labels;
+}
+
+static void StrappyWebViewMessageFromDictionary(
+  NSDictionary *dictionary,
+  strappy_webview_message *message)
+{
+  NSString *role;
+  NSString *text;
+  NSString *reasoning;
+  NSString *metadataJSON;
+  NSString *createdAt;
+  NSNumber *httpStatus;
+
+  if (message == NULL) {
+    return;
+  }
+  memset(message, 0, sizeof(*message));
+
+  if (![dictionary isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
+
+  role = [dictionary objectForKey:@"role"];
+  text = [dictionary objectForKey:@"text"];
+  reasoning = [dictionary objectForKey:@"reasoning"];
+  metadataJSON = [dictionary objectForKey:@"metadata_json"];
+  createdAt = [dictionary objectForKey:@"created_at"];
+  httpStatus = [dictionary objectForKey:@"http_status"];
+
+  message->message_id = StrappyMessageNumericIdentifier(dictionary);
+  message->http_status =
+    [httpStatus isKindOfClass:[NSNumber class]] ? [httpStatus longValue] : 0L;
+  message->role = StrappyCString(role);
+  message->text = StrappyCString(text);
+  message->reasoning = StrappyCString(reasoning);
+  message->metadata_json = StrappyCString(metadataJSON);
+  message->created_at = StrappyCString(createdAt);
 }
 
 static NSString *StrappyStatusHTML(NSString *text, BOOL retry)
 {
-  NSMutableString *html;
+  strappy_webview_labels labels;
 
-  html = [NSMutableString string];
-  [html appendString:StrappyHTMLEscape(text)];
-  if (retry) {
-    [html appendString:@" &middot; <a href=\"strappy-action://retry\">"];
-    [html appendString:StrappyHTMLEscape(NSLocalizedString(@"Retry", nil))];
-    [html appendString:@"</a>"];
-  }
-  return html;
-}
-
-static NSString *StrappyRequestMetadataHTML(NSDictionary *message)
-{
-  NSMutableString *html;
-  NSString *role;
-  NSString *metadata;
-
-  if (![message isKindOfClass:[NSDictionary class]]) {
-    return @"";
-  }
-
-  role = [message objectForKey:@"role"];
-  if (![role isEqualToString:@"assistant"]) {
-    return @"";
-  }
-
-  metadata = [message objectForKey:@"metadata"];
-  if (![metadata isKindOfClass:[NSString class]] || ([metadata length] == 0U)) {
-    return @"";
-  }
-
-  html = [NSMutableString string];
-  [html appendString:@"<div class=\"request-metadata\">"];
-  [html appendFormat:@"<div class=\"request-metadata-title\">%@</div>",
-    StrappyHTMLEscape(NSLocalizedString(@"Request Metadata", nil))];
-  [html appendFormat:@"<div class=\"request-metadata-body\">%@</div>",
-    StrappyHTMLEscape(metadata)];
-  [html appendString:@"</div>"];
-  return html;
-}
-
-static NSString *StrappyReasoningHTML(NSString *reasoning)
-{
-  NSMutableString *html;
-
-  if (![reasoning isKindOfClass:[NSString class]] ||
-      ([reasoning length] == 0U)) {
-    return @"";
-  }
-
-  html = [NSMutableString string];
-  [html appendString:@"<div class=\"reasoning\">"];
-  [html appendFormat:@"<div class=\"reasoning-label\">%@</div>",
-    StrappyHTMLEscape(NSLocalizedString(@"Thinking", nil))];
-  [html appendFormat:@"<div class=\"reasoning-body\">%@</div>",
-    StrappyHTMLEscape(reasoning)];
-  [html appendString:@"</div>"];
-  return html;
+  labels = StrappyWebViewLabels();
+  return StrappyStringFromWebViewCString(
+    strappy_webview_status_html(StrappyCString(text), retry ? 1 : 0, &labels));
 }
 
 static NSString *StrappyMessageHTML(NSDictionary *message,
@@ -238,66 +178,17 @@ static NSString *StrappyMessageHTML(NSDictionary *message,
                                     NSString *state,
                                     NSString *statusHTML)
 {
-  NSMutableString *html;
-  NSString *role;
-  NSString *text;
-  NSString *reasoning;
-  NSString *createdAt;
-  NSNumber *httpStatus;
-  NSString *stateClass;
+  strappy_webview_labels labels;
+  strappy_webview_message webMessage;
 
-  role = [message objectForKey:@"role"];
-  text = [message objectForKey:@"text"];
-  reasoning = [message objectForKey:@"reasoning"];
-  createdAt = [message objectForKey:@"created_at"];
-  httpStatus = [message objectForKey:@"http_status"];
-
-  if (![role isKindOfClass:[NSString class]]) {
-    role = @"assistant";
-  }
-  if (![text isKindOfClass:[NSString class]]) {
-    text = @"";
-  }
-  if (![createdAt isKindOfClass:[NSString class]]) {
-    createdAt = @"";
-  }
-  if (![elementIdentifier isKindOfClass:[NSString class]] ||
-      ([elementIdentifier length] == 0U)) {
-    elementIdentifier = StrappySavedMessageElementIdentifier(message);
-  }
-
-  stateClass = @"";
-  if ([state isKindOfClass:[NSString class]] && ([state length] > 0U)) {
-    stateClass = [NSString stringWithFormat:@" state-%@", state];
-  } else if ([httpStatus isKindOfClass:[NSNumber class]] &&
-             ([httpStatus longValue] >= 400L)) {
-    stateClass = @" state-error";
-    statusHTML = StrappyStatusHTML(
-      [NSString stringWithFormat:NSLocalizedString(@"HTTP %@", nil), httpStatus],
-      NO);
-  }
-
-  html = [NSMutableString string];
-  [html appendFormat:@"<div id=\"%@\" class=\"row %@%@\">",
-    StrappyHTMLEscape(elementIdentifier),
-    StrappyHTMLEscape(role),
-    stateClass];
-  [html appendFormat:@"<div class=\"role\">%@</div>",
-    StrappyHTMLEscape(StrappyRoleLabel(role))];
-  if ([role isEqualToString:@"assistant"]) {
-    [html appendString:StrappyReasoningHTML(reasoning)];
-  }
-  [html appendFormat:@"<div class=\"bubble\">%@</div>",
-    StrappyHTMLEscape(text)];
-  [html appendString:StrappyRequestMetadataHTML(message)];
-  if ([statusHTML length] > 0U) {
-    [html appendFormat:@"<div class=\"meta status\">%@</div>", statusHTML];
-  } else if ([createdAt length] > 0U) {
-    [html appendFormat:@"<div class=\"meta\">%@</div>",
-      StrappyHTMLEscape(createdAt)];
-  }
-  [html appendString:@"</div>"];
-  return html;
+  labels = StrappyWebViewLabels();
+  StrappyWebViewMessageFromDictionary(message, &webMessage);
+  webMessage.element_id = StrappyCString(elementIdentifier);
+  return StrappyStringFromWebViewCString(
+    strappy_webview_message_html(&webMessage,
+                                 &labels,
+                                 StrappyCString(state),
+                                 StrappyCString(statusHTML)));
 }
 
 static NSString *StrappyPendingMessageHTML(NSString *prompt,
@@ -305,14 +196,15 @@ static NSString *StrappyPendingMessageHTML(NSString *prompt,
                                            NSString *state,
                                            NSString *statusHTML)
 {
-  NSDictionary *message;
+  strappy_webview_labels labels;
 
-  message = [NSDictionary dictionaryWithObjectsAndKeys:
-    @"user", @"role",
-    (prompt ? prompt : @""), @"text",
-    @"", @"created_at",
-    nil];
-  return StrappyMessageHTML(message, elementIdentifier, state, statusHTML);
+  labels = StrappyWebViewLabels();
+  return StrappyStringFromWebViewCString(
+    strappy_webview_pending_message_html(StrappyCString(prompt),
+                                         StrappyCString(elementIdentifier),
+                                         StrappyCString(state),
+                                         StrappyCString(statusHTML),
+                                         &labels));
 }
 
 static NSString *StrappyStreamingAssistantMessageHTML(NSString *elementIdentifier,
@@ -321,88 +213,31 @@ static NSString *StrappyStreamingAssistantMessageHTML(NSString *elementIdentifie
                                                       NSString *state,
                                                       NSString *statusHTML)
 {
-  NSMutableString *html;
-  NSString *stateClass;
-  BOOL hasReasoning;
+  strappy_webview_labels labels;
 
-  if (![elementIdentifier isKindOfClass:[NSString class]] ||
-      ([elementIdentifier length] == 0U)) {
-    elementIdentifier = @"streaming-assistant";
-  }
-  if (![text isKindOfClass:[NSString class]]) {
-    text = @"";
-  }
-  if (![reasoning isKindOfClass:[NSString class]]) {
-    reasoning = @"";
-  }
-
-  stateClass = @"";
-  if ([state isKindOfClass:[NSString class]] && ([state length] > 0U)) {
-    stateClass = [NSString stringWithFormat:@" state-%@", state];
-  }
-  hasReasoning = ([reasoning length] > 0U) ? YES : NO;
-
-  html = [NSMutableString string];
-  [html appendFormat:@"<div id=\"%@\" class=\"row assistant%@\">",
-    StrappyHTMLEscape(elementIdentifier),
-    stateClass];
-  [html appendFormat:@"<div class=\"role\">%@</div>",
-    StrappyHTMLEscape(StrappyRoleLabel(@"assistant"))];
-  [html appendFormat:@"<div class=\"reasoning\"%@>",
-    (hasReasoning ? @"" : @" style=\"display:none\"")];
-  [html appendFormat:@"<div class=\"reasoning-label\">%@</div>",
-    StrappyHTMLEscape(NSLocalizedString(@"Thinking", nil))];
-  [html appendFormat:@"<div class=\"reasoning-body\">%@</div>",
-    StrappyHTMLEscape(reasoning)];
-  [html appendString:@"</div>"];
-  [html appendFormat:@"<div class=\"bubble\">%@</div>", StrappyHTMLEscape(text)];
-  if ([statusHTML length] > 0U) {
-    [html appendFormat:@"<div class=\"meta status\">%@</div>", statusHTML];
-  }
-  [html appendString:@"</div>"];
-  return html;
+  labels = StrappyWebViewLabels();
+  return StrappyStringFromWebViewCString(
+    strappy_webview_streaming_assistant_message_html(
+      StrappyCString(elementIdentifier),
+      StrappyCString(text),
+      StrappyCString(reasoning),
+      StrappyCString(state),
+      StrappyCString(statusHTML),
+      &labels));
 }
 
 static NSString *StrappyMessageHTMLWithReasoning(NSDictionary *message,
                                                  NSString *reasoning)
 {
-  NSMutableString *html;
-  NSString *role;
-  NSString *text;
-  NSString *createdAt;
+  strappy_webview_labels labels;
+  strappy_webview_message webMessage;
 
-  if (![reasoning isKindOfClass:[NSString class]] || ([reasoning length] == 0U)) {
-    return StrappyMessageHTML(message, nil, nil, nil);
-  }
-
-  role = [message objectForKey:@"role"];
-  if (![role isEqualToString:@"assistant"]) {
-    return StrappyMessageHTML(message, nil, nil, nil);
-  }
-
-  text = [message objectForKey:@"text"];
-  createdAt = [message objectForKey:@"created_at"];
-  if (![text isKindOfClass:[NSString class]]) {
-    text = @"";
-  }
-  if (![createdAt isKindOfClass:[NSString class]]) {
-    createdAt = @"";
-  }
-
-  html = [NSMutableString string];
-  [html appendFormat:@"<div id=\"%@\" class=\"row assistant\">",
-    StrappyHTMLEscape(StrappySavedMessageElementIdentifier(message))];
-  [html appendFormat:@"<div class=\"role\">%@</div>",
-    StrappyHTMLEscape(StrappyRoleLabel(@"assistant"))];
-  [html appendString:StrappyReasoningHTML(reasoning)];
-  [html appendFormat:@"<div class=\"bubble\">%@</div>", StrappyHTMLEscape(text)];
-  [html appendString:StrappyRequestMetadataHTML(message)];
-  if ([createdAt length] > 0U) {
-    [html appendFormat:@"<div class=\"meta\">%@</div>",
-      StrappyHTMLEscape(createdAt)];
-  }
-  [html appendString:@"</div>"];
-  return html;
+  labels = StrappyWebViewLabels();
+  StrappyWebViewMessageFromDictionary(message, &webMessage);
+  return StrappyStringFromWebViewCString(
+    strappy_webview_message_html_with_reasoning(&webMessage,
+                                                StrappyCString(reasoning),
+                                                &labels));
 }
 
 static NSString *StrappyMessagesHTMLForRange(NSArray *messages,
@@ -430,48 +265,70 @@ static NSString *StrappyMessagesHTMLForRange(NSArray *messages,
 
 static NSString *StrappyAppendMessageJavaScript(NSString *messageHTML)
 {
-  return [NSString stringWithFormat:@"appendMessage(%@);",
-    StrappyJavaScriptStringLiteral(messageHTML)];
+  return StrappyStringFromWebViewCString(
+    strappy_webview_append_message_js(StrappyCString(messageHTML)));
 }
 
 static NSString *StrappyReplaceMessageJavaScript(NSString *elementIdentifier,
                                                  NSString *messageHTML)
 {
-  return [NSString stringWithFormat:@"replaceMessage(%@,%@);",
-    StrappyJavaScriptStringLiteral(elementIdentifier),
-    StrappyJavaScriptStringLiteral(messageHTML)];
+  return StrappyStringFromWebViewCString(
+    strappy_webview_replace_message_js(StrappyCString(elementIdentifier),
+                                       StrappyCString(messageHTML)));
 }
 
 static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
                                                   NSString *statusHTML,
                                                   NSString *state)
 {
-  return [NSString stringWithFormat:@"setMessageState(%@,%@,%@);",
-    StrappyJavaScriptStringLiteral(elementIdentifier),
-    StrappyJavaScriptStringLiteral(statusHTML),
-    StrappyJavaScriptStringLiteral(state)];
+  return StrappyStringFromWebViewCString(
+    strappy_webview_set_message_state_js(StrappyCString(elementIdentifier),
+                                         StrappyCString(statusHTML),
+                                         StrappyCString(state)));
 }
 
 static NSString *StrappyAppendMessageTextJavaScript(NSString *elementIdentifier,
                                                     NSString *delta)
 {
-  return [NSString stringWithFormat:@"appendMessageText(%@,%@);",
-    StrappyJavaScriptStringLiteral(elementIdentifier),
-    StrappyJavaScriptStringLiteral(delta)];
+  return StrappyStringFromWebViewCString(
+    strappy_webview_append_message_text_js(StrappyCString(elementIdentifier),
+                                           StrappyCString(delta)));
 }
 
 static NSString *StrappyAppendReasoningTextJavaScript(NSString *elementIdentifier,
                                                       NSString *delta)
 {
-  return [NSString stringWithFormat:@"appendReasoningText(%@,%@);",
-    StrappyJavaScriptStringLiteral(elementIdentifier),
-    StrappyJavaScriptStringLiteral(delta)];
+  return StrappyStringFromWebViewCString(
+    strappy_webview_append_reasoning_text_js(StrappyCString(elementIdentifier),
+                                             StrappyCString(delta)));
 }
 
 static NSString *StrappyRemoveMessageJavaScript(NSString *elementIdentifier)
 {
-  return [NSString stringWithFormat:@"removeMessage(%@);",
-    StrappyJavaScriptStringLiteral(elementIdentifier)];
+  return StrappyStringFromWebViewCString(
+    strappy_webview_remove_message_js(StrappyCString(elementIdentifier)));
+}
+
+static NSString *StrappyPrependMessagesJavaScript(NSString *messagesHTML,
+                                                  BOOL hasMore)
+{
+  return StrappyStringFromWebViewCString(
+    strappy_webview_prepend_messages_js(StrappyCString(messagesHTML),
+                                        hasMore ? 1 : 0));
+}
+
+static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
+                                         NSString *emptyText,
+                                         BOOL hasMessages,
+                                         BOOL hasMore)
+{
+  return StrappyStringFromWebViewCString(
+    strappy_webview_messages_page_html(
+      StrappyCString(messagesHTML),
+      StrappyCString(emptyText),
+      hasMessages ? 1 : 0,
+      hasMore ? 1 : 0,
+      StrappyCString(NSLocalizedString(@"Show Earlier Messages", nil))));
 }
 
 @interface MessageListViewController () <StrappySessionStreamDelegate>
@@ -697,7 +554,7 @@ static NSString *StrappyRemoveMessageJavaScript(NSString *elementIdentifier)
 
 - (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error
 {
-  NSMutableString *html;
+  NSMutableString *messagesHTML;
   NSUInteger count;
   NSUInteger start;
   NSString *emptyText;
@@ -731,75 +588,20 @@ static NSString *StrappyRemoveMessageJavaScript(NSString *elementIdentifier)
     emptyText = NSLocalizedString(@"New Session", nil);
   }
 
-  html = [NSMutableString string];
-  [html appendString:@"<!doctype html><html><head><meta charset=\"utf-8\">"];
-  [html appendString:@"<style>"];
-  [html appendString:@"html,body{margin:0;padding:0;background:#f4f4f4;color:#222;font:13px Helvetica,Arial,sans-serif;}"];
-  [html appendString:@".page{padding:18px 22px 96px;}"];
-  [html appendString:@".empty{margin:90px auto 0;max-width:520px;color:#777;text-align:center;line-height:1.45;}"];
-  [html appendString:@"#messages{max-width:860px;margin:0 auto;}"];
-  [html appendString:@".load-more{display:block;margin:0 auto 14px;padding:7px 10px;text-align:center;color:#2468a8;text-decoration:none;}"];
-  [html appendString:@".row{margin:0 0 16px;clear:both;}"];
-  [html appendString:@".role{font-size:11px;font-weight:bold;color:#666;text-transform:uppercase;margin:0 0 5px 2px;}"];
-  [html appendString:@".bubble{display:block;max-width:72%;border:1px solid #d8d8d8;background:#fff;padding:12px 14px;line-height:1.45;white-space:pre-wrap;word-wrap:break-word;}"];
-  [html appendString:@".assistant .bubble{background:#fcfcfc;}"];
-  [html appendString:@".reasoning{max-width:72%;border:1px solid #ddd;background:#fffdf2;color:#4f4a36;padding:10px 12px;margin:0 0 7px;line-height:1.4;white-space:pre-wrap;word-wrap:break-word;}"];
-  [html appendString:@".reasoning-label{font-size:11px;font-weight:bold;text-transform:uppercase;color:#7a7046;margin:0 0 5px;}"];
-  [html appendString:@".reasoning-body{white-space:pre-wrap;}"];
-  [html appendString:@".request-metadata{max-width:72%;box-sizing:border-box;border:1px solid #cbd7e2;background:#f7fbff;color:#2e3f4f;padding:9px 11px;margin:7px 0 0;line-height:1.35;white-space:pre-wrap;word-wrap:break-word;}"];
-  [html appendString:@".request-metadata-title{font-size:11px;font-weight:bold;text-transform:uppercase;color:#4d6478;margin:0 0 5px;}"];
-  [html appendString:@".request-metadata-body{font:11px Menlo,Consolas,Monaco,monospace;white-space:pre-wrap;}"];
-  [html appendString:@".user .role,.user .meta{text-align:right;}"];
-  [html appendString:@".user .bubble{margin-left:auto;background:#eef5ff;border-color:#c8d8ef;}"];
-  [html appendString:@".meta{font-size:11px;color:#777;margin-top:6px;}"];
-  [html appendString:@".state-pending .bubble{opacity:.72;}"];
-  [html appendString:@".state-pending .status{color:#777;}"];
-  [html appendString:@".state-error .bubble{border-color:#d99;background:#fff7f7;}"];
-  [html appendString:@".state-error .status{color:#a22;}"];
-  [html appendString:@".status a{color:#2468a8;text-decoration:none;}"];
-  [html appendString:@"</style>"];
-  [html appendString:@"<script>"];
-  [html appendString:@"function byId(i){return document.getElementById(i);}"];
-  [html appendString:@"function firstByClass(root,name){var n=root.getElementsByTagName('*');for(var i=0;i<n.length;i++){if((' '+n[i].className+' ').indexOf(' '+name+' ')>=0)return n[i];}return null;}"];
-  [html appendString:@"function clearEmpty(){var e=byId('empty');if(e)e.style.display='none';}"];
-  [html appendString:@"function nodesFromHTML(html){var d=document.createElement('div');d.innerHTML=html;return d;}"];
-  [html appendString:@"function scrollBottom(){setTimeout(function(){window.scrollTo(0,document.body.scrollHeight);},0);}"];
-  [html appendString:@"function appendMessage(html){clearEmpty();var m=byId('messages');if(!m)return;if(m.insertAdjacentHTML){m.insertAdjacentHTML('beforeend',html);}else{var d=nodesFromHTML(html);while(d.firstChild)m.appendChild(d.firstChild);}scrollBottom();}"];
-  [html appendString:@"function replaceMessage(id,html){clearEmpty();var old=byId(id);if(!old){appendMessage(html);return;}var d=nodesFromHTML(html);if(d.firstChild)old.parentNode.replaceChild(d.firstChild,old);scrollBottom();}"];
-  [html appendString:@"function prependMessages(html,hasMore){var m=byId('messages');if(!m)return;var d=nodesFromHTML(html);while(d.lastChild)m.insertBefore(d.lastChild,m.firstChild);var l=byId('load-more');if(l&&!hasMore)l.parentNode.removeChild(l);}"];
-  [html appendString:@"function setMessageState(id,status,state){var r=byId(id);if(!r)return;r.className=r.className.replace(/\\sstate-[^\\s]+/g,'')+' state-'+state;var s=firstByClass(r,'status');if(!s){s=document.createElement('div');s.className='meta status';r.appendChild(s);}s.innerHTML=status;scrollBottom();}"];
-  [html appendString:@"function appendTextToNode(n,t){if(!n)return;if(typeof n.textContent!='undefined')n.textContent=n.textContent+t;else n.innerText=n.innerText+t;}"];
-  [html appendString:@"function appendMessageText(id,t){var r=byId(id);if(!r)return;appendTextToNode(firstByClass(r,'bubble'),t);scrollBottom();}"];
-  [html appendString:@"function appendReasoningText(id,t){var r=byId(id);if(!r)return;var box=firstByClass(r,'reasoning');var body=firstByClass(r,'reasoning-body');if(box)box.style.display='block';appendTextToNode(body,t);scrollBottom();}"];
-  [html appendString:@"function removeMessage(id){var r=byId(id);if(r&&r.parentNode)r.parentNode.removeChild(r);}"];
-  [html appendString:@"</script></head><body><div class=\"page\">"];
-
-  if (start > 0U) {
-    [html appendString:@"<a id=\"load-more\" class=\"load-more\" href=\"strappy-action://load-more\">"];
-    [html appendString:StrappyHTMLEscape(NSLocalizedString(@"Show Earlier Messages", nil))];
-    [html appendString:@"</a>"];
-  }
-
-  if (!hasMessages) {
-    [html appendFormat:@"<div id=\"empty\" class=\"empty\">%@</div>",
-      StrappyHTMLEscape(emptyText)];
-  } else {
-    [html appendString:@"<div id=\"empty\" class=\"empty\" style=\"display:none\"></div>"];
-  }
-
-  [html appendString:@"<div id=\"messages\">"];
+  messagesHTML = [NSMutableString string];
   if (count > 0U) {
-    [html appendString:StrappyMessagesHTMLForRange(messages, start, count)];
+    [messagesHTML appendString:StrappyMessagesHTMLForRange(messages, start, count)];
   }
   if (hasPending) {
-    [html appendString:StrappyPendingMessageHTML(pendingPrompt_,
-                                                pendingMessageIdentifier_,
-                                                (sending_ ? @"pending" : @"error"),
-                                                (sending_
-                                                 ? StrappyStatusHTML(NSLocalizedString(@"Sending...", nil), NO)
-                                                 : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), YES)))];
+    [messagesHTML appendString:
+      StrappyPendingMessageHTML(pendingPrompt_,
+                                pendingMessageIdentifier_,
+                                (sending_ ? @"pending" : @"error"),
+                                (sending_
+                                 ? StrappyStatusHTML(NSLocalizedString(@"Sending...", nil), NO)
+                                 : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), YES)))];
     if (pendingAssistantMessageIdentifier_ != nil) {
-      [html appendString:
+      [messagesHTML appendString:
         StrappyStreamingAssistantMessageHTML(pendingAssistantMessageIdentifier_,
                                              streamingAssistantText_,
                                              streamingReasoningText_,
@@ -809,8 +611,11 @@ static NSString *StrappyRemoveMessageJavaScript(NSString *elementIdentifier)
                                               : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), NO)))];
     }
   }
-  [html appendString:@"</div></div></body></html>"];
-  return html;
+
+  return StrappyMessagesPageHTML(messagesHTML,
+                                 emptyText,
+                                 hasMessages,
+                                 (start > 0U) ? YES : NO);
 }
 
 - (void)promptSendViewController:(PromptSendViewController *)controller
@@ -1333,9 +1138,7 @@ static NSString *StrappyRemoveMessageJavaScript(NSString *elementIdentifier)
   oldestRenderedMessageIndex_ = start;
   renderedMessageCount_ += (end - start);
 
-  js = [NSString stringWithFormat:@"prependMessages(%@,%@);",
-    StrappyJavaScriptStringLiteral(html),
-    (start > 0U ? @"true" : @"false")];
+  js = StrappyPrependMessagesJavaScript(html, (start > 0U) ? YES : NO);
   [self pushJavaScript:js];
 }
 

@@ -30,6 +30,9 @@ House style for Strappy source:
 6. `StrappySession.m` is the only Objective-C file that may directly import
    Strappy C headers such as `strappy_client.h` or `strappy_core.h`. Other
    Objective-C files should talk to the C layer through `StrappySession`.
+   The only exception is UI code that calls the C webview renderer in
+   `strappy_webview.h`; Objective-C view controllers may pass display data to
+   that renderer, but must not hand-roll webview HTML, CSS, or JavaScript.
 7. Platform and SDK compatibility `#if` / `#ifdef` checks must live in
    `XPAppKit`, `XPUIKit`, or `XPFoundation`. Call sites should use XP-prefixed
    macros, helpers, categories, or types instead of embedding compatibility
@@ -47,6 +50,12 @@ House style for Strappy source:
    `source/shared/XPFoundation.{h,m}`; AppKit/UIKit shims live in `XPAppKit` /
    `XPUIKit`. Call sites must use the XP method and must not call newer SDK
    selectors directly.
+9. SQLite JSON columns are opaque on read. Do not use cJSON to parse values
+   loaded from the database. Stored custom metadata JSON should move unchanged
+   from SQLite into the webview, where page JavaScript can parse it for display.
+10. Webview HTML, CSS, and JavaScript strings are generated in C. Keep that
+    rendering logic in `strappy_webview.{h,c}` or another C module, not in
+    Objective-C view controllers.
 
 The iOS App is a bit special because its not sandboxed. It must be installed via
 .deb file, not .ipa file so that it can scan the whole filesystem for SQLite
@@ -56,7 +65,7 @@ Strappy is an OpenRouter based AI Assistant that has the following basic
 infrastructure:
 
 1. C based API client for OpenRouter/OpenAI API
-2. C based JSON parsing with cJSON
+2. C based API JSON parsing with cJSON; SQLite JSON columns stay opaque on read
 3. C based networking with libcurl
 4. C based storage with sqlite
 5. Web based chat interface for showing the response from the model

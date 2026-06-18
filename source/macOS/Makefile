@@ -13,7 +13,7 @@ ALTIVECCOCOA_LINKAGE = static
 SOURCE_DIRS = $(SHARED_DIR)
 vpath %.m $(SHARED_DIR)
 EXTRA_FLAGS = -I$(SHARED_DIR) -I$(ALTIVECCORE_DIR)/include
-EXTRA_SOURCES = XPFoundation.m StrappySession.m strappy_core.c strappy_config.c strappy_client.c strappy_db.c strappy_assistant.c
+EXTRA_SOURCES = XPFoundation.m StrappySession.m strappy_core.c strappy_config.c strappy_client.c strappy_db.c strappy_assistant.c strappy_webview.c
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
 
 # Import common Mac build engine.

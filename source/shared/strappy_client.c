@@ -949,219 +949,116 @@ static int strappy_client_build_metadata_text(strappy_chat_result *result)
   return 1;
 }
 
-char *strappy_client_metadata_text_from_json(const char *metadata_json)
+static int strappy_client_append_json_string(strappy_http_buffer *buffer,
+                                             const char *value)
 {
-  strappy_http_buffer buffer;
-  cJSON *root;
-  cJSON *usage_root;
-  cJSON *generation_root;
-  cJSON *generation_data;
-  char *copy;
-  int ok;
+  const unsigned char *cursor;
+  char escaped[8];
 
-  if ((metadata_json == NULL) || (metadata_json[0] == '\0')) {
-    return NULL;
+  if (!strappy_http_buffer_append_cstring(buffer, "\"")) {
+    return 0;
   }
 
-  root = cJSON_Parse(metadata_json);
-  if (root == NULL) {
-    return NULL;
-  }
-
-  strappy_http_buffer_init(&buffer);
-  ok = strappy_client_metadata_append_item(&buffer,
-                                           "Response ID",
-                                           root,
-                                           "response_id") &&
-       strappy_client_metadata_append_item(&buffer, "Model", root, "model") &&
-       strappy_client_metadata_append_item(&buffer, "Created", root, "created") &&
-       strappy_client_metadata_append_item(&buffer,
-                                           "Finish reason",
-                                           root,
-                                           "finish_reason") &&
-       strappy_client_metadata_append_item(&buffer,
-                                           "Native finish reason",
-                                           root,
-                                           "native_finish_reason") &&
-       strappy_client_metadata_append_item(&buffer,
-                                           "Service tier",
-                                           root,
-                                           "service_tier") &&
-       strappy_client_metadata_append_item(&buffer,
-                                           "System fingerprint",
-                                           root,
-                                           "system_fingerprint") &&
-       strappy_client_metadata_append_item(&buffer,
-                                           "HTTP status",
-                                           root,
-                                           "http_status");
-
-  usage_root = cJSON_GetObjectItem(root, "usage");
-  if (ok && cJSON_IsObject(usage_root)) {
-    ok = strappy_client_metadata_append_item(&buffer,
-                                             "Cost",
-                                             usage_root,
-                                             "cost") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Prompt tokens",
-                                             usage_root,
-                                             "prompt_tokens") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Completion tokens",
-                                             usage_root,
-                                             "completion_tokens") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Total tokens",
-                                             usage_root,
-                                             "total_tokens") &&
-         strappy_client_metadata_append_nested_item(
-           &buffer,
-           "Cached prompt tokens",
-           usage_root,
-           "prompt_tokens_details",
-           "cached_tokens") &&
-         strappy_client_metadata_append_nested_item(
-           &buffer,
-           "Cache write tokens",
-           usage_root,
-           "prompt_tokens_details",
-           "cache_write_tokens") &&
-         strappy_client_metadata_append_nested_item(
-           &buffer,
-           "Prompt audio tokens",
-           usage_root,
-           "prompt_tokens_details",
-           "audio_tokens") &&
-         strappy_client_metadata_append_nested_item(
-           &buffer,
-           "Reasoning tokens",
-           usage_root,
-           "completion_tokens_details",
-           "reasoning_tokens") &&
-         strappy_client_metadata_append_nested_item(
-           &buffer,
-           "Completion audio tokens",
-           usage_root,
-           "completion_tokens_details",
-           "audio_tokens") &&
-         strappy_client_metadata_append_nested_item(
-           &buffer,
-           "Accepted prediction tokens",
-           usage_root,
-           "completion_tokens_details",
-           "accepted_prediction_tokens") &&
-         strappy_client_metadata_append_nested_item(
-           &buffer,
-           "Rejected prediction tokens",
-           usage_root,
-           "completion_tokens_details",
-           "rejected_prediction_tokens") &&
-         strappy_client_metadata_append_nested_item(
-           &buffer,
-           "Upstream inference cost",
-           usage_root,
-           "cost_details",
-           "upstream_inference_cost");
-  }
-
-  generation_root = cJSON_GetObjectItem(root, "generation");
-  if (ok && cJSON_IsObject(generation_root)) {
-    generation_data = cJSON_GetObjectItem(generation_root, "data");
-    if (!cJSON_IsObject(generation_data)) {
-      generation_data = generation_root;
+  if (value != NULL) {
+    cursor = (const unsigned char *)value;
+    while (*cursor != '\0') {
+      if (*cursor == '"') {
+        if (!strappy_http_buffer_append_cstring(buffer, "\\\"")) {
+          return 0;
+        }
+      } else if (*cursor == '\\') {
+        if (!strappy_http_buffer_append_cstring(buffer, "\\\\")) {
+          return 0;
+        }
+      } else if (*cursor == '\b') {
+        if (!strappy_http_buffer_append_cstring(buffer, "\\b")) {
+          return 0;
+        }
+      } else if (*cursor == '\f') {
+        if (!strappy_http_buffer_append_cstring(buffer, "\\f")) {
+          return 0;
+        }
+      } else if (*cursor == '\n') {
+        if (!strappy_http_buffer_append_cstring(buffer, "\\n")) {
+          return 0;
+        }
+      } else if (*cursor == '\r') {
+        if (!strappy_http_buffer_append_cstring(buffer, "\\r")) {
+          return 0;
+        }
+      } else if (*cursor == '\t') {
+        if (!strappy_http_buffer_append_cstring(buffer, "\\t")) {
+          return 0;
+        }
+      } else if (*cursor < 32U) {
+        snprintf(escaped, sizeof(escaped), "\\u%04x", (unsigned int)*cursor);
+        if (!strappy_http_buffer_append_cstring(buffer, escaped)) {
+          return 0;
+        }
+      } else if (!strappy_http_buffer_append(buffer, (const char *)cursor, 1U)) {
+        return 0;
+      }
+      cursor++;
     }
-
-    ok = strappy_client_metadata_append_item(&buffer,
-                                             "Provider",
-                                             generation_data,
-                                             "provider_name") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Router",
-                                             generation_data,
-                                             "router") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "OpenRouter request ID",
-                                             generation_data,
-                                             "request_id") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Upstream ID",
-                                             generation_data,
-                                             "upstream_id") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Streamed",
-                                             generation_data,
-                                             "streamed") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Data region",
-                                             generation_data,
-                                             "data_region") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Latency (ms)",
-                                             generation_data,
-                                             "latency") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Generation time (ms)",
-                                             generation_data,
-                                             "generation_time") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Moderation latency (ms)",
-                                             generation_data,
-                                             "moderation_latency") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Native prompt tokens",
-                                             generation_data,
-                                             "native_tokens_prompt") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Native completion tokens",
-                                             generation_data,
-                                             "native_tokens_completion") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Native reasoning tokens",
-                                             generation_data,
-                                             "native_tokens_reasoning") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Native cached tokens",
-                                             generation_data,
-                                             "native_tokens_cached") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Total cost",
-                                             generation_data,
-                                             "total_cost") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Usage",
-                                             generation_data,
-                                             "usage") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Upstream inference cost",
-                                             generation_data,
-                                             "upstream_inference_cost") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Generation finish reason",
-                                             generation_data,
-                                             "finish_reason") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Generation native finish reason",
-                                             generation_data,
-                                             "native_finish_reason") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Web search engine",
-                                             generation_data,
-                                             "web_search_engine") &&
-         strappy_client_metadata_append_item(&buffer,
-                                             "Search results",
-                                             generation_data,
-                                             "num_search_results");
   }
 
-  cJSON_Delete(root);
-  if (!ok || (buffer.data == NULL) || (buffer.length == 0U)) {
-    strappy_http_buffer_destroy(&buffer);
-    return NULL;
+  return strappy_http_buffer_append_cstring(buffer, "\"");
+}
+
+static int strappy_client_is_json_space(char character)
+{
+  return (character == ' ') ||
+         (character == '\t') ||
+         (character == '\n') ||
+         (character == '\r');
+}
+
+static int strappy_client_json_object_bounds(const char *json,
+                                             const char **start_out,
+                                             size_t *length_out)
+{
+  const char *start;
+  const char *end;
+
+  if ((json == NULL) || (start_out == NULL) || (length_out == NULL)) {
+    return 0;
   }
 
-  copy = strappy_string_duplicate(buffer.data);
-  strappy_http_buffer_destroy(&buffer);
-  return copy;
+  start = json;
+  while ((*start != '\0') && strappy_client_is_json_space(*start)) {
+    start++;
+  }
+
+  end = start + strlen(start);
+  while ((end > start) && strappy_client_is_json_space(*(end - 1))) {
+    end--;
+  }
+
+  if ((end <= start) || (*start != '{') || (*(end - 1) != '}')) {
+    return 0;
+  }
+
+  *start_out = start;
+  *length_out = (size_t)(end - start);
+  return 1;
+}
+
+static int strappy_client_append_basic_message_json(
+  strappy_http_buffer *buffer,
+  const strappy_chat_message *message)
+{
+  if ((message == NULL) ||
+      (message->role == NULL) ||
+      (message->role[0] == '\0') ||
+      (message->content == NULL)) {
+    return 0;
+  }
+
+  return strappy_http_buffer_append_cstring(buffer, "{\"role\":") &&
+         strappy_client_append_json_string(buffer, message->role) &&
+         strappy_http_buffer_append_cstring(buffer, ",\"content\":") &&
+         strappy_client_append_json_string(buffer, message->content) &&
+         strappy_http_buffer_append_cstring(buffer, "}");
 }
 
 static char *strappy_client_build_messages_request_json(
@@ -1171,148 +1068,78 @@ static char *strappy_client_build_messages_request_json(
                                      int should_stream,
                                      char **error_out)
 {
-  cJSON *root;
-  cJSON *messages;
+  strappy_http_buffer buffer;
   char *json;
   size_t index;
+  int ok;
 
-  root = cJSON_CreateObject();
-  messages = cJSON_CreateArray();
-
-  if ((root == NULL) || (messages == NULL)) {
-    cJSON_Delete(root);
-    cJSON_Delete(messages);
-    strappy_set_error(error_out, "Could not allocate OpenRouter JSON request.");
+  if ((config == NULL) ||
+      (config->api_model == NULL) ||
+      (config->api_model[0] == '\0') ||
+      ((chat_messages == NULL) && (chat_message_count > 0U))) {
+    strappy_set_error(error_out, "OpenRouter request is incomplete.");
     return NULL;
   }
 
-  if ((cJSON_AddStringToObject(root, "model", config->api_model) == NULL) ||
-      (cJSON_AddBoolToObject(root, "stream", should_stream ? 1 : 0) == NULL)) {
-    cJSON_Delete(root);
-    cJSON_Delete(messages);
+  strappy_http_buffer_init(&buffer);
+  ok = strappy_http_buffer_append_cstring(&buffer, "{\"model\":") &&
+       strappy_client_append_json_string(&buffer, config->api_model) &&
+       strappy_http_buffer_append_cstring(&buffer, ",\"stream\":") &&
+       strappy_http_buffer_append_cstring(&buffer,
+                                          should_stream ? "true" : "false");
+
+  if (ok && should_stream && strappy_client_should_request_reasoning(config)) {
+    ok = strappy_http_buffer_append_cstring(
+      &buffer,
+      ",\"reasoning\":{\"enabled\":true,\"exclude\":false}");
+  }
+
+  if (ok && should_stream && strappy_client_should_request_stream_usage(config)) {
+    ok = strappy_http_buffer_append_cstring(
+      &buffer,
+      ",\"stream_options\":{\"include_usage\":true}");
+  }
+
+  ok = ok && strappy_http_buffer_append_cstring(&buffer, ",\"messages\":[");
+
+  for (index = 0U; ok && (index < chat_message_count); index++) {
+    const char *raw_message;
+    size_t raw_message_length;
+
+    if (index > 0U) {
+      ok = strappy_http_buffer_append_cstring(&buffer, ",");
+    }
+    if (!ok) {
+      break;
+    }
+
+    /* Stored JSON columns are opaque on read; splice saved message objects
+       without round-tripping them through cJSON. */
+    raw_message = NULL;
+    raw_message_length = 0U;
+    if (strappy_client_json_object_bounds(chat_messages[index].message_json,
+                                          &raw_message,
+                                          &raw_message_length)) {
+      ok = strappy_http_buffer_append(&buffer,
+                                      raw_message,
+                                      raw_message_length);
+    } else {
+      ok = strappy_client_append_basic_message_json(&buffer,
+                                                   &chat_messages[index]);
+    }
+  }
+
+  ok = ok && strappy_http_buffer_append_cstring(&buffer, "]}");
+  if (!ok) {
+    strappy_http_buffer_destroy(&buffer);
     strappy_set_error(error_out, "Could not build OpenRouter JSON request.");
     return NULL;
   }
 
-  if (should_stream && strappy_client_should_request_reasoning(config)) {
-    cJSON *reasoning;
-
-    reasoning = cJSON_CreateObject();
-    if (reasoning == NULL) {
-      cJSON_Delete(root);
-      cJSON_Delete(messages);
-      strappy_set_error(error_out, "Could not allocate OpenRouter reasoning request.");
-      return NULL;
-    }
-
-    if ((cJSON_AddBoolToObject(reasoning, "enabled", 1) == NULL) ||
-        (cJSON_AddBoolToObject(reasoning, "exclude", 0) == NULL) ||
-        !cJSON_AddItemToObject(root, "reasoning", reasoning)) {
-      cJSON_Delete(root);
-      cJSON_Delete(messages);
-      cJSON_Delete(reasoning);
-      strappy_set_error(error_out, "Could not build OpenRouter reasoning request.");
-      return NULL;
-    }
-    reasoning = NULL;
-  }
-
-  if (should_stream && strappy_client_should_request_stream_usage(config)) {
-    cJSON *stream_options;
-
-    stream_options = cJSON_CreateObject();
-    if (stream_options == NULL) {
-      cJSON_Delete(root);
-      cJSON_Delete(messages);
-      strappy_set_error(error_out, "Could not allocate OpenAI stream options.");
-      return NULL;
-    }
-
-    if ((cJSON_AddBoolToObject(stream_options, "include_usage", 1) == NULL) ||
-        !cJSON_AddItemToObject(root, "stream_options", stream_options)) {
-      cJSON_Delete(root);
-      cJSON_Delete(messages);
-      cJSON_Delete(stream_options);
-      strappy_set_error(error_out, "Could not build OpenAI stream options.");
-      return NULL;
-    }
-    stream_options = NULL;
-  }
-
-  for (index = 0U; index < chat_message_count; index++) {
-    cJSON *message;
-
-    message = NULL;
-    if ((chat_messages[index].message_json != NULL) &&
-        (chat_messages[index].message_json[0] != '\0')) {
-      message = cJSON_Parse(chat_messages[index].message_json);
-      if ((message != NULL) && !cJSON_IsObject(message)) {
-        cJSON_Delete(message);
-        message = NULL;
-      }
-      if (message != NULL) {
-        if (!cJSON_AddItemToArray(messages, message)) {
-          cJSON_Delete(root);
-          cJSON_Delete(messages);
-          cJSON_Delete(message);
-          strappy_set_error(error_out, "Could not build OpenRouter JSON request.");
-          return NULL;
-        }
-        continue;
-      }
-    }
-
-    if ((chat_messages[index].role == NULL) ||
-        (chat_messages[index].role[0] == '\0') ||
-        (chat_messages[index].content == NULL)) {
-      cJSON_Delete(root);
-      cJSON_Delete(messages);
-      strappy_set_error(error_out, "OpenRouter chat message is incomplete.");
-      return NULL;
-    }
-
-    message = cJSON_CreateObject();
-    if (message == NULL) {
-      cJSON_Delete(root);
-      cJSON_Delete(messages);
-      strappy_set_error(error_out, "Could not allocate OpenRouter JSON request.");
-      return NULL;
-    }
-
-    if ((cJSON_AddStringToObject(message, "role", chat_messages[index].role) == NULL) ||
-        (cJSON_AddStringToObject(message, "content", chat_messages[index].content) == NULL)) {
-      cJSON_Delete(root);
-      cJSON_Delete(messages);
-      cJSON_Delete(message);
-      strappy_set_error(error_out, "Could not build OpenRouter JSON request.");
-      return NULL;
-    }
-
-    if (!cJSON_AddItemToArray(messages, message)) {
-      cJSON_Delete(root);
-      cJSON_Delete(messages);
-      cJSON_Delete(message);
-      strappy_set_error(error_out, "Could not build OpenRouter JSON request.");
-      return NULL;
-    }
-  }
-
-  if (!cJSON_AddItemToObject(root, "messages", messages)) {
-    cJSON_Delete(root);
-    cJSON_Delete(messages);
-    strappy_set_error(error_out, "Could not build OpenRouter JSON request.");
-    return NULL;
-  }
-  messages = NULL;
-
-  json = cJSON_PrintUnformatted(root);
-  cJSON_Delete(root);
-
-  if (json == NULL) {
-    strappy_set_error(error_out, "Could not serialize OpenRouter JSON request.");
-    return NULL;
-  }
-
+  json = buffer.data;
+  buffer.data = NULL;
+  buffer.length = 0U;
+  strappy_http_buffer_destroy(&buffer);
   return json;
 }
 

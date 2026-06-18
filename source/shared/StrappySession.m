@@ -136,12 +136,10 @@ static int StrappySessionHandleStreamEvent(
   NSString *role;
   NSString *content;
   NSString *model;
-  NSString *metadata;
   NSString *metadataJSON;
   NSString *messageJSON;
   NSString *reasoning;
   NSString *createdAt;
-  char *metadataText;
 
   if (record == NULL) {
     return nil;
@@ -156,13 +154,6 @@ static int StrappySessionHandleStreamEvent(
   metadataJSON = [StrappySession stringFromCStringOrEmpty:record->metadata_json];
   messageJSON = [StrappySession stringFromCStringOrEmpty:record->message_json];
   reasoning = [StrappySession stringFromCStringOrEmpty:record->reasoning];
-  metadataText = strappy_client_metadata_text_from_json(record->metadata_json);
-  if (metadataText != NULL) {
-    metadata = [StrappySession stringFromCStringOrEmpty:metadataText];
-    strappy_free_string(metadataText);
-  } else {
-    metadata = @"";
-  }
   createdAt = [StrappySession stringFromCStringOrEmpty:record->created_at];
 
   return [NSDictionary dictionaryWithObjectsAndKeys:
@@ -171,7 +162,6 @@ static int StrappySessionHandleStreamEvent(
     role, @"role",
     content, @"text",
     model, @"model",
-    metadata, @"metadata",
     metadataJSON, @"metadata_json",
     messageJSON, @"message_json",
     reasoning, @"reasoning",
@@ -391,7 +381,7 @@ static int StrappySessionHandleStreamEvent(
   }
 
   strappyDirectoryPath = [basePath stringByAppendingPathComponent:@"Strappy"];
-  return [strappyDirectoryPath stringByAppendingPathComponent:@"sessions.sqlite3"];
+  return [strappyDirectoryPath stringByAppendingPathComponent:@"strappy.sqlite"];
 }
 
 + (BOOL)initializeSessionStoreWithError:(NSError **)error
