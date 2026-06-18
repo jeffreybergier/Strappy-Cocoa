@@ -398,6 +398,16 @@ static int strappy_client_reasoning_append_text(strappy_http_buffer *buffer,
   return strappy_http_buffer_append_cstring(buffer, text);
 }
 
+static int strappy_client_reasoning_append_delta(strappy_http_buffer *buffer,
+                                                 const char *text)
+{
+  if ((buffer == NULL) || (text == NULL) || (text[0] == '\0')) {
+    return 1;
+  }
+
+  return strappy_http_buffer_append_cstring(buffer, text);
+}
+
 static int strappy_client_reasoning_append_details_text(
   strappy_http_buffer *buffer,
   cJSON *details)
@@ -436,6 +446,28 @@ static int strappy_client_reasoning_append_details_text(
   }
 
   return 1;
+}
+
+static const char *strappy_client_reasoning_detail_text(cJSON *detail)
+{
+  cJSON *text;
+  cJSON *summary;
+
+  if (!cJSON_IsObject(detail)) {
+    return NULL;
+  }
+
+  text = cJSON_GetObjectItem(detail, "text");
+  if (cJSON_IsString(text) && (text->valuestring != NULL)) {
+    return text->valuestring;
+  }
+
+  summary = cJSON_GetObjectItem(detail, "summary");
+  if (cJSON_IsString(summary) && (summary->valuestring != NULL)) {
+    return summary->valuestring;
+  }
+
+  return NULL;
 }
 
 static char *strappy_client_reasoning_text_from_message(cJSON *message)
@@ -1848,7 +1880,9 @@ static int strappy_client_stream_capture_tool_calls(
 
 static int strappy_client_stream_capture_reasoning_details(
   strappy_stream_context *context,
-  cJSON *details)
+  cJSON *details,
+  const char *skip_first,
+  const char *skip_second)
 {
   int count;
   int index;
@@ -1868,6 +1902,7 @@ static int strappy_client_stream_capture_reasoning_details(
   for (index = 0; index < count; index++) {
     cJSON *item;
     cJSON *copy;
+    const char *text;
 
     item = cJSON_GetArrayItem(details, index);
     if (item == NULL) {
@@ -1883,11 +1918,14 @@ static int strappy_client_stream_capture_reasoning_details(
       cJSON_Delete(copy);
       return strappy_client_stream_set_error(context, "Could not store streamed reasoning detail.");
     }
-  }
 
-  if (!strappy_client_reasoning_append_details_text(&context->reasoning,
-                                                    details)) {
-    return strappy_client_stream_set_error(context, "Could not allocate streamed reasoning text.");
+    text = strappy_client_reasoning_detail_text(item);
+    if ((text != NULL) &&
+        ((skip_first == NULL) || (strcmp(text, skip_first) != 0)) &&
+        ((skip_second == NULL) || (strcmp(text, skip_second) != 0)) &&
+        !strappy_client_reasoning_append_delta(&context->reasoning, text)) {
+      return strappy_client_stream_set_error(context, "Could not allocate streamed reasoning text.");
+    }
   }
 
   return 1;
@@ -2009,9 +2047,29 @@ static int strappy_client_stream_emit_delta(strappy_stream_context *context,
   return 1;
 }
 
+static int strappy_client_stream_append_reasoning_delta(
+  strappy_stream_context *context,
+  const char *text)
+{
+  if ((text == NULL) || (text[0] == '\0')) {
+    return 1;
+  }
+
+  if (!strappy_client_reasoning_append_delta(&context->reasoning, text)) {
+    return strappy_client_stream_set_error(context, "Could not allocate streamed reasoning text.");
+  }
+
+  return strappy_client_stream_emit_delta(
+    context,
+    STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA,
+    text);
+}
+
 static int strappy_client_stream_emit_reasoning_details(
   strappy_stream_context *context,
-  cJSON *details)
+  cJSON *details,
+  const char *skip_first,
+  const char *skip_second)
 {
   int count;
   int index;
@@ -2023,33 +2081,21 @@ static int strappy_client_stream_emit_reasoning_details(
   count = cJSON_GetArraySize(details);
   for (index = 0; index < count; index++) {
     cJSON *item;
-    cJSON *text;
-    cJSON *summary;
+    const char *text;
 
     item = cJSON_GetArrayItem(details, index);
-    if (!cJSON_IsObject(item)) {
+    text = strappy_client_reasoning_detail_text(item);
+    if ((text == NULL) ||
+        ((skip_first != NULL) && (strcmp(text, skip_first) == 0)) ||
+        ((skip_second != NULL) && (strcmp(text, skip_second) == 0))) {
       continue;
     }
 
-    text = cJSON_GetObjectItem(item, "text");
-    if (cJSON_IsString(text) && (text->valuestring != NULL)) {
-      if (!strappy_client_stream_emit_delta(
-            context,
-            STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA,
-            text->valuestring)) {
-        return 0;
-      }
-      continue;
-    }
-
-    summary = cJSON_GetObjectItem(item, "summary");
-    if (cJSON_IsString(summary) && (summary->valuestring != NULL)) {
-      if (!strappy_client_stream_emit_delta(
-            context,
-            STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA,
-            summary->valuestring)) {
-        return 0;
-      }
+    if (!strappy_client_stream_emit_delta(
+          context,
+          STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA,
+          text)) {
+      return 0;
     }
   }
 
@@ -2073,6 +2119,8 @@ static int strappy_client_stream_parse_json_event(strappy_stream_context *contex
   cJSON *model;
   char *api_error;
   char *content_text;
+  const char *reasoning_text;
+  const char *reasoning_content_text;
   int ok;
 
   if ((context == NULL) || (json == NULL) || (json[0] == '\0')) {
@@ -2140,38 +2188,37 @@ static int strappy_client_stream_parse_json_event(strappy_stream_context *contex
     free(content_text);
   }
 
+  reasoning_text = NULL;
+  reasoning_content_text = NULL;
+
   reasoning = cJSON_GetObjectItem(delta, "reasoning");
   if (ok && cJSON_IsString(reasoning) && (reasoning->valuestring != NULL)) {
-    if (!strappy_client_reasoning_append_text(&context->reasoning,
-                                              reasoning->valuestring)) {
-      ok = strappy_client_stream_set_error(context, "Could not allocate streamed reasoning text.");
-    } else {
-      ok = strappy_client_stream_emit_delta(
-        context,
-        STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA,
-        reasoning->valuestring);
-    }
+    reasoning_text = reasoning->valuestring;
+    ok = strappy_client_stream_append_reasoning_delta(context, reasoning_text);
   }
 
   reasoning_content = cJSON_GetObjectItem(delta, "reasoning_content");
   if (ok && cJSON_IsString(reasoning_content) &&
       (reasoning_content->valuestring != NULL)) {
-    if (!strappy_client_reasoning_append_text(&context->reasoning,
-                                              reasoning_content->valuestring)) {
-      ok = strappy_client_stream_set_error(context, "Could not allocate streamed reasoning text.");
-    } else {
-      ok = strappy_client_stream_emit_delta(
+    reasoning_content_text = reasoning_content->valuestring;
+    if ((reasoning_text == NULL) ||
+        (strcmp(reasoning_text, reasoning_content_text) != 0)) {
+      ok = strappy_client_stream_append_reasoning_delta(
         context,
-        STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA,
-        reasoning_content->valuestring);
+        reasoning_content_text);
     }
   }
 
   reasoning_details = cJSON_GetObjectItem(delta, "reasoning_details");
   if (ok) {
     ok = strappy_client_stream_capture_reasoning_details(context,
-                                                         reasoning_details) &&
-         strappy_client_stream_emit_reasoning_details(context, reasoning_details);
+                                                         reasoning_details,
+                                                         reasoning_text,
+                                                         reasoning_content_text) &&
+         strappy_client_stream_emit_reasoning_details(context,
+                                                      reasoning_details,
+                                                      reasoning_text,
+                                                      reasoning_content_text);
   }
 
   tool_calls = cJSON_GetObjectItem(delta, "tool_calls");
