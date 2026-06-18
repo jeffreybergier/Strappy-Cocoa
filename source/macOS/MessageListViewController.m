@@ -184,6 +184,36 @@ static NSString *StrappyStatusHTML(NSString *text, BOOL retry)
   return html;
 }
 
+static NSString *StrappyRequestMetadataHTML(NSDictionary *message)
+{
+  NSMutableString *html;
+  NSString *role;
+  NSString *metadata;
+
+  if (![message isKindOfClass:[NSDictionary class]]) {
+    return @"";
+  }
+
+  role = [message objectForKey:@"role"];
+  if (![role isEqualToString:@"assistant"]) {
+    return @"";
+  }
+
+  metadata = [message objectForKey:@"metadata"];
+  if (![metadata isKindOfClass:[NSString class]] || ([metadata length] == 0U)) {
+    return @"";
+  }
+
+  html = [NSMutableString string];
+  [html appendString:@"<div class=\"request-metadata\">"];
+  [html appendFormat:@"<div class=\"request-metadata-title\">%@</div>",
+    StrappyHTMLEscape(NSLocalizedString(@"Request Metadata", nil))];
+  [html appendFormat:@"<div class=\"request-metadata-body\">%@</div>",
+    StrappyHTMLEscape(metadata)];
+  [html appendString:@"</div>"];
+  return html;
+}
+
 static NSString *StrappyMessageHTML(NSDictionary *message,
                                     NSString *elementIdentifier,
                                     NSString *state,
@@ -235,6 +265,7 @@ static NSString *StrappyMessageHTML(NSDictionary *message,
     StrappyHTMLEscape(StrappyRoleLabel(role))];
   [html appendFormat:@"<div class=\"bubble\">%@</div>",
     StrappyHTMLEscape(text)];
+  [html appendString:StrappyRequestMetadataHTML(message)];
   if ([statusHTML length] > 0U) {
     [html appendFormat:@"<div class=\"meta status\">%@</div>", statusHTML];
   } else if ([createdAt length] > 0U) {
@@ -346,6 +377,7 @@ static NSString *StrappyMessageHTMLWithReasoning(NSDictionary *message,
     StrappyHTMLEscape(reasoning)];
   [html appendString:@"</div>"];
   [html appendFormat:@"<div class=\"bubble\">%@</div>", StrappyHTMLEscape(text)];
+  [html appendString:StrappyRequestMetadataHTML(message)];
   if ([createdAt length] > 0U) {
     [html appendFormat:@"<div class=\"meta\">%@</div>",
       StrappyHTMLEscape(createdAt)];
@@ -695,6 +727,9 @@ static NSString *StrappyRemoveMessageJavaScript(NSString *elementIdentifier)
   [html appendString:@".reasoning{max-width:72%;border:1px solid #ddd;background:#fffdf2;color:#4f4a36;padding:10px 12px;margin:0 0 7px;line-height:1.4;white-space:pre-wrap;word-wrap:break-word;}"];
   [html appendString:@".reasoning-label{font-size:11px;font-weight:bold;text-transform:uppercase;color:#7a7046;margin:0 0 5px;}"];
   [html appendString:@".reasoning-body{white-space:pre-wrap;}"];
+  [html appendString:@".request-metadata{max-width:72%;box-sizing:border-box;border:1px solid #cbd7e2;background:#f7fbff;color:#2e3f4f;padding:9px 11px;margin:7px 0 0;line-height:1.35;white-space:pre-wrap;word-wrap:break-word;}"];
+  [html appendString:@".request-metadata-title{font-size:11px;font-weight:bold;text-transform:uppercase;color:#4d6478;margin:0 0 5px;}"];
+  [html appendString:@".request-metadata-body{font:11px Menlo,Consolas,Monaco,monospace;white-space:pre-wrap;}"];
   [html appendString:@".user .role,.user .meta{text-align:right;}"];
   [html appendString:@".user .bubble{margin-left:auto;background:#eef5ff;border-color:#c8d8ef;}"];
   [html appendString:@".meta{font-size:11px;color:#777;margin-top:6px;}"];

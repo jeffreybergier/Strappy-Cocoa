@@ -252,6 +252,435 @@ static int strappy_client_should_request_reasoning(const strappy_config *config)
   return (strstr(config->api_endpoint, "openrouter.ai") != NULL) ? 1 : 0;
 }
 
+static int strappy_client_is_openrouter_endpoint(const strappy_config *config)
+{
+  if ((config == NULL) || (config->api_endpoint == NULL)) {
+    return 0;
+  }
+
+  return (strstr(config->api_endpoint, "openrouter.ai") != NULL) ? 1 : 0;
+}
+
+static int strappy_client_should_request_stream_usage(const strappy_config *config)
+{
+  if ((config == NULL) || (config->api_endpoint == NULL)) {
+    return 0;
+  }
+
+  return (strstr(config->api_endpoint, "api.openai.com") != NULL) ? 1 : 0;
+}
+
+static int strappy_client_replace_result_string(char **target,
+                                                const char *value)
+{
+  char *copy;
+
+  if (target == NULL) {
+    return 0;
+  }
+
+  if (value == NULL) {
+    return 1;
+  }
+
+  copy = strappy_string_duplicate(value);
+  if (copy == NULL) {
+    return 0;
+  }
+
+  free(*target);
+  *target = copy;
+  return 1;
+}
+
+static char *strappy_client_json_value_text(cJSON *value)
+{
+  if (value == NULL || cJSON_IsNull(value)) {
+    return NULL;
+  }
+
+  if (cJSON_IsString(value) && (value->valuestring != NULL)) {
+    return strappy_string_duplicate(value->valuestring);
+  }
+
+  if (cJSON_IsBool(value) || cJSON_IsNumber(value)) {
+    return cJSON_PrintUnformatted(value);
+  }
+
+  return NULL;
+}
+
+static int strappy_client_metadata_append_text(strappy_http_buffer *buffer,
+                                               const char *text)
+{
+  return strappy_http_buffer_append_cstring(buffer, text);
+}
+
+static int strappy_client_metadata_append_line(strappy_http_buffer *buffer,
+                                               const char *label,
+                                               const char *value)
+{
+  if ((buffer == NULL) || (label == NULL) || (value == NULL)) {
+    return 1;
+  }
+
+  if (value[0] == '\0') {
+    return 1;
+  }
+
+  if ((buffer->length > 0U) &&
+      !strappy_client_metadata_append_text(buffer, "\n")) {
+    return 0;
+  }
+
+  return strappy_client_metadata_append_text(buffer, label) &&
+         strappy_client_metadata_append_text(buffer, ": ") &&
+         strappy_client_metadata_append_text(buffer, value);
+}
+
+static int strappy_client_metadata_append_item(strappy_http_buffer *buffer,
+                                               const char *label,
+                                               cJSON *object,
+                                               const char *key)
+{
+  cJSON *item;
+  char *value;
+  int ok;
+
+  if ((object == NULL) || (key == NULL)) {
+    return 1;
+  }
+
+  item = cJSON_GetObjectItem(object, key);
+  value = strappy_client_json_value_text(item);
+  if (value == NULL) {
+    return 1;
+  }
+
+  ok = strappy_client_metadata_append_line(buffer, label, value);
+  free(value);
+  return ok;
+}
+
+static int strappy_client_metadata_append_nested_item(
+  strappy_http_buffer *buffer,
+  const char *label,
+  cJSON *object,
+  const char *parent_key,
+  const char *key)
+{
+  cJSON *parent;
+
+  if ((object == NULL) || (parent_key == NULL)) {
+    return 1;
+  }
+
+  parent = cJSON_GetObjectItem(object, parent_key);
+  if (!cJSON_IsObject(parent)) {
+    return 1;
+  }
+
+  return strappy_client_metadata_append_item(buffer, label, parent, key);
+}
+
+static int strappy_client_capture_json_string(char **target, cJSON *object, const char *key)
+{
+  cJSON *item;
+
+  if ((target == NULL) || (object == NULL) || (key == NULL)) {
+    return 1;
+  }
+
+  item = cJSON_GetObjectItem(object, key);
+  if (cJSON_IsString(item) && (item->valuestring != NULL)) {
+    return strappy_client_replace_result_string(target, item->valuestring);
+  }
+
+  return 1;
+}
+
+static int strappy_client_capture_json_value(char **target, cJSON *object, const char *key)
+{
+  cJSON *item;
+  char *value;
+  int ok;
+
+  if ((target == NULL) || (object == NULL) || (key == NULL)) {
+    return 1;
+  }
+
+  item = cJSON_GetObjectItem(object, key);
+  value = strappy_client_json_value_text(item);
+  if (value == NULL) {
+    return 1;
+  }
+
+  ok = strappy_client_replace_result_string(target, value);
+  free(value);
+  return ok;
+}
+
+static int strappy_client_capture_response_metadata(cJSON *root,
+                                                    cJSON *choice,
+                                                    strappy_chat_result *result)
+{
+  cJSON *usage;
+  char *usage_json;
+
+  if ((root == NULL) || (result == NULL)) {
+    return 1;
+  }
+
+  if (!strappy_client_capture_json_string(&result->response_id, root, "id") ||
+      !strappy_client_capture_json_value(&result->created, root, "created") ||
+      !strappy_client_capture_json_string(&result->service_tier, root, "service_tier") ||
+      !strappy_client_capture_json_string(&result->system_fingerprint,
+                                          root,
+                                          "system_fingerprint") ||
+      !strappy_client_capture_json_string(&result->native_finish_reason,
+                                          root,
+                                          "native_finish_reason")) {
+    return 0;
+  }
+
+  if (choice != NULL &&
+      !strappy_client_capture_json_string(&result->native_finish_reason,
+                                          choice,
+                                          "native_finish_reason")) {
+    return 0;
+  }
+
+  usage = cJSON_GetObjectItem(root, "usage");
+  if (cJSON_IsObject(usage)) {
+    usage_json = cJSON_PrintUnformatted(usage);
+    if (usage_json != NULL) {
+      free(result->usage_json);
+      result->usage_json = usage_json;
+    }
+  }
+
+  return 1;
+}
+
+static int strappy_client_build_metadata_text(strappy_chat_result *result)
+{
+  strappy_http_buffer buffer;
+  cJSON *usage_root;
+  cJSON *generation_root;
+  cJSON *generation_data;
+  char *copy;
+  int ok;
+
+  if (result == NULL) {
+    return 1;
+  }
+
+  strappy_http_buffer_init(&buffer);
+  ok = strappy_client_metadata_append_line(&buffer,
+                                           "Response ID",
+                                           result->response_id) &&
+       strappy_client_metadata_append_line(&buffer, "Model", result->model) &&
+       strappy_client_metadata_append_line(&buffer, "Created", result->created) &&
+       strappy_client_metadata_append_line(&buffer,
+                                           "Finish reason",
+                                           result->finish_reason) &&
+       strappy_client_metadata_append_line(&buffer,
+                                           "Native finish reason",
+                                           result->native_finish_reason) &&
+       strappy_client_metadata_append_line(&buffer,
+                                           "Service tier",
+                                           result->service_tier) &&
+       strappy_client_metadata_append_line(&buffer,
+                                           "System fingerprint",
+                                           result->system_fingerprint);
+
+  usage_root = NULL;
+  if (ok && (result->usage_json != NULL) && (result->usage_json[0] != '\0')) {
+    usage_root = cJSON_Parse(result->usage_json);
+    if (usage_root != NULL) {
+      ok = strappy_client_metadata_append_item(&buffer,
+                                               "Cost",
+                                               usage_root,
+                                               "cost") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Prompt tokens",
+                                               usage_root,
+                                               "prompt_tokens") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Completion tokens",
+                                               usage_root,
+                                               "completion_tokens") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Total tokens",
+                                               usage_root,
+                                               "total_tokens") &&
+           strappy_client_metadata_append_nested_item(
+             &buffer,
+             "Cached prompt tokens",
+             usage_root,
+             "prompt_tokens_details",
+             "cached_tokens") &&
+           strappy_client_metadata_append_nested_item(
+             &buffer,
+             "Cache write tokens",
+             usage_root,
+             "prompt_tokens_details",
+             "cache_write_tokens") &&
+           strappy_client_metadata_append_nested_item(
+             &buffer,
+             "Prompt audio tokens",
+             usage_root,
+             "prompt_tokens_details",
+             "audio_tokens") &&
+           strappy_client_metadata_append_nested_item(
+             &buffer,
+             "Reasoning tokens",
+             usage_root,
+             "completion_tokens_details",
+             "reasoning_tokens") &&
+           strappy_client_metadata_append_nested_item(
+             &buffer,
+             "Completion audio tokens",
+             usage_root,
+             "completion_tokens_details",
+             "audio_tokens") &&
+           strappy_client_metadata_append_nested_item(
+             &buffer,
+             "Accepted prediction tokens",
+             usage_root,
+             "completion_tokens_details",
+             "accepted_prediction_tokens") &&
+           strappy_client_metadata_append_nested_item(
+             &buffer,
+             "Rejected prediction tokens",
+             usage_root,
+             "completion_tokens_details",
+             "rejected_prediction_tokens") &&
+           strappy_client_metadata_append_nested_item(
+             &buffer,
+             "Upstream inference cost",
+             usage_root,
+             "cost_details",
+             "upstream_inference_cost");
+      cJSON_Delete(usage_root);
+    }
+  }
+
+  generation_root = NULL;
+  if (ok &&
+      (result->generation_metadata_json != NULL) &&
+      (result->generation_metadata_json[0] != '\0')) {
+    generation_root = cJSON_Parse(result->generation_metadata_json);
+    if (generation_root != NULL) {
+      generation_data = cJSON_GetObjectItem(generation_root, "data");
+      if (!cJSON_IsObject(generation_data)) {
+        generation_data = generation_root;
+      }
+
+      ok = strappy_client_metadata_append_item(&buffer,
+                                               "Provider",
+                                               generation_data,
+                                               "provider_name") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Router",
+                                               generation_data,
+                                               "router") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "OpenRouter request ID",
+                                               generation_data,
+                                               "request_id") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Upstream ID",
+                                               generation_data,
+                                               "upstream_id") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Streamed",
+                                               generation_data,
+                                               "streamed") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Data region",
+                                               generation_data,
+                                               "data_region") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Latency (ms)",
+                                               generation_data,
+                                               "latency") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Generation time (ms)",
+                                               generation_data,
+                                               "generation_time") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Moderation latency (ms)",
+                                               generation_data,
+                                               "moderation_latency") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Native prompt tokens",
+                                               generation_data,
+                                               "native_tokens_prompt") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Native completion tokens",
+                                               generation_data,
+                                               "native_tokens_completion") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Native reasoning tokens",
+                                               generation_data,
+                                               "native_tokens_reasoning") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Native cached tokens",
+                                               generation_data,
+                                               "native_tokens_cached") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Total cost",
+                                               generation_data,
+                                               "total_cost") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Usage",
+                                               generation_data,
+                                               "usage") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Upstream inference cost",
+                                               generation_data,
+                                               "upstream_inference_cost") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Generation finish reason",
+                                               generation_data,
+                                               "finish_reason") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Generation native finish reason",
+                                               generation_data,
+                                               "native_finish_reason") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Web search engine",
+                                               generation_data,
+                                               "web_search_engine") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Search results",
+                                               generation_data,
+                                               "num_search_results");
+      cJSON_Delete(generation_root);
+    }
+  }
+
+  if (!ok) {
+    strappy_http_buffer_destroy(&buffer);
+    return 0;
+  }
+
+  free(result->metadata_text);
+  result->metadata_text = NULL;
+  if ((buffer.data != NULL) && (buffer.length > 0U)) {
+    copy = strappy_string_duplicate(buffer.data);
+    if (copy == NULL) {
+      strappy_http_buffer_destroy(&buffer);
+      return 0;
+    }
+    result->metadata_text = copy;
+  }
+
+  strappy_http_buffer_destroy(&buffer);
+  return 1;
+}
+
 static char *strappy_client_build_messages_request_json(
                                      const strappy_config *config,
                                      const strappy_chat_message *chat_messages,
@@ -303,6 +732,28 @@ static char *strappy_client_build_messages_request_json(
       return NULL;
     }
     reasoning = NULL;
+  }
+
+  if (should_stream && strappy_client_should_request_stream_usage(config)) {
+    cJSON *stream_options;
+
+    stream_options = cJSON_CreateObject();
+    if (stream_options == NULL) {
+      cJSON_Delete(root);
+      cJSON_Delete(messages);
+      strappy_set_error(error_out, "Could not allocate OpenAI stream options.");
+      return NULL;
+    }
+
+    if ((cJSON_AddBoolToObject(stream_options, "include_usage", 1) == NULL) ||
+        !cJSON_AddItemToObject(root, "stream_options", stream_options)) {
+      cJSON_Delete(root);
+      cJSON_Delete(messages);
+      cJSON_Delete(stream_options);
+      strappy_set_error(error_out, "Could not build OpenAI stream options.");
+      return NULL;
+    }
+    stream_options = NULL;
   }
 
   for (index = 0U; index < chat_message_count; index++) {
@@ -548,6 +999,16 @@ static int strappy_client_parse_response(const char *json,
     }
   }
 
+  if (!strappy_client_capture_response_metadata(root, first_choice, result)) {
+    free(response_text);
+    free(raw_json);
+    free(finish_reason_text);
+    free(model_text);
+    cJSON_Delete(root);
+    strappy_set_error(error_out, "Could not allocate response metadata.");
+    return 0;
+  }
+
   result->response_text = response_text;
   result->raw_json = raw_json;
   result->finish_reason = finish_reason_text;
@@ -772,6 +1233,13 @@ static int strappy_client_stream_parse_json_event(strappy_stream_context *contex
   ok = 1;
   choices = cJSON_GetObjectItem(root, "choices");
   first_choice = cJSON_GetArrayItem(choices, 0);
+  if (!strappy_client_capture_response_metadata(root,
+                                                first_choice,
+                                                context->result)) {
+    cJSON_Delete(root);
+    return strappy_client_stream_set_error(context,
+                                           "Could not allocate stream metadata.");
+  }
   delta = cJSON_GetObjectItem(first_choice, "delta");
   if (!cJSON_IsObject(delta)) {
     model = cJSON_GetObjectItem(root, "model");
@@ -1008,8 +1476,16 @@ void strappy_chat_result_init(strappy_chat_result *result)
 
   result->response_text = NULL;
   result->raw_json = NULL;
+  result->response_id = NULL;
   result->finish_reason = NULL;
   result->model = NULL;
+  result->created = NULL;
+  result->native_finish_reason = NULL;
+  result->service_tier = NULL;
+  result->system_fingerprint = NULL;
+  result->usage_json = NULL;
+  result->generation_metadata_json = NULL;
+  result->metadata_text = NULL;
   result->http_status = 0L;
 }
 
@@ -1021,10 +1497,192 @@ void strappy_chat_result_destroy(strappy_chat_result *result)
 
   free(result->response_text);
   free(result->raw_json);
+  free(result->response_id);
   free(result->finish_reason);
   free(result->model);
+  free(result->created);
+  free(result->native_finish_reason);
+  free(result->service_tier);
+  free(result->system_fingerprint);
+  free(result->usage_json);
+  free(result->generation_metadata_json);
+  free(result->metadata_text);
 
   strappy_chat_result_init(result);
+}
+
+static char *strappy_client_build_endpoint_base(const char *endpoint)
+{
+  const char *path = "/chat/completions";
+  size_t endpoint_length;
+
+  if (endpoint == NULL) {
+    return NULL;
+  }
+
+  endpoint_length = strlen(endpoint);
+  while ((endpoint_length > 0U) && (endpoint[endpoint_length - 1U] == '/')) {
+    endpoint_length--;
+  }
+
+  if ((endpoint_length >= strlen(path)) &&
+      (strncmp(endpoint + endpoint_length - strlen(path),
+               path,
+               strlen(path)) == 0)) {
+    endpoint_length -= strlen(path);
+  }
+
+  return strappy_string_duplicate_length(endpoint, endpoint_length);
+}
+
+static char *strappy_client_build_openrouter_generation_url(
+  const strappy_config *config,
+  const char *generation_id,
+  CURL *curl)
+{
+  char *base;
+  char *generation_url;
+  char *query_prefix;
+  char *url;
+  char *escaped_id;
+
+  if ((config == NULL) || (generation_id == NULL) ||
+      (generation_id[0] == '\0') || (curl == NULL)) {
+    return NULL;
+  }
+
+  base = strappy_client_build_endpoint_base(config->api_endpoint);
+  if (base == NULL) {
+    return NULL;
+  }
+
+  generation_url = strappy_join_strings(base, "/generation");
+  free(base);
+  if (generation_url == NULL) {
+    return NULL;
+  }
+
+  escaped_id = curl_easy_escape(curl, generation_id, 0);
+  if (escaped_id == NULL) {
+    free(generation_url);
+    return NULL;
+  }
+
+  query_prefix = strappy_join_strings(generation_url, "?id=");
+  free(generation_url);
+  if (query_prefix == NULL) {
+    curl_free(escaped_id);
+    return NULL;
+  }
+
+  url = strappy_join_strings(query_prefix, escaped_id);
+  free(query_prefix);
+  curl_free(escaped_id);
+  return url;
+}
+
+static void strappy_client_fetch_openrouter_generation_metadata(
+  const strappy_config *config,
+  strappy_chat_result *result)
+{
+  CURL *curl;
+  CURLcode code;
+  struct curl_slist *headers;
+  strappy_http_buffer response_buffer;
+  char *auth_header;
+  char *url;
+  long http_status;
+
+  if (!strappy_client_is_openrouter_endpoint(config) ||
+      (result == NULL) ||
+      (result->response_id == NULL) ||
+      (result->response_id[0] == '\0') ||
+      (config->api_token == NULL)) {
+    return;
+  }
+
+  curl = curl_easy_init();
+  if (curl == NULL) {
+    return;
+  }
+
+  url = strappy_client_build_openrouter_generation_url(config,
+                                                       result->response_id,
+                                                       curl);
+  if (url == NULL) {
+    curl_easy_cleanup(curl);
+    return;
+  }
+
+  auth_header = strappy_join_strings("Authorization: Bearer ", config->api_token);
+  if (auth_header == NULL) {
+    free(url);
+    curl_easy_cleanup(curl);
+    return;
+  }
+
+  headers = NULL;
+  if (!strappy_client_add_header(&headers, "Accept: application/json", NULL) ||
+      !strappy_client_add_header(&headers, auth_header, NULL)) {
+    free(auth_header);
+    curl_slist_free_all(headers);
+    free(url);
+    curl_easy_cleanup(curl);
+    return;
+  }
+  free(auth_header);
+
+  strappy_http_buffer_init(&response_buffer);
+  http_status = 0L;
+
+  curl_easy_setopt(curl, CURLOPT_URL, url);
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, strappy_client_write_callback);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response_buffer);
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, "Strappy/0.1");
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+  if ((strappy_cainfo_path != NULL) && (strappy_cainfo_path[0] != '\0')) {
+    curl_easy_setopt(curl, CURLOPT_CAINFO, strappy_cainfo_path);
+  }
+
+  code = curl_easy_perform(curl);
+  if (code == CURLE_OK) {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_status);
+  }
+
+  if ((code == CURLE_OK) &&
+      (http_status >= 200L) &&
+      (http_status < 300L) &&
+      (response_buffer.data != NULL) &&
+      (response_buffer.data[0] != '\0')) {
+    char *metadata_json;
+
+    metadata_json = strappy_string_duplicate(response_buffer.data);
+    if (metadata_json != NULL) {
+      free(result->generation_metadata_json);
+      result->generation_metadata_json = metadata_json;
+    }
+  }
+
+  strappy_http_buffer_destroy(&response_buffer);
+  curl_slist_free_all(headers);
+  free(url);
+  curl_easy_cleanup(curl);
+}
+
+static void strappy_client_finalize_metadata(const strappy_config *config,
+                                             strappy_chat_result *result)
+{
+  if (result == NULL) {
+    return;
+  }
+
+  strappy_client_fetch_openrouter_generation_metadata(config, result);
+  if (!strappy_client_build_metadata_text(result)) {
+    free(result->metadata_text);
+    result->metadata_text = NULL;
+  }
 }
 
 static int strappy_client_send_request_json(const strappy_config *config,
@@ -1125,6 +1783,7 @@ static int strappy_client_send_request_json(const strappy_config *config,
     return 0;
   }
 
+  strappy_client_finalize_metadata(config, result);
   return 1;
 }
 
@@ -1278,6 +1937,7 @@ static int strappy_client_stream_request_json(const strappy_config *config,
         strappy_chat_result_destroy(result);
         return 0;
       }
+      strappy_client_finalize_metadata(config, result);
       return 1;
     }
 
@@ -1307,6 +1967,7 @@ static int strappy_client_stream_request_json(const strappy_config *config,
   }
 
   strappy_stream_context_destroy(&stream_context);
+  strappy_client_finalize_metadata(config, result);
   return 1;
 }
 

@@ -136,6 +136,7 @@ static int StrappySessionHandleStreamEvent(
   NSString *role;
   NSString *content;
   NSString *model;
+  NSString *metadata;
   NSString *createdAt;
 
   if (record == NULL) {
@@ -148,6 +149,7 @@ static int StrappySessionHandleStreamEvent(
   role = [StrappySession stringFromCStringOrEmpty:record->role];
   content = [StrappySession stringFromCStringOrEmpty:record->content];
   model = [StrappySession stringFromCStringOrEmpty:record->model];
+  metadata = [StrappySession stringFromCStringOrEmpty:record->metadata];
   createdAt = [StrappySession stringFromCStringOrEmpty:record->created_at];
 
   return [NSDictionary dictionaryWithObjectsAndKeys:
@@ -156,6 +158,7 @@ static int StrappySessionHandleStreamEvent(
     role, @"role",
     content, @"text",
     model, @"model",
+    metadata, @"metadata",
     httpStatus, @"http_status",
     createdAt, @"created_at",
     nil];

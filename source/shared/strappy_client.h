@@ -17,8 +17,16 @@ typedef struct strappy_chat_message {
 typedef struct strappy_chat_result {
   char *response_text;
   char *raw_json;
+  char *response_id;
   char *finish_reason;
   char *model;
+  char *created;
+  char *native_finish_reason;
+  char *service_tier;
+  char *system_fingerprint;
+  char *usage_json;
+  char *generation_metadata_json;
+  char *metadata_text;
   long http_status;
 } strappy_chat_result;
 

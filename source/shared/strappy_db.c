@@ -3,7 +3,9 @@
 #include "strappy_core.h"
 
 #include <sqlite3.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 void strappy_session_record_init(strappy_session_record *record)
 {
@@ -68,6 +70,7 @@ void strappy_session_message_record_init(strappy_session_message_record *record)
   record->role = NULL;
   record->content = NULL;
   record->model = NULL;
+  record->metadata = NULL;
   record->created_at = NULL;
   record->http_status = 0L;
 }
@@ -81,6 +84,7 @@ void strappy_session_message_record_destroy(strappy_session_message_record *reco
   free(record->role);
   free(record->content);
   free(record->model);
+  free(record->metadata);
   free(record->created_at);
   strappy_session_message_record_init(record);
 }
@@ -180,6 +184,96 @@ static int strappy_db_exec(sqlite3 *db,
   return 1;
 }
 
+static int strappy_db_table_has_column(sqlite3 *db,
+                                       const char *table_name,
+                                       const char *column_name,
+                                       int *exists_out,
+                                       char **error_out)
+{
+  sqlite3_stmt *stmt;
+  char sql[256];
+  int result;
+  int rc;
+
+  if (exists_out == NULL) {
+    strappy_set_error(error_out, "Column check output is missing.");
+    return 0;
+  }
+  *exists_out = 0;
+
+  result = snprintf(sql, sizeof(sql), "PRAGMA table_info(%s);", table_name);
+  if ((result < 0) || ((size_t)result >= sizeof(sql))) {
+    strappy_set_error(error_out, "Column check SQL is too large.");
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare column check: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    const unsigned char *name;
+
+    name = sqlite3_column_text(stmt, 1);
+    if ((name != NULL) && (strcmp((const char *)name, column_name) == 0)) {
+      *exists_out = 1;
+      sqlite3_finalize(stmt);
+      return 1;
+    }
+  }
+
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read column check: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+static int strappy_db_ensure_column(sqlite3 *db,
+                                    const char *table_name,
+                                    const char *column_name,
+                                    const char *column_type,
+                                    char **error_out)
+{
+  char sql[256];
+  int exists;
+  int result;
+
+  if (!strappy_db_table_has_column(db,
+                                   table_name,
+                                   column_name,
+                                   &exists,
+                                   error_out)) {
+    return 0;
+  }
+  if (exists) {
+    return 1;
+  }
+
+  result = snprintf(sql,
+                    sizeof(sql),
+                    "ALTER TABLE %s ADD COLUMN %s %s;",
+                    table_name,
+                    column_name,
+                    column_type);
+  if ((result < 0) || ((size_t)result >= sizeof(sql))) {
+    strappy_set_error(error_out, "Column migration SQL is too large.");
+    return 0;
+  }
+
+  return strappy_db_exec(db, sql, "Could not migrate session schema", error_out);
+}
+
 static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
 {
   static const char *sessions_sql =
@@ -200,6 +294,7 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
     "content TEXT NOT NULL,"
     "model TEXT,"
     "http_status INTEGER NOT NULL DEFAULT 0,"
+    "metadata TEXT,"
     "created_at TEXT NOT NULL DEFAULT "
     "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
     "FOREIGN KEY(session_id) REFERENCES sessions(id)"
@@ -209,16 +304,16 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
     "ON session_messages(session_id, id);";
   static const char *backfill_user_sql =
     "INSERT INTO session_messages "
-    "(session_id, role, content, model, http_status, created_at) "
-    "SELECT s.id, 'user', s.prompt, NULL, 0, s.created_at "
+    "(session_id, role, content, model, http_status, metadata, created_at) "
+    "SELECT s.id, 'user', s.prompt, NULL, 0, NULL, s.created_at "
     "FROM sessions s "
     "WHERE NOT EXISTS ("
     "SELECT 1 FROM session_messages m WHERE m.session_id = s.id"
     ");";
   static const char *backfill_assistant_sql =
     "INSERT INTO session_messages "
-    "(session_id, role, content, model, http_status, created_at) "
-    "SELECT s.id, 'assistant', s.response, s.model, s.http_status, s.created_at "
+    "(session_id, role, content, model, http_status, metadata, created_at) "
+    "SELECT s.id, 'assistant', s.response, s.model, s.http_status, NULL, s.created_at "
     "FROM sessions s "
     "WHERE NOT EXISTS ("
     "SELECT 1 FROM session_messages m "
@@ -243,6 +338,14 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
                        messages_index_sql,
                        "Could not create session message index",
                        error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_column(db,
+                                "session_messages",
+                                "metadata",
+                                "TEXT",
+                                error_out)) {
     return 0;
   }
 
@@ -322,6 +425,7 @@ static int strappy_db_assign_message_from_statement(
   char *role;
   char *content;
   char *model;
+  char *metadata;
   char *created_at;
 
   if ((record == NULL) || (stmt == NULL)) {
@@ -337,12 +441,14 @@ static int strappy_db_assign_message_from_statement(
   role = strappy_db_column_string(stmt, 2);
   content = strappy_db_column_string(stmt, 3);
   model = strappy_db_column_string(stmt, 4);
-  created_at = strappy_db_column_string(stmt, 6);
+  metadata = strappy_db_column_string(stmt, 6);
+  created_at = strappy_db_column_string(stmt, 7);
 
   if ((role == NULL) || (content == NULL) || (created_at == NULL)) {
     free(role);
     free(content);
     free(model);
+    free(metadata);
     free(created_at);
     strappy_set_error(error_out, "Could not allocate session message row.");
     return 0;
@@ -351,6 +457,7 @@ static int strappy_db_assign_message_from_statement(
   record->role = role;
   record->content = content;
   record->model = model;
+  record->metadata = metadata;
   record->created_at = created_at;
   return 1;
 }
@@ -361,12 +468,13 @@ static int strappy_db_insert_message(sqlite3 *db,
                                      const char *content,
                                      const char *model,
                                      long http_status,
+                                     const char *metadata,
                                      char **error_out)
 {
   static const char *sql =
     "INSERT INTO session_messages "
-    "(session_id, role, content, model, http_status) "
-    "VALUES (?, ?, ?, ?, ?);";
+    "(session_id, role, content, model, http_status, metadata) "
+    "VALUES (?, ?, ?, ?, ?, ?);";
   sqlite3_stmt *stmt;
   int rc;
   int ok;
@@ -405,6 +513,13 @@ static int strappy_db_insert_message(sqlite3 *db,
   }
   if (ok &&
       (sqlite3_bind_int64(stmt, 5, (sqlite3_int64)http_status) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (metadata != NULL) &&
+      (sqlite3_bind_text(stmt, 6, metadata, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (metadata == NULL) && (sqlite3_bind_null(stmt, 6) != SQLITE_OK)) {
     ok = 0;
   }
 
@@ -495,6 +610,7 @@ int strappy_db_save_exchange(const char *db_path,
                              const char *response,
                              const char *model,
                              long http_status,
+                             const char *metadata,
                              char **error_out)
 {
   return strappy_db_save_exchange_with_id(db_path,
@@ -502,6 +618,7 @@ int strappy_db_save_exchange(const char *db_path,
                                           response,
                                           model,
                                           http_status,
+                                          metadata,
                                           NULL,
                                           error_out);
 }
@@ -511,6 +628,7 @@ int strappy_db_save_exchange_with_id(const char *db_path,
                                      const char *response,
                                      const char *model,
                                      long http_status,
+                                     const char *metadata,
                                      long long *session_id_out,
                                      char **error_out)
 {
@@ -608,6 +726,7 @@ int strappy_db_save_exchange_with_id(const char *db_path,
                                  prompt,
                                  NULL,
                                  0L,
+                                 NULL,
                                  error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
     sqlite3_close(db);
@@ -620,6 +739,7 @@ int strappy_db_save_exchange_with_id(const char *db_path,
                                  response,
                                  model,
                                  http_status,
+                                 metadata,
                                  error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
     sqlite3_close(db);
@@ -815,6 +935,7 @@ int strappy_db_append_exchange_to_session(const char *db_path,
                                           const char *response,
                                           const char *model,
                                           long http_status,
+                                          const char *metadata,
                                           char **error_out)
 {
   static const char *update_sql =
@@ -856,6 +977,7 @@ int strappy_db_append_exchange_to_session(const char *db_path,
                                  prompt,
                                  NULL,
                                  0L,
+                                 NULL,
                                  error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
     sqlite3_close(db);
@@ -868,6 +990,7 @@ int strappy_db_append_exchange_to_session(const char *db_path,
                                  response,
                                  model,
                                  http_status,
+                                 metadata,
                                  error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
     sqlite3_close(db);
@@ -944,7 +1067,7 @@ int strappy_db_list_session_messages(const char *db_path,
                                      char **error_out)
 {
   static const char *sql =
-    "SELECT id, session_id, role, content, model, http_status, created_at "
+    "SELECT id, session_id, role, content, model, http_status, metadata, created_at "
     "FROM session_messages "
     "WHERE session_id = ? "
     "ORDER BY id ASC;";

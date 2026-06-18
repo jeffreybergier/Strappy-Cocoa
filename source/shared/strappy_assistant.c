@@ -45,6 +45,7 @@ static char *strappy_assistant_send_prompt_internal(const char *prompt,
                                         result.response_text,
                                         result.model,
                                         result.http_status,
+                                        result.metadata_text,
                                         session_id_out,
                                         error_out)) {
     strappy_chat_result_destroy(&result);
@@ -144,6 +145,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                              result.response_text,
                                              result.model,
                                              result.http_status,
+                                             result.metadata_text,
                                              error_out)) {
     strappy_chat_result_destroy(&result);
     strappy_config_destroy(&config);
@@ -203,6 +205,7 @@ static char *strappy_assistant_stream_prompt_internal(
                                         result.response_text,
                                         result.model,
                                         result.http_status,
+                                        result.metadata_text,
                                         session_id_out,
                                         error_out)) {
     strappy_chat_result_destroy(&result);
@@ -307,6 +310,7 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
                                              result.response_text,
                                              result.model,
                                              result.http_status,
+                                             result.metadata_text,
                                              error_out)) {
     strappy_chat_result_destroy(&result);
     strappy_config_destroy(&config);
