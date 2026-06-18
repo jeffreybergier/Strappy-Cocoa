@@ -22,6 +22,20 @@ typedef struct strappy_chat_result {
   long http_status;
 } strappy_chat_result;
 
+typedef enum strappy_chat_stream_event_type {
+  STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA = 1,
+  STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA = 2
+} strappy_chat_stream_event_type;
+
+typedef struct strappy_chat_stream_event {
+  strappy_chat_stream_event_type type;
+  const char *text;
+} strappy_chat_stream_event;
+
+typedef int (*strappy_chat_stream_callback)(
+  const strappy_chat_stream_event *event,
+  void *user_data);
+
 void strappy_chat_result_init(strappy_chat_result *result);
 void strappy_chat_result_destroy(strappy_chat_result *result);
 int strappy_client_set_cainfo(const char *path, char **error_out);
@@ -34,6 +48,19 @@ int strappy_client_send_messages(const strappy_config *config,
                                  size_t message_count,
                                  strappy_chat_result *result,
                                  char **error_out);
+int strappy_client_stream_prompt(const strappy_config *config,
+                                 const char *prompt,
+                                 strappy_chat_result *result,
+                                 strappy_chat_stream_callback callback,
+                                 void *callback_data,
+                                 char **error_out);
+int strappy_client_stream_messages(const strappy_config *config,
+                                   const strappy_chat_message *messages,
+                                   size_t message_count,
+                                   strappy_chat_result *result,
+                                   strappy_chat_stream_callback callback,
+                                   void *callback_data,
+                                   char **error_out);
 
 #ifdef __cplusplus
 }

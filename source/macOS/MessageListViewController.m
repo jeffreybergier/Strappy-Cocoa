@@ -260,6 +260,100 @@ static NSString *StrappyPendingMessageHTML(NSString *prompt,
   return StrappyMessageHTML(message, elementIdentifier, state, statusHTML);
 }
 
+static NSString *StrappyStreamingAssistantMessageHTML(NSString *elementIdentifier,
+                                                      NSString *text,
+                                                      NSString *reasoning,
+                                                      NSString *state,
+                                                      NSString *statusHTML)
+{
+  NSMutableString *html;
+  NSString *stateClass;
+  BOOL hasReasoning;
+
+  if (![elementIdentifier isKindOfClass:[NSString class]] ||
+      ([elementIdentifier length] == 0U)) {
+    elementIdentifier = @"streaming-assistant";
+  }
+  if (![text isKindOfClass:[NSString class]]) {
+    text = @"";
+  }
+  if (![reasoning isKindOfClass:[NSString class]]) {
+    reasoning = @"";
+  }
+
+  stateClass = @"";
+  if ([state isKindOfClass:[NSString class]] && ([state length] > 0U)) {
+    stateClass = [NSString stringWithFormat:@" state-%@", state];
+  }
+  hasReasoning = ([reasoning length] > 0U) ? YES : NO;
+
+  html = [NSMutableString string];
+  [html appendFormat:@"<div id=\"%@\" class=\"row assistant%@\">",
+    StrappyHTMLEscape(elementIdentifier),
+    stateClass];
+  [html appendFormat:@"<div class=\"role\">%@</div>",
+    StrappyHTMLEscape(StrappyRoleLabel(@"assistant"))];
+  [html appendFormat:@"<div class=\"reasoning\"%@>",
+    (hasReasoning ? @"" : @" style=\"display:none\"")];
+  [html appendFormat:@"<div class=\"reasoning-label\">%@</div>",
+    StrappyHTMLEscape(NSLocalizedString(@"Thinking", nil))];
+  [html appendFormat:@"<div class=\"reasoning-body\">%@</div>",
+    StrappyHTMLEscape(reasoning)];
+  [html appendString:@"</div>"];
+  [html appendFormat:@"<div class=\"bubble\">%@</div>", StrappyHTMLEscape(text)];
+  if ([statusHTML length] > 0U) {
+    [html appendFormat:@"<div class=\"meta status\">%@</div>", statusHTML];
+  }
+  [html appendString:@"</div>"];
+  return html;
+}
+
+static NSString *StrappyMessageHTMLWithReasoning(NSDictionary *message,
+                                                 NSString *reasoning)
+{
+  NSMutableString *html;
+  NSString *role;
+  NSString *text;
+  NSString *createdAt;
+
+  if (![reasoning isKindOfClass:[NSString class]] || ([reasoning length] == 0U)) {
+    return StrappyMessageHTML(message, nil, nil, nil);
+  }
+
+  role = [message objectForKey:@"role"];
+  if (![role isEqualToString:@"assistant"]) {
+    return StrappyMessageHTML(message, nil, nil, nil);
+  }
+
+  text = [message objectForKey:@"text"];
+  createdAt = [message objectForKey:@"created_at"];
+  if (![text isKindOfClass:[NSString class]]) {
+    text = @"";
+  }
+  if (![createdAt isKindOfClass:[NSString class]]) {
+    createdAt = @"";
+  }
+
+  html = [NSMutableString string];
+  [html appendFormat:@"<div id=\"%@\" class=\"row assistant\">",
+    StrappyHTMLEscape(StrappySavedMessageElementIdentifier(message))];
+  [html appendFormat:@"<div class=\"role\">%@</div>",
+    StrappyHTMLEscape(StrappyRoleLabel(@"assistant"))];
+  [html appendString:@"<div class=\"reasoning\">"];
+  [html appendFormat:@"<div class=\"reasoning-label\">%@</div>",
+    StrappyHTMLEscape(NSLocalizedString(@"Thinking", nil))];
+  [html appendFormat:@"<div class=\"reasoning-body\">%@</div>",
+    StrappyHTMLEscape(reasoning)];
+  [html appendString:@"</div>"];
+  [html appendFormat:@"<div class=\"bubble\">%@</div>", StrappyHTMLEscape(text)];
+  if ([createdAt length] > 0U) {
+    [html appendFormat:@"<div class=\"meta\">%@</div>",
+      StrappyHTMLEscape(createdAt)];
+  }
+  [html appendString:@"</div>"];
+  return html;
+}
+
 static NSString *StrappyMessagesHTMLForRange(NSArray *messages,
                                              NSUInteger start,
                                              NSUInteger end)
@@ -307,9 +401,35 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
     StrappyJavaScriptStringLiteral(state)];
 }
 
-@interface MessageListViewController ()
+static NSString *StrappyAppendMessageTextJavaScript(NSString *elementIdentifier,
+                                                    NSString *delta)
+{
+  return [NSString stringWithFormat:@"appendMessageText(%@,%@);",
+    StrappyJavaScriptStringLiteral(elementIdentifier),
+    StrappyJavaScriptStringLiteral(delta)];
+}
+
+static NSString *StrappyAppendReasoningTextJavaScript(NSString *elementIdentifier,
+                                                      NSString *delta)
+{
+  return [NSString stringWithFormat:@"appendReasoningText(%@,%@);",
+    StrappyJavaScriptStringLiteral(elementIdentifier),
+    StrappyJavaScriptStringLiteral(delta)];
+}
+
+static NSString *StrappyRemoveMessageJavaScript(NSString *elementIdentifier)
+{
+  return [NSString stringWithFormat:@"removeMessage(%@);",
+    StrappyJavaScriptStringLiteral(elementIdentifier)];
+}
+
+@interface MessageListViewController () <StrappySessionStreamDelegate>
 - (void)sendPromptInBackground:(NSDictionary *)request;
 - (void)sendPromptDidFinish:(NSDictionary *)result;
+- (void)streamContentDeltaDidArrive:(NSDictionary *)delta;
+- (void)streamReasoningDeltaDidArrive:(NSDictionary *)delta;
+- (void)applyStreamContentDeltaAndRelease:(NSDictionary *)delta;
+- (void)applyStreamReasoningDeltaAndRelease:(NSDictionary *)delta;
 - (void)beginSendingPrompt:(NSString *)prompt reusingPendingMessage:(BOOL)reuse;
 - (void)retryFailedPrompt;
 - (void)loadEarlierMessages;
@@ -419,10 +539,16 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
 {
   [pendingMessageIdentifier_ release];
   pendingMessageIdentifier_ = nil;
+  [pendingAssistantMessageIdentifier_ release];
+  pendingAssistantMessageIdentifier_ = nil;
   [pendingPrompt_ release];
   pendingPrompt_ = nil;
   [sendingSessionId_ release];
   sendingSessionId_ = nil;
+  [streamingAssistantText_ release];
+  streamingAssistantText_ = nil;
+  [streamingReasoningText_ release];
+  streamingReasoningText_ = nil;
 }
 
 - (void)reloadWithSession:(NSDictionary *)session
@@ -566,6 +692,9 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
   [html appendString:@".role{font-size:11px;font-weight:bold;color:#666;text-transform:uppercase;margin:0 0 5px 2px;}"];
   [html appendString:@".bubble{display:block;max-width:72%;border:1px solid #d8d8d8;background:#fff;padding:12px 14px;line-height:1.45;white-space:pre-wrap;word-wrap:break-word;}"];
   [html appendString:@".assistant .bubble{background:#fcfcfc;}"];
+  [html appendString:@".reasoning{max-width:72%;border:1px solid #ddd;background:#fffdf2;color:#4f4a36;padding:10px 12px;margin:0 0 7px;line-height:1.4;white-space:pre-wrap;word-wrap:break-word;}"];
+  [html appendString:@".reasoning-label{font-size:11px;font-weight:bold;text-transform:uppercase;color:#7a7046;margin:0 0 5px;}"];
+  [html appendString:@".reasoning-body{white-space:pre-wrap;}"];
   [html appendString:@".user .role,.user .meta{text-align:right;}"];
   [html appendString:@".user .bubble{margin-left:auto;background:#eef5ff;border-color:#c8d8ef;}"];
   [html appendString:@".meta{font-size:11px;color:#777;margin-top:6px;}"];
@@ -585,6 +714,10 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
   [html appendString:@"function replaceMessage(id,html){clearEmpty();var old=byId(id);if(!old){appendMessage(html);return;}var d=nodesFromHTML(html);if(d.firstChild)old.parentNode.replaceChild(d.firstChild,old);scrollBottom();}"];
   [html appendString:@"function prependMessages(html,hasMore){var m=byId('messages');if(!m)return;var d=nodesFromHTML(html);while(d.lastChild)m.insertBefore(d.lastChild,m.firstChild);var l=byId('load-more');if(l&&!hasMore)l.parentNode.removeChild(l);}"];
   [html appendString:@"function setMessageState(id,status,state){var r=byId(id);if(!r)return;r.className=r.className.replace(/\\sstate-[^\\s]+/g,'')+' state-'+state;var s=firstByClass(r,'status');if(!s){s=document.createElement('div');s.className='meta status';r.appendChild(s);}s.innerHTML=status;scrollBottom();}"];
+  [html appendString:@"function appendTextToNode(n,t){if(!n)return;if(typeof n.textContent!='undefined')n.textContent=n.textContent+t;else n.innerText=n.innerText+t;}"];
+  [html appendString:@"function appendMessageText(id,t){var r=byId(id);if(!r)return;appendTextToNode(firstByClass(r,'bubble'),t);scrollBottom();}"];
+  [html appendString:@"function appendReasoningText(id,t){var r=byId(id);if(!r)return;var box=firstByClass(r,'reasoning');var body=firstByClass(r,'reasoning-body');if(box)box.style.display='block';appendTextToNode(body,t);scrollBottom();}"];
+  [html appendString:@"function removeMessage(id){var r=byId(id);if(r&&r.parentNode)r.parentNode.removeChild(r);}"];
   [html appendString:@"</script></head><body><div class=\"page\">"];
 
   if (start > 0U) {
@@ -611,6 +744,16 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
                                                 (sending_
                                                  ? StrappyStatusHTML(NSLocalizedString(@"Sending...", nil), NO)
                                                  : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), YES)))];
+    if (pendingAssistantMessageIdentifier_ != nil) {
+      [html appendString:
+        StrappyStreamingAssistantMessageHTML(pendingAssistantMessageIdentifier_,
+                                             streamingAssistantText_,
+                                             streamingReasoningText_,
+                                             (sending_ ? @"pending" : @"error"),
+                                             (sending_
+                                              ? StrappyStatusHTML(NSLocalizedString(@"Streaming...", nil), NO)
+                                              : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), NO)))];
+    }
   }
   [html appendString:@"</div></div></body></html>"];
   return html;
@@ -634,6 +777,7 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
 - (void)beginSendingPrompt:(NSString *)prompt reusingPendingMessage:(BOOL)reuse
 {
   NSMutableDictionary *request;
+  NSString *promptToSend;
   static unsigned long pendingCounter = 0UL;
 
   if (sending_) {
@@ -644,34 +788,76 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
     return;
   }
 
+  promptToSend = [prompt copy];
+
   sending_ = YES;
   [statusText_ release];
   statusText_ = nil;
   [sendController_ setSending:YES];
 
   if (!reuse || (pendingMessageIdentifier_ == nil)) {
+    NSMutableString *js;
+
     [self clearPendingMessageState];
     pendingCounter++;
     pendingMessageIdentifier_ =
       [[NSString stringWithFormat:@"pending-%lu", pendingCounter] retain];
-    pendingPrompt_ = [prompt copy];
+    pendingAssistantMessageIdentifier_ =
+      [[NSString stringWithFormat:@"pending-%lu-assistant", pendingCounter] retain];
+    pendingPrompt_ = [promptToSend copy];
     sendingSessionId_ = [sessionId_ retain];
-    [self pushJavaScript:
+    streamingAssistantText_ = [[NSMutableString alloc] init];
+    streamingReasoningText_ = [[NSMutableString alloc] init];
+
+    js = [NSMutableString string];
+    [js appendString:
       StrappyAppendMessageJavaScript(
-        StrappyPendingMessageHTML(prompt,
+        StrappyPendingMessageHTML(promptToSend,
                                   pendingMessageIdentifier_,
                                   @"pending",
                                   StrappyStatusHTML(NSLocalizedString(@"Sending...", nil), NO)))];
+    [js appendString:
+      StrappyAppendMessageJavaScript(
+        StrappyStreamingAssistantMessageHTML(
+          pendingAssistantMessageIdentifier_,
+          streamingAssistantText_,
+          streamingReasoningText_,
+          @"pending",
+          StrappyStatusHTML(NSLocalizedString(@"Streaming...", nil), NO)))];
+    [self pushJavaScript:js];
   } else {
-    [self pushJavaScript:
+    NSMutableString *js;
+
+    if (pendingAssistantMessageIdentifier_ == nil) {
+      pendingCounter++;
+      pendingAssistantMessageIdentifier_ =
+        [[NSString stringWithFormat:@"pending-%lu-assistant", pendingCounter] retain];
+    }
+    [streamingAssistantText_ release];
+    streamingAssistantText_ = [[NSMutableString alloc] init];
+    [streamingReasoningText_ release];
+    streamingReasoningText_ = [[NSMutableString alloc] init];
+
+    js = [NSMutableString string];
+    [js appendString:
       StrappySetMessageStateJavaScript(pendingMessageIdentifier_,
                                        StrappyStatusHTML(NSLocalizedString(@"Sending...", nil), NO),
                                        @"pending")];
+    [js appendString:
+      StrappyAppendMessageJavaScript(
+        StrappyStreamingAssistantMessageHTML(
+          pendingAssistantMessageIdentifier_,
+          streamingAssistantText_,
+          streamingReasoningText_,
+          @"pending",
+          StrappyStatusHTML(NSLocalizedString(@"Streaming...", nil), NO)))];
+    [self pushJavaScript:js];
   }
 
   request = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
-    prompt, @"prompt",
+    promptToSend, @"prompt",
     pendingMessageIdentifier_, @"pending_id",
+    pendingAssistantMessageIdentifier_, @"assistant_pending_id",
     [NSNumber numberWithLongLong:lastKnownMessageIdentifier_], @"previous_last_id",
     [NSNumber numberWithBool:(sessionId_ == nil)], @"created",
     nil];
@@ -684,6 +870,7 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
                            toTarget:self
                          withObject:request];
   [request release];
+  [promptToSend release];
 }
 
 - (void)retryFailedPrompt
@@ -703,9 +890,11 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
   NSString *errorMessage;
   NSString *prompt;
   NSString *pendingIdentifier;
+  NSString *assistantPendingIdentifier;
   NSNumber *sessionId;
   NSNumber *previousLastIdentifier;
   NSNumber *created;
+  NSDictionary *streamContext;
 
   pool = [[NSAutoreleasePool alloc] init];
   prompt = [request objectForKey:@"prompt"];
@@ -715,6 +904,10 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
   pendingIdentifier = [request objectForKey:@"pending_id"];
   if (![pendingIdentifier isKindOfClass:[NSString class]]) {
     pendingIdentifier = @"";
+  }
+  assistantPendingIdentifier = [request objectForKey:@"assistant_pending_id"];
+  if (![assistantPendingIdentifier isKindOfClass:[NSString class]]) {
+    assistantPendingIdentifier = @"";
   }
   sessionId = [request objectForKey:@"session_id"];
   if (![sessionId isKindOfClass:[NSNumber class]]) {
@@ -731,13 +924,21 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
 
   result = [[NSMutableDictionary alloc] init];
   [result setObject:pendingIdentifier forKey:@"pending_id"];
+  [result setObject:assistantPendingIdentifier forKey:@"assistant_pending_id"];
   [result setObject:previousLastIdentifier forKey:@"previous_last_id"];
   [result setObject:created forKey:@"created"];
 
+  streamContext = [NSDictionary dictionaryWithObjectsAndKeys:
+    pendingIdentifier, @"pending_id",
+    assistantPendingIdentifier, @"assistant_pending_id",
+    nil];
+
   error = nil;
-  session = [StrappySession submitPrompt:prompt
-                     inSessionIdentifier:sessionId
-                                   error:&error];
+  session = [StrappySession submitPromptStreaming:prompt
+                              inSessionIdentifier:sessionId
+                                          context:streamContext
+                                         delegate:self
+                                            error:&error];
   if (session != nil) {
     [result setObject:session forKey:@"session"];
   } else {
@@ -756,11 +957,127 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
   [self release];
 }
 
+- (void)strappySessionStreamDidReceiveContentDelta:(NSDictionary *)delta
+{
+  [self streamContentDeltaDidArrive:delta];
+}
+
+- (void)strappySessionStreamDidReceiveReasoningDelta:(NSDictionary *)delta
+{
+  [self streamReasoningDeltaDidArrive:delta];
+}
+
+- (void)streamContentDeltaDidArrive:(NSDictionary *)delta
+{
+  NSDictionary *retainedDelta;
+
+  retainedDelta = [delta retain];
+  [self performSelectorOnMainThread:@selector(applyStreamContentDeltaAndRelease:)
+                         withObject:retainedDelta
+                      waitUntilDone:NO];
+}
+
+- (void)streamReasoningDeltaDidArrive:(NSDictionary *)delta
+{
+  NSDictionary *retainedDelta;
+
+  retainedDelta = [delta retain];
+  [self performSelectorOnMainThread:@selector(applyStreamReasoningDeltaAndRelease:)
+                         withObject:retainedDelta
+                      waitUntilDone:NO];
+}
+
+- (BOOL)streamDeltaAppliesToCurrentPendingMessage:(NSDictionary *)delta
+{
+  NSDictionary *context;
+  NSString *pendingIdentifier;
+  NSString *assistantPendingIdentifier;
+
+  if (![delta isKindOfClass:[NSDictionary class]]) {
+    return NO;
+  }
+
+  context = [delta objectForKey:@"context"];
+  if (![context isKindOfClass:[NSDictionary class]]) {
+    return NO;
+  }
+
+  pendingIdentifier = [context objectForKey:@"pending_id"];
+  assistantPendingIdentifier = [context objectForKey:@"assistant_pending_id"];
+  if (![pendingIdentifier isKindOfClass:[NSString class]] ||
+      ![assistantPendingIdentifier isKindOfClass:[NSString class]]) {
+    return NO;
+  }
+
+  if ((pendingMessageIdentifier_ == nil) ||
+      ![pendingMessageIdentifier_ isEqualToString:pendingIdentifier]) {
+    return NO;
+  }
+
+  if ((pendingAssistantMessageIdentifier_ == nil) ||
+      ![pendingAssistantMessageIdentifier_ isEqualToString:assistantPendingIdentifier]) {
+    return NO;
+  }
+
+  return [self pendingAppliesToCurrentSession];
+}
+
+- (void)applyStreamContentDeltaAndRelease:(NSDictionary *)delta
+{
+  NSString *text;
+
+  if (![self streamDeltaAppliesToCurrentPendingMessage:delta]) {
+    [delta release];
+    return;
+  }
+
+  text = [delta objectForKey:@"delta"];
+  if (![text isKindOfClass:[NSString class]] || ([text length] == 0U)) {
+    [delta release];
+    return;
+  }
+
+  if (streamingAssistantText_ == nil) {
+    streamingAssistantText_ = [[NSMutableString alloc] init];
+  }
+  [streamingAssistantText_ appendString:text];
+  [self pushJavaScript:
+    StrappyAppendMessageTextJavaScript(pendingAssistantMessageIdentifier_, text)];
+
+  [delta release];
+}
+
+- (void)applyStreamReasoningDeltaAndRelease:(NSDictionary *)delta
+{
+  NSString *text;
+
+  if (![self streamDeltaAppliesToCurrentPendingMessage:delta]) {
+    [delta release];
+    return;
+  }
+
+  text = [delta objectForKey:@"delta"];
+  if (![text isKindOfClass:[NSString class]] || ([text length] == 0U)) {
+    [delta release];
+    return;
+  }
+
+  if (streamingReasoningText_ == nil) {
+    streamingReasoningText_ = [[NSMutableString alloc] init];
+  }
+  [streamingReasoningText_ appendString:text];
+  [self pushJavaScript:
+    StrappyAppendReasoningTextJavaScript(pendingAssistantMessageIdentifier_, text)];
+
+  [delta release];
+}
+
 - (void)sendPromptDidFinish:(NSDictionary *)result
 {
   NSDictionary *session;
   NSString *errorMessage;
   NSString *pendingIdentifier;
+  NSString *assistantPendingIdentifier;
   NSNumber *previousLastIdentifier;
   NSNumber *created;
   NSNumber *resultSessionId;
@@ -772,6 +1089,10 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
   pendingIdentifier = [result objectForKey:@"pending_id"];
   if (![pendingIdentifier isKindOfClass:[NSString class]]) {
     pendingIdentifier = @"";
+  }
+  assistantPendingIdentifier = [result objectForKey:@"assistant_pending_id"];
+  if (![assistantPendingIdentifier isKindOfClass:[NSString class]]) {
+    assistantPendingIdentifier = @"";
   }
   previousLastIdentifier = [result objectForKey:@"previous_last_id"];
   if (![previousLastIdentifier isKindOfClass:[NSNumber class]]) {
@@ -793,6 +1114,7 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
     NSMutableString *js;
     NSUInteger index;
     BOOL replacedPending;
+    BOOL replacedAssistantPending;
     long long newestIdentifier;
     long long previousIdentifier;
 
@@ -841,6 +1163,7 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
     previousIdentifier = [previousLastIdentifier longLongValue];
     newestIdentifier = previousIdentifier;
     replacedPending = NO;
+    replacedAssistantPending = NO;
     js = [NSMutableString string];
     for (index = 0U; index < [messages count]; index++) {
       NSDictionary *message;
@@ -861,6 +1184,14 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
           StrappyReplaceMessageJavaScript(pendingIdentifier,
                                           StrappyMessageHTML(message, nil, nil, nil))];
         replacedPending = YES;
+      } else if (!replacedAssistantPending &&
+                 ([assistantPendingIdentifier length] > 0U)) {
+        [js appendString:
+          StrappyReplaceMessageJavaScript(assistantPendingIdentifier,
+                                          StrappyMessageHTMLWithReasoning(
+                                            message,
+                                            streamingReasoningText_))];
+        replacedAssistantPending = YES;
       } else {
         [js appendString:
           StrappyAppendMessageJavaScript(StrappyMessageHTML(message, nil, nil, nil))];
@@ -888,10 +1219,23 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
   }
 
   if (pendingIsCurrent) {
-    [self pushJavaScript:
+    NSMutableString *js;
+
+    js = [NSMutableString string];
+    if ([assistantPendingIdentifier length] > 0U) {
+      [js appendString:StrappyRemoveMessageJavaScript(assistantPendingIdentifier)];
+    }
+    [js appendString:
       StrappySetMessageStateJavaScript(pendingIdentifier,
                                        StrappyStatusHTML(errorMessage, YES),
                                        @"error")];
+    [self pushJavaScript:js];
+    [pendingAssistantMessageIdentifier_ release];
+    pendingAssistantMessageIdentifier_ = nil;
+    [streamingAssistantText_ release];
+    streamingAssistantText_ = nil;
+    [streamingReasoningText_ release];
+    streamingReasoningText_ = nil;
   } else {
     return;
   }
@@ -948,8 +1292,11 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
   [sendController_ release];
   [statusText_ release];
   [pendingMessageIdentifier_ release];
+  [pendingAssistantMessageIdentifier_ release];
   [pendingPrompt_ release];
   [sendingSessionId_ release];
+  [streamingAssistantText_ release];
+  [streamingReasoningText_ release];
   [super dealloc];
 }
 

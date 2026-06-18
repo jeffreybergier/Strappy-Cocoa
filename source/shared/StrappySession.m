@@ -6,6 +6,57 @@
 #import "strappy_db.h"
 #import "XPFoundation.h"
 
+typedef struct StrappySessionStreamContext {
+  id delegate;
+  NSDictionary *context;
+} StrappySessionStreamContext;
+
+static int StrappySessionHandleStreamEvent(
+  const strappy_chat_stream_event *event,
+  void *userData)
+{
+  StrappySessionStreamContext *context;
+  NSString *text;
+  NSMutableDictionary *delta;
+
+  if ((event == NULL) || (userData == NULL)) {
+    return 1;
+  }
+
+  context = (StrappySessionStreamContext *)userData;
+  if (context->delegate == nil) {
+    return 1;
+  }
+
+  text = nil;
+  if (event->text != NULL) {
+    text = [NSString stringWithUTF8String:event->text];
+  }
+  if (text == nil) {
+    text = @"";
+  }
+
+  delta = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
+    text, @"delta",
+    nil];
+  if (context->context != nil) {
+    [delta setObject:context->context forKey:@"context"];
+  }
+
+  if ((event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) &&
+      [context->delegate respondsToSelector:
+        @selector(strappySessionStreamDidReceiveContentDelta:)]) {
+    [context->delegate strappySessionStreamDidReceiveContentDelta:delta];
+  } else if ((event->type == STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA) &&
+             [context->delegate respondsToSelector:
+               @selector(strappySessionStreamDidReceiveReasoningDelta:)]) {
+    [context->delegate strappySessionStreamDidReceiveReasoningDelta:delta];
+  }
+
+  [delta release];
+  return 1;
+}
+
 @implementation StrappySession
 
 + (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath
@@ -705,6 +756,114 @@
                                                         [databasePath UTF8String],
                                                         sessionId,
                                                         &strappyError);
+  if (response == NULL) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return nil;
+  }
+  strappy_free_string(response);
+
+  strappy_session_record_init(&record);
+  strappyError = NULL;
+  if (!strappy_db_load_session([databasePath UTF8String],
+                               sessionId,
+                               &record,
+                               &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    strappy_session_record_destroy(&record);
+    return nil;
+  }
+
+  session = [StrappySession dictionaryFromSessionRecord:&record];
+  strappy_session_record_destroy(&record);
+  return session;
+}
+
++ (NSDictionary *)submitPromptStreaming:(NSString *)prompt
+                    inSessionIdentifier:(NSNumber *)sessionIdentifier
+                                context:(NSDictionary *)context
+                               delegate:(id<StrappySessionStreamDelegate>)delegate
+                                  error:(NSError **)error
+{
+  NSString *databasePath;
+  char *response;
+  char *strappyError;
+  long long sessionId;
+  strappy_session_record record;
+  NSDictionary *session;
+  StrappySessionStreamContext streamContext;
+
+  if ((prompt == nil) || ([prompt length] == 0U)) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Prompt is empty.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:4
+                               userInfo:userInfo];
+    }
+    return nil;
+  }
+
+  if ((context != nil) && ![context isKindOfClass:[NSDictionary class]]) {
+    context = nil;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+
+  streamContext.delegate = [(id)delegate retain];
+  streamContext.context = [context retain];
+
+  if (sessionIdentifier == nil) {
+    sessionId = 0;
+    strappyError = NULL;
+    response = strappy_assistant_stream_prompt_and_store_with_id(
+      [prompt UTF8String],
+      NULL,
+      [databasePath UTF8String],
+      &sessionId,
+      StrappySessionHandleStreamEvent,
+      &streamContext,
+      &strappyError);
+  } else {
+    sessionId = [sessionIdentifier longLongValue];
+    if (sessionId <= 0) {
+      [streamContext.context release];
+      [streamContext.delegate release];
+      if (error != nil) {
+        NSDictionary *userInfo =
+          [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
+                                      forKey:NSLocalizedDescriptionKey];
+        *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                     code:6
+                                 userInfo:userInfo];
+      }
+      return nil;
+    }
+
+    strappyError = NULL;
+    response = strappy_assistant_stream_prompt_for_session_and_store(
+      [prompt UTF8String],
+      NULL,
+      [databasePath UTF8String],
+      sessionId,
+      StrappySessionHandleStreamEvent,
+      &streamContext,
+      &strappyError);
+  }
+
+  [streamContext.context release];
+  [streamContext.delegate release];
+
   if (response == NULL) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];

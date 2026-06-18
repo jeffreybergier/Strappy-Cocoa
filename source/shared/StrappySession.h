@@ -1,5 +1,10 @@
 #import <Foundation/Foundation.h>
 
+@protocol StrappySessionStreamDelegate
+- (void)strappySessionStreamDidReceiveContentDelta:(NSDictionary *)delta;
+- (void)strappySessionStreamDidReceiveReasoningDelta:(NSDictionary *)delta;
+@end
+
 @interface StrappySession : NSObject
 
 + (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath;
@@ -16,5 +21,10 @@
 + (NSDictionary *)submitPrompt:(NSString *)prompt
            inSessionIdentifier:(NSNumber *)sessionIdentifier
                          error:(NSError **)error;
++ (NSDictionary *)submitPromptStreaming:(NSString *)prompt
+                    inSessionIdentifier:(NSNumber *)sessionIdentifier
+                                context:(NSDictionary *)context
+                               delegate:(id<StrappySessionStreamDelegate>)delegate
+                                  error:(NSError **)error;
 
 @end
