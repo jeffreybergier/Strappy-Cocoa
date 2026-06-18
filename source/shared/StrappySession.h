@@ -6,6 +6,8 @@
 + (NSString *)sessionsDatabasePath;
 + (BOOL)initializeSessionStoreWithError:(NSError **)error;
 + (NSArray *)sessionSummariesWithError:(NSError **)error;
++ (NSDictionary *)sessionSummaryForSessionIdentifier:(NSNumber *)sessionIdentifier
+                                               error:(NSError **)error;
 + (NSArray *)messagesForSessionIdentifier:(NSNumber *)sessionIdentifier
                                     error:(NSError **)error;
 + (NSString *)submitPromptSynchronously:(NSString *)prompt error:(NSError **)error;

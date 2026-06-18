@@ -11,5 +11,8 @@
 }
 
 - (id)init;
+- (void)newSession:(id)sender;
+- (BOOL)canSendCurrentPrompt;
+- (void)sendCurrentPrompt:(id)sender;
 
 @end

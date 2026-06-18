@@ -1,17 +1,60 @@
 #import "SessionListViewController.h"
 #import "StrappySession.h"
+#import "XPFoundation.h"
 
-static const CGFloat kStrappySessionRowHeight = 52.0;
+static const CGFloat kStrappySessionRowHeight = 58.0;
+static const CGFloat kStrappySectionRowHeight = 24.0;
+static const CGFloat kStrappyAvatarSize = 34.0;
+static const CGFloat kStrappyPadLeft = 8.0;
+static const CGFloat kStrappyPadRight = 8.0;
+static const CGFloat kStrappyTextGap = 8.0;
+
 static NSString * const kStrappySessionRowTypeKey = @"row_type";
 static NSString * const kStrappySessionRowTypeNew = @"new";
+static NSString * const kStrappySessionRowTypeSection = @"section";
+static NSString * const kStrappySessionRowTypeSession = @"session";
+static NSString * const kStrappySessionRowTypeEmpty = @"empty";
+
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
+  #define StrappyPasteboardStringType NSPasteboardTypeString
+#else
+  #define StrappyPasteboardStringType NSStringPboardType
+#endif
+
+static NSDictionary *StrappySectionRow(NSString *title)
+{
+  return [NSDictionary dictionaryWithObjectsAndKeys:
+    kStrappySessionRowTypeSection, kStrappySessionRowTypeKey,
+    (title ? title : @""), @"section_title",
+    nil];
+}
 
 static NSDictionary *StrappyNewSessionRow(void)
 {
   return [NSDictionary dictionaryWithObjectsAndKeys:
     kStrappySessionRowTypeNew, kStrappySessionRowTypeKey,
     NSLocalizedString(@"New Session", nil), @"prompt",
+    NSLocalizedString(@"Start a new conversation", nil), @"last_message_text",
     @"", @"created_at",
     nil];
+}
+
+static NSDictionary *StrappyEmptySessionRow(void)
+{
+  return [NSDictionary dictionaryWithObjectsAndKeys:
+    kStrappySessionRowTypeEmpty, kStrappySessionRowTypeKey,
+    NSLocalizedString(@"No conversations yet", nil), @"prompt",
+    NSLocalizedString(@"Send a prompt to create one.", nil), @"last_message_text",
+    nil];
+}
+
+static NSDictionary *StrappySessionDisplayRow(NSDictionary *session)
+{
+  NSMutableDictionary *row;
+
+  row = [NSMutableDictionary dictionaryWithDictionary:session];
+  [row setObject:kStrappySessionRowTypeSession forKey:kStrappySessionRowTypeKey];
+  return row;
 }
 
 static NSString *StrappySessionPromptPreview(NSDictionary *session)
@@ -31,62 +74,313 @@ static NSString *StrappySessionPromptPreview(NSDictionary *session)
   return prompt;
 }
 
+static NSString *StrappyRolePrefix(NSString *role)
+{
+  if ([role isEqualToString:@"assistant"]) {
+    return NSLocalizedString(@"Agent", nil);
+  }
+  return NSLocalizedString(@"You", nil);
+}
+
+static NSString *StrappyPreviewText(NSDictionary *row)
+{
+  NSString *type;
+  NSString *text;
+  NSString *role;
+
+  type = [row objectForKey:kStrappySessionRowTypeKey];
+  text = [row objectForKey:@"last_message_text"];
+  if (![text isKindOfClass:[NSString class]]) {
+    text = @"";
+  }
+  if ([type isEqualToString:kStrappySessionRowTypeSession]) {
+    role = [row objectForKey:@"last_message_role"];
+    return [NSString stringWithFormat:@"%@: %@",
+      StrappyRolePrefix(role),
+      ([text length] ? text : NSLocalizedString(@"No messages", nil))];
+  }
+  return text;
+}
+
+static NSString *StrappyDisplayTimestamp(NSString *timestamp)
+{
+  static NSDateFormatter *inputFormatter = nil;
+  static NSDateFormatter *displayFormatter = nil;
+  NSDate *date;
+
+  if (![timestamp isKindOfClass:[NSString class]] || ([timestamp length] == 0U)) {
+    return @"";
+  }
+
+  if (inputFormatter == nil) {
+    inputFormatter = [[NSDateFormatter alloc] init];
+    [inputFormatter setFormatterBehavior:NSDateFormatterBehavior10_4];
+    [inputFormatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"];
+    [inputFormatter setTimeZone:[NSTimeZone timeZoneForSecondsFromGMT:0]];
+  }
+  if (displayFormatter == nil) {
+    displayFormatter = [[NSDateFormatter alloc] init];
+    [displayFormatter setFormatterBehavior:NSDateFormatterBehavior10_4];
+    [displayFormatter setDateStyle:NSDateFormatterShortStyle];
+    [displayFormatter setTimeStyle:NSDateFormatterShortStyle];
+  }
+
+  date = [inputFormatter dateFromString:timestamp];
+  if (date == nil) {
+    return timestamp;
+  }
+  return [displayFormatter stringFromDate:date];
+}
+
+static NSDictionary *StrappyTextAttributes(NSFont *font,
+                                           NSColor *color,
+                                           NSLineBreakMode breakMode)
+{
+  NSMutableParagraphStyle *style;
+
+  style = [[[NSMutableParagraphStyle alloc] init] autorelease];
+  [style setLineBreakMode:breakMode];
+  return [NSDictionary dictionaryWithObjectsAndKeys:
+    font, NSFontAttributeName,
+    color, NSForegroundColorAttributeName,
+    style, NSParagraphStyleAttributeName,
+    nil];
+}
+
+static NSColor *StrappySelectedTextColor(BOOL selected)
+{
+  return selected ? [NSColor alternateSelectedControlTextColor]
+                  : [NSColor controlTextColor];
+}
+
+static NSColor *StrappySecondaryTextColor(BOOL selected)
+{
+  return selected ? [NSColor alternateSelectedControlTextColor]
+                  : [NSColor disabledControlTextColor];
+}
+
+@protocol StrappySessionTableViewMenu <NSObject>
+- (NSMenu *)contextMenuForRow:(NSInteger)row;
+@end
+
+@interface StrappySessionTableView : NSTableView
+@end
+
+@implementation StrappySessionTableView
+
+- (NSMenu *)menuForEvent:(NSEvent *)event
+{
+  NSPoint point;
+  NSInteger row;
+  id<StrappySessionTableViewMenu> source;
+
+  point = [self convertPoint:[event locationInWindow] fromView:nil];
+  row = [self rowAtPoint:point];
+  if (row < 0) {
+    return nil;
+  }
+
+  [self selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)row]
+    byExtendingSelection:NO];
+
+  source = (id<StrappySessionTableViewMenu>)[self dataSource];
+  if ([source respondsToSelector:@selector(contextMenuForRow:)]) {
+    return [source contextMenuForRow:row];
+  }
+  return nil;
+}
+
+@end
+
 @interface StrappySessionCell : NSCell
 @end
 
 @implementation StrappySessionCell
 
+- (void)drawSectionWithFrame:(NSRect)frame row:(NSDictionary *)row
+{
+  NSString *title;
+  NSDictionary *attrs;
+  NSRect rect;
+
+  title = [row objectForKey:@"section_title"];
+  if (![title isKindOfClass:[NSString class]]) {
+    title = @"";
+  }
+
+  attrs = StrappyTextAttributes([NSFont boldSystemFontOfSize:11.0],
+                                [NSColor disabledControlTextColor],
+                                NSLineBreakByTruncatingTail);
+  rect = NSMakeRect(NSMinX(frame) + kStrappyPadLeft,
+                    NSMinY(frame) + 5.0,
+                    NSWidth(frame) - (kStrappyPadLeft + kStrappyPadRight),
+                    14.0);
+  [title drawInRect:rect withAttributes:attrs];
+}
+
+- (void)drawAvatarInRect:(NSRect)avatarRect
+                     row:(NSDictionary *)row
+                selected:(BOOL)selected
+{
+  NSString *type;
+  NSString *state;
+  NSString *glyph;
+  NSColor *fillColor;
+  NSDictionary *attrs;
+  NSSize glyphSize;
+  NSRect glyphRect;
+
+  type = [row objectForKey:kStrappySessionRowTypeKey];
+  state = [row objectForKey:@"state"];
+
+  if ([type isEqualToString:kStrappySessionRowTypeNew]) {
+    fillColor = selected ? [NSColor alternateSelectedControlTextColor]
+                         : [NSColor colorWithCalibratedRed:0.12
+                                                     green:0.42
+                                                      blue:0.78
+                                                     alpha:1.0];
+    glyph = @"+";
+  } else {
+    fillColor = selected ? [NSColor alternateSelectedControlTextColor]
+                         : [NSColor colorWithCalibratedWhite:0.72 alpha:1.0];
+    glyph = @"AI";
+  }
+
+  [fillColor set];
+  [[NSBezierPath bezierPathWithOvalInRect:avatarRect] fill];
+
+  attrs = [NSDictionary dictionaryWithObjectsAndKeys:
+    (selected ? [NSColor selectedControlColor] : [NSColor whiteColor]),
+      NSForegroundColorAttributeName,
+    [NSFont boldSystemFontOfSize:([glyph length] == 1U ? 22.0 : 11.0)],
+      NSFontAttributeName,
+    nil];
+  glyphSize = [glyph sizeWithAttributes:attrs];
+  glyphRect = NSMakeRect(NSMidX(avatarRect) - (glyphSize.width / 2.0),
+                         NSMidY(avatarRect) - (glyphSize.height / 2.0),
+                         glyphSize.width,
+                         glyphSize.height);
+  [glyph drawInRect:glyphRect withAttributes:attrs];
+
+  if ([state isEqualToString:@"error"]) {
+    NSRect dotRect;
+
+    dotRect = NSMakeRect(NSMaxX(avatarRect) - 8.0,
+                         NSMinY(avatarRect) + 1.0,
+                         9.0,
+                         9.0);
+    [[NSColor colorWithCalibratedRed:0.82 green:0.12 blue:0.10 alpha:1.0] set];
+    [[NSBezierPath bezierPathWithOvalInRect:dotRect] fill];
+  }
+}
+
+- (void)drawSessionWithFrame:(NSRect)frame row:(NSDictionary *)row
+{
+  NSString *title;
+  NSString *preview;
+  NSString *timestamp;
+  NSString *type;
+  NSNumber *messageCount;
+  BOOL selected;
+  BOOL isEmpty;
+  NSRect avatarRect;
+  CGFloat textX;
+  CGFloat textWidth;
+  CGFloat timestampWidth;
+  NSDictionary *titleAttrs;
+  NSDictionary *previewAttrs;
+  NSDictionary *metaAttrs;
+
+  selected = [self isHighlighted];
+  type = [row objectForKey:kStrappySessionRowTypeKey];
+  isEmpty = [type isEqualToString:kStrappySessionRowTypeEmpty];
+
+  avatarRect = NSMakeRect(NSMinX(frame) + kStrappyPadLeft,
+                          NSMinY(frame) + floor((NSHeight(frame) - kStrappyAvatarSize) / 2.0),
+                          kStrappyAvatarSize,
+                          kStrappyAvatarSize);
+  if (!isEmpty) {
+    [self drawAvatarInRect:avatarRect row:row selected:selected];
+  }
+
+  textX = isEmpty ? (NSMinX(frame) + kStrappyPadLeft)
+                  : (NSMaxX(avatarRect) + kStrappyTextGap);
+  timestampWidth = 78.0;
+  textWidth = NSMaxX(frame) - textX - kStrappyPadRight - timestampWidth;
+  if (textWidth < 40.0) {
+    textWidth = NSMaxX(frame) - textX - kStrappyPadRight;
+    timestampWidth = 0.0;
+  }
+
+  title = StrappySessionPromptPreview(row);
+  preview = StrappyPreviewText(row);
+  timestamp = @"";
+  if ([type isEqualToString:kStrappySessionRowTypeSession]) {
+    timestamp = StrappyDisplayTimestamp([row objectForKey:@"last_message_at"]);
+  }
+
+  titleAttrs = StrappyTextAttributes([NSFont boldSystemFontOfSize:13.0],
+                                     StrappySelectedTextColor(selected),
+                                     NSLineBreakByTruncatingTail);
+  previewAttrs = StrappyTextAttributes([NSFont systemFontOfSize:11.0],
+                                       StrappySecondaryTextColor(selected),
+                                       NSLineBreakByTruncatingTail);
+  metaAttrs = StrappyTextAttributes([NSFont systemFontOfSize:10.0],
+                                    StrappySecondaryTextColor(selected),
+                                    NSLineBreakByTruncatingTail);
+
+  [title drawInRect:NSMakeRect(textX,
+                               NSMinY(frame) + 9.0,
+                               textWidth,
+                               17.0)
+     withAttributes:titleAttrs];
+  [preview drawInRect:NSMakeRect(textX,
+                                 NSMinY(frame) + 29.0,
+                                 NSMaxX(frame) - textX - kStrappyPadRight,
+                                 15.0)
+       withAttributes:previewAttrs];
+
+  if ((timestampWidth > 0.0) && ([timestamp length] > 0U)) {
+    [timestamp drawInRect:NSMakeRect(NSMaxX(frame) - kStrappyPadRight - timestampWidth,
+                                     NSMinY(frame) + 10.0,
+                                     timestampWidth,
+                                     14.0)
+           withAttributes:metaAttrs];
+  }
+
+  messageCount = [row objectForKey:@"message_count"];
+  if ([messageCount isKindOfClass:[NSNumber class]] &&
+      ([messageCount XP_unsignedIntegerValue] > 0UL)) {
+    NSString *countText;
+
+    countText = [NSString stringWithFormat:NSLocalizedString(@"%@ msgs", nil),
+      messageCount];
+    [countText drawInRect:NSMakeRect(NSMaxX(frame) - kStrappyPadRight - timestampWidth,
+                                     NSMinY(frame) + 31.0,
+                                     timestampWidth,
+                                     13.0)
+           withAttributes:metaAttrs];
+  }
+}
+
 - (void)drawInteriorWithFrame:(NSRect)frame inView:(NSView *)view
 {
-  NSDictionary *session;
-  NSString *title;
-  NSString *subtitle;
-  NSColor *textColor;
-  NSDictionary *titleAttrs;
-  NSDictionary *subtitleAttrs;
-  NSRect titleRect;
-  NSRect subtitleRect;
-  BOOL isNewSession;
+  NSDictionary *row;
+  NSString *type;
 
-  session = [self objectValue];
-  if (![session isKindOfClass:[NSDictionary class]]) {
-    session = nil;
-  }
-
-  isNewSession = [[[session objectForKey:kStrappySessionRowTypeKey]
-                    description] isEqualToString:kStrappySessionRowTypeNew];
-  title = StrappySessionPromptPreview(session);
-  subtitle = isNewSession ? NSLocalizedString(@"Start a new conversation", nil)
-                          : [session objectForKey:@"created_at"];
-  if (![subtitle isKindOfClass:[NSString class]]) {
-    subtitle = @"";
-  }
-
-  textColor = [self isHighlighted] ? [NSColor alternateSelectedControlTextColor]
-                                   : [NSColor controlTextColor];
-  titleAttrs = [NSDictionary dictionaryWithObjectsAndKeys:
-    textColor, NSForegroundColorAttributeName,
-    [NSFont systemFontOfSize:13.0], NSFontAttributeName,
-    nil];
-  subtitleAttrs = [NSDictionary dictionaryWithObjectsAndKeys:
-    ([self isHighlighted] ? [NSColor alternateSelectedControlTextColor]
-                          : [NSColor disabledControlTextColor]),
-      NSForegroundColorAttributeName,
-    [NSFont systemFontOfSize:10.0], NSFontAttributeName,
-    nil];
-
-  titleRect = NSMakeRect(NSMinX(frame) + 10.0,
-                         NSMinY(frame) + 8.0,
-                         NSWidth(frame) - 20.0,
-                         18.0);
-  subtitleRect = NSMakeRect(NSMinX(frame) + 10.0,
-                            NSMinY(frame) + 28.0,
-                            NSWidth(frame) - 20.0,
-                            14.0);
-
-  [title drawInRect:titleRect withAttributes:titleAttrs];
-  [subtitle drawInRect:subtitleRect withAttributes:subtitleAttrs];
   (void)view;
+  row = [self objectValue];
+  if (![row isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
+
+  type = [row objectForKey:kStrappySessionRowTypeKey];
+  if ([type isEqualToString:kStrappySessionRowTypeSection]) {
+    [self drawSectionWithFrame:frame row:row];
+    return;
+  }
+
+  [self drawSessionWithFrame:frame row:row];
 }
 
 @end
@@ -116,7 +410,7 @@ static NSString *StrappySessionPromptPreview(NSDictionary *session)
   [scrollView_ setAutohidesScrollers:YES];
   [scrollView_ setBorderType:NSNoBorder];
 
-  tableView_ = [[NSTableView alloc] initWithFrame:[[self view] bounds]];
+  tableView_ = [[StrappySessionTableView alloc] initWithFrame:[[self view] bounds]];
   [tableView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   [tableView_ setDataSource:self];
   [tableView_ setDelegate:self];
@@ -140,6 +434,7 @@ static NSString *StrappySessionPromptPreview(NSDictionary *session)
 {
   NSInteger row;
   NSDictionary *session;
+  NSString *type;
 
   row = [tableView_ selectedRow];
   if ((row < 0) || (row >= (NSInteger)[rows_ count])) {
@@ -150,12 +445,12 @@ static NSString *StrappySessionPromptPreview(NSDictionary *session)
   }
 
   session = [rows_ objectAtIndex:(NSUInteger)row];
+  type = [session objectForKey:kStrappySessionRowTypeKey];
   if (delegate_ != nil) {
-    if ([[session objectForKey:kStrappySessionRowTypeKey]
-          isEqualToString:kStrappySessionRowTypeNew]) {
-      [delegate_ sessionListViewController:self didSelectSession:nil];
-    } else {
+    if ([type isEqualToString:kStrappySessionRowTypeSession]) {
       [delegate_ sessionListViewController:self didSelectSession:session];
+    } else if ([type isEqualToString:kStrappySessionRowTypeNew]) {
+      [delegate_ sessionListViewController:self didSelectSession:nil];
     }
   }
 }
@@ -180,12 +475,27 @@ static NSString *StrappySessionPromptPreview(NSDictionary *session)
   return -1;
 }
 
+- (NSUInteger)firstSessionInsertIndexForRows:(NSArray *)rows
+{
+  NSUInteger index;
+
+  for (index = 0U; index < [rows count]; index++) {
+    NSDictionary *row = [rows objectAtIndex:index];
+    if ([[row objectForKey:kStrappySessionRowTypeKey]
+          isEqualToString:kStrappySessionRowTypeSection]) {
+      return index + 1U;
+    }
+  }
+  return [rows count];
+}
+
 - (void)reloadData
 {
   NSError *error;
   NSArray *sessions;
   NSMutableArray *displayRows;
   NSInteger row;
+  NSUInteger index;
 
   error = nil;
   sessions = [StrappySession sessionSummariesWithError:&error];
@@ -193,9 +503,16 @@ static NSString *StrappySessionPromptPreview(NSDictionary *session)
     sessions = [NSArray array];
   }
 
-  displayRows = [NSMutableArray arrayWithCapacity:[sessions count] + 1U];
+  displayRows = [NSMutableArray arrayWithCapacity:[sessions count] + 2U];
   [displayRows addObject:StrappyNewSessionRow()];
-  [displayRows addObjectsFromArray:sessions];
+  [displayRows addObject:StrappySectionRow(NSLocalizedString(@"Conversations", nil))];
+  if ([sessions count] == 0U) {
+    [displayRows addObject:StrappyEmptySessionRow()];
+  } else {
+    for (index = 0U; index < [sessions count]; index++) {
+      [displayRows addObject:StrappySessionDisplayRow([sessions objectAtIndex:index])];
+    }
+  }
 
   [rows_ release];
   rows_ = [displayRows copy];
@@ -204,13 +521,84 @@ static NSString *StrappySessionPromptPreview(NSDictionary *session)
   row = [self rowForSessionIdentifier:selectedSessionId_];
 
   if (row >= 0) {
+    suppressSelectionNotification_ = YES;
     [tableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)row]
              byExtendingSelection:NO];
+    suppressSelectionNotification_ = NO;
     [tableView_ scrollRowToVisible:row];
   } else {
     [tableView_ deselectAll:self];
     [self notifySelectedSession];
   }
+}
+
+- (void)reloadSessionIdentifier:(NSNumber *)sessionIdentifier select:(BOOL)select
+{
+  NSError *error;
+  NSDictionary *summary;
+  NSMutableArray *mutableRows;
+  NSDictionary *displayRow;
+  NSInteger row;
+  NSUInteger index;
+  NSUInteger insertIndex;
+
+  if (select) {
+    [selectedSessionId_ release];
+    selectedSessionId_ = [sessionIdentifier retain];
+  }
+
+  if (sessionIdentifier == nil) {
+    [self reloadData];
+    return;
+  }
+
+  error = nil;
+  summary = [StrappySession sessionSummaryForSessionIdentifier:sessionIdentifier
+                                                        error:&error];
+  if (summary == nil) {
+    [self reloadData];
+    return;
+  }
+
+  mutableRows = [[rows_ mutableCopy] autorelease];
+  displayRow = StrappySessionDisplayRow(summary);
+  row = [self rowForSessionIdentifier:sessionIdentifier];
+  if (row >= 0) {
+    [mutableRows replaceObjectAtIndex:(NSUInteger)row withObject:displayRow];
+  } else {
+    for (index = 0U; index < [mutableRows count]; index++) {
+      NSDictionary *candidate = [mutableRows objectAtIndex:index];
+      if ([[candidate objectForKey:kStrappySessionRowTypeKey]
+            isEqualToString:kStrappySessionRowTypeEmpty]) {
+        [mutableRows removeObjectAtIndex:index];
+        break;
+      }
+    }
+
+    insertIndex = [self firstSessionInsertIndexForRows:mutableRows];
+    while (insertIndex < [mutableRows count]) {
+      NSDictionary *candidate;
+      NSNumber *candidateId;
+
+      candidate = [mutableRows objectAtIndex:insertIndex];
+      if (![[candidate objectForKey:kStrappySessionRowTypeKey]
+             isEqualToString:kStrappySessionRowTypeSession]) {
+        break;
+      }
+      candidateId = [candidate objectForKey:@"id"];
+      if (![candidateId isKindOfClass:[NSNumber class]] ||
+          ([candidateId longLongValue] < [sessionIdentifier longLongValue])) {
+        break;
+      }
+      insertIndex++;
+    }
+    [mutableRows insertObject:displayRow atIndex:insertIndex];
+  }
+
+  [rows_ release];
+  rows_ = [mutableRows copy];
+  [tableView_ reloadData];
+  [self selectSessionIdentifier:selectedSessionId_];
 }
 
 - (void)selectSessionIdentifier:(NSNumber *)sessionIdentifier
@@ -224,8 +612,10 @@ static NSString *StrappySessionPromptPreview(NSDictionary *session)
 
   row = [self rowForSessionIdentifier:selectedSessionId_];
   if (row >= 0) {
+    suppressSelectionNotification_ = YES;
     [tableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)row]
              byExtendingSelection:NO];
+    suppressSelectionNotification_ = NO;
     [tableView_ scrollRowToVisible:row];
   }
 }
@@ -248,6 +638,39 @@ static NSString *StrappySessionPromptPreview(NSDictionary *session)
   return [rows_ objectAtIndex:(NSUInteger)row];
 }
 
+- (CGFloat)tableView:(NSTableView *)tableView heightOfRow:(NSInteger)row
+{
+  NSDictionary *rowData;
+
+  (void)tableView;
+  if ((row < 0) || (row >= (NSInteger)[rows_ count])) {
+    return kStrappySessionRowHeight;
+  }
+
+  rowData = [rows_ objectAtIndex:(NSUInteger)row];
+  if ([[rowData objectForKey:kStrappySessionRowTypeKey]
+        isEqualToString:kStrappySessionRowTypeSection]) {
+    return kStrappySectionRowHeight;
+  }
+  return kStrappySessionRowHeight;
+}
+
+- (BOOL)tableView:(NSTableView *)tableView shouldSelectRow:(NSInteger)row
+{
+  NSDictionary *rowData;
+  NSString *type;
+
+  (void)tableView;
+  if ((row < 0) || (row >= (NSInteger)[rows_ count])) {
+    return NO;
+  }
+
+  rowData = [rows_ objectAtIndex:(NSUInteger)row];
+  type = [rowData objectForKey:kStrappySessionRowTypeKey];
+  return ([type isEqualToString:kStrappySessionRowTypeNew] ||
+          [type isEqualToString:kStrappySessionRowTypeSession]) ? YES : NO;
+}
+
 - (void)tableViewSelectionDidChange:(NSNotification *)notification
 {
   NSInteger row;
@@ -255,6 +678,10 @@ static NSString *StrappySessionPromptPreview(NSDictionary *session)
 
   (void)notification;
   row = [tableView_ selectedRow];
+  if (suppressSelectionNotification_) {
+    return;
+  }
+
   if ((row >= 0) && (row < (NSInteger)[rows_ count])) {
     session = [rows_ objectAtIndex:(NSUInteger)row];
     [selectedSessionId_ release];
@@ -263,6 +690,88 @@ static NSString *StrappySessionPromptPreview(NSDictionary *session)
       selectedSessionId_ = [[session objectForKey:@"id"] retain];
     }
   }
+  [self notifySelectedSession];
+}
+
+- (NSMenu *)contextMenuForRow:(NSInteger)row
+{
+  NSDictionary *rowData;
+  NSString *type;
+  NSMenu *menu;
+  NSMenuItem *item;
+
+  if ((row < 0) || (row >= (NSInteger)[rows_ count])) {
+    return nil;
+  }
+
+  rowData = [rows_ objectAtIndex:(NSUInteger)row];
+  type = [rowData objectForKey:kStrappySessionRowTypeKey];
+  menu = [[[NSMenu alloc] initWithTitle:@""] autorelease];
+
+  if ([type isEqualToString:kStrappySessionRowTypeNew]) {
+    item = [[[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"New Session", nil)
+                                       action:@selector(contextNewSession:)
+                                keyEquivalent:@""] autorelease];
+    [item setTarget:self];
+    [menu addItem:item];
+    return menu;
+  }
+
+  if (![type isEqualToString:kStrappySessionRowTypeSession]) {
+    return nil;
+  }
+
+  item = [[[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"Copy Title", nil)
+                                     action:@selector(contextCopyTitle:)
+                              keyEquivalent:@""] autorelease];
+  [item setTarget:self];
+  [item setRepresentedObject:rowData];
+  [menu addItem:item];
+
+  item = [[[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"Copy Last Message", nil)
+                                     action:@selector(contextCopyLastMessage:)
+                              keyEquivalent:@""] autorelease];
+  [item setTarget:self];
+  [item setRepresentedObject:rowData];
+  [menu addItem:item];
+
+  return menu;
+}
+
+- (void)copyStringToPasteboard:(NSString *)string
+{
+  NSPasteboard *pasteboard;
+
+  if (![string isKindOfClass:[NSString class]]) {
+    string = @"";
+  }
+
+  pasteboard = [NSPasteboard generalPasteboard];
+  [pasteboard declareTypes:[NSArray arrayWithObject:StrappyPasteboardStringType]
+                     owner:nil];
+  [pasteboard setString:string forType:StrappyPasteboardStringType];
+}
+
+- (void)contextCopyTitle:(id)sender
+{
+  [self copyStringToPasteboard:
+    StrappySessionPromptPreview([sender representedObject])];
+}
+
+- (void)contextCopyLastMessage:(id)sender
+{
+  NSDictionary *rowData;
+  NSString *text;
+
+  rowData = [sender representedObject];
+  text = [rowData objectForKey:@"last_message_text"];
+  [self copyStringToPasteboard:text];
+}
+
+- (void)contextNewSession:(id)sender
+{
+  (void)sender;
+  [self selectSessionIdentifier:nil];
   [self notifySelectedSession];
 }
 

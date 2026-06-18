@@ -17,11 +17,13 @@
   NSArray      *rows_;
   NSNumber     *selectedSessionId_;
   id<SessionListViewControllerDelegate> delegate_;
+  BOOL          suppressSelectionNotification_;
 }
 
 - (void)setDelegate:(id<SessionListViewControllerDelegate>)delegate;
 - (id<SessionListViewControllerDelegate>)delegate;
 - (void)reloadData;
+- (void)reloadSessionIdentifier:(NSNumber *)sessionIdentifier select:(BOOL)select;
 - (void)selectSessionIdentifier:(NSNumber *)sessionIdentifier;
 
 @end

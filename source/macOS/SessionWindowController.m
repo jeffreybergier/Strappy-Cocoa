@@ -26,6 +26,23 @@
   [[self window] setTitle:NSLocalizedString(@"Strappy", nil)];
 }
 
+- (void)newSession:(id)sender
+{
+  (void)sender;
+  [sessionsController_ selectSessionIdentifier:nil];
+  [messagesController_ reloadWithSession:nil];
+}
+
+- (BOOL)canSendCurrentPrompt
+{
+  return [messagesController_ canSendCurrentPrompt];
+}
+
+- (void)sendCurrentPrompt:(id)sender
+{
+  [messagesController_ sendCurrentPrompt:sender];
+}
+
 - (void)sessionListViewController:(SessionListViewController *)controller
                  didSelectSession:(NSDictionary *)session
 {
@@ -37,8 +54,27 @@
                  didCreateSession:(NSDictionary *)session
 {
   (void)controller;
-  [sessionsController_ reloadData];
-  [sessionsController_ selectSessionIdentifier:[session objectForKey:@"id"]];
+  [sessionsController_ reloadSessionIdentifier:[session objectForKey:@"id"]
+                                        select:YES];
+}
+
+- (void)messageListViewController:(MessageListViewController *)controller
+                  didUpdateSession:(NSDictionary *)session
+{
+  (void)controller;
+  [sessionsController_ reloadSessionIdentifier:[session objectForKey:@"id"]
+                                        select:YES];
+}
+
+- (BOOL)validateMenuItem:(NSMenuItem *)item
+{
+  SEL action;
+
+  action = [item action];
+  if (action == @selector(sendCurrentPrompt:)) {
+    return [self canSendCurrentPrompt];
+  }
+  return YES;
 }
 
 - (void)dealloc

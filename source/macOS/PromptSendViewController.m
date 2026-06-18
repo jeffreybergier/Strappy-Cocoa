@@ -1,8 +1,14 @@
 #import "PromptSendViewController.h"
+#import "AIFontAwesome.h"
 
 static const CGFloat kPromptSendHeightCollapsed = 32.0;
 static const CGFloat kPromptSendHeightExpanded = 108.0;
 static const CGFloat kPromptSendPad = 4.0;
+
+enum {
+  kPromptActionClear = 0,
+  kPromptActionSend = 1
+};
 
 static NSColor *StrappyInputBezelBackgroundColor(void) { return [NSColor controlBackgroundColor]; }
 static NSColor *StrappyInputBezelBorderColor(void) { return [NSColor gridColor]; }
@@ -66,7 +72,10 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 
 @interface PromptSendViewController ()
 - (void)updateExpansion;
-- (void)updateSendSegment;
+- (void)updateActionSegments;
+- (void)rebuildActionSegmentIcons;
+- (void)actionSegmentClicked:(id)sender;
+- (void)performClear:(id)sender;
 @end
 
 @implementation PromptSendViewController
@@ -135,18 +144,21 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   [textView_ setDelegate:self];
   [scrollView_ setDocumentView:textView_];
 
-  sendSegmented_ = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
-  [sendSegmented_ setSegmentCount:1];
-  [[sendSegmented_ cell] setTrackingMode:NSSegmentSwitchTrackingMomentary];
-  if ([[sendSegmented_ cell] respondsToSelector:@selector(setSegmentStyle:)]) {
-    [[sendSegmented_ cell] setSegmentStyle:NSSegmentStyleTexturedRounded];
+  actionsSegmented_ = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
+  [actionsSegmented_ setSegmentCount:2];
+  [[actionsSegmented_ cell] setTrackingMode:NSSegmentSwitchTrackingMomentary];
+  if ([[actionsSegmented_ cell] respondsToSelector:@selector(setSegmentStyle:)]) {
+    [[actionsSegmented_ cell] setSegmentStyle:NSSegmentStyleTexturedRounded];
   }
-  [sendSegmented_ setLabel:NSLocalizedString(@"Send", nil) forSegment:0];
-  [sendSegmented_ setTarget:self];
-  [sendSegmented_ setAction:@selector(performSend:)];
-  [sendSegmented_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
-  [sendSegmented_ sizeToFit];
-  [barView_ addSubview:sendSegmented_];
+  [actionsSegmented_ setLabel:NSLocalizedString(@"Send", nil)
+                   forSegment:kPromptActionSend];
+  [actionsSegmented_ setTarget:self];
+  [actionsSegmented_ setAction:@selector(actionSegmentClicked:)];
+  [actionsSegmented_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
+  [actionsSegmented_ setToolTip:NSLocalizedString(@"Clear Draft / Send Prompt (Command-Return)", nil)];
+  [self rebuildActionSegmentIcons];
+  [actionsSegmented_ sizeToFit];
+  [barView_ addSubview:actionsSegmented_];
 
   [self setEnabled:enabled_];
 }
@@ -160,17 +172,17 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 
   [super viewDidLayout];
   bounds = [barView_ bounds];
-  segmentWidth = [sendSegmented_ frame].size.width;
-  segmentHeight = [sendSegmented_ frame].size.height;
+  segmentWidth = [actionsSegmented_ frame].size.width;
+  segmentHeight = [actionsSegmented_ frame].size.height;
   inputWidth = bounds.size.width - segmentWidth - (kPromptSendPad * 3.0);
   if (inputWidth < 0.0) {
     inputWidth = 0.0;
   }
 
-  [sendSegmented_ setFrame:NSMakeRect(NSMaxX(bounds) - kPromptSendPad - segmentWidth,
-                                      kPromptSendPad,
-                                      segmentWidth,
-                                      segmentHeight)];
+  [actionsSegmented_ setFrame:NSMakeRect(NSMaxX(bounds) - kPromptSendPad - segmentWidth,
+                                         kPromptSendPad,
+                                         segmentWidth,
+                                         segmentHeight)];
   [bezelView_ setFrame:NSMakeRect(kPromptSendPad,
                                   kPromptSendPad,
                                   inputWidth,
@@ -183,9 +195,66 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   return expanded_ ? kPromptSendHeightExpanded : kPromptSendHeightCollapsed;
 }
 
-- (void)updateSendSegment
+- (void)rebuildActionSegmentIcons
 {
-  [sendSegmented_ setEnabled:[self canSendCurrentPrompt] forSegment:0];
+  CGFloat scale;
+  NSImage *clearImage;
+  NSImage *sendImage;
+
+  if (actionsSegmented_ == nil) {
+    return;
+  }
+
+  scale = 1.0;
+  if ([[barView_ window] respondsToSelector:@selector(XP_backingScaleFactor)]) {
+    scale = [[barView_ window] XP_backingScaleFactor];
+  }
+  if (scale < 1.0) {
+    scale = 1.0;
+  }
+
+  clearImage = [AIFontAwesome imageForIcon:AIFAXmark
+                                     style:AIFontAwesomeStyleSolid
+                                  iconSize:12.0
+                                canvasSize:18.0
+                                     scale:scale];
+  sendImage = [AIFontAwesome imageForIcon:AIFAPaperPlane
+                                    style:AIFontAwesomeStyleRegular
+                                 iconSize:12.0
+                               canvasSize:18.0
+                                    scale:scale];
+
+  if (clearImage != nil) {
+    [actionsSegmented_ setImage:clearImage forSegment:kPromptActionClear];
+    [actionsSegmented_ setLabel:@"" forSegment:kPromptActionClear];
+  } else {
+    [actionsSegmented_ setLabel:NSLocalizedString(@"Clear", nil)
+                     forSegment:kPromptActionClear];
+  }
+
+  if (sendImage != nil) {
+    [actionsSegmented_ setImage:sendImage forSegment:kPromptActionSend];
+  }
+}
+
+- (void)updateActionSegments
+{
+  NSString *text;
+  NSString *trimmed;
+  BOOL hasDraft;
+
+  hasDraft = NO;
+  if (textView_ != nil) {
+    text = [textView_ string];
+    trimmed = [text stringByTrimmingCharactersInSet:
+      [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    hasDraft = ([trimmed length] > 0U) ? YES : NO;
+  }
+
+  [actionsSegmented_ setEnabled:(enabled_ && hasDraft)
+                     forSegment:kPromptActionClear];
+  [actionsSegmented_ setEnabled:[self canSendCurrentPrompt]
+                     forSegment:kPromptActionSend];
 }
 
 - (void)updateExpansion
@@ -235,10 +304,16 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   enabled_ = enabled ? YES : NO;
   [textView_ setEditable:enabled_];
   [textView_ setSelectable:enabled_];
-  if (sendSegmented_ != nil) {
-    [sendSegmented_ setEnabled:enabled_];
-    [self updateSendSegment];
+  if (actionsSegmented_ != nil) {
+    [actionsSegmented_ setEnabled:enabled_];
+    [self updateActionSegments];
   }
+}
+
+- (void)setSending:(BOOL)sending
+{
+  sending_ = sending ? YES : NO;
+  [self updateActionSegments];
 }
 
 - (BOOL)canSendCurrentPrompt
@@ -246,7 +321,7 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   NSString *text;
   NSString *trimmed;
 
-  if (!enabled_ || (textView_ == nil)) {
+  if (!enabled_ || sending_ || (textView_ == nil)) {
     return NO;
   }
 
@@ -254,6 +329,30 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   trimmed = [text stringByTrimmingCharactersInSet:
     [NSCharacterSet whitespaceAndNewlineCharacterSet]];
   return ([trimmed length] > 0U) ? YES : NO;
+}
+
+- (void)actionSegmentClicked:(id)sender
+{
+  NSInteger selectedSegment;
+
+  selectedSegment = [(NSSegmentedControl *)sender selectedSegment];
+  if (selectedSegment == kPromptActionClear) {
+    [self performClear:sender];
+  } else if (selectedSegment == kPromptActionSend) {
+    [self performSend:sender];
+  }
+}
+
+- (void)performClear:(id)sender
+{
+  (void)sender;
+  if (!enabled_ || (textView_ == nil)) {
+    return;
+  }
+
+  [textView_ setString:@""];
+  [self updateActionSegments];
+  [self updateExpansion];
 }
 
 - (void)performSend:(id)sender
@@ -278,22 +377,40 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   }
 
   [textView_ setString:@""];
-  [self updateSendSegment];
+  [self updateActionSegments];
   [self updateExpansion];
 }
 
 - (void)textDidChange:(NSNotification *)notification
 {
   (void)notification;
-  [self updateSendSegment];
+  [self updateActionSegments];
   [self updateExpansion];
+}
+
+- (BOOL)textView:(NSTextView *)textView doCommandBySelector:(SEL)commandSelector
+{
+  NSEvent *event;
+
+  (void)textView;
+  if (commandSelector != @selector(insertNewline:)) {
+    return NO;
+  }
+
+  event = [NSApp currentEvent];
+  if (([event modifierFlags] & XPEventModifierFlagCommand) == 0) {
+    return NO;
+  }
+
+  [self performSend:textView_];
+  return YES;
 }
 
 - (void)dealloc
 {
   [scrollView_ release];
   [textView_ release];
-  [sendSegmented_ release];
+  [actionsSegmented_ release];
   [super dealloc];
 }
 

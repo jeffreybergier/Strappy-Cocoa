@@ -102,6 +102,29 @@
                       action:@selector(selectAll:)
                keyEquivalent:@"a"];
 
+  NSMenuItem *conversationMenuItem =
+    [mainMenu addItemWithTitle:NSLocalizedString(@"Conversation", nil)
+                        action:NULL
+                 keyEquivalent:@""];
+  NSMenu *conversationMenu = [[[NSMenu alloc]
+      initWithTitle:NSLocalizedString(@"Conversation", nil)] autorelease];
+  [mainMenu setSubmenu:conversationMenu forItem:conversationMenuItem];
+  {
+    NSMenuItem *newSession =
+      [conversationMenu addItemWithTitle:NSLocalizedString(@"New Session", nil)
+                                  action:@selector(newSession:)
+                           keyEquivalent:@"n"];
+    [newSession setTarget:nil];
+  }
+  {
+    NSMenuItem *sendPrompt =
+      [conversationMenu addItemWithTitle:NSLocalizedString(@"Send Prompt", nil)
+                                  action:@selector(sendCurrentPrompt:)
+                           keyEquivalent:@"\r"];
+    [sendPrompt setKeyEquivalentModifierMask:XPEventModifierFlagCommand];
+    [sendPrompt setTarget:nil];
+  }
+
   NSMenuItem *viewMenuItem = [mainMenu addItemWithTitle:NSLocalizedString(@"View", nil)
                                                  action:NULL
                                           keyEquivalent:@""];

@@ -17,16 +17,18 @@
   NSView       *bezelView_;
   NSScrollView *scrollView_;
   NSTextView   *textView_;
-  NSSegmentedControl *sendSegmented_;
+  NSSegmentedControl *actionsSegmented_;
   id<PromptSendViewControllerDelegate> delegate_;
   BOOL          enabled_;
   BOOL          expanded_;
+  BOOL          sending_;
 }
 
 - (void)setDelegate:(id<PromptSendViewControllerDelegate>)delegate;
 - (id<PromptSendViewControllerDelegate>)delegate;
 - (CGFloat)preferredHeight;
 - (void)setEnabled:(BOOL)enabled;
+- (void)setSending:(BOOL)sending;
 - (BOOL)canSendCurrentPrompt;
 - (void)performSend:(id)sender;
 

@@ -4,6 +4,7 @@
 #import "strappy_client.h"
 #import "strappy_core.h"
 #import "strappy_db.h"
+#import "XPFoundation.h"
 
 @implementation StrappySession
 
@@ -107,6 +108,96 @@
     httpStatus, @"http_status",
     createdAt, @"created_at",
     nil];
+}
+
++ (NSDictionary *)enrichedSummaryFromSession:(NSDictionary *)session
+                                    messages:(NSArray *)messages
+{
+  NSMutableDictionary *summary;
+  NSDictionary *lastMessage;
+  NSString *lastText;
+  NSString *lastRole;
+  NSString *lastCreatedAt;
+  NSNumber *httpStatus;
+  NSUInteger index;
+  NSUInteger assistantCount;
+  NSUInteger userCount;
+  BOOL hasError;
+
+  if (![session isKindOfClass:[NSDictionary class]]) {
+    return nil;
+  }
+
+  summary = [NSMutableDictionary dictionaryWithDictionary:session];
+  lastMessage = nil;
+  assistantCount = 0U;
+  userCount = 0U;
+  hasError = NO;
+
+  httpStatus = [session objectForKey:@"http_status"];
+  if ([httpStatus isKindOfClass:[NSNumber class]] &&
+      ([httpStatus longValue] >= 400L)) {
+    hasError = YES;
+  }
+
+  for (index = 0U; index < [messages count]; index++) {
+    NSDictionary *message;
+    NSString *role;
+    NSNumber *messageStatus;
+
+    message = [messages objectAtIndex:index];
+    if (![message isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+
+    role = [message objectForKey:@"role"];
+    if ([role isEqualToString:@"assistant"]) {
+      assistantCount++;
+    } else if ([role isEqualToString:@"user"]) {
+      userCount++;
+    }
+
+    messageStatus = [message objectForKey:@"http_status"];
+    if ([messageStatus isKindOfClass:[NSNumber class]] &&
+        ([messageStatus longValue] >= 400L)) {
+      hasError = YES;
+    }
+
+    lastMessage = message;
+  }
+
+  if (lastMessage != nil) {
+    lastText = [lastMessage objectForKey:@"text"];
+    lastRole = [lastMessage objectForKey:@"role"];
+    lastCreatedAt = [lastMessage objectForKey:@"created_at"];
+  } else {
+    lastText = [session objectForKey:@"prompt"];
+    lastRole = @"user";
+    lastCreatedAt = [session objectForKey:@"created_at"];
+  }
+
+  if (![lastText isKindOfClass:[NSString class]]) {
+    lastText = @"";
+  }
+  if (![lastRole isKindOfClass:[NSString class]]) {
+    lastRole = @"assistant";
+  }
+  if (![lastCreatedAt isKindOfClass:[NSString class]]) {
+    lastCreatedAt = @"";
+  }
+
+  [summary setObject:lastText forKey:@"last_message_text"];
+  [summary setObject:lastRole forKey:@"last_message_role"];
+  [summary setObject:lastCreatedAt forKey:@"last_message_at"];
+  [summary setObject:[NSNumber XP_numberWithUnsignedInteger:[messages count]]
+              forKey:@"message_count"];
+  [summary setObject:[NSNumber XP_numberWithUnsignedInteger:userCount]
+              forKey:@"user_message_count"];
+  [summary setObject:[NSNumber XP_numberWithUnsignedInteger:assistantCount]
+              forKey:@"assistant_message_count"];
+  [summary setObject:(hasError ? @"error" : @"ready") forKey:@"state"];
+
+  return summary;
 }
 
 + (NSError *)errorFromCString:(char *)message
@@ -288,12 +379,102 @@
     NSDictionary *session =
       [StrappySession dictionaryFromSessionRecord:&list.records[index]];
     if (session != nil) {
-      [sessions addObject:session];
+      NSError *messagesError;
+      NSArray *messages;
+      NSDictionary *summary;
+
+      messagesError = nil;
+      messages = [StrappySession messagesForSessionIdentifier:[session objectForKey:@"id"]
+                                                        error:&messagesError];
+      if (messages == nil) {
+        messages = [NSArray array];
+      }
+
+      summary = [StrappySession enrichedSummaryFromSession:session
+                                                  messages:messages];
+      if (summary != nil) {
+        [sessions addObject:summary];
+      } else {
+        [sessions addObject:session];
+      }
     }
   }
 
   strappy_session_record_list_destroy(&list);
   return sessions;
+}
+
++ (NSDictionary *)sessionSummaryForSessionIdentifier:(NSNumber *)sessionIdentifier
+                                               error:(NSError **)error
+{
+  NSString *databasePath;
+  strappy_session_record record;
+  char *strappyError;
+  long long sessionId;
+  NSDictionary *session;
+  NSArray *messages;
+  NSDictionary *summary;
+
+  if (sessionIdentifier == nil) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return nil;
+  }
+
+  sessionId = [sessionIdentifier longLongValue];
+  if (sessionId <= 0) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return nil;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+
+  strappy_session_record_init(&record);
+  strappyError = NULL;
+  if (!strappy_db_load_session([databasePath UTF8String],
+                               sessionId,
+                               &record,
+                               &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    strappy_session_record_destroy(&record);
+    return nil;
+  }
+
+  session = [StrappySession dictionaryFromSessionRecord:&record];
+  strappy_session_record_destroy(&record);
+  if (session == nil) {
+    return nil;
+  }
+
+  messages = [StrappySession messagesForSessionIdentifier:sessionIdentifier
+                                                    error:error];
+  if (messages == nil) {
+    return nil;
+  }
+
+  summary = [StrappySession enrichedSummaryFromSession:session
+                                              messages:messages];
+  return summary;
 }
 
 + (NSArray *)messagesForSessionIdentifier:(NSNumber *)sessionIdentifier

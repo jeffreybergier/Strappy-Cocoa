@@ -7,6 +7,8 @@
 @protocol MessageListViewControllerDelegate
 - (void)messageListViewController:(MessageListViewController *)controller
                  didCreateSession:(NSDictionary *)session;
+- (void)messageListViewController:(MessageListViewController *)controller
+                  didUpdateSession:(NSDictionary *)session;
 @end
 
 @interface MessageListViewController : AIWebViewController
@@ -17,6 +19,12 @@
   PromptSendViewController *sendController_;
   id<MessageListViewControllerDelegate> delegate_;
   NSString                 *statusText_;
+  NSString                 *pendingMessageIdentifier_;
+  NSString                 *pendingPrompt_;
+  NSNumber                 *sendingSessionId_;
+  long long                 lastKnownMessageIdentifier_;
+  NSUInteger                oldestRenderedMessageIndex_;
+  NSUInteger                renderedMessageCount_;
   BOOL                      sending_;
 }
 
@@ -25,5 +33,7 @@
 - (id<MessageListViewControllerDelegate>)delegate;
 - (void)reloadWithSession:(NSDictionary *)session;
 - (void)reloadData;
+- (BOOL)canSendCurrentPrompt;
+- (void)sendCurrentPrompt:(id)sender;
 
 @end

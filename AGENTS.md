@@ -34,6 +34,19 @@ House style for Strappy source:
    `XPAppKit`, `XPUIKit`, or `XPFoundation`. Call sites should use XP-prefixed
    macros, helpers, categories, or types instead of embedding compatibility
    conditionals directly in feature code.
+8. XP-prefixed compatibility methods are runtime bridges, not simple aliases.
+   When the modern API may exist on some target runtimes but not others,
+   implement an `XP_` category method on the owning Cocoa class, check the
+   modern selector with `respondsToSelector:`, and then fall back to the
+   oldest supported selector. Prefer `performSelector:` for object-only
+   signatures. Use `NSInvocation` for primitive or struct arguments/returns
+   where `performSelector:` is unsafe; for example, `NSNumber` integer factory
+   and value helpers must use `NSInvocation`, not `performSelector:`. Do not
+   use raw typed function pointers in Strappy XP helpers. Foundation-only
+   shims live in
+   `source/shared/XPFoundation.{h,m}`; AppKit/UIKit shims live in `XPAppKit` /
+   `XPUIKit`. Call sites must use the XP method and must not call newer SDK
+   selectors directly.
 
 The iOS App is a bit special because its not sandboxed. It must be installed via
 .deb file, not .ipa file so that it can scan the whole filesystem for SQLite
