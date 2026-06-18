@@ -3,9 +3,16 @@
 
 #include "strappy_config.h"
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef struct strappy_chat_message {
+  const char *role;
+  const char *content;
+} strappy_chat_message;
 
 typedef struct strappy_chat_result {
   char *response_text;
@@ -22,6 +29,11 @@ int strappy_client_send_prompt(const strappy_config *config,
                                const char *prompt,
                                strappy_chat_result *result,
                                char **error_out);
+int strappy_client_send_messages(const strappy_config *config,
+                                 const strappy_chat_message *messages,
+                                 size_t message_count,
+                                 strappy_chat_result *result,
+                                 char **error_out);
 
 #ifdef __cplusplus
 }

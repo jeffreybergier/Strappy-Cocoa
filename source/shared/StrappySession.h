@@ -11,5 +11,8 @@
 + (NSString *)submitPromptSynchronously:(NSString *)prompt error:(NSError **)error;
 + (NSDictionary *)submitPromptAndReturnSessionSynchronously:(NSString *)prompt
                                                       error:(NSError **)error;
++ (NSDictionary *)submitPrompt:(NSString *)prompt
+           inSessionIdentifier:(NSNumber *)sessionIdentifier
+                         error:(NSError **)error;
 
 @end

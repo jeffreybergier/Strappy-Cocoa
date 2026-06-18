@@ -184,46 +184,72 @@ static char *strappy_client_build_chat_url(const char *endpoint)
   return url;
 }
 
-static char *strappy_client_build_request_json(const strappy_config *config,
-                                     const char *prompt,
+static char *strappy_client_build_messages_request_json(
+                                     const strappy_config *config,
+                                     const strappy_chat_message *chat_messages,
+                                     size_t chat_message_count,
                                      char **error_out)
 {
   cJSON *root;
   cJSON *messages;
-  cJSON *message;
   char *json;
+  size_t index;
 
   root = cJSON_CreateObject();
   messages = cJSON_CreateArray();
-  message = cJSON_CreateObject();
 
-  if ((root == NULL) || (messages == NULL) || (message == NULL)) {
+  if ((root == NULL) || (messages == NULL)) {
     cJSON_Delete(root);
     cJSON_Delete(messages);
-    cJSON_Delete(message);
     strappy_set_error(error_out, "Could not allocate OpenRouter JSON request.");
     return NULL;
   }
 
   if ((cJSON_AddStringToObject(root, "model", config->api_model) == NULL) ||
-      (cJSON_AddBoolToObject(root, "stream", 0) == NULL) ||
-      (cJSON_AddStringToObject(message, "role", "user") == NULL) ||
-      (cJSON_AddStringToObject(message, "content", prompt) == NULL)) {
+      (cJSON_AddBoolToObject(root, "stream", 0) == NULL)) {
     cJSON_Delete(root);
     cJSON_Delete(messages);
-    cJSON_Delete(message);
     strappy_set_error(error_out, "Could not build OpenRouter JSON request.");
     return NULL;
   }
 
-  if (!cJSON_AddItemToArray(messages, message)) {
-    cJSON_Delete(root);
-    cJSON_Delete(messages);
-    cJSON_Delete(message);
-    strappy_set_error(error_out, "Could not build OpenRouter JSON request.");
-    return NULL;
+  for (index = 0U; index < chat_message_count; index++) {
+    cJSON *message;
+
+    if ((chat_messages[index].role == NULL) ||
+        (chat_messages[index].role[0] == '\0') ||
+        (chat_messages[index].content == NULL)) {
+      cJSON_Delete(root);
+      cJSON_Delete(messages);
+      strappy_set_error(error_out, "OpenRouter chat message is incomplete.");
+      return NULL;
+    }
+
+    message = cJSON_CreateObject();
+    if (message == NULL) {
+      cJSON_Delete(root);
+      cJSON_Delete(messages);
+      strappy_set_error(error_out, "Could not allocate OpenRouter JSON request.");
+      return NULL;
+    }
+
+    if ((cJSON_AddStringToObject(message, "role", chat_messages[index].role) == NULL) ||
+        (cJSON_AddStringToObject(message, "content", chat_messages[index].content) == NULL)) {
+      cJSON_Delete(root);
+      cJSON_Delete(messages);
+      cJSON_Delete(message);
+      strappy_set_error(error_out, "Could not build OpenRouter JSON request.");
+      return NULL;
+    }
+
+    if (!cJSON_AddItemToArray(messages, message)) {
+      cJSON_Delete(root);
+      cJSON_Delete(messages);
+      cJSON_Delete(message);
+      strappy_set_error(error_out, "Could not build OpenRouter JSON request.");
+      return NULL;
+    }
   }
-  message = NULL;
 
   if (!cJSON_AddItemToObject(root, "messages", messages)) {
     cJSON_Delete(root);
@@ -242,6 +268,20 @@ static char *strappy_client_build_request_json(const strappy_config *config,
   }
 
   return json;
+}
+
+static char *strappy_client_build_request_json(const strappy_config *config,
+                                     const char *prompt,
+                                     char **error_out)
+{
+  strappy_chat_message message;
+
+  message.role = "user";
+  message.content = prompt;
+  return strappy_client_build_messages_request_json(config,
+                                                    &message,
+                                                    1U,
+                                                    error_out);
 }
 
 static char *strappy_client_extract_api_error(cJSON *root)
@@ -452,55 +492,19 @@ void strappy_chat_result_destroy(strappy_chat_result *result)
   strappy_chat_result_init(result);
 }
 
-int strappy_client_send_prompt(const strappy_config *config,
-                                const char *prompt,
-                                strappy_chat_result *result,
-                                char **error_out)
+static int strappy_client_send_request_json(const strappy_config *config,
+                                            char *request_json,
+                                            strappy_chat_result *result,
+                                            char **error_out)
 {
   CURL *curl;
   CURLcode code;
   struct curl_slist *headers;
   strappy_http_buffer response_buffer;
-  char *request_json;
   char *auth_header;
   char *url;
   long http_status;
   int ok;
-
-  if (result == NULL) {
-    strappy_set_error(error_out, "strappy_client_send_prompt received no result.");
-    return 0;
-  }
-  strappy_chat_result_init(result);
-
-  if ((config == NULL) || (prompt == NULL) || (prompt[0] == '\0')) {
-    strappy_set_error(error_out, "OpenRouter prompt request is incomplete.");
-    return 0;
-  }
-
-  if ((config->api_endpoint == NULL) || (config->api_endpoint[0] == '\0')) {
-    strappy_set_error(error_out, "APIENDPOINT is not configured.");
-    return 0;
-  }
-
-  if ((config->api_token == NULL) || (config->api_token[0] == '\0')) {
-    strappy_set_error(error_out, "APITOKEN is not configured.");
-    return 0;
-  }
-
-  if ((config->api_model == NULL) || (config->api_model[0] == '\0')) {
-    strappy_set_error(error_out, "APIMODEL is not configured.");
-    return 0;
-  }
-
-  if (!strappy_client_ensure_curl_initialized(error_out)) {
-    return 0;
-  }
-
-  request_json = strappy_client_build_request_json(config, prompt, error_out);
-  if (request_json == NULL) {
-    return 0;
-  }
 
   url = strappy_client_build_chat_url(config->api_endpoint);
   if (url == NULL) {
@@ -587,4 +591,99 @@ int strappy_client_send_prompt(const strappy_config *config,
   }
 
   return 1;
+}
+
+int strappy_client_send_messages(const strappy_config *config,
+                                 const strappy_chat_message *messages,
+                                 size_t message_count,
+                                 strappy_chat_result *result,
+                                 char **error_out)
+{
+  char *request_json;
+
+  if (result == NULL) {
+    strappy_set_error(error_out, "strappy_client_send_messages received no result.");
+    return 0;
+  }
+  strappy_chat_result_init(result);
+
+  if ((config == NULL) || (messages == NULL) || (message_count == 0U)) {
+    strappy_set_error(error_out, "OpenRouter message request is incomplete.");
+    return 0;
+  }
+
+  if ((config->api_endpoint == NULL) || (config->api_endpoint[0] == '\0')) {
+    strappy_set_error(error_out, "APIENDPOINT is not configured.");
+    return 0;
+  }
+
+  if ((config->api_token == NULL) || (config->api_token[0] == '\0')) {
+    strappy_set_error(error_out, "APITOKEN is not configured.");
+    return 0;
+  }
+
+  if ((config->api_model == NULL) || (config->api_model[0] == '\0')) {
+    strappy_set_error(error_out, "APIMODEL is not configured.");
+    return 0;
+  }
+
+  if (!strappy_client_ensure_curl_initialized(error_out)) {
+    return 0;
+  }
+
+  request_json =
+    strappy_client_build_messages_request_json(config,
+                                               messages,
+                                               message_count,
+                                               error_out);
+  if (request_json == NULL) {
+    return 0;
+  }
+
+  return strappy_client_send_request_json(config, request_json, result, error_out);
+}
+
+int strappy_client_send_prompt(const strappy_config *config,
+                                const char *prompt,
+                                strappy_chat_result *result,
+                                char **error_out)
+{
+  char *request_json;
+
+  if (result == NULL) {
+    strappy_set_error(error_out, "strappy_client_send_prompt received no result.");
+    return 0;
+  }
+  strappy_chat_result_init(result);
+
+  if ((config == NULL) || (prompt == NULL) || (prompt[0] == '\0')) {
+    strappy_set_error(error_out, "OpenRouter prompt request is incomplete.");
+    return 0;
+  }
+
+  if ((config->api_endpoint == NULL) || (config->api_endpoint[0] == '\0')) {
+    strappy_set_error(error_out, "APIENDPOINT is not configured.");
+    return 0;
+  }
+
+  if ((config->api_token == NULL) || (config->api_token[0] == '\0')) {
+    strappy_set_error(error_out, "APITOKEN is not configured.");
+    return 0;
+  }
+
+  if ((config->api_model == NULL) || (config->api_model[0] == '\0')) {
+    strappy_set_error(error_out, "APIMODEL is not configured.");
+    return 0;
+  }
+
+  if (!strappy_client_ensure_curl_initialized(error_out)) {
+    return 0;
+  }
+
+  request_json = strappy_client_build_request_json(config, prompt, error_out);
+  if (request_json == NULL) {
+    return 0;
+  }
+
+  return strappy_client_send_request_json(config, request_json, result, error_out);
 }

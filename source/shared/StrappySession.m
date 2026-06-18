@@ -75,6 +75,40 @@
     nil];
 }
 
++ (NSDictionary *)dictionaryFromSessionMessageRecord:
+    (const strappy_session_message_record *)record
+{
+  NSNumber *messageId;
+  NSNumber *sessionId;
+  NSNumber *httpStatus;
+  NSString *role;
+  NSString *content;
+  NSString *model;
+  NSString *createdAt;
+
+  if (record == NULL) {
+    return nil;
+  }
+
+  messageId = [NSNumber numberWithLongLong:record->message_id];
+  sessionId = [NSNumber numberWithLongLong:record->session_id];
+  httpStatus = [NSNumber numberWithLong:record->http_status];
+  role = [StrappySession stringFromCStringOrEmpty:record->role];
+  content = [StrappySession stringFromCStringOrEmpty:record->content];
+  model = [StrappySession stringFromCStringOrEmpty:record->model];
+  createdAt = [StrappySession stringFromCStringOrEmpty:record->created_at];
+
+  return [NSDictionary dictionaryWithObjectsAndKeys:
+    messageId, @"id",
+    sessionId, @"session_id",
+    role, @"role",
+    content, @"text",
+    model, @"model",
+    httpStatus, @"http_status",
+    createdAt, @"created_at",
+    nil];
+}
+
 + (NSError *)errorFromCString:(char *)message
 {
   NSString *description;
@@ -266,12 +300,11 @@
                                     error:(NSError **)error
 {
   NSString *databasePath;
-  strappy_session_record record;
+  strappy_session_message_record_list list;
   NSMutableArray *messages;
-  NSDictionary *promptMessage;
-  NSDictionary *responseMessage;
   char *strappyError;
   long long sessionId;
+  size_t index;
 
   if (sessionIdentifier == nil) {
     if (error != nil) {
@@ -291,41 +324,31 @@
     return nil;
   }
 
-  strappy_session_record_init(&record);
+  strappy_session_message_record_list_init(&list);
   strappyError = NULL;
   sessionId = [sessionIdentifier longLongValue];
-  if (!strappy_db_load_session([databasePath UTF8String],
-                               sessionId,
-                               &record,
-                               &strappyError)) {
+  if (!strappy_db_list_session_messages([databasePath UTF8String],
+                                        sessionId,
+                                        &list,
+                                        &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
     strappy_free_string(strappyError);
-    strappy_session_record_destroy(&record);
+    strappy_session_message_record_list_destroy(&list);
     return nil;
   }
 
-  promptMessage = [NSDictionary dictionaryWithObjectsAndKeys:
-    [NSNumber numberWithLongLong:record.session_id], @"session_id",
-    @"user", @"role",
-    [StrappySession stringFromCStringOrEmpty:record.prompt], @"text",
-    [StrappySession stringFromCStringOrEmpty:record.created_at], @"created_at",
-    nil];
-  responseMessage = [NSDictionary dictionaryWithObjectsAndKeys:
-    [NSNumber numberWithLongLong:record.session_id], @"session_id",
-    @"assistant", @"role",
-    [StrappySession stringFromCStringOrEmpty:record.response], @"text",
-    [StrappySession stringFromCStringOrEmpty:record.created_at], @"created_at",
-    [StrappySession stringFromCStringOrEmpty:record.model], @"model",
-    [NSNumber numberWithLong:record.http_status], @"http_status",
-    nil];
+  messages = [NSMutableArray arrayWithCapacity:list.count];
+  for (index = 0U; index < list.count; index++) {
+    NSDictionary *message =
+      [StrappySession dictionaryFromSessionMessageRecord:&list.records[index]];
+    if (message != nil) {
+      [messages addObject:message];
+    }
+  }
 
-  messages = [NSMutableArray arrayWithCapacity:2U];
-  [messages addObject:promptMessage];
-  [messages addObject:responseMessage];
-
-  strappy_session_record_destroy(&record);
+  strappy_session_message_record_list_destroy(&list);
   return messages;
 }
 
@@ -419,6 +442,88 @@
                                                              [databasePath UTF8String],
                                                              &sessionId,
                                                              &strappyError);
+  if (response == NULL) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return nil;
+  }
+  strappy_free_string(response);
+
+  strappy_session_record_init(&record);
+  strappyError = NULL;
+  if (!strappy_db_load_session([databasePath UTF8String],
+                               sessionId,
+                               &record,
+                               &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    strappy_session_record_destroy(&record);
+    return nil;
+  }
+
+  session = [StrappySession dictionaryFromSessionRecord:&record];
+  strappy_session_record_destroy(&record);
+  return session;
+}
+
++ (NSDictionary *)submitPrompt:(NSString *)prompt
+           inSessionIdentifier:(NSNumber *)sessionIdentifier
+                         error:(NSError **)error
+{
+  NSString *databasePath;
+  char *response;
+  char *strappyError;
+  long long sessionId;
+  strappy_session_record record;
+  NSDictionary *session;
+
+  if (sessionIdentifier == nil) {
+    return [StrappySession submitPromptAndReturnSessionSynchronously:prompt
+                                                               error:error];
+  }
+
+  if ((prompt == nil) || ([prompt length] == 0U)) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Prompt is empty.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:4
+                               userInfo:userInfo];
+    }
+    return nil;
+  }
+
+  sessionId = [sessionIdentifier longLongValue];
+  if (sessionId <= 0) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return nil;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+
+  strappyError = NULL;
+  response =
+    strappy_assistant_send_prompt_for_session_and_store([prompt UTF8String],
+                                                        NULL,
+                                                        [databasePath UTF8String],
+                                                        sessionId,
+                                                        &strappyError);
   if (response == NULL) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];

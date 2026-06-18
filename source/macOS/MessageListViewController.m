@@ -114,7 +114,7 @@ static NSString *StrappyRoleLabel(NSString *role)
 }
 
 @interface MessageListViewController ()
-- (void)sendPromptInBackground:(NSString *)prompt;
+- (void)sendPromptInBackground:(NSDictionary *)request;
 - (void)sendPromptDidFinish:(NSDictionary *)result;
 - (NSString *)writeCurrentHTML;
 - (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error;
@@ -320,7 +320,7 @@ static NSString *StrappyRoleLabel(NSString *role)
 - (void)promptSendViewController:(PromptSendViewController *)controller
                  didSubmitPrompt:(NSString *)prompt
 {
-  NSString *copiedPrompt;
+  NSMutableDictionary *request;
 
   (void)controller;
   if (sending_) {
@@ -333,12 +333,18 @@ static NSString *StrappyRoleLabel(NSString *role)
   [sendController_ setEnabled:NO];
   [self reloadContent];
 
-  copiedPrompt = [prompt copy];
+  request = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
+    prompt, @"prompt",
+    nil];
+  if (sessionId_ != nil) {
+    [request setObject:sessionId_ forKey:@"session_id"];
+  }
+
   [self retain];
   [NSThread detachNewThreadSelector:@selector(sendPromptInBackground:)
                            toTarget:self
-                         withObject:copiedPrompt];
-  [copiedPrompt release];
+                         withObject:request];
+  [request release];
 }
 
 - (void)promptSendViewControllerDidChangeHeight:
@@ -349,18 +355,30 @@ static NSString *StrappyRoleLabel(NSString *role)
   [[self view] setNeedsDisplay:YES];
 }
 
-- (void)sendPromptInBackground:(NSString *)prompt
+- (void)sendPromptInBackground:(NSDictionary *)request
 {
   NSAutoreleasePool *pool;
   NSError *error;
   NSDictionary *session;
   NSDictionary *result;
   NSString *errorMessage;
+  NSString *prompt;
+  NSNumber *sessionId;
 
   pool = [[NSAutoreleasePool alloc] init];
+  prompt = [request objectForKey:@"prompt"];
+  if (![prompt isKindOfClass:[NSString class]]) {
+    prompt = @"";
+  }
+  sessionId = [request objectForKey:@"session_id"];
+  if (![sessionId isKindOfClass:[NSNumber class]]) {
+    sessionId = nil;
+  }
+
   error = nil;
-  session = [StrappySession submitPromptAndReturnSessionSynchronously:prompt
-                                                                error:&error];
+  session = [StrappySession submitPrompt:prompt
+                     inSessionIdentifier:sessionId
+                                   error:&error];
   if (session != nil) {
     result = [[NSDictionary dictionaryWithObject:session forKey:@"session"] retain];
   } else {
