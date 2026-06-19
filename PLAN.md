@@ -25,26 +25,31 @@ duplicating assistant logic.
 
 Deliverables:
 
-- Shared source layout for Strappy core modules under `source/shared`.
-- C API boundaries for logging, errors, memory ownership, and string buffers.
-- cJSON integration with small wrapper helpers for safe object/array/string
-  access.
-- libcurl integration with a reusable HTTP client abstraction.
-- sqlite integration with read-only connection helpers, statement lifecycle
-  helpers, and result serialization helpers.
-- Configuration loading for OpenRouter API key, base URL, model, timeout, and
-  request limits.
-- Build system updates so shared core code and third-party libraries link into
-  both iOS and macOS targets.
+- [x] Shared source layout for Strappy core modules under `source/shared`.
+- [ ] C API boundaries for logging, errors, memory ownership, and string
+  buffers. Errors, memory ownership, and internal buffers exist; a logging
+  boundary is still open.
+- [ ] cJSON integration with small wrapper helpers for safe object/array/string
+  access. cJSON is integrated, but the safe helpers are still mostly local to
+  client code instead of reusable shared wrappers.
+- [x] libcurl integration with a reusable HTTP client abstraction.
+- [ ] sqlite integration with read-only connection helpers, statement lifecycle
+  helpers, and result serialization helpers. Session persistence exists, but
+  read-only local database helpers are still open.
+- [ ] Configuration loading for OpenRouter API key, base URL, model, timeout,
+  and request limits. API key/base URL/model exist; timeout and request-limit
+  configuration are still open.
+- [x] Build system updates so shared core code and third-party libraries link
+  into both iOS and macOS targets.
 
 Validation:
 
-- Clean debug build for macOS.
-- Clean debug build for iOS.
-- Small shared-core smoke tests or command-style test harness where the
+- [x] Clean debug build for macOS.
+- [x] Clean debug build for iOS.
+- [ ] Small shared-core smoke tests or command-style test harness where the
   Altivec environment allows it.
-- No memory ownership warnings from Clang static analysis on the shared C core
-  once non-trivial allocation code exists.
+- [ ] No memory ownership warnings from Clang static analysis on the shared C
+  core once non-trivial allocation code exists.
 
 ## Phase 2: OpenRouter Assistant Client
 
@@ -53,27 +58,36 @@ APIs and parse assistant responses reliably.
 
 Deliverables:
 
-- C request builder for chat messages, model settings, and tool definitions.
-- C response parser for assistant text, tool calls, finish reasons, and API
-  errors.
-- Retry and timeout policy for transient network failures.
-- Request cancellation hook for the UI layer.
-- Redacted diagnostic logging that never prints API keys or full personal
+- [x] C request builder for chat messages and model selection.
+- [ ] C request builder support for model settings and tool definitions.
+- [x] C response parser for assistant text, finish reasons, and API errors.
+- [ ] C response parser support for assistant tool calls as a stable parsed
+  result, not only preserved message JSON.
+- [x] Timeout policy for network requests.
+- [ ] Retry policy for transient network failures.
+- [ ] Request cancellation hook for the UI layer.
+- [ ] Redacted diagnostic logging that never prints API keys or full personal
   database contents.
-- Minimal Objective-C bridge functions for both apps to submit a prompt and
-  receive streamed or complete response text.
+- [x] Minimal Objective-C bridge functions to submit a prompt and receive
+  streamed or complete response text.
 
 Validation:
 
-- Mocked API responses covering success, malformed JSON, HTTP errors, and tool
-  calls.
-- Manual end-to-end request from both apps using a non-sensitive test prompt.
-- Clean builds with full warning logs captured.
+- [ ] Mocked API responses covering success, malformed JSON, HTTP errors, and
+  tool calls.
+- [ ] Manual end-to-end request from both apps using a non-sensitive test
+  prompt.
+- [x] Clean builds with full warning logs captured.
 
 ## Phase 3: SQLite Discovery And Catalog
 
 Goal: discover local SQLite databases and maintain a safe catalog of what the
 assistant is allowed to inspect.
+
+Architecture decision: use deterministic native scanning, cataloging, and
+allow/deny approval as the foundation. The assistant may guide the user through
+the process conversationally later, but permission state and filesystem access
+must be owned by Strappy UI/core code, not inferred from model output.
 
 Deliverables:
 
@@ -83,7 +97,11 @@ Deliverables:
 - Read-only database open path with timeouts and defensive error handling.
 - Local Strappy catalog database for discovered paths, file metadata, scan
   status, and user allow/deny decisions.
-- Basic UI state for scan progress, found databases, and ignored locations.
+- Catalog schema for learned database documentation: assistant-visible database
+  ID, schema summary, table/column descriptions, inferred purpose, sensitivity
+  notes, suggested query examples, and `last_learned_at`.
+- Fixed native UI state for scan progress, found databases, allow/deny
+  decisions, ignored locations, and stored database documentation.
 - Platform-specific safeguards for permission failures, symlinks, loops, large
   directories, and unreadable files.
 
@@ -100,18 +118,29 @@ Validation:
 Goal: expose controlled tools that let the assistant inspect database schemas
 and query user-approved databases.
 
+Architecture decision: expose a small stable tool set backed by the Strappy
+catalog rather than creating executable tools dynamically for each discovered
+database. Model-generated "learning" output is stored as database documentation
+metadata and can be included in prompt context or returned by catalog tools.
+
 Deliverables:
 
 - Tool registry in C with stable tool names, JSON schemas, argument parsing,
   and result serialization.
+- Stable catalog tools such as `scan_databases`, `list_discovered_databases`,
+  `describe_database`, `inspect_database_schema`, and `query_database`, all
+  using assistant-visible database IDs.
 - Schema discovery tool that returns tables, columns, indexes, foreign keys,
   row counts, and sample-safe metadata.
 - Query tool that permits read-only SQL only and enforces statement timeouts,
   row limits, and result size limits.
 - Database selection tool that maps assistant-visible database IDs to cataloged
   local paths without leaking unnecessary filesystem details.
+- Database learning flow that asks the model to document approved schemas and
+  stores the generated documentation in the catalog; it must not create new
+  executable tool code or unbounded per-database tool schemas.
 - Prompt context builder that summarizes available databases and tool usage
-  rules.
+  rules, including learned documentation for approved databases.
 - Audit log of tool calls, query text, row counts, errors, and truncation.
 
 Validation:
