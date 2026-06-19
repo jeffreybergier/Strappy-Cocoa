@@ -4,7 +4,9 @@
 
 #include <cJSON.h>
 #include <sqlite3.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 void strappy_session_record_init(strappy_session_record *record)
 {
@@ -117,6 +119,74 @@ void strappy_session_message_record_list_destroy(strappy_session_message_record_
   strappy_session_message_record_list_init(list);
 }
 
+void strappy_discovered_database_record_init(strappy_discovered_database_record *record)
+{
+  if (record == NULL) {
+    return;
+  }
+
+  record->catalog_id = 0;
+  record->assistant_database_id = NULL;
+  record->path = NULL;
+  record->size = 0;
+  record->modified_at = 0;
+  record->device = 0U;
+  record->inode = 0U;
+  record->is_valid_sqlite = 0;
+  record->validation_error = NULL;
+  record->scan_status = NULL;
+  record->user_decision = NULL;
+  record->scan_root = NULL;
+  record->first_seen_at = NULL;
+  record->last_seen_at = NULL;
+  record->last_scanned_at = NULL;
+}
+
+void strappy_discovered_database_record_destroy(strappy_discovered_database_record *record)
+{
+  if (record == NULL) {
+    return;
+  }
+
+  free(record->assistant_database_id);
+  free(record->path);
+  free(record->validation_error);
+  free(record->scan_status);
+  free(record->user_decision);
+  free(record->scan_root);
+  free(record->first_seen_at);
+  free(record->last_seen_at);
+  free(record->last_scanned_at);
+  strappy_discovered_database_record_init(record);
+}
+
+void strappy_discovered_database_record_list_init(
+  strappy_discovered_database_record_list *list)
+{
+  if (list == NULL) {
+    return;
+  }
+
+  list->records = NULL;
+  list->count = 0U;
+}
+
+void strappy_discovered_database_record_list_destroy(
+  strappy_discovered_database_record_list *list)
+{
+  size_t index;
+
+  if (list == NULL) {
+    return;
+  }
+
+  for (index = 0U; index < list->count; index++) {
+    strappy_discovered_database_record_destroy(&list->records[index]);
+  }
+  free(list->records);
+  strappy_discovered_database_record_list_init(list);
+}
+
 static int strappy_db_open(const char *db_path,
                            sqlite3 **db_out,
                            char **error_out)
@@ -217,6 +287,33 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
   static const char *messages_index_sql =
     "CREATE INDEX IF NOT EXISTS session_messages_session_id_id_idx "
     "ON session_messages(session_id, id);";
+  static const char *discovered_databases_sql =
+    "CREATE TABLE IF NOT EXISTS discovered_databases ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "assistant_database_id TEXT UNIQUE,"
+    "path TEXT NOT NULL UNIQUE,"
+    "size INTEGER NOT NULL DEFAULT 0,"
+    "modified_at INTEGER NOT NULL DEFAULT 0,"
+    "device INTEGER NOT NULL DEFAULT 0,"
+    "inode INTEGER NOT NULL DEFAULT 0,"
+    "is_valid_sqlite INTEGER NOT NULL DEFAULT 0,"
+    "validation_error TEXT,"
+    "scan_status TEXT NOT NULL DEFAULT 'candidate',"
+    "user_decision TEXT NOT NULL DEFAULT 'unknown',"
+    "scan_root TEXT,"
+    "first_seen_at TEXT NOT NULL DEFAULT "
+    "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
+    "last_seen_at TEXT NOT NULL DEFAULT "
+    "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
+    "last_scanned_at TEXT NOT NULL DEFAULT "
+    "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+    ");";
+  static const char *discovered_databases_device_inode_index_sql =
+    "CREATE INDEX IF NOT EXISTS discovered_databases_device_inode_idx "
+    "ON discovered_databases(device, inode);";
+  static const char *discovered_databases_decision_index_sql =
+    "CREATE INDEX IF NOT EXISTS discovered_databases_user_decision_idx "
+    "ON discovered_databases(user_decision);";
 
   if (!strappy_db_exec(db,
                        sessions_sql,
@@ -235,6 +332,27 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
   if (!strappy_db_exec(db,
                        messages_index_sql,
                        "Could not create session message index",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       discovered_databases_sql,
+                       "Could not create discovered database schema",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       discovered_databases_device_inode_index_sql,
+                       "Could not create discovered database device index",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       discovered_databases_decision_index_sql,
+                       "Could not create discovered database decision index",
                        error_out)) {
     return 0;
   }
@@ -343,6 +461,484 @@ static int strappy_db_assign_message_from_statement(
   record->message_json = message_json;
   record->reasoning = reasoning;
   record->created_at = created_at;
+  return 1;
+}
+
+static char *strappy_db_create_assistant_database_id(long long catalog_id)
+{
+  char buffer[64];
+  int result;
+
+  if (catalog_id <= 0) {
+    return NULL;
+  }
+
+  result = snprintf(buffer, sizeof(buffer), "db_%lld", catalog_id);
+  if ((result <= 0) || ((size_t)result >= sizeof(buffer))) {
+    return NULL;
+  }
+
+  return strappy_string_duplicate(buffer);
+}
+
+static const char *strappy_db_scan_status_for_input(
+  const strappy_discovered_database_input *record)
+{
+  if ((record != NULL) && record->is_valid_sqlite) {
+    return "valid";
+  }
+  if ((record != NULL) &&
+      (record->validation_error != NULL) &&
+      (record->validation_error[0] != '\0')) {
+    return "invalid";
+  }
+  return "candidate";
+}
+
+static int strappy_db_is_valid_user_decision(const char *user_decision)
+{
+  if (user_decision == NULL) {
+    return 0;
+  }
+
+  return ((strcmp(user_decision, "unknown") == 0) ||
+          (strcmp(user_decision, "allowed") == 0) ||
+          (strcmp(user_decision, "denied") == 0));
+}
+
+static int strappy_db_bind_optional_text(sqlite3 *db,
+                                         sqlite3_stmt *stmt,
+                                         int index,
+                                         const char *value,
+                                         const char *error_prefix,
+                                         char **error_out)
+{
+  int rc;
+
+  if ((value != NULL) && (value[0] != '\0')) {
+    rc = sqlite3_bind_text(stmt, index, value, -1, SQLITE_TRANSIENT);
+  } else {
+    rc = sqlite3_bind_null(stmt, index);
+  }
+
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "%s: %s",
+                                error_prefix,
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  return 1;
+}
+
+static int strappy_db_set_assistant_database_id(sqlite3 *db,
+                                                long long catalog_id,
+                                                char **error_out)
+{
+  static const char *sql =
+    "UPDATE discovered_databases "
+    "SET assistant_database_id = ? "
+    "WHERE id = ? "
+    "AND (assistant_database_id IS NULL OR assistant_database_id = '');";
+  sqlite3_stmt *stmt;
+  char *assistant_database_id;
+  int rc;
+
+  assistant_database_id = strappy_db_create_assistant_database_id(catalog_id);
+  if (assistant_database_id == NULL) {
+    strappy_set_error(error_out, "Could not allocate discovered database id.");
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare discovered database id update: %s",
+                                sqlite3_errmsg(db));
+    free(assistant_database_id);
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(stmt, 1, assistant_database_id, -1, SQLITE_TRANSIENT);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 2, (sqlite3_int64)catalog_id);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind discovered database id update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    free(assistant_database_id);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save discovered database id: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    free(assistant_database_id);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  free(assistant_database_id);
+  return 1;
+}
+
+static int strappy_db_existing_discovered_database_id(sqlite3 *db,
+                                                      const char *path,
+                                                      long long *catalog_id_out,
+                                                      char **error_out)
+{
+  static const char *sql =
+    "SELECT id FROM discovered_databases WHERE path = ?;";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (catalog_id_out == NULL) {
+    strappy_set_error(error_out, "Discovered database lookup has no output.");
+    return 0;
+  }
+  *catalog_id_out = 0;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare discovered database lookup: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind discovered database lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    *catalog_id_out = (long long)sqlite3_column_int64(stmt, 0);
+    sqlite3_finalize(stmt);
+    return 1;
+  }
+
+  sqlite3_finalize(stmt);
+  if (rc == SQLITE_DONE) {
+    return 1;
+  }
+
+  strappy_set_formatted_error(error_out,
+                              "Could not read discovered database lookup: %s",
+                              sqlite3_errmsg(db));
+  return 0;
+}
+
+static int strappy_db_insert_discovered_database(
+  sqlite3 *db,
+  const strappy_discovered_database_input *record,
+  long long *catalog_id_out,
+  char **error_out)
+{
+  static const char *sql =
+    "INSERT INTO discovered_databases "
+    "(path, size, modified_at, device, inode, is_valid_sqlite, "
+    "validation_error, scan_status, user_decision, scan_root) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unknown', ?);";
+  sqlite3_stmt *stmt;
+  const char *scan_status;
+  int rc;
+  int ok;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare discovered database insert: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  scan_status = strappy_db_scan_status_for_input(record);
+  ok = 1;
+  if (sqlite3_bind_text(stmt, 1, record->path, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)record->size) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)record->modified_at) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)record->device) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 5, (sqlite3_int64)record->inode) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int(stmt, 6, (record->is_valid_sqlite ? 1 : 0)) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           7,
+                                           record->validation_error,
+                                           "Could not bind discovered database insert",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_text(stmt, 8, scan_status, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           9,
+                                           record->scan_root,
+                                           "Could not bind discovered database insert",
+                                           error_out)) {
+    ok = 0;
+  }
+
+  if (!ok) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind discovered database insert: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save discovered database: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  if (catalog_id_out != NULL) {
+    *catalog_id_out = (long long)sqlite3_last_insert_rowid(db);
+  }
+
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+static int strappy_db_update_discovered_database(
+  sqlite3 *db,
+  long long catalog_id,
+  const strappy_discovered_database_input *record,
+  char **error_out)
+{
+  static const char *sql =
+    "UPDATE discovered_databases "
+    "SET size = ?, modified_at = ?, device = ?, inode = ?, "
+    "is_valid_sqlite = ?, validation_error = ?, scan_status = ?, "
+    "scan_root = ?, "
+    "last_seen_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now')), "
+    "last_scanned_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now')) "
+    "WHERE id = ?;";
+  sqlite3_stmt *stmt;
+  const char *scan_status;
+  int rc;
+  int ok;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare discovered database update: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  scan_status = strappy_db_scan_status_for_input(record);
+  ok = 1;
+  if (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)record->size) != SQLITE_OK) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)record->modified_at) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)record->device) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)record->inode) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int(stmt, 5, (record->is_valid_sqlite ? 1 : 0)) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           6,
+                                           record->validation_error,
+                                           "Could not bind discovered database update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_text(stmt, 7, scan_status, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           8,
+                                           record->scan_root,
+                                           "Could not bind discovered database update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 9, (sqlite3_int64)catalog_id) != SQLITE_OK)) {
+    ok = 0;
+  }
+
+  if (!ok) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind discovered database update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not update discovered database: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+static int strappy_db_save_discovered_database(
+  sqlite3 *db,
+  const strappy_discovered_database_input *record,
+  char **error_out)
+{
+  long long catalog_id;
+
+  if ((record == NULL) || (record->path == NULL) || (record->path[0] == '\0')) {
+    strappy_set_error(error_out, "Discovered database path is empty.");
+    return 0;
+  }
+
+  if (!strappy_db_existing_discovered_database_id(db,
+                                                  record->path,
+                                                  &catalog_id,
+                                                  error_out)) {
+    return 0;
+  }
+
+  if (catalog_id > 0) {
+    if (!strappy_db_update_discovered_database(db,
+                                               catalog_id,
+                                               record,
+                                               error_out)) {
+      return 0;
+    }
+  } else {
+    if (!strappy_db_insert_discovered_database(db,
+                                               record,
+                                               &catalog_id,
+                                               error_out)) {
+      return 0;
+    }
+  }
+
+  return strappy_db_set_assistant_database_id(db, catalog_id, error_out);
+}
+
+static int strappy_db_assign_discovered_database_from_statement(
+  strappy_discovered_database_record *record,
+  sqlite3_stmt *stmt,
+  char **error_out)
+{
+  char *assistant_database_id;
+  char *path;
+  char *validation_error;
+  char *scan_status;
+  char *user_decision;
+  char *scan_root;
+  char *first_seen_at;
+  char *last_seen_at;
+  char *last_scanned_at;
+  long long catalog_id;
+
+  if ((record == NULL) || (stmt == NULL)) {
+    strappy_set_error(error_out, "Discovered database row request is incomplete.");
+    return 0;
+  }
+
+  strappy_discovered_database_record_destroy(record);
+  catalog_id = (long long)sqlite3_column_int64(stmt, 0);
+  record->catalog_id = catalog_id;
+  record->size = (long long)sqlite3_column_int64(stmt, 3);
+  record->modified_at = (long long)sqlite3_column_int64(stmt, 4);
+  record->device = (unsigned long long)sqlite3_column_int64(stmt, 5);
+  record->inode = (unsigned long long)sqlite3_column_int64(stmt, 6);
+  record->is_valid_sqlite = sqlite3_column_int(stmt, 7) ? 1 : 0;
+
+  assistant_database_id = strappy_db_column_string(stmt, 1);
+  if (assistant_database_id == NULL) {
+    assistant_database_id = strappy_db_create_assistant_database_id(catalog_id);
+  }
+  path = strappy_db_column_string(stmt, 2);
+  validation_error = strappy_db_column_string(stmt, 8);
+  scan_status = strappy_db_column_string(stmt, 9);
+  user_decision = strappy_db_column_string(stmt, 10);
+  scan_root = strappy_db_column_string(stmt, 11);
+  first_seen_at = strappy_db_column_string(stmt, 12);
+  last_seen_at = strappy_db_column_string(stmt, 13);
+  last_scanned_at = strappy_db_column_string(stmt, 14);
+
+  if ((assistant_database_id == NULL) || (path == NULL) ||
+      (scan_status == NULL) || (user_decision == NULL) ||
+      (first_seen_at == NULL) || (last_seen_at == NULL) ||
+      (last_scanned_at == NULL)) {
+    free(assistant_database_id);
+    free(path);
+    free(validation_error);
+    free(scan_status);
+    free(user_decision);
+    free(scan_root);
+    free(first_seen_at);
+    free(last_seen_at);
+    free(last_scanned_at);
+    strappy_set_error(error_out, "Could not allocate discovered database row.");
+    return 0;
+  }
+
+  record->assistant_database_id = assistant_database_id;
+  record->path = path;
+  record->validation_error = validation_error;
+  record->scan_status = scan_status;
+  record->user_decision = user_decision;
+  record->scan_root = scan_root;
+  record->first_seen_at = first_seen_at;
+  record->last_seen_at = last_seen_at;
+  record->last_scanned_at = last_scanned_at;
   return 1;
 }
 
@@ -548,6 +1144,241 @@ int strappy_db_initialize(const char *db_path, char **error_out)
   ok = strappy_db_ensure_schema(db, error_out);
   sqlite3_close(db);
   return ok;
+}
+
+int strappy_db_save_discovered_databases(
+  const char *db_path,
+  const strappy_discovered_database_input *records,
+  size_t count,
+  char **error_out)
+{
+  sqlite3 *db;
+  size_t index;
+
+  if ((records == NULL) && (count > 0U)) {
+    strappy_set_error(error_out, "Discovered database records are missing.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin discovered database save",
+                       error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  for (index = 0U; index < count; index++) {
+    if (!strappy_db_save_discovered_database(db,
+                                             &records[index],
+                                             error_out)) {
+      strappy_db_exec(db,
+                      "ROLLBACK;",
+                      "Could not roll back discovered database save",
+                      NULL);
+      sqlite3_close(db);
+      return 0;
+    }
+  }
+
+  if (!strappy_db_exec(db,
+                       "COMMIT;",
+                       "Could not commit discovered database save",
+                       error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database save",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  sqlite3_close(db);
+  return 1;
+}
+
+int strappy_db_list_discovered_databases(
+  const char *db_path,
+  strappy_discovered_database_record_list *list,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT id, assistant_database_id, path, size, modified_at, "
+    "device, inode, is_valid_sqlite, validation_error, scan_status, "
+    "user_decision, scan_root, first_seen_at, last_seen_at, last_scanned_at "
+    "FROM discovered_databases "
+    "ORDER BY last_seen_at DESC, id DESC;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (list == NULL) {
+    strappy_set_error(error_out, "strappy_db_list_discovered_databases received no output.");
+    return 0;
+  }
+  strappy_discovered_database_record_list_init(list);
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare discovered database list: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    strappy_discovered_database_record *next_records;
+
+    if (list->count >= (((size_t)-1) / sizeof(strappy_discovered_database_record))) {
+      strappy_set_error(error_out, "Discovered database list is too large.");
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      strappy_discovered_database_record_list_destroy(list);
+      return 0;
+    }
+
+    next_records = (strappy_discovered_database_record *)realloc(
+      list->records,
+      (list->count + 1U) * sizeof(strappy_discovered_database_record));
+    if (next_records == NULL) {
+      strappy_set_error(error_out, "Could not allocate discovered database list.");
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      strappy_discovered_database_record_list_destroy(list);
+      return 0;
+    }
+
+    list->records = next_records;
+    strappy_discovered_database_record_init(&list->records[list->count]);
+    if (!strappy_db_assign_discovered_database_from_statement(
+          &list->records[list->count],
+          stmt,
+          error_out)) {
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      strappy_discovered_database_record_list_destroy(list);
+      return 0;
+    }
+
+    list->count++;
+  }
+
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read discovered database list: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    strappy_discovered_database_record_list_destroy(list);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  return 1;
+}
+
+int strappy_db_update_discovered_database_decision(
+  const char *db_path,
+  long long catalog_id,
+  const char *user_decision,
+  char **error_out)
+{
+  static const char *sql =
+    "UPDATE discovered_databases "
+    "SET user_decision = ? "
+    "WHERE id = ? "
+    "AND (? != 'allowed' OR is_valid_sqlite = 1);";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (catalog_id <= 0) {
+    strappy_set_error(error_out, "Discovered database id is not valid.");
+    return 0;
+  }
+
+  if (!strappy_db_is_valid_user_decision(user_decision)) {
+    strappy_set_error(error_out, "Discovered database decision is not valid.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare discovered database decision update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(stmt, 1, user_decision, -1, SQLITE_TRANSIENT);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 2, (sqlite3_int64)catalog_id);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 3, user_decision, -1, SQLITE_TRANSIENT);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind discovered database decision update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not update discovered database decision: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (sqlite3_changes(db) < 1) {
+    strappy_set_error(error_out,
+                      "Discovered database was not found or is not valid SQLite.");
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  return 1;
 }
 
 int strappy_db_save_exchange(const char *db_path,

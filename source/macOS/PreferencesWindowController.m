@@ -44,9 +44,12 @@ static NSString *StrappyByteCountString(NSNumber *sizeNumber)
 - (NSView *)systemPromptPaneWithFrame:(NSRect)frame;
 - (NSView *)databaseScanningPaneWithFrame:(NSRect)frame;
 - (void)loadSystemPrompt;
+- (void)loadCatalogedDatabases;
 - (void)setScanning:(BOOL)scanning;
 - (void)scanDatabasesInBackground:(NSString *)rootPath;
 - (void)scanDatabasesDidFinish:(NSDictionary *)result;
+- (BOOL)databaseRowCanBeAllowed:(NSDictionary *)row;
+- (NSNumber *)allowedValueForDatabaseRow:(NSDictionary *)row;
 - (NSString *)statusForDatabaseRow:(NSDictionary *)row;
 @end
 
@@ -83,6 +86,7 @@ static NSString *StrappyByteCountString(NSNumber *sizeNumber)
     [self buildContentView];
     [self loadSystemPrompt];
     [self setScanning:NO];
+    [self loadCatalogedDatabases];
   }
 
   [window release];
@@ -164,9 +168,11 @@ static NSString *StrappyByteCountString(NSNumber *sizeNumber)
 - (NSView *)databaseScanningPaneWithFrame:(NSRect)frame
 {
   NSView *view;
+  NSTableColumn *allowedColumn;
   NSTableColumn *pathColumn;
   NSTableColumn *statusColumn;
   NSTableColumn *sizeColumn;
+  NSButtonCell *allowedCell;
   NSScrollView *scrollView;
   CGFloat topY;
 
@@ -229,19 +235,34 @@ static NSString *StrappyByteCountString(NSNumber *sizeNumber)
   [databaseTableView_ setUsesAlternatingRowBackgroundColors:YES];
   [databaseTableView_ setRowHeight:22.0];
 
+  allowedColumn =
+    [[[NSTableColumn alloc] initWithIdentifier:@"allowed"] autorelease];
+  [[allowedColumn headerCell] setStringValue:NSLocalizedString(@"Allow", nil)];
+  [allowedColumn setWidth:58.0];
+  [allowedColumn setEditable:YES];
+  allowedCell = [[[NSButtonCell alloc] init] autorelease];
+  [allowedCell setButtonType:XPButtonTypeSwitch];
+  [allowedCell setTitle:@""];
+  [allowedCell setAlignment:XPTextAlignmentCenter];
+  [allowedColumn setDataCell:allowedCell];
+  [databaseTableView_ addTableColumn:allowedColumn];
+
   pathColumn = [[[NSTableColumn alloc] initWithIdentifier:@"path"] autorelease];
   [[pathColumn headerCell] setStringValue:NSLocalizedString(@"Path", nil)];
-  [pathColumn setWidth:430.0];
+  [pathColumn setWidth:390.0];
+  [pathColumn setEditable:NO];
   [databaseTableView_ addTableColumn:pathColumn];
 
   statusColumn = [[[NSTableColumn alloc] initWithIdentifier:@"status"] autorelease];
   [[statusColumn headerCell] setStringValue:NSLocalizedString(@"Status", nil)];
-  [statusColumn setWidth:140.0];
+  [statusColumn setWidth:130.0];
+  [statusColumn setEditable:NO];
   [databaseTableView_ addTableColumn:statusColumn];
 
   sizeColumn = [[[NSTableColumn alloc] initWithIdentifier:@"size"] autorelease];
   [[sizeColumn headerCell] setStringValue:NSLocalizedString(@"Size", nil)];
-  [sizeColumn setWidth:100.0];
+  [sizeColumn setWidth:90.0];
+  [sizeColumn setEditable:NO];
   [databaseTableView_ addTableColumn:sizeColumn];
 
   [scrollView setDocumentView:databaseTableView_];
@@ -268,6 +289,36 @@ static NSString *StrappyByteCountString(NSNumber *sizeNumber)
     prompt = NSLocalizedString(@"System prompt template could not be read.", nil);
   }
   [systemPromptTextView_ setString:prompt];
+}
+
+- (void)loadCatalogedDatabases
+{
+  NSError *error;
+  NSArray *rows;
+  NSString *errorMessage;
+
+  error = nil;
+  rows = [[FileScanner sharedScanner] catalogedSQLiteDatabasesWithError:&error];
+  if (rows != nil) {
+    [databaseRows_ release];
+    databaseRows_ = [rows copy];
+    [databaseTableView_ reloadData];
+    if ([databaseRows_ count] > 0U) {
+      [scanStatusField_ setStringValue:
+        [NSString stringWithFormat:NSLocalizedString(@"Catalog has %lu SQLite candidate(s).", nil),
+          (unsigned long)[databaseRows_ count]]];
+    } else {
+      [scanStatusField_ setStringValue:
+        NSLocalizedString(@"No databases cataloged yet.", nil)];
+    }
+    return;
+  }
+
+  errorMessage = [error localizedDescription];
+  if ([errorMessage length] == 0U) {
+    errorMessage = NSLocalizedString(@"Could not load database catalog.", nil);
+  }
+  [scanStatusField_ setStringValue:errorMessage];
 }
 
 - (void)setScanning:(BOOL)scanning
@@ -311,7 +362,7 @@ static NSString *StrappyByteCountString(NSNumber *sizeNumber)
   pool = [[NSAutoreleasePool alloc] init];
   error = nil;
   rows = [[FileScanner sharedScanner] scanDirectoryForSQLiteDatabasesAtPath:rootPath
-                                                                      error:&error];
+                                            savingResultsToCatalogWithError:&error];
   result = [[NSMutableDictionary alloc] init];
   if (rows != nil) {
     [result setObject:rows forKey:@"rows"];
@@ -342,7 +393,7 @@ static NSString *StrappyByteCountString(NSNumber *sizeNumber)
     databaseRows_ = [rows copy];
     [databaseTableView_ reloadData];
     [scanStatusField_ setStringValue:
-      [NSString stringWithFormat:NSLocalizedString(@"Found %lu SQLite candidate(s).", nil),
+      [NSString stringWithFormat:NSLocalizedString(@"Catalog has %lu SQLite candidate(s).", nil),
         (unsigned long)[databaseRows_ count]]];
   } else {
     errorMessage = [result objectForKey:@"error"];
@@ -375,6 +426,9 @@ static NSString *StrappyByteCountString(NSNumber *sizeNumber)
 
   database = [databaseRows_ objectAtIndex:(NSUInteger)row];
   identifier = [tableColumn identifier];
+  if ([identifier isEqualToString:@"allowed"]) {
+    return [self allowedValueForDatabaseRow:database];
+  }
   if ([identifier isEqualToString:@"path"]) {
     return [database objectForKey:@"path"];
   }
@@ -388,14 +442,140 @@ static NSString *StrappyByteCountString(NSNumber *sizeNumber)
   return nil;
 }
 
-- (NSString *)statusForDatabaseRow:(NSDictionary *)row
+- (void)tableView:(NSTableView *)tableView
+   setObjectValue:(id)object
+   forTableColumn:(NSTableColumn *)tableColumn
+              row:(NSInteger)row
+{
+  NSDictionary *database;
+  NSString *identifier;
+  NSNumber *catalogId;
+  NSError *error;
+  NSString *errorMessage;
+  BOOL allowed;
+
+  (void)tableView;
+  if ((row < 0) || (row >= (NSInteger)[databaseRows_ count])) {
+    return;
+  }
+
+  identifier = [tableColumn identifier];
+  if (![identifier isEqualToString:@"allowed"]) {
+    return;
+  }
+
+  database = [databaseRows_ objectAtIndex:(NSUInteger)row];
+  allowed = ([object respondsToSelector:@selector(boolValue)] &&
+             [object boolValue]) ? YES : NO;
+  if (allowed && ![self databaseRowCanBeAllowed:database]) {
+    [scanStatusField_ setStringValue:
+      NSLocalizedString(@"Only valid SQLite databases can be allowed.", nil)];
+    [databaseTableView_ reloadData];
+    return;
+  }
+
+  catalogId = [database objectForKey:@"catalog_id"];
+  error = nil;
+  if (![[FileScanner sharedScanner] setCatalogedDatabaseAllowed:allowed
+                                           forCatalogIdentifier:catalogId
+                                                          error:&error]) {
+    errorMessage = [error localizedDescription];
+    if ([errorMessage length] == 0U) {
+      errorMessage = NSLocalizedString(@"Could not update database permission.", nil);
+    }
+    [scanStatusField_ setStringValue:errorMessage];
+    [databaseTableView_ reloadData];
+    return;
+  }
+
+  [self loadCatalogedDatabases];
+  if (allowed) {
+    [scanStatusField_ setStringValue:
+      NSLocalizedString(@"Database allowed.", nil)];
+  } else {
+    [scanStatusField_ setStringValue:
+      NSLocalizedString(@"Database returned to unknown.", nil)];
+  }
+}
+
+- (BOOL)tableView:(NSTableView *)tableView
+ shouldEditTableColumn:(NSTableColumn *)tableColumn
+              row:(NSInteger)row
+{
+  NSDictionary *database;
+
+  (void)tableView;
+  if (![[tableColumn identifier] isEqualToString:@"allowed"]) {
+    return NO;
+  }
+  if ((row < 0) || (row >= (NSInteger)[databaseRows_ count])) {
+    return NO;
+  }
+
+  database = [databaseRows_ objectAtIndex:(NSUInteger)row];
+  return [self databaseRowCanBeAllowed:database];
+}
+
+- (void)tableView:(NSTableView *)tableView
+  willDisplayCell:(id)cell
+   forTableColumn:(NSTableColumn *)tableColumn
+              row:(NSInteger)row
+{
+  NSDictionary *database;
+
+  (void)tableView;
+  if (![[tableColumn identifier] isEqualToString:@"allowed"] ||
+      ![cell respondsToSelector:@selector(setEnabled:)]) {
+    return;
+  }
+  if ((row < 0) || (row >= (NSInteger)[databaseRows_ count])) {
+    [cell setEnabled:NO];
+    return;
+  }
+
+  database = [databaseRows_ objectAtIndex:(NSUInteger)row];
+  [cell setEnabled:[self databaseRowCanBeAllowed:database]];
+}
+
+- (BOOL)databaseRowCanBeAllowed:(NSDictionary *)row
 {
   NSNumber *valid;
+
+  valid = [row objectForKey:@"is_valid_sqlite"];
+  return ([valid isKindOfClass:[NSNumber class]] && [valid boolValue]) ? YES : NO;
+}
+
+- (NSNumber *)allowedValueForDatabaseRow:(NSDictionary *)row
+{
+  NSString *decision;
+
+  decision = [row objectForKey:@"user_decision"];
+  return [NSNumber numberWithBool:[decision isEqualToString:@"allowed"]];
+}
+
+- (NSString *)statusForDatabaseRow:(NSDictionary *)row
+{
+  NSString *decision;
+  NSNumber *valid;
   NSString *validationError;
+  NSString *scanStatus;
+
+  decision = [row objectForKey:@"user_decision"];
+  if ([decision isEqualToString:@"allowed"]) {
+    return NSLocalizedString(@"Allowed", nil);
+  }
+  if ([decision isEqualToString:@"denied"]) {
+    return NSLocalizedString(@"Denied", nil);
+  }
+
+  scanStatus = [row objectForKey:@"scan_status"];
+  if ([scanStatus isEqualToString:@"invalid"]) {
+    return NSLocalizedString(@"Invalid", nil);
+  }
 
   valid = [row objectForKey:@"is_valid_sqlite"];
   if ([valid isKindOfClass:[NSNumber class]] && [valid boolValue]) {
-    return NSLocalizedString(@"SQLite", nil);
+    return NSLocalizedString(@"Unknown SQLite", nil);
   }
 
   validationError = [row objectForKey:@"validation_error"];

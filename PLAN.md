@@ -99,7 +99,7 @@ Deliverables:
 - [x] SQLite file detection that does not rely only on file extensions.
 - [x] Read-only database validation path with a short busy timeout and
   defensive error handling for invalid candidates.
-- [ ] Local Strappy catalog database for discovered paths, file metadata, scan
+- [x] Local Strappy catalog database for discovered paths, file metadata, scan
   status, and user allow/deny decisions.
 - [ ] Catalog schema for deterministic database facts: assistant-visible
   database ID, tables, columns, indexes, foreign keys, row counts where cheap,
@@ -107,10 +107,10 @@ Deliverables:
 - [ ] Catalog schema for learned database documentation: assistant-visible database
   ID, schema summary, table/column descriptions, inferred purpose, sensitivity
   notes, suggested query examples, and `last_learned_at`.
-- [ ] Fixed native UI state for scan progress, found databases, allow/deny
-  decisions, ignored locations, and stored database documentation. Scan
-  progress/found-database display exists in macOS Preferences; allow/deny,
-  ignored locations, and documentation views are still open.
+- [x] Native macOS Preferences allow checkbox whitelisting for valid cataloged
+  SQLite databases.
+- [ ] Fixed native UI state for deny decisions, ignored locations, and stored
+  database documentation.
 - [ ] Platform-specific safeguards for permission failures, symlinks, loops,
   large directories, and unreadable files. Symlink avoidance, unreadable path
   handling, and validation errors exist in the C scanner; ignored locations and

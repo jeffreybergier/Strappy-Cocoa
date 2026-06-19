@@ -43,10 +43,12 @@
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
   #define XPBezelStyleRounded        NSBezelStyleRounded
   #define XPButtonTypeMomentaryLight NSButtonTypeMomentaryLight
+  #define XPButtonTypeSwitch         NSButtonTypeSwitch
   #define XPProgressIndicatorStyleSpinning NSProgressIndicatorStyleSpinning
 #else
   #define XPBezelStyleRounded        NSRoundedBezelStyle
   #define XPButtonTypeMomentaryLight NSMomentaryLightButton
+  #define XPButtonTypeSwitch         NSSwitchButton
   #define XPProgressIndicatorStyleSpinning NSProgressIndicatorSpinningStyle
 #endif
 
