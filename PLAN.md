@@ -91,27 +91,38 @@ must be owned by Strappy UI/core code, not inferred from model output.
 
 Deliverables:
 
-- Filesystem scanner that searches likely user data locations on macOS and the
-  full filesystem on jailbroken iOS.
-- SQLite file detection that does not rely only on file extensions.
-- Read-only database open path with timeouts and defensive error handling.
-- Local Strappy catalog database for discovered paths, file metadata, scan
+- [x] Shared C filesystem scanner with an Objective-C `FileScanner` singleton
+  boundary, keeping filesystem discovery out of `StrappySession`.
+- [x] Filesystem scanner that searches a requested root path and is wired to
+  scan the user's home directory from the macOS Preferences UI. Full-filesystem
+  jailbroken iOS scan roots are still open.
+- [x] SQLite file detection that does not rely only on file extensions.
+- [x] Read-only database validation path with a short busy timeout and
+  defensive error handling for invalid candidates.
+- [ ] Local Strappy catalog database for discovered paths, file metadata, scan
   status, and user allow/deny decisions.
-- Catalog schema for learned database documentation: assistant-visible database
+- [ ] Catalog schema for deterministic database facts: assistant-visible
+  database ID, tables, columns, indexes, foreign keys, row counts where cheap,
+  file metadata, and scan timestamps.
+- [ ] Catalog schema for learned database documentation: assistant-visible database
   ID, schema summary, table/column descriptions, inferred purpose, sensitivity
   notes, suggested query examples, and `last_learned_at`.
-- Fixed native UI state for scan progress, found databases, allow/deny
-  decisions, ignored locations, and stored database documentation.
-- Platform-specific safeguards for permission failures, symlinks, loops, large
-  directories, and unreadable files.
+- [ ] Fixed native UI state for scan progress, found databases, allow/deny
+  decisions, ignored locations, and stored database documentation. Scan
+  progress/found-database display exists in macOS Preferences; allow/deny,
+  ignored locations, and documentation views are still open.
+- [ ] Platform-specific safeguards for permission failures, symlinks, loops,
+  large directories, and unreadable files. Symlink avoidance, unreadable path
+  handling, and validation errors exist in the C scanner; ignored locations and
+  large-directory policy are still open.
 
 Validation:
 
-- Scanner test fixtures with valid SQLite files, non-SQLite files, corrupt
+- [ ] Scanner test fixtures with valid SQLite files, non-SQLite files, corrupt
   files, symlinks, and permission failures.
-- Manual scan on macOS against a constrained test directory.
-- Manual scan on jailbroken iOS package install once `.deb` packaging exists.
-- Clean builds with full warning logs captured.
+- [x] Manual scan on macOS from Preferences against the user's home directory.
+- [ ] Manual scan on jailbroken iOS package install once `.deb` packaging exists.
+- [x] Clean builds with full warning logs captured.
 
 ## Phase 4: Database Tools For The Agent
 
@@ -120,8 +131,12 @@ and query user-approved databases.
 
 Architecture decision: expose a small stable tool set backed by the Strappy
 catalog rather than creating executable tools dynamically for each discovered
-database. Model-generated "learning" output is stored as database documentation
-metadata and can be included in prompt context or returned by catalog tools.
+database. Do not make one tool per whitelisted database; tools should accept an
+assistant-visible database ID and resolve it through the catalog. Deterministic
+schema facts such as tables, columns, indexes, foreign keys, and row counts are
+authoritative catalog data. Model-generated "learning" output is stored as
+database documentation metadata and can be included in prompt context or
+returned by catalog tools, but it is descriptive guidance rather than authority.
 
 Deliverables:
 

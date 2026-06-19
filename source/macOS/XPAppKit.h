@@ -16,12 +16,14 @@
   #define XPWindowStyleMaskTitled         NSWindowStyleMaskTitled
   #define XPWindowStyleMaskClosable       NSWindowStyleMaskClosable
   #define XPWindowStyleMaskMiniaturizable NSWindowStyleMaskMiniaturizable
+  #define XPWindowStyleMaskResizable      NSWindowStyleMaskResizable
   #define XPEventModifierFlagCommand      NSEventModifierFlagCommand
   #define XPEventModifierFlagOption       NSEventModifierFlagOption
 #else
   #define XPWindowStyleMaskTitled         NSTitledWindowMask
   #define XPWindowStyleMaskClosable       NSClosableWindowMask
   #define XPWindowStyleMaskMiniaturizable NSMiniaturizableWindowMask
+  #define XPWindowStyleMaskResizable      NSResizableWindowMask
   #define XPEventModifierFlagCommand      NSCommandKeyMask
   #define XPEventModifierFlagOption       NSAlternateKeyMask
 #endif
@@ -41,9 +43,11 @@
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
   #define XPBezelStyleRounded        NSBezelStyleRounded
   #define XPButtonTypeMomentaryLight NSButtonTypeMomentaryLight
+  #define XPProgressIndicatorStyleSpinning NSProgressIndicatorStyleSpinning
 #else
   #define XPBezelStyleRounded        NSRoundedBezelStyle
   #define XPButtonTypeMomentaryLight NSMomentaryLightButton
+  #define XPProgressIndicatorStyleSpinning NSProgressIndicatorSpinningStyle
 #endif
 
 #if defined(MAC_OS_X_VERSION_MIN_REQUIRED) && MAC_OS_X_VERSION_MIN_REQUIRED >= 110000

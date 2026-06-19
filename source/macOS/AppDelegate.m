@@ -1,4 +1,5 @@
 #import "AppDelegate.h"
+#import "PreferencesWindowController.h"
 #import "SessionWindowController.h"
 #import "StrappySession.h"
 #import <AltivecCore/AltivecCore.h>
@@ -39,6 +40,17 @@
   [NSApp orderFrontStandardAboutPanel:self];
 }
 
+- (void)showPreferencesWindow:(id)sender
+{
+  (void)sender;
+  if (_preferencesWindowController == nil) {
+    _preferencesWindowController = [[PreferencesWindowController alloc] init];
+  }
+
+  [_preferencesWindowController showWindow:self];
+  [[_preferencesWindowController window] makeKeyAndOrderFront:self];
+}
+
 - (void)setupMenu
 {
   NSMenu *mainMenu = [[[NSMenu alloc] initWithTitle:@"MainMenu"] autorelease];
@@ -56,6 +68,13 @@
   [appMenu addItemWithTitle:NSLocalizedString(@"About Strappy", nil)
                      action:@selector(showAboutWindow:)
               keyEquivalent:@""];
+  {
+    NSMenuItem *preferences =
+      [appMenu addItemWithTitle:NSLocalizedString(@"Preferences...", nil)
+                         action:@selector(showPreferencesWindow:)
+                  keyEquivalent:@","];
+    [preferences setTarget:self];
+  }
   [appMenu addItem:[NSMenuItem separatorItem]];
   [appMenu addItemWithTitle:NSLocalizedString(@"Hide Strappy", nil)
                      action:@selector(hide:)
@@ -176,6 +195,7 @@
 - (void)dealloc
 {
   [_windowController release];
+  [_preferencesWindowController release];
   [super dealloc];
 }
 

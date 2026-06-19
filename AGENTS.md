@@ -27,17 +27,22 @@ House style for Strappy source:
 5. C files must not import macOS-only framework headers such as
    `CoreFoundation`. Shared C code must stay portable across the iOS and macOS
    targets.
-6. `StrappySession.m` is the only Objective-C file that may directly import
-   Strappy C headers such as `strappy_client.h` or `strappy_core.h`. Other
-   Objective-C files should talk to the C layer through `StrappySession`.
-   The only exception is UI code that calls the C webview renderer in
-   `strappy_webview.h`; Objective-C view controllers may pass display data to
-   that renderer, but must not hand-roll webview HTML, CSS, or JavaScript.
-7. Platform and SDK compatibility `#if` / `#ifdef` checks must live in
+6. `StrappySession.m` owns the Objective-C/C boundary for AI agent sessions.
+   Keep filesystem scanning and database discovery out of `StrappySession`.
+7. `FileScanner.m` owns the Objective-C/C boundary for filesystem scanning and
+   database discovery. It is a singleton because Strappy scans one host
+   filesystem at a time. Objective-C UI code should talk to `FileScanner`, not
+   directly to scanner C headers.
+8. Except for `StrappySession.m`, `FileScanner.m`, and UI code that calls the C
+   webview renderer in `strappy_webview.h`, Objective-C files must not directly
+   import Strappy C headers such as `strappy_client.h` or `strappy_core.h`.
+   Objective-C view controllers may pass display data to the webview renderer,
+   but must not hand-roll webview HTML, CSS, or JavaScript.
+9. Platform and SDK compatibility `#if` / `#ifdef` checks must live in
    `XPAppKit`, `XPUIKit`, or `XPFoundation`. Call sites should use XP-prefixed
    macros, helpers, categories, or types instead of embedding compatibility
    conditionals directly in feature code.
-8. XP-prefixed compatibility methods are runtime bridges, not simple aliases.
+10. XP-prefixed compatibility methods are runtime bridges, not simple aliases.
    When the modern API may exist on some target runtimes but not others,
    implement an `XP_` category method on the owning Cocoa class, check the
    modern selector with `respondsToSelector:`, and then fall back to the
@@ -50,10 +55,10 @@ House style for Strappy source:
    `source/shared/XPFoundation.{h,m}`; AppKit/UIKit shims live in `XPAppKit` /
    `XPUIKit`. Call sites must use the XP method and must not call newer SDK
    selectors directly.
-9. SQLite JSON columns are opaque on read. Do not use cJSON to parse values
+11. SQLite JSON columns are opaque on read. Do not use cJSON to parse values
    loaded from the database. Stored custom metadata JSON should move unchanged
    from SQLite into the webview, where page JavaScript can parse it for display.
-10. Webview HTML, CSS, and JavaScript strings are generated in C. Keep that
+12. Webview HTML, CSS, and JavaScript strings are generated in C. Keep that
     rendering logic in `strappy_webview.{h,c}` or another C module, not in
     Objective-C view controllers.
 
