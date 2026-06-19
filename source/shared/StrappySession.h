@@ -26,5 +26,11 @@
                                 context:(NSDictionary *)context
                                delegate:(id<StrappySessionStreamDelegate>)delegate
                                   error:(NSError **)error;
++ (NSDictionary *)submitPromptStreaming:(NSString *)prompt
+                    inSessionIdentifier:(NSNumber *)sessionIdentifier
+                        webViewUserAgent:(NSString *)webViewUserAgent
+                                context:(NSDictionary *)context
+                               delegate:(id<StrappySessionStreamDelegate>)delegate
+                                  error:(NSError **)error;
 
 @end

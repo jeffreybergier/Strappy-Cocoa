@@ -4,6 +4,7 @@
 #import "strappy_client.h"
 #import "strappy_core.h"
 #import "strappy_db.h"
+#import "strappy_prompt.h"
 #import "XPFoundation.h"
 
 typedef struct StrappySessionStreamContext {
@@ -79,6 +80,34 @@ static int StrappySessionHandleStreamEvent(
     [NSException raise:NSInvalidArgumentException
                 format:@"%@", (message ? message : @"Could not configure CA certificate path.")];
   }
+}
+
++ (NSString *)systemPromptTemplatePathWithError:(NSError **)error
+{
+  NSString *resourceName;
+  NSString *resourceType;
+  NSString *path;
+
+  resourceName =
+    [NSString stringWithUTF8String:STRAPPY_PROMPT_TEMPLATE_RESOURCE_NAME];
+  resourceType =
+    [NSString stringWithUTF8String:STRAPPY_PROMPT_TEMPLATE_RESOURCE_TYPE];
+  path = [[NSBundle mainBundle] pathForResource:resourceName
+                                         ofType:resourceType];
+  if ([path isKindOfClass:[NSString class]] && ([path length] > 0U)) {
+    return path;
+  }
+
+  if (error != nil) {
+    NSDictionary *userInfo =
+      [NSDictionary dictionaryWithObject:NSLocalizedString(@"System prompt template is missing from the app bundle.", nil)
+                                  forKey:NSLocalizedDescriptionKey];
+    *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                 code:7
+                             userInfo:userInfo];
+  }
+
+  return nil;
 }
 
 + (NSString *)stringFromCStringOrEmpty:(const char *)value
@@ -596,6 +625,7 @@ static int StrappySessionHandleStreamEvent(
 + (NSString *)submitPromptSynchronously:(NSString *)prompt error:(NSError **)error
 {
   NSString *databasePath;
+  NSString *systemPromptTemplatePath;
   NSString *responseString;
   char *response;
   char *strappyError;
@@ -612,6 +642,11 @@ static int StrappySessionHandleStreamEvent(
     return nil;
   }
 
+  systemPromptTemplatePath = [StrappySession systemPromptTemplatePathWithError:error];
+  if (systemPromptTemplatePath == nil) {
+    return nil;
+  }
+
   databasePath = [StrappySession sessionsDatabasePath];
   if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
                                                         error:error]) {
@@ -620,6 +655,8 @@ static int StrappySessionHandleStreamEvent(
 
   strappyError = NULL;
   response = strappy_assistant_send_prompt_and_store([prompt UTF8String],
+                                                     NULL,
+                                                     [systemPromptTemplatePath fileSystemRepresentation],
                                                      NULL,
                                                      [databasePath UTF8String],
                                                      &strappyError);
@@ -652,6 +689,7 @@ static int StrappySessionHandleStreamEvent(
                                                       error:(NSError **)error
 {
   NSString *databasePath;
+  NSString *systemPromptTemplatePath;
   char *response;
   char *strappyError;
   long long sessionId;
@@ -670,6 +708,11 @@ static int StrappySessionHandleStreamEvent(
     return nil;
   }
 
+  systemPromptTemplatePath = [StrappySession systemPromptTemplatePathWithError:error];
+  if (systemPromptTemplatePath == nil) {
+    return nil;
+  }
+
   databasePath = [StrappySession sessionsDatabasePath];
   if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
                                                         error:error]) {
@@ -679,6 +722,8 @@ static int StrappySessionHandleStreamEvent(
   sessionId = 0;
   strappyError = NULL;
   response = strappy_assistant_send_prompt_and_store_with_id([prompt UTF8String],
+                                                             NULL,
+                                                             [systemPromptTemplatePath fileSystemRepresentation],
                                                              NULL,
                                                              [databasePath UTF8String],
                                                              &sessionId,
@@ -716,6 +761,7 @@ static int StrappySessionHandleStreamEvent(
                          error:(NSError **)error
 {
   NSString *databasePath;
+  NSString *systemPromptTemplatePath;
   char *response;
   char *strappyError;
   long long sessionId;
@@ -752,6 +798,11 @@ static int StrappySessionHandleStreamEvent(
     return nil;
   }
 
+  systemPromptTemplatePath = [StrappySession systemPromptTemplatePathWithError:error];
+  if (systemPromptTemplatePath == nil) {
+    return nil;
+  }
+
   databasePath = [StrappySession sessionsDatabasePath];
   if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
                                                         error:error]) {
@@ -761,6 +812,8 @@ static int StrappySessionHandleStreamEvent(
   strappyError = NULL;
   response =
     strappy_assistant_send_prompt_for_session_and_store([prompt UTF8String],
+                                                        NULL,
+                                                        [systemPromptTemplatePath fileSystemRepresentation],
                                                         NULL,
                                                         [databasePath UTF8String],
                                                         sessionId,
@@ -799,7 +852,24 @@ static int StrappySessionHandleStreamEvent(
                                delegate:(id<StrappySessionStreamDelegate>)delegate
                                   error:(NSError **)error
 {
+  return [StrappySession submitPromptStreaming:prompt
+                           inSessionIdentifier:sessionIdentifier
+                              webViewUserAgent:nil
+                                       context:context
+                                      delegate:delegate
+                                         error:error];
+}
+
++ (NSDictionary *)submitPromptStreaming:(NSString *)prompt
+                    inSessionIdentifier:(NSNumber *)sessionIdentifier
+                        webViewUserAgent:(NSString *)webViewUserAgent
+                                context:(NSDictionary *)context
+                               delegate:(id<StrappySessionStreamDelegate>)delegate
+                                  error:(NSError **)error
+{
   NSString *databasePath;
+  NSString *systemPromptTemplatePath;
+  const char *userAgentCString;
   char *response;
   char *strappyError;
   long long sessionId;
@@ -822,6 +892,17 @@ static int StrappySessionHandleStreamEvent(
   if ((context != nil) && ![context isKindOfClass:[NSDictionary class]]) {
     context = nil;
   }
+  if (![webViewUserAgent isKindOfClass:[NSString class]] ||
+      ([webViewUserAgent length] == 0U)) {
+    webViewUserAgent = nil;
+  }
+  userAgentCString =
+    (webViewUserAgent != nil) ? [webViewUserAgent UTF8String] : NULL;
+
+  systemPromptTemplatePath = [StrappySession systemPromptTemplatePathWithError:error];
+  if (systemPromptTemplatePath == nil) {
+    return nil;
+  }
 
   databasePath = [StrappySession sessionsDatabasePath];
   if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
@@ -838,6 +919,8 @@ static int StrappySessionHandleStreamEvent(
     response = strappy_assistant_stream_prompt_and_store_with_id(
       [prompt UTF8String],
       NULL,
+      [systemPromptTemplatePath fileSystemRepresentation],
+      userAgentCString,
       [databasePath UTF8String],
       &sessionId,
       StrappySessionHandleStreamEvent,
@@ -863,6 +946,8 @@ static int StrappySessionHandleStreamEvent(
     response = strappy_assistant_stream_prompt_for_session_and_store(
       [prompt UTF8String],
       NULL,
+      [systemPromptTemplatePath fileSystemRepresentation],
+      userAgentCString,
       [databasePath UTF8String],
       sessionId,
       StrappySessionHandleStreamEvent,
