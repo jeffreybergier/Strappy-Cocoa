@@ -10,6 +10,8 @@ typedef struct strappy_webview_labels {
   const char *you;
   const char *thinking;
   const char *request_metadata;
+  const char *tool_call;
+  const char *tool_result;
   const char *retry;
 } strappy_webview_labels;
 

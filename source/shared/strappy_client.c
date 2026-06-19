@@ -1,6 +1,7 @@
 #include "strappy_client.h"
 
 #include "strappy_core.h"
+#include "strappy_tools.h"
 
 #include <curl/curl.h>
 #include <cJSON.h>
@@ -1061,6 +1062,114 @@ static int strappy_client_append_basic_message_json(
          strappy_http_buffer_append_cstring(buffer, "}");
 }
 
+static const char *strappy_client_tool_call_name(cJSON *tool_call)
+{
+  cJSON *function;
+  cJSON *name;
+
+  if (!cJSON_IsObject(tool_call)) {
+    return NULL;
+  }
+
+  function = cJSON_GetObjectItem(tool_call, "function");
+  if (!cJSON_IsObject(function)) {
+    return NULL;
+  }
+
+  name = cJSON_GetObjectItem(function, "name");
+  if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
+      (name->valuestring[0] == '\0')) {
+    return NULL;
+  }
+
+  return name->valuestring;
+}
+
+static char *strappy_client_tool_calls_display_text(cJSON *tool_calls)
+{
+  strappy_http_buffer buffer;
+  const char *name;
+  int count;
+  int index;
+  int visible_count;
+  char *text;
+
+  if (!cJSON_IsArray(tool_calls)) {
+    return NULL;
+  }
+
+  count = cJSON_GetArraySize(tool_calls);
+  if (count <= 0) {
+    return NULL;
+  }
+
+  strappy_http_buffer_init(&buffer);
+  visible_count = 0;
+  for (index = 0; index < count; index++) {
+    name = strappy_client_tool_call_name(cJSON_GetArrayItem(tool_calls, index));
+    if (name == NULL) {
+      name = "unknown";
+    }
+
+    if (visible_count == 0) {
+      if (!strappy_http_buffer_append_cstring(&buffer,
+                                              "Tool call requested: ")) {
+        strappy_http_buffer_destroy(&buffer);
+        return NULL;
+      }
+    } else if (!strappy_http_buffer_append_cstring(&buffer, "\nTool call requested: ")) {
+      strappy_http_buffer_destroy(&buffer);
+      return NULL;
+    }
+
+    if (!strappy_http_buffer_append_cstring(&buffer, name)) {
+      strappy_http_buffer_destroy(&buffer);
+      return NULL;
+    }
+
+    visible_count++;
+  }
+
+  if ((buffer.data == NULL) || (buffer.length == 0U)) {
+    strappy_http_buffer_destroy(&buffer);
+    return NULL;
+  }
+
+  text = buffer.data;
+  buffer.data = NULL;
+  buffer.length = 0U;
+  strappy_http_buffer_destroy(&buffer);
+  return text;
+}
+
+static char *strappy_client_text_with_tool_calls_display(const char *content,
+                                                         cJSON *tool_calls)
+{
+  char *tool_text;
+  char *prefix;
+  char *combined;
+
+  tool_text = strappy_client_tool_calls_display_text(tool_calls);
+  if (tool_text == NULL) {
+    return NULL;
+  }
+
+  if ((content == NULL) || (content[0] == '\0')) {
+    return tool_text;
+  }
+
+  prefix = strappy_join_strings(content, "\n\n");
+  if (prefix == NULL) {
+    free(tool_text);
+    return NULL;
+  }
+
+  combined = strappy_join_strings(prefix, tool_text);
+  free(prefix);
+  free(tool_text);
+  return combined;
+}
+
 static char *strappy_client_build_messages_request_json(
                                      const strappy_config *config,
                                      const strappy_chat_message *chat_messages,
@@ -1070,6 +1179,7 @@ static char *strappy_client_build_messages_request_json(
 {
   strappy_http_buffer buffer;
   char *json;
+  char *tools_json;
   size_t index;
   int ok;
 
@@ -1078,6 +1188,11 @@ static char *strappy_client_build_messages_request_json(
       (config->api_model[0] == '\0') ||
       ((chat_messages == NULL) && (chat_message_count > 0U))) {
     strappy_set_error(error_out, "OpenRouter request is incomplete.");
+    return NULL;
+  }
+
+  tools_json = strappy_tools_request_json(error_out);
+  if (tools_json == NULL) {
     return NULL;
   }
 
@@ -1098,6 +1213,11 @@ static char *strappy_client_build_messages_request_json(
     ok = strappy_http_buffer_append_cstring(
       &buffer,
       ",\"stream_options\":{\"include_usage\":true}");
+  }
+
+  if (ok && (tools_json[0] != '\0')) {
+    ok = strappy_http_buffer_append_cstring(&buffer, ",\"tools\":") &&
+         strappy_http_buffer_append_cstring(&buffer, tools_json);
   }
 
   ok = ok && strappy_http_buffer_append_cstring(&buffer, ",\"messages\":[");
@@ -1130,6 +1250,7 @@ static char *strappy_client_build_messages_request_json(
   }
 
   ok = ok && strappy_http_buffer_append_cstring(&buffer, "]}");
+  free(tools_json);
   if (!ok) {
     strappy_http_buffer_destroy(&buffer);
     strappy_set_error(error_out, "Could not build OpenRouter JSON request.");
@@ -1246,6 +1367,7 @@ static int strappy_client_parse_response(const char *json,
   cJSON *first_choice;
   cJSON *message;
   cJSON *content;
+  cJSON *tool_calls;
   cJSON *finish_reason;
   cJSON *model;
   char *api_error;
@@ -1253,6 +1375,8 @@ static int strappy_client_parse_response(const char *json,
   char *raw_json;
   char *finish_reason_text;
   char *model_text;
+  char *tool_display_text;
+  int has_tool_calls;
 
   if ((json == NULL) || (json[0] == '\0')) {
     strappy_set_error(error_out, "OpenRouter returned an empty response.");
@@ -1287,9 +1411,22 @@ static int strappy_client_parse_response(const char *json,
   first_choice = cJSON_GetArrayItem(choices, 0);
   message = cJSON_GetObjectItem(first_choice, "message");
   content = cJSON_GetObjectItem(message, "content");
+  tool_calls = cJSON_GetObjectItem(message, "tool_calls");
+  has_tool_calls =
+    (cJSON_IsArray(tool_calls) && (cJSON_GetArraySize(tool_calls) > 0)) ? 1 : 0;
 
   response_text = strappy_client_extract_assistant_content(content);
-  if (response_text == NULL) {
+  if (has_tool_calls) {
+    tool_display_text =
+      strappy_client_text_with_tool_calls_display(response_text, tool_calls);
+    free(response_text);
+    response_text = tool_display_text;
+    if (response_text == NULL) {
+      cJSON_Delete(root);
+      strappy_set_error(error_out, "Could not allocate assistant response.");
+      return 0;
+    }
+  } else if (response_text == NULL) {
     cJSON_Delete(root);
     strappy_set_error(error_out, "OpenRouter response did not contain text.");
     return 0;
@@ -2574,6 +2711,7 @@ static int strappy_client_stream_request_json(const strappy_config *config,
   strappy_stream_context stream_context;
   char *auth_header;
   char *url;
+  char *tool_display_text;
   long http_status;
   int ok;
 
@@ -2619,6 +2757,7 @@ static int strappy_client_stream_request_json(const strappy_config *config,
   stream_context.result = result;
   stream_context.callback = callback;
   stream_context.callback_data = callback_data;
+  tool_display_text = NULL;
   http_status = 0L;
 
   curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -2721,8 +2860,66 @@ static int strappy_client_stream_request_json(const strappy_config *config,
     return 0;
   }
 
-  result->response_text = strappy_string_duplicate(
-    (stream_context.content.data != NULL) ? stream_context.content.data : "");
+  if ((stream_context.tool_calls != NULL) &&
+      (cJSON_GetArraySize(stream_context.tool_calls) > 0)) {
+    const char *streamed_content;
+
+    streamed_content =
+      (stream_context.content.data != NULL) ? stream_context.content.data : "";
+    tool_display_text =
+      strappy_client_tool_calls_display_text(stream_context.tool_calls);
+    if (tool_display_text == NULL) {
+      strappy_set_error(error_out, "Could not allocate streamed tool call text.");
+      strappy_stream_context_destroy(&stream_context);
+      strappy_chat_result_destroy(result);
+      return 0;
+    }
+
+    if ((streamed_content[0] != '\0') &&
+        !strappy_client_stream_emit_delta(
+          &stream_context,
+          STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA,
+          "\n\n")) {
+      if (stream_context.stream_error != NULL) {
+        strappy_set_error(error_out, stream_context.stream_error);
+      } else {
+        strappy_set_error(error_out, "Could not display streamed tool call.");
+      }
+      free(tool_display_text);
+      strappy_stream_context_destroy(&stream_context);
+      strappy_chat_result_destroy(result);
+      return 0;
+    }
+
+    if (!strappy_client_stream_emit_delta(
+          &stream_context,
+          STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA,
+          tool_display_text)) {
+      if (stream_context.stream_error != NULL) {
+        strappy_set_error(error_out, stream_context.stream_error);
+      } else {
+        strappy_set_error(error_out, "Could not display streamed tool call.");
+      }
+      free(tool_display_text);
+      strappy_stream_context_destroy(&stream_context);
+      strappy_chat_result_destroy(result);
+      return 0;
+    }
+
+    if (streamed_content[0] == '\0') {
+      result->response_text = tool_display_text;
+      tool_display_text = NULL;
+    } else {
+      result->response_text =
+        strappy_client_text_with_tool_calls_display(streamed_content,
+                                                    stream_context.tool_calls);
+      free(tool_display_text);
+      tool_display_text = NULL;
+    }
+  } else {
+    result->response_text = strappy_string_duplicate(
+      (stream_context.content.data != NULL) ? stream_context.content.data : "");
+  }
   if (result->response_text == NULL) {
     strappy_set_error(error_out, "Could not allocate streamed assistant response.");
     strappy_stream_context_destroy(&stream_context);

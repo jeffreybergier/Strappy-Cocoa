@@ -1546,6 +1546,232 @@ int strappy_db_save_exchange_with_id(const char *db_path,
   return 1;
 }
 
+static int strappy_db_insert_message_sequence(
+  sqlite3 *db,
+  long long session_id,
+  const strappy_session_message_input *messages,
+  size_t message_count,
+  char **error_out)
+{
+  size_t index;
+
+  if ((messages == NULL) && (message_count > 0U)) {
+    strappy_set_error(error_out, "Session message sequence is missing.");
+    return 0;
+  }
+
+  for (index = 0U; index < message_count; index++) {
+    if (!strappy_db_insert_message(db,
+                                   session_id,
+                                   messages[index].role,
+                                   messages[index].content,
+                                   messages[index].model,
+                                   messages[index].http_status,
+                                   messages[index].metadata_json,
+                                   messages[index].message_json,
+                                   messages[index].reasoning,
+                                   error_out)) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+static int strappy_db_update_session_summary(sqlite3 *db,
+                                             long long session_id,
+                                             const char *response,
+                                             const char *model,
+                                             long http_status,
+                                             char **error_out)
+{
+  static const char *update_sql =
+    "UPDATE sessions "
+    "SET response = ?, model = ?, http_status = ? "
+    "WHERE id = ?;";
+  sqlite3_stmt *stmt;
+  int rc;
+  int ok;
+
+  if ((session_id <= 0) || (response == NULL)) {
+    strappy_set_error(error_out, "Session summary update is incomplete.");
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, update_sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare session update: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  ok = 1;
+  if (sqlite3_bind_text(stmt, 1, response, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+    ok = 0;
+  }
+  if (ok && (model != NULL) &&
+      (sqlite3_bind_text(stmt, 2, model, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (model == NULL) && (sqlite3_bind_null(stmt, 2) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)http_status) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)session_id) != SQLITE_OK)) {
+    ok = 0;
+  }
+
+  if (!ok) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind session update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not update session exchange: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+int strappy_db_save_message_sequence_with_id(
+  const char *db_path,
+  const char *prompt,
+  const char *response,
+  const char *model,
+  long http_status,
+  const strappy_session_message_input *messages,
+  size_t message_count,
+  long long *session_id_out,
+  char **error_out)
+{
+  static const char *sql =
+    "INSERT INTO sessions "
+    "(prompt, response, model, http_status) "
+    "VALUES (?, ?, ?, ?);";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+  int ok;
+  long long session_id;
+
+  if (session_id_out != NULL) {
+    *session_id_out = 0;
+  }
+
+  if ((prompt == NULL) || (response == NULL) ||
+      ((messages == NULL) && (message_count > 0U))) {
+    strappy_set_error(error_out, "Session message sequence is incomplete.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db, "BEGIN IMMEDIATE;", "Could not begin session insert", error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare session insert: %s",
+                                sqlite3_errmsg(db));
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  ok = 1;
+  if (sqlite3_bind_text(stmt, 1, prompt, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_text(stmt, 2, response, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (model != NULL) &&
+      (sqlite3_bind_text(stmt, 3, model, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (model == NULL) && (sqlite3_bind_null(stmt, 3) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)http_status) != SQLITE_OK)) {
+    ok = 0;
+  }
+
+  if (!ok) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind session insert: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save session exchange: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  session_id = (long long)sqlite3_last_insert_rowid(db);
+  sqlite3_finalize(stmt);
+
+  if (!strappy_db_insert_message_sequence(db,
+                                          session_id,
+                                          messages,
+                                          message_count,
+                                          error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db, "COMMIT;", "Could not commit session insert", error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (session_id_out != NULL) {
+    *session_id_out = session_id;
+  }
+
+  sqlite3_close(db);
+  return 1;
+}
+
 int strappy_db_list_sessions(const char *db_path,
                              strappy_session_record_list *list,
                              char **error_out)
@@ -1842,6 +2068,75 @@ int strappy_db_append_exchange_to_session(const char *db_path,
   }
 
   sqlite3_finalize(stmt);
+
+  if (!strappy_db_exec(db, "COMMIT;", "Could not commit session append", error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  sqlite3_close(db);
+  return 1;
+}
+
+int strappy_db_append_message_sequence_to_session(
+  const char *db_path,
+  long long session_id,
+  const char *prompt,
+  const char *response,
+  const char *model,
+  long http_status,
+  const strappy_session_message_input *messages,
+  size_t message_count,
+  char **error_out)
+{
+  sqlite3 *db;
+
+  if ((session_id <= 0) || (prompt == NULL) || (response == NULL) ||
+      ((messages == NULL) && (message_count > 0U))) {
+    strappy_set_error(error_out, "Session message sequence is incomplete.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_session_exists(db, session_id, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db, "BEGIN IMMEDIATE;", "Could not begin session append", error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_insert_message_sequence(db,
+                                          session_id,
+                                          messages,
+                                          message_count,
+                                          error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_update_session_summary(db,
+                                         session_id,
+                                         response,
+                                         model,
+                                         http_status,
+                                         error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
 
   if (!strappy_db_exec(db, "COMMIT;", "Could not commit session append", error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);

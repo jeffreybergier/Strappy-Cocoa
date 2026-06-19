@@ -39,6 +39,16 @@ typedef struct strappy_session_message_record_list {
   size_t count;
 } strappy_session_message_record_list;
 
+typedef struct strappy_session_message_input {
+  const char *role;
+  const char *content;
+  const char *model;
+  long http_status;
+  const char *metadata_json;
+  const char *message_json;
+  const char *reasoning;
+} strappy_session_message_input;
+
 typedef struct strappy_discovered_database_input {
   const char *path;
   long long size;
@@ -137,6 +147,26 @@ int strappy_db_append_exchange_to_session(const char *db_path,
                                           const char *message_json,
                                           const char *reasoning,
                                           char **error_out);
+int strappy_db_save_message_sequence_with_id(
+  const char *db_path,
+  const char *prompt,
+  const char *response,
+  const char *model,
+  long http_status,
+  const strappy_session_message_input *messages,
+  size_t message_count,
+  long long *session_id_out,
+  char **error_out);
+int strappy_db_append_message_sequence_to_session(
+  const char *db_path,
+  long long session_id,
+  const char *prompt,
+  const char *response,
+  const char *model,
+  long http_status,
+  const strappy_session_message_input *messages,
+  size_t message_count,
+  char **error_out);
 int strappy_db_list_session_messages(const char *db_path,
                                      long long session_id,
                                      strappy_session_message_record_list *list,

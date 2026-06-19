@@ -9,6 +9,8 @@
 "Session is not selected." = "セッションが選択されていません。";
 "You" = "あなた";
 "Agent" = "エージェント";
+"Tool Call" = "ツール呼び出し";
+"Tool Result" = "ツール結果";
 "Send" = "送信";
 "Sending prompt..." = "プロンプトを送信中...";
 "Prompt failed." = "プロンプトに失敗しました。";

@@ -123,6 +123,8 @@ static strappy_webview_labels StrappyWebViewLabels(void)
   labels.thinking = StrappyCString(NSLocalizedString(@"Thinking", nil));
   labels.request_metadata =
     StrappyCString(NSLocalizedString(@"Request Metadata", nil));
+  labels.tool_call = StrappyCString(NSLocalizedString(@"Tool Call", nil));
+  labels.tool_result = StrappyCString(NSLocalizedString(@"Tool Result", nil));
   labels.retry = StrappyCString(NSLocalizedString(@"Retry", nil));
   return labels;
 }

@@ -9,6 +9,8 @@
 "Session is not selected." = "Session is not selected.";
 "You" = "You";
 "Agent" = "Agent";
+"Tool Call" = "Tool Call";
+"Tool Result" = "Tool Result";
 "Send" = "Send";
 "Sending prompt..." = "Sending prompt...";
 "Prompt failed." = "Prompt failed.";

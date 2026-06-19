@@ -140,32 +140,57 @@ returned by catalog tools, but it is descriptive guidance rather than authority.
 
 Deliverables:
 
-- Tool registry in C with stable tool names, JSON schemas, argument parsing,
-  and result serialization.
-- Stable catalog tools such as `scan_databases`, `list_discovered_databases`,
-  `describe_database`, `inspect_database_schema`, and `query_database`, all
-  using assistant-visible database IDs.
-- Schema discovery tool that returns tables, columns, indexes, foreign keys,
-  row counts, and sample-safe metadata.
-- Query tool that permits read-only SQL only and enforces statement timeouts,
-  row limits, and result size limits.
-- Database selection tool that maps assistant-visible database IDs to cataloged
-  local paths without leaking unnecessary filesystem details.
-- Database learning flow that asks the model to document approved schemas and
+- [x] Tool registry in C with stable tool names, JSON schemas, argument
+  parsing, and result serialization for the first catalog tool. The registry
+  currently exposes `database_list`; its result now includes
+  `availability_state`, `catalog_summary`, and `recommended_next_steps`.
+  Broader tool coverage remains open.
+- [ ] Stable database tools named `database_list`, `database_info`,
+  `database_query`, and `database_learn`, all using assistant-visible database
+  IDs. First vertical slice exists as `database_list`; schema info, read-only
+  query, and learning tools remain open.
+- [x] `database_list` defines the availability states `error`,
+  `possible_scan_needed`, `possible_whitelist_needed`, and `available`. Empty
+  success results route scanning and approval to the user-clicked
+  `database_manage` app action through next-step hints; `database_manage` is not
+  an LLM tool.
+- [ ] `database_info` tool that returns deterministic schema facts: tables,
+  columns, indexes, foreign keys, row counts, and sample-safe metadata.
+- [ ] `database_query` tool that permits read-only SQL only and enforces
+  statement timeouts, row limits, and result size limits.
+- [ ] Database ID resolution that maps assistant-visible database IDs to
+  cataloged local paths without leaking unnecessary filesystem details. The
+  `database_list` result uses assistant-visible IDs and omits raw filesystem
+  paths.
+- [ ] `database_learn` flow that asks the model to document approved schemas and
   stores the generated documentation in the catalog; it must not create new
   executable tool code or unbounded per-database tool schemas.
-- Prompt context builder that summarizes available databases and tool usage
-  rules, including learned documentation for approved databases.
-- Audit log of tool calls, query text, row counts, errors, and truncation.
+- [ ] `database_manage` app action link, intercepted by the WebView/native
+  bridge, that opens `PreferencesWindowController` for scanning, approval,
+  denial, forgetting, and rescanning databases.
+- [ ] Prompt context builder that summarizes available databases and tool usage
+  rules, including learned documentation for approved databases. Basic tool-use
+  prompt context exists for `database_list`; database summaries and
+  learned documentation remain open.
+- [x] One-round tool execution loop for chat completions: capture assistant
+  `tool_calls`, execute registered local tools, send `role: "tool"` results
+  back to the model, and store the final assistant response. Multi-round tool
+  loops remain open.
+- [x] Persisted tool-call and tool-result messages in `session_messages`, with
+  `tool_call` and `tool` roles replaying through stored raw message JSON.
+- [x] Webview rendering for tool-call inputs and tool outputs as full-width
+  tool activity rows.
+- [ ] Audit log of tool calls, query text, row counts, errors, and truncation.
 
 Validation:
 
-- Unit tests for tool argument validation and SQL safety checks.
-- Fixture databases for common schemas, empty databases, large tables, and
+- [ ] Unit tests for tool argument validation and SQL safety checks.
+- [ ] Fixture databases for common schemas, empty databases, large tables, and
   malformed requests.
-- Static analysis pass focused on JSON parsing, sqlite statement cleanup, and
+- [ ] Static analysis pass focused on JSON parsing, sqlite statement cleanup, and
   error paths.
-- Clean builds with full warning logs captured.
+- [x] Clean builds with full warning logs captured for the current
+  `database_list` vertical slice.
 
 ## Phase 5: Chat Interface And User Workflow
 
@@ -179,7 +204,8 @@ Deliverables:
 - Conversation list, active conversation view, message composer, loading state,
   error state, and cancel action.
 - Tool activity display showing when Strappy is scanning, inspecting schema, or
-  querying a database.
+  querying a database. Basic tool-call and tool-result rows now render in the
+  chat log; scan/schema/query-specific activity remains open.
 - Database permission flow that lets the user approve, deny, or forget a found
   database.
 - Local conversation persistence in sqlite.

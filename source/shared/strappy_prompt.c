@@ -1,6 +1,7 @@
 #include "strappy_prompt.h"
 
 #include "strappy_core.h"
+#include "strappy_tools.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,8 +84,7 @@ static char *strappy_prompt_read_file(const char *path, char **error_out)
 
 char *strappy_prompt_tools_fragment(char **error_out)
 {
-  (void)error_out;
-  return strappy_string_duplicate("No tools available");
+  return strappy_tools_prompt_fragment(error_out);
 }
 
 static char *strappy_prompt_webview_user_agent_fragment(

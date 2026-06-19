@@ -281,9 +281,41 @@ static const char *strappy_webview_retry_label(
   return "Retry";
 }
 
+static const char *strappy_webview_tool_call_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->tool_call != NULL) &&
+      (labels->tool_call[0] != '\0')) {
+    return labels->tool_call;
+  }
+  return "Tool Call";
+}
+
+static const char *strappy_webview_tool_result_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->tool_result != NULL) &&
+      (labels->tool_result[0] != '\0')) {
+    return labels->tool_result;
+  }
+  return "Tool Result";
+}
+
 static int strappy_webview_is_assistant_role(const char *role)
 {
   return (role != NULL) && (strcmp(role, "assistant") == 0);
+}
+
+static int strappy_webview_is_tool_call_role(const char *role)
+{
+  return (role != NULL) && (strcmp(role, "tool_call") == 0);
+}
+
+static int strappy_webview_is_tool_result_role(const char *role)
+{
+  return (role != NULL) && (strcmp(role, "tool") == 0);
 }
 
 static const char *strappy_webview_role_label(
@@ -292,6 +324,12 @@ static const char *strappy_webview_role_label(
 {
   if (strappy_webview_is_assistant_role(role)) {
     return strappy_webview_agent_label(labels);
+  }
+  if (strappy_webview_is_tool_call_role(role)) {
+    return strappy_webview_tool_call_label(labels);
+  }
+  if (strappy_webview_is_tool_result_role(role)) {
+    return strappy_webview_tool_result_label(labels);
   }
   return strappy_webview_you_label(labels);
 }
@@ -395,6 +433,11 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "background:#fff;padding:12px 14px;line-height:1.45;",
     "white-space:normal;word-wrap:break-word;}",
     ".assistant .bubble{background:#fcfcfc;}",
+    ".tool_call .role,.tool .role{color:#4d6478;}",
+    ".tool_call .bubble,.tool .bubble{max-width:100%;box-sizing:border-box;",
+    "font:12px Menlo,Consolas,Monaco,monospace;white-space:pre-wrap;}",
+    ".tool_call .bubble{background:#fffdf2;border-color:#ded6a8;}",
+    ".tool .bubble{background:#f7fbff;border-color:#cbd7e2;}",
     ".bubble p,.reasoning-body p{margin:0 0 9px;}",
     ".bubble h1,.bubble h2,.bubble h3,.bubble h4,.bubble h5,.bubble h6,",
     ".reasoning-body h1,.reasoning-body h2,.reasoning-body h3,",
