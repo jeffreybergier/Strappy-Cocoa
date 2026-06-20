@@ -12,6 +12,10 @@ sure you capture all of the build output so you can see all the warnings. In
 certain cases, we also want to run Clang static analysis to be extra sure we are
 not leaking memory or dereferencing null pointers.
 
+Linux-only shared-core harnesses live under `source/linux`. They are fast
+developer smoke tests for portable C code and do not replace the required
+Altivec iOS/macOS clean builds.
+
 House style for Strappy source:
 
 1. Objective-C classes use Objective-C naming conventions. The Objective-C class
@@ -61,6 +65,11 @@ House style for Strappy source:
 12. Webview HTML, CSS, and JavaScript strings are generated in C. Keep that
     rendering logic in `strappy_webview.{h,c}` or another C module, not in
     Objective-C view controllers.
+13. When changing shared C behavior, especially database, tool, prompt, client,
+    or JSON parsing code, run `make -C source/linux clean test` where the host
+    Linux environment has the required dependencies. Keep the harnesses updated
+    as new shared behavior is added or existing behavior changes, so regressions
+    can be caught without waiting for full Apple-target builds.
 
 The iOS App is a bit special because its not sandboxed. It must be installed via
 .deb file, not .ipa file so that it can scan the whole filesystem for SQLite
