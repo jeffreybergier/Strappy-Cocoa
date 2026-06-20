@@ -3,6 +3,9 @@
 @protocol StrappySessionStreamDelegate
 - (void)strappySessionStreamDidReceiveContentDelta:(NSDictionary *)delta;
 - (void)strappySessionStreamDidReceiveReasoningDelta:(NSDictionary *)delta;
+- (void)strappySessionStreamDidReceiveToolCall:(NSDictionary *)event;
+- (void)strappySessionStreamDidReceiveToolResult:(NSDictionary *)event;
+- (void)strappySessionStreamDidReceiveToolError:(NSDictionary *)event;
 @end
 
 @interface StrappySession : NSObject

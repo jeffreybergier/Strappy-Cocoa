@@ -40,8 +40,47 @@ static int StrappySessionHandleStreamEvent(
   delta = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
     text, @"delta",
     nil];
+  if (event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_CALL) {
+    [delta setObject:@"call" forKey:@"event_type"];
+  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_RESULT) {
+    [delta setObject:@"result" forKey:@"event_type"];
+  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_ERROR) {
+    [delta setObject:@"error" forKey:@"event_type"];
+  }
   if (context->context != nil) {
     [delta setObject:context->context forKey:@"context"];
+  }
+  if (event->tool_call_id != NULL) {
+    NSString *toolCallId;
+
+    toolCallId = [NSString stringWithUTF8String:event->tool_call_id];
+    if (toolCallId != nil) {
+      [delta setObject:toolCallId forKey:@"tool_call_id"];
+    }
+  }
+  if (event->tool_name != NULL) {
+    NSString *toolName;
+
+    toolName = [NSString stringWithUTF8String:event->tool_name];
+    if (toolName != nil) {
+      [delta setObject:toolName forKey:@"tool_name"];
+    }
+  }
+  if (event->arguments_json != NULL) {
+    NSString *argumentsJSON;
+
+    argumentsJSON = [NSString stringWithUTF8String:event->arguments_json];
+    if (argumentsJSON != nil) {
+      [delta setObject:argumentsJSON forKey:@"arguments_json"];
+    }
+  }
+  if (event->result_json != NULL) {
+    NSString *resultJSON;
+
+    resultJSON = [NSString stringWithUTF8String:event->result_json];
+    if (resultJSON != nil) {
+      [delta setObject:resultJSON forKey:@"result_json"];
+    }
   }
 
   if ((event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) &&
@@ -52,6 +91,18 @@ static int StrappySessionHandleStreamEvent(
              [context->delegate respondsToSelector:
                @selector(strappySessionStreamDidReceiveReasoningDelta:)]) {
     [context->delegate strappySessionStreamDidReceiveReasoningDelta:delta];
+  } else if ((event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_CALL) &&
+             [context->delegate respondsToSelector:
+               @selector(strappySessionStreamDidReceiveToolCall:)]) {
+    [context->delegate strappySessionStreamDidReceiveToolCall:delta];
+  } else if ((event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_RESULT) &&
+             [context->delegate respondsToSelector:
+               @selector(strappySessionStreamDidReceiveToolResult:)]) {
+    [context->delegate strappySessionStreamDidReceiveToolResult:delta];
+  } else if ((event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_ERROR) &&
+             [context->delegate respondsToSelector:
+               @selector(strappySessionStreamDidReceiveToolError:)]) {
+    [context->delegate strappySessionStreamDidReceiveToolError:delta];
   }
 
   [delta release];

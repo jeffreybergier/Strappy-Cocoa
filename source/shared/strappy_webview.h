@@ -48,6 +48,12 @@ char *strappy_webview_streaming_assistant_message_html(
   const char *state,
   const char *status_html,
   const strappy_webview_labels *labels);
+char *strappy_webview_tool_activity_message_html(
+  const char *element_id,
+  const char *text,
+  const char *state,
+  const char *status_html,
+  const strappy_webview_labels *labels);
 char *strappy_webview_message_html_with_reasoning(
   const strappy_webview_message *message,
   const char *reasoning,
@@ -61,6 +67,8 @@ char *strappy_webview_messages_page_html(const char *messages_html,
 char *strappy_webview_append_message_js(const char *message_html);
 char *strappy_webview_replace_message_js(const char *element_id,
                                          const char *message_html);
+char *strappy_webview_insert_message_before_js(const char *before_element_id,
+                                               const char *message_html);
 char *strappy_webview_set_message_state_js(const char *element_id,
                                            const char *status_html,
                                            const char *state);
@@ -68,6 +76,14 @@ char *strappy_webview_append_message_text_js(const char *element_id,
                                              const char *delta);
 char *strappy_webview_append_reasoning_text_js(const char *element_id,
                                                const char *delta);
+char *strappy_webview_move_message_text_to_reasoning_js(const char *element_id);
+char *strappy_webview_tool_event_text(const char *event_type,
+                                      const char *tool_call_id,
+                                      const char *tool_name,
+                                      const char *arguments_json,
+                                      const char *result_json);
+char *strappy_webview_append_tool_event_text_js(const char *element_id,
+                                                const char *event_text);
 char *strappy_webview_remove_message_js(const char *element_id);
 char *strappy_webview_prepend_messages_js(const char *messages_html,
                                           int has_more);

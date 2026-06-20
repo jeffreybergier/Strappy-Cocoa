@@ -21,10 +21,12 @@
   NSString                 *statusText_;
   NSString                 *pendingMessageIdentifier_;
   NSString                 *pendingAssistantMessageIdentifier_;
+  NSString                 *pendingToolActivityIdentifier_;
   NSString                 *pendingPrompt_;
   NSNumber                 *sendingSessionId_;
   NSMutableString          *streamingAssistantText_;
   NSMutableString          *streamingReasoningText_;
+  NSMutableString          *streamingToolActivityText_;
   long long                 lastKnownMessageIdentifier_;
   NSUInteger                oldestRenderedMessageIndex_;
   NSUInteger                renderedMessageCount_;

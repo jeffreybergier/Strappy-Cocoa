@@ -209,6 +209,62 @@ static int strappy_webview_append_js_string(strappy_webview_buffer *buffer,
   return strappy_webview_buffer_append_char(buffer, '\'');
 }
 
+static int strappy_webview_append_json_string(strappy_webview_buffer *buffer,
+                                              const char *text)
+{
+  const unsigned char *cursor;
+  char escaped[8];
+
+  if (!strappy_webview_buffer_append_char(buffer, '"')) {
+    return 0;
+  }
+
+  if (text != NULL) {
+    cursor = (const unsigned char *)text;
+    while (*cursor != '\0') {
+      if (*cursor == '"') {
+        if (!strappy_webview_buffer_append_cstring(buffer, "\\\"")) {
+          return 0;
+        }
+      } else if (*cursor == '\\') {
+        if (!strappy_webview_buffer_append_cstring(buffer, "\\\\")) {
+          return 0;
+        }
+      } else if (*cursor == '\b') {
+        if (!strappy_webview_buffer_append_cstring(buffer, "\\b")) {
+          return 0;
+        }
+      } else if (*cursor == '\f') {
+        if (!strappy_webview_buffer_append_cstring(buffer, "\\f")) {
+          return 0;
+        }
+      } else if (*cursor == '\n') {
+        if (!strappy_webview_buffer_append_cstring(buffer, "\\n")) {
+          return 0;
+        }
+      } else if (*cursor == '\r') {
+        if (!strappy_webview_buffer_append_cstring(buffer, "\\r")) {
+          return 0;
+        }
+      } else if (*cursor == '\t') {
+        if (!strappy_webview_buffer_append_cstring(buffer, "\\t")) {
+          return 0;
+        }
+      } else if (*cursor < 32U) {
+        snprintf(escaped, sizeof(escaped), "\\u%04x", (unsigned int)*cursor);
+        if (!strappy_webview_buffer_append_cstring(buffer, escaped)) {
+          return 0;
+        }
+      } else if (!strappy_webview_buffer_append_char(buffer, (char)*cursor)) {
+        return 0;
+      }
+      cursor++;
+    }
+  }
+
+  return strappy_webview_buffer_append_char(buffer, '"');
+}
+
 static int strappy_webview_append_chunks(strappy_webview_buffer *buffer,
                                          const char * const *chunks)
 {
@@ -360,11 +416,25 @@ static int strappy_webview_append_reasoning_html(
   int render_when_empty,
   const strappy_webview_labels *labels)
 {
+  int collapse_reasoning;
+
   if (((reasoning == NULL) || (reasoning[0] == '\0')) && !render_when_empty) {
     return 1;
   }
 
-  if (!strappy_webview_buffer_append_cstring(buffer, "<div class=\"reasoning\"")) {
+  collapse_reasoning = ((reasoning != NULL) &&
+                        (reasoning[0] != '\0') &&
+                        !render_when_empty);
+
+  if (!strappy_webview_buffer_append_cstring(buffer, "<div class=\"reasoning")) {
+    return 0;
+  }
+  if (collapse_reasoning) {
+    if (!strappy_webview_buffer_append_cstring(buffer, " reasoning-collapsed")) {
+      return 0;
+    }
+  }
+  if (!strappy_webview_buffer_append_cstring(buffer, "\"")) {
     return 0;
   }
   if ((reasoning == NULL) || (reasoning[0] == '\0')) {
@@ -373,10 +443,20 @@ static int strappy_webview_append_reasoning_html(
     }
   }
   if (!strappy_webview_buffer_append_cstring(buffer,
-                                            "><div class=\"reasoning-label\">") ||
-      !strappy_webview_append_html_escaped(buffer,
-                                           strappy_webview_thinking_label(labels)) ||
+                                            "><div class=\"reasoning-label\">"
+                                            "<a class=\"reasoning-toggle\" href=\"#\" "
+                                            "onclick=\"return toggleReasoning(this)\">"
+                                            "<span class=\"reasoning-disclosure\">") ||
       !strappy_webview_buffer_append_cstring(buffer,
+                                            collapse_reasoning ?
+                                            "&#9658;" : "&#9660;") ||
+      !strappy_webview_buffer_append_cstring(buffer,
+                                            "</span></a>") ||
+      !strappy_webview_append_html_escaped(buffer,
+                                           strappy_webview_thinking_label(labels))) {
+    return 0;
+  }
+  if (!strappy_webview_buffer_append_cstring(buffer,
                                             "</div><div class=\"reasoning-body\">") ||
       !strappy_webview_append_html_escaped(buffer, reasoning) ||
       !strappy_webview_buffer_append_cstring(buffer, "</div></div>")) {
@@ -400,17 +480,32 @@ static int strappy_webview_append_metadata_html(
 
   return strappy_webview_buffer_append_cstring(
            buffer,
-           "<div class=\"request-metadata\" data-metadata=\"") &&
+           "<div class=\"request-metadata request-metadata-collapsed\" "
+           "data-metadata=\"") &&
          strappy_webview_append_html_escaped(buffer, metadata_json) &&
          strappy_webview_buffer_append_cstring(
            buffer,
-           "\"><div class=\"request-metadata-title\">") &&
+           "\"><div class=\"request-metadata-title\">"
+           "<a class=\"request-metadata-toggle\" href=\"#\" "
+           "onclick=\"return toggleMetadata(this)\">"
+           "<span class=\"metadata-disclosure\">&#9658;</span></a>") &&
          strappy_webview_append_html_escaped(
            buffer,
            strappy_webview_request_metadata_label(labels)) &&
          strappy_webview_buffer_append_cstring(
            buffer,
-           "</div><div class=\"request-metadata-body\"></div></div>");
+           "<span class=\"request-metadata-summary\"></span></div>"
+           "<div class=\"request-metadata-body\"></div></div>");
+}
+
+static int strappy_webview_append_tool_column_html(
+  strappy_webview_buffer *buffer)
+{
+  return strappy_webview_buffer_append_cstring(
+           buffer,
+           "<div class=\"tool-column tool-column-empty\">"
+           "<div class=\"tool-rail-title\">Tool Calls</div>"
+           "<div class=\"tool-cards\"></div></div>");
 }
 
 static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
@@ -419,25 +514,79 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "<style>",
     "html,body{margin:0;padding:0;background:#f4f4f4;color:#222;",
     "font:13px Helvetica,Arial,sans-serif;}",
-    ".page{padding:18px 12px;}",
+    ".page{padding:18px 14px;}",
     ".empty{margin:90px auto 0;max-width:520px;color:#777;",
     "text-align:center;line-height:1.45;}",
-    "#messages{max-width:860px;margin:0 auto;}",
+    ".layout{width:100%;}",
+    ".chat-column{width:100%;box-sizing:border-box;}",
+    ".tool-column{max-width:100%;box-sizing:border-box;margin:0 0 7px;",
+    "border:1px solid #cbd7e2;background:#f7fbff;padding:6px 8px;}",
+    ".tool-column-empty{display:none;}",
+    "#messages{max-width:none;margin:0;}",
+    "#tool-sources,.tool-source-bin{display:none;}",
+    ".tool-cards{margin:0;}",
+    ".tool-rail-title{font-size:11px;font-weight:bold;text-transform:uppercase;",
+    "color:#4d6478;margin:0 0 4px;}",
     ".load-more{display:block;margin:0 auto 14px;padding:7px 10px;",
     "text-align:center;color:#2468a8;text-decoration:none;}",
     ".row{margin:0 0 16px;clear:both;}",
     ".row:last-child{margin-bottom:0;}",
     ".role{font-size:11px;font-weight:bold;color:#666;",
     "text-transform:uppercase;margin:0 0 5px 2px;}",
-    ".bubble{display:block;max-width:72%;border:1px solid #d8d8d8;",
+    ".bubble{display:block;max-width:100%;box-sizing:border-box;",
+    "border:1px solid #d8d8d8;",
     "background:#fff;padding:12px 14px;line-height:1.45;",
     "white-space:normal;word-wrap:break-word;}",
     ".assistant .bubble{background:#fcfcfc;}",
+    ".bubble-status{color:#777;font-style:italic;}",
     ".tool_call .role,.tool .role{color:#4d6478;}",
     ".tool_call .bubble,.tool .bubble{max-width:100%;box-sizing:border-box;",
     "font:12px Menlo,Consolas,Monaco,monospace;white-space:pre-wrap;}",
     ".tool_call .bubble{background:#fffdf2;border-color:#ded6a8;}",
     ".tool .bubble{background:#f7fbff;border-color:#cbd7e2;}",
+    ".tool-panel{font:12px Helvetica,Arial,sans-serif;line-height:1.35;",
+    "white-space:normal;color:#24313d;}",
+    ".tool-heading{font-weight:bold;margin:0 0 6px;color:#2f4150;}",
+    ".tool-subtle{color:#687887;font-size:11px;}",
+    ".tool-pill{display:inline-block;border:1px solid #cbd7e2;background:#fff;",
+    "padding:1px 5px;margin:0 4px 4px 0;color:#4d6478;}",
+    ".tool-section{margin:7px 0 0;}",
+    ".tool-kv{border-collapse:collapse;width:100%;font:12px Menlo,Consolas,Monaco,monospace;}",
+    ".tool-kv th,.tool-kv td{border-top:1px solid #e3e7ea;",
+    "padding:4px 6px;text-align:left;vertical-align:top;}",
+    ".tool-kv th{width:150px;color:#52616f;font-weight:bold;background:#fafafa;}",
+    ".tool-table-wrap{overflow:auto;margin:7px 0 0;border:1px solid #d8e0e7;background:#fff;}",
+    ".tool-table{border-collapse:collapse;min-width:100%;",
+    "font:12px Menlo,Consolas,Monaco,monospace;}",
+    ".tool-table th,.tool-table td{border:1px solid #e0e6eb;",
+    "padding:4px 6px;text-align:left;vertical-align:top;}",
+    ".tool-table th{background:#f3f6f8;color:#40515f;font-weight:bold;}",
+    ".tool-toggle{display:inline-block;margin-top:7px;color:#2468a8;",
+    "text-decoration:none;font-size:11px;}",
+    ".tool-raw{display:none;margin:7px 0 0;padding:8px;border:1px solid #d8d8d8;",
+    "background:#f8f8f8;overflow:auto;white-space:pre-wrap;",
+    "font:11px Menlo,Consolas,Monaco,monospace;color:#333;}",
+    ".tool-open .tool-raw{display:block;}",
+    ".tool-error{border-color:#d99;background:#fff7f7;color:#7a2525;}",
+    ".tool-card{border-top:1px solid #dbe5ed;margin:0;",
+    "line-height:1.35;word-wrap:break-word;}",
+    ".tool-card:first-child{border-top:0;}",
+    ".tool-card-toggle{display:block;padding:3px 0;color:#2f4150;",
+    "text-decoration:none;font-weight:bold;}",
+    ".tool-card-summary{vertical-align:middle;}",
+    ".tool-card-body{display:none;max-height:320px;overflow:auto;",
+    "border:1px solid #e3e7ea;background:#fff;padding:8px;margin:3px 0 6px;}",
+    ".tool-card-open .tool-card-body{display:block;}",
+    ".tool-input-title{font-size:11px;font-weight:bold;text-transform:uppercase;",
+    "color:#687887;margin:7px 0 4px;}",
+    ".tool-input-title:first-child{margin-top:0;}",
+    ".tool-field{margin:0 0 9px;}",
+    ".tool-field:last-child{margin-bottom:0;}",
+    ".tool-output{margin-top:8px;border-top:1px solid #e3e7ea;padding-top:6px;}",
+    ".tool-output-toggle{color:#2468a8;text-decoration:none;font-size:11px;}",
+    ".tool-disclosure{display:inline-block;width:12px;font:10px Monaco,Consolas,monospace;}",
+    ".tool-output-body{display:none;margin-top:6px;max-height:360px;overflow:auto;}",
+    ".tool-output-open .tool-output-body{display:block;}",
     ".bubble p,.reasoning-body p{margin:0 0 9px;}",
     ".bubble h1,.bubble h2,.bubble h3,.bubble h4,.bubble h5,.bubble h6,",
     ".reasoning-body h1,.reasoning-body h2,.reasoning-body h3,",
@@ -471,22 +620,32 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".reasoning-body ol:last-child,.reasoning-body pre:last-child,",
     ".reasoning-body blockquote:last-child,",
     ".reasoning-body .table-wrap:last-child{margin-bottom:0;}",
-    ".reasoning{max-width:72%;border:1px solid #ddd;background:#fffdf2;",
+    ".reasoning{max-width:100%;box-sizing:border-box;",
+    "border:1px solid #ddd;background:#fffdf2;",
     "color:#4f4a36;padding:10px 12px;margin:0 0 7px;line-height:1.4;",
     "white-space:pre-wrap;word-wrap:break-word;}",
     ".reasoning-label{font-size:11px;font-weight:bold;text-transform:uppercase;",
     "color:#7a7046;margin:0 0 5px;}",
-    ".reasoning-body{white-space:normal;}",
-    ".request-metadata{max-width:72%;box-sizing:border-box;",
+    ".reasoning-toggle{color:#2468a8;text-decoration:none;margin-right:4px;}",
+    ".reasoning-disclosure{display:inline-block;width:12px;font:10px Monaco,Consolas,monospace;}",
+    ".reasoning-collapsed .reasoning-body{display:none;}",
+    ".reasoning-body{white-space:pre-wrap;}",
+    ".request-metadata{max-width:100%;box-sizing:border-box;",
     "border:1px solid #cbd7e2;background:#f7fbff;color:#2e3f4f;",
     "padding:9px 11px;margin:7px 0 0;line-height:1.35;",
     "white-space:pre-wrap;word-wrap:break-word;}",
     ".request-metadata-title{font-size:11px;font-weight:bold;",
     "text-transform:uppercase;color:#4d6478;margin:0 0 5px;}",
+    ".request-metadata-toggle{color:#2468a8;text-decoration:none;margin-right:4px;}",
+    ".metadata-disclosure{display:inline-block;width:12px;font:10px Monaco,Consolas,monospace;}",
+    ".request-metadata-summary{display:none;font-weight:normal;text-transform:none;",
+    "color:#687887;margin-left:7px;}",
+    ".request-metadata-collapsed .request-metadata-summary{display:inline;}",
+    ".request-metadata-collapsed .request-metadata-body{display:none;}",
     ".request-metadata-body{font:11px Menlo,Consolas,Monaco,monospace;",
     "white-space:pre-wrap;}",
-    ".user .role,.user .meta{text-align:right;}",
-    ".user .bubble{margin-left:auto;background:#eef5ff;border-color:#c8d8ef;}",
+    ".user .role,.user .meta{text-align:left;}",
+    ".user .bubble{margin-left:0;background:#eef5ff;border-color:#c8d8ef;}",
     ".meta{font-size:11px;color:#777;margin-top:6px;}",
     ".state-pending .bubble{opacity:.72;}",
     ".state-pending .status{color:#777;}",
@@ -508,6 +667,10 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function hasClass(e,n){return e&&(' '+e.className+' ').indexOf(' '+n+' ')>=0;}",
     "function firstByClass(root,name){var n=root.getElementsByTagName('*');",
     "for(var i=0;i<n.length;i++){if(hasClass(n[i],name))return n[i];}return null;}",
+    "function ancestorHasClass(e,n){for(e=e&&e.parentNode;e;e=e.parentNode){",
+    "if(hasClass(e,n))return true;}return false;}",
+    "function nodeText(n){if(!n)return '';if(typeof n.textContent!='undefined')",
+    "return n.textContent;return n.innerText||'';}",
     "function setNodeText(n,t){if(!n)return;if(typeof n.textContent!='undefined')",
     "n.textContent=t;else n.innerText=t;}",
     "function escHTML(t){return String(t).replace(/&/g,'&amp;')",
@@ -585,10 +748,12 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function renderMarkdownNode(n){if(!n)return;if(typeof n._strappyMarkdown=='undefined')",
     "n._strappyMarkdown=n.innerHTML;n.innerHTML=mdToHTML(n._strappyMarkdown);}",
     "function renderMarkdown(root){root=root||document;var n=root.getElementsByTagName('*');",
-    "for(var i=0;i<n.length;i++){if(hasClass(n[i],'bubble')||",
-    "hasClass(n[i],'reasoning-body'))renderMarkdownNode(n[i]);}}",
+    "for(var i=0;i<n.length;i++){if(hasClass(n[i],'bubble')){",
+    "if(!ancestorHasClass(n[i],'tool_call')&&!ancestorHasClass(n[i],'tool'))",
+    "renderMarkdownNode(n[i]);}}}",
     "function isObj(v){return v&&typeof v=='object'&&",
     "Object.prototype.toString.call(v)!='[object Array]';}",
+    "function isArr(v){return Object.prototype.toString.call(v)=='[object Array]';}",
     "function jsonText(v){if(v===null||typeof v=='undefined')return '';",
     "if(typeof v=='string')return v;if(typeof v=='number'||typeof v=='boolean')",
     "return String(v);if(typeof JSON!='undefined'&&JSON.stringify)return JSON.stringify(v);",
@@ -642,44 +807,273 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "addMetaLine(lines,'Web search engine',gen.web_search_engine);",
     "addMetaLine(lines,'Search results',gen.num_search_results);}",
     "if(lines.length)return lines.join('\\n');return jsonText(root);}",
+    "function metadataGen(root){var gen=isObj(root)?root.generation:null;",
+    "if(isObj(gen)&&isObj(gen.data))gen=gen.data;return gen;}",
+    "function metadataSummaryValue(v){var t=jsonText(v);return t!==''?t:'-';}",
+    "function metadataSummaryCost(v){var t=jsonText(v);if(t==='')return '$-';",
+    "return t.charAt(0)=='$'?t:'$'+t;}",
+    "function formatMetadataSummary(root){var usage=isObj(root)?root.usage:null;",
+    "var gen=metadataGen(root);var cost='';var input='';var output='';",
+    "if(isObj(usage)){cost=usage.cost;input=usage.prompt_tokens;output=usage.completion_tokens;}",
+    "if(metadataSummaryValue(cost)=='-'&&isObj(gen))cost=gen.total_cost||gen.upstream_inference_cost;",
+    "if(metadataSummaryValue(input)=='-'&&isObj(gen))input=gen.native_tokens_prompt;",
+    "if(metadataSummaryValue(output)=='-'&&isObj(gen))output=gen.native_tokens_completion;",
+    "return metadataSummaryCost(cost)+' \\u2191 '+metadataSummaryValue(input)+' \\u2193 '+metadataSummaryValue(output);}",
     "function parseMetadata(raw){if(typeof JSON!='undefined'&&JSON.parse)",
     "return JSON.parse(raw);return eval('('+raw+')');}",
     "function renderMetadata(root){root=root||document;var n=root.getElementsByTagName('*');",
     "for(var i=0;i<n.length;i++){if(!hasClass(n[i],'request-metadata'))continue;",
     "var raw=n[i].getAttribute('data-metadata');var body=firstByClass(n[i],'request-metadata-body');",
-    "if(!raw||!body)continue;try{setNodeText(body,formatMetadata(parseMetadata(raw)));}",
-    "catch(e){setNodeText(body,raw);}}}",
+    "var summary=firstByClass(n[i],'request-metadata-summary');var parsed;",
+    "if(!raw||!body)continue;try{parsed=parseMetadata(raw);setNodeText(body,formatMetadata(parsed));",
+    "if(summary)setNodeText(summary,formatMetadataSummary(parsed));}",
+    "catch(e){setNodeText(body,raw);if(summary)setNodeText(summary,'');}}}",
+    "function toggleMetadata(a){var p=a;while(p&&!hasClass(p,'request-metadata'))p=p.parentNode;",
+    "if(!p)return false;var d=firstByClass(a,'metadata-disclosure');",
+    "if(hasClass(p,'request-metadata-collapsed')){",
+    "p.className=p.className.replace(/\\srequest-metadata-collapsed/g,'');if(d)d.innerHTML='&#9660;';}",
+    "else{p.className+=' request-metadata-collapsed';if(d)d.innerHTML='&#9658;';}return false;}",
+    "function toggleReasoning(a){var p=a;while(p&&!hasClass(p,'reasoning'))p=p.parentNode;",
+    "if(!p)return false;setReasoningCollapsed(p,hasClass(p,'reasoning-collapsed')?0:1);return false;}",
+    "function setReasoningCollapsed(box,collapsed){var d=firstByClass(box,'reasoning-disclosure');",
+    "if(collapsed){if(!hasClass(box,'reasoning-collapsed'))box.className+=' reasoning-collapsed';",
+    "if(d)d.innerHTML='&#9658;';}else{box.className=box.className.replace(/\\sreasoning-collapsed/g,'');",
+    "if(d)d.innerHTML='&#9660;';}}",
+    "function setMessageReasoningCollapsed(id,collapsed){var r=byId(id);var box,body;",
+    "if(!r)return;box=firstByClass(r,'reasoning');body=firstByClass(r,'reasoning-body');",
+    "if(!box||!body||nodeText(body)==='')return;setReasoningCollapsed(box,collapsed);}",
+    "function parseJSONSafe(raw){try{if(typeof JSON!='undefined'&&JSON.parse)",
+    "return JSON.parse(raw);return eval('('+raw+')');}catch(e){return null;}}",
+    "function shortText(v,n){var t=jsonText(v).replace(/\\s+/g,' ');",
+    "if(t.length>n)t=t.substring(0,n-1)+'...';return t;}",
+    "function toolRawPreview(raw){var t=jsonText(raw);var n=12000;if(t.length>n)",
+    "return t.substring(0,n)+'\\n... raw JSON preview truncated; '+(t.length-n)+' characters hidden';return t;}",
+    "function toolRaw(raw){return '<a class=\"tool-toggle\" href=\"#\" onclick=\"return toggleToolRaw(this)\">Raw JSON preview</a>'",
+    "+'<pre class=\"tool-raw\">'+escHTML(toolRawPreview(raw))+'</pre>';}",
+    "function toggleToolRaw(a){var p=a;while(p&&!hasClass(p,'tool-panel'))p=p.parentNode;",
+    "if(!p)return false;if(hasClass(p,'tool-open'))",
+    "p.className=p.className.replace(/\\stool-open/g,'');else p.className+=' tool-open';return false;}",
+    "function toolValue(v){if(v===null||typeof v=='undefined')return '<span class=\"tool-subtle\">null</span>';",
+    "if(isObj(v)&&v.type=='blob')return '<span class=\"tool-subtle\">blob, '+jsonText(v.size_bytes)+' bytes</span>';",
+    "if(isObj(v)&&v.type=='text'){return escHTML(v.value||'')+(v.truncated?' <span class=\"tool-subtle\">truncated</span>':'');}",
+    "if(isObj(v)||isArr(v))return escHTML(shortText(v,300));return escHTML(jsonText(v));}",
+    "function toolKV(obj){var h=['<div class=\"tool-table-wrap\"><table class=\"tool-table\"><thead><tr>'",
+    "+'<th>Field</th><th>Value</th></tr></thead><tbody>'];var k;",
+    "for(k in obj){if(obj.hasOwnProperty&& !obj.hasOwnProperty(k))continue;",
+    "h[h.length]='<tr><td>'+escHTML(k)+'</td><td>'+toolValue(obj[k])+'</td></tr>';}",
+    "h[h.length]='</tbody></table></div>';return h.join('');}",
+    "function toolArrayTable(arr){var h=['<div class=\"tool-table-wrap\"><table class=\"tool-table\"><thead><tr>'",
+    "+'<th>Index</th><th>Value</th></tr></thead><tbody>'];var i;",
+    "for(i=0;i<arr.length;i++)h[h.length]='<tr><td>'+i+'</td><td>'+toolValue(arr[i])+'</td></tr>';",
+    "h[h.length]='</tbody></table></div>';return h.join('');}",
+    "function toolPanel(title,meta,body,raw,cls){return '<div class=\"tool-panel '+(cls||'')+'\">'",
+    "+'<div class=\"tool-heading\">'+escHTML(title)+(meta?' <span class=\"tool-subtle\">'+escHTML(meta)+'</span>':'')+'</div>'",
+    "+(body||'')+'</div>';}",
+    "function toolCallsPayload(raw){var p=raw.replace(/^\\s*Tool call input:\\s*/,'');",
+    "return parseJSONSafe(p);}",
+    "function toolArgsValue(args){var parsed=args;var p;if(typeof args=='string'){",
+    "p=parseJSONSafe(args);if(p!==null)parsed=p;}return parsed;}",
+    "function toolArgsHTML(args){var parsed=toolArgsValue(args);if(isObj(parsed))return toolKV(parsed);",
+    "if(isArr(parsed))return toolArrayTable(parsed);",
+    "return '<pre class=\"tool-raw\" style=\"display:block\">'+escHTML(jsonText(parsed))+'</pre>';}",
+    "function parseToolEvents(raw){var lines=raw.split(/\\n/);var out=[];var i,o;",
+    "for(i=0;i<lines.length;i++){if(!/^\\s*\\{/.test(lines[i]))continue;",
+    "o=parseJSONSafe(lines[i]);if(isObj(o)&&o.event)out[out.length]=o;}return out.length?out:null;}",
+    "function databaseListHTML(o,raw){var dbs=isArr(o.databases)?o.databases:[];",
+    "var h=['<div><span class=\"tool-pill\">'+dbs.length+' databases</span>'];",
+    "if(o.availability_state)h[h.length]='<span class=\"tool-pill\">'+escHTML(o.availability_state)+'</span>';",
+    "h[h.length]='</div><div class=\"tool-table-wrap\"><table class=\"tool-table\"><thead><tr>'",
+    "+'<th>ID</th><th>Filename</th><th>Size</th><th>Status</th></tr></thead><tbody>';",
+    "for(var i=0;i<dbs.length&&i<20;i++){var d=dbs[i]||{};h[h.length]='<tr><td>'+escHTML(jsonText(d.database_id))",
+    "+'</td><td>'+escHTML(jsonText(d.filename))+'</td><td>'+escHTML(jsonText(d.size_bytes))",
+    "+'</td><td>'+escHTML(jsonText(d.scan_status||d.user_decision))+'</td></tr>';}",
+    "h[h.length]='</tbody></table></div>';if(dbs.length>20)h[h.length]='<div class=\"tool-subtle\">'",
+    "+(dbs.length-20)+' more databases hidden</div>';return toolPanel('Database List','',h.join(''),raw,'');}",
+    "function queryHTML(o,raw){var cols=isArr(o.columns)?o.columns:[];var rows=isArr(o.rows)?o.rows:[];",
+    "var h=['<div><span class=\"tool-pill\">'+escHTML(jsonText(o.database_id))+'</span>',",
+    "'<span class=\"tool-pill\">'+rows.length+' rows shown</span>'];",
+    "if(o.truncated)h[h.length]='<span class=\"tool-pill\">truncated</span>';",
+    "if(o.ok===false)h[h.length]='<span class=\"tool-pill\">error</span>';h[h.length]='</div>';",
+    "h[h.length]='<div class=\"tool-table-wrap\"><table class=\"tool-table\"><thead><tr>';",
+    "for(var c=0;c<cols.length;c++)h[h.length]='<th>'+escHTML(jsonText(cols[c].name||('c'+c)))+'</th>';",
+    "h[h.length]='</tr></thead><tbody>';for(var r=0;r<rows.length&&r<20;r++){var row=rows[r]||[];",
+    "h[h.length]='<tr>';for(c=0;c<cols.length;c++)h[h.length]='<td>'+toolValue(row[c])+'</td>';h[h.length]='</tr>';}",
+    "h[h.length]='</tbody></table></div>';if(rows.length>20)h[h.length]='<div class=\"tool-subtle\">'",
+    "+(rows.length-20)+' more rows hidden</div>';return toolPanel('Database Query','',h.join(''),raw,o.ok===false?'tool-error':'');}",
+    "function toolResultPanel(o,raw,name){if(isObj(o)&&isArr(o.databases))return databaseListHTML(o,raw);",
+    "if(isObj(o)&&isArr(o.columns)&&isArr(o.rows))return queryHTML(o,raw);",
+    "if(isObj(o)&&o.error)return toolPanel('Tool Error',jsonText(o.tool_name||name||''),",
+    "'<div>'+escHTML(jsonText(o.error))+'</div>',raw,'tool-error');",
+    "return toolPanel('Tool Result',jsonText(name||''),'<div>'+escHTML(shortText(o,600))+'</div>',raw,'');}",
+    "function toggleToolCard(a){var p=a;while(p&&!hasClass(p,'tool-card'))p=p.parentNode;",
+    "if(!p)return false;var d=firstByClass(a,'tool-disclosure');",
+    "if(hasClass(p,'tool-card-open')){p.className=p.className.replace(/\\stool-card-open/g,'');",
+    "if(d)d.innerHTML='&#9658;';}else{p.className+=' tool-card-open';if(d)d.innerHTML='&#9660;';}return false;}",
+    "function decorateToolArgs(name,args,dbNames){var parsed=args;var p;var db;var out;var k;",
+    "if(typeof args=='string'){p=parseJSONSafe(args);if(p!==null)parsed=p;}",
+    "if(name=='database_query'&&isObj(parsed)){db=jsonText(parsed.database_id);",
+    "if(dbNames&&dbNames[db]){out={filename:dbNames[db]};",
+    "for(k in parsed){if(parsed.hasOwnProperty&&!parsed.hasOwnProperty(k))continue;out[k]=parsed[k];}return out;}}return args;}",
+    "function toolSectionHTML(label,body){return '<div class=\"tool-field\"><div class=\"tool-input-title\">'",
+    "+escHTML(label)+'</div>'+(body||'')+'</div>';}",
+    "function toolInputHTML(name,args,dbNames){var shown=decorateToolArgs(name,args,dbNames);",
+    "var t=jsonText(shown);return toolSectionHTML('Input',",
+    "t!==''?toolArgsHTML(shown):'<span class=\"tool-subtle\">No input</span>');}",
+    "function toolOutputBody(raw,name,error){var o;if(!raw)return '<span class=\"tool-subtle\">Output pending</span>';",
+    "o=parseJSONSafe(raw);if(o===null)return toolPanel(error?'Tool Error':'Tool Result',jsonText(name||''),",
+    "'<div>'+escHTML(shortText(raw,600))+'</div>',raw,error?'tool-error':'');",
+    "return toolResultPanel(o,raw,name);}",
+    "function toolOutputHTML(raw,name,error){return toolSectionHTML('Output',",
+    "toolOutputBody(raw,name,error));}",
+    "function toolFilenameForCard(card){var name=jsonText(card.name||'');var parsed=toolArgsValue(card.args||'');",
+    "var db='';var f='';if(name=='database_query'&&isObj(parsed)){f=jsonText(parsed.filename);",
+    "db=jsonText(parsed.database_id);if(f===''&&card.dbNames&&db!==''&&card.dbNames[db])f=jsonText(card.dbNames[db]);",
+    "if(f===''&&db!=='')f=db;}return f;}",
+    "function toolCardSummary(card,index){var name=jsonText(card.name||'Tool');var file=toolFilenameForCard(card);",
+    "return (index+1)+': '+name+(file!==''?' - '+file:'');}",
+    "function toolCardHTML(card,index){var name=jsonText(card.name||'Tool');",
+    "var cls='tool-card'+(card.error?' tool-error':'');var h='<div class=\"'+cls+'\">'",
+    "+'<a class=\"tool-card-toggle\" href=\"#\" onclick=\"return toggleToolCard(this)\">'",
+    "+'<span class=\"tool-disclosure\">&#9658;</span><span class=\"tool-card-summary\">'",
+    "+escHTML(toolCardSummary(card,index))+'</span></a><div class=\"tool-card-body\">';",
+    "if(!card.outputOnly)h+=toolInputHTML(name,card.args||'',card.dbNames);",
+    "h+=toolOutputHTML(card.output,name,card.error);return h+'</div></div>';}",
+    "function toolCallCardData(call){var fn=isObj(call)?call['function']:null;",
+    "return {name:isObj(fn)?jsonText(fn.name):'unknown',id:isObj(call)?jsonText(call.id):'',",
+    "args:(isObj(fn)&&typeof fn.arguments!='undefined')?fn.arguments:'',output:null,error:false};}",
+    "function appendCardsFromEvents(cards,events,dbNames){var map={};var order=[];var i,e,c,id;",
+    "for(i=0;i<events.length;i++){e=events[i];id=jsonText(e.tool_call_id||('event-'+i));",
+    "if(!map[id]){map[id]={name:jsonText(e.tool_name||'Tool'),id:id,args:e.arguments_json||'',output:null,error:false};",
+    "map[id].dbNames=dbNames;map[id]._index=order.length;order[order.length]=map[id];}",
+    "c=map[id];if(e.tool_name)c.name=jsonText(e.tool_name);",
+    "if(e.event=='call'){c.args=e.arguments_json||c.args;}else{c.output=e.result_json||'';c.error=(e.event=='error');}}",
+    "for(i=0;i<order.length;i++)cards[cards.length]=order[i];}",
+    "function collectDatabaseNamesFromObject(dbNames,o){var dbs=isObj(o)&&isArr(o.databases)?o.databases:null;var i,d,id,name;",
+    "if(!dbs)return;for(i=0;i<dbs.length;i++){d=dbs[i]||{};id=jsonText(d.database_id);name=jsonText(d.filename);",
+    "if(id!==''&&name!=='')dbNames[id]=name;}}",
+    "function collectDatabaseNamesFromRaw(dbNames,raw){var events=parseToolEvents(raw);var i,o;",
+    "if(events){for(i=0;i<events.length;i++){o=parseJSONSafe(events[i].result_json||'');collectDatabaseNamesFromObject(dbNames,o);}return;}",
+    "o=parseJSONSafe(raw);collectDatabaseNamesFromObject(dbNames,o);}",
+    "function collectDatabaseNames(rows){var dbNames={};var i;for(i=0;i<rows.length;i++)collectDatabaseNamesFromRaw(dbNames,toolRowRaw(rows[i]));return dbNames;}",
+    "function appendCardsFromToolCall(cards,pending,raw,dbNames){var calls=toolCallsPayload(raw);var i,c;",
+    "if(isArr(calls)){for(i=0;i<calls.length;i++){c=toolCallCardData(calls[i]);c.dbNames=dbNames;cards[cards.length]=c;pending[pending.length]=c;}}",
+    "else{c={name:'Tool Call',id:'',args:raw,output:null,error:false};cards[cards.length]=c;pending[pending.length]=c;}}",
+    "function isToolRow(row){return hasClass(row,'row')&&(hasClass(row,'tool_call')||hasClass(row,'tool'));}",
+    "function isAssistantRow(row){return hasClass(row,'row')&&hasClass(row,'assistant');}",
+    "function toolSources(){return byId('tool-sources')||byId('tools');}",
+    "function rowId(row){return row&&row.id?row.id:'';}",
+    "function messageRows(){var m=byId('messages');var out=[];var n,i;if(!m)return out;n=m.childNodes;",
+    "for(i=0;i<n.length;i++){if(hasClass(n[i],'row'))out[out.length]=n[i];}return out;}",
+    "function assistantRows(){var m=byId('messages');var out=[];var n,i;if(!m)return out;",
+    "n=m.getElementsByTagName('*');for(i=0;i<n.length;i++){if(isAssistantRow(n[i]))out[out.length]=n[i];}return out;}",
+    "function setToolTarget(row,target){if(row&&target&&row.setAttribute)row.setAttribute('data-tool-target',target);}",
+    "function toolTarget(row){return row&&row.getAttribute?row.getAttribute('data-tool-target')||'':'';}",
+    "function assignToolTargetsFromMessageOrder(){var rows=messageRows();var pending=[];var last='';var i,j,row,target;",
+    "for(i=0;i<rows.length;i++){row=rows[i];if(isToolRow(row)){if(toolTarget(row)==='')pending[pending.length]=row;continue;}",
+    "if(isAssistantRow(row)){target=rowId(row);if(target!==''){last=target;for(j=0;j<pending.length;j++)setToolTarget(pending[j],target);pending=[];}}}",
+    "if(last!==''){for(j=0;j<pending.length;j++)setToolTarget(pending[j],last);}}",
+    "function defaultToolTarget(){var rows=assistantRows();return rows.length?rowId(rows[rows.length-1]):'';}",
+    "function ensureToolRowTarget(row){var target=toolTarget(row);if(target===''){target=defaultToolTarget();setToolTarget(row,target);}return target;}",
+    "function setToolBoxEmpty(box,empty){if(!box)return;if(empty){if(!hasClass(box,'tool-column-empty'))box.className+=' tool-column-empty';}",
+    "else box.className=box.className.replace(/\\stool-column-empty/g,'');}",
+    "function ensureAssistantToolBox(row){var box=firstByClass(row,'tool-column');var bubble;if(box)return box;",
+    "box=document.createElement('div');box.className='tool-column tool-column-empty';",
+    "box.innerHTML='<div class=\"tool-rail-title\">Tool Calls</div><div class=\"tool-cards\"></div>';",
+    "bubble=firstByClass(row,'bubble');if(bubble)row.insertBefore(box,bubble);else row.appendChild(box);return box;}",
+    "function clearToolBoxes(){var rows=assistantRows();var i,box,cards;for(i=0;i<rows.length;i++){",
+    "box=ensureAssistantToolBox(rows[i]);cards=firstByClass(box,'tool-cards');if(cards)cards.innerHTML='';setToolBoxEmpty(box,1);}}",
+    "function renderToolCardsForTarget(target,cards){var row=byId(target);var box,slot,h=[],i;if(!row||!isAssistantRow(row))return;",
+    "box=ensureAssistantToolBox(row);slot=firstByClass(box,'tool-cards');if(!slot)return;",
+    "for(i=0;i<cards.length;i++)h[h.length]=toolCardHTML(cards[i],i);slot.innerHTML=h.join('');setToolBoxEmpty(box,cards.length===0);}",
+    "function toolRowSort(row){var m=/^saved-(\\d+)$/.exec((row&&row.id)||'');return m?parseInt(m[1],10):900000000;}",
+    "function insertToolSource(row){var p=toolSources();var v,n,i;if(!p||row.parentNode==p)return;",
+    "v=toolRowSort(row);n=p.childNodes;for(i=0;i<n.length;i++){if(isToolRow(n[i])&&toolRowSort(n[i])>v){p.insertBefore(row,n[i]);return;}}p.appendChild(row);}",
+    "function moveToolRows(root){var p=toolSources();var n,rows=[],i;if(!p)return;assignToolTargetsFromMessageOrder();root=root||document;",
+    "n=root.getElementsByTagName('*');for(i=0;i<n.length;i++){if(isToolRow(n[i]))rows[rows.length]=n[i];}",
+    "for(i=0;i<rows.length;i++)insertToolSource(rows[i]);}",
+    "function toolSourceRows(){var p=toolSources();var out=[];var n,i;if(!p)return out;n=p.childNodes;",
+    "for(i=0;i<n.length;i++){if(isToolRow(n[i]))out[out.length]=n[i];}return out;}",
+    "function toolRowRaw(row){var b=firstByClass(row,'bubble');var raw;if(!b)return '';",
+    "raw=(typeof b._strappyRawText!='undefined')?b._strappyRawText:nodeText(b);b._strappyRawText=raw;return raw;}",
+    "function rebuildToolCards(){var rows=toolSourceRows();var grouped={};var pending={};var targets=[];var dbNames;var i,row,raw,events,c,target;",
+    "clearToolBoxes();dbNames=collectDatabaseNames(rows);for(i=0;i<rows.length;i++){row=rows[i];raw=toolRowRaw(row);if(raw==='')continue;",
+    "target=ensureToolRowTarget(row);if(target==='')continue;if(!grouped[target]){grouped[target]=[];pending[target]=[];targets[targets.length]=target;}",
+    "events=parseToolEvents(raw);if(events){appendCardsFromEvents(grouped[target],events,dbNames);continue;}",
+    "if(hasClass(row,'tool_call'))appendCardsFromToolCall(grouped[target],pending[target],raw,dbNames);",
+    "else{c=pending[target].length?pending[target].shift():null;if(c){c.output=raw;}else{grouped[target][grouped[target].length]={name:'Tool Result',id:'',args:'',output:raw,outputOnly:true,error:false};}}}",
+    "for(i=0;i<targets.length;i++)renderToolCardsForTarget(targets[i],grouped[targets[i]]);scrollToolRailBottom();}",
+    "function renderToolNode(row){toolRowRaw(row);rebuildToolCards();}",
+    "function renderTools(root){moveToolRows(root);rebuildToolCards();}",
+    "function renderMessageDecorations(root){renderMarkdown(root);renderMetadata(root);renderTools(root);}",
     "function clearEmpty(){var e=byId('empty');if(e)e.style.display='none';}",
     "function nodesFromHTML(html){var d=document.createElement('div');d.innerHTML=html;return d;}",
     "function scrollBottom(){setTimeout(function(){window.scrollTo(0,document.body.scrollHeight);},0);}",
+    "function scrollToolRailBottom(){}",
+    "function updateToolTargets(oldId,newId){var rows,i;if(!oldId||!newId||oldId==newId)return;",
+    "rows=toolSourceRows().concat(messageRows());for(i=0;i<rows.length;i++){if(toolTarget(rows[i])==oldId)setToolTarget(rows[i],newId);}}",
+    "var strappyTextQueues={};var strappyTextTimer=null;",
+    "function queueTextAppend(id,t,kind){var k=kind+'|'+id;if(!strappyTextQueues[k])",
+    "strappyTextQueues[k]={id:id,kind:kind,text:''};strappyTextQueues[k].text+=escHTML(t);",
+    "if(!strappyTextTimer)strappyTextTimer=setTimeout(flushTextQueues,60);}",
+    "function flushTextQueues(){var k,q,r,n;strappyTextTimer=null;",
+    "for(k in strappyTextQueues){q=strappyTextQueues[k];r=byId(q.id);if(!r)continue;",
+    "n=(q.kind=='reasoning')?firstByClass(r,'reasoning-body'):firstByClass(r,'bubble');",
+    "if(!n)continue;if(q.kind=='reasoning'){if(typeof n._strappyPlain=='undefined')n._strappyPlain=n.innerHTML;",
+    "n._strappyPlain+=q.text;if(n.insertAdjacentHTML)n.insertAdjacentHTML('beforeend',q.text);else n.innerHTML=n._strappyPlain;continue;}",
+    "if(typeof n._strappyMarkdown=='undefined')n._strappyMarkdown=n.innerHTML;",
+    "n._strappyMarkdown+=q.text;renderMarkdownNode(n);}strappyTextQueues={};scrollBottom();}",
     "function appendMessage(html){clearEmpty();var m=byId('messages');if(!m)return;",
     "if(m.insertAdjacentHTML){m.insertAdjacentHTML('beforeend',html);}",
     "else{var d=nodesFromHTML(html);while(d.firstChild)m.appendChild(d.firstChild);}",
-    "renderMarkdown(m);renderMetadata(m);scrollBottom();}",
-    "function replaceMessage(id,html){clearEmpty();var old=byId(id);",
+    "renderMessageDecorations(m);scrollBottom();}",
+    "function replaceMessage(id,html){clearEmpty();var old=byId(id);var oldId,target,wasAssistant,next,newId;",
+    "flushTextQueues();",
     "if(!old){appendMessage(html);return;}var d=nodesFromHTML(html);",
-    "if(d.firstChild)old.parentNode.replaceChild(d.firstChild,old);",
-    "renderMarkdown(document);renderMetadata(document);scrollBottom();}",
+    "oldId=rowId(old);target=toolTarget(old);wasAssistant=isAssistantRow(old);",
+    "if(d.firstChild){next=d.firstChild;if(target!==''&&isToolRow(next))setToolTarget(next,target);",
+    "old.parentNode.replaceChild(next,old);newId=rowId(next);if(wasAssistant)updateToolTargets(oldId,newId);}",
+    "renderMessageDecorations(document);scrollBottom();}",
+    "function insertMessageBefore(id,html){clearEmpty();var before=byId(id);var m=byId('messages');",
+    "if(!m){return;}if(!before){appendMessage(html);return;}var d=nodesFromHTML(html);",
+    "while(d.firstChild)m.insertBefore(d.firstChild,before);renderMessageDecorations(m);scrollBottom();}",
     "function prependMessages(html,hasMore){var m=byId('messages');if(!m)return;",
     "var d=nodesFromHTML(html);while(d.lastChild)m.insertBefore(d.lastChild,m.firstChild);",
     "var l=byId('load-more');if(l&&!hasMore)l.parentNode.removeChild(l);",
-    "renderMarkdown(m);renderMetadata(m);}",
-    "function setMessageState(id,status,state){var r=byId(id);if(!r)return;",
-    "r.className=r.className.replace(/\\sstate-[^\\s]+/g,'')+' state-'+state;",
-    "var s=firstByClass(r,'status');if(!s){s=document.createElement('div');",
-    "s.className='meta status';r.appendChild(s);}s.innerHTML=status;scrollBottom();}",
-    "function appendTextToNode(n,t){if(!n)return;if(typeof n.textContent!='undefined')",
-    "n.textContent=n.textContent+t;else n.innerText=n.innerText+t;}",
-    "function appendMessageText(id,t){var r=byId(id);if(!r)return;",
-    "var b=firstByClass(r,'bubble');if(!b)return;",
+    "renderMessageDecorations(m);}",
+    "function setMessageState(id,status,state){var r=byId(id);var s;if(!r)return;",
+    "r.className=r.className.replace(/\\sstate-[^\\s]+/g,'');if(state)r.className+=' state-'+state;",
+    "s=firstByClass(r,'status');if(status){if(!s){s=document.createElement('div');",
+    "s.className='meta status';r.appendChild(s);}s.innerHTML=status;}else if(s&&s.parentNode)s.parentNode.removeChild(s);scrollBottom();}",
+    "function appendMessageText(id,t){var r=byId(id);var b;if(!r)return;",
+    "flushTextQueues();b=firstByClass(r,'bubble');if(b)b.style.display='block';",
+    "if(b&&hasClass(b,'bubble-status')){b.className=b.className.replace(/\\sbubble-status/g,'');",
+    "b._strappyMarkdown='';b.innerHTML='';}",
+    "setMessageReasoningCollapsed(id,1);if(!b)return;",
     "if(typeof b._strappyMarkdown=='undefined')b._strappyMarkdown=b.innerHTML;",
     "b._strappyMarkdown+=escHTML(t);renderMarkdownNode(b);scrollBottom();}",
+    "function moveMessageTextToReasoning(id){var r=byId(id);var b,box,body,raw;",
+    "flushTextQueues();if(!r)return;b=firstByClass(r,'bubble');box=firstByClass(r,'reasoning');",
+    "body=firstByClass(r,'reasoning-body');if(!b||!box||!body)return;",
+    "raw=(typeof b._strappyMarkdown!='undefined')?b._strappyMarkdown:escHTML(nodeText(b));",
+    "if(raw==='')return;if(typeof body._strappyPlain=='undefined')body._strappyPlain=body.innerHTML;",
+    "if(body._strappyPlain!==''&&raw.charAt(0)!='\\n')body._strappyPlain+='\\n';",
+    "body._strappyPlain+=raw;body.innerHTML=body._strappyPlain;",
+    "b._strappyMarkdown='';b.className=b.className.replace(/\\sbubble-status/g,'')+' bubble-status';",
+    "b.innerHTML=escHTML((r.getAttribute?r.getAttribute('data-thinking-label'):'')||'Thinking');",
+    "b.style.display='block';",
+    "box.style.display='block';",
+    "setReasoningCollapsed(box,0);scrollBottom();}",
     "function appendReasoningText(id,t){var r=byId(id);if(!r)return;",
     "var box=firstByClass(r,'reasoning');var body=firstByClass(r,'reasoning-body');",
     "if(box)box.style.display='block';if(!body)return;",
-    "if(typeof body._strappyMarkdown=='undefined')body._strappyMarkdown=body.innerHTML;",
-    "body._strappyMarkdown+=escHTML(t);renderMarkdownNode(body);scrollBottom();}",
-    "function removeMessage(id){var r=byId(id);if(r&&r.parentNode)r.parentNode.removeChild(r);}",
+    "if(box)setReasoningCollapsed(box,0);",
+    "queueTextAppend(id,t,'reasoning');}",
+    "function appendToolEventText(id,t){var r=byId(id);var b;if(!r)return;",
+    "r.style.display='block';b=firstByClass(r,'bubble');if(!b)return;",
+    "if(typeof b._strappyRawText=='undefined')b._strappyRawText=nodeText(b);",
+    "b._strappyRawText+=t;renderTools(document);scrollBottom();}",
+    "function removeMessage(id){flushTextQueues();var r=byId(id);",
+    "if(r&&r.parentNode)r.parentNode.removeChild(r);renderTools(document);}",
     "</script>",
     NULL
   };
@@ -781,6 +1175,9 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
 
   if (ok && strappy_webview_is_assistant_role(role)) {
     ok = strappy_webview_append_reasoning_html(&buffer, reasoning, 0, labels);
+    if (ok) {
+      ok = strappy_webview_append_tool_column_html(&buffer);
+    }
   }
 
   ok = ok &&
@@ -837,12 +1234,20 @@ char *strappy_webview_streaming_assistant_message_html(
 {
   strappy_webview_buffer buffer;
   int has_state;
+  int status_is_pending;
+  int render_bubble_status;
   int ok;
 
   if ((element_id == NULL) || (element_id[0] == '\0')) {
     element_id = "streaming-assistant";
   }
   has_state = (state != NULL) && (state[0] != '\0');
+  status_is_pending = (state != NULL) && (strcmp(state, "pending") == 0);
+  render_bubble_status =
+    ((text == NULL) || (text[0] == '\0')) &&
+    (status_html != NULL) &&
+    (status_html[0] != '\0') &&
+    status_is_pending;
 
   strappy_webview_buffer_init(&buffer);
   ok = strappy_webview_buffer_append_cstring(&buffer, "<div id=\"") &&
@@ -854,12 +1259,86 @@ char *strappy_webview_streaming_assistant_message_html(
          strappy_webview_append_html_escaped(&buffer, state);
   }
   ok = ok &&
+       strappy_webview_buffer_append_cstring(
+         &buffer,
+         "\" data-thinking-label=\"") &&
+       strappy_webview_append_html_escaped(
+         &buffer,
+         strappy_webview_thinking_label(labels)) &&
        strappy_webview_buffer_append_cstring(&buffer, "\"><div class=\"role\">") &&
        strappy_webview_append_html_escaped(&buffer,
                                            strappy_webview_agent_label(labels)) &&
        strappy_webview_buffer_append_cstring(&buffer, "</div>") &&
        strappy_webview_append_reasoning_html(&buffer, reasoning, 1, labels) &&
-       strappy_webview_buffer_append_cstring(&buffer, "<div class=\"bubble\">") &&
+       strappy_webview_append_tool_column_html(&buffer) &&
+       strappy_webview_buffer_append_cstring(&buffer, "<div class=\"bubble");
+  if (ok && render_bubble_status) {
+    ok = strappy_webview_buffer_append_cstring(&buffer, " bubble-status");
+  }
+  ok = ok &&
+       strappy_webview_buffer_append_cstring(&buffer, "\">");
+  if (ok && render_bubble_status) {
+    ok = strappy_webview_buffer_append_cstring(&buffer, status_html);
+  } else {
+    ok = strappy_webview_append_html_escaped(&buffer, text);
+  }
+  ok = ok && strappy_webview_buffer_append_cstring(&buffer, "</div>");
+
+  if (ok && !status_is_pending &&
+      (status_html != NULL) && (status_html[0] != '\0')) {
+    ok = strappy_webview_buffer_append_cstring(
+           &buffer,
+           "<div class=\"meta status\">") &&
+         strappy_webview_buffer_append_cstring(&buffer, status_html) &&
+         strappy_webview_buffer_append_cstring(&buffer, "</div>");
+  }
+
+  ok = ok && strappy_webview_buffer_append_cstring(&buffer, "</div>");
+  if (!ok) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_tool_activity_message_html(
+  const char *element_id,
+  const char *text,
+  const char *state,
+  const char *status_html,
+  const strappy_webview_labels *labels)
+{
+  strappy_webview_buffer buffer;
+  int has_state;
+  int has_text;
+  int ok;
+
+  if ((element_id == NULL) || (element_id[0] == '\0')) {
+    element_id = "streaming-tools";
+  }
+  has_state = (state != NULL) && (state[0] != '\0');
+  has_text = (text != NULL) && (text[0] != '\0');
+
+  strappy_webview_buffer_init(&buffer);
+  ok = strappy_webview_buffer_append_cstring(&buffer, "<div id=\"") &&
+       strappy_webview_append_html_escaped(&buffer, element_id) &&
+       strappy_webview_buffer_append_cstring(
+         &buffer,
+         "\" class=\"row tool_call tool_activity");
+  if (ok && has_state) {
+    ok = strappy_webview_buffer_append_cstring(&buffer, " state-") &&
+         strappy_webview_append_html_escaped(&buffer, state);
+  }
+  ok = ok && strappy_webview_buffer_append_cstring(&buffer, "\"");
+  if (ok && !has_text) {
+    ok = strappy_webview_buffer_append_cstring(&buffer, " style=\"display:none\"");
+  }
+  ok = ok &&
+       strappy_webview_buffer_append_cstring(&buffer, "><div class=\"role\">") &&
+       strappy_webview_append_html_escaped(
+         &buffer,
+         strappy_webview_tool_call_label(labels)) &&
+       strappy_webview_buffer_append_cstring(&buffer, "</div><div class=\"bubble\">") &&
        strappy_webview_append_html_escaped(&buffer, text) &&
        strappy_webview_buffer_append_cstring(&buffer, "</div>");
 
@@ -938,11 +1417,15 @@ char *strappy_webview_messages_page_html(const char *messages_html,
   }
 
   ok = ok &&
-       strappy_webview_buffer_append_cstring(&buffer, "<div id=\"messages\">") &&
+       strappy_webview_buffer_append_cstring(
+         &buffer,
+         "<div id=\"strappy-layout\" class=\"layout\">"
+         "<div class=\"chat-column\"><div id=\"messages\">") &&
        strappy_webview_buffer_append_cstring(&buffer, messages_html) &&
        strappy_webview_buffer_append_cstring(
          &buffer,
-         "</div></div><script>renderMarkdown(document);renderMetadata(document);"
+         "</div></div><div id=\"tool-sources\" class=\"tool-source-bin\"></div>"
+         "</div></div><script>renderMessageDecorations(document);"
          "</script></body></html>");
 
   if (!ok) {
@@ -974,6 +1457,23 @@ char *strappy_webview_replace_message_js(const char *element_id,
   strappy_webview_buffer_init(&buffer);
   if (!strappy_webview_buffer_append_cstring(&buffer, "replaceMessage(") ||
       !strappy_webview_append_js_string(&buffer, element_id) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
+      !strappy_webview_append_js_string(&buffer, message_html) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_insert_message_before_js(const char *before_element_id,
+                                               const char *message_html)
+{
+  strappy_webview_buffer buffer;
+
+  strappy_webview_buffer_init(&buffer);
+  if (!strappy_webview_buffer_append_cstring(&buffer, "insertMessageBefore(") ||
+      !strappy_webview_append_js_string(&buffer, before_element_id) ||
       !strappy_webview_buffer_append_cstring(&buffer, ",") ||
       !strappy_webview_append_js_string(&buffer, message_html) ||
       !strappy_webview_buffer_append_cstring(&buffer, ");")) {
@@ -1030,6 +1530,68 @@ char *strappy_webview_append_reasoning_text_js(const char *element_id,
       !strappy_webview_append_js_string(&buffer, element_id) ||
       !strappy_webview_buffer_append_cstring(&buffer, ",") ||
       !strappy_webview_append_js_string(&buffer, delta) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_move_message_text_to_reasoning_js(const char *element_id)
+{
+  strappy_webview_buffer buffer;
+
+  strappy_webview_buffer_init(&buffer);
+  if (!strappy_webview_buffer_append_cstring(
+        &buffer,
+        "moveMessageTextToReasoning(") ||
+      !strappy_webview_append_js_string(&buffer, element_id) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_tool_event_text(const char *event_type,
+                                      const char *tool_call_id,
+                                      const char *tool_name,
+                                      const char *arguments_json,
+                                      const char *result_json)
+{
+  strappy_webview_buffer buffer;
+  int ok;
+
+  strappy_webview_buffer_init(&buffer);
+  ok = strappy_webview_buffer_append_cstring(&buffer, "{\"event\":") &&
+       strappy_webview_append_json_string(&buffer, event_type) &&
+       strappy_webview_buffer_append_cstring(&buffer, ",\"tool_call_id\":") &&
+       strappy_webview_append_json_string(&buffer, tool_call_id) &&
+       strappy_webview_buffer_append_cstring(&buffer, ",\"tool_name\":") &&
+       strappy_webview_append_json_string(&buffer, tool_name) &&
+       strappy_webview_buffer_append_cstring(&buffer, ",\"arguments_json\":") &&
+       strappy_webview_append_json_string(&buffer, arguments_json) &&
+       strappy_webview_buffer_append_cstring(&buffer, ",\"result_json\":") &&
+       strappy_webview_append_json_string(&buffer, result_json) &&
+       strappy_webview_buffer_append_cstring(&buffer, "}\n");
+  if (!ok) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_append_tool_event_text_js(const char *element_id,
+                                                const char *event_text)
+{
+  strappy_webview_buffer buffer;
+
+  strappy_webview_buffer_init(&buffer);
+  if (!strappy_webview_buffer_append_cstring(&buffer, "appendToolEventText(") ||
+      !strappy_webview_append_js_string(&buffer, element_id) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
+      !strappy_webview_append_js_string(&buffer, event_text) ||
       !strappy_webview_buffer_append_cstring(&buffer, ");")) {
     strappy_webview_buffer_destroy(&buffer);
     return NULL;

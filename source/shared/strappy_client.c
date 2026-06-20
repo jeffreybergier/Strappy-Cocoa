@@ -2002,6 +2002,7 @@ static int strappy_client_stream_emit_delta(strappy_stream_context *context,
     return 1;
   }
 
+  memset(&event, 0, sizeof(event));
   event.type = type;
   event.text = text;
   if (!context->callback(&event, context->callback_data)) {
@@ -2870,37 +2871,6 @@ static int strappy_client_stream_request_json(const strappy_config *config,
       strappy_client_tool_calls_display_text(stream_context.tool_calls);
     if (tool_display_text == NULL) {
       strappy_set_error(error_out, "Could not allocate streamed tool call text.");
-      strappy_stream_context_destroy(&stream_context);
-      strappy_chat_result_destroy(result);
-      return 0;
-    }
-
-    if ((streamed_content[0] != '\0') &&
-        !strappy_client_stream_emit_delta(
-          &stream_context,
-          STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA,
-          "\n\n")) {
-      if (stream_context.stream_error != NULL) {
-        strappy_set_error(error_out, stream_context.stream_error);
-      } else {
-        strappy_set_error(error_out, "Could not display streamed tool call.");
-      }
-      free(tool_display_text);
-      strappy_stream_context_destroy(&stream_context);
-      strappy_chat_result_destroy(result);
-      return 0;
-    }
-
-    if (!strappy_client_stream_emit_delta(
-          &stream_context,
-          STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA,
-          tool_display_text)) {
-      if (stream_context.stream_error != NULL) {
-        strappy_set_error(error_out, stream_context.stream_error);
-      } else {
-        strappy_set_error(error_out, "Could not display streamed tool call.");
-      }
-      free(tool_display_text);
       strappy_stream_context_destroy(&stream_context);
       strappy_chat_result_destroy(result);
       return 0;

@@ -94,6 +94,34 @@ static long long StrappyMessageNumericIdentifier(NSDictionary *message)
   return [identifier longLongValue];
 }
 
+static NSString *StrappyMessageRole(NSDictionary *message)
+{
+  NSString *role;
+
+  if (![message isKindOfClass:[NSDictionary class]]) {
+    return @"";
+  }
+
+  role = [message objectForKey:@"role"];
+  if (![role isKindOfClass:[NSString class]]) {
+    return @"";
+  }
+  return role;
+}
+
+static BOOL StrappyMessageHasRole(NSDictionary *message, NSString *role)
+{
+  return [StrappyMessageRole(message) isEqualToString:role];
+}
+
+static BOOL StrappyMessageIsToolActivity(NSDictionary *message)
+{
+  NSString *role;
+
+  role = StrappyMessageRole(message);
+  return ([role isEqualToString:@"tool_call"] || [role isEqualToString:@"tool"]);
+}
+
 static const char *StrappyCString(NSString *string)
 {
   if (![string isKindOfClass:[NSString class]]) {
@@ -228,6 +256,22 @@ static NSString *StrappyStreamingAssistantMessageHTML(NSString *elementIdentifie
       &labels));
 }
 
+static NSString *StrappyToolActivityMessageHTML(NSString *elementIdentifier,
+                                                NSString *text,
+                                                NSString *state,
+                                                NSString *statusHTML)
+{
+  strappy_webview_labels labels;
+
+  labels = StrappyWebViewLabels();
+  return StrappyStringFromWebViewCString(
+    strappy_webview_tool_activity_message_html(StrappyCString(elementIdentifier),
+                                               StrappyCString(text),
+                                               StrappyCString(state),
+                                               StrappyCString(statusHTML),
+                                               &labels));
+}
+
 static NSString *StrappyMessageHTMLWithReasoning(NSDictionary *message,
                                                  NSString *reasoning)
 {
@@ -279,6 +323,14 @@ static NSString *StrappyReplaceMessageJavaScript(NSString *elementIdentifier,
                                        StrappyCString(messageHTML)));
 }
 
+static NSString *StrappyInsertMessageBeforeJavaScript(NSString *beforeElementIdentifier,
+                                                      NSString *messageHTML)
+{
+  return StrappyStringFromWebViewCString(
+    strappy_webview_insert_message_before_js(StrappyCString(beforeElementIdentifier),
+                                             StrappyCString(messageHTML)));
+}
+
 static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
                                                   NSString *statusHTML,
                                                   NSString *state)
@@ -303,6 +355,36 @@ static NSString *StrappyAppendReasoningTextJavaScript(NSString *elementIdentifie
   return StrappyStringFromWebViewCString(
     strappy_webview_append_reasoning_text_js(StrappyCString(elementIdentifier),
                                              StrappyCString(delta)));
+}
+
+static NSString *StrappyMoveMessageTextToReasoningJavaScript(
+  NSString *elementIdentifier)
+{
+  return StrappyStringFromWebViewCString(
+    strappy_webview_move_message_text_to_reasoning_js(
+      StrappyCString(elementIdentifier)));
+}
+
+static NSString *StrappyToolEventText(NSString *eventType,
+                                      NSString *toolCallIdentifier,
+                                      NSString *toolName,
+                                      NSString *argumentsJSON,
+                                      NSString *resultJSON)
+{
+  return StrappyStringFromWebViewCString(
+    strappy_webview_tool_event_text(StrappyCString(eventType),
+                                    StrappyCString(toolCallIdentifier),
+                                    StrappyCString(toolName),
+                                    StrappyCString(argumentsJSON),
+                                    StrappyCString(resultJSON)));
+}
+
+static NSString *StrappyAppendToolEventTextJavaScript(NSString *elementIdentifier,
+                                                      NSString *eventText)
+{
+  return StrappyStringFromWebViewCString(
+    strappy_webview_append_tool_event_text_js(StrappyCString(elementIdentifier),
+                                              StrappyCString(eventText)));
 }
 
 static NSString *StrappyRemoveMessageJavaScript(NSString *elementIdentifier)
@@ -338,8 +420,12 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 - (void)sendPromptDidFinish:(NSDictionary *)result;
 - (void)streamContentDeltaDidArrive:(NSDictionary *)delta;
 - (void)streamReasoningDeltaDidArrive:(NSDictionary *)delta;
+- (void)streamToolCallDidArrive:(NSDictionary *)event;
+- (void)streamToolResultDidArrive:(NSDictionary *)event;
+- (void)streamToolErrorDidArrive:(NSDictionary *)event;
 - (void)applyStreamContentDeltaAndRelease:(NSDictionary *)delta;
 - (void)applyStreamReasoningDeltaAndRelease:(NSDictionary *)delta;
+- (void)applyStreamToolEventAndRelease:(NSDictionary *)event;
 - (void)beginSendingPrompt:(NSString *)prompt reusingPendingMessage:(BOOL)reuse;
 - (void)retryFailedPrompt;
 - (void)loadEarlierMessages;
@@ -452,6 +538,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   pendingMessageIdentifier_ = nil;
   [pendingAssistantMessageIdentifier_ release];
   pendingAssistantMessageIdentifier_ = nil;
+  [pendingToolActivityIdentifier_ release];
+  pendingToolActivityIdentifier_ = nil;
   [pendingPrompt_ release];
   pendingPrompt_ = nil;
   [sendingSessionId_ release];
@@ -460,6 +548,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   streamingAssistantText_ = nil;
   [streamingReasoningText_ release];
   streamingReasoningText_ = nil;
+  [streamingToolActivityText_ release];
+  streamingToolActivityText_ = nil;
 }
 
 - (void)reloadWithSession:(NSDictionary *)session
@@ -599,10 +689,20 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     [messagesHTML appendString:
       StrappyPendingMessageHTML(pendingPrompt_,
                                 pendingMessageIdentifier_,
-                                (sending_ ? @"pending" : @"error"),
+                                (sending_ ? nil : @"error"),
                                 (sending_
-                                 ? StrappyStatusHTML(NSLocalizedString(@"Sending...", nil), NO)
+                                 ? nil
                                  : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), YES)))];
+    if (pendingToolActivityIdentifier_ != nil) {
+      [messagesHTML appendString:
+        StrappyToolActivityMessageHTML(
+          pendingToolActivityIdentifier_,
+          streamingToolActivityText_,
+          (sending_ ? @"pending" : @"error"),
+          (sending_
+           ? StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO)
+           : StrappyStatusHTML(NSLocalizedString(@"Failed to run tools.", nil), NO)))];
+    }
     if (pendingAssistantMessageIdentifier_ != nil) {
       [messagesHTML appendString:
         StrappyStreamingAssistantMessageHTML(pendingAssistantMessageIdentifier_,
@@ -610,7 +710,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
                                              streamingReasoningText_,
                                              (sending_ ? @"pending" : @"error"),
                                              (sending_
-                                              ? StrappyStatusHTML(NSLocalizedString(@"Streaming...", nil), NO)
+                                              ? StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO)
                                               : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), NO)))];
     }
   }
@@ -668,18 +768,28 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
       [[NSString stringWithFormat:@"pending-%lu", pendingCounter] retain];
     pendingAssistantMessageIdentifier_ =
       [[NSString stringWithFormat:@"pending-%lu-assistant", pendingCounter] retain];
+    pendingToolActivityIdentifier_ =
+      [[NSString stringWithFormat:@"pending-%lu-tools", pendingCounter] retain];
     pendingPrompt_ = [promptToSend copy];
     sendingSessionId_ = [sessionId_ retain];
     streamingAssistantText_ = [[NSMutableString alloc] init];
     streamingReasoningText_ = [[NSMutableString alloc] init];
+    streamingToolActivityText_ = [[NSMutableString alloc] init];
 
     js = [NSMutableString string];
     [js appendString:
       StrappyAppendMessageJavaScript(
         StrappyPendingMessageHTML(promptToSend,
                                   pendingMessageIdentifier_,
-                                  @"pending",
-                                  StrappyStatusHTML(NSLocalizedString(@"Sending...", nil), NO)))];
+                                  nil,
+                                  nil))];
+    [js appendString:
+      StrappyAppendMessageJavaScript(
+        StrappyToolActivityMessageHTML(
+          pendingToolActivityIdentifier_,
+          streamingToolActivityText_,
+          @"pending",
+          StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO)))];
     [js appendString:
       StrappyAppendMessageJavaScript(
         StrappyStreamingAssistantMessageHTML(
@@ -687,7 +797,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
           streamingAssistantText_,
           streamingReasoningText_,
           @"pending",
-          StrappyStatusHTML(NSLocalizedString(@"Streaming...", nil), NO)))];
+          StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO)))];
     [self pushJavaScript:js];
   } else {
     NSMutableString *js;
@@ -697,16 +807,31 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
       pendingAssistantMessageIdentifier_ =
         [[NSString stringWithFormat:@"pending-%lu-assistant", pendingCounter] retain];
     }
+    if (pendingToolActivityIdentifier_ == nil) {
+      pendingToolActivityIdentifier_ =
+        [[NSString stringWithFormat:@"pending-%lu-tools", pendingCounter] retain];
+    }
     [streamingAssistantText_ release];
     streamingAssistantText_ = [[NSMutableString alloc] init];
     [streamingReasoningText_ release];
     streamingReasoningText_ = [[NSMutableString alloc] init];
+    [streamingToolActivityText_ release];
+    streamingToolActivityText_ = [[NSMutableString alloc] init];
 
     js = [NSMutableString string];
     [js appendString:
       StrappySetMessageStateJavaScript(pendingMessageIdentifier_,
-                                       StrappyStatusHTML(NSLocalizedString(@"Sending...", nil), NO),
-                                       @"pending")];
+                                       nil,
+                                       nil)];
+    [js appendString:StrappyRemoveMessageJavaScript(pendingToolActivityIdentifier_)];
+    [js appendString:
+      StrappyInsertMessageBeforeJavaScript(
+        pendingAssistantMessageIdentifier_,
+        StrappyToolActivityMessageHTML(
+          pendingToolActivityIdentifier_,
+          streamingToolActivityText_,
+          @"pending",
+          StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO)))];
     [js appendString:
       StrappyAppendMessageJavaScript(
         StrappyStreamingAssistantMessageHTML(
@@ -714,7 +839,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
           streamingAssistantText_,
           streamingReasoningText_,
           @"pending",
-          StrappyStatusHTML(NSLocalizedString(@"Streaming...", nil), NO)))];
+          StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO)))];
     [self pushJavaScript:js];
   }
 
@@ -861,6 +986,21 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [self streamReasoningDeltaDidArrive:delta];
 }
 
+- (void)strappySessionStreamDidReceiveToolCall:(NSDictionary *)event
+{
+  [self streamToolCallDidArrive:event];
+}
+
+- (void)strappySessionStreamDidReceiveToolResult:(NSDictionary *)event
+{
+  [self streamToolResultDidArrive:event];
+}
+
+- (void)strappySessionStreamDidReceiveToolError:(NSDictionary *)event
+{
+  [self streamToolErrorDidArrive:event];
+}
+
 - (void)streamContentDeltaDidArrive:(NSDictionary *)delta
 {
   NSDictionary *retainedDelta;
@@ -878,6 +1018,36 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   retainedDelta = [delta retain];
   [self performSelectorOnMainThread:@selector(applyStreamReasoningDeltaAndRelease:)
                          withObject:retainedDelta
+                      waitUntilDone:NO];
+}
+
+- (void)streamToolCallDidArrive:(NSDictionary *)event
+{
+  NSDictionary *retainedEvent;
+
+  retainedEvent = [event retain];
+  [self performSelectorOnMainThread:@selector(applyStreamToolEventAndRelease:)
+                         withObject:retainedEvent
+                      waitUntilDone:NO];
+}
+
+- (void)streamToolResultDidArrive:(NSDictionary *)event
+{
+  NSDictionary *retainedEvent;
+
+  retainedEvent = [event retain];
+  [self performSelectorOnMainThread:@selector(applyStreamToolEventAndRelease:)
+                         withObject:retainedEvent
+                      waitUntilDone:NO];
+}
+
+- (void)streamToolErrorDidArrive:(NSDictionary *)event
+{
+  NSDictionary *retainedEvent;
+
+  retainedEvent = [event retain];
+  [self performSelectorOnMainThread:@selector(applyStreamToolEventAndRelease:)
+                         withObject:retainedEvent
                       waitUntilDone:NO];
 }
 
@@ -966,6 +1136,105 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [delta release];
 }
 
+- (void)applyStreamToolEventAndRelease:(NSDictionary *)event
+{
+  NSMutableString *js;
+  NSString *eventType;
+  NSString *toolCallIdentifier;
+  NSString *toolName;
+  NSString *argumentsJSON;
+  NSString *resultJSON;
+  NSString *eventText;
+  BOOL createdToolActivity;
+
+  if (![self streamDeltaAppliesToCurrentPendingMessage:event]) {
+    [event release];
+    return;
+  }
+
+  eventType = [event objectForKey:@"event_type"];
+  if (![eventType isKindOfClass:[NSString class]] || ([eventType length] == 0U)) {
+    eventType = @"call";
+  }
+  toolCallIdentifier = [event objectForKey:@"tool_call_id"];
+  if (![toolCallIdentifier isKindOfClass:[NSString class]]) {
+    toolCallIdentifier = @"";
+  }
+  toolName = [event objectForKey:@"tool_name"];
+  if (![toolName isKindOfClass:[NSString class]]) {
+    toolName = @"";
+  }
+  argumentsJSON = [event objectForKey:@"arguments_json"];
+  if (![argumentsJSON isKindOfClass:[NSString class]]) {
+    argumentsJSON = @"";
+  }
+  resultJSON = [event objectForKey:@"result_json"];
+  if (![resultJSON isKindOfClass:[NSString class]]) {
+    resultJSON = @"";
+  }
+
+  eventText = StrappyToolEventText(eventType,
+                                   toolCallIdentifier,
+                                   toolName,
+                                   argumentsJSON,
+                                   resultJSON);
+  if ([eventText length] == 0U) {
+    [event release];
+    return;
+  }
+
+  createdToolActivity = NO;
+  if (pendingToolActivityIdentifier_ == nil) {
+    pendingToolActivityIdentifier_ =
+      [[pendingAssistantMessageIdentifier_ stringByAppendingString:@"-tools"] retain];
+    createdToolActivity = YES;
+  }
+  if (streamingToolActivityText_ == nil) {
+    streamingToolActivityText_ = [[NSMutableString alloc] init];
+  }
+  [streamingToolActivityText_ appendString:eventText];
+
+  js = [NSMutableString string];
+  if ([eventType isEqualToString:@"call"] &&
+      (streamingAssistantText_ != nil) &&
+      ([streamingAssistantText_ length] > 0U) &&
+      (pendingAssistantMessageIdentifier_ != nil)) {
+    if (streamingReasoningText_ == nil) {
+      streamingReasoningText_ = [[NSMutableString alloc] init];
+    }
+    if ([streamingReasoningText_ length] > 0U) {
+      [streamingReasoningText_ appendString:@"\n"];
+    }
+    [streamingReasoningText_ appendString:streamingAssistantText_];
+    [streamingAssistantText_ setString:@""];
+    [js appendString:
+      StrappyMoveMessageTextToReasoningJavaScript(
+        pendingAssistantMessageIdentifier_)];
+  }
+  if (createdToolActivity) {
+    NSString *html;
+
+    html = StrappyToolActivityMessageHTML(
+      pendingToolActivityIdentifier_,
+      @"",
+      @"pending",
+      StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO));
+    if (pendingAssistantMessageIdentifier_ != nil) {
+      [js appendString:
+        StrappyInsertMessageBeforeJavaScript(pendingAssistantMessageIdentifier_,
+                                             html)];
+    } else {
+      [js appendString:StrappyAppendMessageJavaScript(html)];
+    }
+  }
+  [js appendString:
+    StrappyAppendToolEventTextJavaScript(pendingToolActivityIdentifier_,
+                                         eventText)];
+  [self pushJavaScript:js];
+
+  [event release];
+}
+
 - (void)sendPromptDidFinish:(NSDictionary *)result
 {
   NSDictionary *session;
@@ -1006,9 +1275,12 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     NSArray *messages;
     NSError *messagesError;
     NSMutableString *js;
+    NSMutableArray *newMessages;
+    NSMutableArray *toolMessages;
+    NSMutableArray *extraMessages;
+    NSDictionary *userMessage;
+    NSDictionary *assistantMessage;
     NSUInteger index;
-    BOOL replacedPending;
-    BOOL replacedAssistantPending;
     long long newestIdentifier;
     long long previousIdentifier;
 
@@ -1056,9 +1328,12 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
     previousIdentifier = [previousLastIdentifier longLongValue];
     newestIdentifier = previousIdentifier;
-    replacedPending = NO;
-    replacedAssistantPending = NO;
-    js = [NSMutableString string];
+    userMessage = nil;
+    assistantMessage = nil;
+    newMessages = [NSMutableArray array];
+    toolMessages = [NSMutableArray array];
+    extraMessages = [NSMutableArray array];
+
     for (index = 0U; index < [messages count]; index++) {
       NSDictionary *message;
       long long messageIdentifier;
@@ -1073,22 +1348,15 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
         continue;
       }
 
-      if (!replacedPending) {
-        [js appendString:
-          StrappyReplaceMessageJavaScript(pendingIdentifier,
-                                          StrappyMessageHTML(message, nil, nil, nil))];
-        replacedPending = YES;
-      } else if (!replacedAssistantPending &&
-                 ([assistantPendingIdentifier length] > 0U)) {
-        [js appendString:
-          StrappyReplaceMessageJavaScript(assistantPendingIdentifier,
-                                          StrappyMessageHTMLWithReasoning(
-                                            message,
-                                            streamingReasoningText_))];
-        replacedAssistantPending = YES;
+      [newMessages addObject:message];
+      if ((userMessage == nil) && StrappyMessageHasRole(message, @"user")) {
+        userMessage = message;
+      } else if (StrappyMessageHasRole(message, @"assistant")) {
+        assistantMessage = message;
+      } else if (StrappyMessageIsToolActivity(message)) {
+        [toolMessages addObject:message];
       } else {
-        [js appendString:
-          StrappyAppendMessageJavaScript(StrappyMessageHTML(message, nil, nil, nil))];
+        [extraMessages addObject:message];
       }
 
       if (messageIdentifier > newestIdentifier) {
@@ -1096,14 +1364,88 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
       }
     }
 
-    if (replacedPending) {
-      [self pushJavaScript:js];
-      lastKnownMessageIdentifier_ = newestIdentifier;
-      [self clearPendingMessageState];
-    } else {
+    if ([newMessages count] == 0U) {
       [self clearPendingMessageState];
       [self reloadContent];
+      return;
     }
+
+    if (userMessage == nil) {
+      userMessage = [newMessages objectAtIndex:0U];
+    }
+
+    js = [NSMutableString string];
+    [js appendString:
+      StrappyReplaceMessageJavaScript(pendingIdentifier,
+                                      StrappyMessageHTML(userMessage, nil, nil, nil))];
+
+    if ([toolMessages count] > 0U) {
+      if (pendingToolActivityIdentifier_ != nil) {
+        NSDictionary *firstToolMessage;
+
+        firstToolMessage = [toolMessages objectAtIndex:0U];
+        [js appendString:
+          StrappyReplaceMessageJavaScript(
+            pendingToolActivityIdentifier_,
+            StrappyMessageHTML(firstToolMessage, nil, nil, nil))];
+        for (index = 1U; index < [toolMessages count]; index++) {
+          NSDictionary *message;
+
+          message = [toolMessages objectAtIndex:index];
+          if ([assistantPendingIdentifier length] > 0U) {
+            [js appendString:
+              StrappyInsertMessageBeforeJavaScript(
+                assistantPendingIdentifier,
+                StrappyMessageHTML(message, nil, nil, nil))];
+          } else {
+            [js appendString:
+              StrappyAppendMessageJavaScript(StrappyMessageHTML(message, nil, nil, nil))];
+          }
+        }
+      } else {
+        for (index = 0U; index < [toolMessages count]; index++) {
+          NSDictionary *message;
+
+          message = [toolMessages objectAtIndex:index];
+          if ([assistantPendingIdentifier length] > 0U) {
+            [js appendString:
+              StrappyInsertMessageBeforeJavaScript(
+                assistantPendingIdentifier,
+                StrappyMessageHTML(message, nil, nil, nil))];
+          } else {
+            [js appendString:
+              StrappyAppendMessageJavaScript(StrappyMessageHTML(message, nil, nil, nil))];
+          }
+        }
+      }
+    } else if (pendingToolActivityIdentifier_ != nil) {
+      [js appendString:StrappyRemoveMessageJavaScript(pendingToolActivityIdentifier_)];
+    }
+
+    if ((assistantMessage != nil) && ([assistantPendingIdentifier length] > 0U)) {
+      [js appendString:
+        StrappyReplaceMessageJavaScript(assistantPendingIdentifier,
+                                        StrappyMessageHTMLWithReasoning(
+                                          assistantMessage,
+                                          streamingReasoningText_))];
+    } else if (assistantMessage != nil) {
+      [js appendString:
+        StrappyAppendMessageJavaScript(StrappyMessageHTMLWithReasoning(
+          assistantMessage,
+          streamingReasoningText_))];
+    } else if ([assistantPendingIdentifier length] > 0U) {
+      [js appendString:StrappyRemoveMessageJavaScript(assistantPendingIdentifier)];
+    }
+
+    for (index = 0U; index < [extraMessages count]; index++) {
+      [js appendString:
+        StrappyAppendMessageJavaScript(
+          StrappyMessageHTML([extraMessages objectAtIndex:index], nil, nil, nil))];
+    }
+
+    [self pushJavaScript:js];
+    lastKnownMessageIdentifier_ = newestIdentifier;
+    [self clearPendingMessageState];
     return;
   }
 
@@ -1119,6 +1461,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     if ([assistantPendingIdentifier length] > 0U) {
       [js appendString:StrappyRemoveMessageJavaScript(assistantPendingIdentifier)];
     }
+    if (pendingToolActivityIdentifier_ != nil) {
+      [js appendString:StrappyRemoveMessageJavaScript(pendingToolActivityIdentifier_)];
+    }
     [js appendString:
       StrappySetMessageStateJavaScript(pendingIdentifier,
                                        StrappyStatusHTML(errorMessage, YES),
@@ -1126,10 +1471,14 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     [self pushJavaScript:js];
     [pendingAssistantMessageIdentifier_ release];
     pendingAssistantMessageIdentifier_ = nil;
+    [pendingToolActivityIdentifier_ release];
+    pendingToolActivityIdentifier_ = nil;
     [streamingAssistantText_ release];
     streamingAssistantText_ = nil;
     [streamingReasoningText_ release];
     streamingReasoningText_ = nil;
+    [streamingToolActivityText_ release];
+    streamingToolActivityText_ = nil;
   } else {
     return;
   }
@@ -1185,10 +1534,12 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [statusText_ release];
   [pendingMessageIdentifier_ release];
   [pendingAssistantMessageIdentifier_ release];
+  [pendingToolActivityIdentifier_ release];
   [pendingPrompt_ release];
   [sendingSessionId_ release];
   [streamingAssistantText_ release];
   [streamingReasoningText_ release];
+  [streamingToolActivityText_ release];
   [super dealloc];
 }
 

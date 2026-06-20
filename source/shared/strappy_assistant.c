@@ -147,6 +147,37 @@ static void strappy_assistant_tool_sequence_destroy(
   sequence->final_result = NULL;
 }
 
+static int strappy_assistant_emit_tool_event(
+  strappy_chat_stream_event_type type,
+  const char *tool_call_id,
+  const char *tool_name,
+  const char *arguments_json,
+  const char *result_json,
+  strappy_chat_stream_callback callback,
+  void *callback_data,
+  char **error_out)
+{
+  strappy_chat_stream_event event;
+
+  if (callback == NULL) {
+    return 1;
+  }
+
+  memset(&event, 0, sizeof(event));
+  event.type = type;
+  event.text = tool_name;
+  event.tool_call_id = tool_call_id;
+  event.tool_name = tool_name;
+  event.arguments_json = arguments_json;
+  event.result_json = result_json;
+  if (!callback(&event, callback_data)) {
+    strappy_set_error(error_out, "Stream callback rejected tool event.");
+    return 0;
+  }
+
+  return 1;
+}
+
 static char *strappy_assistant_join_strings(const char *first,
                                             const char *second)
 {
@@ -417,6 +448,9 @@ static int strappy_assistant_build_tool_round(
   const char *prompt,
   const strappy_assistant_request_messages *request_messages,
   const strappy_chat_result *tool_request_result,
+  int should_stream,
+  strappy_chat_stream_callback callback,
+  void *callback_data,
   strappy_assistant_tool_round *round,
   char **error_out)
 {
@@ -541,6 +575,7 @@ static int strappy_assistant_build_tool_round(
     char *message_json;
     size_t followup_index;
     size_t storage_index;
+    int had_tool_error;
 
     tool_call = cJSON_GetArrayItem(tool_calls, index);
     tool_call_id = strappy_assistant_tool_call_string(tool_call, "id");
@@ -550,19 +585,54 @@ static int strappy_assistant_build_tool_round(
       strappy_assistant_tool_call_function_string(tool_call, "arguments");
 
     tool_error = NULL;
+    had_tool_error = 0;
+    if (should_stream &&
+        !strappy_assistant_emit_tool_event(STRAPPY_CHAT_STREAM_EVENT_TOOL_CALL,
+                                           tool_call_id,
+                                           tool_name,
+                                           arguments,
+                                           NULL,
+                                           callback,
+                                           callback_data,
+                                           error_out)) {
+      cJSON_Delete(root);
+      strappy_assistant_tool_round_destroy(round);
+      return 0;
+    }
+
     output = strappy_tools_execute(session_db_path,
                                    tool_name,
                                    arguments,
                                    &tool_error);
     if (output == NULL) {
+      had_tool_error = 1;
       output = strappy_assistant_tool_error_result(tool_name, tool_error);
       free(tool_error);
+      tool_error = NULL;
       if (output == NULL) {
         cJSON_Delete(root);
         strappy_assistant_tool_round_destroy(round);
         strappy_set_error(error_out, "Could not build tool error result.");
         return 0;
       }
+    }
+
+    if (should_stream &&
+        !strappy_assistant_emit_tool_event(
+          had_tool_error ? STRAPPY_CHAT_STREAM_EVENT_TOOL_ERROR :
+                           STRAPPY_CHAT_STREAM_EVENT_TOOL_RESULT,
+          tool_call_id,
+          tool_name,
+          arguments,
+          output,
+          callback,
+          callback_data,
+          error_out)) {
+      free(output);
+      free(tool_error);
+      cJSON_Delete(root);
+      strappy_assistant_tool_round_destroy(round);
+      return 0;
     }
 
     message_json = strappy_assistant_tool_message_json(tool_call_id,
@@ -867,6 +937,7 @@ static int strappy_assistant_run_tool_sequence(
       if (should_stream && (callback != NULL)) {
         strappy_chat_stream_event event;
 
+        memset(&event, 0, sizeof(event));
         event.type = STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA;
         event.text = next_result->response_text;
         if (!callback(&event, callback_data)) {
@@ -884,6 +955,9 @@ static int strappy_assistant_run_tool_sequence(
                                             prompt,
                                             current_request,
                                             current_result,
+                                            should_stream,
+                                            callback,
+                                            callback_data,
                                             round,
                                             error_out)) {
       return 0;
