@@ -46,6 +46,8 @@ static int harness_check_page_scripts(void)
 
   ok = harness_expect_contains(page_html, "function toolJSONHTML") &&
        harness_expect_contains(page_html, "function toolObjectArrayTable") &&
+       harness_expect_contains(page_html, "function toolOutputHasError") &&
+       harness_expect_contains(page_html, "c.error=toolOutputHasError(raw)") &&
        harness_expect_contains(page_html, "Raw JSON preview") &&
        harness_expect_contains(page_html, "tool-column tool-column-empty");
 
