@@ -104,14 +104,12 @@ Deliverables:
 - [ ] Catalog schema for deterministic database facts: assistant-visible
   database ID, tables, columns, indexes, foreign keys, row counts where cheap,
   file metadata, and scan timestamps.
-- [x] Catalog schema for learned database documentation: assistant-visible database
-  ID, schema summary, table/column descriptions, inferred purpose, sensitivity
-  notes, suggested query examples, and `last_learned_at`. The schema exists;
-  the `database_learn` writer flow remains open.
+- [x] Removed the database summary-cache catalog path. The assistant now relies
+  on deterministic schema facts from `database_list_info` and uses bounded
+  read-only `database_query` calls for concrete data lookups.
 - [x] Native macOS Preferences allow checkbox whitelisting for valid cataloged
   SQLite databases.
-- [ ] Fixed native UI state for deny decisions, ignored locations, and stored
-  database documentation.
+- [ ] Fixed native UI state for deny decisions and ignored locations.
 - [ ] Platform-specific safeguards for permission failures, symlinks, loops,
   large directories, and unreadable files. Symlink avoidance, unreadable path
   handling, and validation errors exist in the C scanner; ignored locations and
@@ -135,20 +133,16 @@ catalog rather than creating executable tools dynamically for each discovered
 database. Do not make one tool per whitelisted database; tools should accept an
 assistant-visible database ID and resolve it through the catalog. Deterministic
 schema facts such as tables, columns, indexes, foreign keys, and row counts are
-authoritative catalog data. Model-generated "learning" output is stored as
-database documentation metadata and can be included in prompt context or
-returned by catalog tools, but it is descriptive guidance rather than authority.
+the only catalog-provided database facts. The assistant can inspect contents
+with bounded read-only queries when the user asks a concrete question.
 
 Deliverables:
 
 - [x] Tool registry in C with stable tool names, JSON schemas, argument
-  parsing, and result serialization for the first catalog tool. The registry
-  currently exposes `database_list_info`; its result now includes
-  `availability_state`, `catalog_summary`, full approved database info, and
-  `recommended_next_steps`. Broader query/learn tool coverage remains open.
-- [ ] Stable database tools named `database_list_info`, `database_query`, and
-  `database_learn`, all using assistant-visible database IDs.
-  `database_list_info` exists; read-only query and learning tools remain open.
+  parsing, and result serialization. The registry exposes
+  `database_list_info` and `database_query`.
+- [x] Stable database tools named `database_list_info` and `database_query`,
+  both using assistant-visible database IDs.
 - [x] `database_list_info` defines the availability states `error`,
   `possible_scan_needed`, `possible_whitelist_needed`, and `available`. Empty
   success results route scanning and approval to the user-clicked
@@ -156,28 +150,24 @@ Deliverables:
   an LLM tool.
 - [x] `database_list_info` tool that returns all approved databases with
   deterministic schema facts: tables, columns, indexes, foreign keys, cheap row
-  counts, filename-based file metadata, learned documentation when available,
-  and per-database recommended next steps.
+  counts, filename-based file metadata, and per-database recommended next
+  steps.
 - [x] `database_query` tool that permits read-only SQL only and enforces
   statement timeouts, row limits, and result size limits.
 - [ ] Database ID resolution that maps assistant-visible database IDs to
   cataloged local paths without leaking unnecessary filesystem details. The
   `database_list_info` result uses assistant-visible IDs and omits raw filesystem
   paths.
-- [ ] `database_learn` flow that asks the model to document approved schemas and
-  stores the generated documentation in the catalog; it must not create new
-  executable tool code or unbounded per-database tool schemas.
 - [ ] `database_manage` app action link, intercepted by the WebView/native
   bridge, that opens `PreferencesWindowController` for scanning, approval,
   denial, forgetting, and rescanning databases.
 - [ ] Prompt context builder that summarizes available databases and tool usage
-  rules, including learned documentation for approved databases. Basic tool-use
-  prompt context exists for `database_list_info`; database summaries and
-  learned documentation remain open.
-- [x] One-round tool execution loop for chat completions: capture assistant
-  `tool_calls`, execute registered local tools, send `role: "tool"` results
-  back to the model, and store the final assistant response. Multi-round tool
-  loops remain open.
+  rules. Basic tool-use prompt context exists for `database_list_info`;
+  database summaries remain open.
+- [x] Bounded multi-round tool execution loop for chat completions: capture
+  assistant `tool_calls`, execute registered local tools, send `role: "tool"`
+  results back to the model, and repeat until the model returns final text or
+  reaches the 20-round tool limit.
 - [x] Persisted tool-call and tool-result messages in `session_messages`, with
   `tool_call` and `tool` roles replaying through stored raw message JSON.
 - [x] Webview rendering for tool-call inputs and tool outputs as full-width

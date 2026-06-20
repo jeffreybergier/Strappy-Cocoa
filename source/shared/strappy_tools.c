@@ -58,17 +58,15 @@ static const strappy_tool_definition strappy_tool_definitions[] = {
   {
     STRAPPY_TOOL_DATABASE_LIST_INFO,
     "List all user-approved SQLite databases available to Strappy and include "
-    "safe file metadata, deterministic schema facts, learned documentation "
-    "when available, availability state, and recommended next steps without "
-    "full filesystem paths."
+    "safe file metadata, deterministic schema facts, availability state, and "
+    "recommended next steps without full filesystem paths."
   },
   {
     STRAPPY_TOOL_DATABASE_QUERY,
     "Run one bounded read-only SQL query against a user-approved SQLite "
-    "database after learned database information exists. The model supplies "
-    "only the assistant-visible database_id and SQL query; Strappy resolves "
-    "the local path, opens the database read-only, and enforces statement, "
-    "row, and result limits."
+    "database. The model supplies only the assistant-visible database_id and "
+    "SQL query; Strappy resolves the local path, opens the database read-only, "
+    "and enforces statement, row, and result limits."
   }
 };
 
@@ -367,18 +365,14 @@ char *strappy_tools_prompt_fragment(char **error_out)
   return strappy_string_duplicate(
     "- database_list_info: Lists all valid SQLite databases the user has "
     "approved for Strappy and includes safe file metadata, schema facts, "
-    "learned documentation, and next-step hints. Takes no arguments. Use the "
-    "returned database_id values for database-specific tools. Results use "
-    "filename, not raw filesystem path. If a database has no learned info, "
-    "call database_learn for that database_id before database_query. If "
-    "learned info exists, database_query may be used for concrete user "
-    "questions. If no database is available, guide the user to the returned "
-    "database management link.\n"
+    "and next-step hints. Takes no arguments. Use the returned database_id "
+    "values for database-specific tools. Results use filename, not raw "
+    "filesystem path. If no database is available, guide the user to the "
+    "returned database management link.\n"
     "- database_query: Runs one bounded read-only SQL query against an "
-    "approved database that already has learned info. Arguments are exactly "
-    "database_id and sql. Do not provide paths, open modes, limits, PRAGMA, "
-    "ATTACH, writes, or multiple statements. If the tool reports missing "
-    "learned info, run database_learn for that database_id before querying.");
+    "approved database. Arguments are exactly database_id and sql. Do not "
+    "provide paths, open modes, limits, PRAGMA, ATTACH, writes, or multiple "
+    "statements.");
 }
 
 static int strappy_tools_validate_empty_arguments(const char *arguments_json,
@@ -1570,88 +1564,6 @@ static cJSON *strappy_tools_read_database_schema(
   return schema;
 }
 
-static int strappy_tools_documentation_has_learned_info(
-  const strappy_database_documentation_record *record,
-  int found)
-{
-  if (!found || (record == NULL)) {
-    return 0;
-  }
-
-  return (strappy_tools_string_has_value(record->schema_summary) ||
-          strappy_tools_string_has_value(record->table_descriptions_json) ||
-          strappy_tools_string_has_value(record->column_descriptions_json) ||
-          strappy_tools_string_has_value(record->inferred_purpose) ||
-          strappy_tools_string_has_value(record->sensitivity_notes) ||
-          strappy_tools_string_has_value(record->suggested_query_examples_json)) ? 1 : 0;
-}
-
-static int strappy_tools_add_learned_info(
-  cJSON *root,
-  const strappy_database_documentation_record *record,
-  int found,
-  int *has_learned_info_out)
-{
-  cJSON *learned_info;
-  int has_learned_info;
-
-  if (root == NULL) {
-    return 0;
-  }
-
-  has_learned_info =
-    strappy_tools_documentation_has_learned_info(record, found);
-  if (has_learned_info_out != NULL) {
-    *has_learned_info_out = has_learned_info;
-  }
-
-  if (!strappy_tools_add_bool_to_object(root,
-                                        "has_learned_info",
-                                        has_learned_info)) {
-    return 0;
-  }
-
-  if (!has_learned_info) {
-    return strappy_tools_add_null_to_object(root, "learned_info");
-  }
-
-  learned_info = cJSON_CreateObject();
-  if (learned_info == NULL) {
-    return 0;
-  }
-
-  if (!strappy_tools_add_optional_string_to_object(learned_info,
-                                                   "schema_summary",
-                                                   record->schema_summary) ||
-      !strappy_tools_add_optional_string_to_object(
-        learned_info,
-        "table_descriptions_json",
-        record->table_descriptions_json) ||
-      !strappy_tools_add_optional_string_to_object(
-        learned_info,
-        "column_descriptions_json",
-        record->column_descriptions_json) ||
-      !strappy_tools_add_optional_string_to_object(learned_info,
-                                                   "inferred_purpose",
-                                                   record->inferred_purpose) ||
-      !strappy_tools_add_optional_string_to_object(learned_info,
-                                                   "sensitivity_notes",
-                                                   record->sensitivity_notes) ||
-      !strappy_tools_add_optional_string_to_object(
-        learned_info,
-        "suggested_query_examples_json",
-        record->suggested_query_examples_json) ||
-      !strappy_tools_add_optional_string_to_object(learned_info,
-                                                   "last_learned_at",
-                                                   record->last_learned_at) ||
-      !cJSON_AddItemToObject(root, "learned_info", learned_info)) {
-    cJSON_Delete(learned_info);
-    return 0;
-  }
-
-  return 1;
-}
-
 static cJSON *strappy_tools_create_database_tool_step(const char *tool_name,
                                                       const char *database_id,
                                                       const char *purpose)
@@ -1683,8 +1595,7 @@ static cJSON *strappy_tools_create_database_tool_step(const char *tool_name,
 }
 
 static int strappy_tools_add_database_next_steps(cJSON *root,
-                                                 const char *database_id,
-                                                 int has_learned_info)
+                                                 const char *database_id)
 {
   cJSON *steps;
   cJSON *step;
@@ -1698,18 +1609,11 @@ static int strappy_tools_add_database_next_steps(cJSON *root,
     return 0;
   }
 
-  if (has_learned_info) {
-    step = strappy_tools_create_database_tool_step(
-      STRAPPY_TOOL_DATABASE_QUERY,
-      database_id,
-      "Use database_query with this database_id when answering a concrete "
-      "user question from this database.");
-  } else {
-    step = strappy_tools_create_database_tool_step(
-      STRAPPY_TOOL_DATABASE_LEARN,
-      database_id,
-      "Call database_learn for this database_id before querying it.");
-  }
+  step = strappy_tools_create_database_tool_step(
+    STRAPPY_TOOL_DATABASE_QUERY,
+    database_id,
+    "Use database_query with this database_id when answering a concrete user "
+    "question from this database.");
 
   if ((step == NULL) || !cJSON_AddItemToArray(steps, step)) {
     cJSON_Delete(step);
@@ -1726,19 +1630,15 @@ static int strappy_tools_add_database_next_steps(cJSON *root,
 }
 
 static int strappy_tools_add_database_list_info_record(
-  const char *session_db_path,
   cJSON *databases,
   const strappy_discovered_database_record *record,
   char **error_out)
 {
-  strappy_database_documentation_record documentation;
   cJSON *object;
   cJSON *schema;
   char *schema_error;
-  int documentation_found;
-  int has_learned_info;
 
-  if ((session_db_path == NULL) || (databases == NULL) || (record == NULL)) {
+  if ((databases == NULL) || (record == NULL)) {
     strappy_set_error(error_out, "Database list info request is incomplete.");
     return 0;
   }
@@ -1749,20 +1649,8 @@ static int strappy_tools_add_database_list_info_record(
     return 0;
   }
 
-  strappy_database_documentation_record_init(&documentation);
-  documentation_found = 0;
-  if (!strappy_db_load_database_documentation(session_db_path,
-                                             record->assistant_database_id,
-                                             &documentation,
-                                             &documentation_found,
-                                             error_out)) {
-    cJSON_Delete(object);
-    return 0;
-  }
-
   if (!strappy_tools_add_database_metadata(object, record)) {
     cJSON_Delete(object);
-    strappy_database_documentation_record_destroy(&documentation);
     strappy_set_error(error_out, "Could not build database metadata result.");
     return 0;
   }
@@ -1773,7 +1661,6 @@ static int strappy_tools_add_database_list_info_record(
     if (!cJSON_AddItemToObject(object, "schema", schema)) {
       cJSON_Delete(schema);
       cJSON_Delete(object);
-      strappy_database_documentation_record_destroy(&documentation);
       free(schema_error);
       strappy_set_error(error_out, "Could not build database schema result.");
       return 0;
@@ -1786,28 +1673,19 @@ static int strappy_tools_add_database_list_info_record(
                 (schema_error != NULL) ?
                   schema_error : "Could not read database schema.") == NULL)) {
     cJSON_Delete(object);
-    strappy_database_documentation_record_destroy(&documentation);
     free(schema_error);
     strappy_set_error(error_out, "Could not build database schema result.");
     return 0;
   }
   free(schema_error);
 
-  has_learned_info = 0;
-  if (!strappy_tools_add_learned_info(object,
-                                      &documentation,
-                                      documentation_found,
-                                      &has_learned_info) ||
-      !strappy_tools_add_database_next_steps(object,
-                                             record->assistant_database_id,
-                                             has_learned_info)) {
+  if (!strappy_tools_add_database_next_steps(object,
+                                             record->assistant_database_id)) {
     cJSON_Delete(object);
-    strappy_database_documentation_record_destroy(&documentation);
     strappy_set_error(error_out, "Could not build database info result.");
     return 0;
   }
 
-  strappy_database_documentation_record_destroy(&documentation);
   if (!cJSON_AddItemToArray(databases, object)) {
     cJSON_Delete(object);
     strappy_set_error(error_out, "Could not build database list result.");
@@ -2819,11 +2697,9 @@ static char *strappy_tools_execute_database_query(const char *session_db_path,
 {
   strappy_database_query_arguments arguments;
   strappy_discovered_database_record_list list;
-  strappy_database_documentation_record documentation;
   const strappy_discovered_database_record *record;
   char *json;
   int matched_unavailable;
-  int documentation_found;
 
   if ((session_db_path == NULL) || (session_db_path[0] == '\0')) {
     strappy_set_error(error_out, "Catalog database path is not configured.");
@@ -2866,35 +2742,8 @@ static char *strappy_tools_execute_database_query(const char *session_db_path,
     return NULL;
   }
 
-  strappy_database_documentation_record_init(&documentation);
-  documentation_found = 0;
-  if (!strappy_db_load_database_documentation(session_db_path,
-                                             record->assistant_database_id,
-                                             &documentation,
-                                             &documentation_found,
-                                             error_out)) {
-    strappy_discovered_database_record_list_destroy(&list);
-    strappy_database_query_arguments_destroy(&arguments);
-    return NULL;
-  }
-
-  if (!strappy_tools_documentation_has_learned_info(&documentation,
-                                                    documentation_found)) {
-    strappy_set_formatted_error(
-      error_out,
-      "database_query cannot run because database_id \"%s\" has no learned "
-      "database info. Run database_learn with this database_id before "
-      "querying the database.",
-      arguments.database_id);
-    strappy_database_documentation_record_destroy(&documentation);
-    strappy_discovered_database_record_list_destroy(&list);
-    strappy_database_query_arguments_destroy(&arguments);
-    return NULL;
-  }
-
   json = strappy_tools_run_database_query(record, arguments.sql, error_out);
 
-  strappy_database_documentation_record_destroy(&documentation);
   strappy_discovered_database_record_list_destroy(&list);
   strappy_database_query_arguments_destroy(&arguments);
   return json;
@@ -2951,8 +2800,7 @@ static char *strappy_tools_execute_database_list_info(
       continue;
     }
 
-    if (!strappy_tools_add_database_list_info_record(session_db_path,
-                                                     databases,
+    if (!strappy_tools_add_database_list_info_record(databases,
                                                      record,
                                                      error_out)) {
       cJSON_Delete(root);

@@ -160,51 +160,6 @@ static int harness_create_user_database(const char *database_path)
   return ok;
 }
 
-static int harness_insert_documentation(const char *catalog_path,
-                                        const char *database_id)
-{
-  static const char *sql =
-    "INSERT INTO database_documentation "
-    "(assistant_database_id, schema_summary) "
-    "VALUES (?, 'messages table fixture');";
-  sqlite3 *db;
-  sqlite3_stmt *stmt;
-  int rc;
-  int ok;
-
-  db = NULL;
-  stmt = NULL;
-  rc = sqlite3_open_v2(catalog_path, &db, SQLITE_OPEN_READWRITE, NULL);
-  if (rc != SQLITE_OK) {
-    fprintf(stderr,
-            "Could not open catalog for documentation: %s\n",
-            (db != NULL) ? sqlite3_errmsg(db) : "unknown");
-    if (db != NULL) {
-      sqlite3_close(db);
-    }
-    return 0;
-  }
-
-  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-  if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_text(stmt, 1, database_id, -1, SQLITE_TRANSIENT);
-  }
-  if (rc == SQLITE_OK) {
-    rc = sqlite3_step(stmt);
-  }
-
-  ok = (rc == SQLITE_DONE) ? 1 : 0;
-  if (!ok) {
-    fprintf(stderr, "Could not insert documentation: %s\n", sqlite3_errmsg(db));
-  }
-
-  if (stmt != NULL) {
-    sqlite3_finalize(stmt);
-  }
-  sqlite3_close(db);
-  return ok;
-}
-
 static int harness_expect_error_contains(const char *catalog_path,
                                          const char *tool_name,
                                          const char *arguments_json,
@@ -271,6 +226,33 @@ static int harness_expect_output_contains(const char *catalog_path,
   }
 
   free(output);
+  return ok;
+}
+
+static int harness_run_tool_registry_tests(void)
+{
+  char *error;
+  char *tools_json;
+  int ok;
+
+  error = NULL;
+  tools_json = strappy_tools_request_json(&error);
+  if (tools_json == NULL) {
+    fprintf(stderr,
+            "Expected tool schema but got error: %s\n",
+            (error != NULL) ? error : "(null)");
+    free(error);
+    return 0;
+  }
+
+  ok = ((strstr(tools_json, STRAPPY_TOOL_DATABASE_LIST_INFO) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_DATABASE_QUERY) != NULL) &&
+        (strstr(tools_json, "database_learn") == NULL)) ? 1 : 0;
+  if (!ok) {
+    fprintf(stderr, "Tool registry did not match expected tools: %s\n", tools_json);
+  }
+
+  free(tools_json);
   return ok;
 }
 
@@ -351,6 +333,43 @@ static int harness_register_database(harness_context *context)
   return ok;
 }
 
+static int harness_run_database_list_info_tests(const harness_context *context)
+{
+  char *error;
+  char *output;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  error = NULL;
+  output = strappy_tools_execute(context->catalog_path,
+                                 STRAPPY_TOOL_DATABASE_LIST_INFO,
+                                 "{}",
+                                 &error);
+  if (output == NULL) {
+    fprintf(stderr,
+            "Expected database_list_info output but got error: %s\n",
+            (error != NULL) ? error : "(null)");
+    free(error);
+    return 0;
+  }
+
+  ok = ((strstr(output, "\"schema\"") != NULL) &&
+        (strstr(output, "\"messages\"") != NULL) &&
+        (strstr(output, "\"sender\"") != NULL) &&
+        (strstr(output, "\"database_query\"") != NULL) &&
+        (strstr(output, "learned_info") == NULL) &&
+        (strstr(output, "database_learn") == NULL)) ? 1 : 0;
+  if (!ok) {
+    fprintf(stderr, "database_list_info output was not expected: %s\n", output);
+  }
+
+  free(output);
+  return ok;
+}
+
 static int harness_build_query_arguments(char *output,
                                          size_t output_size,
                                          const char *database_id,
@@ -379,19 +398,7 @@ static int harness_run_database_query_tests(const harness_context *context)
         sizeof(arguments),
         context->database_id,
         "SELECT sender, body FROM messages ORDER BY id")) {
-    fprintf(stderr, "Could not build learned-info gate arguments.\n");
-    return 0;
-  }
-
-  if (!harness_expect_error_contains(context->catalog_path,
-                                     STRAPPY_TOOL_DATABASE_QUERY,
-                                     arguments,
-                                     "database_learn")) {
-    return 0;
-  }
-
-  if (!harness_insert_documentation(context->catalog_path,
-                                    context->database_id)) {
+    fprintf(stderr, "Could not build query arguments.\n");
     return 0;
   }
 
@@ -491,9 +498,11 @@ int main(void)
   int ok;
 
   harness_context_init(&context);
-  ok = harness_make_temp_dir(&context) &&
+  ok = harness_run_tool_registry_tests() &&
+       harness_make_temp_dir(&context) &&
        harness_create_user_database(context.database_path) &&
        harness_register_database(&context) &&
+       harness_run_database_list_info_tests(&context) &&
        harness_run_database_query_tests(&context);
 
   harness_context_destroy(&context);

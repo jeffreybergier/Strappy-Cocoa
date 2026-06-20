@@ -7,7 +7,6 @@ extern "C" {
 
 #define STRAPPY_TOOL_DATABASE_LIST_INFO "database_list_info"
 #define STRAPPY_TOOL_DATABASE_QUERY "database_query"
-#define STRAPPY_TOOL_DATABASE_LEARN "database_learn"
 
 char *strappy_tools_request_json(char **error_out);
 char *strappy_tools_prompt_fragment(char **error_out);
