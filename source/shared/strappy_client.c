@@ -1191,7 +1191,16 @@ static char *strappy_client_build_messages_request_json(
     return NULL;
   }
 
-  tools_json = strappy_tools_request_json(error_out);
+  if ((config->guidance_resource_dir != NULL) &&
+      (config->guidance_resource_dir[0] != '\0')) {
+    tools_json = strappy_tools_request_json(config->guidance_resource_dir,
+                                            error_out);
+  } else {
+    tools_json = strappy_string_duplicate("");
+    if (tools_json == NULL) {
+      strappy_set_error(error_out, "Could not allocate empty tool schema list.");
+    }
+  }
   if (tools_json == NULL) {
     return NULL;
   }

@@ -213,11 +213,12 @@ static char *strappy_assistant_join_strings(const char *first,
 static int strappy_assistant_prepare_request_messages(
   const char *prompt,
   const char *system_prompt_template_path,
-  const char *webview_user_agent,
+  strappy_config *config,
   const strappy_session_message_record_list *message_list,
   strappy_assistant_request_messages *request,
   char **error_out)
 {
+  char *resource_dir;
   char *system_prompt;
   strappy_chat_message *messages;
   size_t history_count;
@@ -229,6 +230,11 @@ static int strappy_assistant_prepare_request_messages(
     return 0;
   }
   strappy_assistant_request_messages_init(request);
+
+  if (config == NULL) {
+    strappy_set_error(error_out, "Assistant guidance configuration is missing.");
+    return 0;
+  }
 
   if ((prompt == NULL) || (prompt[0] == '\0')) {
     strappy_set_error(error_out, "Prompt is empty.");
@@ -251,10 +257,25 @@ static int strappy_assistant_prepare_request_messages(
     return 0;
   }
 
+  resource_dir =
+    strappy_prompt_resource_directory_from_template_path(
+      system_prompt_template_path,
+      error_out);
+  if (resource_dir == NULL) {
+    return 0;
+  }
+
+  if (!strappy_config_set_guidance_resource_dir(config,
+                                                resource_dir,
+                                                error_out)) {
+    free(resource_dir);
+    return 0;
+  }
+
   system_prompt =
     strappy_prompt_render_system_prompt(system_prompt_template_path,
-                                        webview_user_agent,
                                         error_out);
+  free(resource_dir);
   if (system_prompt == NULL) {
     return 0;
   }
@@ -449,6 +470,7 @@ static char *strappy_assistant_tool_message_json(const char *tool_call_id,
 
 static int strappy_assistant_build_tool_round(
   const char *session_db_path,
+  const char *resource_dir,
   const char *prompt,
   const strappy_assistant_request_messages *request_messages,
   const strappy_chat_result *tool_request_result,
@@ -607,6 +629,7 @@ static int strappy_assistant_build_tool_round(
     }
 
     output = strappy_tools_execute(session_db_path,
+                                   resource_dir,
                                    tool_name,
                                    arguments,
                                    &tool_error);
@@ -1039,6 +1062,7 @@ static int strappy_assistant_run_tool_sequence(
 
     round = &sequence->rounds[sequence->round_count];
     if (!strappy_assistant_build_tool_round(session_db_path,
+                                            config->guidance_resource_dir,
                                             prompt,
                                             current_request,
                                             current_result,
@@ -1093,7 +1117,6 @@ static int strappy_assistant_run_tool_sequence(
 static char *strappy_assistant_send_prompt_internal(const char *prompt,
                                                     const char *env_path,
                                                     const char *system_prompt_template_path,
-                                                    const char *webview_user_agent,
                                                     const char *session_db_path,
                                                     int should_store,
                                                     long long *session_id_out,
@@ -1130,7 +1153,7 @@ static char *strappy_assistant_send_prompt_internal(const char *prompt,
 
   if (!strappy_assistant_prepare_request_messages(prompt,
                                                   system_prompt_template_path,
-                                                  webview_user_agent,
+                                                  &config,
                                                   NULL,
                                                   &request_messages,
                                                   error_out)) {
@@ -1223,7 +1246,6 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   const char *prompt,
   const char *env_path,
   const char *system_prompt_template_path,
-  const char *webview_user_agent,
   const char *session_db_path,
   long long session_id,
   char **error_out)
@@ -1275,7 +1297,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
 
   if (!strappy_assistant_prepare_request_messages(prompt,
                                                   system_prompt_template_path,
-                                                  webview_user_agent,
+                                                  &config,
                                                   &message_list,
                                                   &request_messages,
                                                   error_out)) {
@@ -1369,7 +1391,6 @@ static char *strappy_assistant_stream_prompt_internal(
   const char *prompt,
   const char *env_path,
   const char *system_prompt_template_path,
-  const char *webview_user_agent,
   const char *session_db_path,
   long long *session_id_out,
   strappy_chat_stream_callback callback,
@@ -1407,7 +1428,7 @@ static char *strappy_assistant_stream_prompt_internal(
 
   if (!strappy_assistant_prepare_request_messages(prompt,
                                                   system_prompt_template_path,
-                                                  webview_user_agent,
+                                                  &config,
                                                   NULL,
                                                   &request_messages,
                                                   error_out)) {
@@ -1499,7 +1520,6 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   const char *prompt,
   const char *env_path,
   const char *system_prompt_template_path,
-  const char *webview_user_agent,
   const char *session_db_path,
   long long session_id,
   strappy_chat_stream_callback callback,
@@ -1553,7 +1573,7 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
 
   if (!strappy_assistant_prepare_request_messages(prompt,
                                                   system_prompt_template_path,
-                                                  webview_user_agent,
+                                                  &config,
                                                   &message_list,
                                                   &request_messages,
                                                   error_out)) {
@@ -1649,13 +1669,11 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
 char *strappy_assistant_send_prompt(const char *prompt,
                                     const char *env_path,
                                     const char *system_prompt_template_path,
-                                    const char *webview_user_agent,
                                     char **error_out)
 {
   return strappy_assistant_send_prompt_internal(prompt,
                                                env_path,
                                                system_prompt_template_path,
-                                               webview_user_agent,
                                                NULL,
                                                0,
                                                NULL,
@@ -1665,14 +1683,12 @@ char *strappy_assistant_send_prompt(const char *prompt,
 char *strappy_assistant_send_prompt_and_store(const char *prompt,
                                              const char *env_path,
                                              const char *system_prompt_template_path,
-                                             const char *webview_user_agent,
                                              const char *session_db_path,
                                              char **error_out)
 {
   return strappy_assistant_send_prompt_internal(prompt,
                                                env_path,
                                                system_prompt_template_path,
-                                               webview_user_agent,
                                                session_db_path,
                                                1,
                                                NULL,
@@ -1682,7 +1698,6 @@ char *strappy_assistant_send_prompt_and_store(const char *prompt,
 char *strappy_assistant_send_prompt_and_store_with_id(const char *prompt,
                                                      const char *env_path,
                                                      const char *system_prompt_template_path,
-                                                     const char *webview_user_agent,
                                                      const char *session_db_path,
                                                      long long *session_id_out,
                                                      char **error_out)
@@ -1690,7 +1705,6 @@ char *strappy_assistant_send_prompt_and_store_with_id(const char *prompt,
   return strappy_assistant_send_prompt_internal(prompt,
                                                env_path,
                                                system_prompt_template_path,
-                                               webview_user_agent,
                                                session_db_path,
                                                1,
                                                session_id_out,
@@ -1700,7 +1714,6 @@ char *strappy_assistant_send_prompt_and_store_with_id(const char *prompt,
 char *strappy_assistant_send_prompt_for_session_and_store(const char *prompt,
                                                          const char *env_path,
                                                          const char *system_prompt_template_path,
-                                                         const char *webview_user_agent,
                                                          const char *session_db_path,
                                                          long long session_id,
                                                          char **error_out)
@@ -1708,7 +1721,6 @@ char *strappy_assistant_send_prompt_for_session_and_store(const char *prompt,
   return strappy_assistant_send_prompt_for_session_internal(prompt,
                                                            env_path,
                                                            system_prompt_template_path,
-                                                           webview_user_agent,
                                                            session_db_path,
                                                            session_id,
                                                            error_out);
@@ -1718,7 +1730,6 @@ char *strappy_assistant_stream_prompt_and_store_with_id(
   const char *prompt,
   const char *env_path,
   const char *system_prompt_template_path,
-  const char *webview_user_agent,
   const char *session_db_path,
   long long *session_id_out,
   strappy_chat_stream_callback callback,
@@ -1728,7 +1739,6 @@ char *strappy_assistant_stream_prompt_and_store_with_id(
   return strappy_assistant_stream_prompt_internal(prompt,
                                                  env_path,
                                                  system_prompt_template_path,
-                                                 webview_user_agent,
                                                  session_db_path,
                                                  session_id_out,
                                                  callback,
@@ -1740,7 +1750,6 @@ char *strappy_assistant_stream_prompt_for_session_and_store(
   const char *prompt,
   const char *env_path,
   const char *system_prompt_template_path,
-  const char *webview_user_agent,
   const char *session_db_path,
   long long session_id,
   strappy_chat_stream_callback callback,
@@ -1750,7 +1759,6 @@ char *strappy_assistant_stream_prompt_for_session_and_store(
   return strappy_assistant_stream_prompt_for_session_internal(prompt,
                                                              env_path,
                                                              system_prompt_template_path,
-                                                             webview_user_agent,
                                                              session_db_path,
                                                              session_id,
                                                              callback,

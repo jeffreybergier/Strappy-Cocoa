@@ -182,6 +182,7 @@ void strappy_config_init(strappy_config *config)
   config->api_endpoint = NULL;
   config->api_token = NULL;
   config->api_model = NULL;
+  config->guidance_resource_dir = NULL;
 }
 
 void strappy_config_destroy(strappy_config *config)
@@ -193,8 +194,23 @@ void strappy_config_destroy(strappy_config *config)
   free(config->api_endpoint);
   free(config->api_token);
   free(config->api_model);
+  free(config->guidance_resource_dir);
 
   strappy_config_init(config);
+}
+
+int strappy_config_set_guidance_resource_dir(strappy_config *config,
+                                             const char *resource_dir,
+                                             char **error_out)
+{
+  if ((config == NULL) || (resource_dir == NULL) || (resource_dir[0] == '\0')) {
+    strappy_set_error(error_out, "Guidance resource directory is not configured.");
+    return 0;
+  }
+
+  return strappy_config_set_string(&config->guidance_resource_dir,
+                                   resource_dir,
+                                   error_out);
 }
 
 int strappy_config_load(strappy_config *config,

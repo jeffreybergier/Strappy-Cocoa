@@ -708,7 +708,6 @@ static int StrappySessionHandleStreamEvent(
   response = strappy_assistant_send_prompt_and_store([prompt UTF8String],
                                                      NULL,
                                                      [systemPromptTemplatePath fileSystemRepresentation],
-                                                     NULL,
                                                      [databasePath UTF8String],
                                                      &strappyError);
   if (response == NULL) {
@@ -775,7 +774,6 @@ static int StrappySessionHandleStreamEvent(
   response = strappy_assistant_send_prompt_and_store_with_id([prompt UTF8String],
                                                              NULL,
                                                              [systemPromptTemplatePath fileSystemRepresentation],
-                                                             NULL,
                                                              [databasePath UTF8String],
                                                              &sessionId,
                                                              &strappyError);
@@ -865,7 +863,6 @@ static int StrappySessionHandleStreamEvent(
     strappy_assistant_send_prompt_for_session_and_store([prompt UTF8String],
                                                         NULL,
                                                         [systemPromptTemplatePath fileSystemRepresentation],
-                                                        NULL,
                                                         [databasePath UTF8String],
                                                         sessionId,
                                                         &strappyError);
@@ -903,24 +900,8 @@ static int StrappySessionHandleStreamEvent(
                                delegate:(id<StrappySessionStreamDelegate>)delegate
                                   error:(NSError **)error
 {
-  return [StrappySession submitPromptStreaming:prompt
-                           inSessionIdentifier:sessionIdentifier
-                              webViewUserAgent:nil
-                                       context:context
-                                      delegate:delegate
-                                         error:error];
-}
-
-+ (NSDictionary *)submitPromptStreaming:(NSString *)prompt
-                    inSessionIdentifier:(NSNumber *)sessionIdentifier
-                        webViewUserAgent:(NSString *)webViewUserAgent
-                                context:(NSDictionary *)context
-                               delegate:(id<StrappySessionStreamDelegate>)delegate
-                                  error:(NSError **)error
-{
   NSString *databasePath;
   NSString *systemPromptTemplatePath;
-  const char *userAgentCString;
   char *response;
   char *strappyError;
   long long sessionId;
@@ -943,12 +924,6 @@ static int StrappySessionHandleStreamEvent(
   if ((context != nil) && ![context isKindOfClass:[NSDictionary class]]) {
     context = nil;
   }
-  if (![webViewUserAgent isKindOfClass:[NSString class]] ||
-      ([webViewUserAgent length] == 0U)) {
-    webViewUserAgent = nil;
-  }
-  userAgentCString =
-    (webViewUserAgent != nil) ? [webViewUserAgent UTF8String] : NULL;
 
   systemPromptTemplatePath = [StrappySession systemPromptTemplatePathWithError:error];
   if (systemPromptTemplatePath == nil) {
@@ -971,7 +946,6 @@ static int StrappySessionHandleStreamEvent(
       [prompt UTF8String],
       NULL,
       [systemPromptTemplatePath fileSystemRepresentation],
-      userAgentCString,
       [databasePath UTF8String],
       &sessionId,
       StrappySessionHandleStreamEvent,
@@ -998,7 +972,6 @@ static int StrappySessionHandleStreamEvent(
       [prompt UTF8String],
       NULL,
       [systemPromptTemplatePath fileSystemRepresentation],
-      userAgentCString,
       [databasePath UTF8String],
       sessionId,
       StrappySessionHandleStreamEvent,

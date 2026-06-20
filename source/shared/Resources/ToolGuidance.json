@@ -1,0 +1,258 @@
+{
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "database_list_info",
+        "description": "List all user-approved SQLite databases available to Strappy with safe basic file metadata, a short human description, and availability state without full filesystem paths. Use database_context_read with a returned database_id for schema and remembered database context.",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "database_query",
+        "description": "Run one bounded read-only SQL query against a user-approved SQLite database. The model supplies only the assistant-visible database_id and SQL query; Strappy resolves the local path, opens the database read-only, and enforces statement, row, and result limits.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "database_id": {
+              "type": "string",
+              "description": "Assistant-visible database_id returned by database_list_info."
+            },
+            "sql": {
+              "type": "string",
+              "description": "One read-only SQL SELECT or EXPLAIN query. Do not include PRAGMA, ATTACH, writes, multiple statements, filesystem paths, open flags, or limit settings. Large 64-bit integer IDs may be returned as decimal strings to preserve exact values. For typeless columns, sample rows before filtering because flag values may be text. If a BLOB column appears to store text, select substr(CAST(column AS TEXT),1,N) instead of selecting the raw BLOB."
+            }
+          },
+          "required": [
+            "database_id",
+            "sql"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "helper_convert_dates",
+        "description": "Convert a comma-separated list of numeric timestamps to a comma-separated list of UTC ISO8601 timestamps. The timestamps argument is required; the optional unit selects unix_seconds, unix_milliseconds, unix_microseconds, unix_nanoseconds, apple_seconds, apple_milliseconds, apple_microseconds, or apple_nanoseconds. The default unit is unix_seconds.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "timestamps": {
+              "type": "string",
+              "description": "Comma-separated numeric timestamps to convert. Preserve the order; do not include labels or surrounding brackets."
+            },
+            "unit": {
+              "type": "string",
+              "description": "Timestamp unit and epoch. Defaults to unix_seconds when omitted.",
+              "enum": [
+                "unix_seconds",
+                "unix_milliseconds",
+                "unix_microseconds",
+                "unix_nanoseconds",
+                "apple_seconds",
+                "apple_milliseconds",
+                "apple_microseconds",
+                "apple_nanoseconds"
+              ]
+            }
+          },
+          "required": [
+            "timestamps"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "helper_user_info_read",
+        "description": "Read remembered stable user facts such as names, relationships, and preferences. Use this when a user request depends on personal context that may have been mentioned in a previous session.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Optional text search across subject, predicate, and value."
+            },
+            "kind": {
+              "type": "string",
+              "description": "Optional exact kind filter such as identity, relationship, or preference."
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Optional maximum facts to return. Defaults to 20; maximum is 50."
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "helper_user_info_remember",
+        "description": "Remember one small stable user fact as structured data. Store only useful personal facts that are explicit or strongly implied in the conversation; do not store secrets, credentials, or long copied content.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "description": "Fact category, such as identity, relationship, preference, or project."
+            },
+            "subject": {
+              "type": "string",
+              "description": "Who or what the fact is about, for example user, Steve, or email_summary."
+            },
+            "predicate": {
+              "type": "string",
+              "description": "Relationship or property name, for example first_name or is_user_parent."
+            },
+            "value": {
+              "type": "string",
+              "description": "Small stable fact value. Do not store secrets, credentials, or long copied content."
+            },
+            "confidence": {
+              "type": "number",
+              "description": "Optional confidence from 0.0 to 1.0. Defaults to 0.75."
+            },
+            "source": {
+              "type": "string",
+              "description": "Optional short source label such as user_explicit or model_observed."
+            }
+          },
+          "required": [
+            "kind",
+            "subject",
+            "predicate",
+            "value"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "helper_user_info_forget",
+        "description": "Forget one remembered user fact by exact id returned from helper_user_info_read.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer",
+              "description": "Exact fact id returned by helper_user_info_read."
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "database_context_read",
+        "description": "Read database context. With a database_id, returns safe metadata, a human description, simplified live schema, and remembered database hints such as join paths, column semantics, content locations, and caveats. Without a database_id, returns remembered database hints only.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "database_id": {
+              "type": "string",
+              "description": "Optional assistant-visible database_id returned by database_list_info. When provided, the result includes metadata, description, and simplified live schema for that selected database."
+            },
+            "query": {
+              "type": "string",
+              "description": "Optional text search across title, content, and evidence."
+            },
+            "kind": {
+              "type": "string",
+              "description": "Optional exact kind filter such as join_hint, column_semantics, query_pattern, caveat, or content_location."
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Optional maximum hints to return. Defaults to 20; maximum is 50."
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "helper_database_info_remember",
+        "description": "Remember one small database hint for an approved database. Store scoped, evidence-backed facts such as join recipes or content extraction patterns, not arbitrary database content.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "database_id": {
+              "type": "string",
+              "description": "Assistant-visible database_id returned by database_list_info."
+            },
+            "kind": {
+              "type": "string",
+              "description": "Hint category, such as join_hint, column_semantics, query_pattern, caveat, or content_location."
+            },
+            "title": {
+              "type": "string",
+              "description": "Short human-readable title for the database hint."
+            },
+            "content": {
+              "type": "string",
+              "description": "Scoped database hint. Store query recipes or schema observations, not arbitrary row content."
+            },
+            "evidence": {
+              "type": "string",
+              "description": "Optional short evidence, sample query, or sampled-result note."
+            },
+            "confidence": {
+              "type": "number",
+              "description": "Optional confidence from 0.0 to 1.0. Defaults to 0.75."
+            }
+          },
+          "required": [
+            "database_id",
+            "kind",
+            "title",
+            "content"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "helper_database_info_forget",
+        "description": "Forget one remembered database hint by exact id returned from database_context_read.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer",
+              "description": "Exact database hint id returned by database_context_read."
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

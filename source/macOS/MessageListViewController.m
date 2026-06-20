@@ -429,7 +429,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 - (void)beginSendingPrompt:(NSString *)prompt reusingPendingMessage:(BOOL)reuse;
 - (void)retryFailedPrompt;
 - (void)loadEarlierMessages;
-- (NSString *)currentWebViewUserAgent;
 - (NSString *)writeCurrentHTML;
 - (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error;
 - (void)layoutWebViewAndPromptBar;
@@ -740,7 +739,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 {
   NSMutableDictionary *request;
   NSString *promptToSend;
-  NSString *webViewUserAgent;
   static unsigned long pendingCounter = 0UL;
 
   if (sending_) {
@@ -752,7 +750,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   }
 
   promptToSend = [prompt copy];
-  webViewUserAgent = [[self currentWebViewUserAgent] retain];
 
   sending_ = YES;
   [statusText_ release];
@@ -853,37 +850,12 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   if (sessionId_ != nil) {
     [request setObject:sessionId_ forKey:@"session_id"];
   }
-  if ([webViewUserAgent length] > 0U) {
-    [request setObject:webViewUserAgent forKey:@"webview_user_agent"];
-  }
-
   [self retain];
   [NSThread detachNewThreadSelector:@selector(sendPromptInBackground:)
                            toTarget:self
                          withObject:request];
   [request release];
-  [webViewUserAgent release];
   [promptToSend release];
-}
-
-- (NSString *)currentWebViewUserAgent
-{
-  id webView;
-  SEL selector;
-  id userAgent;
-
-  webView = [self webView];
-  selector = @selector(stringByEvaluatingJavaScriptFromString:);
-  if ((webView != nil) && [webView respondsToSelector:selector]) {
-    userAgent = [webView performSelector:selector
-                              withObject:@"navigator.userAgent"];
-    if ([userAgent isKindOfClass:[NSString class]] &&
-        ([userAgent length] > 0U)) {
-      return userAgent;
-    }
-  }
-
-  return @"Unknown WebView user agent";
 }
 
 - (void)retryFailedPrompt
@@ -907,7 +879,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   NSNumber *sessionId;
   NSNumber *previousLastIdentifier;
   NSNumber *created;
-  NSString *webViewUserAgent;
   NSDictionary *streamContext;
 
   pool = [[NSAutoreleasePool alloc] init];
@@ -935,11 +906,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   if (![created isKindOfClass:[NSNumber class]]) {
     created = [NSNumber numberWithBool:NO];
   }
-  webViewUserAgent = [request objectForKey:@"webview_user_agent"];
-  if (![webViewUserAgent isKindOfClass:[NSString class]]) {
-    webViewUserAgent = nil;
-  }
-
   result = [[NSMutableDictionary alloc] init];
   [result setObject:pendingIdentifier forKey:@"pending_id"];
   [result setObject:assistantPendingIdentifier forKey:@"assistant_pending_id"];
@@ -954,7 +920,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   error = nil;
   session = [StrappySession submitPromptStreaming:prompt
                               inSessionIdentifier:sessionId
-                                  webViewUserAgent:webViewUserAgent
                                           context:streamContext
                                          delegate:self
                                             error:&error];

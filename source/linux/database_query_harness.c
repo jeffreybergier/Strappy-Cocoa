@@ -10,6 +10,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#define HARNESS_RESOURCE_DIR "../shared/Resources"
+
 typedef struct harness_context {
   char temp_dir[1024];
   char catalog_path[1200];
@@ -178,6 +180,7 @@ static int harness_expect_error_contains(const char *catalog_path,
 
   error = NULL;
   output = strappy_tools_execute(catalog_path,
+                                 HARNESS_RESOURCE_DIR,
                                  tool_name,
                                  arguments_json,
                                  &error);
@@ -211,6 +214,7 @@ static int harness_expect_output_contains(const char *catalog_path,
 
   error = NULL;
   output = strappy_tools_execute(catalog_path,
+                                 HARNESS_RESOURCE_DIR,
                                  tool_name,
                                  arguments_json,
                                  &error);
@@ -249,6 +253,7 @@ static int harness_expect_output_contains_without(const char *catalog_path,
 
   error = NULL;
   output = strappy_tools_execute(catalog_path,
+                                 HARNESS_RESOURCE_DIR,
                                  tool_name,
                                  arguments_json,
                                  &error);
@@ -287,6 +292,7 @@ static int harness_expect_output_equals(const char *catalog_path,
 
   error = NULL;
   output = strappy_tools_execute(catalog_path,
+                                 HARNESS_RESOURCE_DIR,
                                  tool_name,
                                  arguments_json,
                                  &error);
@@ -317,7 +323,7 @@ static int harness_run_tool_registry_tests(void)
   int ok;
 
   error = NULL;
-  tools_json = strappy_tools_request_json(&error);
+  tools_json = strappy_tools_request_json(HARNESS_RESOURCE_DIR, &error);
   if (tools_json == NULL) {
     fprintf(stderr,
             "Expected tool schema but got error: %s\n",
@@ -332,7 +338,7 @@ static int harness_run_tool_registry_tests(void)
         (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_READ) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_FORGET) != NULL) &&
-        (strstr(tools_json, STRAPPY_TOOL_HELPER_DATABASE_INFO_READ) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_DATABASE_CONTEXT_READ) != NULL) &&
         (strstr(tools_json,
                 STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) != NULL) &&
         (strstr(tools_json,
@@ -341,15 +347,17 @@ static int harness_run_tool_registry_tests(void)
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_READ) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_FORGET) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATABASE_INFO_READ) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_CONTEXT_READ) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET) &&
         !strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_QUERY) &&
+        (strstr(tools_json, "helper_database_info_read") == NULL) &&
         (strstr(tools_json, "database_learn") == NULL)) ? 1 : 0;
   if (!ok) {
     fprintf(stderr, "Tool registry did not match expected tools: %s\n", tools_json);
   }
 
+  free(error);
   free(tools_json);
   return ok;
 }
@@ -489,6 +497,7 @@ static int harness_run_database_list_info_tests(const harness_context *context)
 
   error = NULL;
   output = strappy_tools_execute(context->catalog_path,
+                                 HARNESS_RESOURCE_DIR,
                                  STRAPPY_TOOL_DATABASE_LIST_INFO,
                                  "{}",
                                  &error);
@@ -500,14 +509,71 @@ static int harness_run_database_list_info_tests(const harness_context *context)
     return 0;
   }
 
-  ok = ((strstr(output, "\"schema\"") != NULL) &&
-        (strstr(output, "\"messages\"") != NULL) &&
-        (strstr(output, "\"sender\"") != NULL) &&
-        (strstr(output, "\"database_query\"") != NULL) &&
+  ok = ((strstr(output, "\"database_id\"") != NULL) &&
+        (strstr(output, "\"filename\":\"user.sqlite\"") != NULL) &&
+        (strstr(output, "\"description_short\"") != NULL) &&
+        (strstr(output, "\"description\":") == NULL) &&
+        (strstr(output, "\"availability_state\":\"available\"") != NULL) &&
+        (strstr(output, "\"schema\"") == NULL) &&
+        (strstr(output, "\"database_info\"") == NULL) &&
+        (strstr(output, "\"remembered_info\"") == NULL) &&
+        (strstr(output, "\"user_action\"") == NULL) &&
+        (strstr(output, "\"messages\"") == NULL) &&
+        (strstr(output, "\"database_query\"") == NULL) &&
         (strstr(output, "learned_info") == NULL) &&
         (strstr(output, "database_learn") == NULL)) ? 1 : 0;
   if (!ok) {
     fprintf(stderr, "database_list_info output was not expected: %s\n", output);
+  }
+
+  free(output);
+  return ok;
+}
+
+static int harness_run_empty_database_list_info_tests(
+  const harness_context *context)
+{
+  char *error;
+  char *output;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  error = NULL;
+  if (!strappy_db_initialize(context->catalog_path, &error)) {
+    fprintf(stderr,
+            "Could not initialize empty catalog: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    return 0;
+  }
+
+  output = strappy_tools_execute(context->catalog_path,
+                                 HARNESS_RESOURCE_DIR,
+                                 STRAPPY_TOOL_DATABASE_LIST_INFO,
+                                 "{}",
+                                 &error);
+  if (output == NULL) {
+    fprintf(stderr,
+            "Expected empty database_list_info output but got error: %s\n",
+            (error != NULL) ? error : "(null)");
+    free(error);
+    return 0;
+  }
+
+  ok = ((strstr(output, "\"count\":0") != NULL) &&
+        (strstr(output, "\"availability_state\":\"no_approved_databases\"") != NULL) &&
+        (strstr(output, "\"user_action\"") != NULL) &&
+        (strstr(output, "\"href\":\"strappy://database-manage\"") != NULL) &&
+        (strstr(output, "manage_href") != NULL) &&
+        (strstr(output, "scan_needed") == NULL) &&
+        (strstr(output, "whitelist_needed") == NULL) &&
+        (strstr(output, "possible_scan_needed") == NULL) &&
+        (strstr(output, "possible_whitelist_needed") == NULL)) ? 1 : 0;
+  if (!ok) {
+    fprintf(stderr, "empty database_list_info output was not expected: %s\n", output);
   }
 
   free(output);
@@ -731,18 +797,27 @@ static int harness_run_helper_info_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_HELPER_DATABASE_INFO_READ,
-                                      "{\"query\":\"identifiers\"}",
-                                      "\"join_hint\"",
-                                      "\"messages identifiers join\"")) {
+  written = snprintf(arguments,
+                     sizeof(arguments),
+                     "{\"database_id\":\"%s\",\"query\":\"identifiers\"}",
+                     context->database_id);
+  if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
+    fprintf(stderr, "Could not build database info read arguments.\n");
     return 0;
   }
 
   if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_DATABASE_LIST_INFO,
-                                      "{}",
-                                      "\"remembered_info\"",
+                                      STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                      arguments,
+                                      "\"schema\"",
+                                      "\"messages\"")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                      arguments,
+                                      "\"join_hint\"",
                                       "\"messages identifiers join\"")) {
     return 0;
   }
@@ -757,7 +832,7 @@ static int harness_run_helper_info_tests(const harness_context *context)
   }
 
   if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_HELPER_DATABASE_INFO_READ,
+                                      STRAPPY_TOOL_DATABASE_CONTEXT_READ,
                                       "{\"query\":\"identifiers\"}",
                                       "\"database_info\"",
                                       "\"count\":0")) {
@@ -776,6 +851,7 @@ int main(void)
   ok = harness_run_tool_registry_tests() &&
        harness_run_helper_convert_dates_tests() &&
        harness_make_temp_dir(&context) &&
+       harness_run_empty_database_list_info_tests(&context) &&
        harness_create_user_database(context.database_path) &&
        harness_register_database(&context) &&
        harness_run_database_list_info_tests(&context) &&
