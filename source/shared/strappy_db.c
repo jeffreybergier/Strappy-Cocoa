@@ -187,6 +187,39 @@ void strappy_discovered_database_record_list_destroy(
   strappy_discovered_database_record_list_init(list);
 }
 
+void strappy_database_documentation_record_init(
+  strappy_database_documentation_record *record)
+{
+  if (record == NULL) {
+    return;
+  }
+
+  record->schema_summary = NULL;
+  record->table_descriptions_json = NULL;
+  record->column_descriptions_json = NULL;
+  record->inferred_purpose = NULL;
+  record->sensitivity_notes = NULL;
+  record->suggested_query_examples_json = NULL;
+  record->last_learned_at = NULL;
+}
+
+void strappy_database_documentation_record_destroy(
+  strappy_database_documentation_record *record)
+{
+  if (record == NULL) {
+    return;
+  }
+
+  free(record->schema_summary);
+  free(record->table_descriptions_json);
+  free(record->column_descriptions_json);
+  free(record->inferred_purpose);
+  free(record->sensitivity_notes);
+  free(record->suggested_query_examples_json);
+  free(record->last_learned_at);
+  strappy_database_documentation_record_init(record);
+}
+
 static int strappy_db_open(const char *db_path,
                            sqlite3 **db_out,
                            char **error_out)
@@ -314,6 +347,26 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
   static const char *discovered_databases_decision_index_sql =
     "CREATE INDEX IF NOT EXISTS discovered_databases_user_decision_idx "
     "ON discovered_databases(user_decision);";
+  static const char *database_documentation_sql =
+    "CREATE TABLE IF NOT EXISTS database_documentation ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "assistant_database_id TEXT NOT NULL UNIQUE,"
+    "schema_summary TEXT,"
+    "table_descriptions_json TEXT,"
+    "column_descriptions_json TEXT,"
+    "inferred_purpose TEXT,"
+    "sensitivity_notes TEXT,"
+    "suggested_query_examples_json TEXT,"
+    "created_at TEXT NOT NULL DEFAULT "
+    "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
+    "last_learned_at TEXT NOT NULL DEFAULT "
+    "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
+    "FOREIGN KEY(assistant_database_id) "
+    "REFERENCES discovered_databases(assistant_database_id)"
+    ");";
+  static const char *database_documentation_database_index_sql =
+    "CREATE INDEX IF NOT EXISTS database_documentation_database_id_idx "
+    "ON database_documentation(assistant_database_id);";
 
   if (!strappy_db_exec(db,
                        sessions_sql,
@@ -357,6 +410,20 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
     return 0;
   }
 
+  if (!strappy_db_exec(db,
+                       database_documentation_sql,
+                       "Could not create database documentation schema",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       database_documentation_database_index_sql,
+                       "Could not create database documentation index",
+                       error_out)) {
+    return 0;
+  }
+
   return 1;
 }
 
@@ -370,6 +437,33 @@ static char *strappy_db_column_string(sqlite3_stmt *stmt, int column)
   }
 
   return strappy_string_duplicate((const char *)value);
+}
+
+static int strappy_db_assign_optional_column_string(sqlite3_stmt *stmt,
+                                                    int column,
+                                                    char **value_out,
+                                                    char **error_out)
+{
+  char *value;
+
+  if ((stmt == NULL) || (value_out == NULL)) {
+    strappy_set_error(error_out, "Optional column request is incomplete.");
+    return 0;
+  }
+  *value_out = NULL;
+
+  if (sqlite3_column_type(stmt, column) == SQLITE_NULL) {
+    return 1;
+  }
+
+  value = strappy_db_column_string(stmt, column);
+  if (value == NULL) {
+    strappy_set_error(error_out, "Could not allocate database column value.");
+    return 0;
+  }
+
+  *value_out = value;
+  return 1;
 }
 
 static int strappy_db_assign_record_from_statement(strappy_session_record *record,
@@ -1374,6 +1468,143 @@ int strappy_db_update_discovered_database_decision(
     sqlite3_finalize(stmt);
     sqlite3_close(db);
     return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  return 1;
+}
+
+int strappy_db_load_database_documentation(
+  const char *db_path,
+  const char *assistant_database_id,
+  strappy_database_documentation_record *record,
+  int *found_out,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT schema_summary, table_descriptions_json, "
+    "column_descriptions_json, inferred_purpose, sensitivity_notes, "
+    "suggested_query_examples_json, last_learned_at "
+    "FROM database_documentation "
+    "WHERE assistant_database_id = ? "
+    "LIMIT 1;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (record == NULL) {
+    strappy_set_error(error_out,
+                      "Database documentation output is missing.");
+    return 0;
+  }
+  strappy_database_documentation_record_init(record);
+
+  if (found_out != NULL) {
+    *found_out = 0;
+  }
+
+  if ((assistant_database_id == NULL) ||
+      (assistant_database_id[0] == '\0')) {
+    strappy_set_error(error_out, "Database id is empty.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not prepare database documentation lookup: %s",
+      sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(stmt,
+                         1,
+                         assistant_database_id,
+                         -1,
+                         SQLITE_TRANSIENT);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not bind database documentation lookup: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_DONE) {
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 1;
+  }
+
+  if (rc != SQLITE_ROW) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not read database documentation lookup: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_assign_optional_column_string(
+        stmt,
+        0,
+        &record->schema_summary,
+        error_out) ||
+      !strappy_db_assign_optional_column_string(
+        stmt,
+        1,
+        &record->table_descriptions_json,
+        error_out) ||
+      !strappy_db_assign_optional_column_string(
+        stmt,
+        2,
+        &record->column_descriptions_json,
+        error_out) ||
+      !strappy_db_assign_optional_column_string(
+        stmt,
+        3,
+        &record->inferred_purpose,
+        error_out) ||
+      !strappy_db_assign_optional_column_string(
+        stmt,
+        4,
+        &record->sensitivity_notes,
+        error_out) ||
+      !strappy_db_assign_optional_column_string(
+        stmt,
+        5,
+        &record->suggested_query_examples_json,
+        error_out) ||
+      !strappy_db_assign_optional_column_string(
+        stmt,
+        6,
+        &record->last_learned_at,
+        error_out)) {
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    strappy_database_documentation_record_destroy(record);
+    return 0;
+  }
+
+  if (found_out != NULL) {
+    *found_out = 1;
   }
 
   sqlite3_finalize(stmt);

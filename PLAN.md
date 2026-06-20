@@ -104,9 +104,10 @@ Deliverables:
 - [ ] Catalog schema for deterministic database facts: assistant-visible
   database ID, tables, columns, indexes, foreign keys, row counts where cheap,
   file metadata, and scan timestamps.
-- [ ] Catalog schema for learned database documentation: assistant-visible database
+- [x] Catalog schema for learned database documentation: assistant-visible database
   ID, schema summary, table/column descriptions, inferred purpose, sensitivity
-  notes, suggested query examples, and `last_learned_at`.
+  notes, suggested query examples, and `last_learned_at`. The schema exists;
+  the `database_learn` writer flow remains open.
 - [x] Native macOS Preferences allow checkbox whitelisting for valid cataloged
   SQLite databases.
 - [ ] Fixed native UI state for deny decisions, ignored locations, and stored
@@ -142,25 +143,26 @@ Deliverables:
 
 - [x] Tool registry in C with stable tool names, JSON schemas, argument
   parsing, and result serialization for the first catalog tool. The registry
-  currently exposes `database_list`; its result now includes
-  `availability_state`, `catalog_summary`, and `recommended_next_steps`.
-  Broader tool coverage remains open.
-- [ ] Stable database tools named `database_list`, `database_info`,
-  `database_query`, and `database_learn`, all using assistant-visible database
-  IDs. First vertical slice exists as `database_list`; schema info, read-only
-  query, and learning tools remain open.
-- [x] `database_list` defines the availability states `error`,
+  currently exposes `database_list_info`; its result now includes
+  `availability_state`, `catalog_summary`, full approved database info, and
+  `recommended_next_steps`. Broader query/learn tool coverage remains open.
+- [ ] Stable database tools named `database_list_info`, `database_query`, and
+  `database_learn`, all using assistant-visible database IDs.
+  `database_list_info` exists; read-only query and learning tools remain open.
+- [x] `database_list_info` defines the availability states `error`,
   `possible_scan_needed`, `possible_whitelist_needed`, and `available`. Empty
   success results route scanning and approval to the user-clicked
   `database_manage` app action through next-step hints; `database_manage` is not
   an LLM tool.
-- [ ] `database_info` tool that returns deterministic schema facts: tables,
-  columns, indexes, foreign keys, row counts, and sample-safe metadata.
+- [x] `database_list_info` tool that returns all approved databases with
+  deterministic schema facts: tables, columns, indexes, foreign keys, cheap row
+  counts, filename-based file metadata, learned documentation when available,
+  and per-database recommended next steps.
 - [ ] `database_query` tool that permits read-only SQL only and enforces
   statement timeouts, row limits, and result size limits.
 - [ ] Database ID resolution that maps assistant-visible database IDs to
   cataloged local paths without leaking unnecessary filesystem details. The
-  `database_list` result uses assistant-visible IDs and omits raw filesystem
+  `database_list_info` result uses assistant-visible IDs and omits raw filesystem
   paths.
 - [ ] `database_learn` flow that asks the model to document approved schemas and
   stores the generated documentation in the catalog; it must not create new
@@ -170,7 +172,7 @@ Deliverables:
   denial, forgetting, and rescanning databases.
 - [ ] Prompt context builder that summarizes available databases and tool usage
   rules, including learned documentation for approved databases. Basic tool-use
-  prompt context exists for `database_list`; database summaries and
+  prompt context exists for `database_list_info`; database summaries and
   learned documentation remain open.
 - [x] One-round tool execution loop for chat completions: capture assistant
   `tool_calls`, execute registered local tools, send `role: "tool"` results
@@ -190,7 +192,7 @@ Validation:
 - [ ] Static analysis pass focused on JSON parsing, sqlite statement cleanup, and
   error paths.
 - [x] Clean builds with full warning logs captured for the current
-  `database_list` vertical slice.
+  `database_list_info` vertical slice.
 
 ## Phase 5: Chat Interface And User Workflow
 

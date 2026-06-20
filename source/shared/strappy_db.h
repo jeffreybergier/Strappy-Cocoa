@@ -83,6 +83,16 @@ typedef struct strappy_discovered_database_record_list {
   size_t count;
 } strappy_discovered_database_record_list;
 
+typedef struct strappy_database_documentation_record {
+  char *schema_summary;
+  char *table_descriptions_json;
+  char *column_descriptions_json;
+  char *inferred_purpose;
+  char *sensitivity_notes;
+  char *suggested_query_examples_json;
+  char *last_learned_at;
+} strappy_database_documentation_record;
+
 void strappy_session_record_init(strappy_session_record *record);
 void strappy_session_record_destroy(strappy_session_record *record);
 void strappy_session_record_list_init(strappy_session_record_list *list);
@@ -95,6 +105,10 @@ void strappy_discovered_database_record_init(strappy_discovered_database_record 
 void strappy_discovered_database_record_destroy(strappy_discovered_database_record *record);
 void strappy_discovered_database_record_list_init(strappy_discovered_database_record_list *list);
 void strappy_discovered_database_record_list_destroy(strappy_discovered_database_record_list *list);
+void strappy_database_documentation_record_init(
+  strappy_database_documentation_record *record);
+void strappy_database_documentation_record_destroy(
+  strappy_database_documentation_record *record);
 
 int strappy_db_initialize(const char *db_path, char **error_out);
 int strappy_db_save_discovered_databases(
@@ -110,6 +124,12 @@ int strappy_db_update_discovered_database_decision(
   const char *db_path,
   long long catalog_id,
   const char *user_decision,
+  char **error_out);
+int strappy_db_load_database_documentation(
+  const char *db_path,
+  const char *assistant_database_id,
+  strappy_database_documentation_record *record,
+  int *found_out,
   char **error_out);
 int strappy_db_save_exchange(const char *db_path,
                              const char *prompt,
