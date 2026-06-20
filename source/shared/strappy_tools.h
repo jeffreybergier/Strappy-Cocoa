@@ -7,9 +7,11 @@ extern "C" {
 
 #define STRAPPY_TOOL_DATABASE_LIST_INFO "database_list_info"
 #define STRAPPY_TOOL_DATABASE_QUERY "database_query"
+#define STRAPPY_TOOL_HELPER_CONVERT_DATES "helper_convert_dates"
 
 char *strappy_tools_request_json(char **error_out);
 char *strappy_tools_prompt_fragment(char **error_out);
+int strappy_tools_is_helper(const char *tool_name);
 char *strappy_tools_execute(const char *session_db_path,
                             const char *tool_name,
                             const char *arguments_json,

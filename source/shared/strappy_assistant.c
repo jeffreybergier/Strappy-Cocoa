@@ -12,6 +12,7 @@
 #include <string.h>
 
 #define STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS 20U
+#define STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS 100U
 
 typedef struct strappy_assistant_request_messages {
   strappy_chat_message *messages;
@@ -31,9 +32,10 @@ typedef struct strappy_assistant_tool_round {
 } strappy_assistant_tool_round;
 
 typedef struct strappy_assistant_tool_sequence {
-  strappy_assistant_tool_round rounds[STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS];
-  strappy_chat_result results[STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS + 1U];
+  strappy_assistant_tool_round rounds[STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS];
+  strappy_chat_result results[STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS + 1U];
   size_t round_count;
+  size_t charged_round_count;
   strappy_chat_result *final_result;
 } strappy_assistant_tool_sequence;
 
@@ -114,15 +116,16 @@ static void strappy_assistant_tool_sequence_init(
     return;
   }
 
-  for (index = 0U; index < STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS; index++) {
+  for (index = 0U; index < STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS; index++) {
     strappy_assistant_tool_round_init(&sequence->rounds[index]);
   }
 
-  for (index = 0U; index <= STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS; index++) {
+  for (index = 0U; index <= STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS; index++) {
     strappy_chat_result_init(&sequence->results[index]);
   }
 
   sequence->round_count = 0U;
+  sequence->charged_round_count = 0U;
   sequence->final_result = NULL;
 }
 
@@ -135,15 +138,16 @@ static void strappy_assistant_tool_sequence_destroy(
     return;
   }
 
-  for (index = 0U; index < STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS; index++) {
+  for (index = 0U; index < STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS; index++) {
     strappy_assistant_tool_round_destroy(&sequence->rounds[index]);
   }
 
-  for (index = 0U; index <= STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS; index++) {
+  for (index = 0U; index <= STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS; index++) {
     strappy_chat_result_destroy(&sequence->results[index]);
   }
 
   sequence->round_count = 0U;
+  sequence->charged_round_count = 0U;
   sequence->final_result = NULL;
 }
 
@@ -451,6 +455,7 @@ static int strappy_assistant_build_tool_round(
   int should_stream,
   strappy_chat_stream_callback callback,
   void *callback_data,
+  int requires_catalog,
   strappy_assistant_tool_round *round,
   char **error_out)
 {
@@ -484,7 +489,8 @@ static int strappy_assistant_build_tool_round(
   }
   free(parse_error);
 
-  if ((session_db_path == NULL) || (session_db_path[0] == '\0')) {
+  if (requires_catalog &&
+      ((session_db_path == NULL) || (session_db_path[0] == '\0'))) {
     cJSON_Delete(root);
     strappy_set_error(error_out, "Tool execution requires a catalog database.");
     return 0;
@@ -664,20 +670,25 @@ static int strappy_assistant_build_tool_round(
   return 1;
 }
 
-static int strappy_assistant_result_has_tool_calls(
+static int strappy_assistant_result_tool_call_stats(
   const strappy_chat_result *result,
   int *has_tool_calls_out,
+  int *has_charged_tool_calls_out,
   char **error_out)
 {
   cJSON *root;
   cJSON *tool_calls;
   char *parse_error;
+  int tool_count;
+  int index;
 
-  if (has_tool_calls_out == NULL) {
+  if ((has_tool_calls_out == NULL) ||
+      (has_charged_tool_calls_out == NULL)) {
     strappy_set_error(error_out, "Tool-call check output is missing.");
     return 0;
   }
   *has_tool_calls_out = 0;
+  *has_charged_tool_calls_out = 0;
 
   root = NULL;
   parse_error = NULL;
@@ -693,6 +704,20 @@ static int strappy_assistant_result_has_tool_calls(
   }
 
   *has_tool_calls_out = 1;
+  tool_count = cJSON_GetArraySize(tool_calls);
+  for (index = 0; index < tool_count; index++) {
+    cJSON *tool_call;
+    const char *tool_name;
+
+    tool_call = cJSON_GetArrayItem(tool_calls, index);
+    tool_name =
+      strappy_assistant_tool_call_function_string(tool_call, "name");
+    if (!strappy_tools_is_helper(tool_name)) {
+      *has_charged_tool_calls_out = 1;
+      break;
+    }
+  }
+
   cJSON_Delete(root);
   return 1;
 }
@@ -728,18 +753,20 @@ static char *strappy_assistant_create_local_message_json(const char *content,
   return json;
 }
 
-static int strappy_assistant_set_tool_limit_result(
+static int strappy_assistant_set_local_limit_result(
   strappy_chat_result *result,
   const strappy_chat_result *last_result,
+  const char *message,
+  const char *finish_reason,
   char **error_out)
 {
-  static const char *message =
-    "I reached the 20-round database tool limit while inspecting local data, "
-    "so I could not finish a reliable answer. Please ask a narrower question "
-    "or continue with a more specific follow-up.";
-
   if (result == NULL) {
     strappy_set_error(error_out, "Assistant limit result output is missing.");
+    return 0;
+  }
+
+  if ((message == NULL) || (finish_reason == NULL)) {
+    strappy_set_error(error_out, "Assistant limit result request is incomplete.");
     return 0;
   }
 
@@ -747,8 +774,8 @@ static int strappy_assistant_set_tool_limit_result(
   result->response_text = strappy_string_duplicate(message);
   result->message_json =
     strappy_assistant_create_local_message_json(message, error_out);
-  result->finish_reason = strappy_string_duplicate("tool_round_limit");
-  result->native_finish_reason = strappy_string_duplicate("tool_round_limit");
+  result->finish_reason = strappy_string_duplicate(finish_reason);
+  result->native_finish_reason = strappy_string_duplicate(finish_reason);
   if ((last_result != NULL) && (last_result->model != NULL)) {
     result->model = strappy_string_duplicate(last_result->model);
   }
@@ -767,6 +794,40 @@ static int strappy_assistant_set_tool_limit_result(
   }
 
   return 1;
+}
+
+static int strappy_assistant_set_tool_limit_result(
+  strappy_chat_result *result,
+  const strappy_chat_result *last_result,
+  char **error_out)
+{
+  static const char *message =
+    "I reached the 20-round database tool limit while inspecting local data, "
+    "so I could not finish a reliable answer. Please ask a narrower question "
+    "or continue with a more specific follow-up.";
+
+  return strappy_assistant_set_local_limit_result(result,
+                                                  last_result,
+                                                  message,
+                                                  "tool_round_limit",
+                                                  error_out);
+}
+
+static int strappy_assistant_set_total_tool_limit_result(
+  strappy_chat_result *result,
+  const strappy_chat_result *last_result,
+  char **error_out)
+{
+  static const char *message =
+    "I reached the helper tool safety limit while preparing local data, so I "
+    "could not finish a reliable answer. Please ask a narrower question or "
+    "continue with a more specific follow-up.";
+
+  return strappy_assistant_set_local_limit_result(result,
+                                                  last_result,
+                                                  message,
+                                                  "tool_total_round_limit",
+                                                  error_out);
 }
 
 static int strappy_assistant_store_tool_sequence(
@@ -915,10 +976,12 @@ static int strappy_assistant_run_tool_sequence(
     strappy_assistant_tool_round *round;
     strappy_chat_result *next_result;
     int has_tool_calls;
+    int has_charged_tool_calls;
 
-    if (!strappy_assistant_result_has_tool_calls(current_result,
-                                                &has_tool_calls,
-                                                error_out)) {
+    if (!strappy_assistant_result_tool_call_stats(current_result,
+                                                 &has_tool_calls,
+                                                 &has_charged_tool_calls,
+                                                 error_out)) {
       return 0;
     }
 
@@ -927,8 +990,32 @@ static int strappy_assistant_run_tool_sequence(
       return 1;
     }
 
-    if (sequence->round_count >= STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS) {
-      next_result = &sequence->results[STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS];
+    if (sequence->round_count >= STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS) {
+      next_result = &sequence->results[STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS];
+      if (!strappy_assistant_set_total_tool_limit_result(next_result,
+                                                         current_result,
+                                                         error_out)) {
+        return 0;
+      }
+      if (should_stream && (callback != NULL)) {
+        strappy_chat_stream_event event;
+
+        memset(&event, 0, sizeof(event));
+        event.type = STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA;
+        event.text = next_result->response_text;
+        if (!callback(&event, callback_data)) {
+          strappy_set_error(error_out,
+                            "Stream callback rejected assistant limit message.");
+          return 0;
+        }
+      }
+      sequence->final_result = next_result;
+      return 1;
+    }
+
+    if (has_charged_tool_calls &&
+        (sequence->charged_round_count >= STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS)) {
+      next_result = &sequence->results[sequence->round_count];
       if (!strappy_assistant_set_tool_limit_result(next_result,
                                                    current_result,
                                                    error_out)) {
@@ -958,6 +1045,7 @@ static int strappy_assistant_run_tool_sequence(
                                             should_stream,
                                             callback,
                                             callback_data,
+                                            has_charged_tool_calls,
                                             round,
                                             error_out)) {
       return 0;
@@ -970,6 +1058,9 @@ static int strappy_assistant_run_tool_sequence(
 
     next_result = &sequence->results[sequence->round_count];
     sequence->round_count++;
+    if (has_charged_tool_calls) {
+      sequence->charged_round_count++;
+    }
     if (did_run_out != NULL) {
       *did_run_out = 1;
     }

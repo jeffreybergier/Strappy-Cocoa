@@ -1,10 +1,12 @@
 #include "strappy_tools.h"
 
+#include "strappy_cocoa.h"
 #include "strappy_core.h"
 #include "strappy_db.h"
 
 #include <cJSON.h>
 #include <sqlite3.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -25,10 +27,20 @@
 #define STRAPPY_DATABASE_QUERY_TIMEOUT_SECONDS 5.0
 #define STRAPPY_DATABASE_QUERY_PROGRESS_INSTRUCTIONS 1000
 #define STRAPPY_DATABASE_QUERY_MAX_PROGRESS_CALLS 20000
+#define STRAPPY_DATABASE_QUERY_JSON_SAFE_INTEGER_MAX 9007199254740991LL
+#define STRAPPY_DATABASE_QUERY_JSON_SAFE_INTEGER_MIN (-9007199254740991LL)
+#define STRAPPY_HELPER_CONVERT_DATES_MAX_INPUT_BYTES 8192U
+#define STRAPPY_HELPER_CONVERT_DATES_MAX_TIMESTAMPS 256U
+
+typedef enum strappy_tool_kind {
+  STRAPPY_TOOL_KIND_DATABASE = 1,
+  STRAPPY_TOOL_KIND_HELPER = 2
+} strappy_tool_kind;
 
 typedef struct strappy_tool_definition {
   const char *name;
   const char *description;
+  strappy_tool_kind kind;
 } strappy_tool_definition;
 
 typedef struct strappy_tools_catalog_summary {
@@ -43,6 +55,16 @@ typedef struct strappy_database_query_arguments {
   char *database_id;
   char *sql;
 } strappy_database_query_arguments;
+
+typedef struct strappy_helper_convert_dates_arguments {
+  char *timestamps;
+  strappy_cocoa_timestamp_unit unit;
+} strappy_helper_convert_dates_arguments;
+
+typedef struct strappy_helper_text_buffer {
+  char *data;
+  size_t length;
+} strappy_helper_text_buffer;
 
 typedef struct strappy_database_query_authorizer_context {
   int denied_action;
@@ -59,19 +81,57 @@ static const strappy_tool_definition strappy_tool_definitions[] = {
     STRAPPY_TOOL_DATABASE_LIST_INFO,
     "List all user-approved SQLite databases available to Strappy and include "
     "safe file metadata, deterministic schema facts, availability state, and "
-    "recommended next steps without full filesystem paths."
+    "recommended next steps without full filesystem paths.",
+    STRAPPY_TOOL_KIND_DATABASE
   },
   {
     STRAPPY_TOOL_DATABASE_QUERY,
     "Run one bounded read-only SQL query against a user-approved SQLite "
     "database. The model supplies only the assistant-visible database_id and "
     "SQL query; Strappy resolves the local path, opens the database read-only, "
-    "and enforces statement, row, and result limits."
+    "and enforces statement, row, and result limits.",
+    STRAPPY_TOOL_KIND_DATABASE
+  },
+  {
+    STRAPPY_TOOL_HELPER_CONVERT_DATES,
+    "Convert a comma-separated list of numeric timestamps to a comma-separated "
+    "list of UTC ISO8601 timestamps. The timestamps argument is required; the "
+    "optional unit selects unix_seconds, unix_milliseconds, unix_microseconds, "
+    "unix_nanoseconds, apple_seconds, apple_milliseconds, apple_microseconds, "
+    "or apple_nanoseconds. The default unit is unix_seconds.",
+    STRAPPY_TOOL_KIND_HELPER
   }
 };
 
 static const size_t strappy_tool_definition_count =
   sizeof(strappy_tool_definitions) / sizeof(strappy_tool_definitions[0]);
+
+static const strappy_tool_definition *strappy_tools_find_definition(
+  const char *tool_name)
+{
+  size_t index;
+
+  if ((tool_name == NULL) || (tool_name[0] == '\0')) {
+    return NULL;
+  }
+
+  for (index = 0U; index < strappy_tool_definition_count; index++) {
+    if (strcmp(strappy_tool_definitions[index].name, tool_name) == 0) {
+      return &strappy_tool_definitions[index];
+    }
+  }
+
+  return NULL;
+}
+
+int strappy_tools_is_helper(const char *tool_name)
+{
+  const strappy_tool_definition *definition;
+
+  definition = strappy_tools_find_definition(tool_name);
+  return ((definition != NULL) &&
+          (definition->kind == STRAPPY_TOOL_KIND_HELPER)) ? 1 : 0;
+}
 
 static void strappy_database_query_arguments_init(
   strappy_database_query_arguments *arguments)
@@ -94,6 +154,78 @@ static void strappy_database_query_arguments_destroy(
   free(arguments->database_id);
   free(arguments->sql);
   strappy_database_query_arguments_init(arguments);
+}
+
+static void strappy_helper_convert_dates_arguments_init(
+  strappy_helper_convert_dates_arguments *arguments)
+{
+  if (arguments == NULL) {
+    return;
+  }
+
+  arguments->timestamps = NULL;
+  arguments->unit = STRAPPY_COCOA_TIMESTAMP_UNIT_UNIX_SECONDS;
+}
+
+static void strappy_helper_convert_dates_arguments_destroy(
+  strappy_helper_convert_dates_arguments *arguments)
+{
+  if (arguments == NULL) {
+    return;
+  }
+
+  free(arguments->timestamps);
+  strappy_helper_convert_dates_arguments_init(arguments);
+}
+
+static void strappy_helper_text_buffer_init(strappy_helper_text_buffer *buffer)
+{
+  if (buffer == NULL) {
+    return;
+  }
+
+  buffer->data = NULL;
+  buffer->length = 0U;
+}
+
+static void strappy_helper_text_buffer_destroy(strappy_helper_text_buffer *buffer)
+{
+  if (buffer == NULL) {
+    return;
+  }
+
+  free(buffer->data);
+  strappy_helper_text_buffer_init(buffer);
+}
+
+static int strappy_helper_text_buffer_append(
+  strappy_helper_text_buffer *buffer,
+  const char *text)
+{
+  size_t length;
+  char *next_data;
+
+  if ((buffer == NULL) || (text == NULL)) {
+    return 0;
+  }
+
+  length = strlen(text);
+  if (buffer->length > (((size_t)-1) - length - 1U)) {
+    return 0;
+  }
+
+  next_data = (char *)realloc(buffer->data, buffer->length + length + 1U);
+  if (next_data == NULL) {
+    return 0;
+  }
+
+  buffer->data = next_data;
+  if (length > 0U) {
+    memcpy(buffer->data + buffer->length, text, length);
+  }
+  buffer->length += length;
+  buffer->data[buffer->length] = '\0';
+  return 1;
 }
 
 static int strappy_tools_add_empty_parameters(cJSON *function)
@@ -241,7 +373,11 @@ static int strappy_tools_add_database_query_parameters(cJSON *function)
         "sql",
         "One read-only SQL SELECT or EXPLAIN query. Do not include PRAGMA, "
         "ATTACH, writes, multiple statements, filesystem paths, open flags, "
-        "or limit settings.") ||
+        "or limit settings. Large 64-bit integer IDs may be returned as "
+        "decimal strings to preserve exact values. For typeless columns, "
+        "sample rows before filtering because flag values may be text. If a "
+        "BLOB column appears to store text, select substr(CAST(column AS "
+        "TEXT),1,N) instead of selecting the raw BLOB.") ||
       !strappy_tools_add_required_parameter(required, "database_id") ||
       !strappy_tools_add_required_parameter(required, "sql")) {
     cJSON_Delete(parameters);
@@ -250,6 +386,138 @@ static int strappy_tools_add_database_query_parameters(cJSON *function)
     cJSON_Delete(additional_properties);
     return 0;
   }
+
+  if (!cJSON_AddItemToObject(parameters, "properties", properties)) {
+    cJSON_Delete(parameters);
+    cJSON_Delete(properties);
+    cJSON_Delete(required);
+    cJSON_Delete(additional_properties);
+    return 0;
+  }
+  properties = NULL;
+
+  if (!cJSON_AddItemToObject(parameters, "required", required)) {
+    cJSON_Delete(parameters);
+    cJSON_Delete(required);
+    cJSON_Delete(additional_properties);
+    return 0;
+  }
+  required = NULL;
+
+  if (!cJSON_AddItemToObject(parameters,
+                             "additionalProperties",
+                             additional_properties)) {
+    cJSON_Delete(parameters);
+    cJSON_Delete(additional_properties);
+    return 0;
+  }
+  additional_properties = NULL;
+
+  if (!cJSON_AddItemToObject(function, "parameters", parameters)) {
+    cJSON_Delete(parameters);
+    return 0;
+  }
+
+  return 1;
+}
+
+static int strappy_tools_add_string_enum_item(cJSON *array, const char *value)
+{
+  cJSON *item;
+
+  if ((array == NULL) || (value == NULL)) {
+    return 0;
+  }
+
+  item = cJSON_CreateString(value);
+  if ((item == NULL) || !cJSON_AddItemToArray(array, item)) {
+    cJSON_Delete(item);
+    return 0;
+  }
+
+  return 1;
+}
+
+static int strappy_tools_add_helper_convert_dates_parameters(cJSON *function)
+{
+  cJSON *parameters;
+  cJSON *properties;
+  cJSON *required;
+  cJSON *additional_properties;
+  cJSON *unit_property;
+  cJSON *unit_enum;
+
+  if (function == NULL) {
+    return 0;
+  }
+
+  parameters = cJSON_CreateObject();
+  properties = cJSON_CreateObject();
+  required = cJSON_CreateArray();
+  additional_properties = cJSON_CreateBool(0);
+  unit_property = cJSON_CreateObject();
+  unit_enum = cJSON_CreateArray();
+  if ((parameters == NULL) || (properties == NULL) || (required == NULL) ||
+      (additional_properties == NULL) || (unit_property == NULL) ||
+      (unit_enum == NULL)) {
+    cJSON_Delete(parameters);
+    cJSON_Delete(properties);
+    cJSON_Delete(required);
+    cJSON_Delete(additional_properties);
+    cJSON_Delete(unit_property);
+    cJSON_Delete(unit_enum);
+    return 0;
+  }
+
+  if ((cJSON_AddStringToObject(parameters, "type", "object") == NULL) ||
+      !strappy_tools_add_string_parameter(
+        properties,
+        "timestamps",
+        "Comma-separated numeric timestamps to convert. Preserve the order; "
+        "do not include labels or surrounding brackets.") ||
+      (cJSON_AddStringToObject(unit_property, "type", "string") == NULL) ||
+      (cJSON_AddStringToObject(
+         unit_property,
+         "description",
+         "Timestamp unit and epoch. Defaults to unix_seconds when omitted.") == NULL) ||
+      !strappy_tools_add_string_enum_item(unit_enum, "unix_seconds") ||
+      !strappy_tools_add_string_enum_item(unit_enum, "unix_milliseconds") ||
+      !strappy_tools_add_string_enum_item(unit_enum, "unix_microseconds") ||
+      !strappy_tools_add_string_enum_item(unit_enum, "unix_nanoseconds") ||
+      !strappy_tools_add_string_enum_item(unit_enum, "apple_seconds") ||
+      !strappy_tools_add_string_enum_item(unit_enum, "apple_milliseconds") ||
+      !strappy_tools_add_string_enum_item(unit_enum, "apple_microseconds") ||
+      !strappy_tools_add_string_enum_item(unit_enum, "apple_nanoseconds") ||
+      !strappy_tools_add_required_parameter(required, "timestamps")) {
+    cJSON_Delete(parameters);
+    cJSON_Delete(properties);
+    cJSON_Delete(required);
+    cJSON_Delete(additional_properties);
+    cJSON_Delete(unit_property);
+    cJSON_Delete(unit_enum);
+    return 0;
+  }
+
+  if (!cJSON_AddItemToObject(unit_property, "enum", unit_enum)) {
+    cJSON_Delete(parameters);
+    cJSON_Delete(properties);
+    cJSON_Delete(required);
+    cJSON_Delete(additional_properties);
+    cJSON_Delete(unit_property);
+    cJSON_Delete(unit_enum);
+    return 0;
+  }
+  unit_enum = NULL;
+
+  if (!cJSON_AddItemToObject(properties, "unit", unit_property)) {
+    cJSON_Delete(parameters);
+    cJSON_Delete(properties);
+    cJSON_Delete(required);
+    cJSON_Delete(additional_properties);
+    cJSON_Delete(unit_property);
+    return 0;
+  }
+  unit_property = NULL;
 
   if (!cJSON_AddItemToObject(parameters, "properties", properties)) {
     cJSON_Delete(parameters);
@@ -306,6 +574,10 @@ static cJSON *strappy_tools_create_tool_schema(
 
   if (strcmp(definition->name, STRAPPY_TOOL_DATABASE_QUERY) == 0) {
     added_parameters = strappy_tools_add_database_query_parameters(function);
+  } else if (strcmp(definition->name,
+                    STRAPPY_TOOL_HELPER_CONVERT_DATES) == 0) {
+    added_parameters =
+      strappy_tools_add_helper_convert_dates_parameters(function);
   } else {
     added_parameters = strappy_tools_add_empty_parameters(function);
   }
@@ -372,7 +644,19 @@ char *strappy_tools_prompt_fragment(char **error_out)
     "- database_query: Runs one bounded read-only SQL query against an "
     "approved database. Arguments are exactly database_id and sql. Do not "
     "provide paths, open modes, limits, PRAGMA, ATTACH, writes, or multiple "
-    "statements.");
+    "statements. Large 64-bit integer IDs may be returned as decimal strings "
+    "to preserve exact values; use those exact values in follow-up queries. "
+    "For columns with no declared type, sample rows before filtering because "
+    "flag values may be returned as text strings. If a BLOB column appears "
+    "to store text, select substr(CAST(column AS TEXT),1,N) instead of "
+    "selecting the raw BLOB.\n"
+    "- helper_convert_dates: Converts a comma-separated timestamps string to "
+    "a comma-separated list of UTC ISO8601 timestamps. Arguments are "
+    "timestamps and optional unit. The default unit is unix_seconds. Use "
+    "unix_milliseconds, unix_microseconds, unix_nanoseconds, apple_seconds, "
+    "apple_milliseconds, apple_microseconds, or apple_nanoseconds when the "
+    "database schema or sampled values show those formats. Use this helper "
+    "instead of guessing date math from raw numeric timestamps.");
 }
 
 static int strappy_tools_validate_empty_arguments(const char *arguments_json,
@@ -797,6 +1081,130 @@ static int strappy_tools_parse_database_query_arguments(
   }
 
   return 1;
+}
+
+static int strappy_tools_parse_helper_convert_dates_arguments(
+  const char *arguments_json,
+  strappy_helper_convert_dates_arguments *arguments,
+  char **error_out)
+{
+  cJSON *root;
+  cJSON *timestamps;
+  cJSON *unit;
+  cJSON *child;
+  size_t timestamp_length;
+
+  if (arguments == NULL) {
+    strappy_set_error(error_out,
+                      "helper_convert_dates argument output is missing.");
+    return 0;
+  }
+  strappy_helper_convert_dates_arguments_init(arguments);
+
+  if (!strappy_tools_string_has_value(arguments_json)) {
+    strappy_set_error(error_out,
+                      "helper_convert_dates requires a timestamps argument.");
+    return 0;
+  }
+
+  root = cJSON_Parse(arguments_json);
+  if (root == NULL) {
+    strappy_set_error(error_out,
+                      "helper_convert_dates arguments are not valid JSON.");
+    return 0;
+  }
+
+  if (!cJSON_IsObject(root)) {
+    cJSON_Delete(root);
+    strappy_set_error(error_out,
+                      "helper_convert_dates arguments must be a JSON object.");
+    return 0;
+  }
+
+  for (child = root->child; child != NULL; child = child->next) {
+    if ((child->string == NULL) ||
+        ((strcmp(child->string, "timestamps") != 0) &&
+         (strcmp(child->string, "unit") != 0))) {
+      cJSON_Delete(root);
+      strappy_set_error(error_out,
+                        "helper_convert_dates only accepts timestamps and unit.");
+      return 0;
+    }
+  }
+
+  timestamps = cJSON_GetObjectItemCaseSensitive(root, "timestamps");
+  if (!cJSON_IsString(timestamps) ||
+      !strappy_tools_string_has_value(timestamps->valuestring)) {
+    cJSON_Delete(root);
+    strappy_set_error(error_out,
+                      "helper_convert_dates requires a non-empty timestamps string.");
+    return 0;
+  }
+
+  timestamp_length = strlen(timestamps->valuestring);
+  if (timestamp_length > STRAPPY_HELPER_CONVERT_DATES_MAX_INPUT_BYTES) {
+    cJSON_Delete(root);
+    strappy_set_formatted_error(
+      error_out,
+      "helper_convert_dates timestamps is too long; maximum is %u bytes.",
+      (unsigned int)STRAPPY_HELPER_CONVERT_DATES_MAX_INPUT_BYTES);
+    return 0;
+  }
+
+  unit = cJSON_GetObjectItemCaseSensitive(root, "unit");
+  if (unit != NULL) {
+    if (!cJSON_IsString(unit)) {
+      cJSON_Delete(root);
+      strappy_set_error(error_out,
+                        "helper_convert_dates unit must be a string.");
+      return 0;
+    }
+    if (!strappy_cocoa_parse_timestamp_unit(unit->valuestring,
+                                            &arguments->unit,
+                                            error_out)) {
+      cJSON_Delete(root);
+      return 0;
+    }
+  }
+
+  arguments->timestamps = strappy_string_duplicate(timestamps->valuestring);
+  cJSON_Delete(root);
+  if (arguments->timestamps == NULL) {
+    strappy_helper_convert_dates_arguments_destroy(arguments);
+    strappy_set_error(error_out,
+                      "Could not allocate helper_convert_dates arguments.");
+    return 0;
+  }
+
+  return 1;
+}
+
+static int strappy_tools_helper_is_space(char value)
+{
+  return ((value == ' ') || (value == '\t') || (value == '\r') ||
+          (value == '\n') || (value == '\f') || (value == '\v')) ? 1 : 0;
+}
+
+static char *strappy_tools_convert_timestamp_token_to_iso8601(
+  const char *token,
+  size_t length,
+  strappy_cocoa_timestamp_unit unit,
+  char **error_out)
+{
+  char *timestamp;
+  char *iso8601;
+
+  timestamp = strappy_string_duplicate_length(token, length);
+  if (timestamp == NULL) {
+    strappy_set_error(error_out, "Could not allocate timestamp token.");
+    return NULL;
+  }
+
+  iso8601 = strappy_cocoa_copy_iso8601_timestamp_value(timestamp,
+                                                       unit,
+                                                       error_out);
+  free(timestamp);
+  return iso8601;
 }
 
 static char *strappy_tools_sqlite_quote_identifier(const char *identifier)
@@ -1594,6 +2002,99 @@ static cJSON *strappy_tools_create_database_tool_step(const char *tool_name,
   return step;
 }
 
+static int strappy_tools_add_hint_to_array(cJSON *hints, const char *hint)
+{
+  cJSON *item;
+
+  if ((hints == NULL) || (hint == NULL)) {
+    return 0;
+  }
+
+  item = cJSON_CreateString(hint);
+  if ((item == NULL) || !cJSON_AddItemToArray(hints, item)) {
+    cJSON_Delete(item);
+    return 0;
+  }
+
+  return 1;
+}
+
+static int strappy_tools_add_database_known_schema_hints(
+  cJSON *object,
+  const strappy_discovered_database_record *record)
+{
+  const char *filename;
+  cJSON *hints;
+
+  if ((object == NULL) || (record == NULL)) {
+    return 0;
+  }
+
+  filename = strappy_tools_path_basename(record->path);
+  if (filename == NULL) {
+    return 1;
+  }
+
+  hints = NULL;
+  if (strcmp(filename, "Envelope Index") == 0) {
+    hints = cJSON_CreateArray();
+    if (hints == NULL) {
+      return 0;
+    }
+    if (!strappy_tools_add_hint_to_array(
+          hints,
+          "Apple Mail Envelope Index: use mailboxes.ROWID -> "
+          "messages.mailbox to identify folders. Typeless flags such as "
+          "visible and deleted may be text strings, so sample values before "
+          "filtering.") ||
+        !strappy_tools_add_hint_to_array(
+          hints,
+          "Apple Mail Envelope Index: messages.ROWID is the local message "
+          "key used by the companion Protected Index messages.message_id for "
+          "sender and subject. Do not use Envelope Index messages.message_id "
+          "for that cross-index lookup.") ||
+        !strappy_tools_add_hint_to_array(
+          hints,
+          "Apple Mail Envelope Index: message_data.message_id maps to "
+          "messages.ROWID, and message_data.ROWID maps to the companion "
+          "Protected Index message_data.message_data_id for body parts or "
+          "summaries.")) {
+      cJSON_Delete(hints);
+      return 0;
+    }
+  } else if (strcmp(filename, "Protected Index") == 0) {
+    hints = cJSON_CreateArray();
+    if (hints == NULL) {
+      return 0;
+    }
+    if (!strappy_tools_add_hint_to_array(
+          hints,
+          "Apple Mail Protected Index: messages.message_id uses the "
+          "companion Envelope Index messages.ROWID local message key for "
+          "sender and subject lookups.") ||
+        !strappy_tools_add_hint_to_array(
+          hints,
+          "Apple Mail Protected Index: message_data.message_data_id matches "
+          "the companion Envelope Index message_data.ROWID. The data column "
+          "may be stored as a BLOB even when it contains message text; query "
+          "substr(CAST(data AS TEXT),1,N) for bounded snippets.")) {
+      cJSON_Delete(hints);
+      return 0;
+    }
+  }
+
+  if (hints == NULL) {
+    return 1;
+  }
+
+  if (!cJSON_AddItemToObject(object, "known_schema_hints", hints)) {
+    cJSON_Delete(hints);
+    return 0;
+  }
+
+  return 1;
+}
+
 static int strappy_tools_add_database_next_steps(cJSON *root,
                                                  const char *database_id)
 {
@@ -1678,6 +2179,12 @@ static int strappy_tools_add_database_list_info_record(
     return 0;
   }
   free(schema_error);
+
+  if (!strappy_tools_add_database_known_schema_hints(object, record)) {
+    cJSON_Delete(object);
+    strappy_set_error(error_out, "Could not build database schema hints.");
+    return 0;
+  }
 
   if (!strappy_tools_add_database_next_steps(object,
                                              record->assistant_database_id)) {
@@ -2029,6 +2536,46 @@ static cJSON *strappy_tools_create_blob_value(size_t byte_count,
   return object;
 }
 
+static cJSON *strappy_tools_create_database_query_integer_value(
+  sqlite3_int64 integer_value,
+  size_t *payload_bytes_out,
+  char **error_out)
+{
+  char buffer[32];
+  cJSON *value;
+  int written;
+
+  if ((integer_value >= STRAPPY_DATABASE_QUERY_JSON_SAFE_INTEGER_MIN) &&
+      (integer_value <= STRAPPY_DATABASE_QUERY_JSON_SAFE_INTEGER_MAX)) {
+    value = cJSON_CreateNumber((double)integer_value);
+    if (payload_bytes_out != NULL) {
+      *payload_bytes_out = 32U;
+    }
+    return value;
+  }
+
+  written = snprintf(buffer,
+                     sizeof(buffer),
+                     "%lld",
+                     (long long)integer_value);
+  if ((written <= 0) || ((size_t)written >= sizeof(buffer))) {
+    strappy_set_error(error_out, "Could not format integer value.");
+    return NULL;
+  }
+
+  value = cJSON_CreateString(buffer);
+  if (value == NULL) {
+    strappy_set_error(error_out, "Could not allocate integer value.");
+    return NULL;
+  }
+
+  if (payload_bytes_out != NULL) {
+    *payload_bytes_out = ((size_t)written) + 2U;
+  }
+
+  return value;
+}
+
 static cJSON *strappy_tools_create_database_query_value(
   sqlite3_stmt *stmt,
   int column,
@@ -2055,11 +2602,10 @@ static cJSON *strappy_tools_create_database_query_value(
   }
 
   if (column_type == SQLITE_INTEGER) {
-    value = cJSON_CreateNumber((double)sqlite3_column_int64(stmt, column));
-    if (payload_bytes_out != NULL) {
-      *payload_bytes_out = 32U;
-    }
-    return value;
+    return strappy_tools_create_database_query_integer_value(
+      sqlite3_column_int64(stmt, column),
+      payload_bytes_out,
+      error_out);
   }
 
   if (column_type == SQLITE_FLOAT) {
@@ -2749,6 +3295,104 @@ static char *strappy_tools_execute_database_query(const char *session_db_path,
   return json;
 }
 
+static char *strappy_tools_execute_helper_convert_dates(
+  const char *arguments_json,
+  char **error_out)
+{
+  strappy_helper_convert_dates_arguments arguments;
+  strappy_helper_text_buffer buffer;
+  const char *cursor;
+  size_t timestamp_count;
+
+  strappy_helper_convert_dates_arguments_init(&arguments);
+  if (!strappy_tools_parse_helper_convert_dates_arguments(arguments_json,
+                                                          &arguments,
+                                                          error_out)) {
+    return NULL;
+  }
+
+  strappy_helper_text_buffer_init(&buffer);
+  cursor = arguments.timestamps;
+  timestamp_count = 0U;
+  while (cursor != NULL) {
+    const char *item_start;
+    const char *item_end;
+    const char *item_delimiter;
+    char *iso8601;
+
+    iso8601 = NULL;
+    item_start = cursor;
+    item_delimiter = cursor;
+    while ((*item_delimiter != '\0') && (*item_delimiter != ',')) {
+      item_delimiter++;
+    }
+    item_end = item_delimiter;
+
+    while ((item_start < item_end) &&
+           strappy_tools_helper_is_space(*item_start)) {
+      item_start++;
+    }
+    while ((item_end > item_start) &&
+           strappy_tools_helper_is_space(*(item_end - 1))) {
+      item_end--;
+    }
+
+    if (item_start == item_end) {
+      strappy_helper_text_buffer_destroy(&buffer);
+      strappy_helper_convert_dates_arguments_destroy(&arguments);
+      strappy_set_error(error_out,
+                        "helper_convert_dates timestamps contains an empty item.");
+      return NULL;
+    }
+
+    if (timestamp_count >= STRAPPY_HELPER_CONVERT_DATES_MAX_TIMESTAMPS) {
+      strappy_helper_text_buffer_destroy(&buffer);
+      strappy_helper_convert_dates_arguments_destroy(&arguments);
+      strappy_set_formatted_error(
+        error_out,
+        "helper_convert_dates accepts at most %u timestamps.",
+        (unsigned int)STRAPPY_HELPER_CONVERT_DATES_MAX_TIMESTAMPS);
+      return NULL;
+    }
+
+    iso8601 = strappy_tools_convert_timestamp_token_to_iso8601(
+      item_start,
+      (size_t)(item_end - item_start),
+      arguments.unit,
+      error_out);
+    if (iso8601 == NULL) {
+      strappy_helper_text_buffer_destroy(&buffer);
+      strappy_helper_convert_dates_arguments_destroy(&arguments);
+      return NULL;
+    }
+
+    if (((timestamp_count > 0U) &&
+        !strappy_helper_text_buffer_append(&buffer, ",")) ||
+        !strappy_helper_text_buffer_append(&buffer, iso8601)) {
+      free(iso8601);
+      strappy_helper_text_buffer_destroy(&buffer);
+      strappy_helper_convert_dates_arguments_destroy(&arguments);
+      strappy_set_error(error_out,
+                        "Could not build helper_convert_dates result.");
+      return NULL;
+    }
+
+    free(iso8601);
+    timestamp_count++;
+    cursor = (*item_delimiter == ',') ? item_delimiter + 1 : NULL;
+  }
+
+  strappy_helper_convert_dates_arguments_destroy(&arguments);
+  if (timestamp_count == 0U) {
+    strappy_helper_text_buffer_destroy(&buffer);
+    strappy_set_error(error_out,
+                      "helper_convert_dates requires at least one timestamp.");
+    return NULL;
+  }
+
+  return buffer.data;
+}
+
 static char *strappy_tools_execute_database_list_info(
   const char *session_db_path,
   const char *arguments_json,
@@ -2865,6 +3509,11 @@ char *strappy_tools_execute(const char *session_db_path,
     return strappy_tools_execute_database_query(session_db_path,
                                                 arguments_json,
                                                 error_out);
+  }
+
+  if (strcmp(tool_name, STRAPPY_TOOL_HELPER_CONVERT_DATES) == 0) {
+    return strappy_tools_execute_helper_convert_dates(arguments_json,
+                                                      error_out);
   }
 
   strappy_set_formatted_error(error_out, "Tool is not registered: %s", tool_name);

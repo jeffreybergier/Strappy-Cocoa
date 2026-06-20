@@ -14,6 +14,7 @@ SQLITE_LIBS ?= -lsqlite3
 
 DATABASE_QUERY_HARNESS_SOURCES = \
 	database_query_harness.c \
+	$(SHARED_DIR)/strappy_cocoa.c \
 	$(SHARED_DIR)/strappy_tools.c \
 	$(SHARED_DIR)/strappy_db.c \
 	$(SHARED_DIR)/strappy_core.c \

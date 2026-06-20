@@ -154,7 +154,14 @@ static int harness_create_user_database(const char *database_path)
     ");"
     "INSERT INTO messages(sender, body) VALUES "
     "('alice', 'hello'),"
-    "('bob', 'hi');");
+    "('bob', 'hi');"
+    "CREATE TABLE identifiers ("
+    "value INTEGER NOT NULL"
+    ");"
+    "INSERT INTO identifiers(value) VALUES "
+    "(2556198414531480000),"
+    "(-5023472826755880000),"
+    "(42);");
 
   sqlite3_close(db);
   return ok;
@@ -229,6 +236,80 @@ static int harness_expect_output_contains(const char *catalog_path,
   return ok;
 }
 
+static int harness_expect_output_contains_without(const char *catalog_path,
+                                                  const char *tool_name,
+                                                  const char *arguments_json,
+                                                  const char *first_needle,
+                                                  const char *second_needle,
+                                                  const char *forbidden_needle)
+{
+  char *error;
+  char *output;
+  int ok;
+
+  error = NULL;
+  output = strappy_tools_execute(catalog_path,
+                                 tool_name,
+                                 arguments_json,
+                                 &error);
+  if (output == NULL) {
+    fprintf(stderr,
+            "Expected output but got error: %s\n",
+            (error != NULL) ? error : "(null)");
+    free(error);
+    return 0;
+  }
+
+  ok = ((strstr(output, first_needle) != NULL) &&
+        (strstr(output, second_needle) != NULL) &&
+        (strstr(output, forbidden_needle) == NULL)) ? 1 : 0;
+  if (!ok) {
+    fprintf(stderr,
+            "Output did not contain '%s' and '%s' while excluding '%s': %s\n",
+            first_needle,
+            second_needle,
+            forbidden_needle,
+            output);
+  }
+
+  free(output);
+  return ok;
+}
+
+static int harness_expect_output_equals(const char *catalog_path,
+                                        const char *tool_name,
+                                        const char *arguments_json,
+                                        const char *expected)
+{
+  char *error;
+  char *output;
+  int ok;
+
+  error = NULL;
+  output = strappy_tools_execute(catalog_path,
+                                 tool_name,
+                                 arguments_json,
+                                 &error);
+  if (output == NULL) {
+    fprintf(stderr,
+            "Expected output but got error: %s\n",
+            (error != NULL) ? error : "(null)");
+    free(error);
+    return 0;
+  }
+
+  ok = (strcmp(output, expected) == 0) ? 1 : 0;
+  if (!ok) {
+    fprintf(stderr,
+            "Output did not equal expected value.\nExpected: %s\nActual: %s\n",
+            expected,
+            output);
+  }
+
+  free(output);
+  return ok;
+}
+
 static int harness_run_tool_registry_tests(void)
 {
   char *error;
@@ -247,6 +328,9 @@ static int harness_run_tool_registry_tests(void)
 
   ok = ((strstr(tools_json, STRAPPY_TOOL_DATABASE_LIST_INFO) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_QUERY) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_HELPER_CONVERT_DATES) != NULL) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_CONVERT_DATES) &&
+        !strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_QUERY) &&
         (strstr(tools_json, "database_learn") == NULL)) ? 1 : 0;
   if (!ok) {
     fprintf(stderr, "Tool registry did not match expected tools: %s\n", tools_json);
@@ -254,6 +338,52 @@ static int harness_run_tool_registry_tests(void)
 
   free(tools_json);
   return ok;
+}
+
+static int harness_run_helper_convert_dates_tests(void)
+{
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_HELPER_CONVERT_DATES,
+        "{\"timestamps\":\"0,1,-1,-0.5\"}",
+        "1970-01-01T00:00:00Z,1970-01-01T00:00:01Z,"
+        "1969-12-31T23:59:59Z,1969-12-31T23:59:59.5Z")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_HELPER_CONVERT_DATES,
+        "{\"timestamps\":\"1700000000123\",\"unit\":\"unix_milliseconds\"}",
+        "2023-11-14T22:13:20.123Z")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_HELPER_CONVERT_DATES,
+        "{\"timestamps\":\"0, 1.25\",\"unit\":\"apple_seconds\"}",
+        "2001-01-01T00:00:00Z,2001-01-01T00:00:01.25Z")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_CONVERT_DATES,
+        "{\"timestamps\":\"1,,2\"}",
+        "empty item")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_CONVERT_DATES,
+        "{\"timestamps\":\"1\",\"unit\":\"banana_seconds\"}",
+        "unit is not supported")) {
+    return 0;
+  }
+
+  return 1;
 }
 
 static int harness_register_database(harness_context *context)
@@ -410,6 +540,33 @@ static int harness_run_database_query_tests(const harness_context *context)
     return 0;
   }
 
+  if (!harness_build_query_arguments(
+        arguments,
+        sizeof(arguments),
+        context->database_id,
+        "SELECT value FROM identifiers ORDER BY value DESC")) {
+    fprintf(stderr, "Could not build large integer query arguments.\n");
+    return 0;
+  }
+
+  if (!harness_expect_output_contains_without(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_QUERY,
+        arguments,
+        "\"2556198414531480000\"",
+        "\"-5023472826755880000\"",
+        "e+")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_DATABASE_QUERY,
+                                      arguments,
+                                      "[42]",
+                                      "\"rows\"")) {
+    return 0;
+  }
+
   if (!harness_build_query_arguments(arguments,
                                      sizeof(arguments),
                                      context->database_id,
@@ -499,6 +656,7 @@ int main(void)
 
   harness_context_init(&context);
   ok = harness_run_tool_registry_tests() &&
+       harness_run_helper_convert_dates_tests() &&
        harness_make_temp_dir(&context) &&
        harness_create_user_database(context.database_path) &&
        harness_register_database(&context) &&
