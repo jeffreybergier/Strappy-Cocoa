@@ -8,6 +8,12 @@ extern "C" {
 #define STRAPPY_TOOL_DATABASE_LIST_INFO "database_list_info"
 #define STRAPPY_TOOL_DATABASE_QUERY "database_query"
 #define STRAPPY_TOOL_HELPER_CONVERT_DATES "helper_convert_dates"
+#define STRAPPY_TOOL_HELPER_USER_INFO_READ "helper_user_info_read"
+#define STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER "helper_user_info_remember"
+#define STRAPPY_TOOL_HELPER_USER_INFO_FORGET "helper_user_info_forget"
+#define STRAPPY_TOOL_HELPER_DATABASE_INFO_READ "helper_database_info_read"
+#define STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER "helper_database_info_remember"
+#define STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET "helper_database_info_forget"
 
 char *strappy_tools_request_json(char **error_out);
 char *strappy_tools_prompt_fragment(char **error_out);

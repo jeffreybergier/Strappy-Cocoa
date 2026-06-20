@@ -329,7 +329,21 @@ static int harness_run_tool_registry_tests(void)
   ok = ((strstr(tools_json, STRAPPY_TOOL_DATABASE_LIST_INFO) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_QUERY) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_CONVERT_DATES) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_READ) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_FORGET) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_HELPER_DATABASE_INFO_READ) != NULL) &&
+        (strstr(tools_json,
+                STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) != NULL) &&
+        (strstr(tools_json,
+                STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET) != NULL) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_CONVERT_DATES) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_READ) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_FORGET) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATABASE_INFO_READ) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET) &&
         !strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_QUERY) &&
         (strstr(tools_json, "database_learn") == NULL)) ? 1 : 0;
   if (!ok) {
@@ -649,6 +663,110 @@ static int harness_run_database_query_tests(const harness_context *context)
   return 1;
 }
 
+static int harness_run_helper_info_tests(const harness_context *context)
+{
+  char arguments[4096];
+  int written;
+
+  if ((context == NULL) || (context->database_id == NULL)) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER,
+        "{\"kind\":\"identity\",\"subject\":\"user\","
+        "\"predicate\":\"first_name\",\"value\":\"Jeff\","
+        "\"confidence\":0.95,\"source\":\"user_explicit\"}",
+        "\"ok\":true",
+        "\"id\":1")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_HELPER_USER_INFO_READ,
+                                      "{\"query\":\"Jeff\"}",
+                                      "\"first_name\"",
+                                      "\"Jeff\"")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_HELPER_USER_INFO_FORGET,
+                                      "{\"id\":1}",
+                                      "\"forgotten\":true",
+                                      "\"ok\":true")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_HELPER_USER_INFO_READ,
+                                      "{\"query\":\"Jeff\"}",
+                                      "\"facts\"",
+                                      "\"count\":0")) {
+    return 0;
+  }
+
+  written = snprintf(
+    arguments,
+    sizeof(arguments),
+    "{\"database_id\":\"%s\",\"kind\":\"join_hint\","
+    "\"title\":\"messages identifiers join\","
+    "\"content\":\"The messages table can be checked against identifiers "
+    "when validating exact integer serialization.\","
+    "\"evidence\":\"harness fixture query\","
+    "\"confidence\":0.9}",
+    context->database_id);
+  if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
+    fprintf(stderr, "Could not build database info remember arguments.\n");
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER,
+        arguments,
+        "\"ok\":true",
+        "\"id\":1")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_HELPER_DATABASE_INFO_READ,
+                                      "{\"query\":\"identifiers\"}",
+                                      "\"join_hint\"",
+                                      "\"messages identifiers join\"")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_DATABASE_LIST_INFO,
+                                      "{}",
+                                      "\"remembered_info\"",
+                                      "\"messages identifiers join\"")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET,
+        "{\"id\":1}",
+        "\"forgotten\":true",
+        "\"ok\":true")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_HELPER_DATABASE_INFO_READ,
+                                      "{\"query\":\"identifiers\"}",
+                                      "\"database_info\"",
+                                      "\"count\":0")) {
+    return 0;
+  }
+
+  return 1;
+}
+
 int main(void)
 {
   harness_context context;
@@ -661,7 +779,8 @@ int main(void)
        harness_create_user_database(context.database_path) &&
        harness_register_database(&context) &&
        harness_run_database_list_info_tests(&context) &&
-       harness_run_database_query_tests(&context);
+       harness_run_database_query_tests(&context) &&
+       harness_run_helper_info_tests(&context);
 
   harness_context_destroy(&context);
 
