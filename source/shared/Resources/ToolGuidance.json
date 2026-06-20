@@ -27,7 +27,7 @@
             },
             "sql": {
               "type": "string",
-              "description": "One read-only SQL SELECT or EXPLAIN query. Do not include PRAGMA, ATTACH, writes, multiple statements, filesystem paths, open flags, or limit settings. Large 64-bit integer IDs may be returned as decimal strings to preserve exact values. For typeless columns, sample rows before filtering because flag values may be text. If a BLOB column appears to store text, select substr(CAST(column AS TEXT),1,N) instead of selecting the raw BLOB."
+              "description": "One read-only SQL SELECT or EXPLAIN query. Do not include PRAGMA, ATTACH, writes, multiple statements, filesystem paths, open flags, or limit settings. Large 64-bit integer IDs may be returned as decimal strings to preserve exact values. For typeless columns, sample typeof(column) and values before filtering because flag values may be text; if a numeric-looking flag comparison returns zero rows after a count showed rows exist, retry with quoted text or CAST(column AS TEXT). If a BLOB column appears to store text, select substr(CAST(column AS TEXT),1,N) instead of selecting the raw BLOB."
             }
           },
           "required": [

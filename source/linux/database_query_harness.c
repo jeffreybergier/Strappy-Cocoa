@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define HARNESS_RESOURCE_DIR "../shared/Resources"
@@ -16,7 +17,15 @@ typedef struct harness_context {
   char temp_dir[1024];
   char catalog_path[1200];
   char database_path[1200];
+  char sms_path[1200];
+  char mail_library_dir[1200];
+  char mail_dir[1200];
+  char mail_envelope_path[1200];
+  char mail_protected_path[1200];
   char *database_id;
+  char *sms_id;
+  char *mail_envelope_id;
+  char *mail_protected_id;
 } harness_context;
 
 static int harness_join_path(char *output,
@@ -44,7 +53,15 @@ static void harness_context_init(harness_context *context)
   context->temp_dir[0] = '\0';
   context->catalog_path[0] = '\0';
   context->database_path[0] = '\0';
+  context->sms_path[0] = '\0';
+  context->mail_library_dir[0] = '\0';
+  context->mail_dir[0] = '\0';
+  context->mail_envelope_path[0] = '\0';
+  context->mail_protected_path[0] = '\0';
   context->database_id = NULL;
+  context->sms_id = NULL;
+  context->mail_envelope_id = NULL;
+  context->mail_protected_id = NULL;
 }
 
 static void harness_context_destroy(harness_context *context)
@@ -55,12 +72,33 @@ static void harness_context_destroy(harness_context *context)
 
   free(context->database_id);
   context->database_id = NULL;
+  free(context->sms_id);
+  context->sms_id = NULL;
+  free(context->mail_envelope_id);
+  context->mail_envelope_id = NULL;
+  free(context->mail_protected_id);
+  context->mail_protected_id = NULL;
 
   if (context->catalog_path[0] != '\0') {
     unlink(context->catalog_path);
   }
   if (context->database_path[0] != '\0') {
     unlink(context->database_path);
+  }
+  if (context->sms_path[0] != '\0') {
+    unlink(context->sms_path);
+  }
+  if (context->mail_envelope_path[0] != '\0') {
+    unlink(context->mail_envelope_path);
+  }
+  if (context->mail_protected_path[0] != '\0') {
+    unlink(context->mail_protected_path);
+  }
+  if (context->mail_dir[0] != '\0') {
+    rmdir(context->mail_dir);
+  }
+  if (context->mail_library_dir[0] != '\0') {
+    rmdir(context->mail_library_dir);
   }
   if (context->temp_dir[0] != '\0') {
     rmdir(context->temp_dir);
@@ -102,8 +140,32 @@ static int harness_make_temp_dir(harness_context *context)
       !harness_join_path(context->database_path,
                          sizeof(context->database_path),
                          context->temp_dir,
-                         "user.sqlite")) {
+                         "user.sqlite") ||
+      !harness_join_path(context->sms_path,
+                         sizeof(context->sms_path),
+                         context->temp_dir,
+                         "sms.db")) {
     fprintf(stderr, "Could not build harness fixture paths.\n");
+    return 0;
+  }
+
+  if (!harness_join_path(context->mail_library_dir,
+                         sizeof(context->mail_library_dir),
+                         context->temp_dir,
+                         "Library") ||
+      !harness_join_path(context->mail_dir,
+                         sizeof(context->mail_dir),
+                         context->mail_library_dir,
+                         "Mail") ||
+      !harness_join_path(context->mail_envelope_path,
+                         sizeof(context->mail_envelope_path),
+                         context->mail_dir,
+                         "Envelope Index") ||
+      !harness_join_path(context->mail_protected_path,
+                         sizeof(context->mail_protected_path),
+                         context->mail_dir,
+                         "Protected Index")) {
+    fprintf(stderr, "Could not build harness Mail fixture paths.\n");
     return 0;
   }
 
@@ -164,6 +226,172 @@ static int harness_create_user_database(const char *database_path)
     "(2556198414531480000),"
     "(-5023472826755880000),"
     "(42);");
+
+  sqlite3_close(db);
+  return ok;
+}
+
+static int harness_create_sms_database(const char *database_path)
+{
+  sqlite3 *db;
+  int rc;
+  int ok;
+
+  db = NULL;
+  rc = sqlite3_open_v2(database_path,
+                       &db,
+                       SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                       NULL);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr,
+            "Could not create SMS fixture database: %s\n",
+            (db != NULL) ? sqlite3_errmsg(db) : "unknown");
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    return 0;
+  }
+
+  ok = harness_exec_sql(
+    db,
+    "CREATE TABLE handle ("
+    "ROWID INTEGER PRIMARY KEY,"
+    "id TEXT NOT NULL,"
+    "country TEXT,"
+    "service TEXT NOT NULL,"
+    "uncanonicalized_id TEXT"
+    ");"
+    "CREATE TABLE message ("
+    "ROWID INTEGER PRIMARY KEY,"
+    "guid TEXT NOT NULL,"
+    "text TEXT,"
+    "handle_id INTEGER,"
+    "attributedBody BLOB,"
+    "date INTEGER,"
+    "date_read INTEGER,"
+    "date_delivered INTEGER,"
+    "is_from_me INTEGER DEFAULT 0"
+    ");"
+    "CREATE TABLE chat ("
+    "ROWID INTEGER PRIMARY KEY,"
+    "guid TEXT NOT NULL,"
+    "chat_identifier TEXT,"
+    "service_name TEXT,"
+    "room_name TEXT"
+    ");"
+    "CREATE TABLE chat_handle_join ("
+    "chat_id INTEGER,"
+    "handle_id INTEGER"
+    ");"
+    "CREATE TABLE chat_message_join ("
+    "chat_id INTEGER,"
+    "message_id INTEGER,"
+    "PRIMARY KEY(chat_id, message_id)"
+    ");"
+    "CREATE TABLE attachment ("
+    "ROWID INTEGER PRIMARY KEY,"
+    "guid TEXT NOT NULL,"
+    "created_date INTEGER,"
+    "start_date INTEGER,"
+    "filename TEXT,"
+    "mime_type TEXT"
+    ");"
+    "CREATE TABLE message_attachment_join ("
+    "message_id INTEGER,"
+    "attachment_id INTEGER"
+    ");"
+    "INSERT INTO handle(ROWID, id, service, uncanonicalized_id) "
+    "VALUES (1, '+15551234567', 'iMessage', '(555) 123-4567');"
+    "INSERT INTO chat(ROWID, guid, chat_identifier, service_name) "
+    "VALUES (1, 'chat-guid', '+15551234567', 'iMessage');"
+    "INSERT INTO chat_handle_join(chat_id, handle_id) VALUES (1, 1);"
+    "INSERT INTO message(ROWID, guid, text, handle_id, date, is_from_me) "
+    "VALUES (1, 'message-guid', 'hello', 1, 790735841, 0);"
+    "INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1);");
+
+  sqlite3_close(db);
+  return ok;
+}
+
+static int harness_create_mail_database(const harness_context *context,
+                                        int protected_index)
+{
+  const char *database_path;
+  sqlite3 *db;
+  int rc;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  if ((mkdir(context->mail_library_dir, 0700) != 0) &&
+      (access(context->mail_library_dir, F_OK) != 0)) {
+    perror("mkdir Library");
+    return 0;
+  }
+  if ((mkdir(context->mail_dir, 0700) != 0) &&
+      (access(context->mail_dir, F_OK) != 0)) {
+    perror("mkdir Mail");
+    return 0;
+  }
+
+  database_path = protected_index ? context->mail_protected_path :
+                                    context->mail_envelope_path;
+  db = NULL;
+  rc = sqlite3_open_v2(database_path,
+                       &db,
+                       SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                       NULL);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr,
+            "Could not create Mail fixture database: %s\n",
+            (db != NULL) ? sqlite3_errmsg(db) : "unknown");
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    return 0;
+  }
+
+  if (protected_index) {
+    ok = harness_exec_sql(
+      db,
+      "CREATE TABLE messages ("
+      "message_id INTEGER PRIMARY KEY,"
+      "sender,"
+      "subject,"
+      "_to,"
+      "cc,"
+      "bcc"
+      ");"
+      "CREATE TABLE message_data ("
+      "message_data_id INTEGER PRIMARY KEY,"
+      "data"
+      ");"
+      "INSERT INTO messages(message_id, sender, subject) VALUES "
+      "(1, 'sender@example.com', 'hello');");
+  } else {
+    ok = harness_exec_sql(
+      db,
+      "CREATE TABLE mailboxes ("
+      "ROWID INTEGER PRIMARY KEY,"
+      "url UNIQUE"
+      ");"
+      "CREATE TABLE messages ("
+      "ROWID INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "remote_id INTEGER,"
+      "date_sent INTEGER,"
+      "date_received INTEGER,"
+      "mailbox INTEGER,"
+      "deleted,"
+      "visible,"
+      "message_id INTEGER"
+      ");"
+      "INSERT INTO mailboxes(ROWID, url) VALUES "
+      "(1, 'imap://user@example.com/INBOX');"
+      "INSERT INTO messages(remote_id, date_received, mailbox, deleted, visible, message_id) "
+      "VALUES (6547, 1781864527, 1, '0', '1', 2556198414531479370);");
+  }
 
   sqlite3_close(db);
   return ok;
@@ -408,14 +636,22 @@ static int harness_run_helper_convert_dates_tests(void)
   return 1;
 }
 
-static int harness_register_database(harness_context *context)
+static int harness_register_database_path(harness_context *context,
+                                          const char *database_path,
+                                          unsigned long long device,
+                                          unsigned long long inode,
+                                          char **database_id_out)
 {
   strappy_discovered_database_input input;
   strappy_discovered_database_record_list list;
   char *error;
+  size_t index;
+  size_t match_index;
+  int found;
   int ok;
 
-  if (context == NULL) {
+  if ((context == NULL) || (database_path == NULL) ||
+      (database_id_out == NULL)) {
     return 0;
   }
 
@@ -429,11 +665,11 @@ static int harness_register_database(harness_context *context)
   }
 
   memset(&input, 0, sizeof(input));
-  input.path = context->database_path;
+  input.path = database_path;
   input.size = 4096;
   input.modified_at = 1;
-  input.device = 1;
-  input.inode = 1;
+  input.device = device;
+  input.inode = inode;
   input.is_valid_sqlite = 1;
   input.scan_root = context->temp_dir;
 
@@ -451,8 +687,7 @@ static int harness_register_database(harness_context *context)
   strappy_discovered_database_record_list_init(&list);
   if (!strappy_db_list_discovered_databases(context->catalog_path,
                                            &list,
-                                           &error) ||
-      (list.count != 1U)) {
+                                           &error)) {
     fprintf(stderr,
             "Could not list discovered database: %s\n",
             (error != NULL) ? error : "unknown");
@@ -461,9 +696,27 @@ static int harness_register_database(harness_context *context)
     return 0;
   }
 
-  context->database_id =
-    strappy_string_duplicate(list.records[0].assistant_database_id);
-  if (context->database_id == NULL) {
+  found = 0;
+  match_index = 0U;
+  for (index = 0U; index < list.count; index++) {
+    if ((list.records[index].path != NULL) &&
+        (strcmp(list.records[index].path, database_path) == 0)) {
+      match_index = index;
+      found = 1;
+      break;
+    }
+  }
+
+  if (!found) {
+    fprintf(stderr, "Could not find registered database path.\n");
+    strappy_discovered_database_record_list_destroy(&list);
+    return 0;
+  }
+
+  free(*database_id_out);
+  *database_id_out =
+    strappy_string_duplicate(list.records[match_index].assistant_database_id);
+  if (*database_id_out == NULL) {
     fprintf(stderr, "Could not copy assistant database id.\n");
     strappy_discovered_database_record_list_destroy(&list);
     return 0;
@@ -471,7 +724,7 @@ static int harness_register_database(harness_context *context)
 
   ok = strappy_db_update_discovered_database_decision(
     context->catalog_path,
-    list.records[0].catalog_id,
+    list.records[match_index].catalog_id,
     "allowed",
     &error);
   if (!ok) {
@@ -483,6 +736,19 @@ static int harness_register_database(harness_context *context)
 
   strappy_discovered_database_record_list_destroy(&list);
   return ok;
+}
+
+static int harness_register_database(harness_context *context)
+{
+  if (context == NULL) {
+    return 0;
+  }
+
+  return harness_register_database_path(context,
+                                        context->database_path,
+                                        1ULL,
+                                        1ULL,
+                                        &context->database_id);
 }
 
 static int harness_run_database_list_info_tests(const harness_context *context)
@@ -842,6 +1108,132 @@ static int harness_run_helper_info_tests(const harness_context *context)
   return 1;
 }
 
+static int harness_run_mail_guidance_tests(harness_context *context)
+{
+  char arguments[4096];
+  int written;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  if (!harness_create_mail_database(context, 0) ||
+      !harness_register_database_path(context,
+                                      context->mail_envelope_path,
+                                      2ULL,
+                                      2ULL,
+                                      &context->mail_envelope_id) ||
+      !harness_create_mail_database(context, 1) ||
+      !harness_register_database_path(context,
+                                      context->mail_protected_path,
+                                      3ULL,
+                                      3ULL,
+                                      &context->mail_protected_id)) {
+    return 0;
+  }
+
+  written = snprintf(arguments,
+                     sizeof(arguments),
+                     "{\"database_id\":\"%s\"}",
+                     context->mail_envelope_id);
+  if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
+    fprintf(stderr, "Could not build Envelope Index context arguments.\n");
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                      arguments,
+                                      "mailboxes.url",
+                                      "CAST(column AS TEXT)")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        arguments,
+        "Envelope Index messages.ROWID -> Protected Index messages.message_id",
+        "do not join Protected Index using Envelope Index messages.remote_id")) {
+    return 0;
+  }
+
+  written = snprintf(arguments,
+                     sizeof(arguments),
+                     "{\"database_id\":\"%s\"}",
+                     context->mail_protected_id);
+  if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
+    fprintf(stderr, "Could not build Protected Index context arguments.\n");
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        arguments,
+        "Protected Index messages.message_id matches Envelope Index messages.ROWID",
+        "message_data.message_data_id uses the same id")) {
+    return 0;
+  }
+
+  return 1;
+}
+
+static int harness_run_sms_guidance_tests(harness_context *context)
+{
+  char arguments[4096];
+  int written;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  if (!harness_create_sms_database(context->sms_path) ||
+      !harness_register_database_path(context,
+                                      context->sms_path,
+                                      4ULL,
+                                      4ULL,
+                                      &context->sms_id)) {
+    return 0;
+  }
+
+  written = snprintf(arguments,
+                     sizeof(arguments),
+                     "{\"database_id\":\"%s\"}",
+                     context->sms_id);
+  if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
+    fprintf(stderr, "Could not build SMS context arguments.\n");
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        arguments,
+        "handle.id and handle.uncanonicalized_id usually store phone numbers",
+        "chat_message_join -> message.ROWID")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                      arguments,
+                                      "helper_convert_dates with apple_seconds",
+                                      "page chronologically by message.date")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_DATABASE_LIST_INFO,
+                                      "{}",
+                                      "Handles are phone/email identifiers",
+                                      "\"Recents\"")) {
+    return 0;
+  }
+
+  return 1;
+}
+
 int main(void)
 {
   harness_context context;
@@ -856,7 +1248,9 @@ int main(void)
        harness_register_database(&context) &&
        harness_run_database_list_info_tests(&context) &&
        harness_run_database_query_tests(&context) &&
-       harness_run_helper_info_tests(&context);
+       harness_run_helper_info_tests(&context) &&
+       harness_run_sms_guidance_tests(&context) &&
+       harness_run_mail_guidance_tests(&context);
 
   harness_context_destroy(&context);
 

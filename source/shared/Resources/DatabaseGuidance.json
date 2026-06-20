@@ -21,10 +21,11 @@
       "match": {
         "filename": "sms.db"
       },
-      "description_short": "Apple Messages database for SMS/iMessage conversations, participants, message text, timestamps, and attachments.",
-      "description": "Apple Messages SMS/iMessage database for conversations, participants, message text, delivery/read timestamps, chat membership, and attachment metadata. Use this database for message and conversation questions. Message identity is in handle.id and chat_handle_join.handle_id; there is usually no direct foreign key to Contacts. When the user asks who a phone number or email belongs to, also use AddressBook.sqlitedb and match normalized handle.id values against contact phone/email values.",
+      "description_short": "Apple Messages SMS/iMessage database for conversations. Handles are phone/email identifiers, not contact names; resolve names through Contacts/Recents before querying messages.",
+      "description": "Apple Messages SMS/iMessage database for conversations, participants, message text, Apple-epoch timestamps, chat membership, and attachment metadata. Use this database for message and conversation questions. handle.id and handle.uncanonicalized_id usually store phone numbers or email addresses, not human names, so first resolve named people with AddressBook.sqlitedb and, when available, Mail Recents, then match normalized phone/email values to handle rows. For full conversation history, do not rely only on message.handle_id: find matching handle.ROWID values, find chats through chat_handle_join, and fetch messages through chat_message_join -> message.ROWID so inbound, outbound, and group-chat messages stay in context; message.handle_id identifies the sender/other party for many direct messages but can miss chat membership. message.date, date_read, date_delivered, and attachment date fields are Apple epoch values in many iOS Messages stores; sample magnitude and use helper_convert_dates with apple_seconds for ~700-900M values or apple_nanoseconds for ~10^18 values. For broad 'all conversations' requests, page chronologically by message.date and message.ROWID because database_query is row-limited; continue until no more rows, and summarize by chat/person with dates. Message text is usually in message.text; if it is NULL, inspect attributedBody carefully as a BLOB/text fallback. Attachments join through message_attachment_join -> attachment.",
       "related_databases": [
-        "AddressBook.sqlitedb"
+        "AddressBook.sqlitedb",
+        "Recents"
       ]
     },
     {
@@ -83,7 +84,7 @@
         "path_suffix": "/Library/Mail/Envelope Index"
       },
       "description_short": "Apple Mail metadata index for mailboxes, messages, dates, flags, folder placement, threads, and cached message metadata.",
-      "description": "Apple Mail metadata index for mailboxes, messages, dates, flags, message-to-mailbox placement, threads, and cached message data. Use this database for folder and message metadata questions. Pair it with Protected Index for sender, recipient, subject, and protected content fields. When the user asks who an email address belongs to, also use AddressBook.sqlitedb and match sender/recipient email strings to contact email values.",
+      "description": "Apple Mail metadata index for mailboxes, messages, dates, flags, message-to-mailbox placement, threads, and cached message data. Use this database for folder and message metadata questions. For Inbox questions, find the mailbox with mailboxes.url such as '%/INBOX', then filter messages.mailbox by that mailboxes.ROWID. Mail flag columns such as visible, deleted, read, and flagged are typeless and may store text values like '1' and '0'; sample typeof() and compare with quoted text or CAST(column AS TEXT), not bare numeric literals, when needed. Pair it with Protected Index for sender, recipient, subject, and protected content fields. The stable key into Protected Index is Envelope Index messages.ROWID -> Protected Index messages.message_id; do not join Protected Index using Envelope Index messages.remote_id or messages.message_id. date_received and date_sent are Unix seconds. When the user asks who an email address belongs to, also use AddressBook.sqlitedb and match sender/recipient email strings to contact email values.",
       "related_databases": [
         "Protected Index",
         "AddressBook.sqlitedb"
@@ -95,7 +96,7 @@
         "path_suffix": "/Library/Mail/Protected Index"
       },
       "description_short": "Apple Mail protected content index for senders, recipients, subjects, body fragments, and protected message data.",
-      "description": "Apple Mail protected content index for sender, recipient, subject, body fragments, and protected message data. Use this database for bounded body-text snippets or content lookups. Pair it with Envelope Index for dates, mailbox placement, flags, and thread context. When sender, _to, cc, or bcc need human contact names, also use AddressBook.sqlitedb and match email strings to contact email values.",
+      "description": "Apple Mail protected content index for sender, recipient, subject, body fragments, and protected message data. Use this database for bounded body-text snippets or content lookups. Pair it with Envelope Index for dates, mailbox placement, flags, and thread context. Protected Index messages.message_id matches Envelope Index messages.ROWID; message_data.message_data_id uses the same id when body data is present. Start from Envelope Index when the user asks for a folder such as Inbox, then query Protected Index with those Envelope ROWID values and preserve any Envelope rows that have no Protected metadata. Do not treat Protected Index rows as Inbox rows unless they came from the Envelope mailbox filter. When sender, _to, cc, or bcc need human contact names, also use AddressBook.sqlitedb and match email strings to contact email values.",
       "related_databases": [
         "Envelope Index",
         "AddressBook.sqlitedb"
