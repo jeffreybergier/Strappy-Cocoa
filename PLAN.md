@@ -158,7 +158,7 @@ Deliverables:
   deterministic schema facts: tables, columns, indexes, foreign keys, cheap row
   counts, filename-based file metadata, learned documentation when available,
   and per-database recommended next steps.
-- [ ] `database_query` tool that permits read-only SQL only and enforces
+- [x] `database_query` tool that permits read-only SQL only and enforces
   statement timeouts, row limits, and result size limits.
 - [ ] Database ID resolution that maps assistant-visible database IDs to
   cataloged local paths without leaking unnecessary filesystem details. The
