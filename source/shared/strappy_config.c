@@ -183,6 +183,8 @@ void strappy_config_init(strappy_config *config)
   config->api_token = NULL;
   config->api_model = NULL;
   config->guidance_resource_dir = NULL;
+  config->tool_allowlist = NULL;
+  config->tool_allowlist_count = 0U;
 }
 
 void strappy_config_destroy(strappy_config *config)

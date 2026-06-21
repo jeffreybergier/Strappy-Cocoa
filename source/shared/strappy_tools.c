@@ -659,6 +659,90 @@ char *strappy_tools_request_json(const char *resource_dir, char **error_out)
   return json;
 }
 
+static int strappy_tools_name_is_allowed(const char *name,
+                                         const char * const *allowed_names,
+                                         size_t allowed_name_count)
+{
+  size_t index;
+
+  if ((name == NULL) || (allowed_names == NULL) || (allowed_name_count == 0U)) {
+    return 0;
+  }
+
+  for (index = 0U; index < allowed_name_count; index++) {
+    if ((allowed_names[index] != NULL) &&
+        (strcmp(name, allowed_names[index]) == 0)) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+char *strappy_tools_request_json_filtered(const char *resource_dir,
+                                          const char * const *allowed_names,
+                                          size_t allowed_name_count,
+                                          char **error_out)
+{
+  cJSON *root;
+  cJSON *tools;
+  cJSON *filtered;
+  cJSON *tool;
+  char *json;
+
+  if ((allowed_names == NULL) || (allowed_name_count == 0U)) {
+    return strappy_tools_request_json(resource_dir, error_out);
+  }
+
+  root = strappy_tools_read_json_resource(resource_dir,
+                                          STRAPPY_TOOL_GUIDANCE_RESOURCE,
+                                          error_out);
+  if (root == NULL) {
+    return NULL;
+  }
+
+  tools = cJSON_GetObjectItem(root, "tools");
+  if (!strappy_tools_validate_guidance_tools(tools, error_out)) {
+    cJSON_Delete(root);
+    return NULL;
+  }
+
+  filtered = cJSON_CreateArray();
+  if (filtered == NULL) {
+    cJSON_Delete(root);
+    strappy_set_error(error_out, "Could not allocate filtered tool schema list.");
+    return NULL;
+  }
+
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    const char *name;
+
+    name = strappy_tools_tool_schema_name(tool);
+    if (strappy_tools_name_is_allowed(name, allowed_names, allowed_name_count)) {
+      cJSON *copy;
+
+      copy = cJSON_Duplicate(tool, 1);
+      if ((copy == NULL) || !cJSON_AddItemToArray(filtered, copy)) {
+        cJSON_Delete(copy);
+        cJSON_Delete(filtered);
+        cJSON_Delete(root);
+        strappy_set_error(error_out, "Could not copy filtered tool schema.");
+        return NULL;
+      }
+    }
+  }
+
+  json = cJSON_PrintUnformatted(filtered);
+  cJSON_Delete(filtered);
+  cJSON_Delete(root);
+  if (json == NULL) {
+    strappy_set_error(error_out, "Could not serialize filtered tool schema list.");
+    return NULL;
+  }
+
+  return json;
+}
+
 static int strappy_tools_validate_empty_arguments(const char *arguments_json,
                                                   char **error_out)
 {
@@ -1235,7 +1319,8 @@ static char *strappy_tools_database_guidance_string(const char *resource_dir,
 
   section = cJSON_GetObjectItem(root, section_name);
   value = cJSON_IsObject(section) ? cJSON_GetObjectItem(section, key) : NULL;
-  if (!cJSON_IsString(value) || (value->valuestring == NULL) ||
+  if ((value == NULL) || !cJSON_IsString(value) ||
+      (value->valuestring == NULL) ||
       (value->valuestring[0] == '\0')) {
     cJSON_Delete(root);
     strappy_set_formatted_error(error_out,
@@ -2011,6 +2096,15 @@ static int strappy_tools_parse_database_context_read_arguments(
     arguments_json,
     error_out);
   if (root == NULL) {
+    return 0;
+  }
+
+  if (root->child == NULL) {
+    cJSON_Delete(root);
+    strappy_set_error(
+      error_out,
+      "database_context_read requires at least one argument: database_id, "
+      "query, kind, or limit.");
     return 0;
   }
 

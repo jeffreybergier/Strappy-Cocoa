@@ -21,6 +21,10 @@ typedef struct strappy_webview_message {
   long http_status;
   const char *element_id;
   const char *role;
+  const char *kind;
+  const char *actor;
+  const char *message_key;
+  const char *target_message_key;
   const char *text;
   const char *reasoning;
   const char *metadata_json;

@@ -68,13 +68,27 @@ void strappy_session_message_record_init(strappy_session_message_record *record)
 
   record->message_id = 0;
   record->session_id = 0;
+  record->turn_id = 0;
+  record->turn_key = NULL;
+  record->actor = NULL;
+  record->kind = NULL;
+  record->api_role = NULL;
+  record->render_role = NULL;
   record->role = NULL;
   record->content = NULL;
   record->model = NULL;
   record->metadata_json = NULL;
   record->message_json = NULL;
   record->reasoning = NULL;
+  record->message_key = NULL;
+  record->target_message_key = NULL;
+  record->tool_call_id = NULL;
+  record->tool_name = NULL;
+  record->arguments_json = NULL;
+  record->result_json = NULL;
   record->created_at = NULL;
+  record->include_in_context = 0;
+  record->is_error = 0;
   record->http_status = 0L;
 }
 
@@ -84,12 +98,23 @@ void strappy_session_message_record_destroy(strappy_session_message_record *reco
     return;
   }
 
+  free(record->turn_key);
+  free(record->actor);
+  free(record->kind);
+  free(record->api_role);
+  free(record->render_role);
   free(record->role);
   free(record->content);
   free(record->model);
   free(record->metadata_json);
   free(record->message_json);
   free(record->reasoning);
+  free(record->message_key);
+  free(record->target_message_key);
+  free(record->tool_call_id);
+  free(record->tool_name);
+  free(record->arguments_json);
+  free(record->result_json);
   free(record->created_at);
   strappy_session_message_record_init(record);
 }
@@ -269,10 +294,32 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
     "created_at TEXT NOT NULL DEFAULT "
     "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
     ");";
+  static const char *turns_sql =
+    "CREATE TABLE IF NOT EXISTS session_turns ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "session_id INTEGER NOT NULL,"
+    "turn_key TEXT NOT NULL,"
+    "actor TEXT NOT NULL,"
+    "api_role TEXT NOT NULL DEFAULT 'user',"
+    "render_role TEXT NOT NULL,"
+    "context_policy TEXT NOT NULL DEFAULT 'full',"
+    "prompt TEXT NOT NULL DEFAULT '',"
+    "status TEXT NOT NULL DEFAULT 'complete',"
+    "created_at TEXT NOT NULL DEFAULT "
+    "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
+    "FOREIGN KEY(session_id) REFERENCES sessions(id),"
+    "UNIQUE(session_id, turn_key)"
+    ");";
   static const char *messages_sql =
     "CREATE TABLE IF NOT EXISTS session_messages ("
     "id INTEGER PRIMARY KEY AUTOINCREMENT,"
     "session_id INTEGER NOT NULL,"
+    "turn_id INTEGER,"
+    "turn_key TEXT,"
+    "actor TEXT,"
+    "kind TEXT NOT NULL DEFAULT 'message',"
+    "api_role TEXT,"
+    "render_role TEXT NOT NULL,"
     "role TEXT NOT NULL,"
     "content TEXT NOT NULL,"
     "model TEXT,"
@@ -280,13 +327,28 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
     "metadata_json TEXT,"
     "message_json TEXT,"
     "reasoning TEXT,"
+    "message_key TEXT,"
+    "target_message_key TEXT,"
+    "tool_call_id TEXT,"
+    "tool_name TEXT,"
+    "arguments_json TEXT,"
+    "result_json TEXT,"
+    "include_in_context INTEGER NOT NULL DEFAULT 1,"
+    "is_error INTEGER NOT NULL DEFAULT 0,"
     "created_at TEXT NOT NULL DEFAULT "
     "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
-    "FOREIGN KEY(session_id) REFERENCES sessions(id)"
+    "FOREIGN KEY(session_id) REFERENCES sessions(id),"
+    "FOREIGN KEY(turn_id) REFERENCES session_turns(id)"
     ");";
+  static const char *turns_index_sql =
+    "CREATE INDEX IF NOT EXISTS session_turns_session_id_id_idx "
+    "ON session_turns(session_id, id);";
   static const char *messages_index_sql =
     "CREATE INDEX IF NOT EXISTS session_messages_session_id_id_idx "
     "ON session_messages(session_id, id);";
+  static const char *messages_context_index_sql =
+    "CREATE INDEX IF NOT EXISTS session_messages_context_idx "
+    "ON session_messages(session_id, include_in_context, id);";
   static const char *discovered_databases_sql =
     "CREATE TABLE IF NOT EXISTS discovered_databases ("
     "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -314,12 +376,23 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
   static const char *discovered_databases_decision_index_sql =
     "CREATE INDEX IF NOT EXISTS discovered_databases_user_decision_idx "
     "ON discovered_databases(user_decision);";
-  static const char *drop_retired_summary_cache_sql =
-    "DROP TABLE IF EXISTS database_documentation;";
-
   if (!strappy_db_exec(db,
                        sessions_sql,
                        "Could not create session schema",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       turns_sql,
+                       "Could not create session turn schema",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       turns_index_sql,
+                       "Could not create session turn index",
                        error_out)) {
     return 0;
   }
@@ -334,6 +407,13 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
   if (!strappy_db_exec(db,
                        messages_index_sql,
                        "Could not create session message index",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       messages_context_index_sql,
+                       "Could not create session context message index",
                        error_out)) {
     return 0;
   }
@@ -355,13 +435,6 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
   if (!strappy_db_exec(db,
                        discovered_databases_decision_index_sql,
                        "Could not create discovered database decision index",
-                       error_out)) {
-    return 0;
-  }
-
-  if (!strappy_db_exec(db,
-                       drop_retired_summary_cache_sql,
-                       "Could not remove old database summary cache schema",
                        error_out)) {
     return 0;
   }
@@ -425,12 +498,23 @@ static int strappy_db_assign_message_from_statement(
   sqlite3_stmt *stmt,
   char **error_out)
 {
+  char *turn_key;
+  char *actor;
+  char *kind;
+  char *api_role;
+  char *render_role;
   char *role;
   char *content;
   char *model;
   char *metadata_json;
   char *message_json;
   char *reasoning;
+  char *message_key;
+  char *target_message_key;
+  char *tool_call_id;
+  char *tool_name;
+  char *arguments_json;
+  char *result_json;
   char *created_at;
 
   if ((record == NULL) || (stmt == NULL)) {
@@ -441,34 +525,71 @@ static int strappy_db_assign_message_from_statement(
   strappy_session_message_record_destroy(record);
   record->message_id = (long long)sqlite3_column_int64(stmt, 0);
   record->session_id = (long long)sqlite3_column_int64(stmt, 1);
-  record->http_status = (long)sqlite3_column_int64(stmt, 5);
+  record->turn_id = (long long)sqlite3_column_int64(stmt, 2);
+  record->http_status = (long)sqlite3_column_int64(stmt, 11);
+  record->include_in_context = sqlite3_column_int(stmt, 20) ? 1 : 0;
+  record->is_error = sqlite3_column_int(stmt, 21) ? 1 : 0;
 
-  role = strappy_db_column_string(stmt, 2);
-  content = strappy_db_column_string(stmt, 3);
-  model = strappy_db_column_string(stmt, 4);
-  metadata_json = strappy_db_column_string(stmt, 6);
-  message_json = strappy_db_column_string(stmt, 7);
-  reasoning = strappy_db_column_string(stmt, 8);
-  created_at = strappy_db_column_string(stmt, 9);
+  turn_key = strappy_db_column_string(stmt, 3);
+  actor = strappy_db_column_string(stmt, 4);
+  kind = strappy_db_column_string(stmt, 5);
+  api_role = strappy_db_column_string(stmt, 6);
+  render_role = strappy_db_column_string(stmt, 7);
+  role = strappy_db_column_string(stmt, 8);
+  content = strappy_db_column_string(stmt, 9);
+  model = strappy_db_column_string(stmt, 10);
+  metadata_json = strappy_db_column_string(stmt, 12);
+  message_json = strappy_db_column_string(stmt, 13);
+  reasoning = strappy_db_column_string(stmt, 14);
+  message_key = strappy_db_column_string(stmt, 15);
+  target_message_key = strappy_db_column_string(stmt, 16);
+  tool_call_id = strappy_db_column_string(stmt, 17);
+  tool_name = strappy_db_column_string(stmt, 18);
+  arguments_json = strappy_db_column_string(stmt, 19);
+  result_json = strappy_db_column_string(stmt, 22);
+  created_at = strappy_db_column_string(stmt, 23);
 
-  if ((role == NULL) || (content == NULL) || (created_at == NULL)) {
+  if ((kind == NULL) || (render_role == NULL) || (role == NULL) ||
+      (content == NULL) || (created_at == NULL)) {
+    free(turn_key);
+    free(actor);
+    free(kind);
+    free(api_role);
+    free(render_role);
     free(role);
     free(content);
     free(model);
     free(metadata_json);
     free(message_json);
     free(reasoning);
+    free(message_key);
+    free(target_message_key);
+    free(tool_call_id);
+    free(tool_name);
+    free(arguments_json);
+    free(result_json);
     free(created_at);
     strappy_set_error(error_out, "Could not allocate session message row.");
     return 0;
   }
 
+  record->turn_key = turn_key;
+  record->actor = actor;
+  record->kind = kind;
+  record->api_role = api_role;
+  record->render_role = render_role;
   record->role = role;
   record->content = content;
   record->model = model;
   record->metadata_json = metadata_json;
   record->message_json = message_json;
   record->reasoning = reasoning;
+  record->message_key = message_key;
+  record->target_message_key = target_message_key;
+  record->tool_call_id = tool_call_id;
+  record->tool_name = tool_name;
+  record->arguments_json = arguments_json;
+  record->result_json = result_json;
   record->created_at = created_at;
   return 1;
 }
@@ -977,38 +1098,261 @@ static char *strappy_db_create_message_json(const char *role,
   return json;
 }
 
+static const char *strappy_db_input_render_role(
+  const strappy_session_message_input *message)
+{
+  if ((message != NULL) &&
+      (message->render_role != NULL) &&
+      (message->render_role[0] != '\0')) {
+    return message->render_role;
+  }
+  if ((message != NULL) &&
+      (message->role != NULL) &&
+      (message->role[0] != '\0')) {
+    return message->role;
+  }
+  return "assistant";
+}
+
+static const char *strappy_db_input_kind(
+  const strappy_session_message_input *message)
+{
+  if ((message != NULL) &&
+      (message->kind != NULL) &&
+      (message->kind[0] != '\0')) {
+    return message->kind;
+  }
+  return "message";
+}
+
+static const char *strappy_db_input_actor(
+  const strappy_session_message_input *message)
+{
+  if ((message != NULL) &&
+      (message->actor != NULL) &&
+      (message->actor[0] != '\0')) {
+    return message->actor;
+  }
+  return strappy_db_input_render_role(message);
+}
+
+static const char *strappy_db_input_context_policy(
+  const strappy_session_message_input *message)
+{
+  if ((message != NULL) &&
+      (message->context_policy != NULL) &&
+      (message->context_policy[0] != '\0')) {
+    return message->context_policy;
+  }
+  return "full";
+}
+
+static const char *strappy_db_input_api_role(
+  const strappy_session_message_input *message)
+{
+  if ((message != NULL) &&
+      (message->api_role != NULL) &&
+      (message->api_role[0] != '\0')) {
+    return message->api_role;
+  }
+  return NULL;
+}
+
+static int strappy_db_insert_or_load_turn(
+  sqlite3 *db,
+  long long session_id,
+  const strappy_session_message_input *message,
+  long long *turn_id_out,
+  char **error_out)
+{
+  static const char *insert_sql =
+    "INSERT OR IGNORE INTO session_turns "
+    "(session_id, turn_key, actor, api_role, render_role, context_policy, "
+    "prompt, status) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, 'complete');";
+  static const char *select_sql =
+    "SELECT id FROM session_turns WHERE session_id = ? AND turn_key = ?;";
+  sqlite3_stmt *stmt;
+  const char *turn_key;
+  const char *api_role;
+  const char *prompt;
+  int rc;
+  int ok;
+
+  if (turn_id_out == NULL) {
+    strappy_set_error(error_out, "Session turn insert received no output.");
+    return 0;
+  }
+  *turn_id_out = 0;
+
+  if ((message == NULL) ||
+      (message->turn_key == NULL) ||
+      (message->turn_key[0] == '\0')) {
+    return 1;
+  }
+
+  turn_key = message->turn_key;
+  api_role = strappy_db_input_api_role(message);
+  if (api_role == NULL) {
+    api_role = "user";
+  }
+  prompt = "";
+  if (strcmp(strappy_db_input_kind(message), "prompt") == 0) {
+    prompt = (message->content != NULL) ? message->content : "";
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, insert_sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare session turn insert: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  ok = 1;
+  if (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) != SQLITE_OK) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_text(stmt, 2, turn_key, -1, SQLITE_TRANSIENT) !=
+             SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_text(stmt,
+                               3,
+                               strappy_db_input_actor(message),
+                               -1,
+                               SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_text(stmt, 4, api_role, -1, SQLITE_TRANSIENT) !=
+             SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_text(stmt,
+                               5,
+                               strappy_db_input_render_role(message),
+                               -1,
+                               SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_text(stmt,
+                               6,
+                               strappy_db_input_context_policy(message),
+                               -1,
+                               SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_text(stmt, 7, prompt, -1, SQLITE_TRANSIENT) !=
+             SQLITE_OK)) {
+    ok = 0;
+  }
+
+  if (!ok) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind session turn insert: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save session turn: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, select_sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare session turn lookup: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 2, turn_key, -1, SQLITE_TRANSIENT);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind session turn lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    *turn_id_out = (long long)sqlite3_column_int64(stmt, 0);
+    sqlite3_finalize(stmt);
+    return 1;
+  }
+
+  sqlite3_finalize(stmt);
+  if (rc == SQLITE_DONE) {
+    strappy_set_error(error_out, "Session turn was not found after insert.");
+  } else {
+    strappy_set_formatted_error(error_out,
+                                "Could not read session turn lookup: %s",
+                                sqlite3_errmsg(db));
+  }
+  return 0;
+}
+
 static int strappy_db_insert_message(sqlite3 *db,
                                      long long session_id,
-                                     const char *role,
-                                     const char *content,
-                                     const char *model,
-                                     long http_status,
-                                     const char *metadata_json,
-                                     const char *message_json,
-                                     const char *reasoning,
+                                     const strappy_session_message_input *message,
                                      char **error_out)
 {
   static const char *sql =
     "INSERT INTO session_messages "
-    "(session_id, role, content, model, http_status, "
-    "metadata_json, message_json, reasoning) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
+    "(session_id, turn_id, turn_key, actor, kind, api_role, render_role, role, "
+    "content, model, http_status, metadata_json, message_json, reasoning, "
+    "message_key, target_message_key, tool_call_id, tool_name, arguments_json, "
+    "result_json, include_in_context, is_error) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
   sqlite3_stmt *stmt;
   char *generated_message_json;
   const char *message_json_to_store;
+  const char *api_role;
+  const char *render_role;
+  const char *content;
+  long long turn_id;
   int rc;
   int ok;
 
-  if ((session_id <= 0) || (role == NULL) || (role[0] == '\0') ||
-      (content == NULL)) {
+  if ((session_id <= 0) || (message == NULL)) {
     strappy_set_error(error_out, "Session message is incomplete.");
     return 0;
   }
 
+  render_role = strappy_db_input_render_role(message);
+  api_role = strappy_db_input_api_role(message);
+  content = (message->content != NULL) ? message->content : "";
+  if ((render_role == NULL) || (render_role[0] == '\0')) {
+    strappy_set_error(error_out, "Session message render role is incomplete.");
+    return 0;
+  }
+
+  if (!strappy_db_insert_or_load_turn(db,
+                                      session_id,
+                                      message,
+                                      &turn_id,
+                                      error_out)) {
+    return 0;
+  }
+
   generated_message_json = NULL;
-  message_json_to_store = message_json;
-  if ((message_json_to_store == NULL) || (message_json_to_store[0] == '\0')) {
-    generated_message_json = strappy_db_create_message_json(role, content);
+  message_json_to_store = message->message_json;
+  if (((message_json_to_store == NULL) || (message_json_to_store[0] == '\0')) &&
+      (api_role != NULL) &&
+      (api_role[0] != '\0')) {
+    generated_message_json = strappy_db_create_message_json(api_role, content);
     message_json_to_store = generated_message_json;
   }
 
@@ -1026,47 +1370,152 @@ static int strappy_db_insert_message(sqlite3 *db,
   if (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) != SQLITE_OK) {
     ok = 0;
   }
-  if (ok && (sqlite3_bind_text(stmt, 2, role, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+  if (ok && (turn_id > 0) &&
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)turn_id) != SQLITE_OK)) {
     ok = 0;
   }
-  if (ok && (sqlite3_bind_text(stmt, 3, content, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+  if (ok && (turn_id <= 0) && (sqlite3_bind_null(stmt, 2) != SQLITE_OK)) {
     ok = 0;
   }
-  if (ok && (model != NULL) &&
-      (sqlite3_bind_text(stmt, 4, model, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           3,
+                                           message->turn_key,
+                                           "Could not bind session message",
+                                           error_out)) {
     ok = 0;
   }
-  if (ok && (model == NULL) && (sqlite3_bind_null(stmt, 4) != SQLITE_OK)) {
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           4,
+                                           message->actor,
+                                           "Could not bind session message",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_text(stmt,
+                               5,
+                               strappy_db_input_kind(message),
+                               -1,
+                               SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (api_role != NULL) &&
+      (sqlite3_bind_text(stmt, 6, api_role, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (api_role == NULL) && (sqlite3_bind_null(stmt, 6) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_text(stmt, 7, render_role, -1, SQLITE_TRANSIENT) !=
+             SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_text(stmt, 8, render_role, -1, SQLITE_TRANSIENT) !=
+             SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_text(stmt, 9, content, -1, SQLITE_TRANSIENT) !=
+             SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           10,
+                                           message->model,
+                                           "Could not bind session message",
+                                           error_out)) {
     ok = 0;
   }
   if (ok &&
-      (sqlite3_bind_int64(stmt, 5, (sqlite3_int64)http_status) != SQLITE_OK)) {
+      (sqlite3_bind_int64(stmt, 11, (sqlite3_int64)message->http_status) !=
+       SQLITE_OK)) {
     ok = 0;
   }
-  if (ok && (metadata_json != NULL) &&
-      (sqlite3_bind_text(stmt, 6, metadata_json, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
-    ok = 0;
-  }
-  if (ok && (metadata_json == NULL) && (sqlite3_bind_null(stmt, 6) != SQLITE_OK)) {
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           12,
+                                           message->metadata_json,
+                                           "Could not bind session message",
+                                           error_out)) {
     ok = 0;
   }
   if (ok && (message_json_to_store != NULL) &&
       (sqlite3_bind_text(stmt,
-                         7,
+                         13,
                          message_json_to_store,
                          -1,
                          SQLITE_TRANSIENT) != SQLITE_OK)) {
     ok = 0;
   }
   if (ok && (message_json_to_store == NULL) &&
-      (sqlite3_bind_null(stmt, 7) != SQLITE_OK)) {
+      (sqlite3_bind_null(stmt, 13) != SQLITE_OK)) {
     ok = 0;
   }
-  if (ok && (reasoning != NULL) &&
-      (sqlite3_bind_text(stmt, 8, reasoning, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           14,
+                                           message->reasoning,
+                                           "Could not bind session message",
+                                           error_out)) {
     ok = 0;
   }
-  if (ok && (reasoning == NULL) && (sqlite3_bind_null(stmt, 8) != SQLITE_OK)) {
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           15,
+                                           message->message_key,
+                                           "Could not bind session message",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           16,
+                                           message->target_message_key,
+                                           "Could not bind session message",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           17,
+                                           message->tool_call_id,
+                                           "Could not bind session message",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           18,
+                                           message->tool_name,
+                                           "Could not bind session message",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           19,
+                                           message->arguments_json,
+                                           "Could not bind session message",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           20,
+                                           message->result_json,
+                                           "Could not bind session message",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int(stmt,
+                        21,
+                        message->include_in_context ? 1 : 0) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int(stmt, 22, message->is_error ? 1 : 0) != SQLITE_OK)) {
     ok = 0;
   }
 
@@ -1511,34 +1960,43 @@ int strappy_db_save_exchange_with_id(const char *db_path,
   session_id = (long long)sqlite3_last_insert_rowid(db);
   sqlite3_finalize(stmt);
 
-  if (!strappy_db_insert_message(db,
-                                 session_id,
-                                 "user",
-                                 prompt,
-                                 NULL,
-                                 0L,
-                                 NULL,
-                                 NULL,
-                                 NULL,
-                                 error_out)) {
-    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
-    sqlite3_close(db);
-    return 0;
-  }
+  {
+    strappy_session_message_input input;
 
-  if (!strappy_db_insert_message(db,
-                                 session_id,
-                                 "assistant",
-                                 response,
-                                 model,
-                                 http_status,
-                                 metadata_json,
-                                 message_json,
-                                 reasoning,
-                                 error_out)) {
-    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
-    sqlite3_close(db);
-    return 0;
+    memset(&input, 0, sizeof(input));
+    input.actor = "user";
+    input.context_policy = "full";
+    input.kind = "prompt";
+    input.api_role = "user";
+    input.render_role = "user";
+    input.role = "user";
+    input.content = prompt;
+    input.include_in_context = 1;
+    if (!strappy_db_insert_message(db, session_id, &input, error_out)) {
+      strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
+      sqlite3_close(db);
+      return 0;
+    }
+
+    memset(&input, 0, sizeof(input));
+    input.actor = "user";
+    input.context_policy = "full";
+    input.kind = "assistant";
+    input.api_role = "assistant";
+    input.render_role = "assistant";
+    input.role = "assistant";
+    input.content = response;
+    input.model = model;
+    input.http_status = http_status;
+    input.metadata_json = metadata_json;
+    input.message_json = message_json;
+    input.reasoning = reasoning;
+    input.include_in_context = 1;
+    if (!strappy_db_insert_message(db, session_id, &input, error_out)) {
+      strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
+      sqlite3_close(db);
+      return 0;
+    }
   }
 
   if (!strappy_db_exec(db, "COMMIT;", "Could not commit session insert", error_out)) {
@@ -1572,13 +2030,7 @@ static int strappy_db_insert_message_sequence(
   for (index = 0U; index < message_count; index++) {
     if (!strappy_db_insert_message(db,
                                    session_id,
-                                   messages[index].role,
-                                   messages[index].content,
-                                   messages[index].model,
-                                   messages[index].http_status,
-                                   messages[index].metadata_json,
-                                   messages[index].message_json,
-                                   messages[index].reasoning,
+                                   &messages[index],
                                    error_out)) {
       return 0;
     }
@@ -1994,34 +2446,43 @@ int strappy_db_append_exchange_to_session(const char *db_path,
     return 0;
   }
 
-  if (!strappy_db_insert_message(db,
-                                 session_id,
-                                 "user",
-                                 prompt,
-                                 NULL,
-                                 0L,
-                                 NULL,
-                                 NULL,
-                                 NULL,
-                                 error_out)) {
-    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
-    sqlite3_close(db);
-    return 0;
-  }
+  {
+    strappy_session_message_input input;
 
-  if (!strappy_db_insert_message(db,
-                                 session_id,
-                                 "assistant",
-                                 response,
-                                 model,
-                                 http_status,
-                                 metadata_json,
-                                 message_json,
-                                 reasoning,
-                                 error_out)) {
-    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
-    sqlite3_close(db);
-    return 0;
+    memset(&input, 0, sizeof(input));
+    input.actor = "user";
+    input.context_policy = "full";
+    input.kind = "prompt";
+    input.api_role = "user";
+    input.render_role = "user";
+    input.role = "user";
+    input.content = prompt;
+    input.include_in_context = 1;
+    if (!strappy_db_insert_message(db, session_id, &input, error_out)) {
+      strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
+      sqlite3_close(db);
+      return 0;
+    }
+
+    memset(&input, 0, sizeof(input));
+    input.actor = "user";
+    input.context_policy = "full";
+    input.kind = "assistant";
+    input.api_role = "assistant";
+    input.render_role = "assistant";
+    input.role = "assistant";
+    input.content = response;
+    input.model = model;
+    input.http_status = http_status;
+    input.metadata_json = metadata_json;
+    input.message_json = message_json;
+    input.reasoning = reasoning;
+    input.include_in_context = 1;
+    if (!strappy_db_insert_message(db, session_id, &input, error_out)) {
+      strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
+      sqlite3_close(db);
+      return 0;
+    }
   }
 
   stmt = NULL;
@@ -2157,17 +2618,31 @@ int strappy_db_append_message_sequence_to_session(
   return 1;
 }
 
-int strappy_db_list_session_messages(const char *db_path,
-                                     long long session_id,
-                                     strappy_session_message_record_list *list,
-                                     char **error_out)
+static const char *strappy_db_session_message_select_clause(void)
 {
-  static const char *sql =
-    "SELECT id, session_id, role, content, model, http_status, "
-    "metadata_json, message_json, reasoning, created_at "
+  return
+    "SELECT id, session_id, COALESCE(turn_id, 0), turn_key, actor, kind, "
+    "api_role, render_role, role, content, model, http_status, metadata_json, "
+    "message_json, reasoning, message_key, target_message_key, tool_call_id, "
+    "tool_name, arguments_json, include_in_context, is_error, result_json, "
+    "created_at "
+    "FROM session_messages ";
+}
+
+static int strappy_db_list_session_messages_with_filter(
+  const char *db_path,
+  long long session_id,
+  const char *where_suffix,
+  strappy_session_message_record_list *list,
+  char **error_out)
+{
+  static const char *all_suffix =
     "FROM session_messages "
     "WHERE session_id = ? "
     "ORDER BY id ASC;";
+  char *sql;
+  size_t select_length;
+  size_t suffix_length;
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;
@@ -2178,22 +2653,45 @@ int strappy_db_list_session_messages(const char *db_path,
   }
   strappy_session_message_record_list_init(list);
 
+  if ((where_suffix == NULL) || (where_suffix[0] == '\0')) {
+    where_suffix = all_suffix + strlen("FROM session_messages ");
+  }
+
+  select_length = strlen(strappy_db_session_message_select_clause());
+  suffix_length = strlen(where_suffix);
+  if (select_length > (((size_t)-1) - suffix_length - 1U)) {
+    strappy_set_error(error_out, "Session message query is too large.");
+    return 0;
+  }
+  sql = (char *)malloc(select_length + suffix_length + 1U);
+  if (sql == NULL) {
+    strappy_set_error(error_out, "Could not allocate session message query.");
+    return 0;
+  }
+  memcpy(sql, strappy_db_session_message_select_clause(), select_length);
+  memcpy(sql + select_length, where_suffix, suffix_length);
+  sql[select_length + suffix_length] = '\0';
+
   if (!strappy_db_open(db_path, &db, error_out)) {
+    free(sql);
     return 0;
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
+    free(sql);
     sqlite3_close(db);
     return 0;
   }
 
   if (!strappy_db_session_exists(db, session_id, error_out)) {
+    free(sql);
     sqlite3_close(db);
     return 0;
   }
 
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  free(sql);
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
                                 "Could not prepare session message list: %s",
@@ -2261,4 +2759,35 @@ int strappy_db_list_session_messages(const char *db_path,
   sqlite3_finalize(stmt);
   sqlite3_close(db);
   return 1;
+}
+
+int strappy_db_list_session_messages(const char *db_path,
+                                     long long session_id,
+                                     strappy_session_message_record_list *list,
+                                     char **error_out)
+{
+  return strappy_db_list_session_messages_with_filter(
+    db_path,
+    session_id,
+    "WHERE session_id = ? ORDER BY id ASC;",
+    list,
+    error_out);
+}
+
+int strappy_db_list_session_context_messages(
+  const char *db_path,
+  long long session_id,
+  strappy_session_message_record_list *list,
+  char **error_out)
+{
+  return strappy_db_list_session_messages_with_filter(
+    db_path,
+    session_id,
+    "WHERE session_id = ? "
+    "AND include_in_context = 1 "
+    "AND api_role IS NOT NULL "
+    "AND api_role != '' "
+    "ORDER BY id ASC;",
+    list,
+    error_out);
 }

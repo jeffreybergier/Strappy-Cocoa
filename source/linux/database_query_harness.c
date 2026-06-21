@@ -1004,6 +1004,20 @@ static int harness_run_helper_info_tests(const harness_context *context)
     return 0;
   }
 
+  if (!harness_expect_error_contains(context->catalog_path,
+                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                     NULL,
+                                     "requires at least one argument")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(context->catalog_path,
+                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                     "{}",
+                                     "requires at least one argument")) {
+    return 0;
+  }
+
   if (!harness_expect_output_contains(
         context->catalog_path,
         STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER,
@@ -1234,6 +1248,159 @@ static int harness_run_sms_guidance_tests(harness_context *context)
   return 1;
 }
 
+static int harness_run_session_turn_storage_tests(const harness_context *context)
+{
+  strappy_session_message_input messages[5];
+  strappy_session_message_record_list all_messages;
+  strappy_session_message_record_list context_messages;
+  long long session_id;
+  char *error;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  memset(messages, 0, sizeof(messages));
+
+  messages[0].turn_key = "user-turn-test";
+  messages[0].actor = "user";
+  messages[0].context_policy = "full";
+  messages[0].kind = "prompt";
+  messages[0].api_role = "user";
+  messages[0].render_role = "user";
+  messages[0].role = "user";
+  messages[0].content = "What is stored?";
+  messages[0].message_key = "user-turn-test-prompt";
+  messages[0].include_in_context = 1;
+
+  messages[1].turn_key = "user-turn-test";
+  messages[1].actor = "user";
+  messages[1].context_policy = "full";
+  messages[1].kind = "assistant";
+  messages[1].api_role = "assistant";
+  messages[1].render_role = "assistant";
+  messages[1].role = "assistant";
+  messages[1].content = "The answer.";
+  messages[1].message_key = "user-turn-test-assistant";
+  messages[1].include_in_context = 1;
+
+  messages[2].turn_key = "harness-turn-test";
+  messages[2].actor = "harness";
+  messages[2].context_policy = "omit";
+  messages[2].kind = "prompt";
+  messages[2].api_role = "user";
+  messages[2].render_role = "harness";
+  messages[2].role = "harness";
+  messages[2].content = "Learning Summary";
+  messages[2].message_key = "harness-turn-test-prompt";
+  messages[2].include_in_context = 0;
+
+  messages[3].turn_key = "harness-turn-test";
+  messages[3].actor = "harness";
+  messages[3].context_policy = "omit";
+  messages[3].kind = "tool_result";
+  messages[3].api_role = "tool";
+  messages[3].render_role = "tool";
+  messages[3].role = "tool";
+  messages[3].content = "{\"ok\":true}";
+  messages[3].message_key = "harness-turn-test-tool-result";
+  messages[3].target_message_key = "harness-turn-test-assistant";
+  messages[3].tool_call_id = "call-1";
+  messages[3].tool_name = STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER;
+  messages[3].arguments_json = "{\"key\":\"value\"}";
+  messages[3].result_json = "{\"ok\":true}";
+  messages[3].include_in_context = 0;
+
+  messages[4].turn_key = "harness-turn-test";
+  messages[4].actor = "harness";
+  messages[4].context_policy = "omit";
+  messages[4].kind = "assistant";
+  messages[4].api_role = "assistant";
+  messages[4].render_role = "assistant";
+  messages[4].role = "assistant";
+  messages[4].content = "Learning Summary Complete";
+  messages[4].message_key = "harness-turn-test-assistant";
+  messages[4].metadata_json =
+    "{\"usage\":{\"cost\":\"0.001\",\"prompt_tokens\":1,\"completion_tokens\":2}}";
+  messages[4].include_in_context = 0;
+
+  strappy_session_message_record_list_init(&all_messages);
+  strappy_session_message_record_list_init(&context_messages);
+  error = NULL;
+  session_id = 0LL;
+  ok = strappy_db_save_message_sequence_with_id(context->catalog_path,
+                                                "What is stored?",
+                                                "The answer.",
+                                                "harness-model",
+                                                200L,
+                                                messages,
+                                                sizeof(messages) / sizeof(messages[0]),
+                                                &session_id,
+                                                &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not save session turn test: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  ok = strappy_db_list_session_messages(context->catalog_path,
+                                        session_id,
+                                        &all_messages,
+                                        &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not list session turn test messages: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  ok = (all_messages.count == 5U) &&
+       (all_messages.records[0].turn_id > 0LL) &&
+       (all_messages.records[2].turn_id > 0LL) &&
+       (strcmp(all_messages.records[2].actor, "harness") == 0) &&
+       (strcmp(all_messages.records[2].role, "harness") == 0) &&
+       (strcmp(all_messages.records[3].kind, "tool_result") == 0) &&
+       (strcmp(all_messages.records[3].target_message_key,
+               "harness-turn-test-assistant") == 0) &&
+       (all_messages.records[3].include_in_context == 0) &&
+       (strcmp(all_messages.records[4].metadata_json,
+               "{\"usage\":{\"cost\":\"0.001\",\"prompt_tokens\":1,\"completion_tokens\":2}}") == 0);
+  if (!ok) {
+    fprintf(stderr, "Stored session turn rows did not match expected shape.\n");
+    strappy_session_message_record_list_destroy(&all_messages);
+    return 0;
+  }
+
+  ok = strappy_db_list_session_context_messages(context->catalog_path,
+                                                session_id,
+                                                &context_messages,
+                                                &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not list session context messages: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_message_record_list_destroy(&all_messages);
+    return 0;
+  }
+
+  ok = (context_messages.count == 2U) &&
+       (strcmp(context_messages.records[0].api_role, "user") == 0) &&
+       (strcmp(context_messages.records[1].api_role, "assistant") == 0) &&
+       (strcmp(context_messages.records[1].content, "The answer.") == 0);
+  if (!ok) {
+    fprintf(stderr, "Session context replay rows did not match expected shape.\n");
+  }
+
+  strappy_session_message_record_list_destroy(&context_messages);
+  strappy_session_message_record_list_destroy(&all_messages);
+  return ok;
+}
+
 int main(void)
 {
   harness_context context;
@@ -1249,6 +1416,7 @@ int main(void)
        harness_run_database_list_info_tests(&context) &&
        harness_run_database_query_tests(&context) &&
        harness_run_helper_info_tests(&context) &&
+       harness_run_session_turn_storage_tests(&context) &&
        harness_run_sms_guidance_tests(&context) &&
        harness_run_mail_guidance_tests(&context);
 

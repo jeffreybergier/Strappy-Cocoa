@@ -1,6 +1,8 @@
 #ifndef STRAPPY_CONFIG_H
 #define STRAPPY_CONFIG_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -15,6 +17,8 @@ typedef struct strappy_config {
   char *api_token;
   char *api_model;
   char *guidance_resource_dir;
+  const char * const *tool_allowlist;
+  size_t tool_allowlist_count;
 } strappy_config;
 
 void strappy_config_init(strappy_config *config);

@@ -8,8 +8,11 @@
 #include "strappy_tools.h"
 
 #include <cJSON.h>
+#include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 #define STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS 50U
 
@@ -29,9 +32,37 @@ typedef struct strappy_assistant_tool_round {
   int post_final;
   char *tool_call_content;
   char *storage_prompt_message_json;
+  char *tool_call_message_key;
+  char **tool_result_message_keys;
+  char **tool_call_ids;
+  char **tool_names;
+  char **tool_arguments;
   char **tool_outputs;
   char **tool_message_jsons;
 } strappy_assistant_tool_round;
+
+typedef enum strappy_assistant_tool_policy {
+  STRAPPY_ASSISTANT_TOOL_POLICY_NORMAL = 0,
+  STRAPPY_ASSISTANT_TOOL_POLICY_MEMORY_AUDIT = 1
+} strappy_assistant_tool_policy;
+
+typedef struct strappy_assistant_turn_spec {
+  const char *turn_key;
+  const char *actor;
+  const char *render_role;
+  const char *api_role;
+  const char *context_policy;
+  const char *prompt;
+  const char *prompt_message_key;
+  const char *assistant_message_key;
+  strappy_assistant_tool_policy tool_policy;
+} strappy_assistant_turn_spec;
+
+typedef struct strappy_assistant_turn_keys {
+  char *turn_key;
+  char *prompt_message_key;
+  char *assistant_message_key;
+} strappy_assistant_turn_keys;
 
 typedef struct strappy_assistant_tool_sequence {
   strappy_assistant_tool_round rounds[STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS];
@@ -39,13 +70,14 @@ typedef struct strappy_assistant_tool_sequence {
   strappy_chat_result memory_audit_result;
   size_t round_count;
   strappy_chat_result *final_result;
+  strappy_chat_result *memory_audit_final_result;
 } strappy_assistant_tool_sequence;
 
-typedef struct strappy_assistant_stream_phase_context {
+typedef struct strappy_assistant_stream_turn_context {
   strappy_chat_stream_callback callback;
   void *callback_data;
-  const char *phase;
-} strappy_assistant_stream_phase_context;
+  const strappy_assistant_turn_spec *turn;
+} strappy_assistant_stream_turn_context;
 
 static void strappy_assistant_request_messages_init(
   strappy_assistant_request_messages *request)
@@ -87,6 +119,11 @@ static void strappy_assistant_tool_round_init(
   round->post_final = 0;
   round->tool_call_content = NULL;
   round->storage_prompt_message_json = NULL;
+  round->tool_call_message_key = NULL;
+  round->tool_result_message_keys = NULL;
+  round->tool_call_ids = NULL;
+  round->tool_names = NULL;
+  round->tool_arguments = NULL;
   round->tool_outputs = NULL;
   round->tool_message_jsons = NULL;
 }
@@ -104,6 +141,27 @@ static void strappy_assistant_tool_round_destroy(
   free(round->storage_messages);
   free(round->tool_call_content);
   free(round->storage_prompt_message_json);
+  free(round->tool_call_message_key);
+  if (round->tool_result_message_keys != NULL) {
+    for (index = 0U; index < round->tool_count; index++) {
+      free(round->tool_result_message_keys[index]);
+    }
+  }
+  if (round->tool_call_ids != NULL) {
+    for (index = 0U; index < round->tool_count; index++) {
+      free(round->tool_call_ids[index]);
+    }
+  }
+  if (round->tool_names != NULL) {
+    for (index = 0U; index < round->tool_count; index++) {
+      free(round->tool_names[index]);
+    }
+  }
+  if (round->tool_arguments != NULL) {
+    for (index = 0U; index < round->tool_count; index++) {
+      free(round->tool_arguments[index]);
+    }
+  }
   if (round->tool_outputs != NULL) {
     for (index = 0U; index < round->tool_count; index++) {
       free(round->tool_outputs[index]);
@@ -114,6 +172,10 @@ static void strappy_assistant_tool_round_destroy(
       free(round->tool_message_jsons[index]);
     }
   }
+  free(round->tool_result_message_keys);
+  free(round->tool_call_ids);
+  free(round->tool_names);
+  free(round->tool_arguments);
   free(round->tool_outputs);
   free(round->tool_message_jsons);
   strappy_assistant_tool_round_init(round);
@@ -139,6 +201,7 @@ static void strappy_assistant_tool_sequence_init(
 
   sequence->round_count = 0U;
   sequence->final_result = NULL;
+  sequence->memory_audit_final_result = NULL;
 }
 
 static void strappy_assistant_tool_sequence_destroy(
@@ -161,15 +224,56 @@ static void strappy_assistant_tool_sequence_destroy(
 
   sequence->round_count = 0U;
   sequence->final_result = NULL;
+  sequence->memory_audit_final_result = NULL;
+}
+
+static int strappy_assistant_emit_turn_event(
+  strappy_chat_stream_event_type type,
+  const strappy_assistant_turn_spec *turn,
+  const char *text,
+  strappy_chat_stream_callback callback,
+  void *callback_data,
+  char **error_out)
+{
+  strappy_chat_stream_event event;
+
+  if (callback == NULL) {
+    return 1;
+  }
+
+  memset(&event, 0, sizeof(event));
+  event.type = type;
+  event.text = (text != NULL) ? text : "";
+  if (turn != NULL) {
+    event.turn_key = turn->turn_key;
+    event.actor = turn->actor;
+    if (type == STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED) {
+      event.render_role = "assistant";
+      event.api_role = "assistant";
+      event.kind = "assistant";
+      event.message_key = turn->assistant_message_key;
+    } else {
+      event.render_role = turn->render_role;
+      event.api_role = turn->api_role;
+      event.kind = "prompt";
+      event.message_key = turn->prompt_message_key;
+    }
+  }
+  if (!callback(&event, callback_data)) {
+    strappy_set_error(error_out, "Stream callback rejected turn event.");
+    return 0;
+  }
+
+  return 1;
 }
 
 static int strappy_assistant_emit_tool_event(
   strappy_chat_stream_event_type type,
+  const strappy_assistant_turn_spec *turn,
   const char *tool_call_id,
   const char *tool_name,
   const char *arguments_json,
   const char *result_json,
-  const char *phase,
   strappy_chat_stream_callback callback,
   void *callback_data,
   char **error_out)
@@ -183,11 +287,19 @@ static int strappy_assistant_emit_tool_event(
   memset(&event, 0, sizeof(event));
   event.type = type;
   event.text = tool_name;
+  if (turn != NULL) {
+    event.turn_key = turn->turn_key;
+    event.actor = turn->actor;
+    event.render_role = "tool";
+    event.api_role = "tool";
+    event.kind = (type == STRAPPY_CHAT_STREAM_EVENT_TOOL_CALL) ?
+      "tool_call" : "tool_result";
+    event.target_message_key = turn->assistant_message_key;
+  }
   event.tool_call_id = tool_call_id;
   event.tool_name = tool_name;
   event.arguments_json = arguments_json;
   event.result_json = result_json;
-  event.phase = phase;
   if (!callback(&event, callback_data)) {
     strappy_set_error(error_out, "Stream callback rejected tool event.");
     return 0;
@@ -196,42 +308,18 @@ static int strappy_assistant_emit_tool_event(
   return 1;
 }
 
-static int strappy_assistant_emit_harness_prompt(
-  const char *prompt,
-  strappy_chat_stream_callback callback,
-  void *callback_data,
-  char **error_out)
-{
-  strappy_chat_stream_event event;
-
-  if (callback == NULL) {
-    return 1;
-  }
-
-  memset(&event, 0, sizeof(event));
-  event.type = STRAPPY_CHAT_STREAM_EVENT_HARNESS_PROMPT;
-  event.text = (prompt != NULL) ? prompt : "";
-  event.phase = "harness";
-  if (!callback(&event, callback_data)) {
-    strappy_set_error(error_out, "Stream callback rejected harness prompt.");
-    return 0;
-  }
-
-  return 1;
-}
-
-static int strappy_assistant_stream_phase_callback(
+static int strappy_assistant_stream_turn_callback(
   const strappy_chat_stream_event *event,
   void *callback_data)
 {
-  strappy_assistant_stream_phase_context *context;
-  strappy_chat_stream_event phased_event;
+  strappy_assistant_stream_turn_context *context;
+  strappy_chat_stream_event turn_event;
 
   if (callback_data == NULL) {
     return 1;
   }
 
-  context = (strappy_assistant_stream_phase_context *)callback_data;
+  context = (strappy_assistant_stream_turn_context *)callback_data;
   if (context->callback == NULL) {
     return 1;
   }
@@ -240,16 +328,34 @@ static int strappy_assistant_stream_phase_callback(
     return context->callback(event, context->callback_data);
   }
 
-  phased_event = *event;
-  if (phased_event.phase == NULL) {
-    phased_event.phase = context->phase;
+  turn_event = *event;
+  if (context->turn != NULL) {
+    if (turn_event.turn_key == NULL) {
+      turn_event.turn_key = context->turn->turn_key;
+    }
+    if (turn_event.actor == NULL) {
+      turn_event.actor = context->turn->actor;
+    }
+    if (turn_event.render_role == NULL) {
+      turn_event.render_role = "assistant";
+    }
+    if (turn_event.api_role == NULL) {
+      turn_event.api_role = "assistant";
+    }
+    if (turn_event.kind == NULL) {
+      turn_event.kind = "assistant";
+    }
+    if (turn_event.message_key == NULL) {
+      turn_event.message_key = context->turn->assistant_message_key;
+    }
   }
-  return context->callback(&phased_event, context->callback_data);
+  return context->callback(&turn_event, context->callback_data);
 }
 
 static char *strappy_assistant_create_basic_message_json(const char *role,
                                                          const char *content,
                                                          char **error_out);
+static const char *strappy_assistant_memory_audit_prompt(void);
 
 static char *strappy_assistant_join_strings(const char *first,
                                             const char *second)
@@ -279,31 +385,246 @@ static char *strappy_assistant_join_strings(const char *first,
   return joined;
 }
 
+static char *strappy_assistant_make_key(const char *prefix)
+{
+  char buffer[96];
+  struct timeval now;
+  unsigned long stack_marker;
+  int result;
+
+  if (gettimeofday(&now, NULL) != 0) {
+    now.tv_sec = 0;
+    now.tv_usec = 0;
+  }
+  stack_marker = (unsigned long)(uintptr_t)&buffer;
+  result = snprintf(buffer,
+                    sizeof(buffer),
+                    "%s-%lld-%ld-%lx",
+                    (prefix != NULL) ? prefix : "turn",
+                    (long long)now.tv_sec,
+                    (long)now.tv_usec,
+                    stack_marker);
+  if ((result <= 0) || ((size_t)result >= sizeof(buffer))) {
+    return NULL;
+  }
+
+  return strappy_string_duplicate(buffer);
+}
+
+static char *strappy_assistant_make_child_key(const char *parent,
+                                              const char *suffix)
+{
+  char *with_dash;
+  char *joined;
+
+  if ((parent == NULL) || (suffix == NULL)) {
+    return NULL;
+  }
+
+  with_dash = strappy_assistant_join_strings(parent, "-");
+  if (with_dash == NULL) {
+    return NULL;
+  }
+  joined = strappy_assistant_join_strings(with_dash, suffix);
+  free(with_dash);
+  return joined;
+}
+
+static void strappy_assistant_turn_keys_init(
+  strappy_assistant_turn_keys *keys)
+{
+  if (keys == NULL) {
+    return;
+  }
+
+  keys->turn_key = NULL;
+  keys->prompt_message_key = NULL;
+  keys->assistant_message_key = NULL;
+}
+
+static void strappy_assistant_turn_keys_destroy(
+  strappy_assistant_turn_keys *keys)
+{
+  if (keys == NULL) {
+    return;
+  }
+
+  free(keys->turn_key);
+  free(keys->prompt_message_key);
+  free(keys->assistant_message_key);
+  strappy_assistant_turn_keys_init(keys);
+}
+
+static int strappy_assistant_turn_keys_make(
+  strappy_assistant_turn_keys *keys,
+  const char *prefix,
+  char **error_out)
+{
+  if (keys == NULL) {
+    strappy_set_error(error_out, "Turn key output is missing.");
+    return 0;
+  }
+
+  strappy_assistant_turn_keys_init(keys);
+  keys->turn_key = strappy_assistant_make_key(prefix);
+  if (keys->turn_key != NULL) {
+    keys->prompt_message_key =
+      strappy_assistant_make_child_key(keys->turn_key, "prompt");
+  }
+  if (keys->turn_key != NULL) {
+    keys->assistant_message_key =
+      strappy_assistant_make_child_key(keys->turn_key, "assistant");
+  }
+
+  if ((keys->turn_key == NULL) ||
+      (keys->prompt_message_key == NULL) ||
+      (keys->assistant_message_key == NULL)) {
+    strappy_assistant_turn_keys_destroy(keys);
+    strappy_set_error(error_out, "Could not allocate turn message keys.");
+    return 0;
+  }
+
+  return 1;
+}
+
+static void strappy_assistant_turn_spec_set(
+  strappy_assistant_turn_spec *turn,
+  const strappy_assistant_turn_keys *keys,
+  const char *actor,
+  const char *render_role,
+  const char *api_role,
+  const char *context_policy,
+  const char *prompt,
+  strappy_assistant_tool_policy policy)
+{
+  if (turn == NULL) {
+    return;
+  }
+
+  turn->turn_key = (keys != NULL) ? keys->turn_key : NULL;
+  turn->actor = actor;
+  turn->render_role = render_role;
+  turn->api_role = api_role;
+  turn->context_policy = context_policy;
+  turn->prompt = prompt;
+  turn->prompt_message_key = (keys != NULL) ? keys->prompt_message_key : NULL;
+  turn->assistant_message_key =
+    (keys != NULL) ? keys->assistant_message_key : NULL;
+  turn->tool_policy = policy;
+}
+
+static int strappy_assistant_make_default_turns(
+  const char *prompt,
+  strappy_assistant_turn_keys *main_keys,
+  strappy_assistant_turn_keys *audit_keys,
+  strappy_assistant_turn_spec *main_turn,
+  strappy_assistant_turn_spec *audit_turn,
+  char **error_out)
+{
+  if ((main_keys == NULL) || (audit_keys == NULL) ||
+      (main_turn == NULL) || (audit_turn == NULL)) {
+    strappy_set_error(error_out, "Turn outputs are missing.");
+    return 0;
+  }
+
+  if (!strappy_assistant_turn_keys_make(main_keys, "user-turn", error_out) ||
+      !strappy_assistant_turn_keys_make(audit_keys, "harness-turn", error_out)) {
+    strappy_assistant_turn_keys_destroy(audit_keys);
+    strappy_assistant_turn_keys_destroy(main_keys);
+    return 0;
+  }
+
+  strappy_assistant_turn_spec_set(main_turn,
+                                  main_keys,
+                                  "user",
+                                  "user",
+                                  "user",
+                                  "full",
+                                  prompt,
+                                  STRAPPY_ASSISTANT_TOOL_POLICY_NORMAL);
+  strappy_assistant_turn_spec_set(audit_turn,
+                                  audit_keys,
+                                  "harness",
+                                  "harness",
+                                  "user",
+                                  "omit",
+                                  strappy_assistant_memory_audit_prompt(),
+                                  STRAPPY_ASSISTANT_TOOL_POLICY_MEMORY_AUDIT);
+  return 1;
+}
+
+static int strappy_assistant_context_is_included(
+  const strappy_assistant_turn_spec *turn)
+{
+  if ((turn != NULL) &&
+      (turn->context_policy != NULL) &&
+      (strcmp(turn->context_policy, "omit") == 0)) {
+    return 0;
+  }
+  return 1;
+}
+
+static void strappy_assistant_storage_message_set_turn(
+  strappy_session_message_input *message,
+  const strappy_assistant_turn_spec *turn,
+  const char *kind,
+  const char *api_role,
+  const char *render_role,
+  const char *message_key,
+  const char *target_message_key)
+{
+  if (message == NULL) {
+    return;
+  }
+
+  message->turn_key = (turn != NULL) ? turn->turn_key : NULL;
+  message->actor = (turn != NULL) ? turn->actor : NULL;
+  message->context_policy = (turn != NULL) ? turn->context_policy : "full";
+  message->kind = kind;
+  message->api_role = api_role;
+  message->render_role = render_role;
+  message->role = render_role;
+  message->message_key = message_key;
+  message->target_message_key = target_message_key;
+  message->include_in_context = strappy_assistant_context_is_included(turn);
+}
+
+static int strappy_assistant_tool_is_allowed(
+  strappy_assistant_tool_policy policy,
+  const char *tool_name)
+{
+  if (policy == STRAPPY_ASSISTANT_TOOL_POLICY_MEMORY_AUDIT) {
+    return ((tool_name != NULL) &&
+            ((strcmp(tool_name, STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER) == 0) ||
+             (strcmp(tool_name, STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) == 0))) ? 1 : 0;
+  }
+
+  return 1;
+}
+
 static const char *strappy_assistant_memory_audit_prompt(void)
 {
   return
-    "Post-answer memory audit:\n"
+    "Learning Summary:\n"
     "- Do not revise, summarize, or add commentary to the final answer you just "
     "wrote.\n"
-    "- If this turn revealed any new small, stable, future-useful user fact, "
+    "- If the user prompt, tool results, database queries, or what you learned "
+    "while answering revealed any new small, stable, future-useful user fact, "
     "call helper_user_info_remember now.\n"
-    "- If this turn verified any reusable database schema, join, timestamp, "
-    "flag, caveat, or query-pattern hint, call helper_database_info_remember "
-    "now.\n"
+    "- If tool results or database queries verified any reusable database "
+    "schema, join, timestamp, flag, caveat, or query-pattern hint, call "
+    "helper_database_info_remember now.\n"
     "- Store only information that is explicit or strongly implied and useful "
     "later. Never store secrets, credentials, sensitive identifiers, long "
     "copied content, or private row contents.\n"
-    "- Do not call database_list_info, database_query, database_context_read, "
-    "helper_user_info_read, or forget tools during this audit.\n"
     "- If there is nothing worth remembering, do not call a tool.\n"
-    "After any memory tool calls complete, respond with exactly the same final "
-    "answer text as your previous assistant message. Do not mention this "
-    "memory audit.";
+    "After any remember tool calls complete, respond with exactly: "
+    "Learning Summary Complete";
 }
 
 static const char *strappy_assistant_memory_audit_completion_text(void)
 {
-  return "Memory audit complete.";
+  return "Learning Summary Complete";
 }
 
 static int strappy_assistant_final_request_context(
@@ -363,7 +684,7 @@ static int strappy_assistant_build_memory_audit_request(
   size_t request_count;
 
   if (audit_request == NULL) {
-    strappy_set_error(error_out, "Memory audit request output is missing.");
+    strappy_set_error(error_out, "Learning summary request output is missing.");
     return 0;
   }
   strappy_assistant_request_messages_init(audit_request);
@@ -371,24 +692,24 @@ static int strappy_assistant_build_memory_audit_request(
   if ((base_messages == NULL) || (base_count == 0U) ||
       (final_result == NULL) ||
       (final_result->response_text == NULL)) {
-    strappy_set_error(error_out, "Memory audit request is incomplete.");
+    strappy_set_error(error_out, "Learning summary request is incomplete.");
     return 0;
   }
 
   if (base_count > (((size_t)-1) - 2U)) {
-    strappy_set_error(error_out, "Memory audit request is too large.");
+    strappy_set_error(error_out, "Learning summary request is too large.");
     return 0;
   }
   request_count = base_count + 2U;
   if (request_count > (((size_t)-1) / sizeof(strappy_chat_message))) {
-    strappy_set_error(error_out, "Memory audit request is too large.");
+    strappy_set_error(error_out, "Learning summary request is too large.");
     return 0;
   }
 
   messages = (strappy_chat_message *)malloc(
     request_count * sizeof(strappy_chat_message));
   if (messages == NULL) {
-    strappy_set_error(error_out, "Could not allocate memory audit request.");
+    strappy_set_error(error_out, "Could not allocate learning summary request.");
     return 0;
   }
 
@@ -490,7 +811,10 @@ static int strappy_assistant_prepare_request_messages(
   messages[0].message_json = NULL;
 
   for (index = 0U; index < history_count; index++) {
-    messages[index + 1U].role = message_list->records[index].role;
+    messages[index + 1U].role =
+      (message_list->records[index].api_role != NULL) ?
+        message_list->records[index].api_role :
+        message_list->records[index].role;
     messages[index + 1U].content = message_list->records[index].content;
     messages[index + 1U].message_json = message_list->records[index].message_json;
   }
@@ -668,9 +992,8 @@ static char *strappy_assistant_tool_message_json(const char *tool_call_id,
 static int strappy_assistant_build_tool_round(
   const char *session_db_path,
   const char *resource_dir,
-  const char *storage_prompt,
-  const char *storage_prompt_role,
-  const char *storage_prompt_api_role,
+  const strappy_assistant_turn_spec *turn,
+  size_t round_number,
   int store_prompt_message,
   int post_final,
   const strappy_assistant_request_messages *request_messages,
@@ -678,7 +1001,6 @@ static int strappy_assistant_build_tool_round(
   int should_stream,
   strappy_chat_stream_callback callback,
   void *callback_data,
-  const char *stream_phase,
   int requires_catalog,
   strappy_assistant_tool_round *round,
   char **error_out)
@@ -686,6 +1008,7 @@ static int strappy_assistant_build_tool_round(
   cJSON *root;
   cJSON *tool_calls;
   char *parse_error;
+  char tool_call_key[96];
   int tool_count;
   int index;
   size_t followup_count;
@@ -748,10 +1071,19 @@ static int strappy_assistant_build_tool_round(
     followup_count * sizeof(strappy_chat_message));
   round->storage_messages = (strappy_session_message_input *)malloc(
     storage_count * sizeof(strappy_session_message_input));
+  round->tool_result_message_keys =
+    (char **)calloc((size_t)tool_count, sizeof(char *));
+  round->tool_call_ids = (char **)calloc((size_t)tool_count, sizeof(char *));
+  round->tool_names = (char **)calloc((size_t)tool_count, sizeof(char *));
+  round->tool_arguments = (char **)calloc((size_t)tool_count, sizeof(char *));
   round->tool_outputs = (char **)calloc((size_t)tool_count, sizeof(char *));
   round->tool_message_jsons = (char **)calloc((size_t)tool_count, sizeof(char *));
   if ((round->followup_messages == NULL) ||
       (round->storage_messages == NULL) ||
+      (round->tool_result_message_keys == NULL) ||
+      (round->tool_call_ids == NULL) ||
+      (round->tool_names == NULL) ||
+      (round->tool_arguments == NULL) ||
       (round->tool_outputs == NULL) ||
       (round->tool_message_jsons == NULL)) {
     cJSON_Delete(root);
@@ -787,28 +1119,40 @@ static int strappy_assistant_build_tool_round(
   memset(round->storage_messages,
          0,
          storage_count * sizeof(strappy_session_message_input));
-  round->storage_messages[0].role =
-    ((storage_prompt_role != NULL) && (storage_prompt_role[0] != '\0')) ?
-      storage_prompt_role : "user";
+  strappy_assistant_storage_message_set_turn(&round->storage_messages[0],
+                                             turn,
+                                             "prompt",
+                                             (turn != NULL) ?
+                                               turn->api_role : "user",
+                                             (turn != NULL) ?
+                                               turn->render_role : "user",
+                                             (turn != NULL) ?
+                                               turn->prompt_message_key : NULL,
+                                             NULL);
   round->storage_messages[0].content =
-    (storage_prompt != NULL) ? storage_prompt : "";
-  if ((storage_prompt_api_role != NULL) &&
-      (storage_prompt_api_role[0] != '\0') &&
-      (strcmp(round->storage_messages[0].role, storage_prompt_api_role) != 0)) {
-    round->storage_prompt_message_json =
-      strappy_assistant_create_basic_message_json(
-        storage_prompt_api_role,
-        round->storage_messages[0].content,
-        error_out);
-    if (round->storage_prompt_message_json == NULL) {
-      cJSON_Delete(root);
-      strappy_assistant_tool_round_destroy(round);
-      return 0;
-    }
-    round->storage_messages[0].message_json =
-      round->storage_prompt_message_json;
+    ((turn != NULL) && (turn->prompt != NULL)) ? turn->prompt : "";
+  snprintf(tool_call_key,
+           sizeof(tool_call_key),
+           "%s-tool-call-%lu",
+           ((turn != NULL) && (turn->turn_key != NULL)) ?
+             turn->turn_key : "turn",
+           (unsigned long)round_number);
+  round->tool_call_message_key = strappy_string_duplicate(tool_call_key);
+  if (round->tool_call_message_key == NULL) {
+    cJSON_Delete(root);
+    strappy_assistant_tool_round_destroy(round);
+    strappy_set_error(error_out, "Could not allocate tool-call message key.");
+    return 0;
   }
-  round->storage_messages[1].role = "tool_call";
+  strappy_assistant_storage_message_set_turn(&round->storage_messages[1],
+                                             turn,
+                                             "tool_call",
+                                             "assistant",
+                                             "tool_call",
+                                             round->tool_call_message_key,
+                                             (turn != NULL) ?
+                                               turn->assistant_message_key :
+                                               NULL);
   round->storage_messages[1].content = round->tool_call_content;
   round->storage_messages[1].model = tool_request_result->model;
   round->storage_messages[1].http_status = tool_request_result->http_status;
@@ -824,6 +1168,7 @@ static int strappy_assistant_build_tool_round(
     char *tool_error;
     char *output;
     char *message_json;
+    char tool_result_key[96];
     size_t followup_index;
     size_t storage_index;
     int had_tool_error;
@@ -835,15 +1180,40 @@ static int strappy_assistant_build_tool_round(
     arguments =
       strappy_assistant_tool_call_function_string(tool_call, "arguments");
 
+    if ((tool_call_id != NULL) &&
+        ((round->tool_call_ids[index] =
+            strappy_string_duplicate(tool_call_id)) == NULL)) {
+      cJSON_Delete(root);
+      strappy_assistant_tool_round_destroy(round);
+      strappy_set_error(error_out, "Could not allocate tool call id.");
+      return 0;
+    }
+    if ((tool_name != NULL) &&
+        ((round->tool_names[index] =
+            strappy_string_duplicate(tool_name)) == NULL)) {
+      cJSON_Delete(root);
+      strappy_assistant_tool_round_destroy(round);
+      strappy_set_error(error_out, "Could not allocate tool name.");
+      return 0;
+    }
+    if ((arguments != NULL) &&
+        ((round->tool_arguments[index] =
+            strappy_string_duplicate(arguments)) == NULL)) {
+      cJSON_Delete(root);
+      strappy_assistant_tool_round_destroy(round);
+      strappy_set_error(error_out, "Could not allocate tool arguments.");
+      return 0;
+    }
+
     tool_error = NULL;
     had_tool_error = 0;
     if (should_stream &&
         !strappy_assistant_emit_tool_event(STRAPPY_CHAT_STREAM_EVENT_TOOL_CALL,
-                                           tool_call_id,
-                                           tool_name,
-                                           arguments,
+                                           turn,
+                                           round->tool_call_ids[index],
+                                           round->tool_names[index],
+                                           round->tool_arguments[index],
                                            NULL,
-                                           stream_phase,
                                            callback,
                                            callback_data,
                                            error_out)) {
@@ -852,14 +1222,25 @@ static int strappy_assistant_build_tool_round(
       return 0;
     }
 
-    output = strappy_tools_execute(session_db_path,
-                                   resource_dir,
-                                   tool_name,
-                                   arguments,
-                                   &tool_error);
+    if (!strappy_assistant_tool_is_allowed((turn != NULL) ?
+                                             turn->tool_policy :
+                                             STRAPPY_ASSISTANT_TOOL_POLICY_NORMAL,
+                                           round->tool_names[index])) {
+      had_tool_error = 1;
+      output = strappy_assistant_tool_error_result(
+        round->tool_names[index],
+        "Tool is not allowed for this turn.");
+    } else {
+      output = strappy_tools_execute(session_db_path,
+                                     resource_dir,
+                                     round->tool_names[index],
+                                     round->tool_arguments[index],
+                                     &tool_error);
+    }
     if (output == NULL) {
       had_tool_error = 1;
-      output = strappy_assistant_tool_error_result(tool_name, tool_error);
+      output = strappy_assistant_tool_error_result(round->tool_names[index],
+                                                   tool_error);
       free(tool_error);
       tool_error = NULL;
       if (output == NULL) {
@@ -874,11 +1255,11 @@ static int strappy_assistant_build_tool_round(
         !strappy_assistant_emit_tool_event(
           had_tool_error ? STRAPPY_CHAT_STREAM_EVENT_TOOL_ERROR :
                            STRAPPY_CHAT_STREAM_EVENT_TOOL_RESULT,
-          tool_call_id,
-          tool_name,
-          arguments,
+          turn,
+          round->tool_call_ids[index],
+          round->tool_names[index],
+          round->tool_arguments[index],
           output,
-          stream_phase,
           callback,
           callback_data,
           error_out)) {
@@ -889,8 +1270,8 @@ static int strappy_assistant_build_tool_round(
       return 0;
     }
 
-    message_json = strappy_assistant_tool_message_json(tool_call_id,
-                                                       tool_name,
+    message_json = strappy_assistant_tool_message_json(round->tool_call_ids[index],
+                                                       round->tool_names[index],
                                                        output,
                                                        error_out);
     if (message_json == NULL) {
@@ -909,9 +1290,39 @@ static int strappy_assistant_build_tool_round(
     round->followup_messages[followup_index].message_json = message_json;
 
     storage_index = 2U + (size_t)index;
-    round->storage_messages[storage_index].role = "tool";
+    snprintf(tool_result_key,
+             sizeof(tool_result_key),
+             "%s-tool-result-%lu-%d",
+             ((turn != NULL) && (turn->turn_key != NULL)) ?
+               turn->turn_key : "turn",
+             (unsigned long)round_number,
+             index);
+    round->tool_result_message_keys[index] =
+      strappy_string_duplicate(tool_result_key);
+    if (round->tool_result_message_keys[index] == NULL) {
+      cJSON_Delete(root);
+      strappy_assistant_tool_round_destroy(round);
+      strappy_set_error(error_out, "Could not allocate tool-result message key.");
+      return 0;
+    }
+    strappy_assistant_storage_message_set_turn(
+      &round->storage_messages[storage_index],
+      turn,
+      had_tool_error ? "tool_error" : "tool_result",
+      "tool",
+      "tool",
+      round->tool_result_message_keys[index],
+      (turn != NULL) ? turn->assistant_message_key : NULL);
     round->storage_messages[storage_index].content = output;
     round->storage_messages[storage_index].message_json = message_json;
+    round->storage_messages[storage_index].tool_call_id =
+      round->tool_call_ids[index];
+    round->storage_messages[storage_index].tool_name =
+      round->tool_names[index];
+    round->storage_messages[storage_index].arguments_json =
+      round->tool_arguments[index];
+    round->storage_messages[storage_index].result_json = output;
+    round->storage_messages[storage_index].is_error = had_tool_error;
   }
 
   cJSON_Delete(root);
@@ -1057,6 +1468,8 @@ static int strappy_assistant_store_tool_sequence(
   const char *session_db_path,
   long long session_id,
   const char *prompt,
+  const strappy_assistant_turn_spec *main_turn,
+  const strappy_assistant_turn_spec *audit_turn,
   const strappy_assistant_tool_sequence *sequence,
   const strappy_chat_result *final_result,
   long long *session_id_out,
@@ -1067,15 +1480,19 @@ static int strappy_assistant_store_tool_sequence(
   size_t message_index;
   size_t round_index;
   int has_post_final_rounds;
+  int has_memory_audit_turn;
+  int needs_memory_audit_prompt;
   char *memory_audit_completion_json;
+  const strappy_chat_result *memory_audit_final_result;
   int ok;
 
-  if ((sequence == NULL) || (final_result == NULL) ||
-      (sequence->round_count == 0U)) {
+  if ((main_turn == NULL) || (sequence == NULL) || (final_result == NULL)) {
     strappy_set_error(error_out, "Tool message sequence is incomplete.");
     return 0;
   }
 
+  memory_audit_final_result = sequence->memory_audit_final_result;
+  has_memory_audit_turn = (memory_audit_final_result != NULL) ? 1 : 0;
   message_count = 1U;
   has_post_final_rounds = 0;
   for (round_index = 0U; round_index < sequence->round_count; round_index++) {
@@ -1136,7 +1553,17 @@ static int strappy_assistant_store_tool_sequence(
     message_count += addition;
   }
 
-  if (has_post_final_rounds) {
+  needs_memory_audit_prompt =
+    (has_memory_audit_turn && !has_post_final_rounds) ? 1 : 0;
+  if (has_memory_audit_turn) {
+    if (needs_memory_audit_prompt &&
+        (message_count > (((size_t)-1) - 1U))) {
+      strappy_set_error(error_out, "Tool message sequence is too large.");
+      return 0;
+    }
+    if (needs_memory_audit_prompt) {
+      message_count++;
+    }
     if (message_count > (((size_t)-1) - 1U)) {
       strappy_set_error(error_out, "Tool message sequence is too large.");
       return 0;
@@ -1150,7 +1577,7 @@ static int strappy_assistant_store_tool_sequence(
   }
 
   memory_audit_completion_json = NULL;
-  if (has_post_final_rounds) {
+  if (has_memory_audit_turn) {
     memory_audit_completion_json =
       strappy_assistant_create_basic_message_json(
         "assistant",
@@ -1171,7 +1598,13 @@ static int strappy_assistant_store_tool_sequence(
 
   memset(messages, 0, message_count * sizeof(strappy_session_message_input));
   message_index = 0U;
-  messages[message_index].role = "user";
+  strappy_assistant_storage_message_set_turn(&messages[message_index],
+                                             main_turn,
+                                             "prompt",
+                                             main_turn->api_role,
+                                             main_turn->render_role,
+                                             main_turn->prompt_message_key,
+                                             NULL);
   messages[message_index].content = prompt;
   message_index++;
 
@@ -1192,7 +1625,13 @@ static int strappy_assistant_store_tool_sequence(
     message_index += copy_count;
   }
 
-  messages[message_index].role = "assistant";
+  strappy_assistant_storage_message_set_turn(&messages[message_index],
+                                             main_turn,
+                                             "assistant",
+                                             "assistant",
+                                             "assistant",
+                                             main_turn->assistant_message_key,
+                                             NULL);
   messages[message_index].content = final_result->response_text;
   messages[message_index].model = final_result->model;
   messages[message_index].http_status = final_result->http_status;
@@ -1218,10 +1657,41 @@ static int strappy_assistant_store_tool_sequence(
     message_index += copy_count;
   }
 
-  if (has_post_final_rounds) {
-    messages[message_index].role = "assistant";
+  if (needs_memory_audit_prompt) {
+    strappy_assistant_storage_message_set_turn(
+      &messages[message_index],
+      audit_turn,
+      "prompt",
+      (audit_turn != NULL) ? audit_turn->api_role : "user",
+      (audit_turn != NULL) ? audit_turn->render_role : "harness",
+      (audit_turn != NULL) ? audit_turn->prompt_message_key : NULL,
+      NULL);
+    messages[message_index].content =
+      ((audit_turn != NULL) && (audit_turn->prompt != NULL)) ?
+        audit_turn->prompt : strappy_assistant_memory_audit_prompt();
+    message_index++;
+  }
+
+  if (has_memory_audit_turn) {
+    strappy_assistant_storage_message_set_turn(
+      &messages[message_index],
+      audit_turn,
+      "assistant",
+      "assistant",
+      "assistant",
+      (audit_turn != NULL) ? audit_turn->assistant_message_key : NULL,
+      NULL);
     messages[message_index].content =
       strappy_assistant_memory_audit_completion_text();
+    if (memory_audit_final_result != NULL) {
+      messages[message_index].model = memory_audit_final_result->model;
+      messages[message_index].http_status =
+        memory_audit_final_result->http_status;
+      messages[message_index].metadata_json =
+        memory_audit_final_result->metadata_json;
+      messages[message_index].reasoning =
+        memory_audit_final_result->reasoning_text;
+    }
     messages[message_index].message_json = memory_audit_completion_json;
     message_index++;
   }
@@ -1258,9 +1728,7 @@ static int strappy_assistant_store_tool_sequence(
 static int strappy_assistant_run_tool_sequence(
   const strappy_config *config,
   const char *session_db_path,
-  const char *storage_prompt,
-  const char *storage_prompt_role,
-  const char *storage_prompt_api_role,
+  const strappy_assistant_turn_spec *turn,
   int store_prompt_message,
   int post_final,
   const strappy_assistant_request_messages *request_messages,
@@ -1269,7 +1737,6 @@ static int strappy_assistant_run_tool_sequence(
   int stream_model_responses,
   strappy_chat_stream_callback callback,
   void *callback_data,
-  const char *stream_phase,
   strappy_assistant_tool_sequence *sequence,
   int *did_run_out,
   char **error_out)
@@ -1322,7 +1789,14 @@ static int strappy_assistant_run_tool_sequence(
         memset(&event, 0, sizeof(event));
         event.type = STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA;
         event.text = next_result->response_text;
-        event.phase = stream_phase;
+        if (turn != NULL) {
+          event.turn_key = turn->turn_key;
+          event.actor = turn->actor;
+          event.kind = "assistant";
+          event.render_role = "assistant";
+          event.api_role = "assistant";
+          event.message_key = turn->assistant_message_key;
+        }
         if (!callback(&event, callback_data)) {
           strappy_set_error(error_out,
                             "Stream callback rejected assistant limit message.");
@@ -1336,9 +1810,8 @@ static int strappy_assistant_run_tool_sequence(
     round = &sequence->rounds[sequence->round_count];
     if (!strappy_assistant_build_tool_round(session_db_path,
                                             config->guidance_resource_dir,
-                                            storage_prompt,
-                                            storage_prompt_role,
-                                            storage_prompt_api_role,
+                                            turn,
+                                            sequence->round_count,
                                             store_prompt_message &&
                                               !stored_prompt_message,
                                             post_final,
@@ -1347,7 +1820,6 @@ static int strappy_assistant_run_tool_sequence(
                                             stream_tool_events,
                                             callback,
                                             callback_data,
-                                            stream_phase,
                                             1,
                                             round,
                                             error_out)) {
@@ -1369,18 +1841,18 @@ static int strappy_assistant_run_tool_sequence(
     }
 
     if (stream_model_responses) {
-      strappy_assistant_stream_phase_context phase_context;
+      strappy_assistant_stream_turn_context turn_context;
       strappy_chat_stream_callback stream_callback;
       void *stream_callback_data;
 
       stream_callback = callback;
       stream_callback_data = callback_data;
-      if ((stream_phase != NULL) && (callback != NULL)) {
-        phase_context.callback = callback;
-        phase_context.callback_data = callback_data;
-        phase_context.phase = stream_phase;
-        stream_callback = strappy_assistant_stream_phase_callback;
-        stream_callback_data = &phase_context;
+      if ((turn != NULL) && (callback != NULL)) {
+        turn_context.callback = callback;
+        turn_context.callback_data = callback_data;
+        turn_context.turn = turn;
+        stream_callback = strappy_assistant_stream_turn_callback;
+        stream_callback_data = &turn_context;
       }
 
       if (!strappy_client_stream_messages(config,
@@ -1410,6 +1882,7 @@ static int strappy_assistant_run_tool_sequence(
 static int strappy_assistant_run_memory_audit(
   const strappy_config *config,
   const char *session_db_path,
+  const strappy_assistant_turn_spec *audit_turn,
   const strappy_assistant_request_messages *request_messages,
   strappy_assistant_tool_sequence *sequence,
   const strappy_chat_result *final_result,
@@ -1425,9 +1898,13 @@ static int strappy_assistant_run_memory_audit(
   size_t base_count;
   int audit_has_tool_calls;
   int did_run_audit_tool_round;
+  const char *audit_tool_allowlist[2];
+  strappy_config audit_config;
+  strappy_assistant_stream_turn_context turn_context;
 
-  if ((config == NULL) || (sequence == NULL) || (final_result == NULL)) {
-    strappy_set_error(error_out, "Memory audit request is incomplete.");
+  if ((config == NULL) || (audit_turn == NULL) ||
+      (sequence == NULL) || (final_result == NULL)) {
+    strappy_set_error(error_out, "Learning summary request is incomplete.");
     return 0;
   }
 
@@ -1459,14 +1936,49 @@ static int strappy_assistant_run_memory_audit(
     return 0;
   }
 
-  strappy_chat_result_destroy(&sequence->memory_audit_result);
-  if (!strappy_client_send_messages(config,
-                                    audit_request.messages,
-                                    audit_request.count,
-                                    &sequence->memory_audit_result,
-                                    error_out)) {
+  audit_tool_allowlist[0] = STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER;
+  audit_tool_allowlist[1] = STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER;
+  audit_config = *config;
+  audit_config.tool_allowlist = audit_tool_allowlist;
+  audit_config.tool_allowlist_count =
+    sizeof(audit_tool_allowlist) / sizeof(audit_tool_allowlist[0]);
+
+  if (should_stream &&
+      !strappy_assistant_emit_turn_event(STRAPPY_CHAT_STREAM_EVENT_TURN_STARTED,
+                                         audit_turn,
+                                         audit_turn->prompt,
+                                         callback,
+                                         callback_data,
+                                         error_out)) {
     strappy_assistant_request_messages_destroy(&audit_request);
     return 0;
+  }
+
+  sequence->memory_audit_final_result = NULL;
+  strappy_chat_result_destroy(&sequence->memory_audit_result);
+  if (should_stream) {
+    turn_context.callback = callback;
+    turn_context.callback_data = callback_data;
+    turn_context.turn = audit_turn;
+    if (!strappy_client_stream_messages(&audit_config,
+                                        audit_request.messages,
+                                        audit_request.count,
+                                        &sequence->memory_audit_result,
+                                        strappy_assistant_stream_turn_callback,
+                                        &turn_context,
+                                        error_out)) {
+      strappy_assistant_request_messages_destroy(&audit_request);
+      return 0;
+    }
+  } else {
+    if (!strappy_client_send_messages(&audit_config,
+                                      audit_request.messages,
+                                      audit_request.count,
+                                      &sequence->memory_audit_result,
+                                      error_out)) {
+      strappy_assistant_request_messages_destroy(&audit_request);
+      return 0;
+    }
   }
 
   audit_has_tool_calls = 0;
@@ -1477,32 +1989,18 @@ static int strappy_assistant_run_memory_audit(
     return 0;
   }
 
-  if (should_stream &&
-      audit_has_tool_calls &&
-      !strappy_assistant_emit_harness_prompt(
-        strappy_assistant_memory_audit_prompt(),
-        callback,
-        callback_data,
-        error_out)) {
-    strappy_assistant_request_messages_destroy(&audit_request);
-    return 0;
-  }
-
   did_run_audit_tool_round = 0;
-  if (!strappy_assistant_run_tool_sequence(config,
+  if (!strappy_assistant_run_tool_sequence(&audit_config,
                                            session_db_path,
-                                           strappy_assistant_memory_audit_prompt(),
-                                           "harness",
-                                           "user",
+                                           audit_turn,
                                            1,
                                            1,
                                            &audit_request,
                                            &sequence->memory_audit_result,
                                            should_stream && audit_has_tool_calls,
-                                           0,
+                                           should_stream && audit_has_tool_calls,
                                            callback,
                                            callback_data,
-                                           "harness",
                                            sequence,
                                            &did_run_audit_tool_round,
                                            error_out)) {
@@ -1510,6 +2008,19 @@ static int strappy_assistant_run_memory_audit(
     return 0;
   }
 
+  if (should_stream &&
+      !strappy_assistant_emit_turn_event(STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED,
+                                         audit_turn,
+                                         strappy_assistant_memory_audit_completion_text(),
+                                         callback,
+                                         callback_data,
+                                         error_out)) {
+    strappy_assistant_request_messages_destroy(&audit_request);
+    return 0;
+  }
+
+  sequence->memory_audit_final_result = did_run_audit_tool_round ?
+    sequence->final_result : &sequence->memory_audit_result;
   sequence->final_result = (strappy_chat_result *)final_result;
   if (did_run_audit_tool_round && (did_run_tool_round_in_out != NULL)) {
     *did_run_tool_round_in_out = 1;
@@ -1531,6 +2042,10 @@ static char *strappy_assistant_send_prompt_internal(const char *prompt,
   strappy_chat_result result;
   strappy_assistant_request_messages request_messages;
   strappy_assistant_tool_sequence tool_sequence;
+  strappy_assistant_turn_keys main_keys;
+  strappy_assistant_turn_keys audit_keys;
+  strappy_assistant_turn_spec main_turn;
+  strappy_assistant_turn_spec audit_turn;
   const strappy_chat_result *final_result;
   char *response;
   int did_run_tool_round;
@@ -1548,6 +2063,10 @@ static char *strappy_assistant_send_prompt_internal(const char *prompt,
   strappy_chat_result_init(&result);
   strappy_assistant_request_messages_init(&request_messages);
   strappy_assistant_tool_sequence_init(&tool_sequence);
+  strappy_assistant_turn_keys_init(&main_keys);
+  strappy_assistant_turn_keys_init(&audit_keys);
+  memset(&main_turn, 0, sizeof(main_turn));
+  memset(&audit_turn, 0, sizeof(audit_turn));
 
   if (!strappy_config_load(&config, env_path, error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
@@ -1582,35 +2101,63 @@ static char *strappy_assistant_send_prompt_internal(const char *prompt,
   }
 
   did_run_tool_round = 0;
-  if (should_store &&
-      !strappy_assistant_run_tool_sequence(&config,
-                                           session_db_path,
-                                           prompt,
-                                           "user",
-                                           "user",
-                                           0,
-                                           0,
-                                           &request_messages,
-                                           &result,
-                                           0,
-                                           0,
-                                           NULL,
-                                           NULL,
-                                           NULL,
-                                           &tool_sequence,
-                                           &did_run_tool_round,
-                                           error_out)) {
-    strappy_assistant_tool_sequence_destroy(&tool_sequence);
-    strappy_assistant_request_messages_destroy(&request_messages);
-    strappy_chat_result_destroy(&result);
-    strappy_config_destroy(&config);
-    return NULL;
+  if (should_store) {
+    if (!strappy_assistant_turn_keys_make(&main_keys, "user-turn", error_out) ||
+        !strappy_assistant_turn_keys_make(&audit_keys, "harness-turn", error_out)) {
+      strappy_assistant_turn_keys_destroy(&audit_keys);
+      strappy_assistant_turn_keys_destroy(&main_keys);
+      strappy_assistant_tool_sequence_destroy(&tool_sequence);
+      strappy_assistant_request_messages_destroy(&request_messages);
+      strappy_chat_result_destroy(&result);
+      strappy_config_destroy(&config);
+      return NULL;
+    }
+    strappy_assistant_turn_spec_set(&main_turn,
+                                    &main_keys,
+                                    "user",
+                                    "user",
+                                    "user",
+                                    "full",
+                                    prompt,
+                                    STRAPPY_ASSISTANT_TOOL_POLICY_NORMAL);
+    strappy_assistant_turn_spec_set(&audit_turn,
+                                    &audit_keys,
+                                    "harness",
+                                    "harness",
+                                    "user",
+                                    "omit",
+                                    strappy_assistant_memory_audit_prompt(),
+                                    STRAPPY_ASSISTANT_TOOL_POLICY_MEMORY_AUDIT);
+
+    if (!strappy_assistant_run_tool_sequence(&config,
+                                             session_db_path,
+                                             &main_turn,
+                                             0,
+                                             0,
+                                             &request_messages,
+                                             &result,
+                                             0,
+                                             0,
+                                             NULL,
+                                             NULL,
+                                             &tool_sequence,
+                                             &did_run_tool_round,
+                                             error_out)) {
+      strappy_assistant_turn_keys_destroy(&audit_keys);
+      strappy_assistant_turn_keys_destroy(&main_keys);
+      strappy_assistant_tool_sequence_destroy(&tool_sequence);
+      strappy_assistant_request_messages_destroy(&request_messages);
+      strappy_chat_result_destroy(&result);
+      strappy_config_destroy(&config);
+      return NULL;
+    }
   }
 
   if (should_store) {
     final_result = did_run_tool_round ? tool_sequence.final_result : &result;
     if (!strappy_assistant_run_memory_audit(&config,
                                             session_db_path,
+                                            &audit_turn,
                                             &request_messages,
                                             &tool_sequence,
                                             final_result,
@@ -1620,6 +2167,8 @@ static char *strappy_assistant_send_prompt_internal(const char *prompt,
                                             NULL,
                                             &did_run_tool_round,
                                             error_out)) {
+      strappy_assistant_turn_keys_destroy(&audit_keys);
+      strappy_assistant_turn_keys_destroy(&main_keys);
       strappy_assistant_tool_sequence_destroy(&tool_sequence);
       strappy_assistant_request_messages_destroy(&request_messages);
       strappy_chat_result_destroy(&result);
@@ -1631,29 +2180,18 @@ static char *strappy_assistant_send_prompt_internal(const char *prompt,
   strappy_assistant_request_messages_destroy(&request_messages);
 
   if (should_store) {
-    if (did_run_tool_round) {
-      if (!strappy_assistant_store_tool_sequence(session_db_path,
-                                                0LL,
-                                                prompt,
-                                                &tool_sequence,
-                                                tool_sequence.final_result,
-                                                session_id_out,
-                                                error_out)) {
-        strappy_assistant_tool_sequence_destroy(&tool_sequence);
-        strappy_chat_result_destroy(&result);
-        strappy_config_destroy(&config);
-        return NULL;
-      }
-    } else if (!strappy_db_save_exchange_with_id(session_db_path,
-                                                prompt,
-                                                result.response_text,
-                                                result.model,
-                                                result.http_status,
-                                                result.metadata_json,
-                                                result.message_json,
-                                                result.reasoning_text,
-                                                session_id_out,
-                                                error_out)) {
+    final_result = did_run_tool_round ? tool_sequence.final_result : &result;
+    if (!strappy_assistant_store_tool_sequence(session_db_path,
+                                              0LL,
+                                              prompt,
+                                              &main_turn,
+                                              &audit_turn,
+                                              &tool_sequence,
+                                              final_result,
+                                              session_id_out,
+                                              error_out)) {
+      strappy_assistant_turn_keys_destroy(&audit_keys);
+      strappy_assistant_turn_keys_destroy(&main_keys);
       strappy_assistant_tool_sequence_destroy(&tool_sequence);
       strappy_chat_result_destroy(&result);
       strappy_config_destroy(&config);
@@ -1670,6 +2208,8 @@ static char *strappy_assistant_send_prompt_internal(const char *prompt,
   }
 
   strappy_assistant_tool_sequence_destroy(&tool_sequence);
+  strappy_assistant_turn_keys_destroy(&audit_keys);
+  strappy_assistant_turn_keys_destroy(&main_keys);
   strappy_chat_result_destroy(&result);
   strappy_config_destroy(&config);
   return response;
@@ -1688,6 +2228,10 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   strappy_session_message_record_list message_list;
   strappy_assistant_request_messages request_messages;
   strappy_assistant_tool_sequence tool_sequence;
+  strappy_assistant_turn_keys main_keys;
+  strappy_assistant_turn_keys audit_keys;
+  strappy_assistant_turn_spec main_turn;
+  strappy_assistant_turn_spec audit_turn;
   const strappy_chat_result *final_result;
   char *response;
   int did_run_tool_round;
@@ -1707,6 +2251,10 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   strappy_session_message_record_list_init(&message_list);
   strappy_assistant_request_messages_init(&request_messages);
   strappy_assistant_tool_sequence_init(&tool_sequence);
+  strappy_assistant_turn_keys_init(&main_keys);
+  strappy_assistant_turn_keys_init(&audit_keys);
+  memset(&main_turn, 0, sizeof(main_turn));
+  memset(&audit_turn, 0, sizeof(audit_turn));
 
   if (!strappy_config_load(&config, env_path, error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
@@ -1717,10 +2265,10 @@ static char *strappy_assistant_send_prompt_for_session_internal(
     return NULL;
   }
 
-  if (!strappy_db_list_session_messages(session_db_path,
-                                        session_id,
-                                        &message_list,
-                                        error_out)) {
+  if (!strappy_db_list_session_context_messages(session_db_path,
+                                                session_id,
+                                                &message_list,
+                                                error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_session_message_record_list_destroy(&message_list);
@@ -1756,11 +2304,37 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   }
 
   did_run_tool_round = 0;
+  if (!strappy_assistant_turn_keys_make(&main_keys, "user-turn", error_out) ||
+      !strappy_assistant_turn_keys_make(&audit_keys, "harness-turn", error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
+    strappy_assistant_tool_sequence_destroy(&tool_sequence);
+    strappy_assistant_request_messages_destroy(&request_messages);
+    strappy_session_message_record_list_destroy(&message_list);
+    strappy_chat_result_destroy(&result);
+    strappy_config_destroy(&config);
+    return NULL;
+  }
+  strappy_assistant_turn_spec_set(&main_turn,
+                                  &main_keys,
+                                  "user",
+                                  "user",
+                                  "user",
+                                  "full",
+                                  prompt,
+                                  STRAPPY_ASSISTANT_TOOL_POLICY_NORMAL);
+  strappy_assistant_turn_spec_set(&audit_turn,
+                                  &audit_keys,
+                                  "harness",
+                                  "harness",
+                                  "user",
+                                  "omit",
+                                  strappy_assistant_memory_audit_prompt(),
+                                  STRAPPY_ASSISTANT_TOOL_POLICY_MEMORY_AUDIT);
+
   if (!strappy_assistant_run_tool_sequence(&config,
                                            session_db_path,
-                                           prompt,
-                                           "user",
-                                           "user",
+                                           &main_turn,
                                            0,
                                            0,
                                            &request_messages,
@@ -1769,10 +2343,11 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                            0,
                                            NULL,
                                            NULL,
-                                           NULL,
                                            &tool_sequence,
                                            &did_run_tool_round,
                                            error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_session_message_record_list_destroy(&message_list);
@@ -1784,6 +2359,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   final_result = did_run_tool_round ? tool_sequence.final_result : &result;
   if (!strappy_assistant_run_memory_audit(&config,
                                           session_db_path,
+                                          &audit_turn,
                                           &request_messages,
                                           &tool_sequence,
                                           final_result,
@@ -1793,6 +2369,8 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                           NULL,
                                           &did_run_tool_round,
                                           error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_session_message_record_list_destroy(&message_list);
@@ -1804,29 +2382,18 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   strappy_assistant_request_messages_destroy(&request_messages);
   strappy_session_message_record_list_destroy(&message_list);
 
-  if (did_run_tool_round) {
-    if (!strappy_assistant_store_tool_sequence(session_db_path,
-                                              session_id,
-                                              prompt,
-                                              &tool_sequence,
-                                              tool_sequence.final_result,
-                                              NULL,
-                                              error_out)) {
-      strappy_assistant_tool_sequence_destroy(&tool_sequence);
-      strappy_chat_result_destroy(&result);
-      strappy_config_destroy(&config);
-      return NULL;
-    }
-  } else if (!strappy_db_append_exchange_to_session(session_db_path,
-                                                   session_id,
-                                                   prompt,
-                                                   result.response_text,
-                                                   result.model,
-                                                   result.http_status,
-                                                   result.metadata_json,
-                                                   result.message_json,
-                                                   result.reasoning_text,
-                                                   error_out)) {
+  final_result = did_run_tool_round ? tool_sequence.final_result : &result;
+  if (!strappy_assistant_store_tool_sequence(session_db_path,
+                                            session_id,
+                                            prompt,
+                                            &main_turn,
+                                            &audit_turn,
+                                            &tool_sequence,
+                                            final_result,
+                                            NULL,
+                                            error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_chat_result_destroy(&result);
     strappy_config_destroy(&config);
@@ -1842,6 +2409,8 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   }
 
   strappy_assistant_tool_sequence_destroy(&tool_sequence);
+  strappy_assistant_turn_keys_destroy(&audit_keys);
+  strappy_assistant_turn_keys_destroy(&main_keys);
   strappy_chat_result_destroy(&result);
   strappy_config_destroy(&config);
   return response;
@@ -1861,6 +2430,11 @@ static char *strappy_assistant_stream_prompt_internal(
   strappy_chat_result result;
   strappy_assistant_request_messages request_messages;
   strappy_assistant_tool_sequence tool_sequence;
+  strappy_assistant_turn_keys main_keys;
+  strappy_assistant_turn_keys audit_keys;
+  strappy_assistant_turn_spec main_turn;
+  strappy_assistant_turn_spec audit_turn;
+  strappy_assistant_stream_turn_context turn_context;
   const strappy_chat_result *final_result;
   char *response;
   int did_run_tool_round;
@@ -1878,6 +2452,10 @@ static char *strappy_assistant_stream_prompt_internal(
   strappy_chat_result_init(&result);
   strappy_assistant_request_messages_init(&request_messages);
   strappy_assistant_tool_sequence_init(&tool_sequence);
+  strappy_assistant_turn_keys_init(&main_keys);
+  strappy_assistant_turn_keys_init(&audit_keys);
+  memset(&main_turn, 0, sizeof(main_turn));
+  memset(&audit_turn, 0, sizeof(audit_turn));
 
   if (!strappy_config_load(&config, env_path, error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
@@ -1899,13 +2477,46 @@ static char *strappy_assistant_stream_prompt_internal(
     return NULL;
   }
 
+  if (!strappy_assistant_make_default_turns(prompt,
+                                            &main_keys,
+                                            &audit_keys,
+                                            &main_turn,
+                                            &audit_turn,
+                                            error_out)) {
+    strappy_assistant_tool_sequence_destroy(&tool_sequence);
+    strappy_assistant_request_messages_destroy(&request_messages);
+    strappy_chat_result_destroy(&result);
+    strappy_config_destroy(&config);
+    return NULL;
+  }
+
+  if (!strappy_assistant_emit_turn_event(STRAPPY_CHAT_STREAM_EVENT_TURN_STARTED,
+                                         &main_turn,
+                                         prompt,
+                                         callback,
+                                         callback_data,
+                                         error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
+    strappy_assistant_tool_sequence_destroy(&tool_sequence);
+    strappy_assistant_request_messages_destroy(&request_messages);
+    strappy_chat_result_destroy(&result);
+    strappy_config_destroy(&config);
+    return NULL;
+  }
+
+  turn_context.callback = callback;
+  turn_context.callback_data = callback_data;
+  turn_context.turn = &main_turn;
   if (!strappy_client_stream_messages(&config,
                                       request_messages.messages,
                                       request_messages.count,
                                       &result,
-                                      callback,
-                                      callback_data,
+                                      strappy_assistant_stream_turn_callback,
+                                      &turn_context,
                                       error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_chat_result_destroy(&result);
@@ -1916,9 +2527,7 @@ static char *strappy_assistant_stream_prompt_internal(
   did_run_tool_round = 0;
   if (!strappy_assistant_run_tool_sequence(&config,
                                            session_db_path,
-                                           prompt,
-                                           "user",
-                                           "user",
+                                           &main_turn,
                                            0,
                                            0,
                                            &request_messages,
@@ -1927,10 +2536,11 @@ static char *strappy_assistant_stream_prompt_internal(
                                            1,
                                            callback,
                                            callback_data,
-                                           NULL,
                                            &tool_sequence,
                                            &did_run_tool_round,
                                            error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_chat_result_destroy(&result);
@@ -1939,8 +2549,24 @@ static char *strappy_assistant_stream_prompt_internal(
   }
 
   final_result = did_run_tool_round ? tool_sequence.final_result : &result;
+  if (!strappy_assistant_emit_turn_event(STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED,
+                                         &main_turn,
+                                         final_result->response_text,
+                                         callback,
+                                         callback_data,
+                                         error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
+    strappy_assistant_tool_sequence_destroy(&tool_sequence);
+    strappy_assistant_request_messages_destroy(&request_messages);
+    strappy_chat_result_destroy(&result);
+    strappy_config_destroy(&config);
+    return NULL;
+  }
+
   if (!strappy_assistant_run_memory_audit(&config,
                                           session_db_path,
+                                          &audit_turn,
                                           &request_messages,
                                           &tool_sequence,
                                           final_result,
@@ -1950,6 +2576,8 @@ static char *strappy_assistant_stream_prompt_internal(
                                           callback_data,
                                           &did_run_tool_round,
                                           error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_chat_result_destroy(&result);
@@ -1959,29 +2587,18 @@ static char *strappy_assistant_stream_prompt_internal(
 
   strappy_assistant_request_messages_destroy(&request_messages);
 
-  if (did_run_tool_round) {
-    if (!strappy_assistant_store_tool_sequence(session_db_path,
-                                              0LL,
-                                              prompt,
-                                              &tool_sequence,
-                                              tool_sequence.final_result,
-                                              session_id_out,
-                                              error_out)) {
-      strappy_assistant_tool_sequence_destroy(&tool_sequence);
-      strappy_chat_result_destroy(&result);
-      strappy_config_destroy(&config);
-      return NULL;
-    }
-  } else if (!strappy_db_save_exchange_with_id(session_db_path,
-                                              prompt,
-                                              result.response_text,
-                                              result.model,
-                                              result.http_status,
-                                              result.metadata_json,
-                                              result.message_json,
-                                              result.reasoning_text,
-                                              session_id_out,
-                                              error_out)) {
+  final_result = did_run_tool_round ? tool_sequence.final_result : &result;
+  if (!strappy_assistant_store_tool_sequence(session_db_path,
+                                            0LL,
+                                            prompt,
+                                            &main_turn,
+                                            &audit_turn,
+                                            &tool_sequence,
+                                            final_result,
+                                            session_id_out,
+                                            error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_chat_result_destroy(&result);
     strappy_config_destroy(&config);
@@ -1997,6 +2614,8 @@ static char *strappy_assistant_stream_prompt_internal(
   }
 
   strappy_assistant_tool_sequence_destroy(&tool_sequence);
+  strappy_assistant_turn_keys_destroy(&audit_keys);
+  strappy_assistant_turn_keys_destroy(&main_keys);
   strappy_chat_result_destroy(&result);
   strappy_config_destroy(&config);
   return response;
@@ -2017,6 +2636,11 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   strappy_session_message_record_list message_list;
   strappy_assistant_request_messages request_messages;
   strappy_assistant_tool_sequence tool_sequence;
+  strappy_assistant_turn_keys main_keys;
+  strappy_assistant_turn_keys audit_keys;
+  strappy_assistant_turn_spec main_turn;
+  strappy_assistant_turn_spec audit_turn;
+  strappy_assistant_stream_turn_context turn_context;
   const strappy_chat_result *final_result;
   char *response;
   int did_run_tool_round;
@@ -2036,6 +2660,10 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   strappy_session_message_record_list_init(&message_list);
   strappy_assistant_request_messages_init(&request_messages);
   strappy_assistant_tool_sequence_init(&tool_sequence);
+  strappy_assistant_turn_keys_init(&main_keys);
+  strappy_assistant_turn_keys_init(&audit_keys);
+  memset(&main_turn, 0, sizeof(main_turn));
+  memset(&audit_turn, 0, sizeof(audit_turn));
 
   if (!strappy_config_load(&config, env_path, error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
@@ -2046,10 +2674,10 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
     return NULL;
   }
 
-  if (!strappy_db_list_session_messages(session_db_path,
-                                        session_id,
-                                        &message_list,
-                                        error_out)) {
+  if (!strappy_db_list_session_context_messages(session_db_path,
+                                                session_id,
+                                                &message_list,
+                                                error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_session_message_record_list_destroy(&message_list);
@@ -2072,13 +2700,48 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
     return NULL;
   }
 
+  if (!strappy_assistant_make_default_turns(prompt,
+                                            &main_keys,
+                                            &audit_keys,
+                                            &main_turn,
+                                            &audit_turn,
+                                            error_out)) {
+    strappy_assistant_tool_sequence_destroy(&tool_sequence);
+    strappy_assistant_request_messages_destroy(&request_messages);
+    strappy_session_message_record_list_destroy(&message_list);
+    strappy_chat_result_destroy(&result);
+    strappy_config_destroy(&config);
+    return NULL;
+  }
+
+  if (!strappy_assistant_emit_turn_event(STRAPPY_CHAT_STREAM_EVENT_TURN_STARTED,
+                                         &main_turn,
+                                         prompt,
+                                         callback,
+                                         callback_data,
+                                         error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
+    strappy_assistant_tool_sequence_destroy(&tool_sequence);
+    strappy_assistant_request_messages_destroy(&request_messages);
+    strappy_session_message_record_list_destroy(&message_list);
+    strappy_chat_result_destroy(&result);
+    strappy_config_destroy(&config);
+    return NULL;
+  }
+
+  turn_context.callback = callback;
+  turn_context.callback_data = callback_data;
+  turn_context.turn = &main_turn;
   if (!strappy_client_stream_messages(&config,
                                       request_messages.messages,
                                       request_messages.count,
                                       &result,
-                                      callback,
-                                      callback_data,
+                                      strappy_assistant_stream_turn_callback,
+                                      &turn_context,
                                       error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_session_message_record_list_destroy(&message_list);
@@ -2090,9 +2753,7 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   did_run_tool_round = 0;
   if (!strappy_assistant_run_tool_sequence(&config,
                                            session_db_path,
-                                           prompt,
-                                           "user",
-                                           "user",
+                                           &main_turn,
                                            0,
                                            0,
                                            &request_messages,
@@ -2101,10 +2762,11 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
                                            1,
                                            callback,
                                            callback_data,
-                                           NULL,
                                            &tool_sequence,
                                            &did_run_tool_round,
                                            error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_session_message_record_list_destroy(&message_list);
@@ -2114,8 +2776,25 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   }
 
   final_result = did_run_tool_round ? tool_sequence.final_result : &result;
+  if (!strappy_assistant_emit_turn_event(STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED,
+                                         &main_turn,
+                                         final_result->response_text,
+                                         callback,
+                                         callback_data,
+                                         error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
+    strappy_assistant_tool_sequence_destroy(&tool_sequence);
+    strappy_assistant_request_messages_destroy(&request_messages);
+    strappy_session_message_record_list_destroy(&message_list);
+    strappy_chat_result_destroy(&result);
+    strappy_config_destroy(&config);
+    return NULL;
+  }
+
   if (!strappy_assistant_run_memory_audit(&config,
                                           session_db_path,
+                                          &audit_turn,
                                           &request_messages,
                                           &tool_sequence,
                                           final_result,
@@ -2125,6 +2804,8 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
                                           callback_data,
                                           &did_run_tool_round,
                                           error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_session_message_record_list_destroy(&message_list);
@@ -2136,29 +2817,18 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   strappy_assistant_request_messages_destroy(&request_messages);
   strappy_session_message_record_list_destroy(&message_list);
 
-  if (did_run_tool_round) {
-    if (!strappy_assistant_store_tool_sequence(session_db_path,
-                                              session_id,
-                                              prompt,
-                                              &tool_sequence,
-                                              tool_sequence.final_result,
-                                              NULL,
-                                              error_out)) {
-      strappy_assistant_tool_sequence_destroy(&tool_sequence);
-      strappy_chat_result_destroy(&result);
-      strappy_config_destroy(&config);
-      return NULL;
-    }
-  } else if (!strappy_db_append_exchange_to_session(session_db_path,
-                                                   session_id,
-                                                   prompt,
-                                                   result.response_text,
-                                                   result.model,
-                                                   result.http_status,
-                                                   result.metadata_json,
-                                                   result.message_json,
-                                                   result.reasoning_text,
-                                                   error_out)) {
+  final_result = did_run_tool_round ? tool_sequence.final_result : &result;
+  if (!strappy_assistant_store_tool_sequence(session_db_path,
+                                            session_id,
+                                            prompt,
+                                            &main_turn,
+                                            &audit_turn,
+                                            &tool_sequence,
+                                            final_result,
+                                            NULL,
+                                            error_out)) {
+    strappy_assistant_turn_keys_destroy(&audit_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_chat_result_destroy(&result);
     strappy_config_destroy(&config);
@@ -2174,6 +2844,8 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   }
 
   strappy_assistant_tool_sequence_destroy(&tool_sequence);
+  strappy_assistant_turn_keys_destroy(&audit_keys);
+  strappy_assistant_turn_keys_destroy(&main_keys);
   strappy_chat_result_destroy(&result);
   strappy_config_destroy(&config);
   return response;

@@ -429,6 +429,21 @@ static int strappy_webview_append_element_id(strappy_webview_buffer *buffer,
   return strappy_webview_append_html_escaped(buffer, identifier);
 }
 
+static int strappy_webview_append_data_attribute(strappy_webview_buffer *buffer,
+                                                 const char *name,
+                                                 const char *value)
+{
+  if ((value == NULL) || (value[0] == '\0')) {
+    return 1;
+  }
+
+  return strappy_webview_buffer_append_cstring(buffer, " data-") &&
+         strappy_webview_buffer_append_cstring(buffer, name) &&
+         strappy_webview_buffer_append_cstring(buffer, "=\"") &&
+         strappy_webview_append_html_escaped(buffer, value) &&
+         strappy_webview_buffer_append_cstring(buffer, "\"");
+}
+
 static int strappy_webview_append_reasoning_html(
   strappy_webview_buffer *buffer,
   const char *reasoning,
@@ -518,13 +533,34 @@ static int strappy_webview_append_metadata_html(
 }
 
 static int strappy_webview_append_tool_column_html(
-  strappy_webview_buffer *buffer)
+  strappy_webview_buffer *buffer,
+  int collapsed)
 {
-  return strappy_webview_buffer_append_cstring(
-           buffer,
-           "<div class=\"tool-column tool-column-empty\">"
-           "<div class=\"tool-rail-title\">Tool Calls</div>"
-           "<div class=\"tool-cards\"></div></div>");
+  if (!strappy_webview_buffer_append_cstring(
+        buffer,
+        "<div class=\"tool-column tool-column-empty")) {
+    return 0;
+  }
+  if (collapsed &&
+      !strappy_webview_buffer_append_cstring(buffer,
+                                            " tool-column-collapsed")) {
+    return 0;
+  }
+  if (!strappy_webview_buffer_append_cstring(
+        buffer,
+        "\"><div class=\"tool-rail-title\">"
+        "<a class=\"tool-column-toggle\" href=\"#\" "
+        "onclick=\"return toggleToolColumn(this)\">"
+        "<span class=\"tool-column-disclosure\">") ||
+      !strappy_webview_buffer_append_cstring(buffer,
+                                            collapsed ? "&#9658;" : "&#9660;") ||
+      !strappy_webview_buffer_append_cstring(
+        buffer,
+        "</span></a>Tool Calls<span class=\"tool-count\"></span></div>"
+        "<div class=\"tool-cards\"></div></div>")) {
+    return 0;
+  }
+  return 1;
 }
 
 static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
@@ -539,13 +575,24 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".layout{width:100%;}",
     ".chat-column{width:100%;box-sizing:border-box;}",
     ".tool-column{max-width:100%;box-sizing:border-box;margin:0 0 7px;",
-    "border:1px solid #cbd7e2;background:#f7fbff;padding:6px 8px;}",
+    "border:1px solid #cbd7e2;background:#f7fbff;color:#4d6478;",
+    "padding:10px 12px;line-height:1.4;white-space:pre-wrap;word-wrap:break-word;}",
+    ".tool-column-error{border-color:#d99;background:#fff0f6;color:#7a253f;}",
     ".tool-column-empty{display:none;}",
     "#messages{max-width:none;margin:0;}",
     "#tool-sources,.tool-source-bin{display:none;}",
     ".tool-cards{margin:0;}",
+    ".tool-column-collapsed .tool-cards{display:none;}",
     ".tool-rail-title{font-size:11px;font-weight:bold;text-transform:uppercase;",
-    "color:#4d6478;margin:0 0 4px;}",
+    "line-height:14px;color:#4d6478;margin:0 0 5px;}",
+    ".tool-column-collapsed .tool-rail-title{margin-bottom:0;font-size:13px;",
+    "line-height:18px;color:#2f4150;text-transform:none;}",
+    ".tool-column-toggle{color:#2468a8;text-decoration:none;margin-right:4px;}",
+    ".tool-column-disclosure{display:inline-block;width:12px;",
+    "font:10px Monaco,Consolas,monospace;}",
+    ".tool-count{display:none;font-weight:bold;text-transform:none;}",
+    ".tool-column-collapsed .tool-count{display:inline;}",
+    ".streaming-active .tool-column-toggle,.streaming-active .reasoning-toggle{display:none;}",
     ".load-more{display:block;margin:0 auto 14px;padding:7px 10px;",
     "text-align:center;color:#2468a8;text-decoration:none;}",
     ".row{margin:0 0 16px;clear:both;}",
@@ -645,7 +692,8 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "color:#4f4a36;padding:10px 12px;margin:0 0 7px;line-height:1.4;",
     "white-space:pre-wrap;word-wrap:break-word;}",
     ".reasoning-label{font-size:11px;font-weight:bold;text-transform:uppercase;",
-    "color:#7a7046;margin:0 0 5px;}",
+    "line-height:14px;color:#7a7046;margin:0 0 5px;}",
+    ".reasoning-collapsed .reasoning-label{margin-bottom:0;}",
     ".reasoning-toggle{color:#2468a8;text-decoration:none;margin-right:4px;}",
     ".reasoning-disclosure{display:inline-block;width:12px;font:10px Monaco,Consolas,monospace;}",
     ".reasoning-collapsed .reasoning-body{display:none;}",
@@ -769,10 +817,12 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "para[para.length]=line;}flush();return out.join('');}",
     "function renderMarkdownNode(n){if(!n)return;if(typeof n._strappyMarkdown=='undefined')",
     "n._strappyMarkdown=n.innerHTML;n.innerHTML=mdToHTML(n._strappyMarkdown);}",
+    "function shouldRenderMarkdownBubble(n){return hasClass(n,'bubble')&&",
+    "!hasClass(n,'bubble-status')&&ancestorHasClass(n,'assistant')&&",
+    "!ancestorHasClass(n,'tool-column');}",
     "function renderMarkdown(root){root=root||document;var n=root.getElementsByTagName('*');",
-    "for(var i=0;i<n.length;i++){if(hasClass(n[i],'bubble')){",
-    "if(!ancestorHasClass(n[i],'tool_call')&&!ancestorHasClass(n[i],'tool'))",
-    "renderMarkdownNode(n[i]);}}}",
+    "for(var i=0;i<n.length;i++){if(shouldRenderMarkdownBubble(n[i]))",
+    "renderMarkdownNode(n[i]);}}",
     "function isObj(v){return v&&typeof v=='object'&&",
     "Object.prototype.toString.call(v)!='[object Array]';}",
     "function isArr(v){return Object.prototype.toString.call(v)=='[object Array]';}",
@@ -864,6 +914,15 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function setMessageReasoningCollapsed(id,collapsed){var r=byId(id);var box,body;",
     "if(!r)return;box=firstByClass(r,'reasoning');body=firstByClass(r,'reasoning-body');",
     "if(!box||!body||nodeText(body)==='')return;setReasoningCollapsed(box,collapsed);}",
+    "function setToolColumnCollapsed(box,collapsed){var d=firstByClass(box,'tool-column-disclosure');",
+    "if(collapsed){if(!hasClass(box,'tool-column-collapsed'))box.className+=' tool-column-collapsed';",
+    "if(d)d.innerHTML='&#9658;';}else{box.className=box.className.replace(/\\stool-column-collapsed/g,'');",
+    "if(d)d.innerHTML='&#9660;';}}",
+    "function toggleToolColumn(a){var p=a;while(p&&!hasClass(p,'tool-column'))p=p.parentNode;",
+    "if(!p)return false;setToolColumnCollapsed(p,hasClass(p,'tool-column-collapsed')?0:1);return false;}",
+    "function setMessageToolColumnCollapsed(id,collapsed){var r=byId(id);var box;",
+    "if(!r)return;box=firstByClass(r,'tool-column');if(!box)return;",
+    "setToolColumnCollapsed(box,collapsed);}",
     "function parseJSONSafe(raw){try{if(typeof JSON!='undefined'&&JSON.parse)",
     "return JSON.parse(raw);return eval('('+raw+')');}catch(e){return null;}}",
     "function shortText(v,n){var t=jsonText(v).replace(/\\s+/g,' ');",
@@ -1027,25 +1086,38 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "for(i=0;i<n.length;i++){if(hasClass(n[i],'row'))out[out.length]=n[i];}return out;}",
     "function assistantRows(){var m=byId('messages');var out=[];var n,i;if(!m)return out;",
     "n=m.getElementsByTagName('*');for(i=0;i<n.length;i++){if(isAssistantRow(n[i]))out[out.length]=n[i];}return out;}",
+    "function rowMessageKey(row){return row&&row.getAttribute?row.getAttribute('data-message-key')||'':'';}",
+    "function rowTargetMessageKey(row){return row&&row.getAttribute?row.getAttribute('data-target-message-key')||'':'';}",
+    "function assistantByMessageKey(key){var rows=assistantRows();var i;if(!key)return null;",
+    "for(i=0;i<rows.length;i++){if(rowMessageKey(rows[i])==key)return rows[i];}return null;}",
+    "function explicitToolTarget(row){var key=rowTargetMessageKey(row);var target;if(key==='')return '';",
+    "target=assistantByMessageKey(key);return target?rowId(target):'';}",
     "function setToolTarget(row,target){if(row&&target&&row.setAttribute)row.setAttribute('data-tool-target',target);}",
     "function toolTarget(row){return row&&row.getAttribute?row.getAttribute('data-tool-target')||'':'';}",
     "function assignToolTargetsFromMessageOrder(){var rows=messageRows();var pending=[];var last='';var i,j,row,target;",
-    "for(i=0;i<rows.length;i++){row=rows[i];if(isToolRow(row)){if(toolTarget(row)==='')pending[pending.length]=row;continue;}",
+    "for(i=0;i<rows.length;i++){row=rows[i];if(isToolRow(row)){target=explicitToolTarget(row);",
+    "if(target!==''){setToolTarget(row,target);continue;}if(toolTarget(row)==='')pending[pending.length]=row;continue;}",
     "if(isAssistantRow(row)){target=rowId(row);if(target!==''){last=target;for(j=0;j<pending.length;j++)setToolTarget(pending[j],target);pending=[];}}}",
     "if(last!==''){for(j=0;j<pending.length;j++)setToolTarget(pending[j],last);}}",
     "function defaultToolTarget(){var rows=assistantRows();return rows.length?rowId(rows[rows.length-1]):'';}",
-    "function ensureToolRowTarget(row){var target=toolTarget(row);if(target===''){target=defaultToolTarget();setToolTarget(row,target);}return target;}",
+    "function ensureToolRowTarget(row){var target=explicitToolTarget(row);if(target!==''){setToolTarget(row,target);return target;}",
+    "target=toolTarget(row);if(target===''){target=defaultToolTarget();setToolTarget(row,target);}return target;}",
     "function setToolBoxEmpty(box,empty){if(!box)return;if(empty){if(!hasClass(box,'tool-column-empty'))box.className+=' tool-column-empty';}",
     "else box.className=box.className.replace(/\\stool-column-empty/g,'');}",
+    "function setToolBoxCount(box,count,lastSummary,lastError){var c=firstByClass(box,'tool-count');",
+    "if(c)setNodeText(c,count>0?' - '+(lastSummary!==''?lastSummary:jsonText(count)):'');",
+    "if(lastError){if(!hasClass(box,'tool-column-error'))box.className+=' tool-column-error';}",
+    "else box.className=box.className.replace(/\\stool-column-error/g,'');}",
     "function ensureAssistantToolBox(row){var box=firstByClass(row,'tool-column');var bubble;if(box)return box;",
     "box=document.createElement('div');box.className='tool-column tool-column-empty';",
-    "box.innerHTML='<div class=\"tool-rail-title\">Tool Calls</div><div class=\"tool-cards\"></div>';",
+    "box.innerHTML='<div class=\"tool-rail-title\"><a class=\"tool-column-toggle\" href=\"#\" onclick=\"return toggleToolColumn(this)\"><span class=\"tool-column-disclosure\">&#9660;</span></a>Tool Calls<span class=\"tool-count\"></span></div><div class=\"tool-cards\"></div>';",
     "bubble=firstByClass(row,'bubble');if(bubble)row.insertBefore(box,bubble);else row.appendChild(box);return box;}",
     "function clearToolBoxes(){var rows=assistantRows();var i,box,cards;for(i=0;i<rows.length;i++){",
-    "box=ensureAssistantToolBox(rows[i]);cards=firstByClass(box,'tool-cards');if(cards)cards.innerHTML='';setToolBoxEmpty(box,1);}}",
-    "function renderToolCardsForTarget(target,cards){var row=byId(target);var box,slot,h=[],i;if(!row||!isAssistantRow(row))return;",
+    "box=ensureAssistantToolBox(rows[i]);cards=firstByClass(box,'tool-cards');if(cards)cards.innerHTML='';setToolBoxCount(box,0,'',0);setToolBoxEmpty(box,1);}}",
+    "function renderToolCardsForTarget(target,cards){var row=byId(target);var box,slot,h=[],i,last;if(!row||!isAssistantRow(row))return;",
     "box=ensureAssistantToolBox(row);slot=firstByClass(box,'tool-cards');if(!slot)return;",
-    "for(i=0;i<cards.length;i++)h[h.length]=toolCardHTML(cards[i],i);slot.innerHTML=h.join('');setToolBoxEmpty(box,cards.length===0);}",
+    "for(i=0;i<cards.length;i++)h[h.length]=toolCardHTML(cards[i],i);slot.innerHTML=h.join('');",
+    "last=cards.length?cards[cards.length-1]:null;setToolBoxCount(box,cards.length,last?toolCardSummary(last,cards.length-1):'',last?last.error:0);setToolBoxEmpty(box,cards.length===0);}",
     "function toolRowSort(row){var m=/^saved-(\\d+)$/.exec((row&&row.id)||'');return m?parseInt(m[1],10):900000000;}",
     "function insertToolSource(row){var p=toolSources();var v,n,i;if(!p||row.parentNode==p)return;",
     "v=toolRowSort(row);n=p.childNodes;for(i=0;i<n.length;i++){if(isToolRow(n[i])&&toolRowSort(n[i])>v){p.insertBefore(row,n[i]);return;}}p.appendChild(row);}",
@@ -1095,7 +1167,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(!n)continue;if(q.kind=='reasoning'){if(typeof n._strappyPlain=='undefined')n._strappyPlain=n.innerHTML;",
     "n._strappyPlain+=q.text;if(n.insertAdjacentHTML)n.insertAdjacentHTML('beforeend',q.text);else n.innerHTML=n._strappyPlain;continue;}",
     "if(typeof n._strappyMarkdown=='undefined')n._strappyMarkdown=n.innerHTML;",
-    "n._strappyMarkdown+=q.text;renderMarkdownNode(n);}strappyTextQueues={};scrollBottom();}",
+    "n._strappyMarkdown+=q.text;if(shouldRenderMarkdownBubble(n))renderMarkdownNode(n);",
+    "else n.innerHTML=n._strappyMarkdown;}strappyTextQueues={};scrollBottom();}",
     "function appendMessage(html){clearEmpty();var m=byId('messages');if(!m)return;",
     "if(m.insertAdjacentHTML){m.insertAdjacentHTML('beforeend',html);}",
     "else{var d=nodesFromHTML(html);while(d.firstChild)m.appendChild(d.firstChild);}",
@@ -1122,9 +1195,11 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "flushTextQueues();b=firstByClass(r,'bubble');if(b)b.style.display='block';",
     "if(b&&hasClass(b,'bubble-status')){b.className=b.className.replace(/\\sbubble-status/g,'');",
     "b._strappyMarkdown='';b.innerHTML='';}",
-    "setMessageReasoningCollapsed(id,1);if(!b)return;",
+    "r.className=r.className.replace(/\\sstreaming-active/g,'');",
+    "setMessageReasoningCollapsed(id,1);setMessageToolColumnCollapsed(id,1);if(!b)return;",
     "if(typeof b._strappyMarkdown=='undefined')b._strappyMarkdown=b.innerHTML;",
-    "b._strappyMarkdown+=escHTML(t);renderMarkdownNode(b);scrollBottom();}",
+    "b._strappyMarkdown+=escHTML(t);if(shouldRenderMarkdownBubble(b))renderMarkdownNode(b);",
+    "else b.innerHTML=b._strappyMarkdown;scrollBottom();}",
     "function moveMessageTextToReasoning(id){var r=byId(id);var b,box,body,raw;",
     "flushTextQueues();if(!r)return;b=firstByClass(r,'bubble');box=firstByClass(r,'reasoning');",
     "body=firstByClass(r,'reasoning-body');if(!b||!box||!body)return;",
@@ -1136,7 +1211,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "b.innerHTML=escHTML((r.getAttribute?r.getAttribute('data-thinking-label'):'')||'Thinking');",
     "b.style.display='block';",
     "box.style.display='block';",
-    "setReasoningCollapsed(box,0);scrollBottom();}",
+    "if(!hasClass(r,'streaming-active'))r.className+=' streaming-active';",
+    "setReasoningCollapsed(box,0);setMessageToolColumnCollapsed(id,1);scrollBottom();}",
     "function appendReasoningText(id,t){var r=byId(id);if(!r)return;",
     "var box=firstByClass(r,'reasoning');var body=firstByClass(r,'reasoning-body');",
     "if(box)box.style.display='block';if(!body)return;",
@@ -1242,7 +1318,24 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   }
 
   ok = ok &&
-       strappy_webview_buffer_append_cstring(&buffer, "\"><div class=\"role\">") &&
+       strappy_webview_buffer_append_cstring(&buffer, "\"") &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "kind",
+                                             (message != NULL) ?
+                                               message->kind : NULL) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "actor",
+                                             (message != NULL) ?
+                                               message->actor : NULL) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "message-key",
+                                             (message != NULL) ?
+                                               message->message_key : NULL) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "target-message-key",
+                                             (message != NULL) ?
+                                               message->target_message_key : NULL) &&
+       strappy_webview_buffer_append_cstring(&buffer, "><div class=\"role\">") &&
        strappy_webview_append_html_escaped(&buffer,
                                            strappy_webview_role_label(role, labels)) &&
        strappy_webview_buffer_append_cstring(&buffer, "</div>");
@@ -1250,7 +1343,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   if (ok && strappy_webview_is_assistant_role(role)) {
     ok = strappy_webview_append_reasoning_html(&buffer, reasoning, 0, labels);
     if (ok) {
-      ok = strappy_webview_append_tool_column_html(&buffer);
+      ok = strappy_webview_append_tool_column_html(&buffer, 1);
     }
   }
 
@@ -1327,7 +1420,7 @@ char *strappy_webview_streaming_assistant_message_html(
   ok = strappy_webview_buffer_append_cstring(&buffer, "<div id=\"") &&
        strappy_webview_append_html_escaped(&buffer, element_id) &&
        strappy_webview_buffer_append_cstring(&buffer,
-                                             "\" class=\"row assistant");
+                                             "\" class=\"row assistant streaming-active");
   if (ok && has_state) {
     ok = strappy_webview_buffer_append_cstring(&buffer, " state-") &&
          strappy_webview_append_html_escaped(&buffer, state);
@@ -1344,7 +1437,7 @@ char *strappy_webview_streaming_assistant_message_html(
                                            strappy_webview_agent_label(labels)) &&
        strappy_webview_buffer_append_cstring(&buffer, "</div>") &&
        strappy_webview_append_reasoning_html(&buffer, reasoning, 1, labels) &&
-       strappy_webview_append_tool_column_html(&buffer) &&
+       strappy_webview_append_tool_column_html(&buffer, 1) &&
        strappy_webview_buffer_append_cstring(&buffer, "<div class=\"bubble");
   if (ok && render_bubble_status) {
     ok = strappy_webview_buffer_append_cstring(&buffer, " bubble-status");

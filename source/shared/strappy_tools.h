@@ -1,6 +1,8 @@
 #ifndef STRAPPY_TOOLS_H
 #define STRAPPY_TOOLS_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -17,6 +19,10 @@ extern "C" {
 
 char *strappy_tools_request_json(const char *resource_dir,
                                  char **error_out);
+char *strappy_tools_request_json_filtered(const char *resource_dir,
+                                          const char * const *allowed_names,
+                                          size_t allowed_name_count,
+                                          char **error_out);
 int strappy_tools_is_helper(const char *tool_name);
 char *strappy_tools_execute(const char *session_db_path,
                             const char *resource_dir,

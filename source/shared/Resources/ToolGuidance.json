@@ -165,7 +165,7 @@
       "type": "function",
       "function": {
         "name": "database_context_read",
-        "description": "Read database context. With a database_id, returns safe metadata, a human description, simplified live schema, and remembered database hints such as join paths, column semantics, content locations, and caveats. Without a database_id, returns remembered database hints only.",
+        "description": "Read database context. Requires at least one of database_id, query, kind, or limit. With a database_id, returns safe metadata, a human description, simplified live schema, and remembered database hints such as join paths, column semantics, content locations, and caveats. Without a database_id, use query, kind, or limit to read remembered database hints only.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -187,6 +187,7 @@
             }
           },
           "required": [],
+          "minProperties": 1,
           "additionalProperties": false
         }
       }

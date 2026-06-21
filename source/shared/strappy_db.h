@@ -24,13 +24,27 @@ typedef struct strappy_session_record_list {
 typedef struct strappy_session_message_record {
   long long message_id;
   long long session_id;
+  long long turn_id;
+  char *turn_key;
+  char *actor;
+  char *kind;
+  char *api_role;
+  char *render_role;
   char *role;
   char *content;
   char *model;
   char *metadata_json;
   char *message_json;
   char *reasoning;
+  char *message_key;
+  char *target_message_key;
+  char *tool_call_id;
+  char *tool_name;
+  char *arguments_json;
+  char *result_json;
   char *created_at;
+  int include_in_context;
+  int is_error;
   long http_status;
 } strappy_session_message_record;
 
@@ -40,6 +54,12 @@ typedef struct strappy_session_message_record_list {
 } strappy_session_message_record_list;
 
 typedef struct strappy_session_message_input {
+  const char *turn_key;
+  const char *actor;
+  const char *context_policy;
+  const char *kind;
+  const char *api_role;
+  const char *render_role;
   const char *role;
   const char *content;
   const char *model;
@@ -47,6 +67,14 @@ typedef struct strappy_session_message_input {
   const char *metadata_json;
   const char *message_json;
   const char *reasoning;
+  const char *message_key;
+  const char *target_message_key;
+  const char *tool_call_id;
+  const char *tool_name;
+  const char *arguments_json;
+  const char *result_json;
+  int include_in_context;
+  int is_error;
 } strappy_session_message_input;
 
 typedef struct strappy_discovered_database_input {
@@ -171,6 +199,11 @@ int strappy_db_list_session_messages(const char *db_path,
                                      long long session_id,
                                      strappy_session_message_record_list *list,
                                      char **error_out);
+int strappy_db_list_session_context_messages(
+  const char *db_path,
+  long long session_id,
+  strappy_session_message_record_list *list,
+  char **error_out);
 
 #ifdef __cplusplus
 }

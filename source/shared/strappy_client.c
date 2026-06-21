@@ -1193,8 +1193,17 @@ static char *strappy_client_build_messages_request_json(
 
   if ((config->guidance_resource_dir != NULL) &&
       (config->guidance_resource_dir[0] != '\0')) {
-    tools_json = strappy_tools_request_json(config->guidance_resource_dir,
+    if ((config->tool_allowlist != NULL) &&
+        (config->tool_allowlist_count > 0U)) {
+      tools_json =
+        strappy_tools_request_json_filtered(config->guidance_resource_dir,
+                                            config->tool_allowlist,
+                                            config->tool_allowlist_count,
                                             error_out);
+    } else {
+      tools_json = strappy_tools_request_json(config->guidance_resource_dir,
+                                              error_out);
+    }
   } else {
     tools_json = strappy_string_duplicate("");
     if (tools_json == NULL) {

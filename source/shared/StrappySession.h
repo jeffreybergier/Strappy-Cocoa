@@ -6,7 +6,8 @@
 - (void)strappySessionStreamDidReceiveToolCall:(NSDictionary *)event;
 - (void)strappySessionStreamDidReceiveToolResult:(NSDictionary *)event;
 - (void)strappySessionStreamDidReceiveToolError:(NSDictionary *)event;
-- (void)strappySessionStreamDidReceiveHarnessPrompt:(NSDictionary *)event;
+- (void)strappySessionStreamDidStartTurn:(NSDictionary *)event;
+- (void)strappySessionStreamDidFinishTurn:(NSDictionary *)event;
 @end
 
 @interface StrappySession : NSObject

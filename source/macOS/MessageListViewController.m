@@ -155,6 +155,10 @@ static void StrappyWebViewMessageFromDictionary(
   strappy_webview_message *message)
 {
   NSString *role;
+  NSString *kind;
+  NSString *actor;
+  NSString *messageKey;
+  NSString *targetMessageKey;
   NSString *text;
   NSString *reasoning;
   NSString *metadataJSON;
@@ -171,6 +175,10 @@ static void StrappyWebViewMessageFromDictionary(
   }
 
   role = [dictionary objectForKey:@"role"];
+  kind = [dictionary objectForKey:@"kind"];
+  actor = [dictionary objectForKey:@"actor"];
+  messageKey = [dictionary objectForKey:@"message_key"];
+  targetMessageKey = [dictionary objectForKey:@"target_message_key"];
   text = [dictionary objectForKey:@"text"];
   reasoning = [dictionary objectForKey:@"reasoning"];
   metadataJSON = [dictionary objectForKey:@"metadata_json"];
@@ -181,6 +189,10 @@ static void StrappyWebViewMessageFromDictionary(
   message->http_status =
     [httpStatus isKindOfClass:[NSNumber class]] ? [httpStatus longValue] : 0L;
   message->role = StrappyCString(role);
+  message->kind = StrappyCString(kind);
+  message->actor = StrappyCString(actor);
+  message->message_key = StrappyCString(messageKey);
+  message->target_message_key = StrappyCString(targetMessageKey);
   message->text = StrappyCString(text);
   message->reasoning = StrappyCString(reasoning);
   message->metadata_json = StrappyCString(metadataJSON);
@@ -436,13 +448,18 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 - (void)streamToolCallDidArrive:(NSDictionary *)event;
 - (void)streamToolResultDidArrive:(NSDictionary *)event;
 - (void)streamToolErrorDidArrive:(NSDictionary *)event;
-- (void)streamHarnessPromptDidArrive:(NSDictionary *)event;
+- (void)streamTurnDidStart:(NSDictionary *)event;
+- (void)streamTurnDidFinish:(NSDictionary *)event;
 - (void)applyStreamContentDeltaAndRelease:(NSDictionary *)delta;
 - (void)applyStreamReasoningDeltaAndRelease:(NSDictionary *)delta;
 - (void)applyStreamToolEventAndRelease:(NSDictionary *)event;
-- (void)applyStreamHarnessPromptAndRelease:(NSDictionary *)event;
+- (void)applyStreamTurnStartAndRelease:(NSDictionary *)event;
+- (void)applyStreamTurnFinishAndRelease:(NSDictionary *)event;
 - (void)ensurePendingHarnessTurnWithPrompt:(NSString *)prompt;
 - (BOOL)streamEventUsesHarnessTarget:(NSDictionary *)event;
+- (void)scheduleStreamFlush;
+- (void)flushStreamDeltas;
+- (void)flushStreamDeltasFromTimer:(NSTimer *)timer;
 - (void)beginSendingPrompt:(NSString *)prompt reusingPendingMessage:(BOOL)reuse;
 - (void)retryFailedPrompt;
 - (void)loadEarlierMessages;
@@ -550,6 +567,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
 - (void)clearPendingMessageState
 {
+  [streamFlushTimer_ invalidate];
+  [streamFlushTimer_ release];
+  streamFlushTimer_ = nil;
   [pendingMessageIdentifier_ release];
   pendingMessageIdentifier_ = nil;
   [pendingAssistantMessageIdentifier_ release];
@@ -580,6 +600,102 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   streamingHarnessReasoningText_ = nil;
   [streamingHarnessToolActivityText_ release];
   streamingHarnessToolActivityText_ = nil;
+  [pendingAssistantTextDelta_ release];
+  pendingAssistantTextDelta_ = nil;
+  [pendingReasoningTextDelta_ release];
+  pendingReasoningTextDelta_ = nil;
+  [pendingToolActivityTextDelta_ release];
+  pendingToolActivityTextDelta_ = nil;
+  [pendingHarnessAssistantTextDelta_ release];
+  pendingHarnessAssistantTextDelta_ = nil;
+  [pendingHarnessReasoningTextDelta_ release];
+  pendingHarnessReasoningTextDelta_ = nil;
+  [pendingHarnessToolActivityTextDelta_ release];
+  pendingHarnessToolActivityTextDelta_ = nil;
+}
+
+- (void)scheduleStreamFlush
+{
+  if (streamFlushTimer_ != nil) {
+    return;
+  }
+
+  streamFlushTimer_ =
+    [[NSTimer scheduledTimerWithTimeInterval:2.0
+                                      target:self
+                                    selector:@selector(flushStreamDeltasFromTimer:)
+                                    userInfo:nil
+                                     repeats:NO] retain];
+}
+
+- (void)flushStreamDeltasFromTimer:(NSTimer *)timer
+{
+  if (timer != streamFlushTimer_) {
+    return;
+  }
+
+  [streamFlushTimer_ release];
+  streamFlushTimer_ = nil;
+  [self flushStreamDeltas];
+}
+
+- (void)flushStreamDeltas
+{
+  NSMutableString *js;
+
+  if (streamFlushTimer_ != nil) {
+    [streamFlushTimer_ invalidate];
+    [streamFlushTimer_ release];
+    streamFlushTimer_ = nil;
+  }
+
+  js = [NSMutableString string];
+  if ((pendingAssistantMessageIdentifier_ != nil) &&
+      ([pendingAssistantTextDelta_ length] > 0U)) {
+    [js appendString:
+      StrappyAppendMessageTextJavaScript(pendingAssistantMessageIdentifier_,
+                                         pendingAssistantTextDelta_)];
+    [pendingAssistantTextDelta_ setString:@""];
+  }
+  if ((pendingAssistantMessageIdentifier_ != nil) &&
+      ([pendingReasoningTextDelta_ length] > 0U)) {
+    [js appendString:
+      StrappyAppendReasoningTextJavaScript(pendingAssistantMessageIdentifier_,
+                                           pendingReasoningTextDelta_)];
+    [pendingReasoningTextDelta_ setString:@""];
+  }
+  if ((pendingToolActivityIdentifier_ != nil) &&
+      ([pendingToolActivityTextDelta_ length] > 0U)) {
+    [js appendString:
+      StrappyAppendToolEventTextJavaScript(pendingToolActivityIdentifier_,
+                                           pendingToolActivityTextDelta_)];
+    [pendingToolActivityTextDelta_ setString:@""];
+  }
+  if ((pendingHarnessAssistantMessageIdentifier_ != nil) &&
+      ([pendingHarnessAssistantTextDelta_ length] > 0U)) {
+    [js appendString:
+      StrappyAppendMessageTextJavaScript(pendingHarnessAssistantMessageIdentifier_,
+                                         pendingHarnessAssistantTextDelta_)];
+    [pendingHarnessAssistantTextDelta_ setString:@""];
+  }
+  if ((pendingHarnessAssistantMessageIdentifier_ != nil) &&
+      ([pendingHarnessReasoningTextDelta_ length] > 0U)) {
+    [js appendString:
+      StrappyAppendReasoningTextJavaScript(pendingHarnessAssistantMessageIdentifier_,
+                                           pendingHarnessReasoningTextDelta_)];
+    [pendingHarnessReasoningTextDelta_ setString:@""];
+  }
+  if ((pendingHarnessToolActivityIdentifier_ != nil) &&
+      ([pendingHarnessToolActivityTextDelta_ length] > 0U)) {
+    [js appendString:
+      StrappyAppendToolEventTextJavaScript(pendingHarnessToolActivityIdentifier_,
+                                           pendingHarnessToolActivityTextDelta_)];
+    [pendingHarnessToolActivityTextDelta_ setString:@""];
+  }
+
+  if ([js length] > 0U) {
+    [self pushJavaScript:js];
+  }
 }
 
 - (void)reloadWithSession:(NSDictionary *)session
@@ -831,6 +947,12 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     streamingAssistantText_ = [[NSMutableString alloc] init];
     streamingReasoningText_ = [[NSMutableString alloc] init];
     streamingToolActivityText_ = [[NSMutableString alloc] init];
+    pendingAssistantTextDelta_ = [[NSMutableString alloc] init];
+    pendingReasoningTextDelta_ = [[NSMutableString alloc] init];
+    pendingToolActivityTextDelta_ = [[NSMutableString alloc] init];
+    pendingHarnessAssistantTextDelta_ = [[NSMutableString alloc] init];
+    pendingHarnessReasoningTextDelta_ = [[NSMutableString alloc] init];
+    pendingHarnessToolActivityTextDelta_ = [[NSMutableString alloc] init];
 
     js = [NSMutableString string];
     [js appendString:
@@ -873,6 +995,18 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     streamingReasoningText_ = [[NSMutableString alloc] init];
     [streamingToolActivityText_ release];
     streamingToolActivityText_ = [[NSMutableString alloc] init];
+    [pendingAssistantTextDelta_ release];
+    pendingAssistantTextDelta_ = [[NSMutableString alloc] init];
+    [pendingReasoningTextDelta_ release];
+    pendingReasoningTextDelta_ = [[NSMutableString alloc] init];
+    [pendingToolActivityTextDelta_ release];
+    pendingToolActivityTextDelta_ = [[NSMutableString alloc] init];
+    [pendingHarnessAssistantTextDelta_ release];
+    pendingHarnessAssistantTextDelta_ = [[NSMutableString alloc] init];
+    [pendingHarnessReasoningTextDelta_ release];
+    pendingHarnessReasoningTextDelta_ = [[NSMutableString alloc] init];
+    [pendingHarnessToolActivityTextDelta_ release];
+    pendingHarnessToolActivityTextDelta_ = [[NSMutableString alloc] init];
 
     js = [NSMutableString string];
     [js appendString:
@@ -1025,9 +1159,14 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [self streamToolErrorDidArrive:event];
 }
 
-- (void)strappySessionStreamDidReceiveHarnessPrompt:(NSDictionary *)event
+- (void)strappySessionStreamDidStartTurn:(NSDictionary *)event
 {
-  [self streamHarnessPromptDidArrive:event];
+  [self streamTurnDidStart:event];
+}
+
+- (void)strappySessionStreamDidFinishTurn:(NSDictionary *)event
+{
+  [self streamTurnDidFinish:event];
 }
 
 - (void)streamContentDeltaDidArrive:(NSDictionary *)delta
@@ -1080,12 +1219,22 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
                       waitUntilDone:NO];
 }
 
-- (void)streamHarnessPromptDidArrive:(NSDictionary *)event
+- (void)streamTurnDidStart:(NSDictionary *)event
 {
   NSDictionary *retainedEvent;
 
   retainedEvent = [event retain];
-  [self performSelectorOnMainThread:@selector(applyStreamHarnessPromptAndRelease:)
+  [self performSelectorOnMainThread:@selector(applyStreamTurnStartAndRelease:)
+                         withObject:retainedEvent
+                      waitUntilDone:NO];
+}
+
+- (void)streamTurnDidFinish:(NSDictionary *)event
+{
+  NSDictionary *retainedEvent;
+
+  retainedEvent = [event retain];
+  [self performSelectorOnMainThread:@selector(applyStreamTurnFinishAndRelease:)
                          withObject:retainedEvent
                       waitUntilDone:NO];
 }
@@ -1127,11 +1276,18 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
 - (BOOL)streamEventUsesHarnessTarget:(NSDictionary *)event
 {
-  NSString *phase;
+  NSString *actor;
+  NSString *renderRole;
 
-  phase = [event objectForKey:@"stream_phase"];
-  return ([phase isKindOfClass:[NSString class]] &&
-          [phase isEqualToString:@"harness"]) ? YES : NO;
+  actor = [event objectForKey:@"actor"];
+  if ([actor isKindOfClass:[NSString class]] &&
+      [actor isEqualToString:@"harness"]) {
+    return YES;
+  }
+
+  renderRole = [event objectForKey:@"render_role"];
+  return ([renderRole isKindOfClass:[NSString class]] &&
+          [renderRole isEqualToString:@"harness"]) ? YES : NO;
 }
 
 - (void)ensurePendingHarnessTurnWithPrompt:(NSString *)prompt
@@ -1150,7 +1306,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
   promptText = ([prompt isKindOfClass:[NSString class]] &&
                 ([prompt length] > 0U)) ?
-    prompt : NSLocalizedString(@"Post-answer memory audit", nil);
+    prompt : NSLocalizedString(@"Learning Summary", nil);
 
   pendingHarnessMessageIdentifier_ =
     [[pendingMessageIdentifier_ stringByAppendingString:@"-harness"] retain];
@@ -1162,6 +1318,15 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   streamingHarnessAssistantText_ = [[NSMutableString alloc] init];
   streamingHarnessReasoningText_ = [[NSMutableString alloc] init];
   streamingHarnessToolActivityText_ = [[NSMutableString alloc] init];
+  if (pendingHarnessAssistantTextDelta_ == nil) {
+    pendingHarnessAssistantTextDelta_ = [[NSMutableString alloc] init];
+  }
+  if (pendingHarnessReasoningTextDelta_ == nil) {
+    pendingHarnessReasoningTextDelta_ = [[NSMutableString alloc] init];
+  }
+  if (pendingHarnessToolActivityTextDelta_ == nil) {
+    pendingHarnessToolActivityTextDelta_ = [[NSMutableString alloc] init];
+  }
 
   js = [NSMutableString string];
   [js appendString:
@@ -1188,7 +1353,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [self pushJavaScript:js];
 }
 
-- (void)applyStreamHarnessPromptAndRelease:(NSDictionary *)event
+- (void)applyStreamTurnStartAndRelease:(NSDictionary *)event
 {
   NSString *prompt;
 
@@ -1197,11 +1362,21 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     return;
   }
 
-  prompt = [event objectForKey:@"delta"];
-  if (![prompt isKindOfClass:[NSString class]]) {
-    prompt = nil;
+  if ([self streamEventUsesHarnessTarget:event]) {
+    prompt = [event objectForKey:@"delta"];
+    if (![prompt isKindOfClass:[NSString class]]) {
+      prompt = nil;
+    }
+    [self ensurePendingHarnessTurnWithPrompt:prompt];
   }
-  [self ensurePendingHarnessTurnWithPrompt:prompt];
+  [event release];
+}
+
+- (void)applyStreamTurnFinishAndRelease:(NSDictionary *)event
+{
+  if ([self streamDeltaAppliesToCurrentPendingMessage:event]) {
+    [self flushStreamDeltas];
+  }
   [event release];
 }
 
@@ -1229,11 +1404,17 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     if (streamingHarnessAssistantText_ == nil) {
       streamingHarnessAssistantText_ = [[NSMutableString alloc] init];
     }
+    if (pendingHarnessAssistantTextDelta_ == nil) {
+      pendingHarnessAssistantTextDelta_ = [[NSMutableString alloc] init];
+    }
     assistantText = streamingHarnessAssistantText_;
     assistantIdentifier = pendingHarnessAssistantMessageIdentifier_;
   } else {
     if (streamingAssistantText_ == nil) {
       streamingAssistantText_ = [[NSMutableString alloc] init];
+    }
+    if (pendingAssistantTextDelta_ == nil) {
+      pendingAssistantTextDelta_ = [[NSMutableString alloc] init];
     }
     assistantText = streamingAssistantText_;
     assistantIdentifier = pendingAssistantMessageIdentifier_;
@@ -1245,8 +1426,12 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   }
 
   [assistantText appendString:text];
-  [self pushJavaScript:
-    StrappyAppendMessageTextJavaScript(assistantIdentifier, text)];
+  if (harnessTarget) {
+    [pendingHarnessAssistantTextDelta_ appendString:text];
+  } else {
+    [pendingAssistantTextDelta_ appendString:text];
+  }
+  [self scheduleStreamFlush];
 
   [delta release];
 }
@@ -1275,11 +1460,17 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     if (streamingHarnessReasoningText_ == nil) {
       streamingHarnessReasoningText_ = [[NSMutableString alloc] init];
     }
+    if (pendingHarnessReasoningTextDelta_ == nil) {
+      pendingHarnessReasoningTextDelta_ = [[NSMutableString alloc] init];
+    }
     reasoningText = streamingHarnessReasoningText_;
     assistantIdentifier = pendingHarnessAssistantMessageIdentifier_;
   } else {
     if (streamingReasoningText_ == nil) {
       streamingReasoningText_ = [[NSMutableString alloc] init];
+    }
+    if (pendingReasoningTextDelta_ == nil) {
+      pendingReasoningTextDelta_ = [[NSMutableString alloc] init];
     }
     reasoningText = streamingReasoningText_;
     assistantIdentifier = pendingAssistantMessageIdentifier_;
@@ -1291,8 +1482,12 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   }
 
   [reasoningText appendString:text];
-  [self pushJavaScript:
-    StrappyAppendReasoningTextJavaScript(assistantIdentifier, text)];
+  if (harnessTarget) {
+    [pendingHarnessReasoningTextDelta_ appendString:text];
+  } else {
+    [pendingReasoningTextDelta_ appendString:text];
+  }
+  [self scheduleStreamFlush];
 
   [delta release];
 }
@@ -1364,6 +1559,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     if (streamingHarnessToolActivityText_ == nil) {
       streamingHarnessToolActivityText_ = [[NSMutableString alloc] init];
     }
+    if (pendingHarnessToolActivityTextDelta_ == nil) {
+      pendingHarnessToolActivityTextDelta_ = [[NSMutableString alloc] init];
+    }
     assistantText = streamingHarnessAssistantText_;
     reasoningText = streamingHarnessReasoningText_;
     toolActivityText = streamingHarnessToolActivityText_;
@@ -1378,6 +1576,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     }
     if (streamingToolActivityText_ == nil) {
       streamingToolActivityText_ = [[NSMutableString alloc] init];
+    }
+    if (pendingToolActivityTextDelta_ == nil) {
+      pendingToolActivityTextDelta_ = [[NSMutableString alloc] init];
     }
     assistantText = streamingAssistantText_;
     reasoningText = streamingReasoningText_;
@@ -1405,6 +1606,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   if ([eventType isEqualToString:@"call"] &&
       (assistantText != nil) &&
       ([assistantText length] > 0U)) {
+    [self flushStreamDeltas];
     if ([reasoningText length] > 0U) {
       [reasoningText appendString:@"\n"];
     }
@@ -1429,10 +1631,15 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
       [js appendString:StrappyAppendMessageJavaScript(html)];
     }
   }
-  [js appendString:
-    StrappyAppendToolEventTextJavaScript(toolActivityIdentifier,
-                                         eventText)];
-  [self pushJavaScript:js];
+  if ([js length] > 0U) {
+    [self pushJavaScript:js];
+  }
+  if (harnessTarget) {
+    [pendingHarnessToolActivityTextDelta_ appendString:eventText];
+  } else {
+    [pendingToolActivityTextDelta_ appendString:eventText];
+  }
+  [self scheduleStreamFlush];
 
   [event release];
 }
@@ -1450,6 +1657,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
   sending_ = NO;
   [sendController_ setSending:NO];
+  [self flushStreamDeltas];
 
   pendingIdentifier = [result objectForKey:@"pending_id"];
   if (![pendingIdentifier isKindOfClass:[NSString class]]) {
@@ -1721,6 +1929,18 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     streamingHarnessReasoningText_ = nil;
     [streamingHarnessToolActivityText_ release];
     streamingHarnessToolActivityText_ = nil;
+    [pendingAssistantTextDelta_ release];
+    pendingAssistantTextDelta_ = nil;
+    [pendingReasoningTextDelta_ release];
+    pendingReasoningTextDelta_ = nil;
+    [pendingToolActivityTextDelta_ release];
+    pendingToolActivityTextDelta_ = nil;
+    [pendingHarnessAssistantTextDelta_ release];
+    pendingHarnessAssistantTextDelta_ = nil;
+    [pendingHarnessReasoningTextDelta_ release];
+    pendingHarnessReasoningTextDelta_ = nil;
+    [pendingHarnessToolActivityTextDelta_ release];
+    pendingHarnessToolActivityTextDelta_ = nil;
   } else {
     return;
   }
@@ -1789,6 +2009,14 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [streamingHarnessAssistantText_ release];
   [streamingHarnessReasoningText_ release];
   [streamingHarnessToolActivityText_ release];
+  [pendingAssistantTextDelta_ release];
+  [pendingReasoningTextDelta_ release];
+  [pendingToolActivityTextDelta_ release];
+  [pendingHarnessAssistantTextDelta_ release];
+  [pendingHarnessReasoningTextDelta_ release];
+  [pendingHarnessToolActivityTextDelta_ release];
+  [streamFlushTimer_ invalidate];
+  [streamFlushTimer_ release];
   [super dealloc];
 }
 

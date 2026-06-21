@@ -45,9 +45,10 @@ future conversations.
   helper_user_info_read to check remembered user facts that may help. Use a
   broad empty or request-relevant query; if nothing is relevant, continue.
 - At the start of every new user request, before answering, call
-  database_context_read without a database_id to check remembered database
-  hints that may help. Use a broad empty or request-relevant query; if nothing
-  is relevant, continue.
+  database_context_read with at least one argument to check remembered database
+  hints that may help. Use a broad empty query string, a request-relevant
+  query, a kind filter, a limit, or a database_id; if nothing is relevant,
+  continue.
 - Exception: when the current request is explicitly labeled as a memory audit,
   do not perform the start-of-request read tools. Follow the memory audit
   instructions instead.

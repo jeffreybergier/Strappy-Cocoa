@@ -34,6 +34,13 @@
   NSMutableString          *streamingHarnessAssistantText_;
   NSMutableString          *streamingHarnessReasoningText_;
   NSMutableString          *streamingHarnessToolActivityText_;
+  NSMutableString          *pendingAssistantTextDelta_;
+  NSMutableString          *pendingReasoningTextDelta_;
+  NSMutableString          *pendingToolActivityTextDelta_;
+  NSMutableString          *pendingHarnessAssistantTextDelta_;
+  NSMutableString          *pendingHarnessReasoningTextDelta_;
+  NSMutableString          *pendingHarnessToolActivityTextDelta_;
+  NSTimer                  *streamFlushTimer_;
   long long                 lastKnownMessageIdentifier_;
   NSUInteger                oldestRenderedMessageIndex_;
   NSUInteger                renderedMessageCount_;

@@ -82,12 +82,60 @@ static int StrappySessionHandleStreamEvent(
       [delta setObject:resultJSON forKey:@"result_json"];
     }
   }
-  if (event->phase != NULL) {
-    NSString *phase;
+  if (event->turn_key != NULL) {
+    NSString *turnKey;
 
-    phase = [NSString stringWithUTF8String:event->phase];
-    if (phase != nil) {
-      [delta setObject:phase forKey:@"stream_phase"];
+    turnKey = [NSString stringWithUTF8String:event->turn_key];
+    if (turnKey != nil) {
+      [delta setObject:turnKey forKey:@"turn_key"];
+    }
+  }
+  if (event->actor != NULL) {
+    NSString *actor;
+
+    actor = [NSString stringWithUTF8String:event->actor];
+    if (actor != nil) {
+      [delta setObject:actor forKey:@"actor"];
+    }
+  }
+  if (event->kind != NULL) {
+    NSString *kind;
+
+    kind = [NSString stringWithUTF8String:event->kind];
+    if (kind != nil) {
+      [delta setObject:kind forKey:@"kind"];
+    }
+  }
+  if (event->message_key != NULL) {
+    NSString *messageKey;
+
+    messageKey = [NSString stringWithUTF8String:event->message_key];
+    if (messageKey != nil) {
+      [delta setObject:messageKey forKey:@"message_key"];
+    }
+  }
+  if (event->target_message_key != NULL) {
+    NSString *targetMessageKey;
+
+    targetMessageKey = [NSString stringWithUTF8String:event->target_message_key];
+    if (targetMessageKey != nil) {
+      [delta setObject:targetMessageKey forKey:@"target_message_key"];
+    }
+  }
+  if (event->render_role != NULL) {
+    NSString *renderRole;
+
+    renderRole = [NSString stringWithUTF8String:event->render_role];
+    if (renderRole != nil) {
+      [delta setObject:renderRole forKey:@"render_role"];
+    }
+  }
+  if (event->api_role != NULL) {
+    NSString *apiRole;
+
+    apiRole = [NSString stringWithUTF8String:event->api_role];
+    if (apiRole != nil) {
+      [delta setObject:apiRole forKey:@"api_role"];
     }
   }
 
@@ -111,10 +159,14 @@ static int StrappySessionHandleStreamEvent(
              [context->delegate respondsToSelector:
                @selector(strappySessionStreamDidReceiveToolError:)]) {
     [context->delegate strappySessionStreamDidReceiveToolError:delta];
-  } else if ((event->type == STRAPPY_CHAT_STREAM_EVENT_HARNESS_PROMPT) &&
+  } else if ((event->type == STRAPPY_CHAT_STREAM_EVENT_TURN_STARTED) &&
              [context->delegate respondsToSelector:
-               @selector(strappySessionStreamDidReceiveHarnessPrompt:)]) {
-    [context->delegate strappySessionStreamDidReceiveHarnessPrompt:delta];
+               @selector(strappySessionStreamDidStartTurn:)]) {
+    [context->delegate strappySessionStreamDidStartTurn:delta];
+  } else if ((event->type == STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED) &&
+             [context->delegate respondsToSelector:
+               @selector(strappySessionStreamDidFinishTurn:)]) {
+    [context->delegate strappySessionStreamDidFinishTurn:delta];
   }
 
   [delta release];
@@ -224,13 +276,27 @@ static int StrappySessionHandleStreamEvent(
 {
   NSNumber *messageId;
   NSNumber *sessionId;
+  NSNumber *turnId;
   NSNumber *httpStatus;
+  NSNumber *includeInContext;
+  NSNumber *isError;
+  NSString *turnKey;
+  NSString *actor;
+  NSString *kind;
+  NSString *apiRole;
+  NSString *renderRole;
   NSString *role;
   NSString *content;
   NSString *model;
   NSString *metadataJSON;
   NSString *messageJSON;
   NSString *reasoning;
+  NSString *messageKey;
+  NSString *targetMessageKey;
+  NSString *toolCallId;
+  NSString *toolName;
+  NSString *argumentsJSON;
+  NSString *resultJSON;
   NSString *createdAt;
 
   if (record == NULL) {
@@ -239,24 +305,53 @@ static int StrappySessionHandleStreamEvent(
 
   messageId = [NSNumber numberWithLongLong:record->message_id];
   sessionId = [NSNumber numberWithLongLong:record->session_id];
+  turnId = [NSNumber numberWithLongLong:record->turn_id];
   httpStatus = [NSNumber numberWithLong:record->http_status];
+  includeInContext = [NSNumber numberWithBool:(record->include_in_context ? YES : NO)];
+  isError = [NSNumber numberWithBool:(record->is_error ? YES : NO)];
+  turnKey = [StrappySession stringFromCStringOrEmpty:record->turn_key];
+  actor = [StrappySession stringFromCStringOrEmpty:record->actor];
+  kind = [StrappySession stringFromCStringOrEmpty:record->kind];
+  apiRole = [StrappySession stringFromCStringOrEmpty:record->api_role];
+  renderRole = [StrappySession stringFromCStringOrEmpty:record->render_role];
   role = [StrappySession stringFromCStringOrEmpty:record->role];
   content = [StrappySession stringFromCStringOrEmpty:record->content];
   model = [StrappySession stringFromCStringOrEmpty:record->model];
   metadataJSON = [StrappySession stringFromCStringOrEmpty:record->metadata_json];
   messageJSON = [StrappySession stringFromCStringOrEmpty:record->message_json];
   reasoning = [StrappySession stringFromCStringOrEmpty:record->reasoning];
+  messageKey = [StrappySession stringFromCStringOrEmpty:record->message_key];
+  targetMessageKey =
+    [StrappySession stringFromCStringOrEmpty:record->target_message_key];
+  toolCallId = [StrappySession stringFromCStringOrEmpty:record->tool_call_id];
+  toolName = [StrappySession stringFromCStringOrEmpty:record->tool_name];
+  argumentsJSON = [StrappySession stringFromCStringOrEmpty:record->arguments_json];
+  resultJSON = [StrappySession stringFromCStringOrEmpty:record->result_json];
   createdAt = [StrappySession stringFromCStringOrEmpty:record->created_at];
 
   return [NSDictionary dictionaryWithObjectsAndKeys:
     messageId, @"id",
     sessionId, @"session_id",
+    turnId, @"turn_id",
+    turnKey, @"turn_key",
+    actor, @"actor",
+    kind, @"kind",
+    apiRole, @"api_role",
+    renderRole, @"render_role",
     role, @"role",
     content, @"text",
     model, @"model",
     metadataJSON, @"metadata_json",
     messageJSON, @"message_json",
     reasoning, @"reasoning",
+    messageKey, @"message_key",
+    targetMessageKey, @"target_message_key",
+    toolCallId, @"tool_call_id",
+    toolName, @"tool_name",
+    argumentsJSON, @"arguments_json",
+    resultJSON, @"result_json",
+    includeInContext, @"include_in_context",
+    isError, @"is_error",
     httpStatus, @"http_status",
     createdAt, @"created_at",
     nil];
