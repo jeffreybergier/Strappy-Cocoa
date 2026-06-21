@@ -7,10 +7,6 @@
 extern "C" {
 #endif
 
-char *strappy_assistant_send_prompt(const char *prompt,
-                                    const char *env_path,
-                                    const char *system_prompt_template_path,
-                                    char **error_out);
 char *strappy_assistant_send_prompt_and_store(const char *prompt,
                                              const char *env_path,
                                              const char *system_prompt_template_path,
