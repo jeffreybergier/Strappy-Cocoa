@@ -82,6 +82,14 @@ static int StrappySessionHandleStreamEvent(
       [delta setObject:resultJSON forKey:@"result_json"];
     }
   }
+  if (event->phase != NULL) {
+    NSString *phase;
+
+    phase = [NSString stringWithUTF8String:event->phase];
+    if (phase != nil) {
+      [delta setObject:phase forKey:@"stream_phase"];
+    }
+  }
 
   if ((event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) &&
       [context->delegate respondsToSelector:
@@ -103,6 +111,10 @@ static int StrappySessionHandleStreamEvent(
              [context->delegate respondsToSelector:
                @selector(strappySessionStreamDidReceiveToolError:)]) {
     [context->delegate strappySessionStreamDidReceiveToolError:delta];
+  } else if ((event->type == STRAPPY_CHAT_STREAM_EVENT_HARNESS_PROMPT) &&
+             [context->delegate respondsToSelector:
+               @selector(strappySessionStreamDidReceiveHarnessPrompt:)]) {
+    [context->delegate strappySessionStreamDidReceiveHarnessPrompt:delta];
   }
 
   [delta release];

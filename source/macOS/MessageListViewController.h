@@ -22,11 +22,18 @@
   NSString                 *pendingMessageIdentifier_;
   NSString                 *pendingAssistantMessageIdentifier_;
   NSString                 *pendingToolActivityIdentifier_;
+  NSString                 *pendingHarnessMessageIdentifier_;
+  NSString                 *pendingHarnessAssistantMessageIdentifier_;
+  NSString                 *pendingHarnessToolActivityIdentifier_;
+  NSString                 *pendingHarnessPrompt_;
   NSString                 *pendingPrompt_;
   NSNumber                 *sendingSessionId_;
   NSMutableString          *streamingAssistantText_;
   NSMutableString          *streamingReasoningText_;
   NSMutableString          *streamingToolActivityText_;
+  NSMutableString          *streamingHarnessAssistantText_;
+  NSMutableString          *streamingHarnessReasoningText_;
+  NSMutableString          *streamingHarnessToolActivityText_;
   long long                 lastKnownMessageIdentifier_;
   NSUInteger                oldestRenderedMessageIndex_;
   NSUInteger                renderedMessageCount_;

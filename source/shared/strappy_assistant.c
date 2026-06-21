@@ -11,8 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS 20U
-#define STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS 100U
+#define STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS 50U
 
 typedef struct strappy_assistant_request_messages {
   strappy_chat_message *messages;
@@ -26,18 +25,27 @@ typedef struct strappy_assistant_tool_round {
   strappy_session_message_input *storage_messages;
   size_t storage_count;
   size_t tool_count;
+  int store_prompt_message;
+  int post_final;
   char *tool_call_content;
+  char *storage_prompt_message_json;
   char **tool_outputs;
   char **tool_message_jsons;
 } strappy_assistant_tool_round;
 
 typedef struct strappy_assistant_tool_sequence {
-  strappy_assistant_tool_round rounds[STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS];
-  strappy_chat_result results[STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS + 1U];
+  strappy_assistant_tool_round rounds[STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS];
+  strappy_chat_result results[STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS + 1U];
+  strappy_chat_result memory_audit_result;
   size_t round_count;
-  size_t charged_round_count;
   strappy_chat_result *final_result;
 } strappy_assistant_tool_sequence;
+
+typedef struct strappy_assistant_stream_phase_context {
+  strappy_chat_stream_callback callback;
+  void *callback_data;
+  const char *phase;
+} strappy_assistant_stream_phase_context;
 
 static void strappy_assistant_request_messages_init(
   strappy_assistant_request_messages *request)
@@ -75,7 +83,10 @@ static void strappy_assistant_tool_round_init(
   round->storage_messages = NULL;
   round->storage_count = 0U;
   round->tool_count = 0U;
+  round->store_prompt_message = 0;
+  round->post_final = 0;
   round->tool_call_content = NULL;
+  round->storage_prompt_message_json = NULL;
   round->tool_outputs = NULL;
   round->tool_message_jsons = NULL;
 }
@@ -92,6 +103,7 @@ static void strappy_assistant_tool_round_destroy(
   free(round->followup_messages);
   free(round->storage_messages);
   free(round->tool_call_content);
+  free(round->storage_prompt_message_json);
   if (round->tool_outputs != NULL) {
     for (index = 0U; index < round->tool_count; index++) {
       free(round->tool_outputs[index]);
@@ -116,16 +128,16 @@ static void strappy_assistant_tool_sequence_init(
     return;
   }
 
-  for (index = 0U; index < STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS; index++) {
+  for (index = 0U; index < STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS; index++) {
     strappy_assistant_tool_round_init(&sequence->rounds[index]);
   }
 
-  for (index = 0U; index <= STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS; index++) {
+  for (index = 0U; index <= STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS; index++) {
     strappy_chat_result_init(&sequence->results[index]);
   }
+  strappy_chat_result_init(&sequence->memory_audit_result);
 
   sequence->round_count = 0U;
-  sequence->charged_round_count = 0U;
   sequence->final_result = NULL;
 }
 
@@ -138,16 +150,16 @@ static void strappy_assistant_tool_sequence_destroy(
     return;
   }
 
-  for (index = 0U; index < STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS; index++) {
+  for (index = 0U; index < STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS; index++) {
     strappy_assistant_tool_round_destroy(&sequence->rounds[index]);
   }
 
-  for (index = 0U; index <= STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS; index++) {
+  for (index = 0U; index <= STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS; index++) {
     strappy_chat_result_destroy(&sequence->results[index]);
   }
+  strappy_chat_result_destroy(&sequence->memory_audit_result);
 
   sequence->round_count = 0U;
-  sequence->charged_round_count = 0U;
   sequence->final_result = NULL;
 }
 
@@ -157,6 +169,7 @@ static int strappy_assistant_emit_tool_event(
   const char *tool_name,
   const char *arguments_json,
   const char *result_json,
+  const char *phase,
   strappy_chat_stream_callback callback,
   void *callback_data,
   char **error_out)
@@ -174,6 +187,7 @@ static int strappy_assistant_emit_tool_event(
   event.tool_name = tool_name;
   event.arguments_json = arguments_json;
   event.result_json = result_json;
+  event.phase = phase;
   if (!callback(&event, callback_data)) {
     strappy_set_error(error_out, "Stream callback rejected tool event.");
     return 0;
@@ -181,6 +195,61 @@ static int strappy_assistant_emit_tool_event(
 
   return 1;
 }
+
+static int strappy_assistant_emit_harness_prompt(
+  const char *prompt,
+  strappy_chat_stream_callback callback,
+  void *callback_data,
+  char **error_out)
+{
+  strappy_chat_stream_event event;
+
+  if (callback == NULL) {
+    return 1;
+  }
+
+  memset(&event, 0, sizeof(event));
+  event.type = STRAPPY_CHAT_STREAM_EVENT_HARNESS_PROMPT;
+  event.text = (prompt != NULL) ? prompt : "";
+  event.phase = "harness";
+  if (!callback(&event, callback_data)) {
+    strappy_set_error(error_out, "Stream callback rejected harness prompt.");
+    return 0;
+  }
+
+  return 1;
+}
+
+static int strappy_assistant_stream_phase_callback(
+  const strappy_chat_stream_event *event,
+  void *callback_data)
+{
+  strappy_assistant_stream_phase_context *context;
+  strappy_chat_stream_event phased_event;
+
+  if (callback_data == NULL) {
+    return 1;
+  }
+
+  context = (strappy_assistant_stream_phase_context *)callback_data;
+  if (context->callback == NULL) {
+    return 1;
+  }
+
+  if (event == NULL) {
+    return context->callback(event, context->callback_data);
+  }
+
+  phased_event = *event;
+  if (phased_event.phase == NULL) {
+    phased_event.phase = context->phase;
+  }
+  return context->callback(&phased_event, context->callback_data);
+}
+
+static char *strappy_assistant_create_basic_message_json(const char *role,
+                                                         const char *content,
+                                                         char **error_out);
 
 static char *strappy_assistant_join_strings(const char *first,
                                             const char *second)
@@ -208,6 +277,134 @@ static char *strappy_assistant_join_strings(const char *first,
   memcpy(joined + first_length, second, second_length);
   joined[first_length + second_length] = '\0';
   return joined;
+}
+
+static const char *strappy_assistant_memory_audit_prompt(void)
+{
+  return
+    "Post-answer memory audit:\n"
+    "- Do not revise, summarize, or add commentary to the final answer you just "
+    "wrote.\n"
+    "- If this turn revealed any new small, stable, future-useful user fact, "
+    "call helper_user_info_remember now.\n"
+    "- If this turn verified any reusable database schema, join, timestamp, "
+    "flag, caveat, or query-pattern hint, call helper_database_info_remember "
+    "now.\n"
+    "- Store only information that is explicit or strongly implied and useful "
+    "later. Never store secrets, credentials, sensitive identifiers, long "
+    "copied content, or private row contents.\n"
+    "- Do not call database_list_info, database_query, database_context_read, "
+    "helper_user_info_read, or forget tools during this audit.\n"
+    "- If there is nothing worth remembering, do not call a tool.\n"
+    "After any memory tool calls complete, respond with exactly the same final "
+    "answer text as your previous assistant message. Do not mention this "
+    "memory audit.";
+}
+
+static const char *strappy_assistant_memory_audit_completion_text(void)
+{
+  return "Memory audit complete.";
+}
+
+static int strappy_assistant_final_request_context(
+  const strappy_assistant_request_messages *request_messages,
+  const strappy_assistant_tool_sequence *sequence,
+  int did_run_tool_round,
+  const strappy_chat_message **messages_out,
+  size_t *count_out,
+  char **error_out)
+{
+  const strappy_assistant_tool_round *round;
+
+  if ((messages_out == NULL) || (count_out == NULL)) {
+    strappy_set_error(error_out, "Assistant context output is missing.");
+    return 0;
+  }
+  *messages_out = NULL;
+  *count_out = 0U;
+
+  if (did_run_tool_round) {
+    if ((sequence == NULL) || (sequence->round_count == 0U)) {
+      strappy_set_error(error_out, "Assistant tool context is incomplete.");
+      return 0;
+    }
+
+    round = &sequence->rounds[sequence->round_count - 1U];
+    if ((round->followup_messages == NULL) || (round->followup_count == 0U)) {
+      strappy_set_error(error_out, "Assistant tool context is incomplete.");
+      return 0;
+    }
+
+    *messages_out = round->followup_messages;
+    *count_out = round->followup_count;
+    return 1;
+  }
+
+  if ((request_messages == NULL) ||
+      (request_messages->messages == NULL) ||
+      (request_messages->count == 0U)) {
+    strappy_set_error(error_out, "Assistant request context is incomplete.");
+    return 0;
+  }
+
+  *messages_out = request_messages->messages;
+  *count_out = request_messages->count;
+  return 1;
+}
+
+static int strappy_assistant_build_memory_audit_request(
+  const strappy_chat_message *base_messages,
+  size_t base_count,
+  const strappy_chat_result *final_result,
+  strappy_assistant_request_messages *audit_request,
+  char **error_out)
+{
+  strappy_chat_message *messages;
+  size_t request_count;
+
+  if (audit_request == NULL) {
+    strappy_set_error(error_out, "Memory audit request output is missing.");
+    return 0;
+  }
+  strappy_assistant_request_messages_init(audit_request);
+
+  if ((base_messages == NULL) || (base_count == 0U) ||
+      (final_result == NULL) ||
+      (final_result->response_text == NULL)) {
+    strappy_set_error(error_out, "Memory audit request is incomplete.");
+    return 0;
+  }
+
+  if (base_count > (((size_t)-1) - 2U)) {
+    strappy_set_error(error_out, "Memory audit request is too large.");
+    return 0;
+  }
+  request_count = base_count + 2U;
+  if (request_count > (((size_t)-1) / sizeof(strappy_chat_message))) {
+    strappy_set_error(error_out, "Memory audit request is too large.");
+    return 0;
+  }
+
+  messages = (strappy_chat_message *)malloc(
+    request_count * sizeof(strappy_chat_message));
+  if (messages == NULL) {
+    strappy_set_error(error_out, "Could not allocate memory audit request.");
+    return 0;
+  }
+
+  memcpy(messages, base_messages, base_count * sizeof(strappy_chat_message));
+  messages[base_count].role = "assistant";
+  messages[base_count].content = final_result->response_text;
+  messages[base_count].message_json = final_result->message_json;
+  messages[base_count + 1U].role = "user";
+  messages[base_count + 1U].content =
+    strappy_assistant_memory_audit_prompt();
+  messages[base_count + 1U].message_json = NULL;
+
+  audit_request->messages = messages;
+  audit_request->count = request_count;
+  audit_request->system_prompt = NULL;
+  return 1;
 }
 
 static int strappy_assistant_prepare_request_messages(
@@ -471,12 +668,17 @@ static char *strappy_assistant_tool_message_json(const char *tool_call_id,
 static int strappy_assistant_build_tool_round(
   const char *session_db_path,
   const char *resource_dir,
-  const char *prompt,
+  const char *storage_prompt,
+  const char *storage_prompt_role,
+  const char *storage_prompt_api_role,
+  int store_prompt_message,
+  int post_final,
   const strappy_assistant_request_messages *request_messages,
   const strappy_chat_result *tool_request_result,
   int should_stream,
   strappy_chat_stream_callback callback,
   void *callback_data,
+  const char *stream_phase,
   int requires_catalog,
   strappy_assistant_tool_round *round,
   char **error_out)
@@ -561,6 +763,8 @@ static int strappy_assistant_build_tool_round(
   round->tool_count = (size_t)tool_count;
   round->followup_count = followup_count;
   round->storage_count = storage_count;
+  round->store_prompt_message = store_prompt_message ? 1 : 0;
+  round->post_final = post_final ? 1 : 0;
   memcpy(round->followup_messages,
          request_messages->messages,
          request_messages->count * sizeof(strappy_chat_message));
@@ -583,8 +787,27 @@ static int strappy_assistant_build_tool_round(
   memset(round->storage_messages,
          0,
          storage_count * sizeof(strappy_session_message_input));
-  round->storage_messages[0].role = "user";
-  round->storage_messages[0].content = prompt;
+  round->storage_messages[0].role =
+    ((storage_prompt_role != NULL) && (storage_prompt_role[0] != '\0')) ?
+      storage_prompt_role : "user";
+  round->storage_messages[0].content =
+    (storage_prompt != NULL) ? storage_prompt : "";
+  if ((storage_prompt_api_role != NULL) &&
+      (storage_prompt_api_role[0] != '\0') &&
+      (strcmp(round->storage_messages[0].role, storage_prompt_api_role) != 0)) {
+    round->storage_prompt_message_json =
+      strappy_assistant_create_basic_message_json(
+        storage_prompt_api_role,
+        round->storage_messages[0].content,
+        error_out);
+    if (round->storage_prompt_message_json == NULL) {
+      cJSON_Delete(root);
+      strappy_assistant_tool_round_destroy(round);
+      return 0;
+    }
+    round->storage_messages[0].message_json =
+      round->storage_prompt_message_json;
+  }
   round->storage_messages[1].role = "tool_call";
   round->storage_messages[1].content = round->tool_call_content;
   round->storage_messages[1].model = tool_request_result->model;
@@ -620,6 +843,7 @@ static int strappy_assistant_build_tool_round(
                                            tool_name,
                                            arguments,
                                            NULL,
+                                           stream_phase,
                                            callback,
                                            callback_data,
                                            error_out)) {
@@ -654,6 +878,7 @@ static int strappy_assistant_build_tool_round(
           tool_name,
           arguments,
           output,
+          stream_phase,
           callback,
           callback_data,
           error_out)) {
@@ -693,25 +918,20 @@ static int strappy_assistant_build_tool_round(
   return 1;
 }
 
-static int strappy_assistant_result_tool_call_stats(
+static int strappy_assistant_result_has_tool_calls(
   const strappy_chat_result *result,
   int *has_tool_calls_out,
-  int *has_charged_tool_calls_out,
   char **error_out)
 {
   cJSON *root;
   cJSON *tool_calls;
   char *parse_error;
-  int tool_count;
-  int index;
 
-  if ((has_tool_calls_out == NULL) ||
-      (has_charged_tool_calls_out == NULL)) {
+  if (has_tool_calls_out == NULL) {
     strappy_set_error(error_out, "Tool-call check output is missing.");
     return 0;
   }
   *has_tool_calls_out = 0;
-  *has_charged_tool_calls_out = 0;
 
   root = NULL;
   parse_error = NULL;
@@ -727,25 +947,12 @@ static int strappy_assistant_result_tool_call_stats(
   }
 
   *has_tool_calls_out = 1;
-  tool_count = cJSON_GetArraySize(tool_calls);
-  for (index = 0; index < tool_count; index++) {
-    cJSON *tool_call;
-    const char *tool_name;
-
-    tool_call = cJSON_GetArrayItem(tool_calls, index);
-    tool_name =
-      strappy_assistant_tool_call_function_string(tool_call, "name");
-    if (!strappy_tools_is_helper(tool_name)) {
-      *has_charged_tool_calls_out = 1;
-      break;
-    }
-  }
-
   cJSON_Delete(root);
   return 1;
 }
 
-static char *strappy_assistant_create_local_message_json(const char *content,
+static char *strappy_assistant_create_basic_message_json(const char *role,
+                                                         const char *content,
                                                          char **error_out)
 {
   cJSON *root;
@@ -753,27 +960,37 @@ static char *strappy_assistant_create_local_message_json(const char *content,
 
   root = cJSON_CreateObject();
   if (root == NULL) {
-    strappy_set_error(error_out, "Could not allocate assistant limit message.");
+    strappy_set_error(error_out, "Could not allocate assistant message JSON.");
     return NULL;
   }
 
-  if ((cJSON_AddStringToObject(root, "role", "assistant") == NULL) ||
+  if ((cJSON_AddStringToObject(root,
+                               "role",
+                               (role != NULL) ? role : "assistant") == NULL) ||
       (cJSON_AddStringToObject(root,
                                "content",
                                (content != NULL) ? content : "") == NULL)) {
     cJSON_Delete(root);
-    strappy_set_error(error_out, "Could not build assistant limit message.");
+    strappy_set_error(error_out, "Could not build assistant message JSON.");
     return NULL;
   }
 
   json = cJSON_PrintUnformatted(root);
   cJSON_Delete(root);
   if (json == NULL) {
-    strappy_set_error(error_out, "Could not serialize assistant limit message.");
+    strappy_set_error(error_out, "Could not serialize assistant message JSON.");
     return NULL;
   }
 
   return json;
+}
+
+static char *strappy_assistant_create_local_message_json(const char *content,
+                                                         char **error_out)
+{
+  return strappy_assistant_create_basic_message_json("assistant",
+                                                    content,
+                                                    error_out);
 }
 
 static int strappy_assistant_set_local_limit_result(
@@ -825,7 +1042,7 @@ static int strappy_assistant_set_tool_limit_result(
   char **error_out)
 {
   static const char *message =
-    "I reached the 20-round database tool limit while inspecting local data, "
+    "I reached the 50-round tool limit while inspecting local data, "
     "so I could not finish a reliable answer. Please ask a narrower question "
     "or continue with a more specific follow-up.";
 
@@ -833,23 +1050,6 @@ static int strappy_assistant_set_tool_limit_result(
                                                   last_result,
                                                   message,
                                                   "tool_round_limit",
-                                                  error_out);
-}
-
-static int strappy_assistant_set_total_tool_limit_result(
-  strappy_chat_result *result,
-  const strappy_chat_result *last_result,
-  char **error_out)
-{
-  static const char *message =
-    "I reached the helper tool safety limit while preparing local data, so I "
-    "could not finish a reliable answer. Please ask a narrower question or "
-    "continue with a more specific follow-up.";
-
-  return strappy_assistant_set_local_limit_result(result,
-                                                  last_result,
-                                                  message,
-                                                  "tool_total_round_limit",
                                                   error_out);
 }
 
@@ -866,6 +1066,8 @@ static int strappy_assistant_store_tool_sequence(
   size_t message_count;
   size_t message_index;
   size_t round_index;
+  int has_post_final_rounds;
+  char *memory_audit_completion_json;
   int ok;
 
   if ((sequence == NULL) || (final_result == NULL) ||
@@ -875,8 +1077,10 @@ static int strappy_assistant_store_tool_sequence(
   }
 
   message_count = 1U;
+  has_post_final_rounds = 0;
   for (round_index = 0U; round_index < sequence->round_count; round_index++) {
     const strappy_assistant_tool_round *round;
+    size_t copy_start;
     size_t addition;
 
     round = &sequence->rounds[round_index];
@@ -885,7 +1089,17 @@ static int strappy_assistant_store_tool_sequence(
       return 0;
     }
 
-    addition = round->storage_count - 1U;
+    if (round->post_final) {
+      has_post_final_rounds = 1;
+      continue;
+    }
+
+    copy_start = round->store_prompt_message ? 0U : 1U;
+    if (round->storage_count < copy_start) {
+      strappy_set_error(error_out, "Tool message sequence is incomplete.");
+      return 0;
+    }
+    addition = round->storage_count - copy_start;
     if (message_count > (((size_t)-1) - addition - 1U)) {
       strappy_set_error(error_out, "Tool message sequence is too large.");
       return 0;
@@ -899,14 +1113,58 @@ static int strappy_assistant_store_tool_sequence(
   }
   message_count++;
 
+  for (round_index = 0U; round_index < sequence->round_count; round_index++) {
+    const strappy_assistant_tool_round *round;
+    size_t copy_start;
+    size_t addition;
+
+    round = &sequence->rounds[round_index];
+    if (!round->post_final) {
+      continue;
+    }
+
+    copy_start = round->store_prompt_message ? 0U : 1U;
+    if (round->storage_count < copy_start) {
+      strappy_set_error(error_out, "Tool message sequence is incomplete.");
+      return 0;
+    }
+    addition = round->storage_count - copy_start;
+    if (message_count > (((size_t)-1) - addition - 1U)) {
+      strappy_set_error(error_out, "Tool message sequence is too large.");
+      return 0;
+    }
+    message_count += addition;
+  }
+
+  if (has_post_final_rounds) {
+    if (message_count > (((size_t)-1) - 1U)) {
+      strappy_set_error(error_out, "Tool message sequence is too large.");
+      return 0;
+    }
+    message_count++;
+  }
+
   if (message_count > (((size_t)-1) / sizeof(strappy_session_message_input))) {
     strappy_set_error(error_out, "Tool message sequence is too large.");
     return 0;
   }
 
+  memory_audit_completion_json = NULL;
+  if (has_post_final_rounds) {
+    memory_audit_completion_json =
+      strappy_assistant_create_basic_message_json(
+        "assistant",
+        strappy_assistant_memory_audit_completion_text(),
+        error_out);
+    if (memory_audit_completion_json == NULL) {
+      return 0;
+    }
+  }
+
   messages = (strappy_session_message_input *)malloc(
     message_count * sizeof(strappy_session_message_input));
   if (messages == NULL) {
+    free(memory_audit_completion_json);
     strappy_set_error(error_out, "Could not allocate tool message sequence.");
     return 0;
   }
@@ -919,12 +1177,17 @@ static int strappy_assistant_store_tool_sequence(
 
   for (round_index = 0U; round_index < sequence->round_count; round_index++) {
     const strappy_assistant_tool_round *round;
+    size_t copy_start;
     size_t copy_count;
 
     round = &sequence->rounds[round_index];
-    copy_count = round->storage_count - 1U;
+    if (round->post_final) {
+      continue;
+    }
+    copy_start = round->store_prompt_message ? 0U : 1U;
+    copy_count = round->storage_count - copy_start;
     memcpy(&messages[message_index],
-           &round->storage_messages[1],
+           &round->storage_messages[copy_start],
            copy_count * sizeof(strappy_session_message_input));
     message_index += copy_count;
   }
@@ -936,6 +1199,32 @@ static int strappy_assistant_store_tool_sequence(
   messages[message_index].metadata_json = final_result->metadata_json;
   messages[message_index].message_json = final_result->message_json;
   messages[message_index].reasoning = final_result->reasoning_text;
+  message_index++;
+
+  for (round_index = 0U; round_index < sequence->round_count; round_index++) {
+    const strappy_assistant_tool_round *round;
+    size_t copy_start;
+    size_t copy_count;
+
+    round = &sequence->rounds[round_index];
+    if (!round->post_final) {
+      continue;
+    }
+    copy_start = round->store_prompt_message ? 0U : 1U;
+    copy_count = round->storage_count - copy_start;
+    memcpy(&messages[message_index],
+           &round->storage_messages[copy_start],
+           copy_count * sizeof(strappy_session_message_input));
+    message_index += copy_count;
+  }
+
+  if (has_post_final_rounds) {
+    messages[message_index].role = "assistant";
+    messages[message_index].content =
+      strappy_assistant_memory_audit_completion_text();
+    messages[message_index].message_json = memory_audit_completion_json;
+    message_index++;
+  }
 
   if (session_id > 0) {
     ok = strappy_db_append_message_sequence_to_session(
@@ -961,6 +1250,7 @@ static int strappy_assistant_store_tool_sequence(
       error_out);
   }
 
+  free(memory_audit_completion_json);
   free(messages);
   return ok;
 }
@@ -968,12 +1258,18 @@ static int strappy_assistant_store_tool_sequence(
 static int strappy_assistant_run_tool_sequence(
   const strappy_config *config,
   const char *session_db_path,
-  const char *prompt,
+  const char *storage_prompt,
+  const char *storage_prompt_role,
+  const char *storage_prompt_api_role,
+  int store_prompt_message,
+  int post_final,
   const strappy_assistant_request_messages *request_messages,
   const strappy_chat_result *tool_request_result,
-  int should_stream,
+  int stream_tool_events,
+  int stream_model_responses,
   strappy_chat_stream_callback callback,
   void *callback_data,
+  const char *stream_phase,
   strappy_assistant_tool_sequence *sequence,
   int *did_run_out,
   char **error_out)
@@ -981,6 +1277,7 @@ static int strappy_assistant_run_tool_sequence(
   const strappy_assistant_request_messages *current_request;
   strappy_assistant_request_messages followup_request;
   const strappy_chat_result *current_result;
+  int stored_prompt_message;
 
   if (did_run_out != NULL) {
     *did_run_out = 0;
@@ -993,18 +1290,17 @@ static int strappy_assistant_run_tool_sequence(
 
   current_request = request_messages;
   current_result = tool_request_result;
+  stored_prompt_message = 0;
   strappy_assistant_request_messages_init(&followup_request);
 
   for (;;) {
     strappy_assistant_tool_round *round;
     strappy_chat_result *next_result;
     int has_tool_calls;
-    int has_charged_tool_calls;
 
-    if (!strappy_assistant_result_tool_call_stats(current_result,
-                                                 &has_tool_calls,
-                                                 &has_charged_tool_calls,
-                                                 error_out)) {
+    if (!strappy_assistant_result_has_tool_calls(current_result,
+                                                &has_tool_calls,
+                                                error_out)) {
       return 0;
     }
 
@@ -1013,43 +1309,20 @@ static int strappy_assistant_run_tool_sequence(
       return 1;
     }
 
-    if (sequence->round_count >= STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS) {
-      next_result = &sequence->results[STRAPPY_ASSISTANT_MAX_TOTAL_TOOL_ROUNDS];
-      if (!strappy_assistant_set_total_tool_limit_result(next_result,
-                                                         current_result,
-                                                         error_out)) {
-        return 0;
-      }
-      if (should_stream && (callback != NULL)) {
-        strappy_chat_stream_event event;
-
-        memset(&event, 0, sizeof(event));
-        event.type = STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA;
-        event.text = next_result->response_text;
-        if (!callback(&event, callback_data)) {
-          strappy_set_error(error_out,
-                            "Stream callback rejected assistant limit message.");
-          return 0;
-        }
-      }
-      sequence->final_result = next_result;
-      return 1;
-    }
-
-    if (has_charged_tool_calls &&
-        (sequence->charged_round_count >= STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS)) {
+    if (sequence->round_count >= STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS) {
       next_result = &sequence->results[sequence->round_count];
       if (!strappy_assistant_set_tool_limit_result(next_result,
                                                    current_result,
                                                    error_out)) {
         return 0;
       }
-      if (should_stream && (callback != NULL)) {
+      if (stream_model_responses && (callback != NULL)) {
         strappy_chat_stream_event event;
 
         memset(&event, 0, sizeof(event));
         event.type = STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA;
         event.text = next_result->response_text;
+        event.phase = stream_phase;
         if (!callback(&event, callback_data)) {
           strappy_set_error(error_out,
                             "Stream callback rejected assistant limit message.");
@@ -1063,13 +1336,19 @@ static int strappy_assistant_run_tool_sequence(
     round = &sequence->rounds[sequence->round_count];
     if (!strappy_assistant_build_tool_round(session_db_path,
                                             config->guidance_resource_dir,
-                                            prompt,
+                                            storage_prompt,
+                                            storage_prompt_role,
+                                            storage_prompt_api_role,
+                                            store_prompt_message &&
+                                              !stored_prompt_message,
+                                            post_final,
                                             current_request,
                                             current_result,
-                                            should_stream,
+                                            stream_tool_events,
                                             callback,
                                             callback_data,
-                                            has_charged_tool_calls,
+                                            stream_phase,
+                                            1,
                                             round,
                                             error_out)) {
       return 0;
@@ -1082,20 +1361,34 @@ static int strappy_assistant_run_tool_sequence(
 
     next_result = &sequence->results[sequence->round_count];
     sequence->round_count++;
-    if (has_charged_tool_calls) {
-      sequence->charged_round_count++;
+    if (round->store_prompt_message) {
+      stored_prompt_message = 1;
     }
     if (did_run_out != NULL) {
       *did_run_out = 1;
     }
 
-    if (should_stream) {
+    if (stream_model_responses) {
+      strappy_assistant_stream_phase_context phase_context;
+      strappy_chat_stream_callback stream_callback;
+      void *stream_callback_data;
+
+      stream_callback = callback;
+      stream_callback_data = callback_data;
+      if ((stream_phase != NULL) && (callback != NULL)) {
+        phase_context.callback = callback;
+        phase_context.callback_data = callback_data;
+        phase_context.phase = stream_phase;
+        stream_callback = strappy_assistant_stream_phase_callback;
+        stream_callback_data = &phase_context;
+      }
+
       if (!strappy_client_stream_messages(config,
                                           round->followup_messages,
                                           round->followup_count,
                                           next_result,
-                                          callback,
-                                          callback_data,
+                                          stream_callback,
+                                          stream_callback_data,
                                           error_out)) {
         return 0;
       }
@@ -1114,6 +1407,118 @@ static int strappy_assistant_run_tool_sequence(
   }
 }
 
+static int strappy_assistant_run_memory_audit(
+  const strappy_config *config,
+  const char *session_db_path,
+  const strappy_assistant_request_messages *request_messages,
+  strappy_assistant_tool_sequence *sequence,
+  const strappy_chat_result *final_result,
+  int original_did_run_tool_round,
+  int should_stream,
+  strappy_chat_stream_callback callback,
+  void *callback_data,
+  int *did_run_tool_round_in_out,
+  char **error_out)
+{
+  const strappy_chat_message *base_messages;
+  strappy_assistant_request_messages audit_request;
+  size_t base_count;
+  int audit_has_tool_calls;
+  int did_run_audit_tool_round;
+
+  if ((config == NULL) || (sequence == NULL) || (final_result == NULL)) {
+    strappy_set_error(error_out, "Memory audit request is incomplete.");
+    return 0;
+  }
+
+  if ((session_db_path == NULL) || (session_db_path[0] == '\0')) {
+    return 1;
+  }
+
+  if (sequence->round_count >= STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS) {
+    return 1;
+  }
+
+  base_messages = NULL;
+  base_count = 0U;
+  if (!strappy_assistant_final_request_context(request_messages,
+                                               sequence,
+                                               original_did_run_tool_round,
+                                               &base_messages,
+                                               &base_count,
+                                               error_out)) {
+    return 0;
+  }
+
+  strappy_assistant_request_messages_init(&audit_request);
+  if (!strappy_assistant_build_memory_audit_request(base_messages,
+                                                    base_count,
+                                                    final_result,
+                                                    &audit_request,
+                                                    error_out)) {
+    return 0;
+  }
+
+  strappy_chat_result_destroy(&sequence->memory_audit_result);
+  if (!strappy_client_send_messages(config,
+                                    audit_request.messages,
+                                    audit_request.count,
+                                    &sequence->memory_audit_result,
+                                    error_out)) {
+    strappy_assistant_request_messages_destroy(&audit_request);
+    return 0;
+  }
+
+  audit_has_tool_calls = 0;
+  if (!strappy_assistant_result_has_tool_calls(&sequence->memory_audit_result,
+                                               &audit_has_tool_calls,
+                                               error_out)) {
+    strappy_assistant_request_messages_destroy(&audit_request);
+    return 0;
+  }
+
+  if (should_stream &&
+      audit_has_tool_calls &&
+      !strappy_assistant_emit_harness_prompt(
+        strappy_assistant_memory_audit_prompt(),
+        callback,
+        callback_data,
+        error_out)) {
+    strappy_assistant_request_messages_destroy(&audit_request);
+    return 0;
+  }
+
+  did_run_audit_tool_round = 0;
+  if (!strappy_assistant_run_tool_sequence(config,
+                                           session_db_path,
+                                           strappy_assistant_memory_audit_prompt(),
+                                           "harness",
+                                           "user",
+                                           1,
+                                           1,
+                                           &audit_request,
+                                           &sequence->memory_audit_result,
+                                           should_stream && audit_has_tool_calls,
+                                           0,
+                                           callback,
+                                           callback_data,
+                                           "harness",
+                                           sequence,
+                                           &did_run_audit_tool_round,
+                                           error_out)) {
+    strappy_assistant_request_messages_destroy(&audit_request);
+    return 0;
+  }
+
+  sequence->final_result = (strappy_chat_result *)final_result;
+  if (did_run_audit_tool_round && (did_run_tool_round_in_out != NULL)) {
+    *did_run_tool_round_in_out = 1;
+  }
+
+  strappy_assistant_request_messages_destroy(&audit_request);
+  return 1;
+}
+
 static char *strappy_assistant_send_prompt_internal(const char *prompt,
                                                     const char *env_path,
                                                     const char *system_prompt_template_path,
@@ -1126,6 +1531,7 @@ static char *strappy_assistant_send_prompt_internal(const char *prompt,
   strappy_chat_result result;
   strappy_assistant_request_messages request_messages;
   strappy_assistant_tool_sequence tool_sequence;
+  const strappy_chat_result *final_result;
   char *response;
   int did_run_tool_round;
 
@@ -1180,9 +1586,15 @@ static char *strappy_assistant_send_prompt_internal(const char *prompt,
       !strappy_assistant_run_tool_sequence(&config,
                                            session_db_path,
                                            prompt,
+                                           "user",
+                                           "user",
+                                           0,
+                                           0,
                                            &request_messages,
                                            &result,
                                            0,
+                                           0,
+                                           NULL,
                                            NULL,
                                            NULL,
                                            &tool_sequence,
@@ -1193,6 +1605,27 @@ static char *strappy_assistant_send_prompt_internal(const char *prompt,
     strappy_chat_result_destroy(&result);
     strappy_config_destroy(&config);
     return NULL;
+  }
+
+  if (should_store) {
+    final_result = did_run_tool_round ? tool_sequence.final_result : &result;
+    if (!strappy_assistant_run_memory_audit(&config,
+                                            session_db_path,
+                                            &request_messages,
+                                            &tool_sequence,
+                                            final_result,
+                                            did_run_tool_round,
+                                            0,
+                                            NULL,
+                                            NULL,
+                                            &did_run_tool_round,
+                                            error_out)) {
+      strappy_assistant_tool_sequence_destroy(&tool_sequence);
+      strappy_assistant_request_messages_destroy(&request_messages);
+      strappy_chat_result_destroy(&result);
+      strappy_config_destroy(&config);
+      return NULL;
+    }
   }
 
   strappy_assistant_request_messages_destroy(&request_messages);
@@ -1255,6 +1688,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   strappy_session_message_record_list message_list;
   strappy_assistant_request_messages request_messages;
   strappy_assistant_tool_sequence tool_sequence;
+  const strappy_chat_result *final_result;
   char *response;
   int did_run_tool_round;
 
@@ -1325,14 +1759,40 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   if (!strappy_assistant_run_tool_sequence(&config,
                                            session_db_path,
                                            prompt,
+                                           "user",
+                                           "user",
+                                           0,
+                                           0,
                                            &request_messages,
                                            &result,
                                            0,
+                                           0,
+                                           NULL,
                                            NULL,
                                            NULL,
                                            &tool_sequence,
                                            &did_run_tool_round,
                                            error_out)) {
+    strappy_assistant_tool_sequence_destroy(&tool_sequence);
+    strappy_assistant_request_messages_destroy(&request_messages);
+    strappy_session_message_record_list_destroy(&message_list);
+    strappy_chat_result_destroy(&result);
+    strappy_config_destroy(&config);
+    return NULL;
+  }
+
+  final_result = did_run_tool_round ? tool_sequence.final_result : &result;
+  if (!strappy_assistant_run_memory_audit(&config,
+                                          session_db_path,
+                                          &request_messages,
+                                          &tool_sequence,
+                                          final_result,
+                                          did_run_tool_round,
+                                          0,
+                                          NULL,
+                                          NULL,
+                                          &did_run_tool_round,
+                                          error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_session_message_record_list_destroy(&message_list);
@@ -1401,6 +1861,7 @@ static char *strappy_assistant_stream_prompt_internal(
   strappy_chat_result result;
   strappy_assistant_request_messages request_messages;
   strappy_assistant_tool_sequence tool_sequence;
+  const strappy_chat_result *final_result;
   char *response;
   int did_run_tool_round;
 
@@ -1456,14 +1917,39 @@ static char *strappy_assistant_stream_prompt_internal(
   if (!strappy_assistant_run_tool_sequence(&config,
                                            session_db_path,
                                            prompt,
+                                           "user",
+                                           "user",
+                                           0,
+                                           0,
                                            &request_messages,
                                            &result,
                                            1,
+                                           1,
                                            callback,
                                            callback_data,
+                                           NULL,
                                            &tool_sequence,
                                            &did_run_tool_round,
                                            error_out)) {
+    strappy_assistant_tool_sequence_destroy(&tool_sequence);
+    strappy_assistant_request_messages_destroy(&request_messages);
+    strappy_chat_result_destroy(&result);
+    strappy_config_destroy(&config);
+    return NULL;
+  }
+
+  final_result = did_run_tool_round ? tool_sequence.final_result : &result;
+  if (!strappy_assistant_run_memory_audit(&config,
+                                          session_db_path,
+                                          &request_messages,
+                                          &tool_sequence,
+                                          final_result,
+                                          did_run_tool_round,
+                                          1,
+                                          callback,
+                                          callback_data,
+                                          &did_run_tool_round,
+                                          error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_chat_result_destroy(&result);
@@ -1531,6 +2017,7 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   strappy_session_message_record_list message_list;
   strappy_assistant_request_messages request_messages;
   strappy_assistant_tool_sequence tool_sequence;
+  const strappy_chat_result *final_result;
   char *response;
   int did_run_tool_round;
 
@@ -1604,14 +2091,40 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   if (!strappy_assistant_run_tool_sequence(&config,
                                            session_db_path,
                                            prompt,
+                                           "user",
+                                           "user",
+                                           0,
+                                           0,
                                            &request_messages,
                                            &result,
                                            1,
+                                           1,
                                            callback,
                                            callback_data,
+                                           NULL,
                                            &tool_sequence,
                                            &did_run_tool_round,
                                            error_out)) {
+    strappy_assistant_tool_sequence_destroy(&tool_sequence);
+    strappy_assistant_request_messages_destroy(&request_messages);
+    strappy_session_message_record_list_destroy(&message_list);
+    strappy_chat_result_destroy(&result);
+    strappy_config_destroy(&config);
+    return NULL;
+  }
+
+  final_result = did_run_tool_round ? tool_sequence.final_result : &result;
+  if (!strappy_assistant_run_memory_audit(&config,
+                                          session_db_path,
+                                          &request_messages,
+                                          &tool_sequence,
+                                          final_result,
+                                          did_run_tool_round,
+                                          1,
+                                          callback,
+                                          callback_data,
+                                          &did_run_tool_round,
+                                          error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_session_message_record_list_destroy(&message_list);

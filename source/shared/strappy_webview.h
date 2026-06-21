@@ -8,6 +8,7 @@ extern "C" {
 typedef struct strappy_webview_labels {
   const char *agent;
   const char *you;
+  const char *harness;
   const char *thinking;
   const char *request_metadata;
   const char *tool_call;

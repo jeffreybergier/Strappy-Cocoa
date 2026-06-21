@@ -306,6 +306,17 @@ static const char *strappy_webview_you_label(
   return "You";
 }
 
+static const char *strappy_webview_harness_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->harness != NULL) &&
+      (labels->harness[0] != '\0')) {
+    return labels->harness;
+  }
+  return "Harness";
+}
+
 static const char *strappy_webview_thinking_label(
   const strappy_webview_labels *labels)
 {
@@ -374,6 +385,11 @@ static int strappy_webview_is_tool_result_role(const char *role)
   return (role != NULL) && (strcmp(role, "tool") == 0);
 }
 
+static int strappy_webview_is_harness_role(const char *role)
+{
+  return (role != NULL) && (strcmp(role, "harness") == 0);
+}
+
 static const char *strappy_webview_role_label(
   const char *role,
   const strappy_webview_labels *labels)
@@ -386,6 +402,9 @@ static const char *strappy_webview_role_label(
   }
   if (strappy_webview_is_tool_result_role(role)) {
     return strappy_webview_tool_result_label(labels);
+  }
+  if (strappy_webview_is_harness_role(role)) {
+    return strappy_webview_harness_label(labels);
   }
   return strappy_webview_you_label(labels);
 }
@@ -647,6 +666,8 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "white-space:pre-wrap;}",
     ".user .role,.user .meta{text-align:left;}",
     ".user .bubble{margin-left:0;background:#eef5ff;border-color:#c8d8ef;}",
+    ".harness .role,.harness .meta{text-align:left;color:#6a597c;}",
+    ".harness .bubble{margin-left:0;background:#f6f1ff;border-color:#d7caeb;}",
     ".meta{font-size:11px;color:#777;margin-top:6px;}",
     ".state-pending .bubble{opacity:.72;}",
     ".state-pending .status{color:#777;}",
@@ -944,9 +965,10 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(!p)return false;var d=firstByClass(a,'tool-disclosure');",
     "if(hasClass(p,'tool-card-open')){p.className=p.className.replace(/\\stool-card-open/g,'');",
     "if(d)d.innerHTML='&#9658;';}else{p.className+=' tool-card-open';if(d)d.innerHTML='&#9660;';}return false;}",
+    "function toolUsesDatabaseId(name){return name=='database_query'||name=='database_context_read';}",
     "function decorateToolArgs(name,args,dbNames){var parsed=args;var p;var db;var out;var k;",
     "if(typeof args=='string'){p=parseJSONSafe(args);if(p!==null)parsed=p;}",
-    "if(name=='database_query'&&isObj(parsed)){db=jsonText(parsed.database_id);",
+    "if(toolUsesDatabaseId(name)&&isObj(parsed)){db=jsonText(parsed.database_id);",
     "if(dbNames&&dbNames[db]){out={filename:dbNames[db]};",
     "for(k in parsed){if(toolOwn(parsed,k))out[k]=parsed[k];}return out;}}return args;}",
     "function toolSectionHTML(label,body){return '<div class=\"tool-field\"><div class=\"tool-input-title\">'",
@@ -963,7 +985,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function toolOutputHTML(raw,name,error){return toolSectionHTML('Output',",
     "toolOutputBody(raw,name,error));}",
     "function toolFilenameForCard(card){var name=jsonText(card.name||'');var parsed=toolArgsValue(card.args||'');",
-    "var db='';var f='';if(name=='database_query'&&isObj(parsed)){f=jsonText(parsed.filename);",
+    "var db='';var f='';if(toolUsesDatabaseId(name)&&isObj(parsed)){f=jsonText(parsed.filename);",
     "db=jsonText(parsed.database_id);if(f===''&&card.dbNames&&db!==''&&card.dbNames[db])f=jsonText(card.dbNames[db]);",
     "if(f===''&&db!=='')f=db;}return f;}",
     "function toolCardSummary(card,index){var name=jsonText(card.name||'Tool');var file=toolFilenameForCard(card);",
@@ -987,6 +1009,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "c.error=(e.event=='error')||toolOutputHasError(c.output);}}",
     "for(i=0;i<order.length;i++)cards[cards.length]=order[i];}",
     "function collectDatabaseNamesFromObject(dbNames,o){var dbs=isObj(o)&&isArr(o.databases)?o.databases:null;var i,d,id,name;",
+    "if(isObj(o)){id=jsonText(o.database_id);name=jsonText(o.filename);if(id!==''&&name!=='')dbNames[id]=name;}",
     "if(!dbs)return;for(i=0;i<dbs.length;i++){d=dbs[i]||{};id=jsonText(d.database_id);name=jsonText(d.filename);",
     "if(id!==''&&name!=='')dbNames[id]=name;}}",
     "function collectDatabaseNamesFromRaw(dbNames,raw){var events=parseToolEvents(raw);var i,o;",
@@ -1044,9 +1067,21 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function renderToolNode(row){toolRowRaw(row);rebuildToolCards();}",
     "function renderTools(root){moveToolRows(root);rebuildToolCards();}",
     "function renderMessageDecorations(root){renderMarkdown(root);renderMetadata(root);renderTools(root);}",
+    "var strappyBatchDepth=0;var strappyNeedsRender=0;",
+    "function beginMessageBatch(){strappyBatchDepth++;}",
+    "function endMessageBatch(){if(strappyBatchDepth>0)strappyBatchDepth--;",
+    "if(strappyBatchDepth===0&&strappyNeedsRender){strappyNeedsRender=0;",
+    "renderMessageDecorations(document);scrollBottom();}}",
+    "function renderAfterMutation(root){if(strappyBatchDepth>0){strappyNeedsRender=1;return;}",
+    "renderMessageDecorations(root);}",
     "function clearEmpty(){var e=byId('empty');if(e)e.style.display='none';}",
     "function nodesFromHTML(html){var d=document.createElement('div');d.innerHTML=html;return d;}",
-    "function scrollBottom(){setTimeout(function(){window.scrollTo(0,document.body.scrollHeight);},0);}",
+    "function scrollBottomNow(){var b=document.body||{};var e=document.documentElement||{};",
+    "var h=Math.max(b.scrollHeight||0,e.scrollHeight||0,b.offsetHeight||0,e.offsetHeight||0);",
+    "if(e)e.scrollTop=h;if(b)b.scrollTop=h;window.scrollTo(0,h);}",
+    "function scrollBottom(){scrollBottomNow();setTimeout(scrollBottomNow,0);",
+    "setTimeout(scrollBottomNow,80);if(window.requestAnimationFrame)",
+    "window.requestAnimationFrame(scrollBottomNow);}",
     "function scrollToolRailBottom(){}",
     "function updateToolTargets(oldId,newId){var rows,i;if(!oldId||!newId||oldId==newId)return;",
     "rows=toolSourceRows().concat(messageRows());for(i=0;i<rows.length;i++){if(toolTarget(rows[i])==oldId)setToolTarget(rows[i],newId);}}",
@@ -1064,21 +1099,21 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function appendMessage(html){clearEmpty();var m=byId('messages');if(!m)return;",
     "if(m.insertAdjacentHTML){m.insertAdjacentHTML('beforeend',html);}",
     "else{var d=nodesFromHTML(html);while(d.firstChild)m.appendChild(d.firstChild);}",
-    "renderMessageDecorations(m);scrollBottom();}",
+    "renderAfterMutation(m);scrollBottom();}",
     "function replaceMessage(id,html){clearEmpty();var old=byId(id);var oldId,target,wasAssistant,next,newId;",
     "flushTextQueues();",
     "if(!old){appendMessage(html);return;}var d=nodesFromHTML(html);",
     "oldId=rowId(old);target=toolTarget(old);wasAssistant=isAssistantRow(old);",
     "if(d.firstChild){next=d.firstChild;if(target!==''&&isToolRow(next))setToolTarget(next,target);",
     "old.parentNode.replaceChild(next,old);newId=rowId(next);if(wasAssistant)updateToolTargets(oldId,newId);}",
-    "renderMessageDecorations(document);scrollBottom();}",
+    "renderAfterMutation(document);scrollBottom();}",
     "function insertMessageBefore(id,html){clearEmpty();var before=byId(id);var m=byId('messages');",
     "if(!m){return;}if(!before){appendMessage(html);return;}var d=nodesFromHTML(html);",
-    "while(d.firstChild)m.insertBefore(d.firstChild,before);renderMessageDecorations(m);scrollBottom();}",
+    "while(d.firstChild)m.insertBefore(d.firstChild,before);renderAfterMutation(m);scrollBottom();}",
     "function prependMessages(html,hasMore){var m=byId('messages');if(!m)return;",
     "var d=nodesFromHTML(html);while(d.lastChild)m.insertBefore(d.lastChild,m.firstChild);",
     "var l=byId('load-more');if(l&&!hasMore)l.parentNode.removeChild(l);",
-    "renderMessageDecorations(m);}",
+    "renderAfterMutation(m);}",
     "function setMessageState(id,status,state){var r=byId(id);var s;if(!r)return;",
     "r.className=r.className.replace(/\\sstate-[^\\s]+/g,'');if(state)r.className+=' state-'+state;",
     "s=firstByClass(r,'status');if(status){if(!s){s=document.createElement('div');",
@@ -1110,9 +1145,9 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function appendToolEventText(id,t){var r=byId(id);var b;if(!r)return;",
     "r.style.display='block';b=firstByClass(r,'bubble');if(!b)return;",
     "if(typeof b._strappyRawText=='undefined')b._strappyRawText=nodeText(b);",
-    "b._strappyRawText+=t;renderTools(document);scrollBottom();}",
+    "b._strappyRawText+=t;renderAfterMutation(document);scrollBottom();}",
     "function removeMessage(id){flushTextQueues();var r=byId(id);",
-    "if(r&&r.parentNode)r.parentNode.removeChild(r);renderTools(document);}",
+    "if(r&&r.parentNode)r.parentNode.removeChild(r);renderAfterMutation(document);}",
     "</script>",
     NULL
   };

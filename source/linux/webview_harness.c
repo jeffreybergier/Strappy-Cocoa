@@ -48,6 +48,10 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function toolObjectArrayTable") &&
        harness_expect_contains(page_html, "function toolOutputHasError") &&
        harness_expect_contains(page_html, "c.error=toolOutputHasError(raw)") &&
+       harness_expect_contains(page_html, "function toolUsesDatabaseId") &&
+       harness_expect_contains(page_html, "database_context_read") &&
+       harness_expect_contains(page_html, "function beginMessageBatch") &&
+       harness_expect_contains(page_html, "function scrollBottomNow") &&
        harness_expect_contains(page_html, "Raw JSON preview") &&
        harness_expect_contains(page_html, "tool-column tool-column-empty");
 
@@ -89,12 +93,40 @@ static int harness_check_tool_event_text(void)
   return ok;
 }
 
+static int harness_check_harness_message(void)
+{
+  strappy_webview_message message;
+  char *message_html;
+  int ok;
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "harness-1";
+  message.role = "harness";
+  message.text = "Memory audit";
+
+  message_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+  if (message_html == NULL) {
+    fprintf(stderr, "Could not generate harness message HTML.\n");
+    return 0;
+  }
+
+  ok = harness_expect_contains(message_html, "class=\"row harness\"") &&
+       harness_expect_contains(message_html, "<div class=\"role\">Harness</div>") &&
+       harness_expect_contains(message_html, "Memory audit");
+
+  strappy_webview_free(message_html);
+  return ok;
+}
+
 int main(void)
 {
   if (!harness_check_page_scripts()) {
     return 1;
   }
   if (!harness_check_tool_event_text()) {
+    return 1;
+  }
+  if (!harness_check_harness_message()) {
     return 1;
   }
 
