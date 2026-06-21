@@ -716,7 +716,8 @@ static int StrappySessionHandleStreamEvent(
     return nil;
   }
 
-  sessionId = [sessionIdentifier longLongValue];
+  sessionId = [sessionIdentifier isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier longLongValue] : 0LL;
   if (sessionId <= 0) {
     if (error != nil) {
       NSDictionary *userInfo =
@@ -796,7 +797,8 @@ static int StrappySessionHandleStreamEvent(
 
   strappy_session_message_record_list_init(&list);
   strappyError = NULL;
-  sessionId = [sessionIdentifier longLongValue];
+  sessionId = [sessionIdentifier isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier longLongValue] : 0LL;
   if (!strappy_db_list_session_messages([databasePath UTF8String],
                                         sessionId,
                                         &list,
@@ -822,138 +824,6 @@ static int StrappySessionHandleStreamEvent(
   return messages;
 }
 
-+ (NSString *)submitPromptSynchronously:(NSString *)prompt error:(NSError **)error
-{
-  NSString *databasePath;
-  NSString *systemPromptTemplatePath;
-  NSString *responseString;
-  char *response;
-  char *strappyError;
-
-  if ((prompt == nil) || ([prompt length] == 0U)) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Prompt is empty.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:4
-                               userInfo:userInfo];
-    }
-    return nil;
-  }
-
-  systemPromptTemplatePath = [StrappySession systemPromptTemplatePathWithError:error];
-  if (systemPromptTemplatePath == nil) {
-    return nil;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return nil;
-  }
-
-  strappyError = NULL;
-  response = strappy_assistant_send_prompt_and_store([prompt UTF8String],
-                                                     NULL,
-                                                     [systemPromptTemplatePath fileSystemRepresentation],
-                                                     [databasePath UTF8String],
-                                                     &strappyError);
-  if (response == NULL) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_free_string(strappyError);
-    return nil;
-  }
-
-  responseString = [NSString stringWithUTF8String:response];
-  strappy_free_string(response);
-
-  if (responseString == nil) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Response was not valid UTF-8.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:5
-                               userInfo:userInfo];
-    }
-  }
-
-  return responseString;
-}
-
-+ (NSDictionary *)submitPromptAndReturnSessionSynchronously:(NSString *)prompt
-                                                      error:(NSError **)error
-{
-  NSString *databasePath;
-  NSString *systemPromptTemplatePath;
-  char *response;
-  char *strappyError;
-  long long sessionId;
-  strappy_session_record record;
-  NSDictionary *session;
-
-  if ((prompt == nil) || ([prompt length] == 0U)) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Prompt is empty.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:4
-                               userInfo:userInfo];
-    }
-    return nil;
-  }
-
-  systemPromptTemplatePath = [StrappySession systemPromptTemplatePathWithError:error];
-  if (systemPromptTemplatePath == nil) {
-    return nil;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return nil;
-  }
-
-  sessionId = 0;
-  strappyError = NULL;
-  response = strappy_assistant_send_prompt_and_store_with_id([prompt UTF8String],
-                                                             NULL,
-                                                             [systemPromptTemplatePath fileSystemRepresentation],
-                                                             [databasePath UTF8String],
-                                                             &sessionId,
-                                                             &strappyError);
-  if (response == NULL) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_free_string(strappyError);
-    return nil;
-  }
-  strappy_free_string(response);
-
-  strappy_session_record_init(&record);
-  strappyError = NULL;
-  if (!strappy_db_load_session([databasePath UTF8String],
-                               sessionId,
-                               &record,
-                               &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_free_string(strappyError);
-    strappy_session_record_destroy(&record);
-    return nil;
-  }
-
-  session = [StrappySession dictionaryFromSessionRecord:&record];
-  strappy_session_record_destroy(&record);
-  return session;
-}
-
 + (NSDictionary *)submitPrompt:(NSString *)prompt
            inSessionIdentifier:(NSNumber *)sessionIdentifier
                          error:(NSError **)error
@@ -966,11 +836,6 @@ static int StrappySessionHandleStreamEvent(
   strappy_session_record record;
   NSDictionary *session;
 
-  if (sessionIdentifier == nil) {
-    return [StrappySession submitPromptAndReturnSessionSynchronously:prompt
-                                                               error:error];
-  }
-
   if ((prompt == nil) || ([prompt length] == 0U)) {
     if (error != nil) {
       NSDictionary *userInfo =
@@ -983,7 +848,8 @@ static int StrappySessionHandleStreamEvent(
     return nil;
   }
 
-  sessionId = [sessionIdentifier longLongValue];
+  sessionId = [sessionIdentifier isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier longLongValue] : 0LL;
   if (sessionId <= 0) {
     if (error != nil) {
       NSDictionary *userInfo =
@@ -1074,6 +940,20 @@ static int StrappySessionHandleStreamEvent(
     context = nil;
   }
 
+  sessionId = [sessionIdentifier isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier longLongValue] : 0LL;
+  if (sessionId <= 0) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return nil;
+  }
+
   systemPromptTemplatePath = [StrappySession systemPromptTemplatePathWithError:error];
   if (systemPromptTemplatePath == nil) {
     return nil;
@@ -1088,45 +968,16 @@ static int StrappySessionHandleStreamEvent(
   streamContext.delegate = [(id)delegate retain];
   streamContext.context = [context retain];
 
-  if (sessionIdentifier == nil) {
-    sessionId = 0;
-    strappyError = NULL;
-    response = strappy_assistant_stream_prompt_and_store_with_id(
-      [prompt UTF8String],
-      NULL,
-      [systemPromptTemplatePath fileSystemRepresentation],
-      [databasePath UTF8String],
-      &sessionId,
-      StrappySessionHandleStreamEvent,
-      &streamContext,
-      &strappyError);
-  } else {
-    sessionId = [sessionIdentifier longLongValue];
-    if (sessionId <= 0) {
-      [streamContext.context release];
-      [streamContext.delegate release];
-      if (error != nil) {
-        NSDictionary *userInfo =
-          [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
-                                      forKey:NSLocalizedDescriptionKey];
-        *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                     code:6
-                                 userInfo:userInfo];
-      }
-      return nil;
-    }
-
-    strappyError = NULL;
-    response = strappy_assistant_stream_prompt_for_session_and_store(
-      [prompt UTF8String],
-      NULL,
-      [systemPromptTemplatePath fileSystemRepresentation],
-      [databasePath UTF8String],
-      sessionId,
-      StrappySessionHandleStreamEvent,
-      &streamContext,
-      &strappyError);
-  }
+  strappyError = NULL;
+  response = strappy_assistant_stream_prompt_for_session_and_store(
+    [prompt UTF8String],
+    NULL,
+    [systemPromptTemplatePath fileSystemRepresentation],
+    [databasePath UTF8String],
+    sessionId,
+    StrappySessionHandleStreamEvent,
+    &streamContext,
+    &strappyError);
 
   [streamContext.context release];
   [streamContext.delegate release];

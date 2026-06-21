@@ -21,9 +21,6 @@
                                                error:(NSError **)error;
 + (NSArray *)messagesForSessionIdentifier:(NSNumber *)sessionIdentifier
                                     error:(NSError **)error;
-+ (NSString *)submitPromptSynchronously:(NSString *)prompt error:(NSError **)error;
-+ (NSDictionary *)submitPromptAndReturnSessionSynchronously:(NSString *)prompt
-                                                      error:(NSError **)error;
 + (NSDictionary *)submitPrompt:(NSString *)prompt
            inSessionIdentifier:(NSNumber *)sessionIdentifier
                          error:(NSError **)error;
