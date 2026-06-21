@@ -87,6 +87,8 @@ char *strappy_webview_insert_message_before_js(const char *before_element_id,
 char *strappy_webview_set_message_state_js(const char *element_id,
                                            const char *status_html,
                                            const char *state);
+char *strappy_webview_set_message_thinking_js(const char *element_id,
+                                              const char *status_html);
 char *strappy_webview_append_message_text_js(const char *element_id,
                                              const char *delta);
 char *strappy_webview_append_reasoning_text_js(const char *element_id,

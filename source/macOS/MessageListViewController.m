@@ -211,6 +211,44 @@ static NSString *StrappyStatusHTML(NSString *text, BOOL retry)
     strappy_webview_status_html(StrappyCString(text), retry ? 1 : 0, &labels));
 }
 
+static NSString *StrappyElapsedThinkingText(NSTimeInterval startedAt)
+{
+  NSTimeInterval now;
+  NSTimeInterval interval;
+  unsigned long elapsed;
+  unsigned long minutes;
+  unsigned long seconds;
+
+  if (startedAt <= 0.0) {
+    return NSLocalizedString(@"Thinking", nil);
+  }
+
+  now = [NSDate timeIntervalSinceReferenceDate];
+  interval = now - startedAt;
+  if (interval < 0.0) {
+    interval = 0.0;
+  }
+
+  elapsed = (unsigned long)interval;
+  minutes = elapsed / 60UL;
+  seconds = elapsed % 60UL;
+  if (minutes > 0UL) {
+    return [NSString stringWithFormat:@"%@ %lum %02lus",
+                                      NSLocalizedString(@"Thinking", nil),
+                                      minutes,
+                                      seconds];
+  }
+
+  return [NSString stringWithFormat:@"%@ %lus",
+                                    NSLocalizedString(@"Thinking", nil),
+                                    seconds];
+}
+
+static NSString *StrappyElapsedThinkingStatusHTML(NSTimeInterval startedAt)
+{
+  return StrappyStatusHTML(StrappyElapsedThinkingText(startedAt), NO);
+}
+
 static NSString *StrappyMessageHTML(NSDictionary *message,
                                     NSString *elementIdentifier,
                                     NSString *state,
@@ -401,6 +439,14 @@ static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
                                          StrappyCString(state)));
 }
 
+static NSString *StrappySetMessageThinkingJavaScript(NSString *elementIdentifier,
+                                                     NSString *statusHTML)
+{
+  return StrappyStringFromWebViewCString(
+    strappy_webview_set_message_thinking_js(StrappyCString(elementIdentifier),
+                                            StrappyCString(statusHTML)));
+}
+
 static NSString *StrappyAppendMessageTextJavaScript(NSString *elementIdentifier,
                                                     NSString *delta)
 {
@@ -495,6 +541,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 - (void)scheduleStreamFlush;
 - (void)flushStreamDeltas;
 - (void)flushStreamDeltasFromTimer:(NSTimer *)timer;
+- (void)appendPendingThinkingJavaScriptToString:(NSMutableString *)js;
 - (void)beginSendingPrompt:(NSString *)prompt reusingPendingMessage:(BOOL)reuse;
 - (void)retryFailedPrompt;
 - (void)loadEarlierMessages;
@@ -649,6 +696,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   pendingHarnessReasoningTextDelta_ = nil;
   [pendingHarnessToolActivityTextDelta_ release];
   pendingHarnessToolActivityTextDelta_ = nil;
+  pendingStartedAt_ = 0.0;
+  pendingHarnessStartedAt_ = 0.0;
 }
 
 - (void)scheduleStreamFlush
@@ -674,6 +723,29 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [streamFlushTimer_ release];
   streamFlushTimer_ = nil;
   [self flushStreamDeltas];
+}
+
+- (void)appendPendingThinkingJavaScriptToString:(NSMutableString *)js
+{
+  if (js == nil) {
+    return;
+  }
+
+  if ((pendingAssistantMessageIdentifier_ != nil) &&
+      (pendingStartedAt_ > 0.0)) {
+    [js appendString:
+      StrappySetMessageThinkingJavaScript(
+        pendingAssistantMessageIdentifier_,
+        StrappyElapsedThinkingStatusHTML(pendingStartedAt_))];
+  }
+
+  if ((pendingHarnessAssistantMessageIdentifier_ != nil) &&
+      (pendingHarnessStartedAt_ > 0.0)) {
+    [js appendString:
+      StrappySetMessageThinkingJavaScript(
+        pendingHarnessAssistantMessageIdentifier_,
+        StrappyElapsedThinkingStatusHTML(pendingHarnessStartedAt_))];
+  }
 }
 
 - (void)flushStreamDeltas
@@ -730,8 +802,16 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     [pendingHarnessToolActivityTextDelta_ setString:@""];
   }
 
+  if (sending_ && [self pendingAppliesToCurrentSession]) {
+    [self appendPendingThinkingJavaScriptToString:js];
+  }
+
   if ([js length] > 0U) {
     [self pushJavaScript:js];
+  }
+
+  if (sending_ && [self pendingAppliesToCurrentSession]) {
+    [self scheduleStreamFlush];
   }
 }
 
@@ -903,8 +983,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
                                              streamingReasoningText_,
                                              (sending_ ? @"pending" : @"error"),
                                              (sending_
-                                             ? StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO)
-                                             : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), NO)),
+                                              ? StrappyElapsedThinkingStatusHTML(pendingStartedAt_)
+                                              : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), NO)),
                                              @"user",
                                              pendingPromptGroupKey_)];
     }
@@ -936,7 +1016,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
             streamingHarnessReasoningText_,
             (sending_ ? @"pending" : @"error"),
             (sending_
-             ? StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO)
+             ? StrappyElapsedThinkingStatusHTML(pendingHarnessStartedAt_)
              : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), NO)),
             @"harness",
             pendingPromptGroupKey_)];
@@ -1003,6 +1083,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
       [[NSString stringWithFormat:@"pending-%lu-tools", pendingCounter] retain];
     pendingPrompt_ = [promptToSend copy];
     sendingSessionId_ = [sessionId_ retain];
+    pendingStartedAt_ = [NSDate timeIntervalSinceReferenceDate];
+    pendingHarnessStartedAt_ = 0.0;
     streamingAssistantText_ = [[NSMutableString alloc] init];
     streamingReasoningText_ = [[NSMutableString alloc] init];
     streamingToolActivityText_ = [[NSMutableString alloc] init];
@@ -1038,7 +1120,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
           streamingAssistantText_,
           streamingReasoningText_,
           @"pending",
-          StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO),
+          StrappyElapsedThinkingStatusHTML(pendingStartedAt_),
           @"user",
           pendingPromptGroupKey_))];
     [self pushJavaScript:js];
@@ -1060,6 +1142,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     streamingReasoningText_ = [[NSMutableString alloc] init];
     [streamingToolActivityText_ release];
     streamingToolActivityText_ = [[NSMutableString alloc] init];
+    pendingStartedAt_ = [NSDate timeIntervalSinceReferenceDate];
+    pendingHarnessStartedAt_ = 0.0;
     [pendingAssistantTextDelta_ release];
     pendingAssistantTextDelta_ = [[NSMutableString alloc] init];
     [pendingReasoningTextDelta_ release];
@@ -1097,7 +1181,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
           streamingAssistantText_,
           streamingReasoningText_,
           @"pending",
-          StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO),
+          StrappyElapsedThinkingStatusHTML(pendingStartedAt_),
           @"user",
           pendingPromptGroupKey_))];
     [self pushJavaScript:js];
@@ -1116,6 +1200,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
                          withObject:request];
   [request release];
   [promptToSend release];
+  [self scheduleStreamFlush];
 }
 
 - (void)retryFailedPrompt
@@ -1376,6 +1461,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   pendingHarnessToolActivityIdentifier_ =
     [[pendingMessageIdentifier_ stringByAppendingString:@"-harness-tools"] retain];
   pendingHarnessPrompt_ = [promptText copy];
+  pendingHarnessStartedAt_ = [NSDate timeIntervalSinceReferenceDate];
   streamingHarnessAssistantText_ = [[NSMutableString alloc] init];
   streamingHarnessReasoningText_ = [[NSMutableString alloc] init];
   streamingHarnessToolActivityText_ = [[NSMutableString alloc] init];
@@ -1414,7 +1500,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
         streamingHarnessAssistantText_,
         streamingHarnessReasoningText_,
         @"pending",
-        StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO),
+        StrappyElapsedThinkingStatusHTML(pendingHarnessStartedAt_),
         @"harness",
         pendingPromptGroupKey_))];
   [self pushJavaScript:js];

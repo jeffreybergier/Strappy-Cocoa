@@ -40,6 +40,8 @@
   NSMutableString          *pendingHarnessReasoningTextDelta_;
   NSMutableString          *pendingHarnessToolActivityTextDelta_;
   NSTimer                  *streamFlushTimer_;
+  NSTimeInterval            pendingStartedAt_;
+  NSTimeInterval            pendingHarnessStartedAt_;
   long long                 lastKnownMessageIdentifier_;
   NSUInteger                oldestRenderedMessageIndex_;
   NSUInteger                renderedMessageCount_;

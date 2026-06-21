@@ -375,6 +375,11 @@ static int strappy_webview_is_assistant_role(const char *role)
   return (role != NULL) && (strcmp(role, "assistant") == 0);
 }
 
+static int strappy_webview_is_user_role(const char *role)
+{
+  return (role != NULL) && (strcmp(role, "user") == 0);
+}
+
 static int strappy_webview_is_tool_call_role(const char *role)
 {
   return (role != NULL) && (strcmp(role, "tool_call") == 0);
@@ -914,10 +919,14 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "var strappyPromptGroupCollapsed={};",
     "function promptGroupKey(row){return row&&row.getAttribute?row.getAttribute('data-prompt-group-key')||'':'';}",
     "function rowActor(row){return row&&row.getAttribute?row.getAttribute('data-actor')||'':'';}",
+    "function rowIsHarness(row){return rowActor(row)=='harness'||hasClass(row,'harness');}",
     "function setRowClass(row,name,on){if(!row)return;if(on){if(!hasClass(row,name))row.className+=' '+name;}",
     "else row.className=row.className.replace(new RegExp('\\\\s'+name,'g'),'');}",
-    "function promptGroupAnchor(rows){var i;for(i=0;i<rows.length;i++){if(hasClass(rows[i],'user'))return rows[i];}",
-    "return rows.length?rows[0]:null;}",
+    "function removePromptGroupToggle(row){var role=firstByClass(row,'role');var a;if(!role)return;",
+    "a=firstByClass(role,'prompt-group-toggle');if(a&&a.parentNode)a.parentNode.removeChild(a);}",
+    "function promptGroupAnchor(rows){var i;for(i=0;i<rows.length;i++){if(rowIsHarness(rows[i]))return rows[i];}",
+    "return null;}",
+    "function promptGroupHarnessCount(rows){var i,n=0;for(i=0;i<rows.length;i++)if(rowIsHarness(rows[i]))n++;return n;}",
     "function ensurePromptGroupToggle(row,key,collapsed){var role,a,d;if(!row)return;",
     "role=firstByClass(row,'role');if(!role)return;a=firstByClass(role,'prompt-group-toggle');",
     "if(!a){a=document.createElement('a');a.className='prompt-group-toggle';a.href='#';",
@@ -927,12 +936,13 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(d)d.innerHTML=collapsed?'&#9658;':'&#9660;';}",
     "function decoratePromptGroups(root){var rows=messageRows();var groups={};var keys=[];var i,k,row;",
     "for(i=0;i<rows.length;i++){row=rows[i];k=promptGroupKey(row);",
+    "removePromptGroupToggle(row);",
     "setRowClass(row,'prompt-group-hidden',0);setRowClass(row,'prompt-group-harness',",
-    "k!==''&&(rowActor(row)=='harness'||hasClass(row,'harness')));if(k==='')continue;",
+    "k!==''&&rowIsHarness(row));if(k==='')continue;",
     "if(!groups[k]){groups[k]=[];keys[keys.length]=k;}groups[k][groups[k].length]=row;}",
     "for(i=0;i<keys.length;i++){k=keys[i];var g=groups[k];var anchor=promptGroupAnchor(g);",
-    "var collapsed=strappyPromptGroupCollapsed[k]?1:0;if(anchor&&g.length>1)ensurePromptGroupToggle(anchor,k,collapsed);",
-    "for(var j=0;j<g.length;j++)setRowClass(g[j],'prompt-group-hidden',collapsed&&g[j]!==anchor);}}",
+    "var collapsed=strappyPromptGroupCollapsed[k]?1:0;if(anchor&&promptGroupHarnessCount(g)>1)ensurePromptGroupToggle(anchor,k,collapsed);",
+    "for(var j=0;j<g.length;j++)setRowClass(g[j],'prompt-group-hidden',collapsed&&rowIsHarness(g[j])&&g[j]!==anchor);}}",
     "function togglePromptGroup(a){var key=a&&a.getAttribute?a.getAttribute('data-prompt-group-key'):'';",
     "if(key==='')return false;strappyPromptGroupCollapsed[key]=strappyPromptGroupCollapsed[key]?0:1;",
     "decoratePromptGroups(document);return false;}",
@@ -1225,6 +1235,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "r.className=r.className.replace(/\\sstate-[^\\s]+/g,'');if(state)r.className+=' state-'+state;",
     "s=firstByClass(r,'status');if(status){if(!s){s=document.createElement('div');",
     "s.className='meta status';r.appendChild(s);}s.innerHTML=status;}else if(s&&s.parentNode)s.parentNode.removeChild(s);scrollBottom();}",
+    "function setMessageThinking(id,status){var r=byId(id);var b;if(!r)return;",
+    "b=firstByClass(r,'bubble');if(b&&hasClass(b,'bubble-status'))b.innerHTML=status||'';}",
     "function appendMessageText(id,t){var r=byId(id);var b;if(!r)return;",
     "flushTextQueues();b=firstByClass(r,'bubble');if(b)b.style.display='block';",
     "if(b&&hasClass(b,'bubble-status')){b.className=b.className.replace(/\\sbubble-status/g,'');",
@@ -1312,6 +1324,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   char *owned_status_html;
   char http_status_text[64];
   int has_state;
+  int render_created_at;
   int ok;
 
   role = ((message != NULL) && (message->role != NULL) &&
@@ -1326,6 +1339,10 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   status_to_render = strappy_webview_string_or_empty(status_html);
   owned_status_html = NULL;
   has_state = (state != NULL) && (state[0] != '\0');
+  render_created_at =
+    (created_at[0] != '\0') &&
+    !strappy_webview_is_user_role(role) &&
+    !strappy_webview_is_harness_role(role);
 
   if (!has_state && (status_to_render[0] == '\0') &&
       (message != NULL) && (message->http_status >= 400L)) {
@@ -1397,7 +1414,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
            "<div class=\"meta status\">") &&
          strappy_webview_buffer_append_cstring(&buffer, status_to_render) &&
          strappy_webview_buffer_append_cstring(&buffer, "</div>");
-  } else if (ok && (created_at[0] != '\0')) {
+  } else if (ok && render_created_at) {
     ok = strappy_webview_buffer_append_cstring(&buffer, "<div class=\"meta\">") &&
          strappy_webview_append_html_escaped(&buffer, created_at) &&
          strappy_webview_buffer_append_cstring(&buffer, "</div>");
@@ -1740,6 +1757,23 @@ char *strappy_webview_set_message_state_js(const char *element_id,
       !strappy_webview_append_js_string(&buffer, status_html) ||
       !strappy_webview_buffer_append_cstring(&buffer, ",") ||
       !strappy_webview_append_js_string(&buffer, state) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_set_message_thinking_js(const char *element_id,
+                                              const char *status_html)
+{
+  strappy_webview_buffer buffer;
+
+  strappy_webview_buffer_init(&buffer);
+  if (!strappy_webview_buffer_append_cstring(&buffer, "setMessageThinking(") ||
+      !strappy_webview_append_js_string(&buffer, element_id) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
+      !strappy_webview_append_js_string(&buffer, status_html) ||
       !strappy_webview_buffer_append_cstring(&buffer, ");")) {
     strappy_webview_buffer_destroy(&buffer);
     return NULL;
