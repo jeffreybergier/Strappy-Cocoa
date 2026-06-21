@@ -26,6 +26,10 @@ char *strappy_cocoa_copy_iso8601_timestamp_value(
   const char *timestamp,
   strappy_cocoa_timestamp_unit unit,
   char **error_out);
+char *strappy_cocoa_copy_timestamp_value_from_iso8601(
+  const char *iso8601,
+  strappy_cocoa_timestamp_unit unit,
+  char **error_out);
 
 #ifdef __cplusplus
 }

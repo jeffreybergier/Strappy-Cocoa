@@ -41,8 +41,8 @@
     {
       "type": "function",
       "function": {
-        "name": "helper_convert_dates",
-        "description": "Convert a comma-separated list of numeric timestamps to a comma-separated list of UTC ISO8601 timestamps. The timestamps argument is required; the optional unit selects unix_seconds, unix_milliseconds, unix_microseconds, unix_nanoseconds, apple_seconds, apple_milliseconds, apple_microseconds, or apple_nanoseconds. The default unit is unix_seconds.",
+        "name": "helper_datetime_to_iso8601",
+        "description": "Convert a comma-separated list of numeric timestamps to a comma-separated list of UTC ISO8601 timestamps. Use this to display database timestamp values. The optional unit selects unix_seconds, unix_milliseconds, unix_microseconds, unix_nanoseconds, apple_seconds, apple_milliseconds, apple_microseconds, or apple_nanoseconds. The default unit is unix_seconds.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -67,6 +67,40 @@
           },
           "required": [
             "timestamps"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "helper_datetime_from_iso8601",
+        "description": "Convert a comma-separated list of UTC ISO8601 datetimes or YYYY-MM-DD dates to numeric timestamps for SQL predicates. Use this before writing date-range filters against Apple Calendar, Messages, or other databases that store numeric time values. The optional unit selects unix_seconds, unix_milliseconds, unix_microseconds, unix_nanoseconds, apple_seconds, apple_milliseconds, apple_microseconds, or apple_nanoseconds. The default unit is apple_seconds.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "datetimes": {
+              "type": "string",
+              "description": "Comma-separated UTC ISO8601 datetimes or YYYY-MM-DD dates to convert. Preserve the order; do not include labels or surrounding brackets."
+            },
+            "unit": {
+              "type": "string",
+              "description": "Timestamp unit and epoch. Defaults to apple_seconds when omitted.",
+              "enum": [
+                "unix_seconds",
+                "unix_milliseconds",
+                "unix_microseconds",
+                "unix_nanoseconds",
+                "apple_seconds",
+                "apple_milliseconds",
+                "apple_microseconds",
+                "apple_nanoseconds"
+              ]
+            }
+          },
+          "required": [
+            "datetimes"
           ],
           "additionalProperties": false
         }

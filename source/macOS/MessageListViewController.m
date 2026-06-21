@@ -157,6 +157,7 @@ static void StrappyWebViewMessageFromDictionary(
   NSString *role;
   NSString *kind;
   NSString *actor;
+  NSString *promptGroupKey;
   NSString *messageKey;
   NSString *targetMessageKey;
   NSString *text;
@@ -177,6 +178,7 @@ static void StrappyWebViewMessageFromDictionary(
   role = [dictionary objectForKey:@"role"];
   kind = [dictionary objectForKey:@"kind"];
   actor = [dictionary objectForKey:@"actor"];
+  promptGroupKey = [dictionary objectForKey:@"prompt_group_key"];
   messageKey = [dictionary objectForKey:@"message_key"];
   targetMessageKey = [dictionary objectForKey:@"target_message_key"];
   text = [dictionary objectForKey:@"text"];
@@ -191,6 +193,7 @@ static void StrappyWebViewMessageFromDictionary(
   message->role = StrappyCString(role);
   message->kind = StrappyCString(kind);
   message->actor = StrappyCString(actor);
+  message->prompt_group_key = StrappyCString(promptGroupKey);
   message->message_key = StrappyCString(messageKey);
   message->target_message_key = StrappyCString(targetMessageKey);
   message->text = StrappyCString(text);
@@ -229,23 +232,32 @@ static NSString *StrappyMessageHTML(NSDictionary *message,
 static NSString *StrappyPendingMessageHTML(NSString *prompt,
                                            NSString *elementIdentifier,
                                            NSString *state,
-                                           NSString *statusHTML)
+                                           NSString *statusHTML,
+                                           NSString *promptGroupKey)
 {
   strappy_webview_labels labels;
+  strappy_webview_message message;
 
   labels = StrappyWebViewLabels();
+  memset(&message, 0, sizeof(message));
+  message.element_id = StrappyCString(elementIdentifier);
+  message.role = "user";
+  message.actor = "user";
+  message.kind = "prompt";
+  message.prompt_group_key = StrappyCString(promptGroupKey);
+  message.text = StrappyCString(prompt);
   return StrappyStringFromWebViewCString(
-    strappy_webview_pending_message_html(StrappyCString(prompt),
-                                         StrappyCString(elementIdentifier),
-                                         StrappyCString(state),
-                                         StrappyCString(statusHTML),
-                                         &labels));
+    strappy_webview_message_html(&message,
+                                 &labels,
+                                 StrappyCString(state),
+                                 StrappyCString(statusHTML)));
 }
 
 static NSString *StrappyHarnessMessageHTML(NSString *prompt,
                                            NSString *elementIdentifier,
                                            NSString *state,
-                                           NSString *statusHTML)
+                                           NSString *statusHTML,
+                                           NSString *promptGroupKey)
 {
   strappy_webview_labels labels;
   strappy_webview_message message;
@@ -254,6 +266,9 @@ static NSString *StrappyHarnessMessageHTML(NSString *prompt,
   memset(&message, 0, sizeof(message));
   message.element_id = StrappyCString(elementIdentifier);
   message.role = "harness";
+  message.actor = "harness";
+  message.kind = "prompt";
+  message.prompt_group_key = StrappyCString(promptGroupKey);
   message.text = StrappyCString(prompt);
   return StrappyStringFromWebViewCString(
     strappy_webview_message_html(&message,
@@ -266,7 +281,9 @@ static NSString *StrappyStreamingAssistantMessageHTML(NSString *elementIdentifie
                                                       NSString *text,
                                                       NSString *reasoning,
                                                       NSString *state,
-                                                      NSString *statusHTML)
+                                                      NSString *statusHTML,
+                                                      NSString *actor,
+                                                      NSString *promptGroupKey)
 {
   strappy_webview_labels labels;
 
@@ -275,26 +292,44 @@ static NSString *StrappyStreamingAssistantMessageHTML(NSString *elementIdentifie
     strappy_webview_streaming_assistant_message_html(
       StrappyCString(elementIdentifier),
       StrappyCString(text),
-      StrappyCString(reasoning),
-      StrappyCString(state),
-      StrappyCString(statusHTML),
-      &labels));
+                                                 StrappyCString(reasoning),
+                                                 StrappyCString(state),
+                                                 StrappyCString(statusHTML),
+                                                 StrappyCString(actor),
+                                                 StrappyCString(promptGroupKey),
+                                                 &labels));
 }
 
 static NSString *StrappyToolActivityMessageHTML(NSString *elementIdentifier,
                                                 NSString *text,
                                                 NSString *state,
-                                                NSString *statusHTML)
+                                                NSString *statusHTML,
+                                                NSString *actor,
+                                                NSString *promptGroupKey,
+                                                NSString *targetElementIdentifier)
 {
   strappy_webview_labels labels;
 
   labels = StrappyWebViewLabels();
   return StrappyStringFromWebViewCString(
     strappy_webview_tool_activity_message_html(StrappyCString(elementIdentifier),
-                                               StrappyCString(text),
-                                               StrappyCString(state),
-                                               StrappyCString(statusHTML),
-                                               &labels));
+                                                   StrappyCString(text),
+                                                   StrappyCString(state),
+                                                   StrappyCString(statusHTML),
+                                                   StrappyCString(actor),
+                                                   StrappyCString(promptGroupKey),
+                                                   StrappyCString(targetElementIdentifier),
+                                                   &labels));
+}
+
+static NSString *StrappySetMessagePromptGroupJavaScript(NSString *elementIdentifier,
+                                                        NSString *promptGroupKey,
+                                                        NSString *actor)
+{
+  return StrappyStringFromWebViewCString(
+    strappy_webview_set_message_prompt_group_js(StrappyCString(elementIdentifier),
+                                                StrappyCString(promptGroupKey),
+                                                StrappyCString(actor)));
 }
 
 static NSString *StrappyMessageHTMLWithReasoning(NSDictionary *message,
@@ -584,6 +619,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   pendingHarnessToolActivityIdentifier_ = nil;
   [pendingHarnessPrompt_ release];
   pendingHarnessPrompt_ = nil;
+  [pendingPromptGroupKey_ release];
+  pendingPromptGroupKey_ = nil;
   [pendingPrompt_ release];
   pendingPrompt_ = nil;
   [sendingSessionId_ release];
@@ -838,7 +875,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
                                 (sending_ ? nil : @"error"),
                                 (sending_
                                  ? nil
-                                 : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), YES)))];
+                                 : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), YES)),
+                                pendingPromptGroupKey_)];
     if (pendingToolActivityIdentifier_ != nil) {
       [messagesHTML appendString:
         StrappyToolActivityMessageHTML(
@@ -847,7 +885,10 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
           (sending_ ? @"pending" : @"error"),
           (sending_
            ? StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO)
-           : StrappyStatusHTML(NSLocalizedString(@"Failed to run tools.", nil), NO)))];
+          : StrappyStatusHTML(NSLocalizedString(@"Failed to run tools.", nil), NO)),
+          @"user",
+          pendingPromptGroupKey_,
+          pendingAssistantMessageIdentifier_)];
     }
     if (pendingAssistantMessageIdentifier_ != nil) {
       [messagesHTML appendString:
@@ -857,14 +898,17 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
                                              (sending_ ? @"pending" : @"error"),
                                              (sending_
                                              ? StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO)
-                                             : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), NO)))];
+                                             : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), NO)),
+                                             @"user",
+                                             pendingPromptGroupKey_)];
     }
     if (pendingHarnessMessageIdentifier_ != nil) {
       [messagesHTML appendString:
         StrappyHarnessMessageHTML(pendingHarnessPrompt_,
                                   pendingHarnessMessageIdentifier_,
                                   (sending_ ? nil : @"error"),
-                                  nil)];
+                                  nil,
+                                  pendingPromptGroupKey_)];
       if (pendingHarnessToolActivityIdentifier_ != nil) {
         [messagesHTML appendString:
           StrappyToolActivityMessageHTML(
@@ -873,7 +917,10 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
             (sending_ ? @"pending" : @"error"),
             (sending_
              ? StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO)
-             : StrappyStatusHTML(NSLocalizedString(@"Failed to run tools.", nil), NO)))];
+             : StrappyStatusHTML(NSLocalizedString(@"Failed to run tools.", nil), NO)),
+            @"harness",
+            pendingPromptGroupKey_,
+            pendingHarnessAssistantMessageIdentifier_)];
       }
       if (pendingHarnessAssistantMessageIdentifier_ != nil) {
         [messagesHTML appendString:
@@ -884,7 +931,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
             (sending_ ? @"pending" : @"error"),
             (sending_
              ? StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO)
-             : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), NO)))];
+             : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), NO)),
+            @"harness",
+            pendingPromptGroupKey_)];
       }
     }
   }
@@ -960,6 +1009,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
         StrappyPendingMessageHTML(promptToSend,
                                   pendingMessageIdentifier_,
                                   nil,
+                                  nil,
                                   nil))];
     [js appendString:
       StrappyAppendMessageJavaScript(
@@ -967,7 +1017,10 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
           pendingToolActivityIdentifier_,
           streamingToolActivityText_,
           @"pending",
-          StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO)))];
+          StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO),
+          @"user",
+          pendingPromptGroupKey_,
+          pendingAssistantMessageIdentifier_))];
     [js appendString:
       StrappyAppendMessageJavaScript(
         StrappyStreamingAssistantMessageHTML(
@@ -975,7 +1028,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
           streamingAssistantText_,
           streamingReasoningText_,
           @"pending",
-          StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO)))];
+          StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO),
+          @"user",
+          pendingPromptGroupKey_))];
     [self pushJavaScript:js];
   } else {
     NSMutableString *js;
@@ -1021,7 +1076,10 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
           pendingToolActivityIdentifier_,
           streamingToolActivityText_,
           @"pending",
-          StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO)))];
+          StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO),
+          @"user",
+          pendingPromptGroupKey_,
+          pendingAssistantMessageIdentifier_))];
     [js appendString:
       StrappyAppendMessageJavaScript(
         StrappyStreamingAssistantMessageHTML(
@@ -1029,7 +1087,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
           streamingAssistantText_,
           streamingReasoningText_,
           @"pending",
-          StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO)))];
+          StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO),
+          @"user",
+          pendingPromptGroupKey_))];
     [self pushJavaScript:js];
   }
 
@@ -1334,14 +1394,18 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
       StrappyHarnessMessageHTML(promptText,
                                 pendingHarnessMessageIdentifier_,
                                 nil,
-                                nil))];
+                                nil,
+                                pendingPromptGroupKey_))];
   [js appendString:
     StrappyAppendMessageJavaScript(
       StrappyToolActivityMessageHTML(
         pendingHarnessToolActivityIdentifier_,
         streamingHarnessToolActivityText_,
         @"pending",
-        StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO)))];
+        StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO),
+        @"harness",
+        pendingPromptGroupKey_,
+        pendingHarnessAssistantMessageIdentifier_))];
   [js appendString:
     StrappyAppendMessageJavaScript(
       StrappyStreamingAssistantMessageHTML(
@@ -1349,25 +1413,61 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
         streamingHarnessAssistantText_,
         streamingHarnessReasoningText_,
         @"pending",
-        StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO)))];
+        StrappyStatusHTML(NSLocalizedString(@"Thinking", nil), NO),
+        @"harness",
+        pendingPromptGroupKey_))];
   [self pushJavaScript:js];
 }
 
 - (void)applyStreamTurnStartAndRelease:(NSDictionary *)event
 {
+  NSMutableString *js;
   NSString *prompt;
+  NSString *promptGroupKey;
+  BOOL harnessTarget;
 
   if (![self streamDeltaAppliesToCurrentPendingMessage:event]) {
     [event release];
     return;
   }
 
-  if ([self streamEventUsesHarnessTarget:event]) {
+  promptGroupKey = [event objectForKey:@"prompt_group_key"];
+  if ([promptGroupKey isKindOfClass:[NSString class]] &&
+      ([promptGroupKey length] > 0U)) {
+    [pendingPromptGroupKey_ release];
+    pendingPromptGroupKey_ = [promptGroupKey copy];
+  }
+
+  harnessTarget = [self streamEventUsesHarnessTarget:event];
+  if (harnessTarget) {
     prompt = [event objectForKey:@"delta"];
     if (![prompt isKindOfClass:[NSString class]]) {
       prompt = nil;
     }
     [self ensurePendingHarnessTurnWithPrompt:prompt];
+  } else if (pendingPromptGroupKey_ != nil) {
+    js = [NSMutableString string];
+    if (pendingMessageIdentifier_ != nil) {
+      [js appendString:
+        StrappySetMessagePromptGroupJavaScript(pendingMessageIdentifier_,
+                                               pendingPromptGroupKey_,
+                                               @"user")];
+    }
+    if (pendingToolActivityIdentifier_ != nil) {
+      [js appendString:
+        StrappySetMessagePromptGroupJavaScript(pendingToolActivityIdentifier_,
+                                               pendingPromptGroupKey_,
+                                               @"user")];
+    }
+    if (pendingAssistantMessageIdentifier_ != nil) {
+      [js appendString:
+        StrappySetMessagePromptGroupJavaScript(pendingAssistantMessageIdentifier_,
+                                               pendingPromptGroupKey_,
+                                               @"user")];
+    }
+    if ([js length] > 0U) {
+      [self pushJavaScript:js];
+    }
   }
   [event release];
 }
@@ -1508,6 +1608,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   NSMutableString *toolActivityText;
   BOOL harnessTarget;
   BOOL createdToolActivity;
+  BOOL appendToolEventImmediately;
 
   if (![self streamDeltaAppliesToCurrentPendingMessage:event]) {
     [event release];
@@ -1602,11 +1703,15 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   }
   [toolActivityText appendString:eventText];
 
+  appendToolEventImmediately = [eventType isEqualToString:@"call"];
+  if (appendToolEventImmediately) {
+    [self flushStreamDeltas];
+  }
+
   js = [NSMutableString string];
-  if ([eventType isEqualToString:@"call"] &&
+  if (appendToolEventImmediately &&
       (assistantText != nil) &&
       ([assistantText length] > 0U)) {
-    [self flushStreamDeltas];
     if ([reasoningText length] > 0U) {
       [reasoningText appendString:@"\n"];
     }
@@ -1622,7 +1727,10 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
       toolActivityIdentifier,
       @"",
       @"pending",
-      StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO));
+      StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO),
+      (harnessTarget ? @"harness" : @"user"),
+      pendingPromptGroupKey_,
+      assistantIdentifier);
     if (assistantIdentifier != nil) {
       [js appendString:
         StrappyInsertMessageBeforeJavaScript(assistantIdentifier,
@@ -1631,15 +1739,22 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
       [js appendString:StrappyAppendMessageJavaScript(html)];
     }
   }
+  if (appendToolEventImmediately) {
+    [js appendString:
+      StrappyAppendToolEventTextJavaScript(toolActivityIdentifier,
+                                           eventText)];
+  }
   if ([js length] > 0U) {
     [self pushJavaScript:js];
   }
-  if (harnessTarget) {
-    [pendingHarnessToolActivityTextDelta_ appendString:eventText];
-  } else {
-    [pendingToolActivityTextDelta_ appendString:eventText];
+  if (!appendToolEventImmediately) {
+    if (harnessTarget) {
+      [pendingHarnessToolActivityTextDelta_ appendString:eventText];
+    } else {
+      [pendingToolActivityTextDelta_ appendString:eventText];
+    }
+    [self scheduleStreamFlush];
   }
-  [self scheduleStreamFlush];
 
   [event release];
 }
@@ -2001,6 +2116,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [pendingHarnessAssistantMessageIdentifier_ release];
   [pendingHarnessToolActivityIdentifier_ release];
   [pendingHarnessPrompt_ release];
+  [pendingPromptGroupKey_ release];
   [pendingPrompt_ release];
   [sendingSessionId_ release];
   [streamingAssistantText_ release];

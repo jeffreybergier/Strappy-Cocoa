@@ -26,6 +26,7 @@ typedef struct strappy_session_message_record {
   long long session_id;
   long long turn_id;
   char *turn_key;
+  char *prompt_group_key;
   char *actor;
   char *kind;
   char *api_role;
@@ -55,6 +56,7 @@ typedef struct strappy_session_message_record_list {
 
 typedef struct strappy_session_message_input {
   const char *turn_key;
+  const char *prompt_group_key;
   const char *actor;
   const char *context_policy;
   const char *kind;

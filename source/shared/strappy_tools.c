@@ -28,8 +28,8 @@
 #define STRAPPY_DATABASE_QUERY_MAX_PROGRESS_CALLS 20000
 #define STRAPPY_DATABASE_QUERY_JSON_SAFE_INTEGER_MAX 9007199254740991LL
 #define STRAPPY_DATABASE_QUERY_JSON_SAFE_INTEGER_MIN (-9007199254740991LL)
-#define STRAPPY_HELPER_CONVERT_DATES_MAX_INPUT_BYTES 8192U
-#define STRAPPY_HELPER_CONVERT_DATES_MAX_TIMESTAMPS 256U
+#define STRAPPY_HELPER_DATETIME_MAX_INPUT_BYTES 8192U
+#define STRAPPY_HELPER_DATETIME_MAX_ITEMS 256U
 #define STRAPPY_HELPER_INFO_MAX_SHORT_BYTES 128U
 #define STRAPPY_HELPER_INFO_MAX_QUERY_BYTES 512U
 #define STRAPPY_HELPER_INFO_MAX_VALUE_BYTES 2048U
@@ -61,10 +61,10 @@ typedef struct strappy_database_query_arguments {
   char *sql;
 } strappy_database_query_arguments;
 
-typedef struct strappy_helper_convert_dates_arguments {
-  char *timestamps;
+typedef struct strappy_helper_datetime_arguments {
+  char *items;
   strappy_cocoa_timestamp_unit unit;
-} strappy_helper_convert_dates_arguments;
+} strappy_helper_datetime_arguments;
 
 typedef struct strappy_helper_user_info_remember_arguments {
   char *kind;
@@ -116,10 +116,17 @@ typedef struct strappy_database_query_progress_context {
   int timed_out;
 } strappy_database_query_progress_context;
 
+typedef char *(*strappy_tools_datetime_token_converter)(
+  const char *token,
+  size_t length,
+  strappy_cocoa_timestamp_unit unit,
+  char **error_out);
+
 static const strappy_tool_definition strappy_tool_definitions[] = {
   { STRAPPY_TOOL_DATABASE_LIST_INFO, STRAPPY_TOOL_KIND_DATABASE },
   { STRAPPY_TOOL_DATABASE_QUERY, STRAPPY_TOOL_KIND_DATABASE },
-  { STRAPPY_TOOL_HELPER_CONVERT_DATES, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_HELPER_USER_INFO_READ, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_HELPER_USER_INFO_FORGET, STRAPPY_TOOL_KIND_HELPER },
@@ -186,26 +193,28 @@ static void strappy_database_query_arguments_destroy(
   strappy_database_query_arguments_init(arguments);
 }
 
-static void strappy_helper_convert_dates_arguments_init(
-  strappy_helper_convert_dates_arguments *arguments)
+static void strappy_helper_datetime_arguments_init(
+  strappy_helper_datetime_arguments *arguments,
+  strappy_cocoa_timestamp_unit default_unit)
 {
   if (arguments == NULL) {
     return;
   }
 
-  arguments->timestamps = NULL;
-  arguments->unit = STRAPPY_COCOA_TIMESTAMP_UNIT_UNIX_SECONDS;
+  arguments->items = NULL;
+  arguments->unit = default_unit;
 }
 
-static void strappy_helper_convert_dates_arguments_destroy(
-  strappy_helper_convert_dates_arguments *arguments)
+static void strappy_helper_datetime_arguments_destroy(
+  strappy_helper_datetime_arguments *arguments,
+  strappy_cocoa_timestamp_unit default_unit)
 {
   if (arguments == NULL) {
     return;
   }
 
-  free(arguments->timestamps);
-  strappy_helper_convert_dates_arguments_init(arguments);
+  free(arguments->items);
+  strappy_helper_datetime_arguments_init(arguments, default_unit);
 }
 
 static void strappy_helper_user_info_remember_arguments_init(
@@ -1839,71 +1848,51 @@ static int strappy_tools_parse_database_query_arguments(
   return 1;
 }
 
-static int strappy_tools_parse_helper_convert_dates_arguments(
+static int strappy_tools_parse_helper_datetime_arguments(
+  const char *tool_name,
   const char *arguments_json,
-  strappy_helper_convert_dates_arguments *arguments,
+  const char *items_argument_name,
+  strappy_cocoa_timestamp_unit default_unit,
+  strappy_helper_datetime_arguments *arguments,
   char **error_out)
 {
+  const char *allowed_names[2];
   cJSON *root;
-  cJSON *timestamps;
   cJSON *unit;
-  cJSON *child;
-  size_t timestamp_length;
+  int ok;
 
-  if (arguments == NULL) {
-    strappy_set_error(error_out,
-                      "helper_convert_dates argument output is missing.");
+  if ((tool_name == NULL) || (items_argument_name == NULL) ||
+      (arguments == NULL)) {
+    strappy_set_error(error_out, "Datetime helper argument output is missing.");
     return 0;
   }
-  strappy_helper_convert_dates_arguments_init(arguments);
+  strappy_helper_datetime_arguments_init(arguments, default_unit);
 
-  if (!strappy_tools_string_has_value(arguments_json)) {
-    strappy_set_error(error_out,
-                      "helper_convert_dates requires a timestamps argument.");
-    return 0;
-  }
-
-  root = cJSON_Parse(arguments_json);
+  root = strappy_tools_parse_arguments_object(tool_name,
+                                              arguments_json,
+                                              error_out);
   if (root == NULL) {
-    strappy_set_error(error_out,
-                      "helper_convert_dates arguments are not valid JSON.");
     return 0;
   }
 
-  if (!cJSON_IsObject(root)) {
+  allowed_names[0] = items_argument_name;
+  allowed_names[1] = "unit";
+  ok = strappy_tools_json_object_accepts_only(root,
+                                              tool_name,
+                                              allowed_names,
+                                              sizeof(allowed_names) /
+                                                sizeof(allowed_names[0]),
+                                              error_out) &&
+       strappy_tools_copy_string_argument(tool_name,
+                                          root,
+                                          items_argument_name,
+                                          1,
+                                          STRAPPY_HELPER_DATETIME_MAX_INPUT_BYTES,
+                                          &arguments->items,
+                                          error_out);
+  if (!ok) {
     cJSON_Delete(root);
-    strappy_set_error(error_out,
-                      "helper_convert_dates arguments must be a JSON object.");
-    return 0;
-  }
-
-  for (child = root->child; child != NULL; child = child->next) {
-    if ((child->string == NULL) ||
-        ((strcmp(child->string, "timestamps") != 0) &&
-         (strcmp(child->string, "unit") != 0))) {
-      cJSON_Delete(root);
-      strappy_set_error(error_out,
-                        "helper_convert_dates only accepts timestamps and unit.");
-      return 0;
-    }
-  }
-
-  timestamps = cJSON_GetObjectItemCaseSensitive(root, "timestamps");
-  if (!cJSON_IsString(timestamps) ||
-      !strappy_tools_string_has_value(timestamps->valuestring)) {
-    cJSON_Delete(root);
-    strappy_set_error(error_out,
-                      "helper_convert_dates requires a non-empty timestamps string.");
-    return 0;
-  }
-
-  timestamp_length = strlen(timestamps->valuestring);
-  if (timestamp_length > STRAPPY_HELPER_CONVERT_DATES_MAX_INPUT_BYTES) {
-    cJSON_Delete(root);
-    strappy_set_formatted_error(
-      error_out,
-      "helper_convert_dates timestamps is too long; maximum is %u bytes.",
-      (unsigned int)STRAPPY_HELPER_CONVERT_DATES_MAX_INPUT_BYTES);
+    strappy_helper_datetime_arguments_destroy(arguments, default_unit);
     return 0;
   }
 
@@ -1911,27 +1900,22 @@ static int strappy_tools_parse_helper_convert_dates_arguments(
   if (unit != NULL) {
     if (!cJSON_IsString(unit)) {
       cJSON_Delete(root);
-      strappy_set_error(error_out,
-                        "helper_convert_dates unit must be a string.");
+      strappy_helper_datetime_arguments_destroy(arguments, default_unit);
+      strappy_set_formatted_error(error_out,
+                                  "%s unit must be a string.",
+                                  tool_name);
       return 0;
     }
     if (!strappy_cocoa_parse_timestamp_unit(unit->valuestring,
                                             &arguments->unit,
                                             error_out)) {
       cJSON_Delete(root);
+      strappy_helper_datetime_arguments_destroy(arguments, default_unit);
       return 0;
     }
   }
 
-  arguments->timestamps = strappy_string_duplicate(timestamps->valuestring);
   cJSON_Delete(root);
-  if (arguments->timestamps == NULL) {
-    strappy_helper_convert_dates_arguments_destroy(arguments);
-    strappy_set_error(error_out,
-                      "Could not allocate helper_convert_dates arguments.");
-    return 0;
-  }
-
   return 1;
 }
 
@@ -2260,6 +2244,28 @@ static char *strappy_tools_convert_timestamp_token_to_iso8601(
                                                        error_out);
   free(timestamp);
   return iso8601;
+}
+
+static char *strappy_tools_convert_iso8601_token_to_timestamp(
+  const char *token,
+  size_t length,
+  strappy_cocoa_timestamp_unit unit,
+  char **error_out)
+{
+  char *iso8601;
+  char *timestamp;
+
+  iso8601 = strappy_string_duplicate_length(token, length);
+  if (iso8601 == NULL) {
+    strappy_set_error(error_out, "Could not allocate ISO8601 datetime token.");
+    return NULL;
+  }
+
+  timestamp = strappy_cocoa_copy_timestamp_value_from_iso8601(iso8601,
+                                                              unit,
+                                                              error_out);
+  free(iso8601);
+  return timestamp;
 }
 
 static char *strappy_tools_sqlite_quote_identifier(const char *identifier)
@@ -4780,32 +4786,39 @@ static char *strappy_tools_execute_database_query(const char *session_db_path,
   return json;
 }
 
-static char *strappy_tools_execute_helper_convert_dates(
+static char *strappy_tools_execute_helper_datetime(
+  const char *tool_name,
   const char *arguments_json,
+  const char *items_argument_name,
+  strappy_cocoa_timestamp_unit default_unit,
+  strappy_tools_datetime_token_converter converter,
   char **error_out)
 {
-  strappy_helper_convert_dates_arguments arguments;
+  strappy_helper_datetime_arguments arguments;
   strappy_helper_text_buffer buffer;
   const char *cursor;
-  size_t timestamp_count;
+  size_t item_count;
 
-  strappy_helper_convert_dates_arguments_init(&arguments);
-  if (!strappy_tools_parse_helper_convert_dates_arguments(arguments_json,
-                                                          &arguments,
-                                                          error_out)) {
+  strappy_helper_datetime_arguments_init(&arguments, default_unit);
+  if (!strappy_tools_parse_helper_datetime_arguments(tool_name,
+                                                     arguments_json,
+                                                     items_argument_name,
+                                                     default_unit,
+                                                     &arguments,
+                                                     error_out)) {
     return NULL;
   }
 
   strappy_helper_text_buffer_init(&buffer);
-  cursor = arguments.timestamps;
-  timestamp_count = 0U;
+  cursor = arguments.items;
+  item_count = 0U;
   while (cursor != NULL) {
     const char *item_start;
     const char *item_end;
     const char *item_delimiter;
-    char *iso8601;
+    char *converted;
 
-    iso8601 = NULL;
+    converted = NULL;
     item_start = cursor;
     item_delimiter = cursor;
     while ((*item_delimiter != '\0') && (*item_delimiter != ',')) {
@@ -4824,58 +4837,88 @@ static char *strappy_tools_execute_helper_convert_dates(
 
     if (item_start == item_end) {
       strappy_helper_text_buffer_destroy(&buffer);
-      strappy_helper_convert_dates_arguments_destroy(&arguments);
-      strappy_set_error(error_out,
-                        "helper_convert_dates timestamps contains an empty item.");
+      strappy_helper_datetime_arguments_destroy(&arguments, default_unit);
+      strappy_set_formatted_error(error_out,
+                                  "%s %s contains an empty item.",
+                                  tool_name,
+                                  items_argument_name);
       return NULL;
     }
 
-    if (timestamp_count >= STRAPPY_HELPER_CONVERT_DATES_MAX_TIMESTAMPS) {
+    if (item_count >= STRAPPY_HELPER_DATETIME_MAX_ITEMS) {
       strappy_helper_text_buffer_destroy(&buffer);
-      strappy_helper_convert_dates_arguments_destroy(&arguments);
+      strappy_helper_datetime_arguments_destroy(&arguments, default_unit);
       strappy_set_formatted_error(
         error_out,
-        "helper_convert_dates accepts at most %u timestamps.",
-        (unsigned int)STRAPPY_HELPER_CONVERT_DATES_MAX_TIMESTAMPS);
+        "%s accepts at most %u items.",
+        tool_name,
+        (unsigned int)STRAPPY_HELPER_DATETIME_MAX_ITEMS);
       return NULL;
     }
 
-    iso8601 = strappy_tools_convert_timestamp_token_to_iso8601(
-      item_start,
-      (size_t)(item_end - item_start),
-      arguments.unit,
-      error_out);
-    if (iso8601 == NULL) {
+    converted = converter(item_start,
+                          (size_t)(item_end - item_start),
+                          arguments.unit,
+                          error_out);
+    if (converted == NULL) {
       strappy_helper_text_buffer_destroy(&buffer);
-      strappy_helper_convert_dates_arguments_destroy(&arguments);
+      strappy_helper_datetime_arguments_destroy(&arguments, default_unit);
       return NULL;
     }
 
-    if (((timestamp_count > 0U) &&
+    if (((item_count > 0U) &&
         !strappy_helper_text_buffer_append(&buffer, ",")) ||
-        !strappy_helper_text_buffer_append(&buffer, iso8601)) {
-      free(iso8601);
+        !strappy_helper_text_buffer_append(&buffer, converted)) {
+      free(converted);
       strappy_helper_text_buffer_destroy(&buffer);
-      strappy_helper_convert_dates_arguments_destroy(&arguments);
-      strappy_set_error(error_out,
-                        "Could not build helper_convert_dates result.");
+      strappy_helper_datetime_arguments_destroy(&arguments, default_unit);
+      strappy_set_formatted_error(error_out,
+                                  "Could not build %s result.",
+                                  tool_name);
       return NULL;
     }
 
-    free(iso8601);
-    timestamp_count++;
+    free(converted);
+    item_count++;
     cursor = (*item_delimiter == ',') ? item_delimiter + 1 : NULL;
   }
 
-  strappy_helper_convert_dates_arguments_destroy(&arguments);
-  if (timestamp_count == 0U) {
+  strappy_helper_datetime_arguments_destroy(&arguments, default_unit);
+  if (item_count == 0U) {
     strappy_helper_text_buffer_destroy(&buffer);
-    strappy_set_error(error_out,
-                      "helper_convert_dates requires at least one timestamp.");
+    strappy_set_formatted_error(error_out,
+                                "%s requires at least one item.",
+                                tool_name);
     return NULL;
   }
 
   return buffer.data;
+}
+
+static char *strappy_tools_execute_helper_datetime_to_iso8601(
+  const char *arguments_json,
+  char **error_out)
+{
+  return strappy_tools_execute_helper_datetime(
+    STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+    arguments_json,
+    "timestamps",
+    STRAPPY_COCOA_TIMESTAMP_UNIT_UNIX_SECONDS,
+    strappy_tools_convert_timestamp_token_to_iso8601,
+    error_out);
+}
+
+static char *strappy_tools_execute_helper_datetime_from_iso8601(
+  const char *arguments_json,
+  char **error_out)
+{
+  return strappy_tools_execute_helper_datetime(
+    STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+    arguments_json,
+    "datetimes",
+    STRAPPY_COCOA_TIMESTAMP_UNIT_APPLE_SECONDS,
+    strappy_tools_convert_iso8601_token_to_timestamp,
+    error_out);
 }
 
 static char *strappy_tools_execute_helper_user_info_read(
@@ -5274,9 +5317,14 @@ char *strappy_tools_execute(const char *session_db_path,
                                                 error_out);
   }
 
-  if (strcmp(tool_name, STRAPPY_TOOL_HELPER_CONVERT_DATES) == 0) {
-    return strappy_tools_execute_helper_convert_dates(arguments_json,
-                                                      error_out);
+  if (strcmp(tool_name, STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) == 0) {
+    return strappy_tools_execute_helper_datetime_to_iso8601(arguments_json,
+                                                            error_out);
+  }
+
+  if (strcmp(tool_name, STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) == 0) {
+    return strappy_tools_execute_helper_datetime_from_iso8601(arguments_json,
+                                                              error_out);
   }
 
   if (strcmp(tool_name, STRAPPY_TOOL_HELPER_USER_INFO_READ) == 0) {

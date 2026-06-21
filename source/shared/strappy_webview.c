@@ -599,6 +599,12 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".row:last-child{margin-bottom:0;}",
     ".role{font-size:11px;font-weight:bold;color:#666;",
     "text-transform:uppercase;margin:0 0 5px 2px;}",
+    ".prompt-group-toggle{color:#2468a8;text-decoration:none;margin-right:4px;}",
+    ".prompt-group-disclosure{display:inline-block;width:12px;",
+    "font:10px Monaco,Consolas,monospace;}",
+    ".prompt-group-hidden{display:none;}",
+    ".prompt-group-harness{box-sizing:border-box;margin-left:18px;",
+    "padding-left:10px;border-left:2px solid #d7caeb;}",
     ".bubble{display:block;max-width:100%;box-sizing:border-box;",
     "border:1px solid #d8d8d8;",
     "background:#fff;padding:12px 14px;line-height:1.45;",
@@ -905,6 +911,34 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(hasClass(p,'request-metadata-collapsed')){",
     "p.className=p.className.replace(/\\srequest-metadata-collapsed/g,'');if(d)d.innerHTML='&#9660;';}",
     "else{p.className+=' request-metadata-collapsed';if(d)d.innerHTML='&#9658;';}return false;}",
+    "var strappyPromptGroupCollapsed={};",
+    "function promptGroupKey(row){return row&&row.getAttribute?row.getAttribute('data-prompt-group-key')||'':'';}",
+    "function rowActor(row){return row&&row.getAttribute?row.getAttribute('data-actor')||'':'';}",
+    "function setRowClass(row,name,on){if(!row)return;if(on){if(!hasClass(row,name))row.className+=' '+name;}",
+    "else row.className=row.className.replace(new RegExp('\\\\s'+name,'g'),'');}",
+    "function promptGroupAnchor(rows){var i;for(i=0;i<rows.length;i++){if(hasClass(rows[i],'user'))return rows[i];}",
+    "return rows.length?rows[0]:null;}",
+    "function ensurePromptGroupToggle(row,key,collapsed){var role,a,d;if(!row)return;",
+    "role=firstByClass(row,'role');if(!role)return;a=firstByClass(role,'prompt-group-toggle');",
+    "if(!a){a=document.createElement('a');a.className='prompt-group-toggle';a.href='#';",
+    "a.onclick=function(){return togglePromptGroup(this);};d=document.createElement('span');",
+    "d.className='prompt-group-disclosure';a.appendChild(d);role.insertBefore(a,role.firstChild);}",
+    "a.setAttribute('data-prompt-group-key',key);d=firstByClass(a,'prompt-group-disclosure');",
+    "if(d)d.innerHTML=collapsed?'&#9658;':'&#9660;';}",
+    "function decoratePromptGroups(root){var rows=messageRows();var groups={};var keys=[];var i,k,row;",
+    "for(i=0;i<rows.length;i++){row=rows[i];k=promptGroupKey(row);",
+    "setRowClass(row,'prompt-group-hidden',0);setRowClass(row,'prompt-group-harness',",
+    "k!==''&&(rowActor(row)=='harness'||hasClass(row,'harness')));if(k==='')continue;",
+    "if(!groups[k]){groups[k]=[];keys[keys.length]=k;}groups[k][groups[k].length]=row;}",
+    "for(i=0;i<keys.length;i++){k=keys[i];var g=groups[k];var anchor=promptGroupAnchor(g);",
+    "var collapsed=strappyPromptGroupCollapsed[k]?1:0;if(anchor&&g.length>1)ensurePromptGroupToggle(anchor,k,collapsed);",
+    "for(var j=0;j<g.length;j++)setRowClass(g[j],'prompt-group-hidden',collapsed&&g[j]!==anchor);}}",
+    "function togglePromptGroup(a){var key=a&&a.getAttribute?a.getAttribute('data-prompt-group-key'):'';",
+    "if(key==='')return false;strappyPromptGroupCollapsed[key]=strappyPromptGroupCollapsed[key]?0:1;",
+    "decoratePromptGroups(document);return false;}",
+    "function setMessagePromptGroup(id,key,actor){var r=byId(id);if(!r)return;",
+    "if(key&&r.setAttribute)r.setAttribute('data-prompt-group-key',key);",
+    "if(actor&&r.setAttribute)r.setAttribute('data-actor',actor);renderMessageDecorations(document);}",
     "function toggleReasoning(a){var p=a;while(p&&!hasClass(p,'reasoning'))p=p.parentNode;",
     "if(!p)return false;setReasoningCollapsed(p,hasClass(p,'reasoning-collapsed')?0:1);return false;}",
     "function setReasoningCollapsed(box,collapsed){var d=firstByClass(box,'reasoning-disclosure');",
@@ -1138,7 +1172,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "for(i=0;i<targets.length;i++)renderToolCardsForTarget(targets[i],grouped[targets[i]]);scrollToolRailBottom();}",
     "function renderToolNode(row){toolRowRaw(row);rebuildToolCards();}",
     "function renderTools(root){moveToolRows(root);rebuildToolCards();}",
-    "function renderMessageDecorations(root){renderMarkdown(root);renderMetadata(root);renderTools(root);}",
+    "function renderMessageDecorations(root){renderMarkdown(root);renderMetadata(root);renderTools(root);decoratePromptGroups(root);}",
     "var strappyBatchDepth=0;var strappyNeedsRender=0;",
     "function beginMessageBatch(){strappyBatchDepth++;}",
     "function endMessageBatch(){if(strappyBatchDepth>0)strappyBatchDepth--;",
@@ -1328,6 +1362,10 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                              (message != NULL) ?
                                                message->actor : NULL) &&
        strappy_webview_append_data_attribute(&buffer,
+                                             "prompt-group-key",
+                                             (message != NULL) ?
+                                               message->prompt_group_key : NULL) &&
+       strappy_webview_append_data_attribute(&buffer,
                                              "message-key",
                                              (message != NULL) ?
                                                message->message_key : NULL) &&
@@ -1397,6 +1435,8 @@ char *strappy_webview_streaming_assistant_message_html(
   const char *reasoning,
   const char *state,
   const char *status_html,
+  const char *actor,
+  const char *prompt_group_key,
   const strappy_webview_labels *labels)
 {
   strappy_webview_buffer buffer;
@@ -1426,9 +1466,14 @@ char *strappy_webview_streaming_assistant_message_html(
          strappy_webview_append_html_escaped(&buffer, state);
   }
   ok = ok &&
+       strappy_webview_buffer_append_cstring(&buffer, "\"") &&
+       strappy_webview_append_data_attribute(&buffer, "actor", actor) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "prompt-group-key",
+                                             prompt_group_key) &&
        strappy_webview_buffer_append_cstring(
          &buffer,
-         "\" data-thinking-label=\"") &&
+         " data-thinking-label=\"") &&
        strappy_webview_append_html_escaped(
          &buffer,
          strappy_webview_thinking_label(labels)) &&
@@ -1473,6 +1518,9 @@ char *strappy_webview_tool_activity_message_html(
   const char *text,
   const char *state,
   const char *status_html,
+  const char *actor,
+  const char *prompt_group_key,
+  const char *target_element_id,
   const strappy_webview_labels *labels)
 {
   strappy_webview_buffer buffer;
@@ -1496,7 +1544,15 @@ char *strappy_webview_tool_activity_message_html(
     ok = strappy_webview_buffer_append_cstring(&buffer, " state-") &&
          strappy_webview_append_html_escaped(&buffer, state);
   }
-  ok = ok && strappy_webview_buffer_append_cstring(&buffer, "\"");
+  ok = ok &&
+       strappy_webview_buffer_append_cstring(&buffer, "\"") &&
+       strappy_webview_append_data_attribute(&buffer, "actor", actor) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "prompt-group-key",
+                                             prompt_group_key) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "tool-target",
+                                             target_element_id);
   if (ok && !has_text) {
     ok = strappy_webview_buffer_append_cstring(&buffer, " style=\"display:none\"");
   }
@@ -1519,6 +1575,27 @@ char *strappy_webview_tool_activity_message_html(
 
   ok = ok && strappy_webview_buffer_append_cstring(&buffer, "</div>");
   if (!ok) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_set_message_prompt_group_js(
+  const char *element_id,
+  const char *prompt_group_key,
+  const char *actor)
+{
+  strappy_webview_buffer buffer;
+
+  strappy_webview_buffer_init(&buffer);
+  if (!strappy_webview_buffer_append_cstring(&buffer, "setMessagePromptGroup(") ||
+      !strappy_webview_append_js_string(&buffer, element_id) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
+      !strappy_webview_append_js_string(&buffer, prompt_group_key) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
+      !strappy_webview_append_js_string(&buffer, actor) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
     strappy_webview_buffer_destroy(&buffer);
     return NULL;
   }

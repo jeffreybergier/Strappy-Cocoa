@@ -342,6 +342,397 @@ static int strappy_cocoa_parse_timestamp_value(
   return 1;
 }
 
+static int strappy_cocoa_parse_fixed_digits(const char **cursor_in_out,
+                                            int digit_count,
+                                            int *value_out)
+{
+  const char *cursor;
+  int value;
+  int index;
+
+  if ((cursor_in_out == NULL) || (*cursor_in_out == NULL) ||
+      (digit_count <= 0) || (value_out == NULL)) {
+    return 0;
+  }
+
+  cursor = *cursor_in_out;
+  value = 0;
+  for (index = 0; index < digit_count; index++) {
+    if ((cursor[index] < '0') || (cursor[index] > '9')) {
+      return 0;
+    }
+    value = (value * 10) + (int)(cursor[index] - '0');
+  }
+
+  *cursor_in_out = cursor + digit_count;
+  *value_out = value;
+  return 1;
+}
+
+static int strappy_cocoa_is_leap_year(int year)
+{
+  if ((year % 4) != 0) {
+    return 0;
+  }
+  if ((year % 100) != 0) {
+    return 1;
+  }
+  return ((year % 400) == 0) ? 1 : 0;
+}
+
+static int strappy_cocoa_days_in_month(int year, int month)
+{
+  static const int days_by_month[] = {
+    31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
+  };
+
+  if ((month < 1) || (month > 12)) {
+    return 0;
+  }
+
+  if ((month == 2) && strappy_cocoa_is_leap_year(year)) {
+    return 29;
+  }
+
+  return days_by_month[month - 1];
+}
+
+static long long strappy_cocoa_days_from_civil(int year,
+                                               unsigned int month,
+                                               unsigned int day)
+{
+  long long adjusted_year;
+  long long era;
+  int adjusted_month;
+  unsigned long long year_of_era;
+  unsigned long long day_of_year;
+  unsigned long long day_of_era;
+
+  adjusted_year = (long long)year;
+  if (month <= 2U) {
+    adjusted_year--;
+  }
+  era = (adjusted_year >= 0LL) ? (adjusted_year / 400LL)
+                               : ((adjusted_year - 399LL) / 400LL);
+  year_of_era = (unsigned long long)(adjusted_year - (era * 400LL));
+  adjusted_month = (int)month + ((month > 2U) ? -3 : 9);
+  day_of_year =
+    ((153ULL * (unsigned long long)adjusted_month + 2ULL) /
+     5ULL) +
+    (unsigned long long)day - 1ULL;
+  day_of_era = (year_of_era * 365ULL) + (year_of_era / 4ULL) -
+               (year_of_era / 100ULL) + day_of_year;
+  return (era * 146097LL) + (long long)day_of_era - 719468LL;
+}
+
+static int strappy_cocoa_parse_iso8601_value(const char *iso8601,
+                                             long long *unix_seconds_out,
+                                             int *nanoseconds_out,
+                                             char **error_out)
+{
+  const char *cursor;
+  long long days;
+  long long day_seconds;
+  long long unix_seconds;
+  int year;
+  int month;
+  int day;
+  int hour;
+  int minute;
+  int second;
+  int nanoseconds;
+  int fractional_digits;
+  int offset_sign;
+  int offset_hour;
+  int offset_minute;
+  int offset_seconds;
+
+  if (!strappy_cocoa_string_has_value(iso8601) ||
+      (unix_seconds_out == NULL) || (nanoseconds_out == NULL)) {
+    strappy_set_error(error_out, "ISO8601 datetime is empty.");
+    return 0;
+  }
+
+  cursor = iso8601;
+  if (!strappy_cocoa_parse_fixed_digits(&cursor, 4, &year) ||
+      (*cursor != '-')) {
+    strappy_set_error(error_out,
+                      "ISO8601 datetime must start with YYYY-MM-DD.");
+    return 0;
+  }
+  cursor++;
+  if (!strappy_cocoa_parse_fixed_digits(&cursor, 2, &month) ||
+      (*cursor != '-')) {
+    strappy_set_error(error_out,
+                      "ISO8601 datetime must start with YYYY-MM-DD.");
+    return 0;
+  }
+  cursor++;
+  if (!strappy_cocoa_parse_fixed_digits(&cursor, 2, &day)) {
+    strappy_set_error(error_out,
+                      "ISO8601 datetime must start with YYYY-MM-DD.");
+    return 0;
+  }
+
+  if ((month < 1) || (month > 12) || (day < 1) ||
+      (day > strappy_cocoa_days_in_month(year, month))) {
+    strappy_set_error(error_out, "ISO8601 date is invalid.");
+    return 0;
+  }
+
+  hour = 0;
+  minute = 0;
+  second = 0;
+  nanoseconds = 0;
+  offset_seconds = 0;
+  if (*cursor != '\0') {
+    if ((*cursor != 'T') && (*cursor != ' ')) {
+      strappy_set_error(error_out,
+                        "ISO8601 datetime must use T or space before time.");
+      return 0;
+    }
+    cursor++;
+
+    if (!strappy_cocoa_parse_fixed_digits(&cursor, 2, &hour) ||
+        (*cursor != ':')) {
+      strappy_set_error(error_out,
+                        "ISO8601 time must use HH:MM:SS.");
+      return 0;
+    }
+    cursor++;
+    if (!strappy_cocoa_parse_fixed_digits(&cursor, 2, &minute) ||
+        (*cursor != ':')) {
+      strappy_set_error(error_out,
+                        "ISO8601 time must use HH:MM:SS.");
+      return 0;
+    }
+    cursor++;
+    if (!strappy_cocoa_parse_fixed_digits(&cursor, 2, &second)) {
+      strappy_set_error(error_out,
+                        "ISO8601 time must use HH:MM:SS.");
+      return 0;
+    }
+
+    if ((hour > 23) || (minute > 59) || (second > 59)) {
+      strappy_set_error(error_out, "ISO8601 time is invalid.");
+      return 0;
+    }
+
+    if (*cursor == '.') {
+      cursor++;
+      if ((*cursor < '0') || (*cursor > '9')) {
+        strappy_set_error(error_out,
+                          "ISO8601 fractional seconds are empty.");
+        return 0;
+      }
+
+      fractional_digits = 0;
+      while ((*cursor >= '0') && (*cursor <= '9')) {
+        if (fractional_digits >= 9) {
+          strappy_set_error(error_out,
+                            "ISO8601 fractional seconds exceed nanosecond precision.");
+          return 0;
+        }
+        nanoseconds = (nanoseconds * 10) + (int)(*cursor - '0');
+        fractional_digits++;
+        cursor++;
+      }
+      while (fractional_digits < 9) {
+        nanoseconds *= 10;
+        fractional_digits++;
+      }
+    }
+
+    if ((*cursor == 'Z') || (*cursor == 'z')) {
+      cursor++;
+      if (*cursor != '\0') {
+        strappy_set_error(error_out,
+                          "ISO8601 datetime contains trailing text.");
+        return 0;
+      }
+    } else if ((*cursor == '+') || (*cursor == '-')) {
+      offset_sign = (*cursor == '-') ? -1 : 1;
+      cursor++;
+      if (!strappy_cocoa_parse_fixed_digits(&cursor, 2, &offset_hour)) {
+        strappy_set_error(error_out,
+                          "ISO8601 timezone offset must use HH:MM.");
+        return 0;
+      }
+      offset_minute = 0;
+      if (*cursor == ':') {
+        cursor++;
+        if (!strappy_cocoa_parse_fixed_digits(&cursor, 2, &offset_minute)) {
+          strappy_set_error(error_out,
+                            "ISO8601 timezone offset must use HH:MM.");
+          return 0;
+        }
+      } else if ((*cursor >= '0') && (*cursor <= '9')) {
+        if (!strappy_cocoa_parse_fixed_digits(&cursor, 2, &offset_minute)) {
+          strappy_set_error(error_out,
+                            "ISO8601 timezone offset must use HHMM.");
+          return 0;
+        }
+      }
+
+      if ((*cursor != '\0') || (offset_hour > 23) ||
+          (offset_minute > 59)) {
+        strappy_set_error(error_out, "ISO8601 timezone offset is invalid.");
+        return 0;
+      }
+      offset_seconds =
+        offset_sign * ((offset_hour * 3600) + (offset_minute * 60));
+    } else if (*cursor != '\0') {
+      strappy_set_error(error_out,
+                        "ISO8601 datetime timezone must be Z or +/-HH:MM.");
+      return 0;
+    }
+  }
+
+  days = strappy_cocoa_days_from_civil(year,
+                                       (unsigned int)month,
+                                       (unsigned int)day);
+  day_seconds = (days * 86400LL) + ((long long)hour * 3600LL) +
+                ((long long)minute * 60LL) + (long long)second;
+  if (!strappy_cocoa_add_long_long(day_seconds,
+                                   -((long long)offset_seconds),
+                                   &unix_seconds)) {
+    strappy_set_error(error_out,
+                      "ISO8601 datetime is outside the supported range.");
+    return 0;
+  }
+
+  if ((unix_seconds < STRAPPY_COCOA_UNIX_MIN_SECONDS) ||
+      (unix_seconds > STRAPPY_COCOA_UNIX_MAX_SECONDS)) {
+    strappy_set_error(error_out,
+                      "ISO8601 datetime must be between years 0000 and 9999.");
+    return 0;
+  }
+
+  *unix_seconds_out = unix_seconds;
+  *nanoseconds_out = nanoseconds;
+  return 1;
+}
+
+static char *strappy_cocoa_copy_timestamp_value_from_parts(
+  long long unix_seconds,
+  int nanoseconds,
+  strappy_cocoa_timestamp_unit unit,
+  char **error_out)
+{
+  char buffer[96];
+  char fraction[10];
+  long long epoch_offset_seconds;
+  long long duration_seconds;
+  long long nanos_per_unit;
+  unsigned long long units_per_second;
+  unsigned long long magnitude_seconds;
+  unsigned long long magnitude_nanos;
+  unsigned long long whole_units;
+  unsigned long long unit_remainder;
+  unsigned long long remainder_nanos;
+  int max_fractional_digits;
+  int negative;
+  int fraction_length;
+  int written;
+
+  if ((nanoseconds < 0) || (nanoseconds >= 1000000000)) {
+    strappy_set_error(error_out, "Timestamp nanoseconds are invalid.");
+    return NULL;
+  }
+
+  if (!strappy_cocoa_timestamp_unit_config(unit,
+                                           &epoch_offset_seconds,
+                                           &units_per_second,
+                                           &nanos_per_unit,
+                                           &max_fractional_digits)) {
+    strappy_set_error(error_out, "Timestamp unit configuration is invalid.");
+    return NULL;
+  }
+
+  if (!strappy_cocoa_add_long_long(unix_seconds,
+                                   -epoch_offset_seconds,
+                                   &duration_seconds)) {
+    strappy_set_error(error_out,
+                      "ISO8601 datetime is outside the selected timestamp epoch.");
+    return NULL;
+  }
+
+  negative = 0;
+  magnitude_nanos = 0ULL;
+  if (duration_seconds < 0LL) {
+    negative = 1;
+    if (nanoseconds > 0) {
+      magnitude_seconds = (unsigned long long)(-(duration_seconds + 1LL));
+      magnitude_nanos = (unsigned long long)(1000000000 - nanoseconds);
+    } else {
+      if (duration_seconds == LLONG_MIN) {
+        strappy_set_error(error_out, "Timestamp is too large.");
+        return NULL;
+      }
+      magnitude_seconds = (unsigned long long)(-duration_seconds);
+    }
+  } else {
+    magnitude_seconds = (unsigned long long)duration_seconds;
+    magnitude_nanos = (unsigned long long)nanoseconds;
+  }
+
+  if ((magnitude_seconds == 0ULL) && (magnitude_nanos == 0ULL)) {
+    negative = 0;
+  }
+
+  if (magnitude_seconds > (ULLONG_MAX / units_per_second)) {
+    strappy_set_error(error_out,
+                      "Timestamp is too large for the selected unit.");
+    return NULL;
+  }
+  whole_units = magnitude_seconds * units_per_second;
+  unit_remainder = magnitude_nanos / (unsigned long long)nanos_per_unit;
+  remainder_nanos = magnitude_nanos % (unsigned long long)nanos_per_unit;
+  if (whole_units > (ULLONG_MAX - unit_remainder)) {
+    strappy_set_error(error_out,
+                      "Timestamp is too large for the selected unit.");
+    return NULL;
+  }
+  whole_units += unit_remainder;
+
+  if ((remainder_nanos > 0ULL) && (max_fractional_digits > 0)) {
+    written = snprintf(fraction,
+                       sizeof(fraction),
+                       "%0*llu",
+                       max_fractional_digits,
+                       remainder_nanos);
+    if ((written <= 0) || ((size_t)written >= sizeof(fraction))) {
+      strappy_set_error(error_out, "Could not format timestamp fraction.");
+      return NULL;
+    }
+    fraction_length = written;
+    while ((fraction_length > 0) &&
+           (fraction[fraction_length - 1] == '0')) {
+      fraction_length--;
+    }
+    fraction[fraction_length] = '\0';
+    written = snprintf(buffer,
+                       sizeof(buffer),
+                       "%s%llu.%s",
+                       negative ? "-" : "",
+                       whole_units,
+                       fraction);
+  } else {
+    written = snprintf(buffer,
+                       sizeof(buffer),
+                       "%s%llu",
+                       negative ? "-" : "",
+                       whole_units);
+  }
+
+  if ((written <= 0) || ((size_t)written >= sizeof(buffer))) {
+    strappy_set_error(error_out, "Could not format timestamp value.");
+    return NULL;
+  }
+
+  return strappy_string_duplicate(buffer);
+}
+
 static char *strappy_cocoa_copy_with_fraction(const char *base_iso8601,
                                               int nanoseconds,
                                               char **error_out)
@@ -578,4 +969,27 @@ char *strappy_cocoa_copy_iso8601_timestamp_value(
   return strappy_cocoa_copy_iso8601_timestamp(unix_seconds,
                                               nanoseconds,
                                               error_out);
+}
+
+char *strappy_cocoa_copy_timestamp_value_from_iso8601(
+  const char *iso8601,
+  strappy_cocoa_timestamp_unit unit,
+  char **error_out)
+{
+  long long unix_seconds;
+  int nanoseconds;
+
+  unix_seconds = 0LL;
+  nanoseconds = 0;
+  if (!strappy_cocoa_parse_iso8601_value(iso8601,
+                                         &unix_seconds,
+                                         &nanoseconds,
+                                         error_out)) {
+    return NULL;
+  }
+
+  return strappy_cocoa_copy_timestamp_value_from_parts(unix_seconds,
+                                                       nanoseconds,
+                                                       unit,
+                                                       error_out);
 }

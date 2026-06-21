@@ -90,6 +90,14 @@ static int StrappySessionHandleStreamEvent(
       [delta setObject:turnKey forKey:@"turn_key"];
     }
   }
+  if (event->prompt_group_key != NULL) {
+    NSString *promptGroupKey;
+
+    promptGroupKey = [NSString stringWithUTF8String:event->prompt_group_key];
+    if (promptGroupKey != nil) {
+      [delta setObject:promptGroupKey forKey:@"prompt_group_key"];
+    }
+  }
   if (event->actor != NULL) {
     NSString *actor;
 
@@ -281,6 +289,7 @@ static int StrappySessionHandleStreamEvent(
   NSNumber *includeInContext;
   NSNumber *isError;
   NSString *turnKey;
+  NSString *promptGroupKey;
   NSString *actor;
   NSString *kind;
   NSString *apiRole;
@@ -310,6 +319,8 @@ static int StrappySessionHandleStreamEvent(
   includeInContext = [NSNumber numberWithBool:(record->include_in_context ? YES : NO)];
   isError = [NSNumber numberWithBool:(record->is_error ? YES : NO)];
   turnKey = [StrappySession stringFromCStringOrEmpty:record->turn_key];
+  promptGroupKey =
+    [StrappySession stringFromCStringOrEmpty:record->prompt_group_key];
   actor = [StrappySession stringFromCStringOrEmpty:record->actor];
   kind = [StrappySession stringFromCStringOrEmpty:record->kind];
   apiRole = [StrappySession stringFromCStringOrEmpty:record->api_role];
@@ -334,6 +345,7 @@ static int StrappySessionHandleStreamEvent(
     sessionId, @"session_id",
     turnId, @"turn_id",
     turnKey, @"turn_key",
+    promptGroupKey, @"prompt_group_key",
     actor, @"actor",
     kind, @"kind",
     apiRole, @"api_role",

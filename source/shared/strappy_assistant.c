@@ -48,6 +48,7 @@ typedef enum strappy_assistant_tool_policy {
 
 typedef struct strappy_assistant_turn_spec {
   const char *turn_key;
+  const char *prompt_group_key;
   const char *actor;
   const char *render_role;
   const char *api_role;
@@ -60,6 +61,7 @@ typedef struct strappy_assistant_turn_spec {
 
 typedef struct strappy_assistant_turn_keys {
   char *turn_key;
+  char *prompt_group_key;
   char *prompt_message_key;
   char *assistant_message_key;
 } strappy_assistant_turn_keys;
@@ -246,6 +248,7 @@ static int strappy_assistant_emit_turn_event(
   event.text = (text != NULL) ? text : "";
   if (turn != NULL) {
     event.turn_key = turn->turn_key;
+    event.prompt_group_key = turn->prompt_group_key;
     event.actor = turn->actor;
     if (type == STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED) {
       event.render_role = "assistant";
@@ -289,6 +292,7 @@ static int strappy_assistant_emit_tool_event(
   event.text = tool_name;
   if (turn != NULL) {
     event.turn_key = turn->turn_key;
+    event.prompt_group_key = turn->prompt_group_key;
     event.actor = turn->actor;
     event.render_role = "tool";
     event.api_role = "tool";
@@ -332,6 +336,9 @@ static int strappy_assistant_stream_turn_callback(
   if (context->turn != NULL) {
     if (turn_event.turn_key == NULL) {
       turn_event.turn_key = context->turn->turn_key;
+    }
+    if (turn_event.prompt_group_key == NULL) {
+      turn_event.prompt_group_key = context->turn->prompt_group_key;
     }
     if (turn_event.actor == NULL) {
       turn_event.actor = context->turn->actor;
@@ -438,6 +445,7 @@ static void strappy_assistant_turn_keys_init(
   }
 
   keys->turn_key = NULL;
+  keys->prompt_group_key = NULL;
   keys->prompt_message_key = NULL;
   keys->assistant_message_key = NULL;
 }
@@ -450,6 +458,7 @@ static void strappy_assistant_turn_keys_destroy(
   }
 
   free(keys->turn_key);
+  free(keys->prompt_group_key);
   free(keys->prompt_message_key);
   free(keys->assistant_message_key);
   strappy_assistant_turn_keys_init(keys);
@@ -467,6 +476,7 @@ static int strappy_assistant_turn_keys_make(
 
   strappy_assistant_turn_keys_init(keys);
   keys->turn_key = strappy_assistant_make_key(prefix);
+  keys->prompt_group_key = strappy_assistant_make_key("prompt-group");
   if (keys->turn_key != NULL) {
     keys->prompt_message_key =
       strappy_assistant_make_child_key(keys->turn_key, "prompt");
@@ -477,6 +487,7 @@ static int strappy_assistant_turn_keys_make(
   }
 
   if ((keys->turn_key == NULL) ||
+      (keys->prompt_group_key == NULL) ||
       (keys->prompt_message_key == NULL) ||
       (keys->assistant_message_key == NULL)) {
     strappy_assistant_turn_keys_destroy(keys);
@@ -490,6 +501,7 @@ static int strappy_assistant_turn_keys_make(
 static void strappy_assistant_turn_spec_set(
   strappy_assistant_turn_spec *turn,
   const strappy_assistant_turn_keys *keys,
+  const char *prompt_group_key,
   const char *actor,
   const char *render_role,
   const char *api_role,
@@ -502,6 +514,9 @@ static void strappy_assistant_turn_spec_set(
   }
 
   turn->turn_key = (keys != NULL) ? keys->turn_key : NULL;
+  turn->prompt_group_key =
+    (prompt_group_key != NULL) ? prompt_group_key :
+      ((keys != NULL) ? keys->prompt_group_key : NULL);
   turn->actor = actor;
   turn->render_role = render_role;
   turn->api_role = api_role;
@@ -536,6 +551,7 @@ static int strappy_assistant_make_default_turns(
 
   strappy_assistant_turn_spec_set(main_turn,
                                   main_keys,
+                                  NULL,
                                   "user",
                                   "user",
                                   "user",
@@ -544,6 +560,7 @@ static int strappy_assistant_make_default_turns(
                                   STRAPPY_ASSISTANT_TOOL_POLICY_NORMAL);
   strappy_assistant_turn_spec_set(audit_turn,
                                   audit_keys,
+                                  main_keys->prompt_group_key,
                                   "harness",
                                   "harness",
                                   "user",
@@ -578,6 +595,8 @@ static void strappy_assistant_storage_message_set_turn(
   }
 
   message->turn_key = (turn != NULL) ? turn->turn_key : NULL;
+  message->prompt_group_key =
+    (turn != NULL) ? turn->prompt_group_key : NULL;
   message->actor = (turn != NULL) ? turn->actor : NULL;
   message->context_policy = (turn != NULL) ? turn->context_policy : "full";
   message->kind = kind;
@@ -1791,6 +1810,7 @@ static int strappy_assistant_run_tool_sequence(
         event.text = next_result->response_text;
         if (turn != NULL) {
           event.turn_key = turn->turn_key;
+          event.prompt_group_key = turn->prompt_group_key;
           event.actor = turn->actor;
           event.kind = "assistant";
           event.render_role = "assistant";
@@ -2114,6 +2134,7 @@ static char *strappy_assistant_send_prompt_internal(const char *prompt,
     }
     strappy_assistant_turn_spec_set(&main_turn,
                                     &main_keys,
+                                    NULL,
                                     "user",
                                     "user",
                                     "user",
@@ -2122,6 +2143,7 @@ static char *strappy_assistant_send_prompt_internal(const char *prompt,
                                     STRAPPY_ASSISTANT_TOOL_POLICY_NORMAL);
     strappy_assistant_turn_spec_set(&audit_turn,
                                     &audit_keys,
+                                    main_keys.prompt_group_key,
                                     "harness",
                                     "harness",
                                     "user",
@@ -2317,6 +2339,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   }
   strappy_assistant_turn_spec_set(&main_turn,
                                   &main_keys,
+                                  NULL,
                                   "user",
                                   "user",
                                   "user",
@@ -2325,6 +2348,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                   STRAPPY_ASSISTANT_TOOL_POLICY_NORMAL);
   strappy_assistant_turn_spec_set(&audit_turn,
                                   &audit_keys,
+                                  main_keys.prompt_group_key,
                                   "harness",
                                   "harness",
                                   "user",

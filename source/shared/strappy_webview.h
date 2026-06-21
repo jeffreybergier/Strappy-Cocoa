@@ -23,6 +23,7 @@ typedef struct strappy_webview_message {
   const char *role;
   const char *kind;
   const char *actor;
+  const char *prompt_group_key;
   const char *message_key;
   const char *target_message_key;
   const char *text;
@@ -52,13 +53,22 @@ char *strappy_webview_streaming_assistant_message_html(
   const char *reasoning,
   const char *state,
   const char *status_html,
+  const char *actor,
+  const char *prompt_group_key,
   const strappy_webview_labels *labels);
 char *strappy_webview_tool_activity_message_html(
   const char *element_id,
   const char *text,
   const char *state,
   const char *status_html,
+  const char *actor,
+  const char *prompt_group_key,
+  const char *target_element_id,
   const strappy_webview_labels *labels);
+char *strappy_webview_set_message_prompt_group_js(
+  const char *element_id,
+  const char *prompt_group_key,
+  const char *actor);
 char *strappy_webview_message_html_with_reasoning(
   const strappy_webview_message *message,
   const char *reasoning,

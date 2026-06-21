@@ -48,6 +48,7 @@ typedef struct strappy_chat_stream_event {
   strappy_chat_stream_event_type type;
   const char *text;
   const char *turn_key;
+  const char *prompt_group_key;
   const char *actor;
   const char *kind;
   const char *message_key;

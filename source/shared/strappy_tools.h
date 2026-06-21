@@ -9,7 +9,8 @@ extern "C" {
 
 #define STRAPPY_TOOL_DATABASE_LIST_INFO "database_list_info"
 #define STRAPPY_TOOL_DATABASE_QUERY "database_query"
-#define STRAPPY_TOOL_HELPER_CONVERT_DATES "helper_convert_dates"
+#define STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601 "helper_datetime_to_iso8601"
+#define STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601 "helper_datetime_from_iso8601"
 #define STRAPPY_TOOL_HELPER_USER_INFO_READ "helper_user_info_read"
 #define STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER "helper_user_info_remember"
 #define STRAPPY_TOOL_HELPER_USER_INFO_FORGET "helper_user_info_forget"

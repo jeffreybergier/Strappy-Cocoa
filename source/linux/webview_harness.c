@@ -36,6 +36,8 @@ static int harness_check_page_scripts(void)
   memset(&message, 0, sizeof(message));
   message.element_id = "assistant-1";
   message.role = "assistant";
+  message.actor = "user";
+  message.prompt_group_key = "prompt-group-page";
   message.text = "Done.";
 
   message_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
@@ -77,6 +79,11 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "tool-column-collapsed .tool-count") &&
        harness_expect_contains(page_html, "streaming-active .tool-column-toggle") &&
        harness_expect_contains(page_html, "tool-column-error") &&
+       harness_expect_contains(page_html, "function decoratePromptGroups") &&
+       harness_expect_contains(page_html, "function togglePromptGroup") &&
+       harness_expect_contains(page_html, "function setMessagePromptGroup") &&
+       harness_expect_contains(page_html, "prompt-group-harness") &&
+       harness_expect_contains(page_html, "data-prompt-group-key=\"prompt-group-page\"") &&
        harness_expect_contains(page_html, "reasoning-collapsed .reasoning-label");
 
   strappy_webview_free(page_html);
@@ -93,6 +100,8 @@ static int harness_check_tool_column_state(void)
   memset(&message, 0, sizeof(message));
   message.element_id = "assistant-final";
   message.role = "assistant";
+  message.actor = "user";
+  message.prompt_group_key = "prompt-group-final";
   message.text = "Done.";
 
   final_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
@@ -107,6 +116,8 @@ static int harness_check_tool_column_state(void)
     "",
     "pending",
     "Thinking",
+    "user",
+    "prompt-group-test",
     NULL);
   if (streaming_html == NULL) {
     fprintf(stderr, "Could not generate streaming assistant message HTML.\n");
@@ -122,6 +133,8 @@ static int harness_check_tool_column_state(void)
                                "row assistant streaming-active state-pending") &&
        harness_expect_contains(streaming_html,
                                "tool-column tool-column-empty tool-column-collapsed") &&
+       harness_expect_contains(streaming_html,
+                               "data-prompt-group-key=\"prompt-group-test\"") &&
        harness_expect_contains(streaming_html,
                                "tool-column-disclosure\">&#9658;") &&
        harness_expect_not_contains(streaming_html,
@@ -163,6 +176,35 @@ static int harness_check_tool_event_text(void)
 
   strappy_webview_free(script);
   strappy_webview_free(event_text);
+  return ok;
+}
+
+static int harness_check_tool_activity_target(void)
+{
+  char *html;
+  int ok;
+
+  html = strappy_webview_tool_activity_message_html(
+    "streaming-harness-tools",
+    "",
+    "pending",
+    "Running tools...",
+    "harness",
+    "prompt-group-harness",
+    "streaming-harness-assistant",
+    NULL);
+  if (html == NULL) {
+    fprintf(stderr, "Could not generate tool activity HTML.\n");
+    return 0;
+  }
+
+  ok = harness_expect_contains(html, "class=\"row tool_call tool_activity") &&
+       harness_expect_contains(html, "data-actor=\"harness\"") &&
+       harness_expect_contains(html,
+                               "data-tool-target=\"streaming-harness-assistant\"") &&
+       harness_expect_contains(html, "style=\"display:none\"");
+
+  strappy_webview_free(html);
   return ok;
 }
 
@@ -228,6 +270,9 @@ int main(void)
     return 1;
   }
   if (!harness_check_tool_event_text()) {
+    return 1;
+  }
+  if (!harness_check_tool_activity_target()) {
     return 1;
   }
   if (!harness_check_harness_message()) {

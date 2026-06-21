@@ -562,7 +562,8 @@ static int harness_run_tool_registry_tests(void)
 
   ok = ((strstr(tools_json, STRAPPY_TOOL_DATABASE_LIST_INFO) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_QUERY) != NULL) &&
-        (strstr(tools_json, STRAPPY_TOOL_HELPER_CONVERT_DATES) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_READ) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_FORGET) != NULL) &&
@@ -571,7 +572,8 @@ static int harness_run_tool_registry_tests(void)
                 STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) != NULL) &&
         (strstr(tools_json,
                 STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET) != NULL) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_CONVERT_DATES) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_READ) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_FORGET) &&
@@ -579,7 +581,9 @@ static int harness_run_tool_registry_tests(void)
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET) &&
         !strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_QUERY) &&
+        !strappy_tools_is_helper("helper_convert_dates") &&
         (strstr(tools_json, "helper_database_info_read") == NULL) &&
+        (strstr(tools_json, "helper_convert_dates") == NULL) &&
         (strstr(tools_json, "database_learn") == NULL)) ? 1 : 0;
   if (!ok) {
     fprintf(stderr, "Tool registry did not match expected tools: %s\n", tools_json);
@@ -590,11 +594,11 @@ static int harness_run_tool_registry_tests(void)
   return ok;
 }
 
-static int harness_run_helper_convert_dates_tests(void)
+static int harness_run_helper_datetime_tests(void)
 {
   if (!harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_CONVERT_DATES,
+        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
         "{\"timestamps\":\"0,1,-1,-0.5\"}",
         "1970-01-01T00:00:00Z,1970-01-01T00:00:01Z,"
         "1969-12-31T23:59:59Z,1969-12-31T23:59:59.5Z")) {
@@ -603,7 +607,7 @@ static int harness_run_helper_convert_dates_tests(void)
 
   if (!harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_CONVERT_DATES,
+        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
         "{\"timestamps\":\"1700000000123\",\"unit\":\"unix_milliseconds\"}",
         "2023-11-14T22:13:20.123Z")) {
     return 0;
@@ -611,7 +615,7 @@ static int harness_run_helper_convert_dates_tests(void)
 
   if (!harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_CONVERT_DATES,
+        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
         "{\"timestamps\":\"0, 1.25\",\"unit\":\"apple_seconds\"}",
         "2001-01-01T00:00:00Z,2001-01-01T00:00:01.25Z")) {
     return 0;
@@ -619,7 +623,7 @@ static int harness_run_helper_convert_dates_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_CONVERT_DATES,
+        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
         "{\"timestamps\":\"1,,2\"}",
         "empty item")) {
     return 0;
@@ -627,9 +631,69 @@ static int harness_run_helper_convert_dates_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_CONVERT_DATES,
+        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
         "{\"timestamps\":\"1\",\"unit\":\"banana_seconds\"}",
         "unit is not supported")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":\"1970-01-01T00:00:00Z,1970-01-01T00:00:01Z\","
+        "\"unit\":\"unix_seconds\"}",
+        "0,1")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":\"2001-01-01T00:00:00Z,2026-01-01T00:00:00Z,"
+        "2027-01-01T00:00:00Z\",\"unit\":\"apple_seconds\"}",
+        "0,788918400,820454400")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":\"2026-01-01,2027-01-01\"}",
+        "788918400,820454400")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":\"1969-12-31T23:59:59.5Z\","
+        "\"unit\":\"unix_seconds\"}",
+        "-0.5")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":\"2026-01-01T05:00:00+05:00\","
+        "\"unit\":\"apple_seconds\"}",
+        "788918400")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":\"2026-01-01,,2027-01-01\"}",
+        "empty item")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":\"2026-02-30\"}",
+        "date is invalid")) {
     return 0;
   }
 
@@ -1232,8 +1296,16 @@ static int harness_run_sms_guidance_tests(harness_context *context)
   if (!harness_expect_output_contains(context->catalog_path,
                                       STRAPPY_TOOL_DATABASE_CONTEXT_READ,
                                       arguments,
-                                      "helper_convert_dates with apple_seconds",
+                                      "helper_datetime_to_iso8601 with apple_seconds",
                                       "page chronologically by message.date")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                      arguments,
+                                      "helper_datetime_from_iso8601",
+                                      "matching Apple unit")) {
     return 0;
   }
 
@@ -1264,6 +1336,7 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
   memset(messages, 0, sizeof(messages));
 
   messages[0].turn_key = "user-turn-test";
+  messages[0].prompt_group_key = "prompt-group-test";
   messages[0].actor = "user";
   messages[0].context_policy = "full";
   messages[0].kind = "prompt";
@@ -1275,6 +1348,7 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
   messages[0].include_in_context = 1;
 
   messages[1].turn_key = "user-turn-test";
+  messages[1].prompt_group_key = "prompt-group-test";
   messages[1].actor = "user";
   messages[1].context_policy = "full";
   messages[1].kind = "assistant";
@@ -1286,6 +1360,7 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
   messages[1].include_in_context = 1;
 
   messages[2].turn_key = "harness-turn-test";
+  messages[2].prompt_group_key = "prompt-group-test";
   messages[2].actor = "harness";
   messages[2].context_policy = "omit";
   messages[2].kind = "prompt";
@@ -1297,6 +1372,7 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
   messages[2].include_in_context = 0;
 
   messages[3].turn_key = "harness-turn-test";
+  messages[3].prompt_group_key = "prompt-group-test";
   messages[3].actor = "harness";
   messages[3].context_policy = "omit";
   messages[3].kind = "tool_result";
@@ -1313,6 +1389,7 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
   messages[3].include_in_context = 0;
 
   messages[4].turn_key = "harness-turn-test";
+  messages[4].prompt_group_key = "prompt-group-test";
   messages[4].actor = "harness";
   messages[4].context_policy = "omit";
   messages[4].kind = "assistant";
@@ -1361,6 +1438,10 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
   ok = (all_messages.count == 5U) &&
        (all_messages.records[0].turn_id > 0LL) &&
        (all_messages.records[2].turn_id > 0LL) &&
+       (strcmp(all_messages.records[0].prompt_group_key,
+               "prompt-group-test") == 0) &&
+       (strcmp(all_messages.records[2].prompt_group_key,
+               "prompt-group-test") == 0) &&
        (strcmp(all_messages.records[2].actor, "harness") == 0) &&
        (strcmp(all_messages.records[2].role, "harness") == 0) &&
        (strcmp(all_messages.records[3].kind, "tool_result") == 0) &&
@@ -1408,7 +1489,7 @@ int main(void)
 
   harness_context_init(&context);
   ok = harness_run_tool_registry_tests() &&
-       harness_run_helper_convert_dates_tests() &&
+       harness_run_helper_datetime_tests() &&
        harness_make_temp_dir(&context) &&
        harness_run_empty_database_list_info_tests(&context) &&
        harness_create_user_database(context.database_path) &&
