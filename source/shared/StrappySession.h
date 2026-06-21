@@ -15,6 +15,7 @@
 + (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath;
 + (NSString *)sessionsDatabasePath;
 + (BOOL)initializeSessionStoreWithError:(NSError **)error;
++ (NSDictionary *)createSessionWithError:(NSError **)error;
 + (NSArray *)sessionSummariesWithError:(NSError **)error;
 + (NSDictionary *)sessionSummaryForSessionIdentifier:(NSNumber *)sessionIdentifier
                                                error:(NSError **)error;

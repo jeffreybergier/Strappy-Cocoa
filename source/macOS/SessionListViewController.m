@@ -1,16 +1,18 @@
 #import "SessionListViewController.h"
+#import "AIFontAwesome.h"
 #import "StrappySession.h"
 #import "XPFoundation.h"
 
 static const CGFloat kStrappySessionRowHeight = 58.0;
 static const CGFloat kStrappySectionRowHeight = 24.0;
+static const CGFloat kStrappySessionToolbarHeight = 32.0;
+static const CGFloat kStrappySessionToolbarPad = 4.0;
 static const CGFloat kStrappyAvatarSize = 34.0;
 static const CGFloat kStrappyPadLeft = 8.0;
 static const CGFloat kStrappyPadRight = 8.0;
 static const CGFloat kStrappyTextGap = 8.0;
 
 static NSString * const kStrappySessionRowTypeKey = @"row_type";
-static NSString * const kStrappySessionRowTypeNew = @"new";
 static NSString * const kStrappySessionRowTypeSection = @"section";
 static NSString * const kStrappySessionRowTypeSession = @"session";
 static NSString * const kStrappySessionRowTypeEmpty = @"empty";
@@ -29,22 +31,12 @@ static NSDictionary *StrappySectionRow(NSString *title)
     nil];
 }
 
-static NSDictionary *StrappyNewSessionRow(void)
-{
-  return [NSDictionary dictionaryWithObjectsAndKeys:
-    kStrappySessionRowTypeNew, kStrappySessionRowTypeKey,
-    NSLocalizedString(@"New Session", nil), @"prompt",
-    NSLocalizedString(@"Start a new conversation", nil), @"last_message_text",
-    @"", @"created_at",
-    nil];
-}
-
 static NSDictionary *StrappyEmptySessionRow(void)
 {
   return [NSDictionary dictionaryWithObjectsAndKeys:
     kStrappySessionRowTypeEmpty, kStrappySessionRowTypeKey,
     NSLocalizedString(@"No conversations yet", nil), @"prompt",
-    NSLocalizedString(@"Send a prompt to create one.", nil), @"last_message_text",
+    NSLocalizedString(@"Create a conversation to begin.", nil), @"last_message_text",
     nil];
 }
 
@@ -60,11 +52,6 @@ static NSDictionary *StrappySessionDisplayRow(NSDictionary *session)
 static NSString *StrappySessionPromptPreview(NSDictionary *session)
 {
   NSString *prompt;
-
-  if ([[session objectForKey:kStrappySessionRowTypeKey]
-        isEqualToString:kStrappySessionRowTypeNew]) {
-    return NSLocalizedString(@"New Session", nil);
-  }
 
   prompt = [session objectForKey:@"prompt"];
   if (![prompt isKindOfClass:[NSString class]] || ([prompt length] == 0U)) {
@@ -173,6 +160,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   NSPoint point;
   NSInteger row;
   id<StrappySessionTableViewMenu> source;
+  NSMenu *menu;
 
   point = [self convertPoint:[event locationInWindow] fromView:nil];
   row = [self rowAtPoint:point];
@@ -180,14 +168,45 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
     return nil;
   }
 
-  [self selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)row]
-    byExtendingSelection:NO];
-
   source = (id<StrappySessionTableViewMenu>)[self dataSource];
   if ([source respondsToSelector:@selector(contextMenuForRow:)]) {
-    return [source contextMenuForRow:row];
+    menu = [source contextMenuForRow:row];
+    if (menu != nil) {
+      [self selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)row]
+          byExtendingSelection:NO];
+    }
+    return menu;
   }
   return nil;
+}
+
+@end
+
+@interface StrappySessionToolbarView : NSView
+@end
+
+@implementation StrappySessionToolbarView
+
+- (BOOL)isOpaque
+{
+  return YES;
+}
+
+- (void)drawRect:(NSRect)dirtyRect
+{
+  NSRect bounds;
+
+  (void)dirtyRect;
+  bounds = [self bounds];
+
+  [XPColorWindowFrame set];
+  NSRectFill(bounds);
+
+  [XPColorControlHighlight set];
+  NSRectFill(NSMakeRect(bounds.origin.x,
+                        bounds.origin.y + bounds.size.height - 1.0,
+                        bounds.size.width,
+                        1.0));
 }
 
 @end
@@ -222,29 +241,15 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
                      row:(NSDictionary *)row
                 selected:(BOOL)selected
 {
-  NSString *type;
   NSString *state;
-  NSString *glyph;
   NSColor *fillColor;
   NSDictionary *attrs;
   NSSize glyphSize;
   NSRect glyphRect;
 
-  type = [row objectForKey:kStrappySessionRowTypeKey];
   state = [row objectForKey:@"state"];
-
-  if ([type isEqualToString:kStrappySessionRowTypeNew]) {
-    fillColor = selected ? [NSColor alternateSelectedControlTextColor]
-                         : [NSColor colorWithCalibratedRed:0.12
-                                                     green:0.42
-                                                      blue:0.78
-                                                     alpha:1.0];
-    glyph = @"+";
-  } else {
-    fillColor = selected ? [NSColor alternateSelectedControlTextColor]
-                         : [NSColor colorWithCalibratedWhite:0.72 alpha:1.0];
-    glyph = @"AI";
-  }
+  fillColor = selected ? [NSColor alternateSelectedControlTextColor]
+                       : [NSColor colorWithCalibratedWhite:0.72 alpha:1.0];
 
   [fillColor set];
   [[NSBezierPath bezierPathWithOvalInRect:avatarRect] fill];
@@ -252,15 +257,15 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   attrs = [NSDictionary dictionaryWithObjectsAndKeys:
     (selected ? [NSColor selectedControlColor] : [NSColor whiteColor]),
       NSForegroundColorAttributeName,
-    [NSFont boldSystemFontOfSize:([glyph length] == 1U ? 22.0 : 11.0)],
+    [NSFont boldSystemFontOfSize:11.0],
       NSFontAttributeName,
     nil];
-  glyphSize = [glyph sizeWithAttributes:attrs];
+  glyphSize = [@"AI" sizeWithAttributes:attrs];
   glyphRect = NSMakeRect(NSMidX(avatarRect) - (glyphSize.width / 2.0),
                          NSMidY(avatarRect) - (glyphSize.height / 2.0),
                          glyphSize.width,
                          glyphSize.height);
-  [glyph drawInRect:glyphRect withAttributes:attrs];
+  [@"AI" drawInRect:glyphRect withAttributes:attrs];
 
   if ([state isEqualToString:@"error"]) {
     NSRect dotRect;
@@ -385,6 +390,12 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
 
 @end
 
+@interface SessionListViewController ()
+- (void)rebuildAddSegmentIcon;
+- (void)addSessionSegmentClicked:(id)sender;
+- (void)layoutSidebarViews;
+@end
+
 @implementation SessionListViewController
 
 - (void)setDelegate:(id<SessionListViewControllerDelegate>)delegate
@@ -400,6 +411,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
 - (void)viewDidLoad
 {
   NSTableColumn *column;
+  StrappySessionToolbarView *toolbar;
 
   [super viewDidLoad];
 
@@ -426,8 +438,96 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   [scrollView_ setDocumentView:tableView_];
   [[self view] addSubview:scrollView_];
 
+  toolbar = [[StrappySessionToolbarView alloc] initWithFrame:NSZeroRect];
+  toolbarView_ = toolbar;
+  [toolbarView_ setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
+  [[self view] addSubview:toolbarView_];
+
+  addSegmented_ = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
+  [addSegmented_ setSegmentCount:1];
+  [[addSegmented_ cell] setTrackingMode:NSSegmentSwitchTrackingMomentary];
+  if ([[addSegmented_ cell] respondsToSelector:@selector(setSegmentStyle:)]) {
+    [[addSegmented_ cell] setSegmentStyle:NSSegmentStyleTexturedRounded];
+  }
+  [addSegmented_ setTarget:self];
+  [addSegmented_ setAction:@selector(addSessionSegmentClicked:)];
+  [addSegmented_ setToolTip:NSLocalizedString(@"New Session", nil)];
+  [self rebuildAddSegmentIcon];
+  [addSegmented_ sizeToFit];
+  [toolbarView_ addSubview:addSegmented_];
+
   [self reloadData];
   [tableView_ sizeLastColumnToFit];
+  [self layoutSidebarViews];
+}
+
+- (void)viewDidLayout
+{
+  [self layoutSidebarViews];
+  [super viewDidLayout];
+}
+
+- (void)layoutSidebarViews
+{
+  NSRect bounds;
+  CGFloat scrollHeight;
+  CGFloat segmentWidth;
+  CGFloat segmentHeight;
+
+  bounds = [[self view] bounds];
+  scrollHeight = bounds.size.height - kStrappySessionToolbarHeight;
+  if (scrollHeight < 0.0) {
+    scrollHeight = 0.0;
+  }
+
+  [toolbarView_ setFrame:NSMakeRect(0.0,
+                                    0.0,
+                                    bounds.size.width,
+                                    kStrappySessionToolbarHeight)];
+  [scrollView_ setFrame:NSMakeRect(0.0,
+                                   kStrappySessionToolbarHeight,
+                                   bounds.size.width,
+                                   scrollHeight)];
+
+  segmentWidth = [addSegmented_ frame].size.width;
+  segmentHeight = [addSegmented_ frame].size.height;
+  if (segmentWidth < 28.0) {
+    segmentWidth = 28.0;
+  }
+  [addSegmented_ setFrame:NSMakeRect(kStrappySessionToolbarPad,
+                                     kStrappySessionToolbarPad,
+                                     segmentWidth,
+                                     segmentHeight)];
+}
+
+- (void)rebuildAddSegmentIcon
+{
+  CGFloat scale;
+  NSImage *addImage;
+
+  if (addSegmented_ == nil) {
+    return;
+  }
+
+  scale = 1.0;
+  if ([[toolbarView_ window] respondsToSelector:@selector(XP_backingScaleFactor)]) {
+    scale = [[toolbarView_ window] XP_backingScaleFactor];
+  }
+  if (scale < 1.0) {
+    scale = 1.0;
+  }
+
+  addImage = [AIFontAwesome imageForIcon:AIFACirclePlus
+                                   style:AIFontAwesomeStyleSolid
+                                iconSize:12.0
+                              canvasSize:18.0
+                                   scale:scale];
+  if (addImage != nil) {
+    [addSegmented_ setImage:addImage forSegment:0];
+    [addSegmented_ setLabel:@"" forSegment:0];
+  } else {
+    [addSegmented_ setLabel:@"+" forSegment:0];
+  }
 }
 
 - (void)notifySelectedSession
@@ -449,8 +549,6 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   if (delegate_ != nil) {
     if ([type isEqualToString:kStrappySessionRowTypeSession]) {
       [delegate_ sessionListViewController:self didSelectSession:session];
-    } else if ([type isEqualToString:kStrappySessionRowTypeNew]) {
-      [delegate_ sessionListViewController:self didSelectSession:nil];
     }
   }
 }
@@ -460,7 +558,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   NSUInteger index;
 
   if (sessionIdentifier == nil) {
-    return 0;
+    return -1;
   }
 
   for (index = 0U; index < [rows_ count]; index++) {
@@ -503,8 +601,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
     sessions = [NSArray array];
   }
 
-  displayRows = [NSMutableArray arrayWithCapacity:[sessions count] + 2U];
-  [displayRows addObject:StrappyNewSessionRow()];
+  displayRows = [NSMutableArray arrayWithCapacity:[sessions count] + 1U];
   [displayRows addObject:StrappySectionRow(NSLocalizedString(@"Conversations", nil))];
   if ([sessions count] == 0U) {
     [displayRows addObject:StrappyEmptySessionRow()];
@@ -617,7 +714,47 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
              byExtendingSelection:NO];
     suppressSelectionNotification_ = NO;
     [tableView_ scrollRowToVisible:row];
+  } else {
+    suppressSelectionNotification_ = YES;
+    [tableView_ deselectAll:self];
+    suppressSelectionNotification_ = NO;
   }
+}
+
+- (void)addSessionSegmentClicked:(id)sender
+{
+  (void)sender;
+  [self addSession:sender];
+}
+
+- (void)addSession:(id)sender
+{
+  NSError *error;
+  NSDictionary *session;
+  NSNumber *identifier;
+
+  (void)sender;
+  if (creatingSession_) {
+    return;
+  }
+
+  creatingSession_ = YES;
+  [addSegmented_ setEnabled:NO];
+
+  error = nil;
+  session = [StrappySession createSessionWithError:&error];
+
+  creatingSession_ = NO;
+  [addSegmented_ setEnabled:YES];
+
+  identifier = [session objectForKey:@"id"];
+  if (![identifier isKindOfClass:[NSNumber class]]) {
+    NSBeep();
+    return;
+  }
+
+  [self reloadSessionIdentifier:identifier select:YES];
+  [self notifySelectedSession];
 }
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView
@@ -667,8 +804,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
 
   rowData = [rows_ objectAtIndex:(NSUInteger)row];
   type = [rowData objectForKey:kStrappySessionRowTypeKey];
-  return ([type isEqualToString:kStrappySessionRowTypeNew] ||
-          [type isEqualToString:kStrappySessionRowTypeSession]) ? YES : NO;
+  return [type isEqualToString:kStrappySessionRowTypeSession] ? YES : NO;
 }
 
 - (void)tableViewSelectionDidChange:(NSNotification *)notification
@@ -682,10 +818,10 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
     return;
   }
 
+  [selectedSessionId_ release];
+  selectedSessionId_ = nil;
   if ((row >= 0) && (row < (NSInteger)[rows_ count])) {
     session = [rows_ objectAtIndex:(NSUInteger)row];
-    [selectedSessionId_ release];
-    selectedSessionId_ = nil;
     if ([[session objectForKey:@"id"] isKindOfClass:[NSNumber class]]) {
       selectedSessionId_ = [[session objectForKey:@"id"] retain];
     }
@@ -707,15 +843,6 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   rowData = [rows_ objectAtIndex:(NSUInteger)row];
   type = [rowData objectForKey:kStrappySessionRowTypeKey];
   menu = [[[NSMenu alloc] initWithTitle:@""] autorelease];
-
-  if ([type isEqualToString:kStrappySessionRowTypeNew]) {
-    item = [[[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"New Session", nil)
-                                       action:@selector(contextNewSession:)
-                                keyEquivalent:@""] autorelease];
-    [item setTarget:self];
-    [menu addItem:item];
-    return menu;
-  }
 
   if (![type isEqualToString:kStrappySessionRowTypeSession]) {
     return nil;
@@ -768,17 +895,12 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   [self copyStringToPasteboard:text];
 }
 
-- (void)contextNewSession:(id)sender
-{
-  (void)sender;
-  [self selectSessionIdentifier:nil];
-  [self notifySelectedSession];
-}
-
 - (void)dealloc
 {
   [scrollView_ release];
   [tableView_ release];
+  [toolbarView_ release];
+  [addSegmented_ release];
   [rows_ release];
   [selectedSessionId_ release];
   [super dealloc];

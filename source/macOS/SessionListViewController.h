@@ -14,10 +14,13 @@
  @private
   NSScrollView *scrollView_;
   NSTableView  *tableView_;
+  NSView       *toolbarView_;
+  NSSegmentedControl *addSegmented_;
   NSArray      *rows_;
   NSNumber     *selectedSessionId_;
   id<SessionListViewControllerDelegate> delegate_;
   BOOL          suppressSelectionNotification_;
+  BOOL          creatingSession_;
 }
 
 - (void)setDelegate:(id<SessionListViewControllerDelegate>)delegate;
@@ -25,5 +28,6 @@
 - (void)reloadData;
 - (void)reloadSessionIdentifier:(NSNumber *)sessionIdentifier select:(BOOL)select;
 - (void)selectSessionIdentifier:(NSNumber *)sessionIdentifier;
+- (void)addSession:(id)sender;
 
 @end

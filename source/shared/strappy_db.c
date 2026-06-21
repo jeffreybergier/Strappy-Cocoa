@@ -2065,6 +2065,7 @@ static int strappy_db_insert_message_sequence(
 
 static int strappy_db_update_session_summary(sqlite3 *db,
                                              long long session_id,
+                                             const char *prompt,
                                              const char *response,
                                              const char *model,
                                              long http_status,
@@ -2072,13 +2073,14 @@ static int strappy_db_update_session_summary(sqlite3 *db,
 {
   static const char *update_sql =
     "UPDATE sessions "
-    "SET response = ?, model = ?, http_status = ? "
+    "SET prompt = CASE WHEN prompt = '' THEN ? ELSE prompt END, "
+    "response = ?, model = ?, http_status = ? "
     "WHERE id = ?;";
   sqlite3_stmt *stmt;
   int rc;
   int ok;
 
-  if ((session_id <= 0) || (response == NULL)) {
+  if ((session_id <= 0) || (prompt == NULL) || (response == NULL)) {
     strappy_set_error(error_out, "Session summary update is incomplete.");
     return 0;
   }
@@ -2093,22 +2095,26 @@ static int strappy_db_update_session_summary(sqlite3 *db,
   }
 
   ok = 1;
-  if (sqlite3_bind_text(stmt, 1, response, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+  if (sqlite3_bind_text(stmt, 1, prompt, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_text(stmt, 2, response, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
     ok = 0;
   }
   if (ok && (model != NULL) &&
-      (sqlite3_bind_text(stmt, 2, model, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+      (sqlite3_bind_text(stmt, 3, model, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
     ok = 0;
   }
-  if (ok && (model == NULL) && (sqlite3_bind_null(stmt, 2) != SQLITE_OK)) {
-    ok = 0;
-  }
-  if (ok &&
-      (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)http_status) != SQLITE_OK)) {
+  if (ok && (model == NULL) && (sqlite3_bind_null(stmt, 3) != SQLITE_OK)) {
     ok = 0;
   }
   if (ok &&
-      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)session_id) != SQLITE_OK)) {
+      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)http_status) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 5, (sqlite3_int64)session_id) != SQLITE_OK)) {
     ok = 0;
   }
 
@@ -2130,6 +2136,60 @@ static int strappy_db_update_session_summary(sqlite3 *db,
   }
 
   sqlite3_finalize(stmt);
+  return 1;
+}
+
+int strappy_db_create_session(const char *db_path,
+                              long long *session_id_out,
+                              char **error_out)
+{
+  static const char *sql =
+    "INSERT INTO sessions "
+    "(prompt, response, model, http_status) "
+    "VALUES ('', '', NULL, 0);";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (session_id_out != NULL) {
+    *session_id_out = 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare session insert: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not create session: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (session_id_out != NULL) {
+    *session_id_out = (long long)sqlite3_last_insert_rowid(db);
+  }
+
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
   return 1;
 }
 
@@ -2439,7 +2499,8 @@ int strappy_db_append_exchange_to_session(const char *db_path,
 {
   static const char *update_sql =
     "UPDATE sessions "
-    "SET response = ?, model = ?, http_status = ? "
+    "SET prompt = CASE WHEN prompt = '' THEN ? ELSE prompt END, "
+    "response = ?, model = ?, http_status = ? "
     "WHERE id = ?;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
@@ -2521,22 +2582,26 @@ int strappy_db_append_exchange_to_session(const char *db_path,
   }
 
   ok = 1;
-  if (sqlite3_bind_text(stmt, 1, response, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+  if (sqlite3_bind_text(stmt, 1, prompt, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_text(stmt, 2, response, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
     ok = 0;
   }
   if (ok && (model != NULL) &&
-      (sqlite3_bind_text(stmt, 2, model, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+      (sqlite3_bind_text(stmt, 3, model, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
     ok = 0;
   }
-  if (ok && (model == NULL) && (sqlite3_bind_null(stmt, 2) != SQLITE_OK)) {
-    ok = 0;
-  }
-  if (ok &&
-      (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)http_status) != SQLITE_OK)) {
+  if (ok && (model == NULL) && (sqlite3_bind_null(stmt, 3) != SQLITE_OK)) {
     ok = 0;
   }
   if (ok &&
-      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)session_id) != SQLITE_OK)) {
+      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)http_status) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 5, (sqlite3_int64)session_id) != SQLITE_OK)) {
     ok = 0;
   }
 
@@ -2623,6 +2688,7 @@ int strappy_db_append_message_sequence_to_session(
 
   if (!strappy_db_update_session_summary(db,
                                          session_id,
+                                         prompt,
                                          response,
                                          model,
                                          http_status,

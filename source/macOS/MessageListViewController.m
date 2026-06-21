@@ -543,7 +543,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [self AI_addChildViewController:sendController_];
   [[sendController_ view] setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
   [[self view] addSubview:[sendController_ view]];
-  [sendController_ setEnabled:YES];
+  [sendController_ setEnabled:(sessionId_ != nil)];
   [sendController_ setSending:sending_];
 
   [self reloadContent];
@@ -753,6 +753,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     sessionId_ = [identifier retain];
   }
 
+  [sendController_ setEnabled:(sessionId_ != nil)];
   [self reloadContent];
 }
 
@@ -763,6 +764,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
 - (BOOL)canSendCurrentPrompt
 {
+  if (sessionId_ == nil) {
+    return NO;
+  }
   return [sendController_ canSendCurrentPrompt];
 }
 
@@ -860,6 +864,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     emptyText = statusText_;
   } else if (error != nil) {
     emptyText = [error localizedDescription];
+  } else if (sessionId_ == nil) {
+    emptyText = NSLocalizedString(@"No session selected.", nil);
   } else {
     emptyText = NSLocalizedString(@"New Session", nil);
   }
@@ -966,6 +972,10 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   static unsigned long pendingCounter = 0UL;
 
   if (sending_) {
+    return;
+  }
+
+  if (sessionId_ == nil) {
     return;
   }
 
@@ -1098,11 +1108,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     pendingMessageIdentifier_, @"pending_id",
     pendingAssistantMessageIdentifier_, @"assistant_pending_id",
     [NSNumber numberWithLongLong:lastKnownMessageIdentifier_], @"previous_last_id",
-    [NSNumber numberWithBool:(sessionId_ == nil)], @"created",
+    sessionId_, @"session_id",
     nil];
-  if (sessionId_ != nil) {
-    [request setObject:sessionId_ forKey:@"session_id"];
-  }
   [self retain];
   [NSThread detachNewThreadSelector:@selector(sendPromptInBackground:)
                            toTarget:self
@@ -1131,7 +1138,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   NSString *assistantPendingIdentifier;
   NSNumber *sessionId;
   NSNumber *previousLastIdentifier;
-  NSNumber *created;
   NSDictionary *streamContext;
 
   pool = [[NSAutoreleasePool alloc] init];
@@ -1155,15 +1161,10 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   if (![previousLastIdentifier isKindOfClass:[NSNumber class]]) {
     previousLastIdentifier = [NSNumber numberWithLongLong:0LL];
   }
-  created = [request objectForKey:@"created"];
-  if (![created isKindOfClass:[NSNumber class]]) {
-    created = [NSNumber numberWithBool:NO];
-  }
   result = [[NSMutableDictionary alloc] init];
   [result setObject:pendingIdentifier forKey:@"pending_id"];
   [result setObject:assistantPendingIdentifier forKey:@"assistant_pending_id"];
   [result setObject:previousLastIdentifier forKey:@"previous_last_id"];
-  [result setObject:created forKey:@"created"];
 
   streamContext = [NSDictionary dictionaryWithObjectsAndKeys:
     pendingIdentifier, @"pending_id",
@@ -1766,7 +1767,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   NSString *pendingIdentifier;
   NSString *assistantPendingIdentifier;
   NSNumber *previousLastIdentifier;
-  NSNumber *created;
   NSNumber *resultSessionId;
   BOOL pendingIsCurrent;
 
@@ -1786,11 +1786,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   if (![previousLastIdentifier isKindOfClass:[NSNumber class]]) {
     previousLastIdentifier = [NSNumber numberWithLongLong:0LL];
   }
-  created = [result objectForKey:@"created"];
-  if (![created isKindOfClass:[NSNumber class]]) {
-    created = [NSNumber numberWithBool:NO];
-  }
-
   pendingIsCurrent = (pendingMessageIdentifier_ != nil &&
                       [pendingMessageIdentifier_ isEqualToString:pendingIdentifier] &&
                       [self pendingAppliesToCurrentSession]) ? YES : NO;
@@ -1815,11 +1810,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     }
 
     if (delegate_ != nil) {
-      if ([created boolValue]) {
-        [delegate_ messageListViewController:self didCreateSession:session];
-      } else {
-        [delegate_ messageListViewController:self didUpdateSession:session];
-      }
+      [delegate_ messageListViewController:self didUpdateSession:session];
     }
 
     if (!pendingIsCurrent) {

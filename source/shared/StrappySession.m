@@ -608,6 +608,36 @@ static int StrappySessionHandleStreamEvent(
   return YES;
 }
 
++ (NSDictionary *)createSessionWithError:(NSError **)error
+{
+  NSString *databasePath;
+  char *strappyError;
+  long long sessionId;
+  NSNumber *sessionIdentifier;
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+
+  sessionId = 0;
+  strappyError = NULL;
+  if (!strappy_db_create_session([databasePath UTF8String],
+                                 &sessionId,
+                                 &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return nil;
+  }
+
+  sessionIdentifier = [NSNumber numberWithLongLong:sessionId];
+  return [StrappySession sessionSummaryForSessionIdentifier:sessionIdentifier
+                                                     error:error];
+}
+
 + (NSArray *)sessionSummariesWithError:(NSError **)error
 {
   NSString *databasePath;

@@ -160,6 +160,9 @@ int strappy_db_save_exchange_with_id(const char *db_path,
                                      const char *reasoning,
                                      long long *session_id_out,
                                      char **error_out);
+int strappy_db_create_session(const char *db_path,
+                              long long *session_id_out,
+                              char **error_out);
 int strappy_db_list_sessions(const char *db_path,
                              strappy_session_record_list *list,
                              char **error_out);

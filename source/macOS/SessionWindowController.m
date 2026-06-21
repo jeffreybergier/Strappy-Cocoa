@@ -28,9 +28,7 @@
 
 - (void)newSession:(id)sender
 {
-  (void)sender;
-  [sessionsController_ selectSessionIdentifier:nil];
-  [messagesController_ reloadWithSession:nil];
+  [sessionsController_ addSession:sender];
 }
 
 - (BOOL)canSendCurrentPrompt
@@ -48,14 +46,6 @@
 {
   (void)controller;
   [messagesController_ reloadWithSession:session];
-}
-
-- (void)messageListViewController:(MessageListViewController *)controller
-                 didCreateSession:(NSDictionary *)session
-{
-  (void)controller;
-  [sessionsController_ reloadSessionIdentifier:[session objectForKey:@"id"]
-                                        select:YES];
 }
 
 - (void)messageListViewController:(MessageListViewController *)controller

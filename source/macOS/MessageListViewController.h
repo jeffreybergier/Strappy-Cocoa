@@ -6,8 +6,6 @@
 
 @protocol MessageListViewControllerDelegate
 - (void)messageListViewController:(MessageListViewController *)controller
-                 didCreateSession:(NSDictionary *)session;
-- (void)messageListViewController:(MessageListViewController *)controller
                   didUpdateSession:(NSDictionary *)session;
 @end
 

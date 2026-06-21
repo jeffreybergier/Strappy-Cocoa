@@ -1320,6 +1320,172 @@ static int harness_run_sms_guidance_tests(harness_context *context)
   return 1;
 }
 
+static int harness_run_empty_session_storage_tests(const harness_context *context)
+{
+  strappy_session_record session;
+  strappy_session_message_input inputs[2];
+  strappy_session_message_record_list messages;
+  long long session_id;
+  char *error;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  error = NULL;
+  session_id = 0LL;
+  ok = strappy_db_create_session(context->catalog_path, &session_id, &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not create empty session: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  strappy_session_record_init(&session);
+  ok = strappy_db_load_session(context->catalog_path,
+                               session_id,
+                               &session,
+                               &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not load empty session: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_record_destroy(&session);
+    return 0;
+  }
+
+  ok = (session.session_id == session_id) &&
+       (session.prompt != NULL) &&
+       (strcmp(session.prompt, "") == 0) &&
+       (session.response != NULL) &&
+       (strcmp(session.response, "") == 0) &&
+       (session.http_status == 0L);
+  strappy_session_record_destroy(&session);
+  if (!ok) {
+    fprintf(stderr, "Empty session row did not have the expected shape.\n");
+    return 0;
+  }
+
+  strappy_session_message_record_list_init(&messages);
+  ok = strappy_db_list_session_messages(context->catalog_path,
+                                        session_id,
+                                        &messages,
+                                        &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not list empty session messages: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_message_record_list_destroy(&messages);
+    return 0;
+  }
+
+  ok = (messages.count == 0U);
+  strappy_session_message_record_list_destroy(&messages);
+  if (!ok) {
+    fprintf(stderr, "Empty session unexpectedly had messages.\n");
+    return 0;
+  }
+
+  memset(inputs, 0, sizeof(inputs));
+  inputs[0].turn_key = "empty-session-turn";
+  inputs[0].prompt_group_key = "empty-session-group";
+  inputs[0].actor = "user";
+  inputs[0].context_policy = "full";
+  inputs[0].kind = "prompt";
+  inputs[0].api_role = "user";
+  inputs[0].render_role = "user";
+  inputs[0].role = "user";
+  inputs[0].content = "First prompt";
+  inputs[0].message_key = "empty-session-prompt";
+  inputs[0].include_in_context = 1;
+
+  inputs[1].turn_key = "empty-session-turn";
+  inputs[1].prompt_group_key = "empty-session-group";
+  inputs[1].actor = "user";
+  inputs[1].context_policy = "full";
+  inputs[1].kind = "assistant";
+  inputs[1].api_role = "assistant";
+  inputs[1].render_role = "assistant";
+  inputs[1].role = "assistant";
+  inputs[1].content = "First answer";
+  inputs[1].message_key = "empty-session-assistant";
+  inputs[1].include_in_context = 1;
+
+  ok = strappy_db_append_message_sequence_to_session(context->catalog_path,
+                                                     session_id,
+                                                     "First prompt",
+                                                     "First answer",
+                                                     "harness-model",
+                                                     200L,
+                                                     inputs,
+                                                     sizeof(inputs) / sizeof(inputs[0]),
+                                                     &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not append to empty session: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  strappy_session_record_init(&session);
+  ok = strappy_db_load_session(context->catalog_path,
+                               session_id,
+                               &session,
+                               &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not load appended empty session: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_record_destroy(&session);
+    return 0;
+  }
+
+  ok = (session.prompt != NULL) &&
+       (strcmp(session.prompt, "First prompt") == 0) &&
+       (session.response != NULL) &&
+       (strcmp(session.response, "First answer") == 0) &&
+       (session.model != NULL) &&
+       (strcmp(session.model, "harness-model") == 0) &&
+       (session.http_status == 200L);
+  strappy_session_record_destroy(&session);
+  if (!ok) {
+    fprintf(stderr, "Appended empty session summary was not updated.\n");
+    return 0;
+  }
+
+  strappy_session_message_record_list_init(&messages);
+  ok = strappy_db_list_session_messages(context->catalog_path,
+                                        session_id,
+                                        &messages,
+                                        &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not list appended empty session messages: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_message_record_list_destroy(&messages);
+    return 0;
+  }
+
+  ok = (messages.count == 2U) &&
+       (messages.records[0].content != NULL) &&
+       (strcmp(messages.records[0].content, "First prompt") == 0) &&
+       (messages.records[1].content != NULL) &&
+       (strcmp(messages.records[1].content, "First answer") == 0);
+  if (!ok) {
+    fprintf(stderr, "Appended empty session messages were not stored.\n");
+  }
+  strappy_session_message_record_list_destroy(&messages);
+  return ok;
+}
+
 static int harness_run_session_turn_storage_tests(const harness_context *context)
 {
   strappy_session_message_input messages[5];
@@ -1497,6 +1663,7 @@ int main(void)
        harness_run_database_list_info_tests(&context) &&
        harness_run_database_query_tests(&context) &&
        harness_run_helper_info_tests(&context) &&
+       harness_run_empty_session_storage_tests(&context) &&
        harness_run_session_turn_storage_tests(&context) &&
        harness_run_sms_guidance_tests(&context) &&
        harness_run_mail_guidance_tests(&context);
