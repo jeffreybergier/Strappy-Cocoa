@@ -37,6 +37,7 @@
 #define STRAPPY_HELPER_INFO_DEFAULT_CONFIDENCE 0.75
 #define STRAPPY_HELPER_INFO_DEFAULT_LIMIT 20
 #define STRAPPY_HELPER_INFO_MAX_LIMIT 50
+#define STRAPPY_HELPER_SESSION_NAME_MAX_BYTES 96U
 
 typedef enum strappy_tool_kind {
   STRAPPY_TOOL_KIND_DATABASE = 1,
@@ -80,6 +81,10 @@ typedef struct strappy_helper_user_info_read_arguments {
   char *kind;
   int limit;
 } strappy_helper_user_info_read_arguments;
+
+typedef struct strappy_helper_session_name_write_arguments {
+  char *name;
+} strappy_helper_session_name_write_arguments;
 
 typedef struct strappy_helper_info_forget_arguments {
   long long id;
@@ -130,6 +135,7 @@ static const strappy_tool_definition strappy_tool_definitions[] = {
   { STRAPPY_TOOL_HELPER_USER_INFO_READ, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_HELPER_USER_INFO_FORGET, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_DATABASE_CONTEXT_READ, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET, STRAPPY_TOOL_KIND_HELPER }
@@ -269,6 +275,27 @@ static void strappy_helper_user_info_read_arguments_destroy(
   free(arguments->query);
   free(arguments->kind);
   strappy_helper_user_info_read_arguments_init(arguments);
+}
+
+static void strappy_helper_session_name_write_arguments_init(
+  strappy_helper_session_name_write_arguments *arguments)
+{
+  if (arguments == NULL) {
+    return;
+  }
+
+  arguments->name = NULL;
+}
+
+static void strappy_helper_session_name_write_arguments_destroy(
+  strappy_helper_session_name_write_arguments *arguments)
+{
+  if (arguments == NULL) {
+    return;
+  }
+
+  free(arguments->name);
+  strappy_helper_session_name_write_arguments_init(arguments);
 }
 
 static void strappy_helper_info_forget_arguments_init(
@@ -2057,6 +2084,52 @@ static int strappy_tools_parse_helper_user_info_remember_arguments(
   return ok;
 }
 
+static int strappy_tools_parse_helper_session_name_write_arguments(
+  const char *arguments_json,
+  strappy_helper_session_name_write_arguments *arguments,
+  char **error_out)
+{
+  static const char *const allowed_names[] = { "name" };
+  cJSON *root;
+  int ok;
+
+  if (arguments == NULL) {
+    strappy_set_error(
+      error_out,
+      "helper_session_name_write argument output is missing.");
+    return 0;
+  }
+  strappy_helper_session_name_write_arguments_init(arguments);
+
+  root = strappy_tools_parse_arguments_object(
+    STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+    arguments_json,
+    error_out);
+  if (root == NULL) {
+    return 0;
+  }
+
+  ok = strappy_tools_json_object_accepts_only(
+         root,
+         STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+         allowed_names,
+         sizeof(allowed_names) / sizeof(allowed_names[0]),
+         error_out) &&
+       strappy_tools_copy_string_argument(
+         STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+         root,
+         "name",
+         1,
+         STRAPPY_HELPER_SESSION_NAME_MAX_BYTES,
+         &arguments->name,
+         error_out);
+  cJSON_Delete(root);
+  if (!ok) {
+    strappy_helper_session_name_write_arguments_destroy(arguments);
+  }
+  return ok;
+}
+
 static int strappy_tools_parse_database_context_read_arguments(
   const char *arguments_json,
   strappy_database_context_read_arguments *arguments,
@@ -2222,6 +2295,73 @@ static int strappy_tools_helper_is_space(char value)
 {
   return ((value == ' ') || (value == '\t') || (value == '\r') ||
           (value == '\n') || (value == '\f') || (value == '\v')) ? 1 : 0;
+}
+
+static char *strappy_tools_copy_normalized_session_name(const char *name,
+                                                        char **error_out)
+{
+  char *normalized;
+  size_t start;
+  size_t end;
+  size_t index;
+  size_t output_index;
+  int pending_space;
+
+  if (name == NULL) {
+    strappy_set_error(error_out, "Session name is empty.");
+    return NULL;
+  }
+
+  start = 0U;
+  end = strlen(name);
+  while ((start < end) && strappy_tools_helper_is_space(name[start])) {
+    start++;
+  }
+  while ((end > start) && strappy_tools_helper_is_space(name[end - 1U])) {
+    end--;
+  }
+  if (start == end) {
+    strappy_set_error(error_out, "Session name is empty.");
+    return NULL;
+  }
+
+  normalized = (char *)malloc((end - start) + 1U);
+  if (normalized == NULL) {
+    strappy_set_error(error_out, "Could not allocate session name.");
+    return NULL;
+  }
+
+  output_index = 0U;
+  pending_space = 0;
+  for (index = start; index < end; index++) {
+    if (strappy_tools_helper_is_space(name[index])) {
+      pending_space = 1;
+      continue;
+    }
+
+    if (pending_space && (output_index > 0U)) {
+      normalized[output_index++] = ' ';
+    }
+    pending_space = 0;
+    normalized[output_index++] = name[index];
+  }
+
+  if (output_index == 0U) {
+    free(normalized);
+    strappy_set_error(error_out, "Session name is empty.");
+    return NULL;
+  }
+  if (output_index > STRAPPY_HELPER_SESSION_NAME_MAX_BYTES) {
+    free(normalized);
+    strappy_set_formatted_error(
+      error_out,
+      "helper_session_name_write name is too long; maximum is %u bytes.",
+      (unsigned int)STRAPPY_HELPER_SESSION_NAME_MAX_BYTES);
+    return NULL;
+  }
+
+  normalized[output_index] = '\0';
+  return normalized;
 }
 
 static char *strappy_tools_convert_timestamp_token_to_iso8601(
@@ -5012,6 +5152,72 @@ static char *strappy_tools_execute_helper_user_info_forget(
   return json;
 }
 
+static char *strappy_tools_execute_helper_session_name_write(
+  const char *session_db_path,
+  long long active_session_id,
+  const char *arguments_json,
+  char **error_out)
+{
+  strappy_helper_session_name_write_arguments arguments;
+  cJSON *root;
+  char *name;
+  char *json;
+  int did_update;
+
+  if (active_session_id <= 0) {
+    strappy_set_error(error_out,
+                      "helper_session_name_write requires an active session.");
+    return NULL;
+  }
+
+  strappy_helper_session_name_write_arguments_init(&arguments);
+  if (!strappy_tools_parse_helper_session_name_write_arguments(arguments_json,
+                                                               &arguments,
+                                                               error_out)) {
+    return NULL;
+  }
+
+  name = strappy_tools_copy_normalized_session_name(arguments.name, error_out);
+  strappy_helper_session_name_write_arguments_destroy(&arguments);
+  if (name == NULL) {
+    return NULL;
+  }
+
+  did_update = 0;
+  if (!strappy_db_update_session_name_if_empty(session_db_path,
+                                              active_session_id,
+                                              name,
+                                              &did_update,
+                                              error_out)) {
+    free(name);
+    return NULL;
+  }
+
+  root = cJSON_CreateObject();
+  if ((root == NULL) ||
+      !strappy_tools_add_bool_to_object(root, "ok", 1) ||
+      (cJSON_AddStringToObject(root, "name", name) == NULL) ||
+      !strappy_tools_add_bool_to_object(root, "updated", did_update) ||
+      (cJSON_AddStringToObject(root,
+                               "status",
+                               did_update ? "written" : "unchanged") == NULL)) {
+    cJSON_Delete(root);
+    free(name);
+    strappy_set_error(error_out, "Could not build session name result.");
+    return NULL;
+  }
+
+  json = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  free(name);
+  if (json == NULL) {
+    strappy_set_error(error_out, "Could not serialize session name result.");
+    return NULL;
+  }
+
+  return json;
+}
+
 static char *strappy_tools_execute_database_context_read(
   const char *session_db_path,
   const char *resource_dir,
@@ -5293,6 +5499,7 @@ static char *strappy_tools_execute_database_list_info(
 }
 
 char *strappy_tools_execute(const char *session_db_path,
+                            long long active_session_id,
                             const char *resource_dir,
                             const char *tool_name,
                             const char *arguments_json,
@@ -5343,6 +5550,13 @@ char *strappy_tools_execute(const char *session_db_path,
     return strappy_tools_execute_helper_user_info_forget(session_db_path,
                                                          arguments_json,
                                                          error_out);
+  }
+
+  if (strcmp(tool_name, STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) == 0) {
+    return strappy_tools_execute_helper_session_name_write(session_db_path,
+                                                           active_session_id,
+                                                           arguments_json,
+                                                           error_out);
   }
 
   if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_CONTEXT_READ) == 0) {

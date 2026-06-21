@@ -15,6 +15,7 @@ void strappy_session_record_init(strappy_session_record *record)
   }
 
   record->session_id = 0;
+  record->name = NULL;
   record->prompt = NULL;
   record->response = NULL;
   record->model = NULL;
@@ -29,6 +30,7 @@ void strappy_session_record_destroy(strappy_session_record *record)
   }
 
   free(record->prompt);
+  free(record->name);
   free(record->response);
   free(record->model);
   free(record->created_at);
@@ -289,6 +291,7 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
   static const char *sessions_sql =
     "CREATE TABLE IF NOT EXISTS sessions ("
     "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "name TEXT NOT NULL DEFAULT '',"
     "prompt TEXT NOT NULL,"
     "response TEXT NOT NULL,"
     "model TEXT,"
@@ -462,6 +465,7 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
                                                    sqlite3_stmt *stmt,
                                                    char **error_out)
 {
+  char *name;
   char *prompt;
   char *response;
   char *model;
@@ -474,14 +478,17 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
 
   strappy_session_record_destroy(record);
   record->session_id = (long long)sqlite3_column_int64(stmt, 0);
-  record->http_status = (long)sqlite3_column_int64(stmt, 4);
+  record->http_status = (long)sqlite3_column_int64(stmt, 5);
 
-  prompt = strappy_db_column_string(stmt, 1);
-  response = strappy_db_column_string(stmt, 2);
-  model = strappy_db_column_string(stmt, 3);
-  created_at = strappy_db_column_string(stmt, 5);
+  name = strappy_db_column_string(stmt, 1);
+  prompt = strappy_db_column_string(stmt, 2);
+  response = strappy_db_column_string(stmt, 3);
+  model = strappy_db_column_string(stmt, 4);
+  created_at = strappy_db_column_string(stmt, 6);
 
-  if ((prompt == NULL) || (response == NULL) || (created_at == NULL)) {
+  if ((name == NULL) || (prompt == NULL) || (response == NULL) ||
+      (created_at == NULL)) {
+    free(name);
     free(prompt);
     free(response);
     free(model);
@@ -490,6 +497,7 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
     return 0;
   }
 
+  record->name = name;
   record->prompt = prompt;
   record->response = response;
   record->model = model;
@@ -2193,6 +2201,84 @@ int strappy_db_create_session(const char *db_path,
   return 1;
 }
 
+int strappy_db_update_session_name_if_empty(const char *db_path,
+                                            long long session_id,
+                                            const char *name,
+                                            int *did_update_out,
+                                            char **error_out)
+{
+  static const char *sql =
+    "UPDATE sessions "
+    "SET name = ? "
+    "WHERE id = ? AND name = '';";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+  int changed;
+
+  if (did_update_out != NULL) {
+    *did_update_out = 0;
+  }
+
+  if ((name == NULL) || (name[0] == '\0')) {
+    strappy_set_error(error_out, "Session name is empty.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_session_exists(db, session_id, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare session name update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if ((sqlite3_bind_text(stmt, 1, name, -1, SQLITE_TRANSIENT) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) != SQLITE_OK)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind session name update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not update session name: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  changed = sqlite3_changes(db);
+  if (did_update_out != NULL) {
+    *did_update_out = (changed > 0) ? 1 : 0;
+  }
+
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  return 1;
+}
+
 int strappy_db_save_message_sequence_with_id(
   const char *db_path,
   const char *prompt,
@@ -2322,7 +2408,7 @@ int strappy_db_list_sessions(const char *db_path,
                              char **error_out)
 {
   static const char *sql =
-    "SELECT id, prompt, response, model, http_status, created_at "
+    "SELECT id, name, prompt, response, model, http_status, created_at "
     "FROM sessions "
     "ORDER BY id DESC;";
   sqlite3 *db;
@@ -2411,7 +2497,7 @@ int strappy_db_load_session(const char *db_path,
                             char **error_out)
 {
   static const char *sql =
-    "SELECT id, prompt, response, model, http_status, created_at "
+    "SELECT id, name, prompt, response, model, http_status, created_at "
     "FROM sessions "
     "WHERE id = ?;";
   sqlite3 *db;

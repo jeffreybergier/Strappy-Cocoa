@@ -408,6 +408,7 @@ static int harness_expect_error_contains(const char *catalog_path,
 
   error = NULL;
   output = strappy_tools_execute(catalog_path,
+                                 0LL,
                                  HARNESS_RESOURCE_DIR,
                                  tool_name,
                                  arguments_json,
@@ -442,6 +443,7 @@ static int harness_expect_output_contains(const char *catalog_path,
 
   error = NULL;
   output = strappy_tools_execute(catalog_path,
+                                 0LL,
                                  HARNESS_RESOURCE_DIR,
                                  tool_name,
                                  arguments_json,
@@ -481,6 +483,7 @@ static int harness_expect_output_contains_without(const char *catalog_path,
 
   error = NULL;
   output = strappy_tools_execute(catalog_path,
+                                 0LL,
                                  HARNESS_RESOURCE_DIR,
                                  tool_name,
                                  arguments_json,
@@ -520,6 +523,7 @@ static int harness_expect_output_equals(const char *catalog_path,
 
   error = NULL;
   output = strappy_tools_execute(catalog_path,
+                                 0LL,
                                  HARNESS_RESOURCE_DIR,
                                  tool_name,
                                  arguments_json,
@@ -567,6 +571,7 @@ static int harness_run_tool_registry_tests(void)
         (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_READ) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_FORGET) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_CONTEXT_READ) != NULL) &&
         (strstr(tools_json,
                 STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) != NULL) &&
@@ -577,6 +582,7 @@ static int harness_run_tool_registry_tests(void)
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_READ) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_FORGET) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) &&
         strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_CONTEXT_READ) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET) &&
@@ -827,6 +833,7 @@ static int harness_run_database_list_info_tests(const harness_context *context)
 
   error = NULL;
   output = strappy_tools_execute(context->catalog_path,
+                                 0LL,
                                  HARNESS_RESOURCE_DIR,
                                  STRAPPY_TOOL_DATABASE_LIST_INFO,
                                  "{}",
@@ -881,6 +888,7 @@ static int harness_run_empty_database_list_info_tests(
   }
 
   output = strappy_tools_execute(context->catalog_path,
+                                 0LL,
                                  HARNESS_RESOURCE_DIR,
                                  STRAPPY_TOOL_DATABASE_LIST_INFO,
                                  "{}",
@@ -1327,6 +1335,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   strappy_session_message_record_list messages;
   long long session_id;
   char *error;
+  char *output;
   int ok;
 
   if (context == NULL) {
@@ -1359,6 +1368,8 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   }
 
   ok = (session.session_id == session_id) &&
+       (session.name != NULL) &&
+       (strcmp(session.name, "") == 0) &&
        (session.prompt != NULL) &&
        (strcmp(session.prompt, "") == 0) &&
        (session.response != NULL) &&
@@ -1367,6 +1378,91 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   strappy_session_record_destroy(&session);
   if (!ok) {
     fprintf(stderr, "Empty session row did not have the expected shape.\n");
+    return 0;
+  }
+
+  error = NULL;
+  output = strappy_tools_execute(context->catalog_path,
+                                 session_id,
+                                 HARNESS_RESOURCE_DIR,
+                                 STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+                                 "{\"name\":\"  Find   Receipts  \"}",
+                                 &error);
+  if (output == NULL) {
+    fprintf(stderr,
+            "Could not write session name: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  ok = (strstr(output, "\"name\":\"Find Receipts\"") != NULL) &&
+       (strstr(output, "\"updated\":true") != NULL);
+  free(output);
+  if (!ok) {
+    fprintf(stderr, "Session name tool did not report a write.\n");
+    return 0;
+  }
+
+  strappy_session_record_init(&session);
+  ok = strappy_db_load_session(context->catalog_path,
+                               session_id,
+                               &session,
+                               &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not load named empty session: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_record_destroy(&session);
+    return 0;
+  }
+  ok = (session.name != NULL) &&
+       (strcmp(session.name, "Find Receipts") == 0);
+  strappy_session_record_destroy(&session);
+  if (!ok) {
+    fprintf(stderr, "Session name was not stored.\n");
+    return 0;
+  }
+
+  error = NULL;
+  output = strappy_tools_execute(context->catalog_path,
+                                 session_id,
+                                 HARNESS_RESOURCE_DIR,
+                                 STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+                                 "{\"name\":\"Different Title\"}",
+                                 &error);
+  if (output == NULL) {
+    fprintf(stderr,
+            "Could not run second session name write: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  ok = (strstr(output, "\"updated\":false") != NULL);
+  free(output);
+  if (!ok) {
+    fprintf(stderr, "Second session name write unexpectedly updated.\n");
+    return 0;
+  }
+
+  strappy_session_record_init(&session);
+  ok = strappy_db_load_session(context->catalog_path,
+                               session_id,
+                               &session,
+                               &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not load unchanged named session: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_record_destroy(&session);
+    return 0;
+  }
+  ok = (session.name != NULL) &&
+       (strcmp(session.name, "Find Receipts") == 0);
+  strappy_session_record_destroy(&session);
+  if (!ok) {
+    fprintf(stderr, "Session name was unexpectedly changed.\n");
     return 0;
   }
 
@@ -1447,7 +1543,9 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
     return 0;
   }
 
-  ok = (session.prompt != NULL) &&
+  ok = (session.name != NULL) &&
+       (strcmp(session.name, "Find Receipts") == 0) &&
+       (session.prompt != NULL) &&
        (strcmp(session.prompt, "First prompt") == 0) &&
        (session.response != NULL) &&
        (strcmp(session.response, "First answer") == 0) &&

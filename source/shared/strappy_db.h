@@ -9,6 +9,7 @@ extern "C" {
 
 typedef struct strappy_session_record {
   long long session_id;
+  char *name;
   char *prompt;
   char *response;
   char *model;
@@ -163,6 +164,11 @@ int strappy_db_save_exchange_with_id(const char *db_path,
 int strappy_db_create_session(const char *db_path,
                               long long *session_id_out,
                               char **error_out);
+int strappy_db_update_session_name_if_empty(const char *db_path,
+                                            long long session_id,
+                                            const char *name,
+                                            int *did_update_out,
+                                            char **error_out);
 int strappy_db_list_sessions(const char *db_path,
                              strappy_session_record_list *list,
                              char **error_out);

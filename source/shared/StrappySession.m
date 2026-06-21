@@ -253,6 +253,7 @@ static int StrappySessionHandleStreamEvent(
 {
   NSNumber *sessionId;
   NSNumber *httpStatus;
+  NSString *name;
   NSString *prompt;
   NSString *response;
   NSString *model;
@@ -264,6 +265,7 @@ static int StrappySessionHandleStreamEvent(
 
   sessionId = [NSNumber numberWithLongLong:record->session_id];
   httpStatus = [NSNumber numberWithLong:record->http_status];
+  name = [StrappySession stringFromCStringOrEmpty:record->name];
   prompt = [StrappySession stringFromCStringOrEmpty:record->prompt];
   response = [StrappySession stringFromCStringOrEmpty:record->response];
   model = [StrappySession stringFromCStringOrEmpty:record->model];
@@ -271,6 +273,7 @@ static int StrappySessionHandleStreamEvent(
 
   return [NSDictionary dictionaryWithObjectsAndKeys:
     sessionId, @"id",
+    name, @"name",
     prompt, @"prompt",
     response, @"response",
     model, @"model",

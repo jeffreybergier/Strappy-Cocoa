@@ -56,6 +56,7 @@ typedef struct strappy_assistant_turn_spec {
   const char *prompt;
   const char *prompt_message_key;
   const char *assistant_message_key;
+  long long session_id;
   strappy_assistant_tool_policy tool_policy;
 } strappy_assistant_turn_spec;
 
@@ -501,6 +502,7 @@ static int strappy_assistant_turn_keys_make(
 static void strappy_assistant_turn_spec_set(
   strappy_assistant_turn_spec *turn,
   const strappy_assistant_turn_keys *keys,
+  long long session_id,
   const char *prompt_group_key,
   const char *actor,
   const char *render_role,
@@ -525,11 +527,13 @@ static void strappy_assistant_turn_spec_set(
   turn->prompt_message_key = (keys != NULL) ? keys->prompt_message_key : NULL;
   turn->assistant_message_key =
     (keys != NULL) ? keys->assistant_message_key : NULL;
+  turn->session_id = session_id;
   turn->tool_policy = policy;
 }
 
 static int strappy_assistant_make_default_turns(
   const char *prompt,
+  long long session_id,
   strappy_assistant_turn_keys *main_keys,
   strappy_assistant_turn_keys *audit_keys,
   strappy_assistant_turn_spec *main_turn,
@@ -551,6 +555,7 @@ static int strappy_assistant_make_default_turns(
 
   strappy_assistant_turn_spec_set(main_turn,
                                   main_keys,
+                                  session_id,
                                   NULL,
                                   "user",
                                   "user",
@@ -560,6 +565,7 @@ static int strappy_assistant_make_default_turns(
                                   STRAPPY_ASSISTANT_TOOL_POLICY_NORMAL);
   strappy_assistant_turn_spec_set(audit_turn,
                                   audit_keys,
+                                  session_id,
                                   main_keys->prompt_group_key,
                                   "harness",
                                   "harness",
@@ -614,7 +620,8 @@ static int strappy_assistant_tool_is_allowed(
 {
   if (policy == STRAPPY_ASSISTANT_TOOL_POLICY_MEMORY_AUDIT) {
     return ((tool_name != NULL) &&
-            ((strcmp(tool_name, STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER) == 0) ||
+            ((strcmp(tool_name, STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) == 0) ||
+             (strcmp(tool_name, STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER) == 0) ||
              (strcmp(tool_name, STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) == 0))) ? 1 : 0;
   }
 
@@ -627,6 +634,10 @@ static const char *strappy_assistant_memory_audit_prompt(void)
     "Learning Summary:\n"
     "- Do not revise, summarize, or add commentary to the final answer you just "
     "wrote.\n"
+    "- Call helper_session_name_write once with the shortest useful title "
+    "summarizing the user's request. Use only a few words, no quotes, and no "
+    "punctuation unless necessary. The tool only writes if the session is "
+    "currently untitled.\n"
     "- If the user prompt, tool results, database queries, or what you learned "
     "while answering revealed any new small, stable, future-useful user fact, "
     "call helper_user_info_remember now.\n"
@@ -636,7 +647,8 @@ static const char *strappy_assistant_memory_audit_prompt(void)
     "- Store only information that is explicit or strongly implied and useful "
     "later. Never store secrets, credentials, sensitive identifiers, long "
     "copied content, or private row contents.\n"
-    "- If there is nothing worth remembering, do not call a tool.\n"
+    "- If there is nothing worth remembering beyond the session title, do not "
+    "call a remember tool.\n"
     "After any remember tool calls complete, respond with exactly: "
     "Learning Summary Complete";
 }
@@ -1251,6 +1263,7 @@ static int strappy_assistant_build_tool_round(
         "Tool is not allowed for this turn.");
     } else {
       output = strappy_tools_execute(session_db_path,
+                                     (turn != NULL) ? turn->session_id : 0LL,
                                      resource_dir,
                                      round->tool_names[index],
                                      round->tool_arguments[index],
@@ -1907,7 +1920,7 @@ static int strappy_assistant_run_memory_audit(
   size_t base_count;
   int audit_has_tool_calls;
   int did_run_audit_tool_round;
-  const char *audit_tool_allowlist[2];
+  const char *audit_tool_allowlist[3];
   strappy_config audit_config;
   strappy_assistant_stream_turn_context turn_context;
 
@@ -1945,8 +1958,9 @@ static int strappy_assistant_run_memory_audit(
     return 0;
   }
 
-  audit_tool_allowlist[0] = STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER;
-  audit_tool_allowlist[1] = STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER;
+  audit_tool_allowlist[0] = STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE;
+  audit_tool_allowlist[1] = STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER;
+  audit_tool_allowlist[2] = STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER;
   audit_config = *config;
   audit_config.tool_allowlist = audit_tool_allowlist;
   audit_config.tool_allowlist_count =
@@ -2141,6 +2155,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   }
   strappy_assistant_turn_spec_set(&main_turn,
                                   &main_keys,
+                                  session_id,
                                   NULL,
                                   "user",
                                   "user",
@@ -2150,6 +2165,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                   STRAPPY_ASSISTANT_TOOL_POLICY_NORMAL);
   strappy_assistant_turn_spec_set(&audit_turn,
                                   &audit_keys,
+                                  session_id,
                                   main_keys.prompt_group_key,
                                   "harness",
                                   "harness",
@@ -2321,6 +2337,7 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   }
 
   if (!strappy_assistant_make_default_turns(prompt,
+                                            session_id,
                                             &main_keys,
                                             &audit_keys,
                                             &main_turn,

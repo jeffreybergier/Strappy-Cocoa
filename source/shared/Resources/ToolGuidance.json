@@ -198,6 +198,26 @@
     {
       "type": "function",
       "function": {
+        "name": "helper_session_name_write",
+        "description": "Name the active chat session with a concise title based on the user's request. Use only a few words, no quotes, and no punctuation unless necessary. The title is written only if the session is currently untitled.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Concise session title in as few words as possible, based on the user's request."
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "database_context_read",
         "description": "Read database context. Requires at least one of database_id, query, kind, or limit. With a database_id, returns safe metadata, a human description, simplified live schema, and remembered database hints such as join paths, column semantics, content locations, and caveats. Without a database_id, use query, kind, or limit to read remembered database hints only.",
         "parameters": {

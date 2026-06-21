@@ -51,7 +51,13 @@ static NSDictionary *StrappySessionDisplayRow(NSDictionary *session)
 
 static NSString *StrappySessionPromptPreview(NSDictionary *session)
 {
+  NSString *name;
   NSString *prompt;
+
+  name = [session objectForKey:@"name"];
+  if ([name isKindOfClass:[NSString class]] && ([name length] > 0U)) {
+    return name;
+  }
 
   prompt = [session objectForKey:@"prompt"];
   if (![prompt isKindOfClass:[NSString class]] || ([prompt length] == 0U)) {
