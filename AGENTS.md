@@ -10,11 +10,15 @@ app is always built for arm64, x64, x86, and PPC. After changing anything before
 you finish, please run a clean build to ensure there are no warnings. Also make
 sure you capture all of the build output so you can see all the warnings. In
 certain cases, we also want to run Clang static analysis to be extra sure we are
-not leaking memory or dereferencing null pointers.
+not leaking memory or dereferencing null pointers. Capture build output in the
+terminal transcript or a local working log, but do not commit generated build or
+analysis logs unless the user explicitly asks for them.
 
 Linux-only shared-core harnesses live under `source/linux`. They are fast
 developer smoke tests for portable C code and do not replace the required
-Altivec iOS/macOS clean builds.
+Altivec iOS/macOS clean builds. The current harness targets are
+`database_query_harness` and `webview_harness`, run through
+`make -C source/linux clean test`.
 
 House style for Strappy source:
 
@@ -65,15 +69,40 @@ House style for Strappy source:
 12. Webview HTML, CSS, and JavaScript strings are generated in C. Keep that
     rendering logic in `strappy_webview.{h,c}` or another C module, not in
     Objective-C view controllers.
-13. When changing shared C behavior, especially database, tool, prompt, client,
+13. Prompt, tool, and database guidance are runtime resources under
+    `source/shared/Resources`: `PromptSystem.txt`, `ToolGuidance.json`, and
+    `DatabaseGuidance.json`. Keep tool schemas in `ToolGuidance.json` in sync
+    with the tool-name constants in `strappy_tools.h` and the executor in
+    `strappy_tools.c`; do not duplicate prompt or tool guidance in
+    Objective-C UI code.
+14. Database tool flow is split by responsibility. `database_list_info` lists
+    approved databases by assistant-visible IDs with safe metadata and short
+    descriptions only. `database_context_read` returns selected database
+    context, live simplified schema, and remembered database hints.
+    `database_query` runs bounded read-only SQL against approved databases.
+    Do not put raw filesystem paths, full schema dumps, or learned hint caches
+    into `database_list_info`.
+15. Helper memory and session-title tools persist durable assistant state.
+    `helper_user_info_*` stores small stable user facts, `helper_database_info_*`
+    stores reusable evidence-backed database hints, and
+    `helper_session_name_write` names an untitled active session. Do not store
+    secrets, credentials, sensitive identifiers, long copied content, or private
+    row contents in helper memory.
+16. Assistant turns and persisted messages carry `turn_key`,
+    `prompt_group_key`, actor, context policy, tool-call metadata, and optional
+    reasoning text. Harness and post-answer memory-audit turns should use
+    `context_policy = omit` so they can render in history without being replayed
+    as normal user context.
+17. When changing shared C behavior, especially database, tool, prompt, client,
     or JSON parsing code, run `make -C source/linux clean test` where the host
     Linux environment has the required dependencies. Keep the harnesses updated
     as new shared behavior is added or existing behavior changes, so regressions
     can be caught without waiting for full Apple-target builds.
 
-The iOS App is a bit special because its not sandboxed. It must be installed via
-.deb file, not .ipa file so that it can scan the whole filesystem for SQLite
-database. This is known to only work on Jailbroken iPhones and that is ok.
+The iOS App is a bit special because it's not sandboxed. It must be installed
+via .deb file, not .ipa file so that it can scan the whole filesystem for
+SQLite databases. This is known to only work on Jailbroken iPhones and that is
+ok.
 
 Strappy is an OpenRouter based AI Assistant that has the following basic
 infrastructure:
@@ -86,3 +115,5 @@ infrastructure:
 6. Filesystem search to search the host device for sqlite databases
 7. Tools that allow the Agent to discover the schema of a sqlite database found
 8. Tools that allow the Agent to answer questions the user asks from the personal context found in the sqlite databases
+9. Helper tools for timestamp conversion, remembered user facts, remembered database hints, and session naming
+10. Runtime prompt/tool/database guidance resources that steer database selection, SQL workflow, and memory behavior

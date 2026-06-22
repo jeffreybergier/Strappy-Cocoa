@@ -17,6 +17,9 @@ personal context from those databases.
   required architecture.
 - After source changes, run clean builds and capture full build output so
   warnings are visible.
+- Keep prompt, tool, and database guidance resources in
+  `source/shared/Resources` synchronized with the C tool registry and prompt
+  loader.
 
 ## Phase 1: Core Runtime Foundation
 
@@ -34,8 +37,9 @@ Deliverables:
   client code instead of reusable shared wrappers.
 - [x] libcurl integration with a reusable HTTP client abstraction.
 - [ ] sqlite integration with read-only connection helpers, statement lifecycle
-  helpers, and result serialization helpers. Session persistence exists, but
-  read-only local database helpers are still open.
+  helpers, and result serialization helpers. Session/catalog persistence and
+  bounded read-only `database_query` execution exist; reusable shared sqlite
+  helper APIs are still mostly local to `strappy_db.c` and `strappy_tools.c`.
 - [ ] Configuration loading for OpenRouter API key, base URL, model, timeout,
   and request limits. API key/base URL/model exist; timeout and request-limit
   configuration are still open.
@@ -46,8 +50,8 @@ Validation:
 
 - [x] Clean debug build for macOS.
 - [x] Clean debug build for iOS.
-- [ ] Small shared-core smoke tests or command-style test harness where the
-  Altivec environment allows it.
+- [x] Linux shared-core smoke harnesses under `source/linux` for database/tool
+  behavior and webview rendering, run with `make -C source/linux clean test`.
 - [ ] No memory ownership warnings from Clang static analysis on the shared C
   core once non-trivial allocation code exists.
 
@@ -59,17 +63,24 @@ APIs and parse assistant responses reliably.
 Deliverables:
 
 - [x] C request builder for chat messages and model selection.
-- [ ] C request builder support for model settings and tool definitions.
+- [x] C request builder support for loading tool definitions from
+  `ToolGuidance.json`, including a tool allowlist for memory-audit turns.
+- [ ] Additional model-setting configuration beyond endpoint, model, streaming,
+  reasoning, and stream usage options.
 - [x] C response parser for assistant text, finish reasons, and API errors.
-- [ ] C response parser support for assistant tool calls as a stable parsed
-  result, not only preserved message JSON.
+- [x] C client preservation of non-streamed and streamed assistant
+  `tool_calls`, streamed tool-call deltas, and reasoning text for the assistant
+  loop.
+- [ ] Public stable parsed tool-call result API outside the assistant loop.
 - [x] Timeout policy for network requests.
 - [ ] Retry policy for transient network failures.
-- [ ] Request cancellation hook for the UI layer.
+- [ ] Request cancellation hook for the UI layer. The streaming callback can
+  reject/cancel a stream, but a user-facing native cancel action is still open.
 - [ ] Redacted diagnostic logging that never prints API keys or full personal
   database contents.
 - [x] Minimal Objective-C bridge functions to submit a prompt and receive
-  streamed or complete response text.
+  streamed or complete response text, reasoning deltas, tool events, and turn
+  events.
 
 Validation:
 
@@ -101,12 +112,15 @@ Deliverables:
   defensive error handling for invalid candidates.
 - [x] Local Strappy catalog database for discovered paths, file metadata, scan
   status, and user allow/deny decisions.
-- [ ] Catalog schema for deterministic database facts: assistant-visible
-  database ID, tables, columns, indexes, foreign keys, row counts where cheap,
-  file metadata, and scan timestamps.
+- [ ] Catalog schema for persisted deterministic database facts:
+  assistant-visible database ID, tables, columns, indexes, foreign keys, row
+  counts where cheap, file metadata, and scan timestamps. Live simplified schema
+  is available through `database_context_read`, but it is not yet stored as
+  catalog facts.
 - [x] Removed the database summary-cache catalog path. The assistant now relies
-  on deterministic schema facts from `database_list_info` and uses bounded
-  read-only `database_query` calls for concrete data lookups.
+  on `database_list_info` for database availability, `database_context_read` for
+  selected live schema and remembered hints, and bounded read-only
+  `database_query` calls for concrete data lookups.
 - [x] Native macOS Preferences allow checkbox whitelisting for valid cataloged
   SQLite databases.
 - [ ] Fixed native UI state for deny decisions and ignored locations.
@@ -129,54 +143,71 @@ Goal: expose controlled tools that let the assistant inspect database schemas
 and query user-approved databases.
 
 Architecture decision: expose a small stable tool set backed by the Strappy
-catalog rather than creating executable tools dynamically for each discovered
-database. Do not make one tool per whitelisted database; tools should accept an
-assistant-visible database ID and resolve it through the catalog. Deterministic
-schema facts such as tables, columns, indexes, foreign keys, and row counts are
-the only catalog-provided database facts. The assistant can inspect contents
-with bounded read-only queries when the user asks a concrete question.
+catalog and helper memory tables rather than creating executable tools
+dynamically for each discovered database. Do not make one tool per whitelisted
+database; tools should accept an assistant-visible database ID and resolve it
+through the catalog. `database_list_info` is for selection and availability,
+`database_context_read` is for selected live schema plus remembered hints, and
+`database_query` is for bounded read-only SQL. Durable learned user facts and
+database hints live in helper memory tables, not in a schema-summary cache.
 
 Deliverables:
 
 - [x] Tool registry in C with stable tool names, JSON schemas, argument
-  parsing, and result serialization. The registry exposes
-  `database_list_info` and `database_query`.
-- [x] Stable database tools named `database_list_info` and `database_query`,
-  both using assistant-visible database IDs.
-- [x] `database_list_info` defines the availability states `error`,
-  `possible_scan_needed`, `possible_whitelist_needed`, and `available`. Empty
-  success results route scanning and approval to the user-clicked
-  `database_manage` app action through next-step hints; `database_manage` is not
-  an LLM tool.
-- [x] `database_list_info` tool that returns all approved databases with
-  deterministic schema facts: tables, columns, indexes, foreign keys, cheap row
-  counts, filename-based file metadata, and per-database recommended next
-  steps.
+  parsing, and result serialization. The registry exposes `database_list_info`,
+  `database_context_read`, `database_query`, timestamp helpers, remembered user
+  fact helpers, remembered database hint helpers, and
+  `helper_session_name_write`.
+- [x] Stable database tools named `database_list_info`,
+  `database_context_read`, and `database_query`, all using assistant-visible
+  database IDs when a database is selected.
+- [x] `database_list_info` defines `available` and `no_approved_databases`
+  success states, with tool failure representing errors. Empty success results
+  include a `database_manage` user action hint; `database_manage` is not an LLM
+  tool.
+- [x] `database_list_info` returns approved databases with assistant-visible
+  IDs, safe filename metadata, short descriptions, and availability state. It
+  intentionally omits raw filesystem paths, schema, remembered hints, and query
+  results.
+- [x] `database_context_read` returns selected database metadata, full
+  description, simplified live schema, and remembered database hints; without a
+  database ID it can search remembered hints only.
 - [x] `database_query` tool that permits read-only SQL only and enforces
   statement timeouts, row limits, and result size limits.
-- [ ] Database ID resolution that maps assistant-visible database IDs to
+- [x] Database ID resolution that maps assistant-visible database IDs to
   cataloged local paths without leaking unnecessary filesystem details. The
   `database_list_info` result uses assistant-visible IDs and omits raw filesystem
   paths.
-- [ ] `database_manage` app action link, intercepted by the WebView/native
-  bridge, that opens `PreferencesWindowController` for scanning, approval,
-  denial, forgetting, and rescanning databases.
-- [ ] Prompt context builder that summarizes available databases and tool usage
-  rules. Basic tool-use prompt context exists for `database_list_info`;
-  database summaries remain open.
+- [ ] `database_manage` app action link. The tool result now emits
+  `strappy://database-manage`; WebView/native bridge interception that opens
+  `PreferencesWindowController` remains open.
+- [x] Runtime prompt, tool, and database guidance resources:
+  `PromptSystem.txt`, `ToolGuidance.json`, and `DatabaseGuidance.json`.
+- [ ] Proactive prompt context builder that injects available-database summaries
+  before a tool call. Current behavior relies on tool guidance and
+  `database_list_info` / `database_context_read`.
 - [x] Bounded multi-round tool execution loop for chat completions: capture
   assistant `tool_calls`, execute registered local tools, send `role: "tool"`
   results back to the model, and repeat until the model returns final text or
   reaches the 20-round tool limit.
-- [x] Persisted tool-call and tool-result messages in `session_messages`, with
-  `tool_call` and `tool` roles replaying through stored raw message JSON.
+- [x] Post-answer memory-audit turn that can call `helper_session_name_write`,
+  `helper_user_info_remember`, and `helper_database_info_remember` with an
+  allowlisted tool set and `context_policy = omit`.
+- [x] Persisted prompt, assistant, tool-call, tool-result, and harness messages
+  in `session_messages`, with `session_turns`, `turn_key`, `prompt_group_key`,
+  raw message JSON, reasoning text, and context inclusion flags.
 - [x] Webview rendering for tool-call inputs and tool outputs as full-width
-  tool activity rows.
+  tool activity rows, with dynamic JSON object display and improved tool-error
+  visualization.
 - [ ] Audit log of tool calls, query text, row counts, errors, and truncation.
 
 Validation:
 
-- [ ] Unit tests for tool argument validation and SQL safety checks.
+- [x] Linux `database_query_harness` coverage for tool schema loading/filtering,
+  database-list output shape, SQL safety checks, timestamp helpers, remembered
+  user/database helper memory, session naming, and message persistence.
+- [x] Linux `webview_harness` coverage for webview rendering of JSON objects,
+  tool events, reasoning, and harness turns.
 - [ ] Fixture databases for common schemas, empty databases, large tables, and
   malformed requests.
 - [ ] Static analysis pass focused on JSON parsing, sqlite statement cleanup, and
@@ -191,22 +222,35 @@ that works on old iOS and macOS targets.
 
 Deliverables:
 
-- Embedded web chat UI suitable for legacy WebKit/UIWebView-era platforms.
-- Native bridge between the web UI and Objective-C/C assistant core.
-- Conversation list, active conversation view, message composer, loading state,
-  error state, and cancel action.
-- Tool activity display showing when Strappy is scanning, inspecting schema, or
-  querying a database. Basic tool-call and tool-result rows now render in the
-  chat log; scan/schema/query-specific activity remains open.
-- Database permission flow that lets the user approve, deny, or forget a found
-  database.
-- Local conversation persistence in sqlite.
-- Localized strings for English and Japanese for new visible UI.
+- [x] Embedded web chat UI suitable for legacy WebKit/UIWebView-era platforms.
+- [x] Native bridge between the web UI and Objective-C/C assistant core for
+  prompt submission, streaming text, reasoning, tool events, and turn events.
+- [ ] Conversation list, active conversation view, message composer, loading
+  state, error state, and cancel action. Conversation list/view/composer and
+  error states exist; a user-facing cancel action remains open.
+- [x] Local conversation persistence in sqlite using `sessions`,
+  `session_turns`, and `session_messages`; the old empty/non-started session
+  path has been removed.
+- [x] Session titles written by `helper_session_name_write` when the active
+  session is untitled.
+- [x] Tool activity display for tool-call inputs and tool outputs, including
+  dynamic JSON object rendering and tool-error visualization.
+- [x] Reasoning display for streamed and persisted assistant/harness messages,
+  with collapsed rendering for completed reasoning blocks.
+- [ ] Scan/schema/query-specific activity labels beyond generic tool rows.
+- [ ] Database permission flow that lets the user approve, deny, or forget a
+  found database. macOS approval checkboxes exist; deny, forget, rescan, and the
+  WebView `database_manage` bridge remain open.
+- [x] Localized strings for English and Japanese for new visible UI touched by
+  the current chat/session flow.
 
 Validation:
 
 - Manual UI pass on macOS and iOS build outputs.
 - Browser/webview compatibility pass for the oldest supported platform APIs.
+- Linux `webview_harness` smoke coverage for generated webview HTML/JS.
+- Linux `database_query_harness` smoke coverage for session message
+  persistence.
 - Persistence test covering app restart and failed request recovery.
 - Clean builds with full warning logs captured.
 
