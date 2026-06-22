@@ -25,6 +25,10 @@ char *strappy_tools_request_json_filtered(const char *resource_dir,
                                           const char * const *allowed_names,
                                           size_t allowed_name_count,
                                           char **error_out);
+char *strappy_tools_tool_guidance_string(const char *resource_dir,
+                                         const char *section_name,
+                                         const char *key,
+                                         char **error_out);
 int strappy_tools_is_helper(const char *tool_name);
 char *strappy_tools_execute(const char *session_db_path,
                             long long active_session_id,

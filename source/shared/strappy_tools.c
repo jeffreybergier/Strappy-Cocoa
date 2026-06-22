@@ -779,6 +779,57 @@ char *strappy_tools_request_json_filtered(const char *resource_dir,
   return json;
 }
 
+char *strappy_tools_tool_guidance_string(const char *resource_dir,
+                                         const char *section_name,
+                                         const char *key,
+                                         char **error_out)
+{
+  cJSON *root;
+  cJSON *section;
+  cJSON *item;
+  char *value;
+
+  if ((section_name == NULL) || (section_name[0] == '\0') ||
+      (key == NULL) || (key[0] == '\0')) {
+    strappy_set_error(error_out, "Tool guidance lookup is incomplete.");
+    return NULL;
+  }
+
+  root = strappy_tools_read_json_resource(resource_dir,
+                                          STRAPPY_TOOL_GUIDANCE_RESOURCE,
+                                          error_out);
+  if (root == NULL) {
+    return NULL;
+  }
+
+  section = cJSON_GetObjectItem(root, section_name);
+  if (!cJSON_IsObject(section)) {
+    cJSON_Delete(root);
+    strappy_set_formatted_error(error_out,
+                                "Tool guidance is missing %s.",
+                                section_name);
+    return NULL;
+  }
+
+  item = cJSON_GetObjectItem(section, key);
+  if (!cJSON_IsString(item) || (item->valuestring == NULL) ||
+      (item->valuestring[0] == '\0')) {
+    cJSON_Delete(root);
+    strappy_set_formatted_error(error_out,
+                                "Tool guidance is missing %s.%s.",
+                                section_name,
+                                key);
+    return NULL;
+  }
+
+  value = strappy_string_duplicate(item->valuestring);
+  cJSON_Delete(root);
+  if (value == NULL) {
+    strappy_set_error(error_out, "Could not allocate tool guidance string.");
+  }
+  return value;
+}
+
 static int strappy_tools_validate_empty_arguments(const char *arguments_json,
                                                   char **error_out)
 {

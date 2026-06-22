@@ -1,4 +1,15 @@
 {
+  "assistant_prompts": {
+    "memory_audit": "Learning Summary:\n- Do not revise, summarize, or add commentary to the final answer you just wrote.\n- Call helper_session_name_write once with the shortest useful title summarizing the user's request. Use only a few words, no quotes, and no punctuation unless necessary. The tool only writes if the session is currently untitled.\n- If the user prompt, tool results, database queries, or what you learned while answering revealed any new small, stable, future-useful user fact, call helper_user_info_remember now.\n- If tool results or database queries verified any reusable database schema, join, timestamp, flag, caveat, or query-pattern hint, call helper_database_info_remember now.\n- Store only information that is explicit or strongly implied and useful later. Never store secrets, credentials, sensitive identifiers, long copied content, or private row contents.\n- If there is nothing worth remembering beyond the session title, do not call a remember tool.\nAfter any remember tool calls complete, respond with exactly: Learning Summary Complete",
+    "memory_audit_completion": "Learning Summary Complete"
+  },
+  "assistant_messages": {
+    "tool_round_limit": "I reached the 50-round tool limit while inspecting local data, so I could not finish a reliable answer. Please ask a narrower question or continue with a more specific follow-up."
+  },
+  "tool_errors": {
+    "default": "Tool failed.",
+    "not_allowed_for_turn": "Tool is not allowed for this turn."
+  },
   "tools": [
     {
       "type": "function",
