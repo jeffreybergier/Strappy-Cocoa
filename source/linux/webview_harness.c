@@ -244,6 +244,7 @@ static int harness_check_harness_assistant_metadata(void)
   message.role = "assistant";
   message.actor = "harness";
   message.text = "Learning Summary Complete";
+  message.reasoning = "Harness thinking";
   message.metadata_json =
     "{\"usage\":{\"cost\":\"0.001\",\"prompt_tokens\":1,\"completion_tokens\":2}}";
 
@@ -255,6 +256,7 @@ static int harness_check_harness_assistant_metadata(void)
 
   ok = harness_expect_contains(message_html, "data-actor=\"harness\"") &&
        harness_expect_contains(message_html, "request-metadata") &&
+       harness_expect_contains(message_html, "Harness thinking") &&
        harness_expect_contains(message_html, "Learning Summary Complete");
 
   strappy_webview_free(message_html);

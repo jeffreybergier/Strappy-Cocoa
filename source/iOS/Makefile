@@ -6,8 +6,8 @@ INFO_PLIST = Info.plist
 SHARED_DIR = ../shared
 SYSTEM_PROMPT_TEMPLATE = $(SHARED_DIR)/Resources/PromptSystem.txt
 GUIDANCE_RESOURCES = $(SYSTEM_PROMPT_TEMPLATE) \
-                     $(SHARED_DIR)/Resources/ToolGuidance.json \
-                     $(SHARED_DIR)/Resources/DatabaseGuidance.json
+                     $(SHARED_DIR)/Resources/GuidanceTools.json \
+                     $(SHARED_DIR)/Resources/GuidanceDatabase.json
 ALTIVECCORE_REQUIRED = 1
 ALTIVECCOCOA_REQUIRED = 1
 SOURCE_DIRS = $(SHARED_DIR)

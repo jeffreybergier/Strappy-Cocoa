@@ -1230,8 +1230,8 @@ static int harness_run_mail_guidance_tests(harness_context *context)
   if (!harness_expect_output_contains(context->catalog_path,
                                       STRAPPY_TOOL_DATABASE_CONTEXT_READ,
                                       arguments,
-                                      "mailboxes.url",
-                                      "CAST(column AS TEXT)")) {
+                                      "identify the mailbox row first",
+                                      "Flags may be typeless text")) {
     return 0;
   }
 
@@ -1239,8 +1239,8 @@ static int harness_run_mail_guidance_tests(harness_context *context)
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_CONTEXT_READ,
         arguments,
-        "Envelope Index messages.ROWID -> Protected Index messages.message_id",
-        "do not join Protected Index using Envelope Index messages.remote_id")) {
+        "Envelope messages.ROWID -> Protected messages.message_id",
+        "date_received and date_sent are Unix seconds")) {
     return 0;
   }
 
@@ -1257,8 +1257,8 @@ static int harness_run_mail_guidance_tests(harness_context *context)
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_CONTEXT_READ,
         arguments,
-        "Protected Index messages.message_id matches Envelope Index messages.ROWID",
-        "message_data.message_data_id uses the same id")) {
+        "Pair with Envelope Index for mailbox, dates, flags, and thread context",
+        "Do not treat rows as Inbox unless they came from an Envelope mailbox filter")) {
     return 0;
   }
 
@@ -1296,24 +1296,24 @@ static int harness_run_sms_guidance_tests(harness_context *context)
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_CONTEXT_READ,
         arguments,
-        "handle.id and handle.uncanonicalized_id usually store phone numbers",
-        "chat_message_join -> message.ROWID")) {
+        "Handles are phone/email identifiers, not names",
+        "chat_message_join instead of relying only on message.handle_id")) {
     return 0;
   }
 
   if (!harness_expect_output_contains(context->catalog_path,
                                       STRAPPY_TOOL_DATABASE_CONTEXT_READ,
                                       arguments,
-                                      "helper_datetime_to_iso8601 with apple_seconds",
-                                      "page chronologically by message.date")) {
+                                      "Message dates are Apple epoch values",
+                                      "sample magnitude before converting")) {
     return 0;
   }
 
   if (!harness_expect_output_contains(context->catalog_path,
                                       STRAPPY_TOOL_DATABASE_CONTEXT_READ,
                                       arguments,
-                                      "helper_datetime_from_iso8601",
-                                      "matching Apple unit")) {
+                                      "attributedBody can be a fallback",
+                                      "message_attachment_join")) {
     return 0;
   }
 

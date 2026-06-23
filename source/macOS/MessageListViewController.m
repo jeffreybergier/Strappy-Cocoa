@@ -2022,10 +2022,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
           StrappyMessageHasRole(message, @"assistant")) {
         [js appendString:
           StrappyReplaceMessageJavaScript(pendingHarnessAssistantMessageIdentifier_,
-                                          StrappyMessageHTML(message,
-                                                             nil,
-                                                             nil,
-                                                             nil))];
+                                          StrappyMessageHTMLWithReasoning(
+                                            message,
+                                            streamingHarnessReasoningText_))];
         replacedHarnessAssistant = YES;
         continue;
       }

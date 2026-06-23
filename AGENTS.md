@@ -70,8 +70,8 @@ House style for Strappy source:
     rendering logic in `strappy_webview.{h,c}` or another C module, not in
     Objective-C view controllers.
 13. Prompt, tool, and database guidance are runtime resources under
-    `source/shared/Resources`: `PromptSystem.txt`, `ToolGuidance.json`, and
-    `DatabaseGuidance.json`. Keep tool schemas in `ToolGuidance.json` in sync
+    `source/shared/Resources`: `PromptSystem.txt`, `GuidanceTools.json`, and
+    `GuidanceDatabase.json`. Keep tool schemas in `GuidanceTools.json` in sync
     with the tool-name constants in `strappy_tools.h` and the executor in
     `strappy_tools.c`; do not duplicate prompt or tool guidance in
     Objective-C UI code.

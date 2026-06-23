@@ -64,7 +64,7 @@ Deliverables:
 
 - [x] C request builder for chat messages and model selection.
 - [x] C request builder support for loading tool definitions from
-  `ToolGuidance.json`, including a tool allowlist for memory-audit turns.
+  `GuidanceTools.json`, including a tool allowlist for memory-audit turns.
 - [ ] Additional model-setting configuration beyond endpoint, model, streaming,
   reasoning, and stream usage options.
 - [x] C response parser for assistant text, finish reasons, and API errors.
@@ -182,7 +182,7 @@ Deliverables:
   `strappy://database-manage`; WebView/native bridge interception that opens
   `PreferencesWindowController` remains open.
 - [x] Runtime prompt, tool, and database guidance resources:
-  `PromptSystem.txt`, `ToolGuidance.json`, and `DatabaseGuidance.json`.
+  `PromptSystem.txt`, `GuidanceTools.json`, and `GuidanceDatabase.json`.
 - [ ] Proactive prompt context builder that injects available-database summaries
   before a tool call. Current behavior relies on tool guidance and
   `database_list_info` / `database_context_read`.
