@@ -4,14 +4,17 @@
 #import "StrappySession.h"
 #import "XPFoundation.h"
 
-static const CGFloat kStrappySessionRowHeight = 58.0;
+static const CGFloat kStrappySessionRowHeight = 80.0;
 static const CGFloat kStrappySectionRowHeight = 24.0;
 static const CGFloat kStrappySessionToolbarHeight = 32.0;
 static const CGFloat kStrappySessionToolbarPad = 4.0;
-static const CGFloat kStrappyAvatarSize = 34.0;
 static const CGFloat kStrappyPadLeft = 8.0;
 static const CGFloat kStrappyPadRight = 8.0;
-static const CGFloat kStrappyTextGap = 8.0;
+static const CGFloat kStrappyTimestampTop = 8.0;
+static const CGFloat kStrappyTitleLineHeight = 17.0;
+static const CGFloat kStrappyTitleLines = 3.0;
+static const CGFloat kStrappyTimestampGap = 3.0;
+static const CGFloat kStrappyTimestampHeight = 14.0;
 static const AIFontAwesomeIcon kStrappySessionToolbarPlusIcon =
   (AIFontAwesomeIcon)0xF067;
 
@@ -75,34 +78,6 @@ static NSString *StrappySessionPromptPreview(NSDictionary *session)
   return prompt;
 }
 
-static NSString *StrappyRolePrefix(NSString *role)
-{
-  if ([role isEqualToString:@"assistant"]) {
-    return NSLocalizedString(@"Agent", nil);
-  }
-  return NSLocalizedString(@"You", nil);
-}
-
-static NSString *StrappyPreviewText(NSDictionary *row)
-{
-  NSString *type;
-  NSString *text;
-  NSString *role;
-
-  type = [row objectForKey:kStrappySessionRowTypeKey];
-  text = [row objectForKey:@"last_message_text"];
-  if (![text isKindOfClass:[NSString class]]) {
-    text = @"";
-  }
-  if ([type isEqualToString:kStrappySessionRowTypeSession]) {
-    role = [row objectForKey:@"last_message_role"];
-    return [NSString stringWithFormat:@"%@: %@",
-      StrappyRolePrefix(role),
-      ([text length] ? text : NSLocalizedString(@"No messages", nil))];
-  }
-  return text;
-}
-
 static NSString *StrappyDisplayTimestamp(NSString *timestamp)
 {
   static NSDateFormatter *inputFormatter = nil;
@@ -146,6 +121,21 @@ static NSDictionary *StrappyTextAttributes(NSFont *font,
     color, NSForegroundColorAttributeName,
     style, NSParagraphStyleAttributeName,
     nil];
+}
+
+static void StrappyDrawMultilineString(NSString *text,
+                                       NSRect rect,
+                                       NSDictionary *attrs)
+{
+  NSStringDrawingOptions options;
+
+  if (![text isKindOfClass:[NSString class]]) {
+    text = @"";
+  }
+
+  options = NSStringDrawingUsesLineFragmentOrigin |
+            NSStringDrawingTruncatesLastVisibleLine;
+  [text drawWithRect:rect options:options attributes:attrs];
 }
 
 static NSColor *StrappySelectedTextColor(BOOL selected)
@@ -222,135 +212,52 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   [title drawInRect:rect withAttributes:attrs];
 }
 
-- (void)drawAvatarInRect:(NSRect)avatarRect
-                     row:(NSDictionary *)row
-                selected:(BOOL)selected
-{
-  NSString *state;
-  NSColor *fillColor;
-  NSDictionary *attrs;
-  NSSize glyphSize;
-  NSRect glyphRect;
-
-  state = [row objectForKey:@"state"];
-  fillColor = selected ? [NSColor alternateSelectedControlTextColor]
-                       : [NSColor colorWithCalibratedWhite:0.72 alpha:1.0];
-
-  [fillColor set];
-  [[NSBezierPath bezierPathWithOvalInRect:avatarRect] fill];
-
-  attrs = [NSDictionary dictionaryWithObjectsAndKeys:
-    (selected ? [NSColor selectedControlColor] : [NSColor whiteColor]),
-      NSForegroundColorAttributeName,
-    [NSFont boldSystemFontOfSize:11.0],
-      NSFontAttributeName,
-    nil];
-  glyphSize = [@"AI" sizeWithAttributes:attrs];
-  glyphRect = NSMakeRect(NSMidX(avatarRect) - (glyphSize.width / 2.0),
-                         NSMidY(avatarRect) - (glyphSize.height / 2.0),
-                         glyphSize.width,
-                         glyphSize.height);
-  [@"AI" drawInRect:glyphRect withAttributes:attrs];
-
-  if ([state isEqualToString:@"error"]) {
-    NSRect dotRect;
-
-    dotRect = NSMakeRect(NSMaxX(avatarRect) - 8.0,
-                         NSMinY(avatarRect) + 1.0,
-                         9.0,
-                         9.0);
-    [[NSColor colorWithCalibratedRed:0.82 green:0.12 blue:0.10 alpha:1.0] set];
-    [[NSBezierPath bezierPathWithOvalInRect:dotRect] fill];
-  }
-}
-
 - (void)drawSessionWithFrame:(NSRect)frame row:(NSDictionary *)row
 {
   NSString *title;
-  NSString *preview;
   NSString *timestamp;
   NSString *type;
-  NSNumber *messageCount;
   BOOL selected;
-  BOOL isEmpty;
-  NSRect avatarRect;
-  CGFloat textX;
-  CGFloat textWidth;
-  CGFloat timestampWidth;
+  CGFloat titleHeight;
+  CGFloat titleY;
+  NSRect titleRect;
+  NSRect timestampRect;
   NSDictionary *titleAttrs;
-  NSDictionary *previewAttrs;
   NSDictionary *metaAttrs;
 
   selected = [self isHighlighted];
   type = [row objectForKey:kStrappySessionRowTypeKey];
-  isEmpty = [type isEqualToString:kStrappySessionRowTypeEmpty];
-
-  avatarRect = NSMakeRect(NSMinX(frame) + kStrappyPadLeft,
-                          NSMinY(frame) + floor((NSHeight(frame) - kStrappyAvatarSize) / 2.0),
-                          kStrappyAvatarSize,
-                          kStrappyAvatarSize);
-  if (!isEmpty) {
-    [self drawAvatarInRect:avatarRect row:row selected:selected];
-  }
-
-  textX = isEmpty ? (NSMinX(frame) + kStrappyPadLeft)
-                  : (NSMaxX(avatarRect) + kStrappyTextGap);
-  timestampWidth = 78.0;
-  textWidth = NSMaxX(frame) - textX - kStrappyPadRight - timestampWidth;
-  if (textWidth < 40.0) {
-    textWidth = NSMaxX(frame) - textX - kStrappyPadRight;
-    timestampWidth = 0.0;
-  }
 
   title = StrappySessionPromptPreview(row);
-  preview = StrappyPreviewText(row);
   timestamp = @"";
   if ([type isEqualToString:kStrappySessionRowTypeSession]) {
     timestamp = StrappyDisplayTimestamp([row objectForKey:@"last_message_at"]);
   }
 
-  titleAttrs = StrappyTextAttributes([NSFont boldSystemFontOfSize:13.0],
+  titleAttrs = StrappyTextAttributes([NSFont systemFontOfSize:13.0],
                                      StrappySelectedTextColor(selected),
-                                     NSLineBreakByTruncatingTail);
-  previewAttrs = StrappyTextAttributes([NSFont systemFontOfSize:11.0],
-                                       StrappySecondaryTextColor(selected),
-                                       NSLineBreakByTruncatingTail);
+                                     NSLineBreakByWordWrapping);
   metaAttrs = StrappyTextAttributes([NSFont systemFontOfSize:10.0],
                                     StrappySecondaryTextColor(selected),
                                     NSLineBreakByTruncatingTail);
 
-  [title drawInRect:NSMakeRect(textX,
-                               NSMinY(frame) + 9.0,
-                               textWidth,
-                               17.0)
-     withAttributes:titleAttrs];
-  [preview drawInRect:NSMakeRect(textX,
-                                 NSMinY(frame) + 29.0,
-                                 NSMaxX(frame) - textX - kStrappyPadRight,
-                                 15.0)
-       withAttributes:previewAttrs];
+  titleHeight = kStrappyTitleLineHeight * kStrappyTitleLines;
+  titleY = NSMinY(frame) + kStrappyTimestampTop;
+  if ([timestamp length] > 0U) {
+    timestampRect = NSMakeRect(NSMinX(frame) + kStrappyPadLeft,
+                               NSMinY(frame) + kStrappyTimestampTop,
+                               NSWidth(frame) - (kStrappyPadLeft + kStrappyPadRight),
+                               kStrappyTimestampHeight);
+    [timestamp drawInRect:timestampRect withAttributes:metaAttrs];
 
-  if ((timestampWidth > 0.0) && ([timestamp length] > 0U)) {
-    [timestamp drawInRect:NSMakeRect(NSMaxX(frame) - kStrappyPadRight - timestampWidth,
-                                     NSMinY(frame) + 10.0,
-                                     timestampWidth,
-                                     14.0)
-           withAttributes:metaAttrs];
+    titleY += kStrappyTimestampHeight + kStrappyTimestampGap;
   }
 
-  messageCount = [row objectForKey:@"message_count"];
-  if ([messageCount isKindOfClass:[NSNumber class]] &&
-      ([messageCount XP_unsignedIntegerValue] > 0UL)) {
-    NSString *countText;
-
-    countText = [NSString stringWithFormat:NSLocalizedString(@"%@ msgs", nil),
-      messageCount];
-    [countText drawInRect:NSMakeRect(NSMaxX(frame) - kStrappyPadRight - timestampWidth,
-                                     NSMinY(frame) + 31.0,
-                                     timestampWidth,
-                                     13.0)
-           withAttributes:metaAttrs];
-  }
+  titleRect = NSMakeRect(NSMinX(frame) + kStrappyPadLeft,
+                         titleY,
+                         NSWidth(frame) - (kStrappyPadLeft + kStrappyPadRight),
+                         titleHeight);
+  StrappyDrawMultilineString(title, titleRect, titleAttrs);
 }
 
 - (void)drawInteriorWithFrame:(NSRect)frame inView:(NSView *)view
