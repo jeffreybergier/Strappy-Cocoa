@@ -7,6 +7,8 @@
 @protocol PromptSendViewControllerDelegate
 - (void)promptSendViewController:(PromptSendViewController *)controller
                  didSubmitPrompt:(NSString *)prompt;
+- (void)promptSendViewControllerDidCancelPrompt:
+    (PromptSendViewController *)controller;
 - (void)promptSendViewControllerDidChangeHeight:
     (PromptSendViewController *)controller;
 @end
@@ -22,6 +24,7 @@
   BOOL          enabled_;
   BOOL          expanded_;
   BOOL          sending_;
+  BOOL          cancellationRequested_;
 }
 
 - (void)setDelegate:(id<PromptSendViewControllerDelegate>)delegate;
@@ -29,6 +32,7 @@
 - (CGFloat)preferredHeight;
 - (void)setEnabled:(BOOL)enabled;
 - (void)setSending:(BOOL)sending;
+- (void)setCancellationRequested:(BOOL)requested;
 - (BOOL)canSendCurrentPrompt;
 - (void)performSend:(id)sender;
 

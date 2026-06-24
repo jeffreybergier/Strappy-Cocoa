@@ -5,8 +5,14 @@
 
 #include <curl/curl.h>
 #include <cJSON.h>
+#include <ctype.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <time.h>
 
 typedef struct strappy_http_buffer {
   char *data;
@@ -149,6 +155,74 @@ static size_t strappy_client_write_callback(void *contents,
     return 0U;
   }
 
+  return real_size;
+}
+
+static int strappy_client_string_starts_with(const char *value,
+                                             const char *prefix)
+{
+  size_t prefix_length;
+
+  if ((value == NULL) || (prefix == NULL)) {
+    return 0;
+  }
+
+  prefix_length = strlen(prefix);
+  return (strncmp(value, prefix, prefix_length) == 0) ? 1 : 0;
+}
+
+static size_t strappy_client_header_callback(char *contents,
+                                             size_t size,
+                                             size_t nmemb,
+                                             void *userp)
+{
+  strappy_chat_result *result;
+  const char *header_name = "X-Generation-Id:";
+  size_t real_size;
+  size_t header_name_length;
+  size_t start;
+  size_t end;
+  char *copy;
+
+  if ((contents == NULL) || (userp == NULL)) {
+    return 0U;
+  }
+
+  if ((size != 0U) && (nmemb > (((size_t)-1) / size))) {
+    return 0U;
+  }
+
+  real_size = size * nmemb;
+  header_name_length = strlen(header_name);
+  if ((real_size <= header_name_length) ||
+      (strncasecmp(contents, header_name, header_name_length) != 0)) {
+    return real_size;
+  }
+
+  start = header_name_length;
+  while ((start < real_size) &&
+         isspace((unsigned char)contents[start])) {
+    start++;
+  }
+
+  end = real_size;
+  while ((end > start) &&
+         isspace((unsigned char)contents[end - 1U])) {
+    end--;
+  }
+
+  if (end <= start) {
+    return real_size;
+  }
+
+  copy = strappy_string_duplicate_length(contents + start, end - start);
+  if (copy == NULL) {
+    return 0U;
+  }
+
+  result = (strappy_chat_result *)userp;
+  free(result->response_id);
+  result->response_id = copy;
   return real_size;
 }
 
@@ -535,6 +609,30 @@ static int strappy_client_capture_json_string(char **target, cJSON *object, cons
   return 1;
 }
 
+static int strappy_client_capture_response_id(cJSON *root,
+                                              strappy_chat_result *result)
+{
+  cJSON *item;
+
+  if ((root == NULL) || (result == NULL)) {
+    return 1;
+  }
+
+  item = cJSON_GetObjectItem(root, "id");
+  if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
+    return 1;
+  }
+
+  if ((result->response_id != NULL) &&
+      strappy_client_string_starts_with(result->response_id, "gen-") &&
+      !strappy_client_string_starts_with(item->valuestring, "gen-")) {
+    return 1;
+  }
+
+  return strappy_client_replace_result_string(&result->response_id,
+                                              item->valuestring);
+}
+
 static int strappy_client_capture_json_value(char **target, cJSON *object, const char *key)
 {
   cJSON *item;
@@ -567,7 +665,7 @@ static int strappy_client_capture_response_metadata(cJSON *root,
     return 1;
   }
 
-  if (!strappy_client_capture_json_string(&result->response_id, root, "id") ||
+  if (!strappy_client_capture_response_id(root, result) ||
       !strappy_client_capture_json_value(&result->created, root, "created") ||
       !strappy_client_capture_json_string(&result->service_tier, root, "service_tier") ||
       !strappy_client_capture_json_string(&result->system_fingerprint,
@@ -882,6 +980,18 @@ static int strappy_client_build_metadata_text(strappy_chat_result *result)
                                                "Moderation latency (ms)",
                                                generation_data,
                                                "moderation_latency") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Prompt tokens",
+                                               generation_data,
+                                               "tokens_prompt") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Completion tokens",
+                                               generation_data,
+                                               "tokens_completion") &&
+           strappy_client_metadata_append_item(&buffer,
+                                               "Reasoning tokens",
+                                               generation_data,
+                                               "tokens_reasoning") &&
            strappy_client_metadata_append_item(&buffer,
                                                "Native prompt tokens",
                                                generation_data,
@@ -1512,8 +1622,10 @@ typedef struct strappy_stream_context {
   void *callback_data;
   char *message_role;
   char *stream_error;
+  time_t started_at;
   int saw_event;
   int done;
+  int cancelled;
 } strappy_stream_context;
 
 static void strappy_stream_context_init(strappy_stream_context *context)
@@ -1534,8 +1646,10 @@ static void strappy_stream_context_init(strappy_stream_context *context)
   context->callback_data = NULL;
   context->message_role = NULL;
   context->stream_error = NULL;
+  context->started_at = 0;
   context->saw_event = 0;
   context->done = 0;
+  context->cancelled = 0;
 }
 
 static void strappy_stream_context_destroy(strappy_stream_context *context)
@@ -1567,6 +1681,19 @@ static int strappy_client_stream_set_error(strappy_stream_context *context,
   context->stream_error = strappy_string_duplicate(message);
   if (context->stream_error == NULL) {
     context->stream_error = strappy_string_duplicate("OpenRouter stream failed.");
+  }
+  return 0;
+}
+
+static int strappy_client_stream_mark_cancelled(strappy_stream_context *context)
+{
+  if (context == NULL) {
+    return 0;
+  }
+
+  context->cancelled = 1;
+  if (context->result != NULL) {
+    context->result->cancelled = 1;
   }
   return 0;
 }
@@ -1960,7 +2087,7 @@ static int strappy_client_stream_finalize_message(strappy_stream_context *contex
     }
   }
 
-  if (has_tool_calls) {
+  if (has_tool_calls && !context->cancelled) {
     copy = cJSON_Duplicate(context->tool_calls, 1);
     if ((copy == NULL) || !cJSON_AddItemToObject(message, "tool_calls", copy)) {
       cJSON_Delete(copy);
@@ -2008,7 +2135,106 @@ static int strappy_client_stream_emit_delta(strappy_stream_context *context,
   event.type = type;
   event.text = text;
   if (!context->callback(&event, context->callback_data)) {
-    return strappy_client_stream_set_error(context, "OpenRouter stream was cancelled.");
+    return strappy_client_stream_mark_cancelled(context);
+  }
+
+  return 1;
+}
+
+static int strappy_client_stream_poll_cancelled(strappy_stream_context *context)
+{
+  strappy_chat_stream_event event;
+
+  if ((context == NULL) || (context->callback == NULL)) {
+    return 1;
+  }
+
+  memset(&event, 0, sizeof(event));
+  event.type = STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA;
+  event.text = "";
+  if (!context->callback(&event, context->callback_data)) {
+    return strappy_client_stream_mark_cancelled(context);
+  }
+
+  return 1;
+}
+
+static int strappy_client_stream_progress_callback(void *clientp,
+                                                   double dltotal,
+                                                   double dlnow,
+                                                   double ultotal,
+                                                   double ulnow)
+{
+  (void)dltotal;
+  (void)dlnow;
+  (void)ultotal;
+  (void)ulnow;
+
+  return strappy_client_stream_poll_cancelled(
+    (strappy_stream_context *)clientp) ? 0 : 1;
+}
+
+static unsigned long strappy_client_stream_elapsed_seconds(
+  const strappy_stream_context *context)
+{
+  time_t now;
+  double elapsed;
+
+  if ((context == NULL) || (context->started_at == 0)) {
+    return 0UL;
+  }
+
+  now = time(NULL);
+  elapsed = difftime(now, context->started_at);
+  if (elapsed < 0.0) {
+    elapsed = 0.0;
+  }
+  return (unsigned long)elapsed;
+}
+
+static char *strappy_client_cancelled_text(unsigned long elapsed_seconds)
+{
+  char buffer[64];
+
+  snprintf(buffer,
+           sizeof(buffer),
+           "Cancelled - %lu seconds",
+           elapsed_seconds);
+  buffer[sizeof(buffer) - 1U] = '\0';
+  return strappy_string_duplicate(buffer);
+}
+
+static int strappy_client_stream_append_cancelled_text(
+  strappy_stream_context *context)
+{
+  char *text;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  text = strappy_client_cancelled_text(
+    strappy_client_stream_elapsed_seconds(context));
+  if (text == NULL) {
+    return strappy_client_stream_set_error(
+      context,
+      "Could not allocate cancelled stream text.");
+  }
+
+  ok = 1;
+  if ((context->content.data != NULL) && (context->content.length > 0U)) {
+    ok = strappy_http_buffer_append_cstring(&context->content, "\n\n");
+  }
+  if (ok) {
+    ok = strappy_http_buffer_append_cstring(&context->content, text);
+  }
+  free(text);
+
+  if (!ok) {
+    return strappy_client_stream_set_error(
+      context,
+      "Could not allocate cancelled stream text.");
   }
 
   return 1;
@@ -2128,6 +2354,9 @@ static int strappy_client_stream_parse_json_event(strappy_stream_context *contex
                                                      context)) {
       ok = 0;
     }
+    if (ok && !strappy_client_stream_poll_cancelled(context)) {
+      ok = 0;
+    }
     cJSON_Delete(root);
     return ok;
   }
@@ -2206,6 +2435,10 @@ static int strappy_client_stream_parse_json_event(strappy_stream_context *contex
     ok = strappy_client_stream_replace_result_string(&context->result->model,
                                                      model->valuestring,
                                                      context);
+  }
+
+  if (ok && !strappy_client_stream_poll_cancelled(context)) {
+    ok = 0;
   }
 
   cJSON_Delete(root);
@@ -2394,6 +2627,7 @@ void strappy_chat_result_init(strappy_chat_result *result)
   result->metadata_text = NULL;
   result->reasoning_text = NULL;
   result->http_status = 0L;
+  result->cancelled = 0;
 }
 
 void strappy_chat_result_destroy(strappy_chat_result *result)
@@ -2491,6 +2725,74 @@ static char *strappy_client_build_openrouter_generation_url(
   return url;
 }
 
+static void strappy_client_sleep_milliseconds(unsigned int milliseconds)
+{
+  struct timeval delay;
+  int result;
+
+  do {
+    delay.tv_sec = (long)(milliseconds / 1000U);
+    delay.tv_usec = (long)((milliseconds % 1000U) * 1000U);
+    result = select(0, NULL, NULL, NULL, &delay);
+  } while ((result < 0) && (errno == EINTR));
+}
+
+static int strappy_client_generation_has_field(cJSON *data, const char *key)
+{
+  cJSON *item;
+
+  if (!cJSON_IsObject(data) || (key == NULL)) {
+    return 0;
+  }
+
+  item = cJSON_GetObjectItem(data, key);
+  return (item != NULL) && !cJSON_IsNull(item);
+}
+
+static int strappy_client_generation_metadata_is_ready(const char *json,
+                                                       int require_usage)
+{
+  cJSON *root;
+  cJSON *data;
+  int ready;
+
+  if ((json == NULL) || (json[0] == '\0')) {
+    return 0;
+  }
+
+  root = cJSON_Parse(json);
+  if (root == NULL) {
+    return 0;
+  }
+
+  data = cJSON_GetObjectItem(root, "data");
+  if (!cJSON_IsObject(data)) {
+    data = root;
+  }
+
+  ready = cJSON_IsObject(data) ? 1 : 0;
+  if (ready && require_usage) {
+    int has_cost;
+    int has_prompt_tokens;
+    int has_completion_tokens;
+
+    has_cost =
+      strappy_client_generation_has_field(data, "total_cost") ||
+      strappy_client_generation_has_field(data, "usage") ||
+      strappy_client_generation_has_field(data, "upstream_inference_cost");
+    has_prompt_tokens =
+      strappy_client_generation_has_field(data, "tokens_prompt") ||
+      strappy_client_generation_has_field(data, "native_tokens_prompt");
+    has_completion_tokens =
+      strappy_client_generation_has_field(data, "tokens_completion") ||
+      strappy_client_generation_has_field(data, "native_tokens_completion");
+    ready = has_cost && has_prompt_tokens && has_completion_tokens;
+  }
+
+  cJSON_Delete(root);
+  return ready;
+}
+
 static void strappy_client_fetch_openrouter_generation_metadata(
   const strappy_config *config,
   strappy_chat_result *result)
@@ -2502,6 +2804,10 @@ static void strappy_client_fetch_openrouter_generation_metadata(
   char *auth_header;
   char *url;
   long http_status;
+  unsigned int attempt;
+  unsigned int max_attempts;
+  unsigned int delay_ms;
+  int require_usage;
 
   if (!strappy_client_is_openrouter_endpoint(config) ||
       (result == NULL) ||
@@ -2544,6 +2850,12 @@ static void strappy_client_fetch_openrouter_generation_metadata(
 
   strappy_http_buffer_init(&response_buffer);
   http_status = 0L;
+  require_usage =
+    (result->cancelled ||
+     (result->usage_json == NULL) ||
+     (result->usage_json[0] == '\0')) ? 1 : 0;
+  max_attempts = require_usage ? 8U : 1U;
+  delay_ms = 100U;
 
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -2556,22 +2868,40 @@ static void strappy_client_fetch_openrouter_generation_metadata(
     curl_easy_setopt(curl, CURLOPT_CAINFO, strappy_cainfo_path);
   }
 
-  code = curl_easy_perform(curl);
-  if (code == CURLE_OK) {
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_status);
-  }
+  for (attempt = 0U; attempt < max_attempts; attempt++) {
+    strappy_http_buffer_clear(&response_buffer);
+    http_status = 0L;
+    code = curl_easy_perform(curl);
+    if (code == CURLE_OK) {
+      curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_status);
+    }
 
-  if ((code == CURLE_OK) &&
-      (http_status >= 200L) &&
-      (http_status < 300L) &&
-      (response_buffer.data != NULL) &&
-      (response_buffer.data[0] != '\0')) {
-    char *metadata_json;
+    if ((code == CURLE_OK) &&
+        (http_status >= 200L) &&
+        (http_status < 300L) &&
+        (response_buffer.data != NULL) &&
+        (response_buffer.data[0] != '\0')) {
+      char *metadata_json;
+      int ready;
 
-    metadata_json = strappy_string_duplicate(response_buffer.data);
-    if (metadata_json != NULL) {
-      free(result->generation_metadata_json);
-      result->generation_metadata_json = metadata_json;
+      ready = strappy_client_generation_metadata_is_ready(response_buffer.data,
+                                                          require_usage);
+      if (ready || (attempt + 1U >= max_attempts)) {
+        metadata_json = strappy_string_duplicate(response_buffer.data);
+        if (metadata_json != NULL) {
+          free(result->generation_metadata_json);
+          result->generation_metadata_json = metadata_json;
+        }
+        break;
+      }
+    }
+
+    if (attempt + 1U >= max_attempts) {
+      break;
+    }
+    strappy_client_sleep_milliseconds(delay_ms);
+    if (delay_ms < 400U) {
+      delay_ms *= 2U;
     }
   }
 
@@ -2597,6 +2927,29 @@ static void strappy_client_finalize_metadata(const strappy_config *config,
     free(result->metadata_text);
     result->metadata_text = NULL;
   }
+}
+
+static int strappy_client_mark_cancelled_result(strappy_chat_result *result,
+                                                char **error_out)
+{
+  if (result == NULL) {
+    strappy_set_error(error_out, "Cancelled OpenRouter stream has no result.");
+    return 0;
+  }
+
+  result->cancelled = 1;
+  if (!strappy_client_replace_result_string(&result->finish_reason,
+                                            "cancelled")) {
+    strappy_set_error(error_out, "Could not allocate cancelled stream metadata.");
+    return 0;
+  }
+  if (!strappy_client_replace_result_string(&result->native_finish_reason,
+                                            "cancelled")) {
+    strappy_set_error(error_out, "Could not allocate cancelled stream metadata.");
+    return 0;
+  }
+
+  return 1;
 }
 
 static int strappy_client_send_request_json(const strappy_config *config,
@@ -2659,6 +3012,8 @@ static int strappy_client_send_request_json(const strappy_config *config,
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
   curl_easy_setopt(curl, CURLOPT_POST, 1L);
   curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request_json);
+  curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, strappy_client_header_callback);
+  curl_easy_setopt(curl, CURLOPT_HEADERDATA, (void *)result);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, strappy_client_write_callback);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response_buffer);
   curl_easy_setopt(curl, CURLOPT_USERAGENT, "Strappy/0.1");
@@ -2760,6 +3115,7 @@ static int strappy_client_stream_request_json(const strappy_config *config,
   stream_context.result = result;
   stream_context.callback = callback;
   stream_context.callback_data = callback_data;
+  stream_context.started_at = time(NULL);
   tool_display_text = NULL;
   http_status = 0L;
 
@@ -2767,8 +3123,15 @@ static int strappy_client_stream_request_json(const strappy_config *config,
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
   curl_easy_setopt(curl, CURLOPT_POST, 1L);
   curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request_json);
+  curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, strappy_client_header_callback);
+  curl_easy_setopt(curl, CURLOPT_HEADERDATA, (void *)result);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, strappy_client_stream_write_callback);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&stream_context);
+  curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+  curl_easy_setopt(curl,
+                   CURLOPT_PROGRESSFUNCTION,
+                   strappy_client_stream_progress_callback);
+  curl_easy_setopt(curl, CURLOPT_PROGRESSDATA, (void *)&stream_context);
   curl_easy_setopt(curl, CURLOPT_USERAGENT, "Strappy/0.1");
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
   curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
@@ -2779,8 +3142,8 @@ static int strappy_client_stream_request_json(const strappy_config *config,
   }
 
   code = curl_easy_perform(curl);
-  if (code == CURLE_OK) {
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_status);
+  if (curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_status) != CURLE_OK) {
+    http_status = 0L;
   }
 
   if ((code == CURLE_OK) && (stream_context.line_buffer.length > 0U)) {
@@ -2805,7 +3168,7 @@ static int strappy_client_stream_request_json(const strappy_config *config,
 
   result->http_status = http_status;
 
-  if (code != CURLE_OK) {
+  if ((code != CURLE_OK) && !stream_context.cancelled) {
     if (stream_context.stream_error != NULL) {
       strappy_set_error(error_out, stream_context.stream_error);
     } else {
@@ -2818,7 +3181,8 @@ static int strappy_client_stream_request_json(const strappy_config *config,
     return 0;
   }
 
-  if ((http_status < 200L) || (http_status >= 300L)) {
+  if (!stream_context.cancelled &&
+      ((http_status < 200L) || (http_status >= 300L))) {
     cJSON *root;
     char *api_error;
 
@@ -2841,7 +3205,9 @@ static int strappy_client_stream_request_json(const strappy_config *config,
     return 0;
   }
 
-  if (!stream_context.saw_event && !stream_context.done) {
+  if (!stream_context.cancelled &&
+      !stream_context.saw_event &&
+      !stream_context.done) {
     if ((stream_context.raw_body.data != NULL) &&
         (stream_context.raw_body.length > 0U)) {
       ok = strappy_client_parse_response(stream_context.raw_body.data,
@@ -2863,7 +3229,20 @@ static int strappy_client_stream_request_json(const strappy_config *config,
     return 0;
   }
 
-  if ((stream_context.tool_calls != NULL) &&
+  if (stream_context.cancelled &&
+      !strappy_client_stream_append_cancelled_text(&stream_context)) {
+    if (stream_context.stream_error != NULL) {
+      strappy_set_error(error_out, stream_context.stream_error);
+    } else {
+      strappy_set_error(error_out, "Could not build cancelled stream response.");
+    }
+    strappy_stream_context_destroy(&stream_context);
+    strappy_chat_result_destroy(result);
+    return 0;
+  }
+
+  if (!stream_context.cancelled &&
+      (stream_context.tool_calls != NULL) &&
       (cJSON_GetArraySize(stream_context.tool_calls) > 0)) {
     const char *streamed_content;
 
@@ -2915,6 +3294,13 @@ static int strappy_client_stream_request_json(const strappy_config *config,
     } else {
       strappy_set_error(error_out, "Could not build streamed assistant message.");
     }
+    strappy_stream_context_destroy(&stream_context);
+    strappy_chat_result_destroy(result);
+    return 0;
+  }
+
+  if (stream_context.cancelled &&
+      !strappy_client_mark_cancelled_result(result, error_out)) {
     strappy_stream_context_destroy(&stream_context);
     strappy_chat_result_destroy(result);
     return 0;

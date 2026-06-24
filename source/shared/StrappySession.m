@@ -29,6 +29,14 @@ static int StrappySessionHandleStreamEvent(
     return 1;
   }
 
+  if (((event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) ||
+       (event->type == STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA)) &&
+      [context->delegate respondsToSelector:
+        @selector(strappySessionStreamShouldCancel:)] &&
+      [context->delegate strappySessionStreamShouldCancel:context->context]) {
+    return 0;
+  }
+
   text = nil;
   if (event->text != NULL) {
     text = [NSString stringWithUTF8String:event->text];
@@ -50,6 +58,14 @@ static int StrappySessionHandleStreamEvent(
   if (context->context != nil) {
     [delta setObject:context->context forKey:@"context"];
   }
+
+  if (([text length] == 0U) &&
+      ((event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) ||
+       (event->type == STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA))) {
+    [delta release];
+    return 1;
+  }
+
   if (event->tool_call_id != NULL) {
     NSString *toolCallId;
 

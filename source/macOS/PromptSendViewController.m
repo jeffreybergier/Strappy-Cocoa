@@ -246,7 +246,7 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 
 - (void)updateActionSegments
 {
-  [actionsSegmented_ setEnabled:(enabled_ && sending_)
+  [actionsSegmented_ setEnabled:(enabled_ && sending_ && !cancellationRequested_)
                      forSegment:kPromptActionStop];
   [actionsSegmented_ setEnabled:[self canSendCurrentPrompt]
                      forSegment:kPromptActionSend];
@@ -312,6 +312,15 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 - (void)setSending:(BOOL)sending
 {
   sending_ = sending ? YES : NO;
+  if (!sending_) {
+    cancellationRequested_ = NO;
+  }
+  [self updateActionSegments];
+}
+
+- (void)setCancellationRequested:(BOOL)requested
+{
+  cancellationRequested_ = requested ? YES : NO;
   [self updateActionSegments];
 }
 
@@ -335,7 +344,14 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   NSInteger selectedSegment;
 
   selectedSegment = [(NSSegmentedControl *)sender selectedSegment];
-  if (selectedSegment == kPromptActionSend) {
+  if (selectedSegment == kPromptActionStop) {
+    if (sending_ && !cancellationRequested_) {
+      [self setCancellationRequested:YES];
+      if (delegate_ != nil) {
+        [delegate_ promptSendViewControllerDidCancelPrompt:self];
+      }
+    }
+  } else if (selectedSegment == kPromptActionSend) {
     [self performSend:sender];
   }
 }

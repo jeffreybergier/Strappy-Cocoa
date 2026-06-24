@@ -32,6 +32,7 @@ typedef struct strappy_chat_result {
   char *metadata_text;
   char *reasoning_text;
   long http_status;
+  int cancelled;
 } strappy_chat_result;
 
 typedef enum strappy_chat_stream_event_type {

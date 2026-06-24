@@ -249,6 +249,29 @@ static NSString *StrappyElapsedThinkingStatusHTML(NSTimeInterval startedAt)
   return StrappyStatusHTML(StrappyElapsedThinkingText(startedAt), NO);
 }
 
+static NSString *StrappyElapsedCancelledText(NSTimeInterval startedAt)
+{
+  NSTimeInterval now;
+  NSTimeInterval interval;
+  unsigned long elapsed;
+
+  if (startedAt <= 0.0) {
+    elapsed = 0UL;
+  } else {
+    now = [NSDate timeIntervalSinceReferenceDate];
+    interval = now - startedAt;
+    if (interval < 0.0) {
+      interval = 0.0;
+    }
+    elapsed = (unsigned long)interval;
+  }
+
+  return [NSString stringWithFormat:@"%@ - %lu %@",
+                                    NSLocalizedString(@"Cancelled", nil),
+                                    elapsed,
+                                    NSLocalizedString(@"seconds", nil)];
+}
+
 static NSString *StrappyMessageHTML(NSDictionary *message,
                                     NSString *elementIdentifier,
                                     NSString *state,
@@ -543,6 +566,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 - (void)flushStreamDeltasFromTimer:(NSTimer *)timer;
 - (void)appendPendingThinkingJavaScriptToString:(NSMutableString *)js;
 - (void)beginSendingPrompt:(NSString *)prompt reusingPendingMessage:(BOOL)reuse;
+- (void)setPromptCancellationRequested:(BOOL)requested;
+- (BOOL)promptCancellationRequested;
+- (void)showPromptCancellationRequested;
 - (void)retryFailedPrompt;
 - (void)loadEarlierMessages;
 - (NSString *)writeCurrentHTML;
@@ -1037,12 +1063,82 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [self beginSendingPrompt:prompt reusingPendingMessage:NO];
 }
 
+- (void)promptSendViewControllerDidCancelPrompt:
+    (PromptSendViewController *)controller
+{
+  (void)controller;
+  if (!sending_) {
+    return;
+  }
+  [self setPromptCancellationRequested:YES];
+  [sendController_ setCancellationRequested:YES];
+  [self showPromptCancellationRequested];
+}
+
 - (void)promptSendViewControllerDidChangeHeight:
     (PromptSendViewController *)controller
 {
   (void)controller;
   [self layoutWebViewAndPromptBar];
   [[self view] setNeedsDisplay:YES];
+}
+
+- (void)setPromptCancellationRequested:(BOOL)requested
+{
+  @synchronized(self) {
+    cancelPromptRequested_ = requested ? YES : NO;
+  }
+}
+
+- (BOOL)promptCancellationRequested
+{
+  BOOL requested;
+
+  @synchronized(self) {
+    requested = cancelPromptRequested_;
+  }
+  return requested;
+}
+
+- (void)showPromptCancellationRequested
+{
+  NSMutableString *js;
+  NSMutableString *assistantText;
+  NSString *assistantIdentifier;
+  NSString *cancelledText;
+  NSString *appendText;
+
+  if (![self pendingAppliesToCurrentSession]) {
+    return;
+  }
+
+  [self flushStreamDeltas];
+
+  assistantIdentifier = pendingAssistantMessageIdentifier_;
+  assistantText = streamingAssistantText_;
+  cancelledText = StrappyElapsedCancelledText(pendingStartedAt_);
+
+  if (assistantIdentifier == nil) {
+    return;
+  }
+  if (assistantText == nil) {
+    streamingAssistantText_ = [[NSMutableString alloc] init];
+    assistantText = streamingAssistantText_;
+  }
+
+  appendText = ([assistantText length] > 0U) ?
+    [@"\n\n" stringByAppendingString:cancelledText] :
+    cancelledText;
+  [assistantText appendString:appendText];
+
+  js = [NSMutableString string];
+  [js appendString:StrappyAppendMessageTextJavaScript(assistantIdentifier,
+                                                     appendText)];
+  [js appendString:
+    StrappySetMessageStateJavaScript(assistantIdentifier,
+                                     StrappyStatusHTML(cancelledText, NO),
+                                     @"cancelled")];
+  [self pushJavaScript:js];
 }
 
 - (void)beginSendingPrompt:(NSString *)prompt reusingPendingMessage:(BOOL)reuse
@@ -1066,9 +1162,11 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   promptToSend = [prompt copy];
 
   sending_ = YES;
+  [self setPromptCancellationRequested:NO];
   [statusText_ release];
   statusText_ = nil;
   [sendController_ setSending:YES];
+  [sendController_ setCancellationRequested:NO];
 
   if (!reuse || (pendingMessageIdentifier_ == nil)) {
     NSMutableString *js;
@@ -1313,6 +1411,12 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 - (void)strappySessionStreamDidFinishTurn:(NSDictionary *)event
 {
   [self streamTurnDidFinish:event];
+}
+
+- (BOOL)strappySessionStreamShouldCancel:(NSDictionary *)context
+{
+  (void)context;
+  return [self promptCancellationRequested];
 }
 
 - (void)streamContentDeltaDidArrive:(NSDictionary *)delta
@@ -1857,7 +1961,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   BOOL pendingIsCurrent;
 
   sending_ = NO;
+  [self setPromptCancellationRequested:NO];
   [sendController_ setSending:NO];
+  [sendController_ setCancellationRequested:NO];
   [self flushStreamDeltas];
 
   pendingIdentifier = [result objectForKey:@"pending_id"];

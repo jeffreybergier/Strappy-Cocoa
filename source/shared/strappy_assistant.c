@@ -1901,6 +1901,11 @@ static int strappy_assistant_run_tool_sequence(
     strappy_chat_result *next_result;
     int has_tool_calls;
 
+    if ((current_result != NULL) && current_result->cancelled) {
+      sequence->final_result = (strappy_chat_result *)current_result;
+      return 1;
+    }
+
     if (!strappy_assistant_result_has_tool_calls(current_result,
                                                 &has_tool_calls,
                                                 error_out)) {
@@ -2002,6 +2007,10 @@ static int strappy_assistant_run_tool_sequence(
                                           stream_callback_data,
                                           error_out)) {
         return 0;
+      }
+      if (next_result->cancelled) {
+        sequence->final_result = next_result;
+        return 1;
       }
     } else if (!strappy_client_send_messages(config,
                                              round->followup_messages,
@@ -2542,7 +2551,8 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   }
 
   did_run_tool_round = 0;
-  if (!strappy_assistant_run_tool_sequence(&config,
+  if (!result.cancelled &&
+      !strappy_assistant_run_tool_sequence(&config,
                                            session_db_path,
                                            &guidance,
                                            &main_turn,
@@ -2569,45 +2579,47 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   }
 
   final_result = did_run_tool_round ? tool_sequence.final_result : &result;
-  if (!strappy_assistant_emit_turn_event(STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED,
-                                         &main_turn,
-                                         final_result->response_text,
-                                         callback,
-                                         callback_data,
-                                         error_out)) {
-    strappy_assistant_turn_keys_destroy(&helper_keys);
-    strappy_assistant_turn_keys_destroy(&main_keys);
-    strappy_assistant_tool_sequence_destroy(&tool_sequence);
-    strappy_assistant_request_messages_destroy(&request_messages);
-    strappy_session_message_record_list_destroy(&message_list);
-    strappy_chat_result_destroy(&result);
-    strappy_assistant_guidance_destroy(&guidance);
-    strappy_config_destroy(&config);
-    return NULL;
-  }
+  if (!final_result->cancelled) {
+    if (!strappy_assistant_emit_turn_event(STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED,
+                                           &main_turn,
+                                           final_result->response_text,
+                                           callback,
+                                           callback_data,
+                                           error_out)) {
+      strappy_assistant_turn_keys_destroy(&helper_keys);
+      strappy_assistant_turn_keys_destroy(&main_keys);
+      strappy_assistant_tool_sequence_destroy(&tool_sequence);
+      strappy_assistant_request_messages_destroy(&request_messages);
+      strappy_session_message_record_list_destroy(&message_list);
+      strappy_chat_result_destroy(&result);
+      strappy_assistant_guidance_destroy(&guidance);
+      strappy_config_destroy(&config);
+      return NULL;
+    }
 
-  if (!strappy_assistant_run_learning_summary(&config,
-                                          session_db_path,
-                                          &guidance,
-                                          &helper_turn,
-                                          &request_messages,
-                                          &tool_sequence,
-                                          final_result,
-                                          did_run_tool_round,
-                                          1,
-                                          callback,
-                                          callback_data,
-                                          &did_run_tool_round,
-                                          error_out)) {
-    strappy_assistant_turn_keys_destroy(&helper_keys);
-    strappy_assistant_turn_keys_destroy(&main_keys);
-    strappy_assistant_tool_sequence_destroy(&tool_sequence);
-    strappy_assistant_request_messages_destroy(&request_messages);
-    strappy_session_message_record_list_destroy(&message_list);
-    strappy_chat_result_destroy(&result);
-    strappy_assistant_guidance_destroy(&guidance);
-    strappy_config_destroy(&config);
-    return NULL;
+    if (!strappy_assistant_run_learning_summary(&config,
+                                            session_db_path,
+                                            &guidance,
+                                            &helper_turn,
+                                            &request_messages,
+                                            &tool_sequence,
+                                            final_result,
+                                            did_run_tool_round,
+                                            1,
+                                            callback,
+                                            callback_data,
+                                            &did_run_tool_round,
+                                            error_out)) {
+      strappy_assistant_turn_keys_destroy(&helper_keys);
+      strappy_assistant_turn_keys_destroy(&main_keys);
+      strappy_assistant_tool_sequence_destroy(&tool_sequence);
+      strappy_assistant_request_messages_destroy(&request_messages);
+      strappy_session_message_record_list_destroy(&message_list);
+      strappy_chat_result_destroy(&result);
+      strappy_assistant_guidance_destroy(&guidance);
+      strappy_config_destroy(&config);
+      return NULL;
+    }
   }
 
   strappy_assistant_request_messages_destroy(&request_messages);

@@ -8,6 +8,7 @@
 - (void)strappySessionStreamDidReceiveToolError:(NSDictionary *)event;
 - (void)strappySessionStreamDidStartTurn:(NSDictionary *)event;
 - (void)strappySessionStreamDidFinishTurn:(NSDictionary *)event;
+- (BOOL)strappySessionStreamShouldCancel:(NSDictionary *)context;
 @end
 
 @interface StrappySession : NSObject

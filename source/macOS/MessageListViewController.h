@@ -46,6 +46,7 @@
   NSUInteger                oldestRenderedMessageIndex_;
   NSUInteger                renderedMessageCount_;
   BOOL                      sending_;
+  BOOL                      cancelPromptRequested_;
 }
 
 - (id)init;
