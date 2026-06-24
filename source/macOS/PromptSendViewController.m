@@ -1,47 +1,19 @@
 #import "PromptSendViewController.h"
 #import "AIFontAwesome.h"
+#import "StrappyBottomToolbarView.h"
 
 static const CGFloat kPromptSendHeightCollapsed = 32.0;
 static const CGFloat kPromptSendHeightExpanded = 108.0;
 static const CGFloat kPromptSendPad = 4.0;
 
 enum {
-  kPromptActionClear = 0,
+  kPromptActionStop = 0,
   kPromptActionSend = 1
 };
 
 static NSColor *StrappyInputBezelBackgroundColor(void) { return [NSColor controlBackgroundColor]; }
 static NSColor *StrappyInputBezelBorderColor(void) { return [NSColor gridColor]; }
 static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHighlight; }
-
-@interface StrappyPromptToolbarView : NSView
-@end
-
-@implementation StrappyPromptToolbarView
-
-- (BOOL)isOpaque
-{
-  return YES;
-}
-
-- (void)drawRect:(NSRect)dirtyRect
-{
-  NSRect bounds;
-
-  (void)dirtyRect;
-  bounds = [self bounds];
-
-  [XPColorWindowFrame set];
-  NSRectFill(bounds);
-
-  [XPColorControlHighlight set];
-  NSRectFill(NSMakeRect(bounds.origin.x,
-                        bounds.origin.y + bounds.size.height - 1.0,
-                        bounds.size.width,
-                        1.0));
-}
-
-@end
 
 @interface StrappyPromptInputBezelView : NSView
 @end
@@ -57,6 +29,10 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 
   [StrappyInputBezelBackgroundColor() set];
   NSRectFill(bounds);
+
+  if (AICCCurrentTier() >= AICCTierMiddle) {
+    return;
+  }
 
   [StrappyInputBezelBorderColor() set];
   NSFrameRect(bounds);
@@ -74,8 +50,9 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 - (void)updateExpansion;
 - (void)updateActionSegments;
 - (void)rebuildActionSegmentIcons;
+- (void)barDidMoveToWindow:(id)sender;
+- (void)barViewFrameDidChange:(NSNotification *)notification;
 - (void)actionSegmentClicked:(id)sender;
-- (void)performClear:(id)sender;
 @end
 
 @implementation PromptSendViewController
@@ -100,12 +77,13 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 
 - (void)loadView
 {
-  StrappyPromptToolbarView *bar;
+  StrappyBottomToolbarView *bar;
 
-  bar = [[StrappyPromptToolbarView alloc]
+  bar = [[StrappyBottomToolbarView alloc]
       initWithFrame:NSMakeRect(0.0, 0.0, 400.0, kPromptSendHeightCollapsed)];
   barView_ = bar;
   [barView_ setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
+  [bar setWindowChangeTarget:self action:@selector(barDidMoveToWindow:)];
   [self setView:barView_];
   [barView_ release];
 }
@@ -121,13 +99,20 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   [bezelView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   [barView_ addSubview:bezelView_];
   [bezel release];
+  [bezelView_ XP_setWantsLayer:YES];
+  [bezelView_ XP_setLayerCornerRadius:8.0];
+  [bezelView_ XP_setLayerMasksToBounds:YES];
+  [bezelView_ XP_setLayerBorderWidth:1.0];
+  [bezelView_ XP_setLayerBorderColor:StrappyInputBezelBorderColor()];
 
   scrollView_ = [[NSScrollView alloc] initWithFrame:NSZeroRect];
   [scrollView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   [scrollView_ setBorderType:NSNoBorder];
   [scrollView_ setHasVerticalScroller:YES];
   [scrollView_ setHasHorizontalScroller:NO];
-  [scrollView_ setAutohidesScrollers:YES];
+  if ([scrollView_ respondsToSelector:@selector(setAutohidesScrollers:)]) {
+    [scrollView_ setAutohidesScrollers:YES];
+  }
   [bezelView_ addSubview:scrollView_];
 
   textView_ = [[NSTextView alloc] initWithFrame:NSZeroRect];
@@ -137,7 +122,7 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   [textView_ setHorizontallyResizable:NO];
   [textView_ setAutoresizingMask:NSViewWidthSizable];
   [[textView_ textContainer] setWidthTracksTextView:YES];
-  [textView_ setFont:[NSFont systemFontOfSize:13.0]];
+  [textView_ setFont:XPFontTextStyleBody];
   [textView_ setDrawsBackground:YES];
   [textView_ setBackgroundColor:[NSColor controlBackgroundColor]];
   [textView_ setTextContainerInset:NSMakeSize(2.0, 2.0)];
@@ -155,10 +140,15 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   [actionsSegmented_ setTarget:self];
   [actionsSegmented_ setAction:@selector(actionSegmentClicked:)];
   [actionsSegmented_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
-  [actionsSegmented_ setToolTip:NSLocalizedString(@"Clear Draft / Send Prompt (Command-Return)", nil)];
   [self rebuildActionSegmentIcons];
-  [actionsSegmented_ sizeToFit];
   [barView_ addSubview:actionsSegmented_];
+
+  [barView_ setPostsFrameChangedNotifications:YES];
+  [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(barViewFrameDidChange:)
+             name:NSViewFrameDidChangeNotification
+           object:barView_];
 
   [self setEnabled:enabled_];
 }
@@ -195,10 +185,22 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   return expanded_ ? kPromptSendHeightExpanded : kPromptSendHeightCollapsed;
 }
 
+- (void)barDidMoveToWindow:(id)sender
+{
+  (void)sender;
+  [self rebuildActionSegmentIcons];
+}
+
+- (void)barViewFrameDidChange:(NSNotification *)notification
+{
+  (void)notification;
+  [self updateExpansion];
+}
+
 - (void)rebuildActionSegmentIcons
 {
   CGFloat scale;
-  NSImage *clearImage;
+  NSImage *stopImage;
   NSImage *sendImage;
 
   if (actionsSegmented_ == nil) {
@@ -213,46 +215,39 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
     scale = 1.0;
   }
 
-  clearImage = [AIFontAwesome imageForIcon:AIFAXmark
-                                     style:AIFontAwesomeStyleSolid
-                                  iconSize:12.0
-                                canvasSize:18.0
-                                     scale:scale];
+  stopImage = [AIFontAwesome imageForIcon:AIFACircleStop
+                                    style:AIFontAwesomeStyleRegular
+                                 iconSize:14.0
+                               canvasSize:20.0
+                                    scale:scale];
   sendImage = [AIFontAwesome imageForIcon:AIFAPaperPlane
                                     style:AIFontAwesomeStyleRegular
-                                 iconSize:12.0
-                               canvasSize:18.0
+                                 iconSize:14.0
+                               canvasSize:20.0
                                     scale:scale];
 
-  if (clearImage != nil) {
-    [actionsSegmented_ setImage:clearImage forSegment:kPromptActionClear];
-    [actionsSegmented_ setLabel:@"" forSegment:kPromptActionClear];
+  if (stopImage != nil) {
+    [actionsSegmented_ setImage:stopImage forSegment:kPromptActionStop];
+    [actionsSegmented_ setLabel:@"" forSegment:kPromptActionStop];
   } else {
-    [actionsSegmented_ setLabel:NSLocalizedString(@"Clear", nil)
-                     forSegment:kPromptActionClear];
+    [actionsSegmented_ setLabel:NSLocalizedString(@"Stop", nil)
+                     forSegment:kPromptActionStop];
   }
 
   if (sendImage != nil) {
     [actionsSegmented_ setImage:sendImage forSegment:kPromptActionSend];
   }
+  [actionsSegmented_ XP_setToolTip:NSLocalizedString(@"Stop Prompt Request", nil)
+                         forSegment:kPromptActionStop];
+  [actionsSegmented_ XP_setToolTip:NSLocalizedString(@"Send Prompt", nil)
+                         forSegment:kPromptActionSend];
+  [actionsSegmented_ sizeToFit];
 }
 
 - (void)updateActionSegments
 {
-  NSString *text;
-  NSString *trimmed;
-  BOOL hasDraft;
-
-  hasDraft = NO;
-  if (textView_ != nil) {
-    text = [textView_ string];
-    trimmed = [text stringByTrimmingCharactersInSet:
-      [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    hasDraft = ([trimmed length] > 0U) ? YES : NO;
-  }
-
-  [actionsSegmented_ setEnabled:(enabled_ && hasDraft)
-                     forSegment:kPromptActionClear];
+  [actionsSegmented_ setEnabled:(enabled_ && sending_)
+                     forSegment:kPromptActionStop];
   [actionsSegmented_ setEnabled:[self canSendCurrentPrompt]
                      forSegment:kPromptActionSend];
 }
@@ -304,6 +299,10 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   enabled_ = enabled ? YES : NO;
   [textView_ setEditable:enabled_];
   [textView_ setSelectable:enabled_];
+  [textView_ setDrawsBackground:YES];
+  [textView_ setBackgroundColor:enabled_
+    ? [NSColor controlBackgroundColor]
+    : [NSColor disabledControlTextColor]];
   if (actionsSegmented_ != nil) {
     [actionsSegmented_ setEnabled:enabled_];
     [self updateActionSegments];
@@ -336,23 +335,9 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   NSInteger selectedSegment;
 
   selectedSegment = [(NSSegmentedControl *)sender selectedSegment];
-  if (selectedSegment == kPromptActionClear) {
-    [self performClear:sender];
-  } else if (selectedSegment == kPromptActionSend) {
+  if (selectedSegment == kPromptActionSend) {
     [self performSend:sender];
   }
-}
-
-- (void)performClear:(id)sender
-{
-  (void)sender;
-  if (!enabled_ || (textView_ == nil)) {
-    return;
-  }
-
-  [textView_ setString:@""];
-  [self updateActionSegments];
-  [self updateExpansion];
 }
 
 - (void)performSend:(id)sender
@@ -408,6 +393,7 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 
 - (void)dealloc
 {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   [scrollView_ release];
   [textView_ release];
   [actionsSegmented_ release];

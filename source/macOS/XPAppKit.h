@@ -1,4 +1,7 @@
 #import <AppKit/AppKit.h>
+#import <ApplicationServices/ApplicationServices.h>
+#import "AICookieCutterWindowController.h"
+#import "XPFoundation.h"
 
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
   #define XPApplicationDelegate NSApplicationDelegate
@@ -42,11 +45,13 @@
 
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
   #define XPBezelStyleRounded        NSBezelStyleRounded
+  #define XPBezelStyleTexturedSquare NSBezelStyleTexturedSquare
   #define XPButtonTypeMomentaryLight NSButtonTypeMomentaryLight
   #define XPButtonTypeSwitch         NSButtonTypeSwitch
   #define XPProgressIndicatorStyleSpinning NSProgressIndicatorStyleSpinning
 #else
   #define XPBezelStyleRounded        NSRoundedBezelStyle
+  #define XPBezelStyleTexturedSquare NSTexturedSquareBezelStyle
   #define XPButtonTypeMomentaryLight NSMomentaryLightButton
   #define XPButtonTypeSwitch         NSSwitchButton
   #define XPProgressIndicatorStyleSpinning NSProgressIndicatorSpinningStyle
@@ -66,5 +71,51 @@
 
 @interface NSWindow (XPAppKit)
 - (void)XP_setTitle:(NSString *)title;
+- (CGFloat)XP_titlebarHeight;
 - (CGFloat)XP_backingScaleFactor;
+@end
+
+@interface NSScrollView (XPAppKit)
+- (void)XP_setAutomaticallyAdjustsContentInsets:(BOOL)flag;
+- (void)XP_setContentInsetsTop:(CGFloat)top
+                          left:(CGFloat)left
+                        bottom:(CGFloat)bottom
+                         right:(CGFloat)right;
+@end
+
+@interface NSView (XPAppKitLayer)
+- (void)XP_setWantsLayer:(BOOL)flag;
+- (void)XP_setLayerCornerRadius:(CGFloat)radius;
+- (void)XP_setLayerMasksToBounds:(BOOL)flag;
+- (void)XP_setLayerBorderWidth:(CGFloat)width;
+- (void)XP_setLayerBorderColor:(NSColor *)color;
+@end
+
+@interface NSView (XPAppKit)
+- (void)XP_pinToWindowAppearance;
+@end
+
+@interface NSSegmentedControl (XPAppKit)
+- (void)XP_setToolTip:(NSString *)tip forSegment:(XPInteger)segment;
+@end
+
+#if defined(MAC_OS_X_VERSION_MIN_REQUIRED) && MAC_OS_X_VERSION_MIN_REQUIRED >= 110000
+  #define XPFontTextStyleBody       [NSFont preferredFontForTextStyle:NSFontTextStyleBody options:@{}]
+  #define XPFontTextStyleBoldBody   [NSFont preferredFontForTextStyle:NSFontTextStyleHeadline options:@{}]
+  #define XPFontTextStyleChatName   [NSFont preferredFontForTextStyle:NSFontTextStyleCallout options:@{}]
+  #define XPFontTextStyleSmallLabel [NSFont preferredFontForTextStyle:NSFontTextStyleCaption2 options:@{}]
+  #define XPFontTextStyleBoldSmall  [NSFont preferredFontForTextStyle:NSFontTextStyleFootnote options:@{}]
+#else
+  #define XPFontTextStyleBody       [NSFont systemFontOfSize:13.0]
+  #define XPFontTextStyleBoldBody   [NSFont boldSystemFontOfSize:13.0]
+  #define XPFontTextStyleChatName   [NSFont systemFontOfSize:14.0]
+  #define XPFontTextStyleSmallLabel [NSFont systemFontOfSize:10.0]
+  #define XPFontTextStyleBoldSmall  [NSFont boldSystemFontOfSize:11.0]
+#endif
+
+#define XPTableViewStyleSourceList 3
+
+@interface NSTableView (XPAppKit)
+- (void)XP_setFloatsGroupRows:(BOOL)floats;
+- (void)XP_setSourceListStyle;
 @end

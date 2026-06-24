@@ -15,7 +15,7 @@
   NSScrollView *scrollView_;
   NSTableView  *tableView_;
   NSView       *toolbarView_;
-  NSSegmentedControl *addSegmented_;
+  NSSegmentedControl *toolbarSegmented_;
   NSArray      *rows_;
   NSNumber     *selectedSessionId_;
   id<SessionListViewControllerDelegate> delegate_;

@@ -3,7 +3,8 @@ APP_NAME = Strappy
 SOURCES = main.m AppDelegate.m XPAppKit.m PreferencesWindowController.m \
           SessionWindowController.m \
           SessionListViewController.m MessageListViewController.m \
-          PromptSendViewController.m
+          PromptSendViewController.m StrappyWindowAwareView.m \
+          StrappyBottomToolbarView.m
 INFO_PLIST = Info.plist
 
 SHARED_DIR = ../shared

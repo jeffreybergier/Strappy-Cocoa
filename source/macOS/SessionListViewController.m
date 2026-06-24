@@ -1,5 +1,6 @@
 #import "SessionListViewController.h"
 #import "AIFontAwesome.h"
+#import "StrappyBottomToolbarView.h"
 #import "StrappySession.h"
 #import "XPFoundation.h"
 
@@ -11,6 +12,13 @@ static const CGFloat kStrappyAvatarSize = 34.0;
 static const CGFloat kStrappyPadLeft = 8.0;
 static const CGFloat kStrappyPadRight = 8.0;
 static const CGFloat kStrappyTextGap = 8.0;
+static const AIFontAwesomeIcon kStrappySessionToolbarPlusIcon =
+  (AIFontAwesomeIcon)0xF067;
+
+enum {
+  kStrappySessionToolbarClose = 0,
+  kStrappySessionToolbarNew = 1
+};
 
 static NSString * const kStrappySessionRowTypeKey = @"row_type";
 static NSString * const kStrappySessionRowTypeSection = @"section";
@@ -184,35 +192,6 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
     return menu;
   }
   return nil;
-}
-
-@end
-
-@interface StrappySessionToolbarView : NSView
-@end
-
-@implementation StrappySessionToolbarView
-
-- (BOOL)isOpaque
-{
-  return YES;
-}
-
-- (void)drawRect:(NSRect)dirtyRect
-{
-  NSRect bounds;
-
-  (void)dirtyRect;
-  bounds = [self bounds];
-
-  [XPColorWindowFrame set];
-  NSRectFill(bounds);
-
-  [XPColorControlHighlight set];
-  NSRectFill(NSMakeRect(bounds.origin.x,
-                        bounds.origin.y + bounds.size.height - 1.0,
-                        bounds.size.width,
-                        1.0));
 }
 
 @end
@@ -397,8 +376,11 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
 @end
 
 @interface SessionListViewController ()
-- (void)rebuildAddSegmentIcon;
-- (void)addSessionSegmentClicked:(id)sender;
+- (void)rebuildToolbarSegmentIcons;
+- (void)updateToolbarSegments;
+- (void)toolbarDidMoveToWindow:(id)sender;
+- (void)toolbarSegmentClicked:(id)sender;
+- (void)closeActiveSession:(id)sender;
 - (void)layoutSidebarViews;
 @end
 
@@ -417,7 +399,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
 - (void)viewDidLoad
 {
   NSTableColumn *column;
-  StrappySessionToolbarView *toolbar;
+  StrappyBottomToolbarView *toolbar;
 
   [super viewDidLoad];
 
@@ -427,6 +409,11 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   [scrollView_ setHasHorizontalScroller:NO];
   [scrollView_ setAutohidesScrollers:YES];
   [scrollView_ setBorderType:NSNoBorder];
+  if (AICCCurrentTier() >= AICCTierMiddle) {
+    [scrollView_ setDrawsBackground:NO];
+    [[scrollView_ contentView] setDrawsBackground:NO];
+  }
+  [scrollView_ XP_setAutomaticallyAdjustsContentInsets:NO];
 
   tableView_ = [[StrappySessionTableView alloc] initWithFrame:[[self view] bounds]];
   [tableView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
@@ -436,6 +423,12 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   [tableView_ setRowHeight:kStrappySessionRowHeight];
   [tableView_ setUsesAlternatingRowBackgroundColors:NO];
   [tableView_ setFocusRingType:NSFocusRingTypeNone];
+  if (AICCCurrentTier() >= AICCTierMiddle) {
+    [tableView_ setBackgroundColor:[NSColor clearColor]];
+  }
+  [tableView_ XP_setSourceListStyle];
+  [tableView_ XP_setFloatsGroupRows:YES];
+  [scrollView_ setFocusRingType:NSFocusRingTypeNone];
 
   column = [[[NSTableColumn alloc] initWithIdentifier:@"session"] autorelease];
   [column setDataCell:[[[StrappySessionCell alloc] init] autorelease]];
@@ -444,23 +437,23 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   [scrollView_ setDocumentView:tableView_];
   [[self view] addSubview:scrollView_];
 
-  toolbar = [[StrappySessionToolbarView alloc] initWithFrame:NSZeroRect];
+  toolbar = [[StrappyBottomToolbarView alloc] initWithFrame:NSZeroRect];
   toolbarView_ = toolbar;
   [toolbarView_ setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
+  [toolbar setWindowChangeTarget:self action:@selector(toolbarDidMoveToWindow:)];
   [[self view] addSubview:toolbarView_];
 
-  addSegmented_ = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
-  [addSegmented_ setSegmentCount:1];
-  [[addSegmented_ cell] setTrackingMode:NSSegmentSwitchTrackingMomentary];
-  if ([[addSegmented_ cell] respondsToSelector:@selector(setSegmentStyle:)]) {
-    [[addSegmented_ cell] setSegmentStyle:NSSegmentStyleTexturedRounded];
+  toolbarSegmented_ = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
+  [toolbarSegmented_ setSegmentCount:2];
+  [[toolbarSegmented_ cell] setTrackingMode:NSSegmentSwitchTrackingMomentary];
+  if ([[toolbarSegmented_ cell] respondsToSelector:@selector(setSegmentStyle:)]) {
+    [[toolbarSegmented_ cell] setSegmentStyle:NSSegmentStyleTexturedRounded];
   }
-  [addSegmented_ setTarget:self];
-  [addSegmented_ setAction:@selector(addSessionSegmentClicked:)];
-  [addSegmented_ setToolTip:NSLocalizedString(@"New Session", nil)];
-  [self rebuildAddSegmentIcon];
-  [addSegmented_ sizeToFit];
-  [toolbarView_ addSubview:addSegmented_];
+  [toolbarSegmented_ setTarget:self];
+  [toolbarSegmented_ setAction:@selector(toolbarSegmentClicked:)];
+  [toolbarSegmented_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
+  [self rebuildToolbarSegmentIcons];
+  [toolbarView_ addSubview:toolbarSegmented_];
 
   [self reloadData];
   [tableView_ sizeLastColumnToFit];
@@ -469,49 +462,72 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
 
 - (void)viewDidLayout
 {
-  [self layoutSidebarViews];
   [super viewDidLayout];
+  [self layoutSidebarViews];
 }
 
 - (void)layoutSidebarViews
 {
   NSRect bounds;
-  CGFloat scrollHeight;
   CGFloat segmentWidth;
   CGFloat segmentHeight;
 
   bounds = [[self view] bounds];
-  scrollHeight = bounds.size.height - kStrappySessionToolbarHeight;
-  if (scrollHeight < 0.0) {
-    scrollHeight = 0.0;
-  }
 
   [toolbarView_ setFrame:NSMakeRect(0.0,
                                     0.0,
                                     bounds.size.width,
                                     kStrappySessionToolbarHeight)];
-  [scrollView_ setFrame:NSMakeRect(0.0,
-                                   kStrappySessionToolbarHeight,
-                                   bounds.size.width,
-                                   scrollHeight)];
+  if (AICCCurrentTier() >= AICCTierMiddle) {
+    CGFloat top;
 
-  segmentWidth = [addSegmented_ frame].size.width;
-  segmentHeight = [addSegmented_ frame].size.height;
-  if (segmentWidth < 28.0) {
-    segmentWidth = 28.0;
+    [scrollView_ setFrame:NSMakeRect(0.0,
+                                     0.0,
+                                     bounds.size.width,
+                                     bounds.size.height)];
+    top = [[[self view] window] XP_titlebarHeight];
+    [scrollView_ XP_setContentInsetsTop:top
+                                   left:0.0
+                                 bottom:kStrappySessionToolbarHeight
+                                  right:0.0];
+  } else {
+    CGFloat scrollHeight;
+
+    scrollHeight = bounds.size.height - kStrappySessionToolbarHeight;
+    if (scrollHeight < 0.0) {
+      scrollHeight = 0.0;
+    }
+    [scrollView_ setFrame:NSMakeRect(0.0,
+                                     kStrappySessionToolbarHeight,
+                                     bounds.size.width,
+                                     scrollHeight)];
   }
-  [addSegmented_ setFrame:NSMakeRect(kStrappySessionToolbarPad,
-                                     kStrappySessionToolbarPad,
-                                     segmentWidth,
-                                     segmentHeight)];
+
+  segmentWidth = [toolbarSegmented_ frame].size.width;
+  segmentHeight = [toolbarSegmented_ frame].size.height;
+  [toolbarSegmented_ setFrame:NSMakeRect(bounds.size.width -
+                                         kStrappySessionToolbarPad -
+                                         segmentWidth,
+                                         kStrappySessionToolbarPad,
+                                         segmentWidth,
+                                         segmentHeight)];
 }
 
-- (void)rebuildAddSegmentIcon
+- (void)toolbarDidMoveToWindow:(id)sender
+{
+  (void)sender;
+  [toolbarView_ XP_pinToWindowAppearance];
+  [self rebuildToolbarSegmentIcons];
+  [self updateToolbarSegments];
+}
+
+- (void)rebuildToolbarSegmentIcons
 {
   CGFloat scale;
-  NSImage *addImage;
+  NSImage *closeImage;
+  NSImage *newImage;
 
-  if (addSegmented_ == nil) {
+  if (toolbarSegmented_ == nil) {
     return;
   }
 
@@ -523,17 +539,57 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
     scale = 1.0;
   }
 
-  addImage = [AIFontAwesome imageForIcon:AIFACirclePlus
+  closeImage = [AIFontAwesome imageForIcon:AIFAXmark
+                                     style:AIFontAwesomeStyleSolid
+                                  iconSize:14.0
+                                canvasSize:20.0
+                                     scale:scale];
+  newImage = [AIFontAwesome imageForIcon:kStrappySessionToolbarPlusIcon
                                    style:AIFontAwesomeStyleSolid
-                                iconSize:12.0
-                              canvasSize:18.0
+                                iconSize:14.0
+                              canvasSize:20.0
                                    scale:scale];
-  if (addImage != nil) {
-    [addSegmented_ setImage:addImage forSegment:0];
-    [addSegmented_ setLabel:@"" forSegment:0];
+
+  if (closeImage != nil) {
+    [toolbarSegmented_ setImage:closeImage
+                     forSegment:kStrappySessionToolbarClose];
+    [toolbarSegmented_ setLabel:@""
+                     forSegment:kStrappySessionToolbarClose];
   } else {
-    [addSegmented_ setLabel:@"+" forSegment:0];
+    [toolbarSegmented_ setLabel:NSLocalizedString(@"Close", nil)
+                     forSegment:kStrappySessionToolbarClose];
   }
+
+  if (newImage != nil) {
+    [toolbarSegmented_ setImage:newImage
+                     forSegment:kStrappySessionToolbarNew];
+    [toolbarSegmented_ setLabel:@""
+                     forSegment:kStrappySessionToolbarNew];
+  } else {
+    [toolbarSegmented_ setLabel:NSLocalizedString(@"New", nil)
+                     forSegment:kStrappySessionToolbarNew];
+  }
+
+  [toolbarSegmented_ XP_setToolTip:NSLocalizedString(@"Close Chat", nil)
+                         forSegment:kStrappySessionToolbarClose];
+  [toolbarSegmented_ XP_setToolTip:NSLocalizedString(@"New Chat", nil)
+                         forSegment:kStrappySessionToolbarNew];
+  [toolbarSegmented_ sizeToFit];
+}
+
+- (void)updateToolbarSegments
+{
+  BOOL hasOpenSession;
+
+  if (toolbarSegmented_ == nil) {
+    return;
+  }
+
+  hasOpenSession = ([tableView_ selectedRow] >= 0) ? YES : NO;
+  [toolbarSegmented_ setEnabled:hasOpenSession
+                     forSegment:kStrappySessionToolbarClose];
+  [toolbarSegmented_ setEnabled:(creatingSession_ ? NO : YES)
+                     forSegment:kStrappySessionToolbarNew];
 }
 
 - (void)notifySelectedSession
@@ -547,6 +603,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
     if (delegate_ != nil) {
       [delegate_ sessionListViewController:self didSelectSession:nil];
     }
+    [self updateToolbarSegments];
     return;
   }
 
@@ -557,6 +614,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
       [delegate_ sessionListViewController:self didSelectSession:session];
     }
   }
+  [self updateToolbarSegments];
 }
 
 - (NSInteger)rowForSessionIdentifier:(NSNumber *)sessionIdentifier
@@ -633,6 +691,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
     [tableView_ deselectAll:self];
     [self notifySelectedSession];
   }
+  [self updateToolbarSegments];
 }
 
 - (void)reloadSessionIdentifier:(NSNumber *)sessionIdentifier select:(BOOL)select
@@ -702,6 +761,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   rows_ = [mutableRows copy];
   [tableView_ reloadData];
   [self selectSessionIdentifier:selectedSessionId_];
+  [self updateToolbarSegments];
 }
 
 - (void)selectSessionIdentifier:(NSNumber *)sessionIdentifier
@@ -725,12 +785,35 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
     [tableView_ deselectAll:self];
     suppressSelectionNotification_ = NO;
   }
+  [self updateToolbarSegments];
 }
 
-- (void)addSessionSegmentClicked:(id)sender
+- (void)toolbarSegmentClicked:(id)sender
+{
+  NSInteger selectedSegment;
+
+  selectedSegment = [(NSSegmentedControl *)sender selectedSegment];
+  if (selectedSegment == kStrappySessionToolbarClose) {
+    [self closeActiveSession:sender];
+  } else if (selectedSegment == kStrappySessionToolbarNew) {
+    [self addSession:sender];
+  }
+}
+
+- (void)closeActiveSession:(id)sender
 {
   (void)sender;
-  [self addSession:sender];
+  if ([tableView_ selectedRow] < 0) {
+    return;
+  }
+
+  [selectedSessionId_ release];
+  selectedSessionId_ = nil;
+  suppressSelectionNotification_ = YES;
+  [tableView_ deselectAll:self];
+  suppressSelectionNotification_ = NO;
+  [self notifySelectedSession];
+  [self updateToolbarSegments];
 }
 
 - (void)addSession:(id)sender
@@ -745,13 +828,13 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   }
 
   creatingSession_ = YES;
-  [addSegmented_ setEnabled:NO];
+  [self updateToolbarSegments];
 
   error = nil;
   session = [StrappySession createSessionWithError:&error];
 
   creatingSession_ = NO;
-  [addSegmented_ setEnabled:YES];
+  [self updateToolbarSegments];
 
   identifier = [session objectForKey:@"id"];
   if (![identifier isKindOfClass:[NSNumber class]]) {
@@ -906,7 +989,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   [scrollView_ release];
   [tableView_ release];
   [toolbarView_ release];
-  [addSegmented_ release];
+  [toolbarSegmented_ release];
   [rows_ release];
   [selectedSessionId_ release];
   [super dealloc];
