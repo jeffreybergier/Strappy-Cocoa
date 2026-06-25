@@ -303,6 +303,14 @@ static int StrappySessionHandleStreamEvent(
   return ([self inFlightSessionCount] > 0U) ? YES : NO;
 }
 
++ (BOOL)isPromptInFlightForSessionIdentifier:(NSNumber *)sessionIdentifier
+{
+  StrappySession *session;
+
+  session = [self inFlightSessionForIdentifier:sessionIdentifier];
+  return ((session != nil) && [session isPromptInFlight]) ? YES : NO;
+}
+
 + (StrappySession *)sessionWithIdentifier:(NSNumber *)sessionIdentifier
 {
   StrappySession *session;

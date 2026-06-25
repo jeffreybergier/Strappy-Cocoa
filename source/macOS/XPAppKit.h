@@ -69,6 +69,14 @@
   #define XPColorControlHighlight [NSColor controlHighlightColor]
 #endif
 
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101200
+  #define XPCompositingOperationSourceOver NSCompositingOperationSourceOver
+  #define XPCompositingOperationSourceIn   NSCompositingOperationSourceIn
+#else
+  #define XPCompositingOperationSourceOver NSCompositeSourceOver
+  #define XPCompositingOperationSourceIn   NSCompositeSourceIn
+#endif
+
 @interface NSWindow (XPAppKit)
 - (void)XP_setTitle:(NSString *)title;
 - (CGFloat)XP_titlebarHeight;

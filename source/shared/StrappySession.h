@@ -21,6 +21,7 @@ extern NSString * const StrappySessionStreamEventNotification;
 + (StrappySession *)sessionWithSummary:(NSDictionary *)summary;
 + (NSUInteger)inFlightSessionCount;
 + (BOOL)hasInFlightSessions;
++ (BOOL)isPromptInFlightForSessionIdentifier:(NSNumber *)sessionIdentifier;
 + (NSArray *)sessionSummariesWithError:(NSError **)error;
 + (NSDictionary *)sessionSummaryForSessionIdentifier:(NSNumber *)sessionIdentifier
                                                error:(NSError **)error;

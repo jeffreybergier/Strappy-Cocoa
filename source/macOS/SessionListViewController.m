@@ -4,7 +4,7 @@
 #import "StrappySession.h"
 #import "XPFoundation.h"
 
-static const CGFloat kStrappySessionRowHeight = 80.0;
+static const CGFloat kStrappySessionRowHeight = 68.0;
 static const CGFloat kStrappySectionRowHeight = 24.0;
 static const CGFloat kStrappySessionToolbarHeight = 32.0;
 static const CGFloat kStrappySessionToolbarPad = 4.0;
@@ -12,11 +12,16 @@ static const CGFloat kStrappyPadLeft = 8.0;
 static const CGFloat kStrappyPadRight = 8.0;
 static const CGFloat kStrappyTimestampTop = 8.0;
 static const CGFloat kStrappyTitleLineHeight = 17.0;
-static const CGFloat kStrappyTitleLines = 3.0;
-static const CGFloat kStrappyTimestampGap = 3.0;
+static const CGFloat kStrappyTitleLines = 2.0;
+static const CGFloat kStrappyTimestampGap = 4.0;
 static const CGFloat kStrappyTimestampHeight = 14.0;
+static const CGFloat kStrappyPromptIconCanvasSize = 14.0;
+static const CGFloat kStrappyPromptIconSize = 10.0;
+static const CGFloat kStrappyPromptIconGap = 4.0;
 static const AIFontAwesomeIcon kStrappySessionToolbarPlusIcon =
   (AIFontAwesomeIcon)0xF067;
+static const AIFontAwesomeIcon kStrappySessionPromptActiveIcon =
+  AIFAArrowsRotate;
 
 enum {
   kStrappySessionToolbarClose = 0,
@@ -27,6 +32,8 @@ static NSString * const kStrappySessionRowTypeKey = @"row_type";
 static NSString * const kStrappySessionRowTypeSection = @"section";
 static NSString * const kStrappySessionRowTypeSession = @"session";
 static NSString * const kStrappySessionRowTypeEmpty = @"empty";
+static NSString * const kStrappySessionPromptInFlightKey =
+  @"prompt_in_flight";
 
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
   #define StrappyPasteboardStringType NSPasteboardTypeString
@@ -54,9 +61,16 @@ static NSDictionary *StrappyEmptySessionRow(void)
 static NSDictionary *StrappySessionDisplayRow(NSDictionary *session)
 {
   NSMutableDictionary *row;
+  NSNumber *sessionIdentifier;
+  BOOL inFlight;
 
   row = [NSMutableDictionary dictionaryWithDictionary:session];
   [row setObject:kStrappySessionRowTypeSession forKey:kStrappySessionRowTypeKey];
+  sessionIdentifier = [session objectForKey:@"id"];
+  inFlight =
+    [StrappySession isPromptInFlightForSessionIdentifier:sessionIdentifier];
+  [row setObject:[NSNumber numberWithBool:inFlight]
+          forKey:kStrappySessionPromptInFlightKey];
   return row;
 }
 
@@ -150,6 +164,56 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
                   : [NSColor disabledControlTextColor];
 }
 
+static BOOL StrappyRowIsPromptInFlight(NSDictionary *row)
+{
+  NSNumber *inFlight;
+
+  inFlight = [row objectForKey:kStrappySessionPromptInFlightKey];
+  return ([inFlight isKindOfClass:[NSNumber class]] &&
+          [inFlight boolValue]) ? YES : NO;
+}
+
+static CGFloat StrappyBackingScaleForView(NSView *view)
+{
+  NSWindow *window;
+  CGFloat scale;
+
+  window = [view window];
+  scale = 1.0;
+  if ([window respondsToSelector:@selector(XP_backingScaleFactor)]) {
+    scale = [window XP_backingScaleFactor];
+  }
+  return (scale > 1.0) ? scale : 1.0;
+}
+
+static void StrappyDrawTintedImage(NSImage *image,
+                                   NSRect rect,
+                                   NSColor *color)
+{
+  NSImage *tintedImage;
+  NSRect imageRect;
+
+  if ((image == nil) || (color == nil)) {
+    return;
+  }
+
+  imageRect = NSMakeRect(0.0, 0.0, [image size].width, [image size].height);
+  tintedImage = [[[NSImage alloc] initWithSize:[image size]] autorelease];
+  [tintedImage lockFocus];
+  [image drawAtPoint:NSZeroPoint
+            fromRect:imageRect
+           operation:XPCompositingOperationSourceOver
+            fraction:1.0];
+  [color set];
+  NSRectFillUsingOperation(imageRect, XPCompositingOperationSourceIn);
+  [tintedImage unlockFocus];
+
+  [tintedImage drawInRect:rect
+                 fromRect:imageRect
+                operation:XPCompositingOperationSourceOver
+                 fraction:1.0];
+}
+
 @protocol StrappySessionTableViewMenu <NSObject>
 - (NSMenu *)contextMenuForRow:(NSInteger)row;
 @end
@@ -212,21 +276,31 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   [title drawInRect:rect withAttributes:attrs];
 }
 
-- (void)drawSessionWithFrame:(NSRect)frame row:(NSDictionary *)row
+- (void)drawSessionWithFrame:(NSRect)frame
+                         row:(NSDictionary *)row
+                        view:(NSView *)view
 {
   NSString *title;
   NSString *timestamp;
   NSString *type;
   BOOL selected;
+  BOOL promptInFlight;
+  CGFloat scale;
   CGFloat titleHeight;
   CGFloat titleY;
+  CGFloat timestampWidth;
   NSRect titleRect;
   NSRect timestampRect;
+  NSRect promptIconRect;
   NSDictionary *titleAttrs;
   NSDictionary *metaAttrs;
 
   selected = [self isHighlighted];
   type = [row objectForKey:kStrappySessionRowTypeKey];
+  promptInFlight =
+    ([type isEqualToString:kStrappySessionRowTypeSession] &&
+     StrappyRowIsPromptInFlight(row)) ? YES : NO;
+  scale = StrappyBackingScaleForView(view);
 
   title = StrappySessionPromptPreview(row);
   timestamp = @"";
@@ -244,13 +318,39 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   titleHeight = kStrappyTitleLineHeight * kStrappyTitleLines;
   titleY = NSMinY(frame) + kStrappyTimestampTop;
   if ([timestamp length] > 0U) {
+    timestampWidth = NSWidth(frame) -
+      (kStrappyPadLeft + kStrappyPadRight +
+       kStrappyPromptIconCanvasSize + kStrappyPromptIconGap);
+    if (timestampWidth < 0.0) {
+      timestampWidth = 0.0;
+    }
     timestampRect = NSMakeRect(NSMinX(frame) + kStrappyPadLeft,
                                NSMinY(frame) + kStrappyTimestampTop,
-                               NSWidth(frame) - (kStrappyPadLeft + kStrappyPadRight),
+                               timestampWidth,
                                kStrappyTimestampHeight);
     [timestamp drawInRect:timestampRect withAttributes:metaAttrs];
 
     titleY += kStrappyTimestampHeight + kStrappyTimestampGap;
+  }
+  if (promptInFlight) {
+    NSImage *image;
+
+    promptIconRect =
+      NSMakeRect(NSMaxX(frame) - kStrappyPadRight -
+                   kStrappyPromptIconCanvasSize,
+                 NSMinY(frame) + kStrappyTimestampTop +
+                   ((kStrappyTimestampHeight -
+                     kStrappyPromptIconCanvasSize) / 2.0),
+                 kStrappyPromptIconCanvasSize,
+                 kStrappyPromptIconCanvasSize);
+    image = [AIFontAwesome imageForIcon:kStrappySessionPromptActiveIcon
+                                  style:AIFontAwesomeStyleSolid
+                               iconSize:kStrappyPromptIconSize
+                             canvasSize:kStrappyPromptIconCanvasSize
+                                  scale:scale];
+    StrappyDrawTintedImage(image,
+                           promptIconRect,
+                           StrappySecondaryTextColor(selected));
   }
 
   titleRect = NSMakeRect(NSMinX(frame) + kStrappyPadLeft,
@@ -277,7 +377,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
     return;
   }
 
-  [self drawSessionWithFrame:frame row:row];
+  [self drawSessionWithFrame:frame row:row view:view];
 }
 
 @end
@@ -285,6 +385,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
 @interface SessionListViewController ()
 - (void)rebuildToolbarSegmentIcons;
 - (void)updateToolbarSegments;
+- (void)sessionPromptActivityDidChange:(NSNotification *)notification;
 - (void)toolbarDidMoveToWindow:(id)sender;
 - (void)toolbarSegmentClicked:(id)sender;
 - (void)closeActiveSession:(id)sender;
@@ -365,6 +466,17 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   [self reloadData];
   [tableView_ sizeLastColumnToFit];
   [self layoutSidebarViews];
+
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(sessionPromptActivityDidChange:)
+           name:StrappySessionPromptDidStartNotification
+         object:nil];
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(sessionPromptActivityDidChange:)
+           name:StrappySessionPromptDidFinishNotification
+         object:nil];
 }
 
 - (void)viewDidLayout
@@ -497,6 +609,30 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
                      forSegment:kStrappySessionToolbarClose];
   [toolbarSegmented_ setEnabled:(creatingSession_ ? NO : YES)
                      forSegment:kStrappySessionToolbarNew];
+}
+
+- (void)sessionPromptActivityDidChange:(NSNotification *)notification
+{
+  StrappySession *session;
+  NSNumber *identifier;
+  NSDictionary *summary;
+
+  session = [notification object];
+  identifier = nil;
+  if ([session isKindOfClass:[StrappySession class]]) {
+    identifier = [session sessionIdentifier];
+  }
+  if (![identifier isKindOfClass:[NSNumber class]]) {
+    summary = [[notification userInfo] objectForKey:@"session"];
+    if ([summary isKindOfClass:[NSDictionary class]]) {
+      identifier = [summary objectForKey:@"id"];
+    }
+  }
+  if (![identifier isKindOfClass:[NSNumber class]]) {
+    return;
+  }
+
+  [self reloadSessionIdentifier:identifier select:NO];
 }
 
 - (void)notifySelectedSession
@@ -894,6 +1030,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
 
 - (void)dealloc
 {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   [scrollView_ release];
   [tableView_ release];
   [toolbarView_ release];
