@@ -1589,6 +1589,8 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
   strappy_session_message_input messages[5];
   strappy_session_message_record_list all_messages;
   strappy_session_message_record_list context_messages;
+  const char *reasoning_streaming_state;
+  const char *content_streaming_state;
   long long session_id;
   char *error;
   int ok;
@@ -1596,6 +1598,14 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
   if (context == NULL) {
     return 0;
   }
+
+  reasoning_streaming_state =
+    "{\"streaming\":true,\"reasoning_render_when_empty\":true,"
+    "\"reasoning_collapsed\":false,\"tool_column_collapsed\":true}";
+  content_streaming_state =
+    "{\"streaming\":true,\"reasoning_render_when_empty\":true,"
+    "\"reasoning_collapsed\":false,\"tool_column_collapsed\":true,"
+    "\"content_started\":true}";
 
   memset(messages, 0, sizeof(messages));
 
@@ -1739,10 +1749,148 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
        (strcmp(context_messages.records[1].content, "The answer.") == 0);
   if (!ok) {
     fprintf(stderr, "Session context replay rows did not match expected shape.\n");
+    strappy_session_message_record_list_destroy(&context_messages);
+    strappy_session_message_record_list_destroy(&all_messages);
+    return 0;
   }
 
   strappy_session_message_record_list_destroy(&context_messages);
   strappy_session_message_record_list_destroy(&all_messages);
+
+  memset(messages, 0, sizeof(messages));
+  messages[0].turn_key = "stream-turn-test";
+  messages[0].prompt_group_key = "prompt-group-test";
+  messages[0].actor = "user";
+  messages[0].context_policy = "full";
+  messages[0].kind = "assistant";
+  messages[0].api_role = "assistant";
+  messages[0].render_role = "assistant";
+  messages[0].role = "assistant";
+  messages[0].content = "";
+  messages[0].message_key = "stream-turn-test-assistant";
+  messages[0].render_state_json = reasoning_streaming_state;
+  messages[0].include_in_context = 1;
+
+  if (!strappy_db_append_session_message_content(context->catalog_path,
+                                                 session_id,
+                                                 &messages[0],
+                                                 "",
+                                                 "thinking",
+                                                 &error)) {
+    fprintf(stderr,
+            "Could not append streamed reasoning content: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  messages[0].render_state_json = content_streaming_state;
+  if (!strappy_db_append_session_message_content(context->catalog_path,
+                                                 session_id,
+                                                 &messages[0],
+                                                 "Hel",
+                                                 NULL,
+                                                 &error) ||
+      !strappy_db_append_session_message_content(context->catalog_path,
+                                                 session_id,
+                                                 &messages[0],
+                                                 "lo",
+                                                 NULL,
+                                                 &error)) {
+    fprintf(stderr,
+            "Could not append streamed message content: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  messages[0].render_state_json = reasoning_streaming_state;
+  if (!strappy_db_append_session_message_content(context->catalog_path,
+                                                 session_id,
+                                                 &messages[0],
+                                                 "",
+                                                 " late",
+                                                 &error)) {
+    fprintf(stderr,
+            "Could not append streamed message content: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  strappy_session_message_record_list_init(&all_messages);
+  ok = strappy_db_list_session_messages(context->catalog_path,
+                                        session_id,
+                                        &all_messages,
+                                        &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not list streamed message rows: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_message_record_list_destroy(&all_messages);
+    return 0;
+  }
+
+  ok = (all_messages.count == 6U) &&
+       (strcmp(all_messages.records[5].message_key,
+               "stream-turn-test-assistant") == 0) &&
+       (strcmp(all_messages.records[5].content, "Hello") == 0) &&
+       (strcmp(all_messages.records[5].reasoning, "thinking late") == 0) &&
+       (all_messages.records[5].render_state_json != NULL) &&
+       (strcmp(all_messages.records[5].render_state_json,
+               content_streaming_state) == 0);
+  strappy_session_message_record_list_destroy(&all_messages);
+  if (!ok) {
+    fprintf(stderr, "Streamed message append did not persist expected content.\n");
+    return 0;
+  }
+
+  messages[0].content = "Hello final";
+  messages[0].reasoning = "final reasoning";
+  messages[0].render_state_json = NULL;
+  if (!strappy_db_append_message_sequence_to_session(context->catalog_path,
+                                                     session_id,
+                                                     "Stream prompt",
+                                                     "Hello final",
+                                                     "harness-model",
+                                                     200L,
+                                                     &messages[0],
+                                                     1U,
+                                                     &error)) {
+    fprintf(stderr,
+            "Could not upsert final streamed message row: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  strappy_session_message_record_list_init(&all_messages);
+  ok = strappy_db_list_session_messages(context->catalog_path,
+                                        session_id,
+                                        &all_messages,
+                                        &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not list final streamed message rows: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_message_record_list_destroy(&all_messages);
+    return 0;
+  }
+
+  ok = (all_messages.count == 6U) &&
+       (strcmp(all_messages.records[5].message_key,
+               "stream-turn-test-assistant") == 0) &&
+       (strcmp(all_messages.records[5].content, "Hello final") == 0) &&
+       (strcmp(all_messages.records[5].reasoning, "final reasoning") == 0) &&
+       (all_messages.records[5].render_state_json == NULL);
+  strappy_session_message_record_list_destroy(&all_messages);
+  if (!ok) {
+    fprintf(stderr, "Final streamed message upsert duplicated or missed the row.\n");
+    return 0;
+  }
+
   return ok;
 }
 

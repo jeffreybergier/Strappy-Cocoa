@@ -288,6 +288,62 @@ static const char *strappy_webview_string_or_empty(const char *value)
   return (value != NULL) ? value : "";
 }
 
+static int strappy_webview_is_json_space(char value)
+{
+  return (value == ' ') || (value == '\t') || (value == '\r') ||
+         (value == '\n');
+}
+
+static int strappy_webview_json_bool(const char *json,
+                                     const char *key,
+                                     int default_value)
+{
+  char pattern[96];
+  const char *cursor;
+  int written;
+
+  if ((json == NULL) || (json[0] == '\0') ||
+      (key == NULL) || (key[0] == '\0')) {
+    return default_value;
+  }
+
+  written = snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+  if ((written <= 0) || ((size_t)written >= sizeof(pattern))) {
+    return default_value;
+  }
+
+  cursor = strstr(json, pattern);
+  if (cursor == NULL) {
+    return default_value;
+  }
+  cursor += (size_t)written;
+  while (strappy_webview_is_json_space(*cursor)) {
+    cursor++;
+  }
+  if (*cursor != ':') {
+    return default_value;
+  }
+  cursor++;
+  while (strappy_webview_is_json_space(*cursor)) {
+    cursor++;
+  }
+
+  if (strncmp(cursor, "true", 4U) == 0) {
+    return 1;
+  }
+  if (strncmp(cursor, "false", 5U) == 0) {
+    return 0;
+  }
+  if (*cursor == '1') {
+    return 1;
+  }
+  if (*cursor == '0') {
+    return 0;
+  }
+
+  return default_value;
+}
+
 static const char *strappy_webview_agent_label(
   const strappy_webview_labels *labels)
 {
@@ -453,6 +509,7 @@ static int strappy_webview_append_reasoning_html(
   strappy_webview_buffer *buffer,
   const char *reasoning,
   int render_when_empty,
+  int collapsed,
   const strappy_webview_labels *labels)
 {
   int collapse_reasoning;
@@ -463,7 +520,7 @@ static int strappy_webview_append_reasoning_html(
 
   collapse_reasoning = ((reasoning != NULL) &&
                         (reasoning[0] != '\0') &&
-                        !render_when_empty);
+                        collapsed);
 
   if (!strappy_webview_buffer_append_cstring(buffer, "<div class=\"reasoning")) {
     return 0;
@@ -1138,6 +1195,10 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "n=m.getElementsByTagName('*');for(i=0;i<n.length;i++){if(isAssistantRow(n[i]))out[out.length]=n[i];}return out;}",
     "function rowMessageKey(row){return row&&row.getAttribute?row.getAttribute('data-message-key')||'':'';}",
     "function rowTargetMessageKey(row){return row&&row.getAttribute?row.getAttribute('data-target-message-key')||'':'';}",
+    "function rowByMessageKeyAny(key){var rows=messageRows();var p=byId('tool-sources')||byId('tools');var n,i;",
+    "if(!key)return null;if(p){n=p.childNodes;for(i=0;i<n.length;i++){if(hasClass(n[i],'row'))rows[rows.length]=n[i];}}",
+    "for(i=0;i<rows.length;i++){if(rowMessageKey(rows[i])==key)return rows[i];}return null;}",
+    "function rowIdByMessageKey(key){var r=rowByMessageKeyAny(key);return r?rowId(r):'';}",
     "function assistantByMessageKey(key){var rows=assistantRows();var i;if(!key)return null;",
     "for(i=0;i<rows.length;i++){if(rowMessageKey(rows[i])==key)return rows[i];}return null;}",
     "function explicitToolTarget(row){var key=rowTargetMessageKey(row);var target;if(key==='')return '';",
@@ -1247,11 +1308,12 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "flushTextQueues();b=firstByClass(r,'bubble');if(b)b.style.display='block';",
     "if(b&&hasClass(b,'bubble-status')){b.className=b.className.replace(/\\sbubble-status/g,'');",
     "b._strappyMarkdown='';b.innerHTML='';}",
-    "r.className=r.className.replace(/\\sstreaming-active/g,'');",
-    "setMessageReasoningCollapsed(id,1);setMessageToolColumnCollapsed(id,1);if(!b)return;",
+    "if(!b)return;",
     "if(typeof b._strappyMarkdown=='undefined')b._strappyMarkdown=b.innerHTML;",
     "b._strappyMarkdown+=escHTML(t);if(shouldRenderMarkdownBubble(b))renderMarkdownNode(b);",
     "else b.innerHTML=b._strappyMarkdown;scrollBottom();}",
+    "function appendMessageTextByMessageKey(key,t){var id=rowIdByMessageKey(key);",
+    "if(id==='')return false;appendMessageText(id,t);return true;}",
     "function moveMessageTextToReasoning(id){var r=byId(id);var b,box,body,raw;",
     "flushTextQueues();if(!r)return;b=firstByClass(r,'bubble');box=firstByClass(r,'reasoning');",
     "body=firstByClass(r,'reasoning-body');if(!b||!box||!body)return;",
@@ -1270,6 +1332,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(box)box.style.display='block';if(!body)return;",
     "if(box)setReasoningCollapsed(box,0);",
     "queueTextAppend(id,t,'reasoning');}",
+    "function appendReasoningTextByMessageKey(key,t){var id=rowIdByMessageKey(key);",
+    "if(id==='')return false;appendReasoningText(id,t);return true;}",
     "function appendToolEventText(id,t){var r=byId(id);var b;if(!r)return;",
     "r.style.display='block';b=firstByClass(r,'bubble');if(!b)return;",
     "if(typeof b._strappyRawText=='undefined')b._strappyRawText=nodeText(b);",
@@ -1326,11 +1390,18 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   const char *reasoning;
   const char *created_at;
   const char *metadata_json;
+  const char *render_state_json;
   const char *status_to_render;
   char *owned_status_html;
   char http_status_text[64];
   int has_state;
   int render_created_at;
+  int render_streaming;
+  int reasoning_render_when_empty;
+  int reasoning_collapsed;
+  int tool_column_collapsed;
+  int render_bubble_status;
+  int suppress_status_meta;
   int ok;
 
   role = ((message != NULL) && (message->role != NULL) &&
@@ -1342,11 +1413,38 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     strappy_webview_string_or_empty(message->created_at) : "";
   metadata_json = (message != NULL) ?
     strappy_webview_string_or_empty(message->metadata_json) : "";
+  render_state_json = (message != NULL) ?
+    strappy_webview_string_or_empty(message->render_state_json) : "";
   status_to_render = strappy_webview_string_or_empty(status_html);
   owned_status_html = NULL;
   has_state = (state != NULL) && (state[0] != '\0');
+  render_streaming = strappy_webview_json_bool(render_state_json,
+                                              "streaming",
+                                              0);
+  reasoning_render_when_empty =
+    strappy_webview_json_bool(render_state_json,
+                              "reasoning_render_when_empty",
+                              render_streaming ? 1 : 0);
+  reasoning_collapsed =
+    strappy_webview_json_bool(render_state_json,
+                              "reasoning_collapsed",
+                              ((reasoning[0] != '\0') &&
+                               !reasoning_render_when_empty) ? 1 : 0);
+  tool_column_collapsed =
+    strappy_webview_json_bool(render_state_json,
+                              "tool_column_collapsed",
+                              1);
+  render_bubble_status =
+    render_streaming &&
+    strappy_webview_is_assistant_role(role) &&
+    (text[0] == '\0');
+  suppress_status_meta =
+    render_streaming &&
+    (state != NULL) &&
+    (strcmp(state, "pending") == 0);
   render_created_at =
     (created_at[0] != '\0') &&
+    !render_streaming &&
     !strappy_webview_is_user_role(role) &&
     !strappy_webview_is_harness_role(role);
 
@@ -1368,6 +1466,10 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
        strappy_webview_append_element_id(&buffer, message) &&
        strappy_webview_buffer_append_cstring(&buffer, "\" class=\"row ") &&
        strappy_webview_append_html_escaped(&buffer, role);
+
+  if (ok && render_streaming) {
+    ok = strappy_webview_buffer_append_cstring(&buffer, " streaming-active");
+  }
 
   if (ok && has_state) {
     ok = strappy_webview_buffer_append_cstring(&buffer, " state-") &&
@@ -1396,25 +1498,57 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                              "target-message-key",
                                              (message != NULL) ?
                                                message->target_message_key : NULL) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "render-state",
+                                             (message != NULL) ?
+                                               message->render_state_json : NULL);
+  if (ok && render_streaming && strappy_webview_is_assistant_role(role)) {
+    ok = strappy_webview_append_data_attribute(
+           &buffer,
+           "thinking-label",
+           strappy_webview_thinking_label(labels));
+  }
+  ok = ok &&
        strappy_webview_buffer_append_cstring(&buffer, "><div class=\"role\">") &&
        strappy_webview_append_html_escaped(&buffer,
                                            strappy_webview_role_label(role, labels)) &&
        strappy_webview_buffer_append_cstring(&buffer, "</div>");
 
   if (ok && strappy_webview_is_assistant_role(role)) {
-    ok = strappy_webview_append_reasoning_html(&buffer, reasoning, 0, labels);
+    ok = strappy_webview_append_reasoning_html(&buffer,
+                                               reasoning,
+                                               reasoning_render_when_empty,
+                                               reasoning_collapsed,
+                                               labels);
     if (ok) {
-      ok = strappy_webview_append_tool_column_html(&buffer, 1);
+      ok = strappy_webview_append_tool_column_html(&buffer,
+                                                  tool_column_collapsed);
     }
   }
 
   ok = ok &&
-       strappy_webview_buffer_append_cstring(&buffer, "<div class=\"bubble\">") &&
-       strappy_webview_append_html_escaped(&buffer, text) &&
+       strappy_webview_buffer_append_cstring(&buffer, "<div class=\"bubble");
+  if (ok && render_bubble_status) {
+    ok = strappy_webview_buffer_append_cstring(&buffer, " bubble-status");
+  }
+  ok = ok && strappy_webview_buffer_append_cstring(&buffer, "\">");
+  if (ok && render_bubble_status) {
+    if (status_to_render[0] != '\0') {
+      ok = strappy_webview_buffer_append_cstring(&buffer, status_to_render);
+    } else {
+      ok = strappy_webview_append_html_escaped(
+             &buffer,
+             strappy_webview_thinking_label(labels));
+    }
+  } else {
+    ok = ok && strappy_webview_append_html_escaped(&buffer, text);
+  }
+  ok = ok &&
        strappy_webview_buffer_append_cstring(&buffer, "</div>") &&
        strappy_webview_append_metadata_html(&buffer, role, metadata_json, labels);
 
-  if (ok && (status_to_render[0] != '\0')) {
+  if (ok && (status_to_render[0] != '\0') &&
+      !render_bubble_status && !suppress_status_meta) {
     ok = strappy_webview_buffer_append_cstring(
            &buffer,
            "<div class=\"meta status\">") &&
@@ -1462,78 +1596,24 @@ char *strappy_webview_streaming_assistant_message_html(
   const char *prompt_group_key,
   const strappy_webview_labels *labels)
 {
-  strappy_webview_buffer buffer;
-  int has_state;
-  int status_is_pending;
-  int render_bubble_status;
-  int ok;
+  static const char *streaming_render_state =
+    "{\"streaming\":true,\"reasoning_render_when_empty\":true,"
+    "\"reasoning_collapsed\":false,\"tool_column_collapsed\":true}";
+  strappy_webview_message message;
 
   if ((element_id == NULL) || (element_id[0] == '\0')) {
     element_id = "streaming-assistant";
   }
-  has_state = (state != NULL) && (state[0] != '\0');
-  status_is_pending = (state != NULL) && (strcmp(state, "pending") == 0);
-  render_bubble_status =
-    ((text == NULL) || (text[0] == '\0')) &&
-    (status_html != NULL) &&
-    (status_html[0] != '\0') &&
-    status_is_pending;
 
-  strappy_webview_buffer_init(&buffer);
-  ok = strappy_webview_buffer_append_cstring(&buffer, "<div id=\"") &&
-       strappy_webview_append_html_escaped(&buffer, element_id) &&
-       strappy_webview_buffer_append_cstring(&buffer,
-                                             "\" class=\"row assistant streaming-active");
-  if (ok && has_state) {
-    ok = strappy_webview_buffer_append_cstring(&buffer, " state-") &&
-         strappy_webview_append_html_escaped(&buffer, state);
-  }
-  ok = ok &&
-       strappy_webview_buffer_append_cstring(&buffer, "\"") &&
-       strappy_webview_append_data_attribute(&buffer, "actor", actor) &&
-       strappy_webview_append_data_attribute(&buffer,
-                                             "prompt-group-key",
-                                             prompt_group_key) &&
-       strappy_webview_buffer_append_cstring(
-         &buffer,
-         " data-thinking-label=\"") &&
-       strappy_webview_append_html_escaped(
-         &buffer,
-         strappy_webview_thinking_label(labels)) &&
-       strappy_webview_buffer_append_cstring(&buffer, "\"><div class=\"role\">") &&
-       strappy_webview_append_html_escaped(&buffer,
-                                           strappy_webview_agent_label(labels)) &&
-       strappy_webview_buffer_append_cstring(&buffer, "</div>") &&
-       strappy_webview_append_reasoning_html(&buffer, reasoning, 1, labels) &&
-       strappy_webview_append_tool_column_html(&buffer, 1) &&
-       strappy_webview_buffer_append_cstring(&buffer, "<div class=\"bubble");
-  if (ok && render_bubble_status) {
-    ok = strappy_webview_buffer_append_cstring(&buffer, " bubble-status");
-  }
-  ok = ok &&
-       strappy_webview_buffer_append_cstring(&buffer, "\">");
-  if (ok && render_bubble_status) {
-    ok = strappy_webview_buffer_append_cstring(&buffer, status_html);
-  } else {
-    ok = strappy_webview_append_html_escaped(&buffer, text);
-  }
-  ok = ok && strappy_webview_buffer_append_cstring(&buffer, "</div>");
-
-  if (ok && !status_is_pending &&
-      (status_html != NULL) && (status_html[0] != '\0')) {
-    ok = strappy_webview_buffer_append_cstring(
-           &buffer,
-           "<div class=\"meta status\">") &&
-         strappy_webview_buffer_append_cstring(&buffer, status_html) &&
-         strappy_webview_buffer_append_cstring(&buffer, "</div>");
-  }
-
-  ok = ok && strappy_webview_buffer_append_cstring(&buffer, "</div>");
-  if (!ok) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
+  memset(&message, 0, sizeof(message));
+  message.element_id = element_id;
+  message.role = "assistant";
+  message.actor = actor;
+  message.prompt_group_key = prompt_group_key;
+  message.text = strappy_webview_string_or_empty(text);
+  message.reasoning = strappy_webview_string_or_empty(reasoning);
+  message.render_state_json = streaming_render_state;
+  return strappy_webview_message_html(&message, labels, state, status_html);
 }
 
 char *strappy_webview_tool_activity_message_html(
@@ -1812,6 +1892,43 @@ char *strappy_webview_append_reasoning_text_js(const char *element_id,
   strappy_webview_buffer_init(&buffer);
   if (!strappy_webview_buffer_append_cstring(&buffer, "appendReasoningText(") ||
       !strappy_webview_append_js_string(&buffer, element_id) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
+      !strappy_webview_append_js_string(&buffer, delta) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_append_message_text_by_key_js(const char *message_key,
+                                                    const char *delta)
+{
+  strappy_webview_buffer buffer;
+
+  strappy_webview_buffer_init(&buffer);
+  if (!strappy_webview_buffer_append_cstring(&buffer,
+                                             "appendMessageTextByMessageKey(") ||
+      !strappy_webview_append_js_string(&buffer, message_key) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
+      !strappy_webview_append_js_string(&buffer, delta) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_append_reasoning_text_by_key_js(const char *message_key,
+                                                      const char *delta)
+{
+  strappy_webview_buffer buffer;
+
+  strappy_webview_buffer_init(&buffer);
+  if (!strappy_webview_buffer_append_cstring(
+        &buffer,
+        "appendReasoningTextByMessageKey(") ||
+      !strappy_webview_append_js_string(&buffer, message_key) ||
       !strappy_webview_buffer_append_cstring(&buffer, ",") ||
       !strappy_webview_append_js_string(&buffer, delta) ||
       !strappy_webview_buffer_append_cstring(&buffer, ");")) {

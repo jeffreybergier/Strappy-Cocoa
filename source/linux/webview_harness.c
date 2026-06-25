@@ -67,7 +67,8 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function scrollBottomNow") &&
        harness_expect_contains(page_html, "function shouldRenderMarkdownBubble") &&
        harness_expect_contains(page_html, "ancestorHasClass(n,'assistant')") &&
-       harness_expect_contains(page_html, "setMessageToolColumnCollapsed(id,1)") &&
+       harness_expect_contains(page_html, "appendMessageTextByMessageKey") &&
+       harness_expect_contains(page_html, "appendReasoningTextByMessageKey") &&
        harness_expect_contains(page_html, "function setToolBoxCount") &&
        harness_expect_contains(page_html, "setToolBoxCount(box,cards.length,last") &&
        harness_expect_contains(page_html, "toolCardSummary(last,cards.length-1)") &&
@@ -95,6 +96,8 @@ static int harness_check_tool_column_state(void)
   strappy_webview_message message;
   char *final_html;
   char *streaming_html;
+  char *reloaded_streaming_html;
+  char *reloaded_content_html;
   int ok;
 
   memset(&message, 0, sizeof(message));
@@ -125,6 +128,38 @@ static int harness_check_tool_column_state(void)
     return 0;
   }
 
+  message.element_id = "assistant-reloaded-streaming";
+  message.text = "";
+  message.reasoning = "Thinking through it";
+  message.render_state_json =
+    "{\"streaming\":true,\"reasoning_render_when_empty\":true,"
+    "\"reasoning_collapsed\":false,\"tool_column_collapsed\":true}";
+  reloaded_streaming_html =
+    strappy_webview_message_html(&message, NULL, NULL, NULL);
+  if (reloaded_streaming_html == NULL) {
+    fprintf(stderr, "Could not generate reloaded streaming assistant HTML.\n");
+    strappy_webview_free(streaming_html);
+    strappy_webview_free(final_html);
+    return 0;
+  }
+
+  message.element_id = "assistant-reloaded-content";
+  message.text = "Answer text";
+  message.reasoning = "Thinking through it";
+  message.render_state_json =
+    "{\"streaming\":true,\"reasoning_render_when_empty\":true,"
+    "\"reasoning_collapsed\":false,\"tool_column_collapsed\":true,"
+    "\"content_started\":true}";
+  reloaded_content_html =
+    strappy_webview_message_html(&message, NULL, NULL, NULL);
+  if (reloaded_content_html == NULL) {
+    fprintf(stderr, "Could not generate reloaded content assistant HTML.\n");
+    strappy_webview_free(reloaded_streaming_html);
+    strappy_webview_free(streaming_html);
+    strappy_webview_free(final_html);
+    return 0;
+  }
+
   ok = harness_expect_contains(final_html,
                                "tool-column tool-column-empty tool-column-collapsed") &&
        harness_expect_contains(final_html,
@@ -138,8 +173,30 @@ static int harness_check_tool_column_state(void)
        harness_expect_contains(streaming_html,
                                "tool-column-disclosure\">&#9658;") &&
        harness_expect_not_contains(streaming_html,
-                                   "tool-column-disclosure\">&#9660;");
+                                   "tool-column-disclosure\">&#9660;") &&
+       harness_expect_contains(reloaded_streaming_html,
+                               "row assistant streaming-active") &&
+       harness_expect_contains(reloaded_streaming_html,
+                               "data-render-state=\"{&quot;streaming&quot;:true") &&
+       harness_expect_contains(reloaded_streaming_html,
+                               "Thinking through it") &&
+       harness_expect_contains(reloaded_streaming_html,
+                               "bubble bubble-status") &&
+       harness_expect_not_contains(reloaded_streaming_html,
+                                   "reasoning-collapsed") &&
+       harness_expect_contains(reloaded_content_html,
+                               "row assistant streaming-active") &&
+       harness_expect_not_contains(reloaded_content_html,
+                                   "reasoning-collapsed") &&
+       harness_expect_contains(reloaded_content_html,
+                               "Answer text") &&
+       harness_expect_contains(reloaded_content_html,
+                               "Thinking through it") &&
+       harness_expect_not_contains(reloaded_content_html,
+                                   "bubble bubble-status");
 
+  strappy_webview_free(reloaded_content_html);
+  strappy_webview_free(reloaded_streaming_html);
   strappy_webview_free(streaming_html);
   strappy_webview_free(final_html);
   return ok;

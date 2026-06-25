@@ -81,6 +81,7 @@ void strappy_session_message_record_init(strappy_session_message_record *record)
   record->content = NULL;
   record->model = NULL;
   record->metadata_json = NULL;
+  record->render_state_json = NULL;
   record->message_json = NULL;
   record->reasoning = NULL;
   record->message_key = NULL;
@@ -111,6 +112,7 @@ void strappy_session_message_record_destroy(strappy_session_message_record *reco
   free(record->content);
   free(record->model);
   free(record->metadata_json);
+  free(record->render_state_json);
   free(record->message_json);
   free(record->reasoning);
   free(record->message_key);
@@ -286,6 +288,80 @@ static int strappy_db_exec(sqlite3 *db,
   return 1;
 }
 
+static int strappy_db_session_messages_has_column(sqlite3 *db,
+                                                  const char *column_name,
+                                                  int *has_column_out,
+                                                  char **error_out)
+{
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if ((db == NULL) || (column_name == NULL) || (has_column_out == NULL)) {
+    strappy_set_error(error_out, "Session message column lookup is incomplete.");
+    return 0;
+  }
+
+  *has_column_out = 0;
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db,
+                          "PRAGMA table_info(session_messages);",
+                          -1,
+                          &stmt,
+                          NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not inspect session message schema: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    const unsigned char *name;
+
+    name = sqlite3_column_text(stmt, 1);
+    if ((name != NULL) &&
+        (strcmp((const char *)name, column_name) == 0)) {
+      *has_column_out = 1;
+      break;
+    }
+  }
+
+  sqlite3_finalize(stmt);
+  if ((rc != SQLITE_DONE) && (rc != SQLITE_ROW)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read session message schema: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  return 1;
+}
+
+static int strappy_db_ensure_session_messages_column(sqlite3 *db,
+                                                     const char *column_name,
+                                                     const char *alter_sql,
+                                                     char **error_out)
+{
+  int has_column;
+
+  has_column = 0;
+  if (!strappy_db_session_messages_has_column(db,
+                                              column_name,
+                                              &has_column,
+                                              error_out)) {
+    return 0;
+  }
+
+  if (has_column) {
+    return 1;
+  }
+
+  return strappy_db_exec(db,
+                         alter_sql,
+                         "Could not migrate session message schema",
+                         error_out);
+}
+
 static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
 {
   static const char *sessions_sql =
@@ -332,6 +408,7 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
     "model TEXT,"
     "http_status INTEGER NOT NULL DEFAULT 0,"
     "metadata_json TEXT,"
+    "render_state_json TEXT,"
     "message_json TEXT,"
     "reasoning TEXT,"
     "message_key TEXT,"
@@ -408,6 +485,14 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
                        messages_sql,
                        "Could not create session message schema",
                        error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_session_messages_column(
+        db,
+        "render_state_json",
+        "ALTER TABLE session_messages ADD COLUMN render_state_json TEXT;",
+        error_out)) {
     return 0;
   }
 
@@ -520,6 +605,7 @@ static int strappy_db_assign_message_from_statement(
   char *content;
   char *model;
   char *metadata_json;
+  char *render_state_json;
   char *message_json;
   char *reasoning;
   char *message_key;
@@ -562,6 +648,7 @@ static int strappy_db_assign_message_from_statement(
   arguments_json = strappy_db_column_string(stmt, 20);
   result_json = strappy_db_column_string(stmt, 23);
   created_at = strappy_db_column_string(stmt, 24);
+  render_state_json = strappy_db_column_string(stmt, 25);
 
   if ((kind == NULL) || (render_role == NULL) || (role == NULL) ||
       (content == NULL) || (created_at == NULL)) {
@@ -575,6 +662,7 @@ static int strappy_db_assign_message_from_statement(
     free(content);
     free(model);
     free(metadata_json);
+    free(render_state_json);
     free(message_json);
     free(reasoning);
     free(message_key);
@@ -598,6 +686,7 @@ static int strappy_db_assign_message_from_statement(
   record->content = content;
   record->model = model;
   record->metadata_json = metadata_json;
+  record->render_state_json = render_state_json;
   record->message_json = message_json;
   record->reasoning = reasoning;
   record->message_key = message_key;
@@ -1337,9 +1426,10 @@ static int strappy_db_insert_message(sqlite3 *db,
     "INSERT INTO session_messages "
     "(session_id, turn_id, turn_key, prompt_group_key, actor, kind, api_role, "
     "render_role, role, content, model, http_status, metadata_json, "
-    "message_json, reasoning, message_key, target_message_key, tool_call_id, "
-    "tool_name, arguments_json, result_json, include_in_context, is_error) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
+    "render_state_json, message_json, reasoning, message_key, "
+    "target_message_key, tool_call_id, tool_name, arguments_json, result_json, "
+    "include_in_context, is_error) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
   sqlite3_stmt *stmt;
   char *generated_message_json;
   const char *message_json_to_store;
@@ -1472,21 +1562,29 @@ static int strappy_db_insert_message(sqlite3 *db,
                                            error_out)) {
     ok = 0;
   }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           14,
+                                           message->render_state_json,
+                                           "Could not bind session message",
+                                           error_out)) {
+    ok = 0;
+  }
   if (ok && (message_json_to_store != NULL) &&
       (sqlite3_bind_text(stmt,
-                         14,
+                         15,
                          message_json_to_store,
                          -1,
                          SQLITE_TRANSIENT) != SQLITE_OK)) {
     ok = 0;
   }
   if (ok && (message_json_to_store == NULL) &&
-      (sqlite3_bind_null(stmt, 14) != SQLITE_OK)) {
+      (sqlite3_bind_null(stmt, 15) != SQLITE_OK)) {
     ok = 0;
   }
   if (ok && !strappy_db_bind_optional_text(db,
                                            stmt,
-                                           15,
+                                           16,
                                            message->reasoning,
                                            "Could not bind session message",
                                            error_out)) {
@@ -1494,7 +1592,7 @@ static int strappy_db_insert_message(sqlite3 *db,
   }
   if (ok && !strappy_db_bind_optional_text(db,
                                            stmt,
-                                           16,
+                                           17,
                                            message->message_key,
                                            "Could not bind session message",
                                            error_out)) {
@@ -1502,7 +1600,7 @@ static int strappy_db_insert_message(sqlite3 *db,
   }
   if (ok && !strappy_db_bind_optional_text(db,
                                            stmt,
-                                           17,
+                                           18,
                                            message->target_message_key,
                                            "Could not bind session message",
                                            error_out)) {
@@ -1510,7 +1608,7 @@ static int strappy_db_insert_message(sqlite3 *db,
   }
   if (ok && !strappy_db_bind_optional_text(db,
                                            stmt,
-                                           18,
+                                           19,
                                            message->tool_call_id,
                                            "Could not bind session message",
                                            error_out)) {
@@ -1518,7 +1616,7 @@ static int strappy_db_insert_message(sqlite3 *db,
   }
   if (ok && !strappy_db_bind_optional_text(db,
                                            stmt,
-                                           19,
+                                           20,
                                            message->tool_name,
                                            "Could not bind session message",
                                            error_out)) {
@@ -1526,7 +1624,7 @@ static int strappy_db_insert_message(sqlite3 *db,
   }
   if (ok && !strappy_db_bind_optional_text(db,
                                            stmt,
-                                           20,
+                                           21,
                                            message->arguments_json,
                                            "Could not bind session message",
                                            error_out)) {
@@ -1534,7 +1632,7 @@ static int strappy_db_insert_message(sqlite3 *db,
   }
   if (ok && !strappy_db_bind_optional_text(db,
                                            stmt,
-                                           21,
+                                           22,
                                            message->result_json,
                                            "Could not bind session message",
                                            error_out)) {
@@ -1542,12 +1640,12 @@ static int strappy_db_insert_message(sqlite3 *db,
   }
   if (ok &&
       (sqlite3_bind_int(stmt,
-                        22,
+                        23,
                         message->include_in_context ? 1 : 0) != SQLITE_OK)) {
     ok = 0;
   }
   if (ok &&
-      (sqlite3_bind_int(stmt, 23, message->is_error ? 1 : 0) != SQLITE_OK)) {
+      (sqlite3_bind_int(stmt, 24, message->is_error ? 1 : 0) != SQLITE_OK)) {
     ok = 0;
   }
 
@@ -1572,6 +1670,493 @@ static int strappy_db_insert_message(sqlite3 *db,
 
   sqlite3_finalize(stmt);
   free(generated_message_json);
+  return 1;
+}
+
+static int strappy_db_find_message_id_by_key(sqlite3 *db,
+                                             long long session_id,
+                                             const char *message_key,
+                                             long long *message_id_out,
+                                             char **error_out)
+{
+  static const char *sql =
+    "SELECT id FROM session_messages "
+    "WHERE session_id = ? AND message_key = ? "
+    "ORDER BY id ASC LIMIT 1;";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (message_id_out == NULL) {
+    strappy_set_error(error_out, "Session message lookup received no output.");
+    return 0;
+  }
+  *message_id_out = 0LL;
+
+  if ((message_key == NULL) || (message_key[0] == '\0')) {
+    return 1;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare session message lookup: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 2, message_key, -1, SQLITE_TRANSIENT);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind session message lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    *message_id_out = (long long)sqlite3_column_int64(stmt, 0);
+    sqlite3_finalize(stmt);
+    return 1;
+  }
+
+  sqlite3_finalize(stmt);
+  if (rc == SQLITE_DONE) {
+    return 1;
+  }
+
+  strappy_set_formatted_error(error_out,
+                              "Could not read session message lookup: %s",
+                              sqlite3_errmsg(db));
+  return 0;
+}
+
+static int strappy_db_update_message(sqlite3 *db,
+                                     long long session_id,
+                                     long long message_id,
+                                     const strappy_session_message_input *message,
+                                     char **error_out)
+{
+  static const char *sql =
+    "UPDATE session_messages "
+    "SET turn_id = ?, turn_key = ?, prompt_group_key = ?, actor = ?, "
+    "kind = ?, api_role = ?, render_role = ?, role = ?, content = ?, "
+    "model = ?, http_status = ?, metadata_json = ?, message_json = ?, "
+    "reasoning = ?, target_message_key = ?, tool_call_id = ?, "
+    "tool_name = ?, arguments_json = ?, result_json = ?, render_state_json = ?, "
+    "include_in_context = ?, is_error = ? "
+    "WHERE id = ? AND session_id = ?;";
+  sqlite3_stmt *stmt;
+  char *generated_message_json;
+  const char *message_json_to_store;
+  const char *api_role;
+  const char *render_role;
+  const char *content;
+  long long turn_id;
+  int rc;
+  int ok;
+
+  if ((session_id <= 0) || (message_id <= 0) || (message == NULL)) {
+    strappy_set_error(error_out, "Session message update is incomplete.");
+    return 0;
+  }
+
+  render_role = strappy_db_input_render_role(message);
+  api_role = strappy_db_input_api_role(message);
+  content = (message->content != NULL) ? message->content : "";
+  if ((render_role == NULL) || (render_role[0] == '\0')) {
+    strappy_set_error(error_out, "Session message render role is incomplete.");
+    return 0;
+  }
+
+  if (!strappy_db_insert_or_load_turn(db,
+                                      session_id,
+                                      message,
+                                      &turn_id,
+                                      error_out)) {
+    return 0;
+  }
+
+  generated_message_json = NULL;
+  message_json_to_store = message->message_json;
+  if (((message_json_to_store == NULL) || (message_json_to_store[0] == '\0')) &&
+      (api_role != NULL) &&
+      (api_role[0] != '\0')) {
+    generated_message_json = strappy_db_create_message_json(api_role, content);
+    message_json_to_store = generated_message_json;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare session message update: %s",
+                                sqlite3_errmsg(db));
+    free(generated_message_json);
+    return 0;
+  }
+
+  ok = 1;
+  if ((turn_id > 0) &&
+      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)turn_id) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if ((turn_id <= 0) && (sqlite3_bind_null(stmt, 1) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           2,
+                                           message->turn_key,
+                                           "Could not bind session message update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           3,
+                                           message->prompt_group_key,
+                                           "Could not bind session message update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           4,
+                                           message->actor,
+                                           "Could not bind session message update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_text(stmt,
+                               5,
+                               strappy_db_input_kind(message),
+                               -1,
+                               SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (api_role != NULL) &&
+      (sqlite3_bind_text(stmt, 6, api_role, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (api_role == NULL) && (sqlite3_bind_null(stmt, 6) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_text(stmt, 7, render_role, -1, SQLITE_TRANSIENT) !=
+             SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_text(stmt, 8, render_role, -1, SQLITE_TRANSIENT) !=
+             SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_text(stmt, 9, content, -1, SQLITE_TRANSIENT) !=
+             SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           10,
+                                           message->model,
+                                           "Could not bind session message update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 11, (sqlite3_int64)message->http_status) !=
+       SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           12,
+                                           message->metadata_json,
+                                           "Could not bind session message update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && (message_json_to_store != NULL) &&
+      (sqlite3_bind_text(stmt,
+                         13,
+                         message_json_to_store,
+                         -1,
+                         SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (message_json_to_store == NULL) &&
+      (sqlite3_bind_null(stmt, 13) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           14,
+                                           message->reasoning,
+                                           "Could not bind session message update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           15,
+                                           message->target_message_key,
+                                           "Could not bind session message update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           16,
+                                           message->tool_call_id,
+                                           "Could not bind session message update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           17,
+                                           message->tool_name,
+                                           "Could not bind session message update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           18,
+                                           message->arguments_json,
+                                           "Could not bind session message update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           19,
+                                           message->result_json,
+                                           "Could not bind session message update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           20,
+                                           message->render_state_json,
+                                           "Could not bind session message update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int(stmt,
+                        21,
+                        message->include_in_context ? 1 : 0) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int(stmt, 22, message->is_error ? 1 : 0) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 23, (sqlite3_int64)message_id) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 24, (sqlite3_int64)session_id) != SQLITE_OK)) {
+    ok = 0;
+  }
+
+  if (!ok) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind session message update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    free(generated_message_json);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not update session message: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    free(generated_message_json);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  free(generated_message_json);
+  return 1;
+}
+
+static int strappy_db_upsert_message(sqlite3 *db,
+                                     long long session_id,
+                                     const strappy_session_message_input *message,
+                                     char **error_out)
+{
+  long long message_id;
+
+  if ((message != NULL) &&
+      (message->message_key != NULL) &&
+      (message->message_key[0] != '\0')) {
+    if (!strappy_db_find_message_id_by_key(db,
+                                           session_id,
+                                           message->message_key,
+                                           &message_id,
+                                           error_out)) {
+      return 0;
+    }
+    if (message_id > 0LL) {
+      return strappy_db_update_message(db,
+                                       session_id,
+                                       message_id,
+                                       message,
+                                       error_out);
+    }
+  }
+
+  return strappy_db_insert_message(db, session_id, message, error_out);
+}
+
+static int strappy_db_append_message_content(sqlite3 *db,
+                                             long long session_id,
+                                             const strappy_session_message_input *message,
+                                             const char *content_delta,
+                                             const char *reasoning_delta,
+                                             char **error_out)
+{
+  static const char *sql =
+    "UPDATE session_messages "
+    "SET content = content || ?, "
+    "reasoning = CASE "
+    "WHEN ? = '' THEN reasoning "
+    "WHEN reasoning IS NULL THEN ? "
+    "ELSE reasoning || ? END "
+    ", render_state_json = CASE "
+    "WHEN ? IS NULL THEN render_state_json "
+    "WHEN render_state_json LIKE '%\"content_started\":true%' "
+    "AND ? LIKE '%\"reasoning_collapsed\":false%' THEN render_state_json "
+    "ELSE ? END "
+    "WHERE id = ? AND session_id = ?;";
+  sqlite3_stmt *stmt;
+  long long message_id;
+  int rc;
+
+  if ((session_id <= 0) || (message == NULL) ||
+      (message->message_key == NULL) ||
+      (message->message_key[0] == '\0')) {
+    strappy_set_error(error_out, "Streamed session message is incomplete.");
+    return 0;
+  }
+
+  if (!strappy_db_find_message_id_by_key(db,
+                                         session_id,
+                                         message->message_key,
+                                         &message_id,
+                                         error_out)) {
+    return 0;
+  }
+  if (message_id <= 0LL) {
+    if (!strappy_db_insert_message(db, session_id, message, error_out)) {
+      return 0;
+    }
+    if (!strappy_db_find_message_id_by_key(db,
+                                           session_id,
+                                           message->message_key,
+                                           &message_id,
+                                           error_out)) {
+      return 0;
+    }
+  }
+  if (message_id <= 0LL) {
+    strappy_set_error(error_out, "Streamed session message was not found.");
+    return 0;
+  }
+
+  if (content_delta == NULL) {
+    content_delta = "";
+  }
+  if (reasoning_delta == NULL) {
+    reasoning_delta = "";
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare streamed message update: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(stmt, 1, content_delta, -1, SQLITE_TRANSIENT);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 2, reasoning_delta, -1, SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 3, reasoning_delta, -1, SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 4, reasoning_delta, -1, SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    if (message->render_state_json != NULL) {
+      rc = sqlite3_bind_text(stmt,
+                             5,
+                             message->render_state_json,
+                             -1,
+                             SQLITE_TRANSIENT);
+    } else {
+      rc = sqlite3_bind_null(stmt, 5);
+    }
+  }
+  if (rc == SQLITE_OK) {
+    if (message->render_state_json != NULL) {
+      rc = sqlite3_bind_text(stmt,
+                             6,
+                             message->render_state_json,
+                             -1,
+                             SQLITE_TRANSIENT);
+    } else {
+      rc = sqlite3_bind_null(stmt, 6);
+    }
+  }
+  if (rc == SQLITE_OK) {
+    if (message->render_state_json != NULL) {
+      rc = sqlite3_bind_text(stmt,
+                             7,
+                             message->render_state_json,
+                             -1,
+                             SQLITE_TRANSIENT);
+    } else {
+      rc = sqlite3_bind_null(stmt, 7);
+    }
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 8, (sqlite3_int64)message_id);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 9, (sqlite3_int64)session_id);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind streamed message update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not update streamed message: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
   return 1;
 }
 
@@ -2060,7 +2645,7 @@ static int strappy_db_insert_message_sequence(
   }
 
   for (index = 0U; index < message_count; index++) {
-    if (!strappy_db_insert_message(db,
+    if (!strappy_db_upsert_message(db,
                                    session_id,
                                    &messages[index],
                                    error_out)) {
@@ -2794,6 +3379,109 @@ int strappy_db_append_message_sequence_to_session(
   return 1;
 }
 
+int strappy_db_upsert_session_message(
+  const char *db_path,
+  long long session_id,
+  const strappy_session_message_input *message,
+  char **error_out)
+{
+  sqlite3 *db;
+
+  if ((session_id <= 0) || (message == NULL)) {
+    strappy_set_error(error_out, "Session message upsert is incomplete.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_session_exists(db, session_id, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db, "BEGIN IMMEDIATE;", "Could not begin session message upsert", error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_upsert_message(db, session_id, message, error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session message upsert", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db, "COMMIT;", "Could not commit session message upsert", error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session message upsert", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  sqlite3_close(db);
+  return 1;
+}
+
+int strappy_db_append_session_message_content(
+  const char *db_path,
+  long long session_id,
+  const strappy_session_message_input *message,
+  const char *content_delta,
+  const char *reasoning_delta,
+  char **error_out)
+{
+  sqlite3 *db;
+
+  if ((session_id <= 0) || (message == NULL)) {
+    strappy_set_error(error_out, "Streamed session message append is incomplete.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_session_exists(db, session_id, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db, "BEGIN IMMEDIATE;", "Could not begin streamed message append", error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_append_message_content(db,
+                                         session_id,
+                                         message,
+                                         content_delta,
+                                         reasoning_delta,
+                                         error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back streamed message append", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db, "COMMIT;", "Could not commit streamed message append", error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back streamed message append", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  sqlite3_close(db);
+  return 1;
+}
+
 static const char *strappy_db_session_message_select_clause(void)
 {
   return
@@ -2801,7 +3489,7 @@ static const char *strappy_db_session_message_select_clause(void)
     "prompt_group_key, actor, kind, api_role, render_role, role, content, "
     "model, http_status, metadata_json, message_json, reasoning, message_key, "
     "target_message_key, tool_call_id, tool_name, arguments_json, "
-    "include_in_context, is_error, result_json, created_at "
+    "include_in_context, is_error, result_json, created_at, render_state_json "
     "FROM session_messages ";
 }
 

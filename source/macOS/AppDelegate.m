@@ -7,7 +7,10 @@
 @interface AppDelegate (Private)
 - (void)setupMenu;
 - (void)showMainWindow;
+- (void)strappySessionPromptDidStart:(NSNotification *)notification;
 - (void)strappySessionPromptDidFinish:(NSNotification *)notification;
+- (void)releaseFinishedPromptSession:(StrappySession *)session;
+- (void)terminateIfPendingInFlightSessionsFinished;
 @end
 
 @implementation AppDelegate
@@ -28,6 +31,11 @@
   }
   [[NSNotificationCenter defaultCenter]
     addObserver:self
+       selector:@selector(strappySessionPromptDidStart:)
+           name:StrappySessionPromptDidStartNotification
+         object:nil];
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
        selector:@selector(strappySessionPromptDidFinish:)
            name:StrappySessionPromptDidFinishNotification
          object:nil];
@@ -37,7 +45,7 @@
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender
 {
   (void)sender;
-  if ([StrappySession hasInFlightSessions]) {
+  if ([StrappySession hasInFlightSessions] || ([_inFlightSessions count] > 0U)) {
     _terminateWhenInFlightSessionsFinish = YES;
     return NO;
   }
@@ -205,11 +213,63 @@
 
 - (void)strappySessionPromptDidFinish:(NSNotification *)notification
 {
-  (void)notification;
+  StrappySession *session;
+
+  session = [notification object];
+  if ([session isKindOfClass:[StrappySession class]]) {
+    [self performSelectorOnMainThread:@selector(releaseFinishedPromptSession:)
+                           withObject:session
+                        waitUntilDone:NO];
+    return;
+  }
+  [self terminateIfPendingInFlightSessionsFinished];
+}
+
+- (void)strappySessionPromptDidStart:(NSNotification *)notification
+{
+  StrappySession *session;
+  NSNumber *identifier;
+
+  session = [notification object];
+  if (![session isKindOfClass:[StrappySession class]]) {
+    return;
+  }
+
+  identifier = [session sessionIdentifier];
+  if (![identifier isKindOfClass:[NSNumber class]]) {
+    return;
+  }
+
+  if (_inFlightSessions == nil) {
+    _inFlightSessions = [[NSMutableDictionary alloc] init];
+  }
+  [_inFlightSessions setObject:session forKey:identifier];
+}
+
+- (void)releaseFinishedPromptSession:(StrappySession *)session
+{
+  NSNumber *identifier;
+
+  if ([session isKindOfClass:[StrappySession class]]) {
+    identifier = [session sessionIdentifier];
+    if ([identifier isKindOfClass:[NSNumber class]] &&
+        ([_inFlightSessions objectForKey:identifier] == session)) {
+      [_inFlightSessions removeObjectForKey:identifier];
+    }
+  }
+
+  [self terminateIfPendingInFlightSessionsFinished];
+}
+
+- (void)terminateIfPendingInFlightSessionsFinished
+{
   if (!_terminateWhenInFlightSessionsFinish) {
     return;
   }
   if ([StrappySession hasInFlightSessions]) {
+    return;
+  }
+  if ([_inFlightSessions count] > 0U) {
     return;
   }
   [NSApp terminate:self];
@@ -220,6 +280,7 @@
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [_windowController release];
   [_preferencesWindowController release];
+  [_inFlightSessions release];
   [super dealloc];
 }
 

@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 
 extern NSString * const StrappySessionDidUpdateNotification;
+extern NSString * const StrappySessionPromptDidStartNotification;
 extern NSString * const StrappySessionPromptDidFinishNotification;
 extern NSString * const StrappySessionStreamEventNotification;
 

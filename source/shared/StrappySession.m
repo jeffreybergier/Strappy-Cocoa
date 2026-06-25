@@ -9,6 +9,8 @@
 
 NSString * const StrappySessionDidUpdateNotification =
   @"StrappySessionDidUpdateNotification";
+NSString * const StrappySessionPromptDidStartNotification =
+  @"StrappySessionPromptDidStartNotification";
 NSString * const StrappySessionPromptDidFinishNotification =
   @"StrappySessionPromptDidFinishNotification";
 NSString * const StrappySessionStreamEventNotification =
@@ -562,6 +564,7 @@ static int StrappySessionHandleStreamEvent(
   NSString *content;
   NSString *model;
   NSString *metadataJSON;
+  NSString *renderStateJSON;
   NSString *messageJSON;
   NSString *reasoning;
   NSString *messageKey;
@@ -593,6 +596,8 @@ static int StrappySessionHandleStreamEvent(
   content = [StrappySession stringFromCStringOrEmpty:record->content];
   model = [StrappySession stringFromCStringOrEmpty:record->model];
   metadataJSON = [StrappySession stringFromCStringOrEmpty:record->metadata_json];
+  renderStateJSON =
+    [StrappySession stringFromCStringOrEmpty:record->render_state_json];
   messageJSON = [StrappySession stringFromCStringOrEmpty:record->message_json];
   reasoning = [StrappySession stringFromCStringOrEmpty:record->reasoning];
   messageKey = [StrappySession stringFromCStringOrEmpty:record->message_key];
@@ -618,6 +623,7 @@ static int StrappySessionHandleStreamEvent(
     content, @"text",
     model, @"model",
     metadataJSON, @"metadata_json",
+    renderStateJSON, @"render_state_json",
     messageJSON, @"message_json",
     reasoning, @"reasoning",
     messageKey, @"message_key",
@@ -1333,6 +1339,9 @@ static int StrappySessionHandleStreamEvent(
   }
 
   [StrappySession registerInFlightSession:self];
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionPromptDidStartNotification
+                  object:self];
 
   request = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
     prompt, @"prompt",
@@ -1341,7 +1350,6 @@ static int StrappySessionHandleStreamEvent(
     [request setObject:context forKey:@"context"];
   }
 
-  [self retain];
   [NSThread detachNewThreadSelector:@selector(sendPromptInBackground:)
                            toTarget:self
                          withObject:request];
@@ -1395,7 +1403,6 @@ static int StrappySessionHandleStreamEvent(
   [result release];
 
   [pool release];
-  [self release];
 }
 
 - (void)streamingPromptDidFinish:(NSDictionary *)result

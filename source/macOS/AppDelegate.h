@@ -7,6 +7,7 @@
  @private
   SessionWindowController *_windowController;
   PreferencesWindowController *_preferencesWindowController;
+  NSMutableDictionary *_inFlightSessions;
   BOOL _terminateWhenInFlightSessionsFinish;
 }
 

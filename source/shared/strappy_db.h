@@ -36,6 +36,7 @@ typedef struct strappy_session_message_record {
   char *content;
   char *model;
   char *metadata_json;
+  char *render_state_json;
   char *message_json;
   char *reasoning;
   char *message_key;
@@ -68,6 +69,7 @@ typedef struct strappy_session_message_input {
   const char *model;
   long http_status;
   const char *metadata_json;
+  const char *render_state_json;
   const char *message_json;
   const char *reasoning;
   const char *message_key;
@@ -205,6 +207,18 @@ int strappy_db_append_message_sequence_to_session(
   long http_status,
   const strappy_session_message_input *messages,
   size_t message_count,
+  char **error_out);
+int strappy_db_upsert_session_message(
+  const char *db_path,
+  long long session_id,
+  const strappy_session_message_input *message,
+  char **error_out);
+int strappy_db_append_session_message_content(
+  const char *db_path,
+  long long session_id,
+  const strappy_session_message_input *message,
+  const char *content_delta,
+  const char *reasoning_delta,
   char **error_out);
 int strappy_db_list_session_messages(const char *db_path,
                                      long long session_id,

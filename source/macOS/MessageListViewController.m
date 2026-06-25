@@ -163,6 +163,7 @@ static void StrappyWebViewMessageFromDictionary(
   NSString *text;
   NSString *reasoning;
   NSString *metadataJSON;
+  NSString *renderStateJSON;
   NSString *createdAt;
   NSNumber *httpStatus;
 
@@ -184,6 +185,7 @@ static void StrappyWebViewMessageFromDictionary(
   text = [dictionary objectForKey:@"text"];
   reasoning = [dictionary objectForKey:@"reasoning"];
   metadataJSON = [dictionary objectForKey:@"metadata_json"];
+  renderStateJSON = [dictionary objectForKey:@"render_state_json"];
   createdAt = [dictionary objectForKey:@"created_at"];
   httpStatus = [dictionary objectForKey:@"http_status"];
 
@@ -199,6 +201,7 @@ static void StrappyWebViewMessageFromDictionary(
   message->text = StrappyCString(text);
   message->reasoning = StrappyCString(reasoning);
   message->metadata_json = StrappyCString(metadataJSON);
+  message->render_state_json = StrappyCString(renderStateJSON);
   message->created_at = StrappyCString(createdAt);
 }
 
@@ -486,6 +489,22 @@ static NSString *StrappyAppendReasoningTextJavaScript(NSString *elementIdentifie
                                              StrappyCString(delta)));
 }
 
+static NSString *StrappyAppendMessageTextByKeyJavaScript(NSString *messageKey,
+                                                         NSString *delta)
+{
+  return StrappyStringFromWebViewCString(
+    strappy_webview_append_message_text_by_key_js(StrappyCString(messageKey),
+                                                  StrappyCString(delta)));
+}
+
+static NSString *StrappyAppendReasoningTextByKeyJavaScript(NSString *messageKey,
+                                                           NSString *delta)
+{
+  return StrappyStringFromWebViewCString(
+    strappy_webview_append_reasoning_text_by_key_js(StrappyCString(messageKey),
+                                                    StrappyCString(delta)));
+}
+
 static NSString *StrappyMoveMessageTextToReasoningJavaScript(
   NSString *elementIdentifier)
 {
@@ -560,11 +579,14 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 - (void)applyStreamToolEventAndRelease:(NSDictionary *)event;
 - (void)applyStreamTurnStartAndRelease:(NSDictionary *)event;
 - (void)applyStreamTurnFinishAndRelease:(NSDictionary *)event;
+- (BOOL)applyDatabaseStreamEventIfPossible:(NSDictionary *)event;
 - (void)ensurePendingHarnessTurnWithPrompt:(NSString *)prompt;
 - (BOOL)streamEventUsesHarnessTarget:(NSDictionary *)event;
 - (void)scheduleStreamFlush;
+- (void)scheduleDatabaseReload;
 - (void)flushStreamDeltas;
 - (void)flushStreamDeltasFromTimer:(NSTimer *)timer;
+- (void)reloadDatabaseContentFromTimer:(NSTimer *)timer;
 - (void)appendPendingThinkingJavaScriptToString:(NSMutableString *)js;
 - (void)beginSendingPrompt:(NSString *)prompt reusingPendingMessage:(BOOL)reuse;
 - (void)setPromptCancellationRequested:(BOOL)requested;
@@ -575,6 +597,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 - (NSString *)writeCurrentHTML;
 - (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error;
 - (void)layoutWebViewAndPromptBar;
+- (BOOL)streamDeltaAppliesToCurrentPendingMessage:(NSDictionary *)delta;
 - (BOOL)pendingAppliesToSessionIdentifier:(NSNumber *)identifier;
 - (BOOL)pendingAppliesToCurrentSession;
 - (void)clearPendingMessageState;
@@ -679,6 +702,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [streamFlushTimer_ invalidate];
   [streamFlushTimer_ release];
   streamFlushTimer_ = nil;
+  [databaseReloadTimer_ invalidate];
+  [databaseReloadTimer_ release];
+  databaseReloadTimer_ = nil;
   [pendingMessageIdentifier_ release];
   pendingMessageIdentifier_ = nil;
   [pendingAssistantMessageIdentifier_ release];
@@ -741,6 +767,20 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
                                      repeats:NO] retain];
 }
 
+- (void)scheduleDatabaseReload
+{
+  if (databaseReloadTimer_ != nil) {
+    return;
+  }
+
+  databaseReloadTimer_ =
+    [[NSTimer scheduledTimerWithTimeInterval:0.25
+                                      target:self
+                                    selector:@selector(reloadDatabaseContentFromTimer:)
+                                    userInfo:nil
+                                     repeats:NO] retain];
+}
+
 - (void)flushStreamDeltasFromTimer:(NSTimer *)timer
 {
   if (timer != streamFlushTimer_) {
@@ -750,6 +790,17 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [streamFlushTimer_ release];
   streamFlushTimer_ = nil;
   [self flushStreamDeltas];
+}
+
+- (void)reloadDatabaseContentFromTimer:(NSTimer *)timer
+{
+  if (timer != databaseReloadTimer_) {
+    return;
+  }
+
+  [databaseReloadTimer_ release];
+  databaseReloadTimer_ = nil;
+  [self reloadContent];
 }
 
 - (void)appendPendingThinkingJavaScriptToString:(NSMutableString *)js
@@ -1367,6 +1418,14 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     return;
   }
 
+  if (![self streamDeltaAppliesToCurrentPendingMessage:event]) {
+    if ([self applyDatabaseStreamEventIfPossible:event]) {
+      return;
+    }
+    [self scheduleDatabaseReload];
+    return;
+  }
+
   streamEvent = [event objectForKey:@"stream_event"];
   if ([streamEvent isEqualToString:@"content_delta"]) {
     [self streamContentDeltaDidArrive:event];
@@ -1488,6 +1547,43 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   }
 
   return [self pendingAppliesToCurrentSession];
+}
+
+- (BOOL)applyDatabaseStreamEventIfPossible:(NSDictionary *)event
+{
+  NSString *streamEvent;
+  NSString *messageKey;
+  NSString *text;
+  NSString *js;
+
+  if (![event isKindOfClass:[NSDictionary class]]) {
+    return NO;
+  }
+
+  streamEvent = [event objectForKey:@"stream_event"];
+  messageKey = [event objectForKey:@"message_key"];
+  text = [event objectForKey:@"delta"];
+  if (![streamEvent isKindOfClass:[NSString class]] ||
+      ![messageKey isKindOfClass:[NSString class]] ||
+      ([messageKey length] == 0U) ||
+      ![text isKindOfClass:[NSString class]] ||
+      ([text length] == 0U)) {
+    return NO;
+  }
+
+  if ([streamEvent isEqualToString:@"content_delta"]) {
+    js = StrappyAppendMessageTextByKeyJavaScript(messageKey, text);
+  } else if ([streamEvent isEqualToString:@"reasoning_delta"]) {
+    js = StrappyAppendReasoningTextByKeyJavaScript(messageKey, text);
+  } else {
+    return NO;
+  }
+
+  if ([js length] == 0U) {
+    return NO;
+  }
+  [self pushJavaScript:js];
+  return YES;
 }
 
 - (BOOL)streamEventUsesHarnessTarget:(NSDictionary *)event
@@ -2287,6 +2383,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [pendingHarnessToolActivityTextDelta_ release];
   [streamFlushTimer_ invalidate];
   [streamFlushTimer_ release];
+  [databaseReloadTimer_ invalidate];
+  [databaseReloadTimer_ release];
   [super dealloc];
 }
 

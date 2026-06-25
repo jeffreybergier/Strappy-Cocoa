@@ -29,6 +29,7 @@ typedef struct strappy_webview_message {
   const char *text;
   const char *reasoning;
   const char *metadata_json;
+  const char *render_state_json;
   const char *created_at;
 } strappy_webview_message;
 
@@ -93,6 +94,10 @@ char *strappy_webview_append_message_text_js(const char *element_id,
                                              const char *delta);
 char *strappy_webview_append_reasoning_text_js(const char *element_id,
                                                const char *delta);
+char *strappy_webview_append_message_text_by_key_js(const char *message_key,
+                                                    const char *delta);
+char *strappy_webview_append_reasoning_text_by_key_js(const char *message_key,
+                                                      const char *delta);
 char *strappy_webview_move_message_text_to_reasoning_js(const char *element_id);
 char *strappy_webview_tool_event_text(const char *event_type,
                                       const char *tool_call_id,

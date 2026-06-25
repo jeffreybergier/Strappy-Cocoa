@@ -41,6 +41,7 @@
   NSMutableString          *pendingHarnessReasoningTextDelta_;
   NSMutableString          *pendingHarnessToolActivityTextDelta_;
   NSTimer                  *streamFlushTimer_;
+  NSTimer                  *databaseReloadTimer_;
   NSTimeInterval            pendingStartedAt_;
   NSTimeInterval            pendingHarnessStartedAt_;
   long long                 lastKnownMessageIdentifier_;
