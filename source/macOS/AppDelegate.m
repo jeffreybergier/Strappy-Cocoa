@@ -7,6 +7,7 @@
 @interface AppDelegate (Private)
 - (void)setupMenu;
 - (void)showMainWindow;
+- (void)strappySessionPromptDidFinish:(NSNotification *)notification;
 @end
 
 @implementation AppDelegate
@@ -25,12 +26,21 @@
     NSParameterAssert(cacert);
     [StrappySession bootstrapProcessWithCACertPath:cacert];
   }
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(strappySessionPromptDidFinish:)
+           name:StrappySessionPromptDidFinishNotification
+         object:nil];
   [self showMainWindow];
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender
 {
   (void)sender;
+  if ([StrappySession hasInFlightSessions]) {
+    _terminateWhenInFlightSessionsFinish = YES;
+    return NO;
+  }
   return YES;
 }
 
@@ -183,6 +193,7 @@
 
 - (void)showMainWindow
 {
+  _terminateWhenInFlightSessionsFinish = NO;
   if (_windowController != nil) {
     [_windowController showWindow:self];
     return;
@@ -192,8 +203,21 @@
   [_windowController showWindow:self];
 }
 
+- (void)strappySessionPromptDidFinish:(NSNotification *)notification
+{
+  (void)notification;
+  if (!_terminateWhenInFlightSessionsFinish) {
+    return;
+  }
+  if ([StrappySession hasInFlightSessions]) {
+    return;
+  }
+  [NSApp terminate:self];
+}
+
 - (void)dealloc
 {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   [_windowController release];
   [_preferencesWindowController release];
   [super dealloc];

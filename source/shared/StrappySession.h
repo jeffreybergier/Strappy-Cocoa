@@ -1,34 +1,40 @@
 #import <Foundation/Foundation.h>
 
-@protocol StrappySessionStreamDelegate
-- (void)strappySessionStreamDidReceiveContentDelta:(NSDictionary *)delta;
-- (void)strappySessionStreamDidReceiveReasoningDelta:(NSDictionary *)delta;
-- (void)strappySessionStreamDidReceiveToolCall:(NSDictionary *)event;
-- (void)strappySessionStreamDidReceiveToolResult:(NSDictionary *)event;
-- (void)strappySessionStreamDidReceiveToolError:(NSDictionary *)event;
-- (void)strappySessionStreamDidStartTurn:(NSDictionary *)event;
-- (void)strappySessionStreamDidFinishTurn:(NSDictionary *)event;
-- (BOOL)strappySessionStreamShouldCancel:(NSDictionary *)context;
-@end
+extern NSString * const StrappySessionDidUpdateNotification;
+extern NSString * const StrappySessionPromptDidFinishNotification;
+extern NSString * const StrappySessionStreamEventNotification;
 
-@interface StrappySession : NSObject
+@interface StrappySession : NSObject {
+ @private
+  NSNumber     *sessionIdentifier_;
+  NSDictionary *cachedSummary_;
+  BOOL          promptInFlight_;
+  BOOL          promptCancellationRequested_;
+}
 
 + (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath;
 + (NSString *)sessionsDatabasePath;
 + (BOOL)initializeSessionStoreWithError:(NSError **)error;
-+ (NSDictionary *)createSessionWithError:(NSError **)error;
++ (StrappySession *)createSessionWithError:(NSError **)error;
++ (StrappySession *)sessionWithIdentifier:(NSNumber *)sessionIdentifier;
++ (StrappySession *)sessionWithSummary:(NSDictionary *)summary;
++ (NSUInteger)inFlightSessionCount;
++ (BOOL)hasInFlightSessions;
 + (NSArray *)sessionSummariesWithError:(NSError **)error;
 + (NSDictionary *)sessionSummaryForSessionIdentifier:(NSNumber *)sessionIdentifier
                                                error:(NSError **)error;
-+ (NSArray *)messagesForSessionIdentifier:(NSNumber *)sessionIdentifier
-                                    error:(NSError **)error;
-+ (NSDictionary *)submitPrompt:(NSString *)prompt
-           inSessionIdentifier:(NSNumber *)sessionIdentifier
-                         error:(NSError **)error;
-+ (NSDictionary *)submitPromptStreaming:(NSString *)prompt
-                    inSessionIdentifier:(NSNumber *)sessionIdentifier
-                                context:(NSDictionary *)context
-                               delegate:(id<StrappySessionStreamDelegate>)delegate
-                                  error:(NSError **)error;
+
+- (id)initWithSessionIdentifier:(NSNumber *)sessionIdentifier
+                        summary:(NSDictionary *)summary;
+- (NSNumber *)sessionIdentifier;
+- (NSDictionary *)cachedSummary;
+- (NSDictionary *)summaryWithError:(NSError **)error;
+- (NSArray *)messagesWithError:(NSError **)error;
+- (BOOL)isPromptInFlight;
+- (BOOL)promptCancellationRequested;
+- (BOOL)beginStreamingPrompt:(NSString *)prompt
+                     context:(NSDictionary *)context
+                       error:(NSError **)error;
+- (void)cancelPrompt;
 
 @end

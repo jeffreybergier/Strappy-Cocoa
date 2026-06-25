@@ -518,7 +518,8 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   type = [session objectForKey:kStrappySessionRowTypeKey];
   if (delegate_ != nil) {
     if ([type isEqualToString:kStrappySessionRowTypeSession]) {
-      [delegate_ sessionListViewController:self didSelectSession:session];
+      [delegate_ sessionListViewController:self
+                          didSelectSession:[StrappySession sessionWithSummary:session]];
     }
   }
   [self updateToolbarSegments];
@@ -726,7 +727,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
 - (void)addSession:(id)sender
 {
   NSError *error;
-  NSDictionary *session;
+  StrappySession *session;
   NSNumber *identifier;
 
   (void)sender;
@@ -743,7 +744,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
   creatingSession_ = NO;
   [self updateToolbarSegments];
 
-  identifier = [session objectForKey:@"id"];
+  identifier = [session sessionIdentifier];
   if (![identifier isKindOfClass:[NSNumber class]]) {
     NSBeep();
     return;

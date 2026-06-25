@@ -1,4 +1,9 @@
 #import "SessionWindowController.h"
+#import "StrappySession.h"
+
+@interface SessionWindowController ()
+- (void)strappySessionDidUpdate:(NSNotification *)notification;
+@end
 
 @implementation SessionWindowController
 
@@ -16,6 +21,12 @@
     [self setDetailViewController:messagesController_];
     [self setSidebarWidthLimits:AIMinMidMaxMake(180.0, 260.0, 360.0)];
     [self setSplitViewAutosaveName:@"StrappySessionSplit"];
+
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(strappySessionDidUpdate:)
+             name:StrappySessionDidUpdateNotification
+           object:nil];
   }
   return self;
 }
@@ -42,10 +53,28 @@
 }
 
 - (void)sessionListViewController:(SessionListViewController *)controller
-                 didSelectSession:(NSDictionary *)session
+                 didSelectSession:(StrappySession *)session
 {
   (void)controller;
   [messagesController_ reloadWithSession:session];
+}
+
+- (void)strappySessionDidUpdate:(NSNotification *)notification
+{
+  NSDictionary *session;
+  NSNumber *identifier;
+
+  session = [[notification userInfo] objectForKey:@"session"];
+  if (![session isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
+
+  identifier = [session objectForKey:@"id"];
+  if (![identifier isKindOfClass:[NSNumber class]]) {
+    return;
+  }
+
+  [sessionsController_ reloadSessionIdentifier:identifier select:NO];
 }
 
 - (void)messageListViewController:(MessageListViewController *)controller
@@ -69,6 +98,7 @@
 
 - (void)dealloc
 {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   [sessionsController_ release];
   [messagesController_ release];
   [super dealloc];

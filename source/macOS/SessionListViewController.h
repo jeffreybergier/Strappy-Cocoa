@@ -3,10 +3,11 @@
 #import "XPAppKit.h"
 
 @class SessionListViewController;
+@class StrappySession;
 
 @protocol SessionListViewControllerDelegate
 - (void)sessionListViewController:(SessionListViewController *)controller
-                 didSelectSession:(NSDictionary *)session;
+                 didSelectSession:(StrappySession *)session;
 @end
 
 @interface SessionListViewController : AIViewController

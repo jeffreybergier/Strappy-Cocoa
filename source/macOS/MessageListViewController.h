@@ -1,6 +1,7 @@
 #import <AppKit/AppKit.h>
 #import "AIWebViewController.h"
 #import "PromptSendViewController.h"
+#import "StrappySession.h"
 
 @class MessageListViewController;
 
@@ -13,7 +14,7 @@
     <PromptSendViewControllerDelegate> {
  @private
   NSString                 *htmlDirectoryPath_;
-  NSNumber                 *sessionId_;
+  StrappySession           *session_;
   PromptSendViewController *sendController_;
   id<MessageListViewControllerDelegate> delegate_;
   NSString                 *statusText_;
@@ -52,7 +53,7 @@
 - (id)init;
 - (void)setDelegate:(id<MessageListViewControllerDelegate>)delegate;
 - (id<MessageListViewControllerDelegate>)delegate;
-- (void)reloadWithSession:(NSDictionary *)session;
+- (void)reloadWithSession:(StrappySession *)session;
 - (void)reloadData;
 - (BOOL)canSendCurrentPrompt;
 - (void)sendCurrentPrompt:(id)sender;

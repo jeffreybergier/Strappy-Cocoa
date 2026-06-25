@@ -544,8 +544,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
       StrappyCString(NSLocalizedString(@"Show Earlier Messages", nil))));
 }
 
-@interface MessageListViewController () <StrappySessionStreamDelegate>
-- (void)sendPromptInBackground:(NSDictionary *)request;
+@interface MessageListViewController ()
+- (void)sessionStreamEvent:(NSNotification *)notification;
+- (void)sessionPromptDidFinish:(NSNotification *)notification;
 - (void)sendPromptDidFinish:(NSDictionary *)result;
 - (void)streamContentDeltaDidArrive:(NSDictionary *)delta;
 - (void)streamReasoningDeltaDidArrive:(NSDictionary *)delta;
@@ -616,7 +617,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [self AI_addChildViewController:sendController_];
   [[sendController_ view] setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
   [[self view] addSubview:[sendController_ view]];
-  [sendController_ setEnabled:(sessionId_ != nil)];
+  [sendController_ setEnabled:(session_ != nil)];
   [sendController_ setSending:sending_];
 
   [self reloadContent];
@@ -670,7 +671,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
 - (BOOL)pendingAppliesToCurrentSession
 {
-  return [self pendingAppliesToSessionIdentifier:sessionId_];
+  return [self pendingAppliesToSessionIdentifier:[session_ sessionIdentifier]];
 }
 
 - (void)clearPendingMessageState
@@ -841,11 +842,15 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   }
 }
 
-- (void)reloadWithSession:(NSDictionary *)session
+- (void)reloadWithSession:(StrappySession *)session
 {
   NSNumber *identifier;
 
-  identifier = [session objectForKey:@"id"];
+  if (![session isKindOfClass:[StrappySession class]]) {
+    session = nil;
+  }
+
+  identifier = [session sessionIdentifier];
   if (![identifier isKindOfClass:[NSNumber class]]) {
     identifier = nil;
   }
@@ -854,12 +859,34 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     [self clearPendingMessageState];
   }
 
-  if (sessionId_ != identifier) {
-    [sessionId_ release];
-    sessionId_ = [identifier retain];
+  if (session_ != session) {
+    if (session_ != nil) {
+      [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                      name:StrappySessionPromptDidFinishNotification
+                                                    object:session_];
+      [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                      name:StrappySessionStreamEventNotification
+                                                    object:session_];
+    }
+    [session_ release];
+    session_ = [session retain];
+    if (session_ != nil) {
+      [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(sessionPromptDidFinish:)
+               name:StrappySessionPromptDidFinishNotification
+             object:session_];
+      [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(sessionStreamEvent:)
+               name:StrappySessionStreamEventNotification
+             object:session_];
+    }
   }
 
-  [sendController_ setEnabled:(sessionId_ != nil)];
+  sending_ = (session_ != nil) && [session_ isPromptInFlight];
+  [sendController_ setEnabled:(session_ != nil)];
+  [sendController_ setSending:sending_];
   [self reloadContent];
 }
 
@@ -870,7 +897,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
 - (BOOL)canSendCurrentPrompt
 {
-  if (sessionId_ == nil) {
+  if ((session_ == nil) || [session_ isPromptInFlight]) {
     return NO;
   }
   return [sendController_ canSendCurrentPrompt];
@@ -925,9 +952,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   error = nil;
   messages = nil;
 
-  if (sessionId_ != nil) {
-    messages = [StrappySession messagesForSessionIdentifier:sessionId_
-                                                      error:&error];
+  if (session_ != nil) {
+    messages = [session_ messagesWithError:&error];
   }
 
   html = [self htmlForMessages:messages error:error];
@@ -970,7 +996,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     emptyText = statusText_;
   } else if (error != nil) {
     emptyText = [error localizedDescription];
-  } else if (sessionId_ == nil) {
+  } else if (session_ == nil) {
     emptyText = NSLocalizedString(@"No session selected.", nil);
   } else {
     emptyText = NSLocalizedString(@"New Session", nil);
@@ -1088,6 +1114,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   @synchronized(self) {
     cancelPromptRequested_ = requested ? YES : NO;
   }
+  if (requested && (session_ != nil)) {
+    [session_ cancelPrompt];
+  }
 }
 
 - (BOOL)promptCancellationRequested
@@ -1096,6 +1125,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
   @synchronized(self) {
     requested = cancelPromptRequested_;
+  }
+  if (!requested && (session_ != nil)) {
+    requested = [session_ promptCancellationRequested];
   }
   return requested;
 }
@@ -1143,15 +1175,16 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
 - (void)beginSendingPrompt:(NSString *)prompt reusingPendingMessage:(BOOL)reuse
 {
-  NSMutableDictionary *request;
+  NSMutableDictionary *streamContext;
   NSString *promptToSend;
+  NSError *startError;
   static unsigned long pendingCounter = 0UL;
 
   if (sending_) {
     return;
   }
 
-  if (sessionId_ == nil) {
+  if ((session_ == nil) || [session_ isPromptInFlight]) {
     return;
   }
 
@@ -1180,7 +1213,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     pendingToolActivityIdentifier_ =
       [[NSString stringWithFormat:@"pending-%lu-tools", pendingCounter] retain];
     pendingPrompt_ = [promptToSend copy];
-    sendingSessionId_ = [sessionId_ retain];
+    sendingSessionId_ = [[session_ sessionIdentifier] retain];
     pendingStartedAt_ = [NSDate timeIntervalSinceReferenceDate];
     pendingHarnessStartedAt_ = 0.0;
     streamingAssistantText_ = [[NSMutableString alloc] init];
@@ -1285,18 +1318,29 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     [self pushJavaScript:js];
   }
 
-  request = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
-    promptToSend, @"prompt",
+  streamContext = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
     pendingMessageIdentifier_, @"pending_id",
     pendingAssistantMessageIdentifier_, @"assistant_pending_id",
     [NSNumber numberWithLongLong:lastKnownMessageIdentifier_], @"previous_last_id",
-    sessionId_, @"session_id",
+    [session_ sessionIdentifier], @"session_id",
     nil];
-  [self retain];
-  [NSThread detachNewThreadSelector:@selector(sendPromptInBackground:)
-                           toTarget:self
-                         withObject:request];
-  [request release];
+  startError = nil;
+  if (![session_ beginStreamingPrompt:promptToSend
+                              context:streamContext
+                                error:&startError]) {
+    NSMutableDictionary *result;
+    NSString *errorMessage;
+
+    errorMessage = [startError localizedDescription];
+    if ([errorMessage length] == 0U) {
+      errorMessage = NSLocalizedString(@"Prompt failed.", nil);
+    }
+    result = [[NSMutableDictionary alloc] initWithDictionary:streamContext];
+    [result setObject:errorMessage forKey:@"error"];
+    [self sendPromptDidFinish:result];
+    [result release];
+  }
+  [streamContext release];
   [promptToSend release];
   [self scheduleStreamFlush];
 }
@@ -1309,114 +1353,36 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [self beginSendingPrompt:pendingPrompt_ reusingPendingMessage:YES];
 }
 
-- (void)sendPromptInBackground:(NSDictionary *)request
+- (void)sessionStreamEvent:(NSNotification *)notification
 {
-  NSAutoreleasePool *pool;
-  NSError *error;
-  NSDictionary *session;
-  NSMutableDictionary *result;
-  NSString *errorMessage;
-  NSString *prompt;
-  NSString *pendingIdentifier;
-  NSString *assistantPendingIdentifier;
-  NSNumber *sessionId;
-  NSNumber *previousLastIdentifier;
-  NSDictionary *streamContext;
+  NSDictionary *event;
+  NSString *streamEvent;
 
-  pool = [[NSAutoreleasePool alloc] init];
-  prompt = [request objectForKey:@"prompt"];
-  if (![prompt isKindOfClass:[NSString class]]) {
-    prompt = @"";
-  }
-  pendingIdentifier = [request objectForKey:@"pending_id"];
-  if (![pendingIdentifier isKindOfClass:[NSString class]]) {
-    pendingIdentifier = @"";
-  }
-  assistantPendingIdentifier = [request objectForKey:@"assistant_pending_id"];
-  if (![assistantPendingIdentifier isKindOfClass:[NSString class]]) {
-    assistantPendingIdentifier = @"";
-  }
-  sessionId = [request objectForKey:@"session_id"];
-  if (![sessionId isKindOfClass:[NSNumber class]]) {
-    sessionId = nil;
-  }
-  previousLastIdentifier = [request objectForKey:@"previous_last_id"];
-  if (![previousLastIdentifier isKindOfClass:[NSNumber class]]) {
-    previousLastIdentifier = [NSNumber numberWithLongLong:0LL];
-  }
-  result = [[NSMutableDictionary alloc] init];
-  [result setObject:pendingIdentifier forKey:@"pending_id"];
-  [result setObject:assistantPendingIdentifier forKey:@"assistant_pending_id"];
-  [result setObject:previousLastIdentifier forKey:@"previous_last_id"];
-
-  streamContext = [NSDictionary dictionaryWithObjectsAndKeys:
-    pendingIdentifier, @"pending_id",
-    assistantPendingIdentifier, @"assistant_pending_id",
-    nil];
-
-  error = nil;
-  session = [StrappySession submitPromptStreaming:prompt
-                              inSessionIdentifier:sessionId
-                                          context:streamContext
-                                         delegate:self
-                                            error:&error];
-  if (session != nil) {
-    [result setObject:session forKey:@"session"];
-  } else {
-    errorMessage = [error localizedDescription];
-    if ([errorMessage length] == 0U) {
-      errorMessage = NSLocalizedString(@"Prompt failed.", nil);
-    }
-    [result setObject:errorMessage forKey:@"error"];
+  if ([notification object] != session_) {
+    return;
   }
 
-  [self performSelectorOnMainThread:@selector(sendPromptDidFinish:)
-                         withObject:result
-                      waitUntilDone:NO];
-  [result release];
-  [pool release];
-  [self release];
-}
+  event = [notification userInfo];
+  if (![event isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
 
-- (void)strappySessionStreamDidReceiveContentDelta:(NSDictionary *)delta
-{
-  [self streamContentDeltaDidArrive:delta];
-}
-
-- (void)strappySessionStreamDidReceiveReasoningDelta:(NSDictionary *)delta
-{
-  [self streamReasoningDeltaDidArrive:delta];
-}
-
-- (void)strappySessionStreamDidReceiveToolCall:(NSDictionary *)event
-{
-  [self streamToolCallDidArrive:event];
-}
-
-- (void)strappySessionStreamDidReceiveToolResult:(NSDictionary *)event
-{
-  [self streamToolResultDidArrive:event];
-}
-
-- (void)strappySessionStreamDidReceiveToolError:(NSDictionary *)event
-{
-  [self streamToolErrorDidArrive:event];
-}
-
-- (void)strappySessionStreamDidStartTurn:(NSDictionary *)event
-{
-  [self streamTurnDidStart:event];
-}
-
-- (void)strappySessionStreamDidFinishTurn:(NSDictionary *)event
-{
-  [self streamTurnDidFinish:event];
-}
-
-- (BOOL)strappySessionStreamShouldCancel:(NSDictionary *)context
-{
-  (void)context;
-  return [self promptCancellationRequested];
+  streamEvent = [event objectForKey:@"stream_event"];
+  if ([streamEvent isEqualToString:@"content_delta"]) {
+    [self streamContentDeltaDidArrive:event];
+  } else if ([streamEvent isEqualToString:@"reasoning_delta"]) {
+    [self streamReasoningDeltaDidArrive:event];
+  } else if ([streamEvent isEqualToString:@"tool_call"]) {
+    [self streamToolCallDidArrive:event];
+  } else if ([streamEvent isEqualToString:@"tool_result"]) {
+    [self streamToolResultDidArrive:event];
+  } else if ([streamEvent isEqualToString:@"tool_error"]) {
+    [self streamToolErrorDidArrive:event];
+  } else if ([streamEvent isEqualToString:@"turn_started"]) {
+    [self streamTurnDidStart:event];
+  } else if ([streamEvent isEqualToString:@"turn_finished"]) {
+    [self streamTurnDidFinish:event];
+  }
 }
 
 - (void)streamContentDeltaDidArrive:(NSDictionary *)delta
@@ -1950,6 +1916,14 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [event release];
 }
 
+- (void)sessionPromptDidFinish:(NSNotification *)notification
+{
+  if ([notification object] != session_) {
+    return;
+  }
+  [self sendPromptDidFinish:[notification userInfo]];
+}
+
 - (void)sendPromptDidFinish:(NSDictionary *)result
 {
   NSDictionary *session;
@@ -1958,6 +1932,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   NSString *assistantPendingIdentifier;
   NSNumber *previousLastIdentifier;
   NSNumber *resultSessionId;
+  NSNumber *currentSessionId;
   BOOL pendingIsCurrent;
 
   sending_ = NO;
@@ -1978,6 +1953,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   if (![previousLastIdentifier isKindOfClass:[NSNumber class]]) {
     previousLastIdentifier = [NSNumber numberWithLongLong:0LL];
   }
+  currentSessionId = [session_ sessionIdentifier];
   pendingIsCurrent = (pendingMessageIdentifier_ != nil &&
                       [pendingMessageIdentifier_ isEqualToString:pendingIdentifier] &&
                       [self pendingAppliesToCurrentSession]) ? YES : NO;
@@ -2006,22 +1982,18 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     }
 
     if (!pendingIsCurrent) {
-      if ((resultSessionId != nil) && [sessionId_ isEqualToNumber:resultSessionId]) {
+      if ((resultSessionId != nil) &&
+          (currentSessionId != nil) &&
+          [currentSessionId isEqualToNumber:resultSessionId]) {
         [self reloadContent];
       }
       return;
     }
 
-    if (resultSessionId != nil) {
-      [sessionId_ release];
-      sessionId_ = [resultSessionId retain];
-    }
-
     messagesError = nil;
     messages = nil;
-    if (sessionId_ != nil) {
-      messages = [StrappySession messagesForSessionIdentifier:sessionId_
-                                                        error:&messagesError];
+    if (session_ != nil) {
+      messages = [session_ messagesWithError:&messagesError];
     }
 
     if (messages == nil) {
@@ -2252,13 +2224,12 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   NSString *html;
   NSString *js;
 
-  if ((sessionId_ == nil) || (oldestRenderedMessageIndex_ == 0U)) {
+  if ((session_ == nil) || (oldestRenderedMessageIndex_ == 0U)) {
     return;
   }
 
   error = nil;
-  messages = [StrappySession messagesForSessionIdentifier:sessionId_
-                                                    error:&error];
+  messages = [session_ messagesWithError:&error];
   if (messages == nil) {
     return;
   }
@@ -2287,8 +2258,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
 - (void)dealloc
 {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   [htmlDirectoryPath_ release];
-  [sessionId_ release];
+  [session_ release];
   [sendController_ release];
   [statusText_ release];
   [pendingMessageIdentifier_ release];

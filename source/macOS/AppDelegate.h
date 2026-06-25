@@ -7,6 +7,7 @@
  @private
   SessionWindowController *_windowController;
   PreferencesWindowController *_preferencesWindowController;
+  BOOL _terminateWhenInFlightSessionsFinish;
 }
 
 - (void)showAboutWindow:(id)sender;

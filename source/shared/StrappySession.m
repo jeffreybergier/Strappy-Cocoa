@@ -7,33 +7,74 @@
 #import "strappy_prompt.h"
 #import "XPFoundation.h"
 
+NSString * const StrappySessionDidUpdateNotification =
+  @"StrappySessionDidUpdateNotification";
+NSString * const StrappySessionPromptDidFinishNotification =
+  @"StrappySessionPromptDidFinishNotification";
+NSString * const StrappySessionStreamEventNotification =
+  @"StrappySessionStreamEventNotification";
+
+static NSMutableDictionary *StrappySessionInFlightSessions = nil;
+
 typedef struct StrappySessionStreamContext {
-  id delegate;
+  StrappySession *session;
   NSDictionary *context;
 } StrappySessionStreamContext;
+
+@interface StrappySession ()
++ (NSMutableDictionary *)inFlightSessions;
++ (void)registerInFlightSession:(StrappySession *)session;
++ (void)unregisterInFlightSession:(StrappySession *)session;
++ (StrappySession *)inFlightSessionForIdentifier:(NSNumber *)identifier;
++ (NSArray *)messagesForSessionIdentifier:(NSNumber *)sessionIdentifier
+                                    error:(NSError **)error;
+- (void)updateCachedSummary:(NSDictionary *)summary;
+- (BOOL)shouldCancelStreamEventOfType:(strappy_chat_stream_event_type)eventType;
+- (int)handleStreamEvent:(const strappy_chat_stream_event *)event
+                 context:(NSDictionary *)context;
+- (void)postStreamEventAndRelease:(NSDictionary *)event;
+- (NSDictionary *)submitPrompt:(NSString *)prompt
+                         error:(NSError **)error;
+- (NSDictionary *)submitPromptStreaming:(NSString *)prompt
+                                context:(NSDictionary *)context
+                                  error:(NSError **)error;
+- (void)sendPromptInBackground:(NSDictionary *)request;
+- (void)streamingPromptDidFinish:(NSDictionary *)result;
+@end
 
 static int StrappySessionHandleStreamEvent(
   const strappy_chat_stream_event *event,
   void *userData)
 {
   StrappySessionStreamContext *context;
-  NSString *text;
-  NSMutableDictionary *delta;
+  StrappySession *session;
 
   if ((event == NULL) || (userData == NULL)) {
     return 1;
   }
 
   context = (StrappySessionStreamContext *)userData;
-  if (context->delegate == nil) {
+  session = context->session;
+  if (session == nil) {
     return 1;
   }
 
-  if (((event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) ||
-       (event->type == STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA)) &&
-      [context->delegate respondsToSelector:
-        @selector(strappySessionStreamShouldCancel:)] &&
-      [context->delegate strappySessionStreamShouldCancel:context->context]) {
+  return [session handleStreamEvent:event context:context->context];
+}
+
+@implementation StrappySession
+
+- (int)handleStreamEvent:(const strappy_chat_stream_event *)event
+                 context:(NSDictionary *)contextDictionary
+{
+  NSString *text;
+  NSMutableDictionary *delta;
+
+  if (event == NULL) {
+    return 1;
+  }
+
+  if ([self shouldCancelStreamEventOfType:event->type]) {
     return 0;
   }
 
@@ -55,8 +96,8 @@ static int StrappySessionHandleStreamEvent(
   } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_ERROR) {
     [delta setObject:@"error" forKey:@"event_type"];
   }
-  if (context->context != nil) {
-    [delta setObject:context->context forKey:@"context"];
+  if (contextDictionary != nil) {
+    [delta setObject:contextDictionary forKey:@"context"];
   }
 
   if (([text length] == 0U) &&
@@ -163,41 +204,245 @@ static int StrappySessionHandleStreamEvent(
     }
   }
 
-  if ((event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) &&
-      [context->delegate respondsToSelector:
-        @selector(strappySessionStreamDidReceiveContentDelta:)]) {
-    [context->delegate strappySessionStreamDidReceiveContentDelta:delta];
-  } else if ((event->type == STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA) &&
-             [context->delegate respondsToSelector:
-               @selector(strappySessionStreamDidReceiveReasoningDelta:)]) {
-    [context->delegate strappySessionStreamDidReceiveReasoningDelta:delta];
-  } else if ((event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_CALL) &&
-             [context->delegate respondsToSelector:
-               @selector(strappySessionStreamDidReceiveToolCall:)]) {
-    [context->delegate strappySessionStreamDidReceiveToolCall:delta];
-  } else if ((event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_RESULT) &&
-             [context->delegate respondsToSelector:
-               @selector(strappySessionStreamDidReceiveToolResult:)]) {
-    [context->delegate strappySessionStreamDidReceiveToolResult:delta];
-  } else if ((event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_ERROR) &&
-             [context->delegate respondsToSelector:
-               @selector(strappySessionStreamDidReceiveToolError:)]) {
-    [context->delegate strappySessionStreamDidReceiveToolError:delta];
-  } else if ((event->type == STRAPPY_CHAT_STREAM_EVENT_TURN_STARTED) &&
-             [context->delegate respondsToSelector:
-               @selector(strappySessionStreamDidStartTurn:)]) {
-    [context->delegate strappySessionStreamDidStartTurn:delta];
-  } else if ((event->type == STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED) &&
-             [context->delegate respondsToSelector:
-               @selector(strappySessionStreamDidFinishTurn:)]) {
-    [context->delegate strappySessionStreamDidFinishTurn:delta];
+  if (event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) {
+    [delta setObject:@"content_delta" forKey:@"stream_event"];
+  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA) {
+    [delta setObject:@"reasoning_delta" forKey:@"stream_event"];
+  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_CALL) {
+    [delta setObject:@"tool_call" forKey:@"stream_event"];
+  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_RESULT) {
+    [delta setObject:@"tool_result" forKey:@"stream_event"];
+  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_ERROR) {
+    [delta setObject:@"tool_error" forKey:@"stream_event"];
+  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TURN_STARTED) {
+    [delta setObject:@"turn_started" forKey:@"stream_event"];
+  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED) {
+    [delta setObject:@"turn_finished" forKey:@"stream_event"];
   }
 
-  [delta release];
+  [self performSelectorOnMainThread:@selector(postStreamEventAndRelease:)
+                         withObject:delta
+                      waitUntilDone:NO];
   return 1;
 }
 
-@implementation StrappySession
++ (NSMutableDictionary *)inFlightSessions
+{
+  if (StrappySessionInFlightSessions == nil) {
+    StrappySessionInFlightSessions = [[NSMutableDictionary alloc] init];
+  }
+  return StrappySessionInFlightSessions;
+}
+
++ (void)registerInFlightSession:(StrappySession *)session
+{
+  NSNumber *identifier;
+
+  if (![session isKindOfClass:[StrappySession class]]) {
+    return;
+  }
+
+  identifier = [session sessionIdentifier];
+  if (identifier == nil) {
+    return;
+  }
+
+  @synchronized(self) {
+    [[self inFlightSessions] setObject:session forKey:identifier];
+  }
+}
+
++ (void)unregisterInFlightSession:(StrappySession *)session
+{
+  NSNumber *identifier;
+
+  if (![session isKindOfClass:[StrappySession class]]) {
+    return;
+  }
+
+  identifier = [session sessionIdentifier];
+  if (identifier == nil) {
+    return;
+  }
+
+  @synchronized(self) {
+    if ([[self inFlightSessions] objectForKey:identifier] == session) {
+      [[self inFlightSessions] removeObjectForKey:identifier];
+    }
+  }
+}
+
++ (StrappySession *)inFlightSessionForIdentifier:(NSNumber *)identifier
+{
+  StrappySession *session;
+
+  if (![identifier isKindOfClass:[NSNumber class]]) {
+    return nil;
+  }
+
+  @synchronized(self) {
+    session = [[[self inFlightSessions] objectForKey:identifier] retain];
+  }
+  return [session autorelease];
+}
+
++ (NSUInteger)inFlightSessionCount
+{
+  NSUInteger count;
+
+  @synchronized(self) {
+    count = [[self inFlightSessions] count];
+  }
+  return count;
+}
+
++ (BOOL)hasInFlightSessions
+{
+  return ([self inFlightSessionCount] > 0U) ? YES : NO;
+}
+
++ (StrappySession *)sessionWithIdentifier:(NSNumber *)sessionIdentifier
+{
+  StrappySession *session;
+
+  if (![sessionIdentifier isKindOfClass:[NSNumber class]]) {
+    return nil;
+  }
+
+  session = [self inFlightSessionForIdentifier:sessionIdentifier];
+  if (session != nil) {
+    return session;
+  }
+
+  return [[[self alloc] initWithSessionIdentifier:sessionIdentifier
+                                         summary:nil] autorelease];
+}
+
++ (StrappySession *)sessionWithSummary:(NSDictionary *)summary
+{
+  NSNumber *identifier;
+  StrappySession *session;
+
+  if (![summary isKindOfClass:[NSDictionary class]]) {
+    return nil;
+  }
+
+  identifier = [summary objectForKey:@"id"];
+  if (![identifier isKindOfClass:[NSNumber class]]) {
+    return nil;
+  }
+
+  session = [self inFlightSessionForIdentifier:identifier];
+  if (session != nil) {
+    [session updateCachedSummary:summary];
+    return session;
+  }
+
+  return [[[self alloc] initWithSessionIdentifier:identifier
+                                         summary:summary] autorelease];
+}
+
+- (id)initWithSessionIdentifier:(NSNumber *)sessionIdentifier
+                        summary:(NSDictionary *)summary
+{
+  if (![sessionIdentifier isKindOfClass:[NSNumber class]] ||
+      ([sessionIdentifier longLongValue] <= 0LL)) {
+    [self release];
+    [NSException raise:NSInvalidArgumentException
+                format:@"[StrappySession initWithSessionIdentifier:summary:] sessionIdentifier is required"];
+    return nil;
+  }
+
+  if ((self = [super init])) {
+    sessionIdentifier_ = [sessionIdentifier retain];
+    if ([summary isKindOfClass:[NSDictionary class]]) {
+      cachedSummary_ = [summary retain];
+    }
+  }
+  return self;
+}
+
+- (void)dealloc
+{
+  [StrappySession unregisterInFlightSession:self];
+  [sessionIdentifier_ release];
+  [cachedSummary_ release];
+  [super dealloc];
+}
+
+- (NSNumber *)sessionIdentifier
+{
+  return sessionIdentifier_;
+}
+
+- (NSDictionary *)cachedSummary
+{
+  return cachedSummary_;
+}
+
+- (void)updateCachedSummary:(NSDictionary *)summary
+{
+  if (![summary isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
+
+  @synchronized(self) {
+    if (cachedSummary_ != summary) {
+      [cachedSummary_ release];
+      cachedSummary_ = [summary retain];
+    }
+  }
+}
+
+- (BOOL)isPromptInFlight
+{
+  BOOL inFlight;
+
+  @synchronized(self) {
+    inFlight = promptInFlight_;
+  }
+  return inFlight;
+}
+
+- (BOOL)promptCancellationRequested
+{
+  BOOL requested;
+
+  @synchronized(self) {
+    requested = promptCancellationRequested_;
+  }
+  return requested;
+}
+
+- (void)cancelPrompt
+{
+  @synchronized(self) {
+    if (promptInFlight_) {
+      promptCancellationRequested_ = YES;
+    }
+  }
+}
+
+- (BOOL)shouldCancelStreamEventOfType:(strappy_chat_stream_event_type)eventType
+{
+  if ((eventType != STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) &&
+      (eventType != STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA)) {
+    return NO;
+  }
+
+  return [self promptCancellationRequested];
+}
+
+- (void)postStreamEventAndRelease:(NSDictionary *)event
+{
+  if ([event isKindOfClass:[NSDictionary class]]) {
+    [[NSNotificationCenter defaultCenter]
+      postNotificationName:StrappySessionStreamEventNotification
+                    object:self
+                  userInfo:event];
+  }
+  [event release];
+}
 
 + (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath
 {
@@ -627,12 +872,13 @@ static int StrappySessionHandleStreamEvent(
   return YES;
 }
 
-+ (NSDictionary *)createSessionWithError:(NSError **)error
++ (StrappySession *)createSessionWithError:(NSError **)error
 {
   NSString *databasePath;
   char *strappyError;
   long long sessionId;
   NSNumber *sessionIdentifier;
+  NSDictionary *summary;
 
   databasePath = [StrappySession sessionsDatabasePath];
   if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
@@ -653,8 +899,13 @@ static int StrappySessionHandleStreamEvent(
   }
 
   sessionIdentifier = [NSNumber numberWithLongLong:sessionId];
-  return [StrappySession sessionSummaryForSessionIdentifier:sessionIdentifier
-                                                     error:error];
+  summary = [StrappySession sessionSummaryForSessionIdentifier:sessionIdentifier
+                                                        error:error];
+  if (summary == nil) {
+    return nil;
+  }
+  return [[[StrappySession alloc] initWithSessionIdentifier:sessionIdentifier
+                                                    summary:summary] autorelease];
 }
 
 + (NSArray *)sessionSummariesWithError:(NSError **)error
@@ -843,8 +1094,25 @@ static int StrappySessionHandleStreamEvent(
   return messages;
 }
 
-+ (NSDictionary *)submitPrompt:(NSString *)prompt
-           inSessionIdentifier:(NSNumber *)sessionIdentifier
+- (NSDictionary *)summaryWithError:(NSError **)error
+{
+  NSDictionary *summary;
+
+  summary = [StrappySession sessionSummaryForSessionIdentifier:sessionIdentifier_
+                                                        error:error];
+  if (summary != nil) {
+    [self updateCachedSummary:summary];
+  }
+  return summary;
+}
+
+- (NSArray *)messagesWithError:(NSError **)error
+{
+  return [StrappySession messagesForSessionIdentifier:sessionIdentifier_
+                                               error:error];
+}
+
+- (NSDictionary *)submitPrompt:(NSString *)prompt
                          error:(NSError **)error
 {
   NSString *databasePath;
@@ -867,8 +1135,8 @@ static int StrappySessionHandleStreamEvent(
     return nil;
   }
 
-  sessionId = [sessionIdentifier isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier longLongValue] : 0LL;
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
   if (sessionId <= 0) {
     if (error != nil) {
       NSDictionary *userInfo =
@@ -928,10 +1196,8 @@ static int StrappySessionHandleStreamEvent(
   return session;
 }
 
-+ (NSDictionary *)submitPromptStreaming:(NSString *)prompt
-                    inSessionIdentifier:(NSNumber *)sessionIdentifier
+- (NSDictionary *)submitPromptStreaming:(NSString *)prompt
                                 context:(NSDictionary *)context
-                               delegate:(id<StrappySessionStreamDelegate>)delegate
                                   error:(NSError **)error
 {
   NSString *databasePath;
@@ -959,8 +1225,8 @@ static int StrappySessionHandleStreamEvent(
     context = nil;
   }
 
-  sessionId = [sessionIdentifier isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier longLongValue] : 0LL;
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
   if (sessionId <= 0) {
     if (error != nil) {
       NSDictionary *userInfo =
@@ -984,7 +1250,7 @@ static int StrappySessionHandleStreamEvent(
     return nil;
   }
 
-  streamContext.delegate = [(id)delegate retain];
+  streamContext.session = self;
   streamContext.context = [context retain];
 
   strappyError = NULL;
@@ -999,8 +1265,6 @@ static int StrappySessionHandleStreamEvent(
     &strappyError);
 
   [streamContext.context release];
-  [streamContext.delegate release];
-
   if (response == NULL) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
@@ -1027,6 +1291,149 @@ static int StrappySessionHandleStreamEvent(
   session = [StrappySession dictionaryFromSessionRecord:&record];
   strappy_session_record_destroy(&record);
   return session;
+}
+
+- (BOOL)beginStreamingPrompt:(NSString *)prompt
+                     context:(NSDictionary *)context
+                       error:(NSError **)error
+{
+  NSMutableDictionary *request;
+
+  if (![prompt isKindOfClass:[NSString class]] || ([prompt length] == 0U)) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Prompt is empty.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:4
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  if ((context != nil) && ![context isKindOfClass:[NSDictionary class]]) {
+    context = nil;
+  }
+
+  @synchronized(self) {
+    if (promptInFlight_) {
+      if (error != nil) {
+        NSDictionary *userInfo =
+          [NSDictionary dictionaryWithObject:NSLocalizedString(@"Prompt request is already running.", nil)
+                                      forKey:NSLocalizedDescriptionKey];
+        *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                     code:8
+                                 userInfo:userInfo];
+      }
+      return NO;
+    }
+
+    promptInFlight_ = YES;
+    promptCancellationRequested_ = NO;
+  }
+
+  [StrappySession registerInFlightSession:self];
+
+  request = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
+    prompt, @"prompt",
+    nil];
+  if (context != nil) {
+    [request setObject:context forKey:@"context"];
+  }
+
+  [self retain];
+  [NSThread detachNewThreadSelector:@selector(sendPromptInBackground:)
+                           toTarget:self
+                         withObject:request];
+  [request release];
+  return YES;
+}
+
+- (void)sendPromptInBackground:(NSDictionary *)request
+{
+  NSAutoreleasePool *pool;
+  NSError *error;
+  NSDictionary *session;
+  NSDictionary *context;
+  NSMutableDictionary *result;
+  NSString *prompt;
+  NSString *errorMessage;
+
+  pool = [[NSAutoreleasePool alloc] init];
+
+  prompt = [request objectForKey:@"prompt"];
+  if (![prompt isKindOfClass:[NSString class]]) {
+    prompt = @"";
+  }
+  context = [request objectForKey:@"context"];
+  if (![context isKindOfClass:[NSDictionary class]]) {
+    context = nil;
+  }
+
+  result = [[NSMutableDictionary alloc] init];
+  if (context != nil) {
+    [result addEntriesFromDictionary:context];
+  }
+
+  error = nil;
+  session = [self submitPromptStreaming:prompt
+                                context:context
+                                  error:&error];
+  if (session != nil) {
+    [result setObject:session forKey:@"session"];
+  } else {
+    errorMessage = [error localizedDescription];
+    if ([errorMessage length] == 0U) {
+      errorMessage = NSLocalizedString(@"Prompt failed.", nil);
+    }
+    [result setObject:errorMessage forKey:@"error"];
+  }
+
+  [self performSelectorOnMainThread:@selector(streamingPromptDidFinish:)
+                         withObject:result
+                      waitUntilDone:NO];
+  [result release];
+
+  [pool release];
+  [self release];
+}
+
+- (void)streamingPromptDidFinish:(NSDictionary *)result
+{
+  NSMutableDictionary *userInfo;
+  NSDictionary *summary;
+
+  userInfo = [[NSMutableDictionary alloc] init];
+  if ([result isKindOfClass:[NSDictionary class]]) {
+    [userInfo addEntriesFromDictionary:result];
+  }
+
+  summary = nil;
+  if ([userInfo objectForKey:@"error"] == nil) {
+    summary = [self summaryWithError:nil];
+    if (summary != nil) {
+      [userInfo setObject:summary forKey:@"session"];
+    }
+  }
+
+  @synchronized(self) {
+    promptInFlight_ = NO;
+    promptCancellationRequested_ = NO;
+  }
+  [StrappySession unregisterInFlightSession:self];
+
+  if (summary != nil) {
+    [[NSNotificationCenter defaultCenter]
+      postNotificationName:StrappySessionDidUpdateNotification
+                    object:self
+                  userInfo:userInfo];
+  }
+
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionPromptDidFinishNotification
+                  object:self
+                userInfo:userInfo];
+  [userInfo release];
 }
 
 @end
