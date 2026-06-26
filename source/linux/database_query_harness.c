@@ -568,30 +568,33 @@ static int harness_run_tool_registry_tests(void)
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_QUERY) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) != NULL) &&
-        (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_READ) != NULL) &&
-        (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER) != NULL) &&
-        (strstr(tools_json, STRAPPY_TOOL_HELPER_USER_INFO_FORGET) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_MEMORY_USER_FACT_READ) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_MEMORY_USER_FACT_FORGET) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_CONTEXT_READ) != NULL) &&
         (strstr(tools_json,
-                STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) != NULL) &&
+                STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) != NULL) &&
         (strstr(tools_json,
-                STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET) != NULL) &&
+                STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET) != NULL) &&
         (strstr(tools_json,
                 STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH) != NULL) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_READ) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_FORGET) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_USER_FACT_READ) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_USER_FACT_FORGET) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) &&
         strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_CONTEXT_READ) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH) &&
         !strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_QUERY) &&
         !strappy_tools_is_helper("helper_convert_dates") &&
+        (strstr(tools_json, "memory_database_hint_read") == NULL) &&
         (strstr(tools_json, "helper_database_info_read") == NULL) &&
+        (strstr(tools_json, "helper_user_info_read") == NULL) &&
+        (strstr(tools_json, "helper_database_info_remember") == NULL) &&
         (strstr(tools_json, "helper_convert_dates") == NULL) &&
         (strstr(tools_json, "database_learn") == NULL)) ? 1 : 0;
   if (!ok) {
@@ -888,6 +891,7 @@ static int harness_run_database_list_info_tests(const harness_context *context)
         (strstr(output, "\"availability_state\":\"available\"") != NULL) &&
         (strstr(output, "\"schema\"") == NULL) &&
         (strstr(output, "\"database_info\"") == NULL) &&
+        (strstr(output, "\"database_hints\"") == NULL) &&
         (strstr(output, "\"remembered_info\"") == NULL) &&
         (strstr(output, "\"user_action\"") == NULL) &&
         (strstr(output, "\"messages\"") == NULL) &&
@@ -1127,7 +1131,7 @@ static int harness_run_helper_info_tests(const harness_context *context)
 
   if (!harness_expect_output_contains(
         context->catalog_path,
-        STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER,
+        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
         "{\"kind\":\"identity\",\"subject\":\"user\","
         "\"predicate\":\"first_name\",\"value\":\"Jeff\","
         "\"confidence\":0.95,\"source\":\"user_explicit\"}",
@@ -1137,7 +1141,7 @@ static int harness_run_helper_info_tests(const harness_context *context)
   }
 
   if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_HELPER_USER_INFO_READ,
+                                      STRAPPY_TOOL_MEMORY_USER_FACT_READ,
                                       "{\"query\":\"Jeff\"}",
                                       "\"first_name\"",
                                       "\"Jeff\"")) {
@@ -1145,7 +1149,7 @@ static int harness_run_helper_info_tests(const harness_context *context)
   }
 
   if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_HELPER_USER_INFO_FORGET,
+                                      STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
                                       "{\"id\":1}",
                                       "\"forgotten\":true",
                                       "\"ok\":true")) {
@@ -1153,7 +1157,7 @@ static int harness_run_helper_info_tests(const harness_context *context)
   }
 
   if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_HELPER_USER_INFO_READ,
+                                      STRAPPY_TOOL_MEMORY_USER_FACT_READ,
                                       "{\"query\":\"Jeff\"}",
                                       "\"facts\"",
                                       "\"count\":0")) {
@@ -1171,13 +1175,13 @@ static int harness_run_helper_info_tests(const harness_context *context)
     "\"confidence\":0.9}",
     context->database_id);
   if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
-    fprintf(stderr, "Could not build database info remember arguments.\n");
+    fprintf(stderr, "Could not build database hint remember arguments.\n");
     return 0;
   }
 
   if (!harness_expect_output_contains(
         context->catalog_path,
-        STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
         arguments,
         "\"ok\":true",
         "\"id\":1")) {
@@ -1189,7 +1193,7 @@ static int harness_run_helper_info_tests(const harness_context *context)
                      "{\"database_id\":\"%s\",\"query\":\"identifiers\"}",
                      context->database_id);
   if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
-    fprintf(stderr, "Could not build database info read arguments.\n");
+    fprintf(stderr, "Could not build database hint read arguments.\n");
     return 0;
   }
 
@@ -1211,7 +1215,7 @@ static int harness_run_helper_info_tests(const harness_context *context)
 
   if (!harness_expect_output_contains(
         context->catalog_path,
-        STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET,
         "{\"id\":1}",
         "\"forgotten\":true",
         "\"ok\":true")) {
@@ -1221,7 +1225,7 @@ static int harness_run_helper_info_tests(const harness_context *context)
   if (!harness_expect_output_contains(context->catalog_path,
                                       STRAPPY_TOOL_DATABASE_CONTEXT_READ,
                                       "{\"query\":\"identifiers\"}",
-                                      "\"database_info\"",
+                                      "\"database_hints\"",
                                       "\"count\":0")) {
     return 0;
   }
@@ -1727,7 +1731,7 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
   messages[3].message_key = "harness-turn-test-tool-result";
   messages[3].target_message_key = "harness-turn-test-assistant";
   messages[3].tool_call_id = "call-1";
-  messages[3].tool_name = STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER;
+  messages[3].tool_name = STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER;
   messages[3].arguments_json = "{\"key\":\"value\"}";
   messages[3].result_json = "{\"ok\":true}";
   messages[3].include_in_context = 0;

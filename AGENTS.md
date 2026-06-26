@@ -82,12 +82,12 @@ House style for Strappy source:
     `database_query` runs bounded read-only SQL against approved databases.
     Do not put raw filesystem paths, full schema dumps, or learned hint caches
     into `database_list_info`.
-15. Helper memory and session-title tools persist durable assistant state.
-    `helper_user_info_*` stores small stable user facts, `helper_database_info_*`
-    stores reusable evidence-backed database hints, and
+15. Memory and session-title tools persist durable assistant state.
+    `memory_user_fact_*` stores small stable user facts,
+    `memory_database_hint_*` stores reusable evidence-backed database hints, and
     `helper_session_name_write` names an untitled active session. Do not store
     secrets, credentials, sensitive identifiers, long copied content, or private
-    row contents in helper memory.
+    row contents in memory.
 16. Assistant turns and persisted messages carry `turn_key`,
     `prompt_group_key`, actor, context policy, tool-call metadata, and optional
     reasoning text. Harness and post-answer memory-audit turns should use

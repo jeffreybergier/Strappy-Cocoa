@@ -272,7 +272,7 @@ static int harness_check_tool_event_text(void)
   event_text = strappy_webview_tool_event_text(
     "result",
     "call-1",
-    "helper_user_info_read",
+    "memory_user_fact_read",
     "{\"query\":\"Alice\"}",
     "{\"records\":[{\"kind\":\"person\",\"value\":{\"name\":\"Alice\"}}]}");
   if (event_text == NULL) {
@@ -288,7 +288,7 @@ static int harness_check_tool_event_text(void)
     return 0;
   }
 
-  ok = harness_expect_contains(event_text, "\"tool_name\":\"helper_user_info_read\"") &&
+  ok = harness_expect_contains(event_text, "\"tool_name\":\"memory_user_fact_read\"") &&
        harness_expect_contains(event_text, "\\\"records\\\"") &&
        harness_expect_contains(script, "appendToolEventText");
 

@@ -1009,8 +1009,8 @@ static int strappy_assistant_tool_is_allowed(
   if (policy == STRAPPY_ASSISTANT_TOOL_POLICY_LEARNING_SUMMARY) {
     return ((tool_name != NULL) &&
             ((strcmp(tool_name, STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) == 0) ||
-             (strcmp(tool_name, STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER) == 0) ||
-             (strcmp(tool_name, STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) == 0))) ? 1 : 0;
+             (strcmp(tool_name, STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) == 0) ||
+             (strcmp(tool_name, STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) == 0))) ? 1 : 0;
   }
 
   return 1;
@@ -2451,8 +2451,8 @@ static int strappy_assistant_run_learning_summary(
   }
 
   helper_tool_allowlist[0] = STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE;
-  helper_tool_allowlist[1] = STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER;
-  helper_tool_allowlist[2] = STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER;
+  helper_tool_allowlist[1] = STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER;
+  helper_tool_allowlist[2] = STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER;
   helper_config = *config;
   helper_config.tool_allowlist = helper_tool_allowlist;
   helper_config.tool_allowlist_count =

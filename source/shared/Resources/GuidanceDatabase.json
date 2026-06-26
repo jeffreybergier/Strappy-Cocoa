@@ -12,8 +12,8 @@
     "database_query_missing_database_id": "Use database_list_info first.",
     "database_context_read_unavailable_database_id": "Use database_list_info to choose an available database_id first.",
     "database_context_read_missing_database_id": "Use database_list_info first.",
-    "helper_database_info_remember_unavailable_database_id": "Use database_list_info to choose an available database_id first.",
-    "helper_database_info_remember_missing_database_id": "Use database_list_info first."
+    "memory_database_hint_remember_unavailable_database_id": "Use database_list_info to choose an available database_id first.",
+    "memory_database_hint_remember_missing_database_id": "Use database_list_info first."
   },
   "database_descriptions": [
     {

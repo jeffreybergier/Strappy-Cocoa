@@ -28,7 +28,7 @@ commits, issue comments, database facts, or stored memory.
   Answer the user's request directly. Make a plan to use the tools to answer
 the user's request.
 
-- Call helper_user_info_read to remember info you saved about the user
+- Call memory_user_fact_read for remembered user facts when personal context may help
 - Call database_list_info and database_context_read to learn about the available databases
 - Call helper_datetime_to_iso8601 and helper_datetime_from_iso8601 for numeric timestamp display and SQL date bounds
 - Run bounded read-only SQL only; sample schema and values before assuming joins, timestamp units, or flag types

@@ -191,7 +191,7 @@ Deliverables:
   results back to the model, and repeat until the model returns final text or
   reaches the 20-round tool limit.
 - [x] Post-answer memory-audit turn that can call `helper_session_name_write`,
-  `helper_user_info_remember`, and `helper_database_info_remember` with an
+  `memory_user_fact_remember`, and `memory_database_hint_remember` with an
   allowlisted tool set and `context_policy = omit`.
 - [x] Persisted prompt, assistant, tool-call, tool-result, and harness messages
   in `session_messages`, with `session_turns`, `turn_key`, `prompt_group_key`,

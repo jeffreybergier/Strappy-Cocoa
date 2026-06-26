@@ -11,13 +11,13 @@ extern "C" {
 #define STRAPPY_TOOL_DATABASE_QUERY "database_query"
 #define STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601 "helper_datetime_to_iso8601"
 #define STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601 "helper_datetime_from_iso8601"
-#define STRAPPY_TOOL_HELPER_USER_INFO_READ "helper_user_info_read"
-#define STRAPPY_TOOL_HELPER_USER_INFO_REMEMBER "helper_user_info_remember"
-#define STRAPPY_TOOL_HELPER_USER_INFO_FORGET "helper_user_info_forget"
+#define STRAPPY_TOOL_MEMORY_USER_FACT_READ "memory_user_fact_read"
+#define STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER "memory_user_fact_remember"
+#define STRAPPY_TOOL_MEMORY_USER_FACT_FORGET "memory_user_fact_forget"
 #define STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE "helper_session_name_write"
 #define STRAPPY_TOOL_DATABASE_CONTEXT_READ "database_context_read"
-#define STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER "helper_database_info_remember"
-#define STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET "helper_database_info_forget"
+#define STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER "memory_database_hint_remember"
+#define STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET "memory_database_hint_forget"
 #define STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH "helper_fontawesome_icons_search"
 
 char *strappy_tools_request_json(const char *resource_dir,
