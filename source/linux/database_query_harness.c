@@ -3,6 +3,7 @@
 #include "strappy_core.h"
 #include "strappy_db.h"
 #include "strappy_tools.h"
+#include "cJSON.h"
 
 #include <sqlite3.h>
 #include <stdio.h>
@@ -12,6 +13,7 @@
 #include <unistd.h>
 
 #define HARNESS_RESOURCE_DIR "../shared/Resources"
+#define HARNESS_DATABASE_GUIDANCE_RESOURCE "GuidanceDatabase.json"
 
 typedef struct harness_context {
   char temp_dir[1024];
@@ -186,6 +188,144 @@ static int harness_exec_sql(sqlite3 *db, const char *sql)
   }
 
   return 1;
+}
+
+static char *harness_read_file(const char *path)
+{
+  FILE *file;
+  char *buffer;
+  long length;
+  size_t byte_count;
+  size_t read_count;
+
+  if ((path == NULL) || (path[0] == '\0')) {
+    fprintf(stderr, "Harness file path is empty.\n");
+    return NULL;
+  }
+
+  file = fopen(path, "rb");
+  if (file == NULL) {
+    fprintf(stderr, "Could not open harness resource: %s\n", path);
+    return NULL;
+  }
+
+  if ((fseek(file, 0L, SEEK_END) != 0) ||
+      ((length = ftell(file)) < 0L) ||
+      (fseek(file, 0L, SEEK_SET) != 0)) {
+    fprintf(stderr, "Could not measure harness resource: %s\n", path);
+    fclose(file);
+    return NULL;
+  }
+
+  byte_count = (size_t)length;
+  buffer = (char *)malloc(byte_count + 1U);
+  if (buffer == NULL) {
+    fprintf(stderr, "Could not allocate harness resource buffer.\n");
+    fclose(file);
+    return NULL;
+  }
+
+  read_count = fread(buffer, 1U, byte_count, file);
+  fclose(file);
+  if (read_count != byte_count) {
+    fprintf(stderr, "Could not read harness resource: %s\n", path);
+    free(buffer);
+    return NULL;
+  }
+
+  buffer[byte_count] = '\0';
+  return buffer;
+}
+
+static cJSON *harness_read_json_resource(const char *resource_name)
+{
+  char path[1200];
+  char *text;
+  cJSON *root;
+
+  if (!harness_join_path(path,
+                         sizeof(path),
+                         HARNESS_RESOURCE_DIR,
+                         resource_name)) {
+    fprintf(stderr, "Could not build harness resource path.\n");
+    return NULL;
+  }
+
+  text = harness_read_file(path);
+  if (text == NULL) {
+    return NULL;
+  }
+
+  root = cJSON_Parse(text);
+  free(text);
+  if (root == NULL) {
+    fprintf(stderr, "Could not parse harness JSON resource: %s\n", path);
+    return NULL;
+  }
+
+  return root;
+}
+
+static cJSON *harness_database_guidance_rule(cJSON *root,
+                                             const char *guidance_id)
+{
+  cJSON *rules;
+  cJSON *rule;
+
+  if ((root == NULL) || (guidance_id == NULL) || (guidance_id[0] == '\0')) {
+    return NULL;
+  }
+
+  rules = cJSON_GetObjectItem(root, "database_descriptions");
+  if (!cJSON_IsArray(rules)) {
+    return NULL;
+  }
+
+  for (rule = rules->child; rule != NULL; rule = rule->next) {
+    cJSON *id;
+
+    id = cJSON_GetObjectItem(rule, "id");
+    if (cJSON_IsString(id) &&
+        (id->valuestring != NULL) &&
+        (strcmp(id->valuestring, guidance_id) == 0)) {
+      return rule;
+    }
+  }
+
+  return NULL;
+}
+
+static char *harness_database_guidance_string(const char *guidance_id,
+                                              const char *key)
+{
+  cJSON *root;
+  cJSON *rule;
+  cJSON *value;
+  char *copy;
+
+  root = harness_read_json_resource(HARNESS_DATABASE_GUIDANCE_RESOURCE);
+  if (root == NULL) {
+    return NULL;
+  }
+
+  rule = harness_database_guidance_rule(root, guidance_id);
+  value = (rule != NULL) ? cJSON_GetObjectItem(rule, key) : NULL;
+  if (!cJSON_IsString(value) || (value->valuestring == NULL)) {
+    fprintf(stderr,
+            "Database guidance %s is missing %s.\n",
+            (guidance_id != NULL) ? guidance_id : "(null)",
+            (key != NULL) ? key : "(null)");
+    cJSON_Delete(root);
+    return NULL;
+  }
+
+  copy = strappy_string_duplicate(value->valuestring);
+  cJSON_Delete(root);
+  if (copy == NULL) {
+    fprintf(stderr, "Could not copy database guidance string.\n");
+  }
+
+  return copy;
 }
 
 static int harness_create_user_database(const char *database_path)
@@ -467,6 +607,125 @@ static int harness_expect_output_contains(const char *catalog_path,
   }
 
   free(output);
+  return ok;
+}
+
+static cJSON *harness_tool_output_json(const char *catalog_path,
+                                       const char *tool_name,
+                                       const char *arguments_json)
+{
+  char *error;
+  char *output;
+  cJSON *root;
+
+  error = NULL;
+  output = strappy_tools_execute(catalog_path,
+                                 0LL,
+                                 HARNESS_RESOURCE_DIR,
+                                 tool_name,
+                                 arguments_json,
+                                 &error);
+  if (output == NULL) {
+    fprintf(stderr,
+            "Expected JSON output but got error: %s\n",
+            (error != NULL) ? error : "(null)");
+    free(error);
+    return NULL;
+  }
+
+  root = cJSON_Parse(output);
+  if (root == NULL) {
+    fprintf(stderr, "Could not parse tool output JSON: %s\n", output);
+  }
+  free(output);
+  return root;
+}
+
+static int harness_expect_context_description_from_guidance(
+  const char *catalog_path,
+  const char *arguments_json,
+  const char *guidance_id)
+{
+  char *expected;
+  cJSON *root;
+  cJSON *description;
+  int ok;
+
+  expected = harness_database_guidance_string(guidance_id, "description");
+  if (expected == NULL) {
+    return 0;
+  }
+
+  root = harness_tool_output_json(catalog_path,
+                                  STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                  arguments_json);
+  if (root == NULL) {
+    free(expected);
+    return 0;
+  }
+
+  description = cJSON_GetObjectItem(root, "description");
+  ok = (cJSON_IsString(description) &&
+        (description->valuestring != NULL) &&
+        (strcmp(description->valuestring, expected) == 0)) ? 1 : 0;
+  if (!ok) {
+    fprintf(stderr,
+            "Database context description did not match %s guidance.\n",
+            guidance_id);
+  }
+
+  cJSON_Delete(root);
+  free(expected);
+  return ok;
+}
+
+static int harness_expect_list_description_from_guidance(
+  const char *catalog_path,
+  const char *guidance_id)
+{
+  char *expected;
+  cJSON *root;
+  cJSON *databases;
+  cJSON *database;
+  int ok;
+
+  expected = harness_database_guidance_string(guidance_id, "description_short");
+  if (expected == NULL) {
+    return 0;
+  }
+
+  root = harness_tool_output_json(catalog_path,
+                                  STRAPPY_TOOL_DATABASE_LIST_INFO,
+                                  "{}");
+  if (root == NULL) {
+    free(expected);
+    return 0;
+  }
+
+  ok = 0;
+  databases = cJSON_GetObjectItem(root, "databases");
+  if (cJSON_IsArray(databases)) {
+    for (database = databases->child; database != NULL; database = database->next) {
+      cJSON *description_short;
+
+      description_short = cJSON_GetObjectItem(database, "description_short");
+      if (cJSON_IsString(description_short) &&
+          (description_short->valuestring != NULL) &&
+          (strcmp(description_short->valuestring, expected) == 0)) {
+        ok = 1;
+        break;
+      }
+    }
+  }
+
+  if (!ok) {
+    fprintf(stderr,
+            "Database list did not contain %s description_short guidance.\n",
+            guidance_id);
+  }
+
+  cJSON_Delete(root);
+  free(expected);
   return ok;
 }
 
@@ -1266,20 +1525,10 @@ static int harness_run_mail_guidance_tests(harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-                                      arguments,
-                                      "identify the mailbox row first",
-                                      "Flags may be typeless text")) {
-    return 0;
-  }
-
-  if (!harness_expect_output_contains(
+  if (!harness_expect_context_description_from_guidance(
         context->catalog_path,
-        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
         arguments,
-        "Envelope messages.ROWID -> Protected messages.message_id",
-        "date_received and date_sent are Unix seconds")) {
+        "apple_mail_envelope_index")) {
     return 0;
   }
 
@@ -1292,12 +1541,10 @@ static int harness_run_mail_guidance_tests(harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_contains(
+  if (!harness_expect_context_description_from_guidance(
         context->catalog_path,
-        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
         arguments,
-        "Pair with Envelope Index for mailbox, dates, flags, and thread context",
-        "Do not treat rows as Inbox unless they came from an Envelope mailbox filter")) {
+        "apple_mail_protected_index")) {
     return 0;
   }
 
@@ -1331,36 +1578,14 @@ static int harness_run_sms_guidance_tests(harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_contains(
-        context->catalog_path,
-        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-        arguments,
-        "Handles are phone/email identifiers, not names",
-        "chat_message_join instead of relying only on message.handle_id")) {
+  if (!harness_expect_context_description_from_guidance(context->catalog_path,
+                                                        arguments,
+                                                        "apple_messages_sms")) {
     return 0;
   }
 
-  if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-                                      arguments,
-                                      "Message dates are Apple epoch values",
-                                      "sample magnitude before converting")) {
-    return 0;
-  }
-
-  if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-                                      arguments,
-                                      "attributedBody can be a fallback",
-                                      "message_attachment_join")) {
-    return 0;
-  }
-
-  if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_DATABASE_LIST_INFO,
-                                      "{}",
-                                      "Handles are phone/email identifiers",
-                                      "\"Recents\"")) {
+  if (!harness_expect_list_description_from_guidance(context->catalog_path,
+                                                     "apple_messages_sms")) {
     return 0;
   }
 
