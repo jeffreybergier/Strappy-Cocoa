@@ -10,6 +10,8 @@ typedef struct strappy_webview_buffer {
   size_t capacity;
 } strappy_webview_buffer;
 
+static char *g_strappy_webview_font_dir = NULL;
+
 static void strappy_webview_buffer_init(strappy_webview_buffer *buffer)
 {
   if (buffer == NULL) {
@@ -123,6 +125,52 @@ static char *strappy_webview_buffer_finish(strappy_webview_buffer *buffer)
   buffer->length = 0U;
   buffer->capacity = 0U;
   return result;
+}
+
+static int strappy_webview_url_unreserved(unsigned char value)
+{
+  if ((value >= 'A') && (value <= 'Z')) {
+    return 1;
+  }
+  if ((value >= 'a') && (value <= 'z')) {
+    return 1;
+  }
+  if ((value >= '0') && (value <= '9')) {
+    return 1;
+  }
+  return (value == '-') || (value == '_') || (value == '.') || (value == '~');
+}
+
+static int strappy_webview_append_url_path_escaped(
+  strappy_webview_buffer *buffer,
+  const char *path)
+{
+  static const char hex[] = "0123456789ABCDEF";
+  const unsigned char *cursor;
+  char escaped[3];
+
+  if (path == NULL) {
+    return 1;
+  }
+
+  escaped[0] = '%';
+  cursor = (const unsigned char *)path;
+  while (*cursor != '\0') {
+    if (strappy_webview_url_unreserved(*cursor) || (*cursor == '/')) {
+      if (!strappy_webview_buffer_append_char(buffer, (char)*cursor)) {
+        return 0;
+      }
+    } else {
+      escaped[1] = hex[*cursor >> 4];
+      escaped[2] = hex[*cursor & 15U];
+      if (!strappy_webview_buffer_append(buffer, escaped, sizeof(escaped))) {
+        return 0;
+      }
+    }
+    cursor++;
+  }
+
+  return 1;
 }
 
 static int strappy_webview_append_html_escaped(strappy_webview_buffer *buffer,
@@ -625,10 +673,50 @@ static int strappy_webview_append_tool_column_html(
   return 1;
 }
 
+static int strappy_webview_append_font_faces(strappy_webview_buffer *buffer)
+{
+  static const struct {
+    const char *family;
+    const char *file_name;
+  } faces[] = {
+    { "FA7S", "FA7-Solid-900.otf" },
+    { "FA7R", "FA7-Regular-400.otf" },
+    { "FA7B", "FA7-Brands-400.otf" }
+  };
+  size_t index;
+
+  if (g_strappy_webview_font_dir == NULL) {
+    return 1;
+  }
+
+  for (index = 0U; index < (sizeof(faces) / sizeof(faces[0])); index++) {
+    if (!strappy_webview_buffer_append_cstring(buffer,
+          "@font-face{font-family:'") ||
+        !strappy_webview_buffer_append_cstring(buffer, faces[index].family) ||
+        !strappy_webview_buffer_append_cstring(buffer,
+          "';src:url('file://") ||
+        !strappy_webview_append_url_path_escaped(buffer,
+                                                 g_strappy_webview_font_dir) ||
+        !strappy_webview_buffer_append_cstring(buffer, "/") ||
+        !strappy_webview_buffer_append_cstring(buffer, faces[index].file_name) ||
+        !strappy_webview_buffer_append_cstring(buffer,
+          "') format('opentype');}")) {
+      return 0;
+    }
+  }
+
+  return strappy_webview_buffer_append_cstring(
+    buffer,
+    ".fa{font-family:'FA7S';font-style:normal;font-weight:normal;"
+    "display:inline-block;line-height:1;vertical-align:-.08em;}"
+    ".fa-solid{font-family:'FA7S';}"
+    ".fa-regular{font-family:'FA7R';}"
+    ".fa-brands{font-family:'FA7B';}");
+}
+
 static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
 {
   static const char * const chunks[] = {
-    "<style>",
     "html,body{margin:0;padding:0;background:#f4f4f4;color:#222;",
     "font:13px Helvetica,Arial,sans-serif;}",
     ".page{padding:18px 14px;}",
@@ -795,7 +883,9 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     NULL
   };
 
-  return strappy_webview_append_chunks(buffer, chunks);
+  return strappy_webview_buffer_append_cstring(buffer, "<style>") &&
+         strappy_webview_append_font_faces(buffer) &&
+         strappy_webview_append_chunks(buffer, chunks);
 }
 
 static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
@@ -814,6 +904,44 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "n.textContent=t;else n.innerText=t;}",
     "function escHTML(t){return String(t).replace(/&/g,'&amp;')",
     ".replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');}",
+    "var faIconMap={",
+    "'heart':'F004','star':'F005','check':'F00C','xmark':'F00D',",
+    "'search':'F002','magnifying-glass':'F002','envelope':'F003',",
+    "'user':'F007','gear':'F013','house':'F015','file':'F016',",
+    "'clock':'F017','download':'F019','lock':'F023','book':'F02D',",
+    "'camera':'F030','list':'F03A','image':'F03E','location-pin':'F041',",
+    "'square-check':'F046','circle-plus':'F055','circle-minus':'F056',",
+    "'circle-xmark':'F057','circle-check':'F058','circle-question':'F059',",
+    "'circle-info':'F05A','info':'F129','arrow-left':'F060',",
+    "'arrow-right':'F061','arrow-up':'F062','arrow-down':'F063',",
+    "'share':'F064','expand':'F065','compress':'F066','plus':'F067',",
+    "'minus':'F068','circle-exclamation':'F06A','gift':'F06B',",
+    "'fire':'F06D','eye':'F06E','eye-slash':'F070',",
+    "'triangle-exclamation':'F071','calendar-days':'F073',",
+    "'cart-shopping':'F07A','folder':'F07B','folder-open':'F07C',",
+    "'key':'F084','gears':'F085','thumbs-up':'F087','trophy':'F091',",
+    "'upload':'F093','credit-card':'F09D','hard-drive':'F0A0',",
+    "'bell':'F0A2','globe':'F0AC','wrench':'F0AD','users':'F0C0',",
+    "'link':'F0C1','cloud':'F0C2','copy':'F0C5','paperclip':'F0C6',",
+    "'floppy-disk':'F0C7','bars':'F0C9','table':'F0CE',",
+    "'wand-magic':'F0D0','gauge':'F624','bolt':'F0E7',",
+    "'lightbulb':'F0EB','file-lines':'F0F6','laptop':'F109',",
+    "'face-smile':'F118','keyboard':'F11C','terminal':'F120',",
+    "'code':'F121','code-branch':'F126','microphone':'F130',",
+    "'shield':'F132','calendar':'F133','rocket':'F135','bug':'F188',",
+    "'database':'F1C0','paper-plane':'F1D8','wifi':'F1EB',",
+    "'trash':'F1F8','chart-line':'F201','message':'F27A',",
+    "'pen':'F304','gem':'F3A5','seedling':'F4D8','robot':'F544',",
+    "'face-grin':'F580','face-laugh':'F599','palette':'F53F',",
+    "'brain':'F5DC','layer-group':'F5FD','bars-progress':'F828'};",
+    "function faIconCode(n){var k=String(n||'').toLowerCase();",
+    "if(k.indexOf('fa-')==0)k=k.substring(3);if(k.indexOf('0x')==0)k=k.substring(2);",
+    "if(/^[0-9a-f]{3,6}$/i.test(k))return k.toUpperCase();return faIconMap[k]||'';}",
+    "function faIconHTML(style,name,raw){var c=faIconCode(name);",
+    "var s=String(style||'solid').toLowerCase();",
+    "if(s!='solid'&&s!='regular'&&s!='brands')s='solid';",
+    "if(c==='')return escHTML(raw);",
+    "return '<span class=\"fa fa-'+s+'\" aria-hidden=\"true\">&#x'+c+';</span>';}",
     "function mdSafeHref(h){var v=(h||'').replace(/^\\s+|\\s+$/g,'').toLowerCase();",
     "return v.indexOf('http://')==0||v.indexOf('https://')==0||",
     "v.indexOf('mailto:')==0;}",
@@ -824,6 +952,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function(m,c){return mdStash(a,'<code>'+c+'</code>');});",
     "s=s.replace(/\\[([^\\]\\n]+)\\]\\(([^)\\s]+)\\)/g,function(m,l,h){",
     "if(!mdSafeHref(h))return l;return mdStash(a,'<a href=\"'+h+'\">'+mdInline(l)+'</a>');});",
+    "s=s.replace(/\\[fa(?::(solid|regular|brands))?:([A-Za-z0-9_-]+|0x[0-9A-Fa-f]{3,6}|[0-9A-Fa-f]{3,6})\\]/g,",
+    "function(m,st,n){return mdStash(a,faIconHTML(st,n,m));});",
     "s=s.replace(/(\\*\\*|__)([^\\n]+?)\\1/g,'<strong>$2</strong>');",
     "s=s.replace(/~~([^\\n]+?)~~/g,'<s>$1</s>');",
     "s=s.replace(/(^|[^*])\\*([^*\\n]+)\\*/g,'$1<em>$2</em>');",
@@ -1350,6 +1480,28 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
 void strappy_webview_free(char *value)
 {
   free(value);
+}
+
+void strappy_webview_set_font_dir(const char *abs_dir)
+{
+  size_t length;
+  char *copy;
+
+  free(g_strappy_webview_font_dir);
+  g_strappy_webview_font_dir = NULL;
+
+  if ((abs_dir == NULL) || (abs_dir[0] == '\0')) {
+    return;
+  }
+
+  length = strlen(abs_dir);
+  copy = (char *)malloc(length + 1U);
+  if (copy == NULL) {
+    return;
+  }
+
+  memcpy(copy, abs_dir, length + 1U);
+  g_strappy_webview_font_dir = copy;
 }
 
 char *strappy_webview_status_html(const char *text,

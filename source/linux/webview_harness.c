@@ -57,7 +57,11 @@ static int harness_check_page_scripts(void)
     return 0;
   }
 
-  ok = harness_expect_contains(page_html, "function toolJSONHTML") &&
+  ok = harness_expect_contains(page_html, "@font-face") &&
+       harness_expect_contains(page_html, "function faIconHTML") &&
+       harness_expect_contains(page_html, "'heart':'F004'") &&
+       harness_expect_contains(page_html, "[fa(?::(solid|regular|brands))?") &&
+       harness_expect_contains(page_html, "function toolJSONHTML") &&
        harness_expect_contains(page_html, "function toolObjectArrayTable") &&
        harness_expect_contains(page_html, "function toolOutputHasError") &&
        harness_expect_contains(page_html, "c.error=toolOutputHasError(raw)") &&
@@ -88,6 +92,49 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "reasoning-collapsed .reasoning-label");
 
   strappy_webview_free(page_html);
+  return ok;
+}
+
+static int harness_check_fontawesome_rendering(void)
+{
+  strappy_webview_message message;
+  char *message_html;
+  char *page_html;
+  int ok;
+
+  strappy_webview_set_font_dir("/tmp/Strappy Fonts");
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "assistant-icon";
+  message.role = "assistant";
+  message.text = "Ready [fa:heart] [fa:regular:face-smile] [fa:solid:F004].";
+
+  message_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+  if (message_html == NULL) {
+    fprintf(stderr, "Could not generate Font Awesome message HTML.\n");
+    return 0;
+  }
+
+  page_html = strappy_webview_messages_page_html(message_html,
+                                                "Empty",
+                                                1,
+                                                0,
+                                                "Load More");
+  strappy_webview_free(message_html);
+  if (page_html == NULL) {
+    fprintf(stderr, "Could not generate Font Awesome page HTML.\n");
+    return 0;
+  }
+
+  ok = harness_expect_contains(page_html, "file:///tmp/Strappy%20Fonts/FA7-Solid-900.otf") &&
+       harness_expect_contains(page_html, "file:///tmp/Strappy%20Fonts/FA7-Regular-400.otf") &&
+       harness_expect_contains(page_html, "file:///tmp/Strappy%20Fonts/FA7-Brands-400.otf") &&
+       harness_expect_contains(page_html, ".fa-regular{font-family:'FA7R';}") &&
+       harness_expect_contains(page_html, "Ready [fa:heart]") &&
+       harness_expect_contains(page_html, "faIconHTML(st,n,m)");
+
+  strappy_webview_free(page_html);
+  strappy_webview_set_font_dir(NULL);
   return ok;
 }
 
@@ -322,7 +369,11 @@ static int harness_check_harness_assistant_metadata(void)
 
 int main(void)
 {
+  strappy_webview_set_font_dir("/tmp/Strappy Fonts");
   if (!harness_check_page_scripts()) {
+    return 1;
+  }
+  if (!harness_check_fontawesome_rendering()) {
     return 1;
   }
   if (!harness_check_tool_column_state()) {

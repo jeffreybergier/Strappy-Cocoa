@@ -5,6 +5,7 @@
 #import "strappy_core.h"
 #import "strappy_db.h"
 #import "strappy_prompt.h"
+#import "strappy_webview.h"
 #import "XPFoundation.h"
 
 NSString * const StrappySessionDidUpdateNotification =
@@ -477,6 +478,7 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 + (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath
 {
   char *strappyError;
+  NSString *fontsPath;
 
   if (![caCertPath isKindOfClass:[NSString class]] || ([caCertPath length] == 0U)) {
     [NSException raise:NSInvalidArgumentException
@@ -494,6 +496,10 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
     [NSException raise:NSInvalidArgumentException
                 format:@"%@", (message ? message : @"Could not configure CA certificate path.")];
   }
+
+  fontsPath = [[[NSBundle mainBundle] resourcePath]
+    stringByAppendingPathComponent:@"Fonts"];
+  strappy_webview_set_font_dir([fontsPath fileSystemRepresentation]);
 }
 
 + (NSString *)systemPromptTemplatePathWithError:(NSError **)error

@@ -20,6 +20,7 @@ SOURCE_DIRS = $(SHARED_DIR)
 vpath %.m $(SHARED_DIR)
 EXTRA_FLAGS = -I$(SHARED_DIR) -I$(ALTIVECCORE_DIR)/include
 EXTRA_SOURCES = XPFoundation.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_config.c strappy_client.c strappy_db.c strappy_file_scanner.c strappy_prompt.c strappy_tools.c strappy_assistant.c strappy_webview.c
+BUNDLE_FONT_DIRS = $(ALTIVECCOCOA_DIR)/Resources/Fonts
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
 EXTRA_BUNDLE_STEPS = @echo "  > copying prompt guidance resources"; for resource in $(GUIDANCE_RESOURCES); do cp "$$resource" "$@/Contents/Resources/"; done
 

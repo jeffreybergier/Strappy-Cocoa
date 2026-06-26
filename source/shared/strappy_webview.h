@@ -33,6 +33,7 @@ typedef struct strappy_webview_message {
   const char *created_at;
 } strappy_webview_message;
 
+void strappy_webview_set_font_dir(const char *abs_dir);
 void strappy_webview_free(char *value);
 
 char *strappy_webview_status_html(const char *text,
