@@ -938,6 +938,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   sending_ = (session_ != nil) && [session_ isPromptInFlight];
   [sendController_ setEnabled:(session_ != nil)];
   [sendController_ setSending:sending_];
+  [sendController_ setStreamingEnabled:(session_ != nil) ?
+    [session_ streamingEnabled] : NO];
   [self reloadContent];
 }
 
@@ -957,6 +959,35 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 - (void)sendCurrentPrompt:(id)sender
 {
   [sendController_ performSend:sender];
+}
+
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
+              setStreamingEnabled:(BOOL)enabled
+{
+  NSError *error;
+
+  (void)controller;
+  if (session_ == nil) {
+    return NO;
+  }
+
+  error = nil;
+  if (![session_ setStreamingEnabled:enabled error:&error]) {
+    NSString *errorMessage;
+
+    errorMessage = [error localizedDescription];
+    if ([errorMessage length] == 0U) {
+      errorMessage = NSLocalizedString(@"Could not update streaming setting.", nil);
+    }
+    [statusText_ release];
+    statusText_ = [errorMessage retain];
+    [sendController_ setStreamingEnabled:[session_ streamingEnabled]];
+    [self reloadContent];
+    return NO;
+  }
+
+  [sendController_ setStreamingEnabled:[session_ streamingEnabled]];
+  return YES;
 }
 
 + (NSArray *)handledURLSchemes
@@ -1229,6 +1260,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   NSMutableDictionary *streamContext;
   NSString *promptToSend;
   NSError *startError;
+  BOOL shouldStream;
+  BOOL didStartPrompt;
   static unsigned long pendingCounter = 0UL;
 
   if (sending_) {
@@ -1376,9 +1409,17 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     [session_ sessionIdentifier], @"session_id",
     nil];
   startError = nil;
-  if (![session_ beginNonStreamingPrompt:promptToSend
-                                 context:streamContext
-                                   error:&startError]) {
+  shouldStream = [session_ streamingEnabled];
+  if (shouldStream) {
+    didStartPrompt = [session_ beginStreamingPrompt:promptToSend
+                                           context:streamContext
+                                             error:&startError];
+  } else {
+    didStartPrompt = [session_ beginNonStreamingPrompt:promptToSend
+                                              context:streamContext
+                                                error:&startError];
+  }
+  if (!didStartPrompt) {
     NSMutableDictionary *result;
     NSString *errorMessage;
 

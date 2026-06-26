@@ -8,7 +8,8 @@ static const CGFloat kPromptSendPad = 4.0;
 
 enum {
   kPromptActionStop = 0,
-  kPromptActionSend = 1
+  kPromptActionStream = 1,
+  kPromptActionSend = 2
 };
 
 static NSColor *StrappyInputBezelBackgroundColor(void) { return [NSColor controlBackgroundColor]; }
@@ -130,11 +131,13 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   [scrollView_ setDocumentView:textView_];
 
   actionsSegmented_ = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
-  [actionsSegmented_ setSegmentCount:2];
-  [[actionsSegmented_ cell] setTrackingMode:NSSegmentSwitchTrackingMomentary];
+  [actionsSegmented_ setSegmentCount:3];
+  [[actionsSegmented_ cell] setTrackingMode:NSSegmentSwitchTrackingSelectAny];
   if ([[actionsSegmented_ cell] respondsToSelector:@selector(setSegmentStyle:)]) {
     [[actionsSegmented_ cell] setSegmentStyle:NSSegmentStyleTexturedRounded];
   }
+  [actionsSegmented_ setLabel:NSLocalizedString(@"Stream", nil)
+                   forSegment:kPromptActionStream];
   [actionsSegmented_ setLabel:NSLocalizedString(@"Send", nil)
                    forSegment:kPromptActionSend];
   [actionsSegmented_ setTarget:self];
@@ -201,6 +204,7 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 {
   CGFloat scale;
   NSImage *stopImage;
+  NSImage *streamImage;
   NSImage *sendImage;
 
   if (actionsSegmented_ == nil) {
@@ -220,6 +224,11 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
                                  iconSize:14.0
                                canvasSize:20.0
                                     scale:scale];
+  streamImage = [AIFontAwesome imageForIcon:AIFATowerBroadcast
+                                      style:AIFontAwesomeStyleSolid
+                                   iconSize:14.0
+                                 canvasSize:20.0
+                                      scale:scale];
   sendImage = [AIFontAwesome imageForIcon:AIFAPaperPlane
                                     style:AIFontAwesomeStyleRegular
                                  iconSize:14.0
@@ -234,11 +243,21 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
                      forSegment:kPromptActionStop];
   }
 
+  if (streamImage != nil) {
+    [actionsSegmented_ setImage:streamImage forSegment:kPromptActionStream];
+    [actionsSegmented_ setLabel:@"" forSegment:kPromptActionStream];
+  } else {
+    [actionsSegmented_ setLabel:NSLocalizedString(@"Stream", nil)
+                     forSegment:kPromptActionStream];
+  }
+
   if (sendImage != nil) {
     [actionsSegmented_ setImage:sendImage forSegment:kPromptActionSend];
   }
   [actionsSegmented_ XP_setToolTip:NSLocalizedString(@"Stop Prompt Request", nil)
                          forSegment:kPromptActionStop];
+  [actionsSegmented_ XP_setToolTip:NSLocalizedString(@"Stream Responses", nil)
+                         forSegment:kPromptActionStream];
   [actionsSegmented_ XP_setToolTip:NSLocalizedString(@"Send Prompt", nil)
                          forSegment:kPromptActionSend];
   [actionsSegmented_ sizeToFit];
@@ -248,6 +267,8 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 {
   [actionsSegmented_ setEnabled:(enabled_ && sending_ && !cancellationRequested_)
                      forSegment:kPromptActionStop];
+  [actionsSegmented_ setEnabled:(enabled_ && !sending_)
+                     forSegment:kPromptActionStream];
   [actionsSegmented_ setEnabled:[self canSendCurrentPrompt]
                      forSegment:kPromptActionSend];
 }
@@ -324,6 +345,15 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   [self updateActionSegments];
 }
 
+- (void)setStreamingEnabled:(BOOL)enabled
+{
+  if (actionsSegmented_ == nil) {
+    return;
+  }
+  [actionsSegmented_ setSelected:(enabled ? YES : NO)
+                      forSegment:kPromptActionStream];
+}
+
 - (BOOL)canSendCurrentPrompt
 {
   NSString *text;
@@ -345,13 +375,26 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 
   selectedSegment = [(NSSegmentedControl *)sender selectedSegment];
   if (selectedSegment == kPromptActionStop) {
+    [actionsSegmented_ setSelected:NO forSegment:kPromptActionStop];
     if (sending_ && !cancellationRequested_) {
       [self setCancellationRequested:YES];
       if (delegate_ != nil) {
         [delegate_ promptSendViewControllerDidCancelPrompt:self];
       }
     }
+  } else if (selectedSegment == kPromptActionStream) {
+    BOOL enabled;
+
+    enabled = [actionsSegmented_ isSelectedForSegment:kPromptActionStream] ?
+      YES : NO;
+    if ((delegate_ == nil) ||
+        ![delegate_ promptSendViewController:self
+                         setStreamingEnabled:enabled]) {
+      [actionsSegmented_ setSelected:(!enabled ? YES : NO)
+                          forSegment:kPromptActionStream];
+    }
   } else if (selectedSegment == kPromptActionSend) {
+    [actionsSegmented_ setSelected:NO forSegment:kPromptActionSend];
     [self performSend:sender];
   }
 }

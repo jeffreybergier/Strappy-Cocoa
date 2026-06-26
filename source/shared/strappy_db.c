@@ -20,6 +20,7 @@ void strappy_session_record_init(strappy_session_record *record)
   record->response = NULL;
   record->model = NULL;
   record->created_at = NULL;
+  record->streaming_enabled = 0;
   record->http_status = 0L;
 }
 
@@ -288,29 +289,38 @@ static int strappy_db_exec(sqlite3 *db,
   return 1;
 }
 
-static int strappy_db_session_messages_has_column(sqlite3 *db,
-                                                  const char *column_name,
-                                                  int *has_column_out,
-                                                  char **error_out)
+static int strappy_db_table_has_column(sqlite3 *db,
+                                       const char *table_name,
+                                       const char *column_name,
+                                       int *has_column_out,
+                                       char **error_out)
 {
   sqlite3_stmt *stmt;
+  char sql[128];
+  int written;
   int rc;
 
-  if ((db == NULL) || (column_name == NULL) || (has_column_out == NULL)) {
-    strappy_set_error(error_out, "Session message column lookup is incomplete.");
+  if ((db == NULL) || (table_name == NULL) || (column_name == NULL) ||
+      (has_column_out == NULL)) {
+    strappy_set_error(error_out, "Schema column lookup is incomplete.");
+    return 0;
+  }
+
+  written = snprintf(sql,
+                     sizeof(sql),
+                     "PRAGMA table_info(%s);",
+                     table_name);
+  if ((written <= 0) || ((size_t)written >= sizeof(sql))) {
+    strappy_set_error(error_out, "Schema table name is too long.");
     return 0;
   }
 
   *has_column_out = 0;
   stmt = NULL;
-  rc = sqlite3_prepare_v2(db,
-                          "PRAGMA table_info(session_messages);",
-                          -1,
-                          &stmt,
-                          NULL);
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
-                                "Could not inspect session message schema: %s",
+                                "Could not inspect session schema: %s",
                                 sqlite3_errmsg(db));
     return 0;
   }
@@ -329,7 +339,7 @@ static int strappy_db_session_messages_has_column(sqlite3 *db,
   sqlite3_finalize(stmt);
   if ((rc != SQLITE_DONE) && (rc != SQLITE_ROW)) {
     strappy_set_formatted_error(error_out,
-                                "Could not read session message schema: %s",
+                                "Could not read session schema: %s",
                                 sqlite3_errmsg(db));
     return 0;
   }
@@ -337,18 +347,21 @@ static int strappy_db_session_messages_has_column(sqlite3 *db,
   return 1;
 }
 
-static int strappy_db_ensure_session_messages_column(sqlite3 *db,
-                                                     const char *column_name,
-                                                     const char *alter_sql,
-                                                     char **error_out)
+static int strappy_db_ensure_table_column(sqlite3 *db,
+                                          const char *table_name,
+                                          const char *column_name,
+                                          const char *alter_sql,
+                                          const char *error_prefix,
+                                          char **error_out)
 {
   int has_column;
 
   has_column = 0;
-  if (!strappy_db_session_messages_has_column(db,
-                                              column_name,
-                                              &has_column,
-                                              error_out)) {
+  if (!strappy_db_table_has_column(db,
+                                   table_name,
+                                   column_name,
+                                   &has_column,
+                                   error_out)) {
     return 0;
   }
 
@@ -358,7 +371,7 @@ static int strappy_db_ensure_session_messages_column(sqlite3 *db,
 
   return strappy_db_exec(db,
                          alter_sql,
-                         "Could not migrate session message schema",
+                         error_prefix,
                          error_out);
 }
 
@@ -372,6 +385,7 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
     "response TEXT NOT NULL,"
     "model TEXT,"
     "http_status INTEGER NOT NULL DEFAULT 0,"
+    "streaming_enabled INTEGER NOT NULL DEFAULT 0,"
     "created_at TEXT NOT NULL DEFAULT "
     "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
     ");";
@@ -467,6 +481,17 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
     return 0;
   }
 
+  if (!strappy_db_ensure_table_column(
+        db,
+        "sessions",
+        "streaming_enabled",
+        "ALTER TABLE sessions "
+        "ADD COLUMN streaming_enabled INTEGER NOT NULL DEFAULT 0;",
+        "Could not migrate session schema",
+        error_out)) {
+    return 0;
+  }
+
   if (!strappy_db_exec(db,
                        turns_sql,
                        "Could not create session turn schema",
@@ -488,10 +513,12 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
     return 0;
   }
 
-  if (!strappy_db_ensure_session_messages_column(
+  if (!strappy_db_ensure_table_column(
         db,
+        "session_messages",
         "render_state_json",
         "ALTER TABLE session_messages ADD COLUMN render_state_json TEXT;",
+        "Could not migrate session message schema",
         error_out)) {
     return 0;
   }
@@ -564,6 +591,7 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   strappy_session_record_destroy(record);
   record->session_id = (long long)sqlite3_column_int64(stmt, 0);
   record->http_status = (long)sqlite3_column_int64(stmt, 5);
+  record->streaming_enabled = sqlite3_column_int(stmt, 7) ? 1 : 0;
 
   name = strappy_db_column_string(stmt, 1);
   prompt = strappy_db_column_string(stmt, 2);
@@ -2864,6 +2892,68 @@ int strappy_db_update_session_name_if_empty(const char *db_path,
   return 1;
 }
 
+int strappy_db_update_session_streaming_enabled(const char *db_path,
+                                                long long session_id,
+                                                int streaming_enabled,
+                                                char **error_out)
+{
+  static const char *sql =
+    "UPDATE sessions "
+    "SET streaming_enabled = ? "
+    "WHERE id = ?;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_session_exists(db, session_id, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare session streaming update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if ((sqlite3_bind_int(stmt, 1, streaming_enabled ? 1 : 0) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) != SQLITE_OK)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind session streaming update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not update session streaming setting: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  return 1;
+}
+
 int strappy_db_save_message_sequence_with_id(
   const char *db_path,
   const char *prompt,
@@ -2993,7 +3083,8 @@ int strappy_db_list_sessions(const char *db_path,
                              char **error_out)
 {
   static const char *sql =
-    "SELECT id, name, prompt, response, model, http_status, created_at "
+    "SELECT id, name, prompt, response, model, http_status, created_at, "
+    "streaming_enabled "
     "FROM sessions "
     "ORDER BY id DESC;";
   sqlite3 *db;
@@ -3082,7 +3173,8 @@ int strappy_db_load_session(const char *db_path,
                             char **error_out)
 {
   static const char *sql =
-    "SELECT id, name, prompt, response, model, http_status, created_at "
+    "SELECT id, name, prompt, response, model, http_status, created_at, "
+    "streaming_enabled "
     "FROM sessions "
     "WHERE id = ?;";
   sqlite3 *db;

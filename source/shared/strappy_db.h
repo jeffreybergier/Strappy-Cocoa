@@ -14,6 +14,7 @@ typedef struct strappy_session_record {
   char *response;
   char *model;
   char *created_at;
+  int streaming_enabled;
   long http_status;
 } strappy_session_record;
 
@@ -171,6 +172,10 @@ int strappy_db_update_session_name_if_empty(const char *db_path,
                                             const char *name,
                                             int *did_update_out,
                                             char **error_out);
+int strappy_db_update_session_streaming_enabled(const char *db_path,
+                                                long long session_id,
+                                                int streaming_enabled,
+                                                char **error_out);
 int strappy_db_list_sessions(const char *db_path,
                              strappy_session_record_list *list,
                              char **error_out);

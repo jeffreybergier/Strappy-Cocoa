@@ -69,6 +69,19 @@ static int StrappySessionHandleStreamEvent(
   return [session handleStreamEvent:event context:context->context];
 }
 
+static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
+{
+  NSNumber *streamingEnabled;
+
+  if (![summary isKindOfClass:[NSDictionary class]]) {
+    return NO;
+  }
+
+  streamingEnabled = [summary objectForKey:@"streaming_enabled"];
+  return ([streamingEnabled isKindOfClass:[NSNumber class]] &&
+          [streamingEnabled boolValue]) ? YES : NO;
+}
+
 @implementation StrappySession
 
 - (int)handleStreamEvent:(const strappy_chat_stream_event *)event
@@ -372,6 +385,7 @@ static int StrappySessionHandleStreamEvent(
     sessionIdentifier_ = [sessionIdentifier retain];
     if ([summary isKindOfClass:[NSDictionary class]]) {
       cachedSummary_ = [summary retain];
+      streamingEnabled_ = StrappySessionStreamingEnabledFromSummary(summary);
     }
   }
   return self;
@@ -406,6 +420,7 @@ static int StrappySessionHandleStreamEvent(
       [cachedSummary_ release];
       cachedSummary_ = [summary retain];
     }
+    streamingEnabled_ = StrappySessionStreamingEnabledFromSummary(summary);
   }
 }
 
@@ -529,6 +544,7 @@ static int StrappySessionHandleStreamEvent(
 {
   NSNumber *sessionId;
   NSNumber *httpStatus;
+  NSNumber *streamingEnabled;
   NSString *name;
   NSString *prompt;
   NSString *response;
@@ -541,6 +557,8 @@ static int StrappySessionHandleStreamEvent(
 
   sessionId = [NSNumber numberWithLongLong:record->session_id];
   httpStatus = [NSNumber numberWithLong:record->http_status];
+  streamingEnabled =
+    [NSNumber numberWithBool:(record->streaming_enabled ? YES : NO)];
   name = [StrappySession stringFromCStringOrEmpty:record->name];
   prompt = [StrappySession stringFromCStringOrEmpty:record->prompt];
   response = [StrappySession stringFromCStringOrEmpty:record->response];
@@ -554,6 +572,7 @@ static int StrappySessionHandleStreamEvent(
     response, @"response",
     model, @"model",
     httpStatus, @"http_status",
+    streamingEnabled, @"streaming_enabled",
     createdAt, @"created_at",
     nil];
 }
@@ -1129,6 +1148,86 @@ static int StrappySessionHandleStreamEvent(
 {
   return [StrappySession messagesForSessionIdentifier:sessionIdentifier_
                                                error:error];
+}
+
+- (BOOL)streamingEnabled
+{
+  BOOL enabled;
+
+  @synchronized(self) {
+    enabled = streamingEnabled_;
+  }
+  return enabled;
+}
+
+- (BOOL)setStreamingEnabled:(BOOL)enabled error:(NSError **)error
+{
+  NSString *databasePath;
+  NSNumber *streamingEnabled;
+  NSDictionary *notificationSession;
+  char *strappyError;
+  long long sessionId;
+
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  if (sessionId <= 0) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+
+  strappyError = NULL;
+  if (!strappy_db_update_session_streaming_enabled([databasePath UTF8String],
+                                                   sessionId,
+                                                   enabled ? 1 : 0,
+                                                   &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return NO;
+  }
+
+  streamingEnabled = [NSNumber numberWithBool:(enabled ? YES : NO)];
+  notificationSession = nil;
+  @synchronized(self) {
+    NSMutableDictionary *summary;
+
+    streamingEnabled_ = enabled ? YES : NO;
+    if (cachedSummary_ != nil) {
+      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
+      [summary setObject:streamingEnabled forKey:@"streaming_enabled"];
+      [cachedSummary_ release];
+      cachedSummary_ = summary;
+      notificationSession = [cachedSummary_ retain];
+    } else {
+      notificationSession =
+        [[NSDictionary alloc] initWithObjectsAndKeys:
+          sessionIdentifier_, @"id",
+          streamingEnabled, @"streaming_enabled",
+          nil];
+    }
+  }
+
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionDidUpdateNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObject:notificationSession
+                                                     forKey:@"session"]];
+  [notificationSession release];
+  return YES;
 }
 
 - (NSDictionary *)submitPrompt:(NSString *)prompt

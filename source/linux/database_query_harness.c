@@ -1374,10 +1374,44 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (strcmp(session.prompt, "") == 0) &&
        (session.response != NULL) &&
        (strcmp(session.response, "") == 0) &&
+       (session.streaming_enabled == 0) &&
        (session.http_status == 0L);
   strappy_session_record_destroy(&session);
   if (!ok) {
     fprintf(stderr, "Empty session row did not have the expected shape.\n");
+    return 0;
+  }
+
+  error = NULL;
+  ok = strappy_db_update_session_streaming_enabled(context->catalog_path,
+                                                   session_id,
+                                                   1,
+                                                   &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not update session streaming setting: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  strappy_session_record_init(&session);
+  ok = strappy_db_load_session(context->catalog_path,
+                               session_id,
+                               &session,
+                               &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not reload streaming session setting: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_record_destroy(&session);
+    return 0;
+  }
+  ok = (session.streaming_enabled == 1);
+  strappy_session_record_destroy(&session);
+  if (!ok) {
+    fprintf(stderr, "Session streaming setting was not stored.\n");
     return 0;
   }
 
@@ -1551,6 +1585,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (strcmp(session.response, "First answer") == 0) &&
        (session.model != NULL) &&
        (strcmp(session.model, "harness-model") == 0) &&
+       (session.streaming_enabled == 1) &&
        (session.http_status == 200L);
   strappy_session_record_destroy(&session);
   if (!ok) {

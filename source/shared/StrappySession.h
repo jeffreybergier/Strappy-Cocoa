@@ -9,6 +9,7 @@ extern NSString * const StrappySessionStreamEventNotification;
  @private
   NSNumber     *sessionIdentifier_;
   NSDictionary *cachedSummary_;
+  BOOL          streamingEnabled_;
   BOOL          promptInFlight_;
   BOOL          promptCancellationRequested_;
 }
@@ -32,6 +33,8 @@ extern NSString * const StrappySessionStreamEventNotification;
 - (NSDictionary *)cachedSummary;
 - (NSDictionary *)summaryWithError:(NSError **)error;
 - (NSArray *)messagesWithError:(NSError **)error;
+- (BOOL)streamingEnabled;
+- (BOOL)setStreamingEnabled:(BOOL)enabled error:(NSError **)error;
 - (BOOL)isPromptInFlight;
 - (BOOL)promptCancellationRequested;
 - (BOOL)beginStreamingPrompt:(NSString *)prompt

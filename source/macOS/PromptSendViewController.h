@@ -7,6 +7,8 @@
 @protocol PromptSendViewControllerDelegate
 - (void)promptSendViewController:(PromptSendViewController *)controller
                  didSubmitPrompt:(NSString *)prompt;
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
+              setStreamingEnabled:(BOOL)enabled;
 - (void)promptSendViewControllerDidCancelPrompt:
     (PromptSendViewController *)controller;
 - (void)promptSendViewControllerDidChangeHeight:
@@ -33,6 +35,7 @@
 - (void)setEnabled:(BOOL)enabled;
 - (void)setSending:(BOOL)sending;
 - (void)setCancellationRequested:(BOOL)requested;
+- (void)setStreamingEnabled:(BOOL)enabled;
 - (BOOL)canSendCurrentPrompt;
 - (void)performSend:(id)sender;
 
