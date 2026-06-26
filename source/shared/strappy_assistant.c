@@ -2419,6 +2419,12 @@ static int strappy_assistant_run_learning_summary(
     return 1;
   }
 
+  /* This flag belongs to the current user turn; older session tool rows do
+     not participate in deciding whether this harness turn is worth running. */
+  if (!original_did_run_tool_round) {
+    return 1;
+  }
+
   if (sequence->round_count >= STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS) {
     return 1;
   }

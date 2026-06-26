@@ -87,6 +87,16 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function decoratePromptGroups") &&
        harness_expect_contains(page_html, "function togglePromptGroup") &&
        harness_expect_contains(page_html, "function setMessagePromptGroup") &&
+       harness_expect_contains(page_html, "function promptGroupDefaultCollapsed") &&
+       harness_expect_contains(page_html, "function promptGroupCollapsed") &&
+       harness_expect_contains(page_html, "function rowIsActiveHarness") &&
+       harness_expect_contains(page_html,
+                               "function promptGroupAnchor(rows){var i;for(i=0;i<rows.length;i++){if(rowIsHarness(rows[i]))return rows[i];}") &&
+       harness_expect_contains(page_html,
+                               "setRowClass(anchor,'prompt-group-collapsed-anchor'") &&
+       harness_expect_contains(page_html,
+                               "prompt-group-collapsed-anchor .bubble") &&
+       harness_expect_contains(page_html, "collapsed&&rowIsHarness(g[j])&&g[j]!==anchor") &&
        harness_expect_contains(page_html, "prompt-group-harness") &&
        harness_expect_contains(page_html, "data-prompt-group-key=\"prompt-group-page\"") &&
        harness_expect_contains(page_html, "reasoning-collapsed .reasoning-label");
@@ -312,6 +322,164 @@ static int harness_check_tool_activity_target(void)
   return ok;
 }
 
+static int harness_check_harness_prompt_group_collapse(void)
+{
+  strappy_webview_message message;
+  char *user_html;
+  char *assistant_html;
+  char *harness_prompt_html;
+  char *harness_assistant_html;
+  char *messages_html;
+  char *page_html;
+  char *streaming_harness_html;
+  size_t messages_length;
+  int ok;
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "collapse-user";
+  message.role = "user";
+  message.actor = "user";
+  message.prompt_group_key = "prompt-group-collapse";
+  message.text = "What should I remember?";
+  user_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+  if (user_html == NULL) {
+    fprintf(stderr, "Could not generate prompt group user HTML.\n");
+    return 0;
+  }
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "collapse-assistant";
+  message.role = "assistant";
+  message.actor = "user";
+  message.prompt_group_key = "prompt-group-collapse";
+  message.text = "Done.";
+  assistant_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+  if (assistant_html == NULL) {
+    fprintf(stderr, "Could not generate prompt group assistant HTML.\n");
+    strappy_webview_free(user_html);
+    return 0;
+  }
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "collapse-harness-prompt";
+  message.role = "harness";
+  message.actor = "harness";
+  message.prompt_group_key = "prompt-group-collapse";
+  message.text = "Learning Summary";
+  harness_prompt_html =
+    strappy_webview_message_html(&message, NULL, NULL, NULL);
+  if (harness_prompt_html == NULL) {
+    fprintf(stderr, "Could not generate prompt group harness prompt HTML.\n");
+    strappy_webview_free(assistant_html);
+    strappy_webview_free(user_html);
+    return 0;
+  }
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "collapse-harness-assistant";
+  message.role = "assistant";
+  message.actor = "harness";
+  message.prompt_group_key = "prompt-group-collapse";
+  message.text = "Learning Summary Complete";
+  harness_assistant_html =
+    strappy_webview_message_html(&message, NULL, NULL, NULL);
+  if (harness_assistant_html == NULL) {
+    fprintf(stderr, "Could not generate prompt group harness assistant HTML.\n");
+    strappy_webview_free(harness_prompt_html);
+    strappy_webview_free(assistant_html);
+    strappy_webview_free(user_html);
+    return 0;
+  }
+
+  messages_length = strlen(user_html) +
+                    strlen(assistant_html) +
+                    strlen(harness_prompt_html) +
+                    strlen(harness_assistant_html);
+  messages_html = (char *)malloc(messages_length + 1U);
+  if (messages_html == NULL) {
+    fprintf(stderr, "Could not allocate prompt group collapse fixture HTML.\n");
+    strappy_webview_free(harness_assistant_html);
+    strappy_webview_free(harness_prompt_html);
+    strappy_webview_free(assistant_html);
+    strappy_webview_free(user_html);
+    return 0;
+  }
+  snprintf(messages_html,
+           messages_length + 1U,
+           "%s%s%s%s",
+           user_html,
+           assistant_html,
+           harness_prompt_html,
+           harness_assistant_html);
+
+  page_html = strappy_webview_messages_page_html(messages_html,
+                                                "Empty",
+                                                1,
+                                                0,
+                                                "Load More");
+  free(messages_html);
+  if (page_html == NULL) {
+    fprintf(stderr, "Could not generate prompt group collapse page HTML.\n");
+    strappy_webview_free(harness_assistant_html);
+    strappy_webview_free(harness_prompt_html);
+    strappy_webview_free(assistant_html);
+    strappy_webview_free(user_html);
+    return 0;
+  }
+
+  streaming_harness_html = strappy_webview_streaming_assistant_message_html(
+    "collapse-harness-streaming",
+    "",
+    "",
+    "pending",
+    "Thinking",
+    "harness",
+    "prompt-group-collapse",
+    NULL);
+  if (streaming_harness_html == NULL) {
+    fprintf(stderr, "Could not generate streaming harness group HTML.\n");
+    strappy_webview_free(harness_assistant_html);
+    strappy_webview_free(harness_prompt_html);
+    strappy_webview_free(assistant_html);
+    strappy_webview_free(user_html);
+    strappy_webview_free(page_html);
+    return 0;
+  }
+
+  ok = harness_expect_contains(user_html,
+                               "data-prompt-group-key=\"prompt-group-collapse\"") &&
+       harness_expect_contains(assistant_html,
+                               "data-actor=\"user\"") &&
+       harness_expect_contains(harness_prompt_html,
+                               "class=\"row harness\"") &&
+       harness_expect_contains(harness_prompt_html,
+                               "data-actor=\"harness\"") &&
+       harness_expect_contains(harness_assistant_html,
+                               "class=\"row assistant\"") &&
+       harness_expect_contains(harness_assistant_html,
+                               "data-actor=\"harness\"") &&
+       harness_expect_not_contains(harness_assistant_html,
+                                   "streaming-active") &&
+       harness_expect_contains(page_html,
+                               "id=\"collapse-harness-prompt\"") &&
+       harness_expect_contains(page_html,
+                               "id=\"collapse-harness-assistant\"") &&
+       harness_expect_contains(page_html,
+                               "renderMessageDecorations(document);") &&
+       harness_expect_contains(streaming_harness_html,
+                               "row assistant streaming-active state-pending") &&
+       harness_expect_contains(streaming_harness_html,
+                               "data-actor=\"harness\"");
+
+  strappy_webview_free(streaming_harness_html);
+  strappy_webview_free(page_html);
+  strappy_webview_free(harness_assistant_html);
+  strappy_webview_free(harness_prompt_html);
+  strappy_webview_free(assistant_html);
+  strappy_webview_free(user_html);
+  return ok;
+}
+
 static int harness_check_harness_message(void)
 {
   strappy_webview_message message;
@@ -383,6 +551,9 @@ int main(void)
     return 1;
   }
   if (!harness_check_tool_activity_target()) {
+    return 1;
+  }
+  if (!harness_check_harness_prompt_group_collapse()) {
     return 1;
   }
   if (!harness_check_harness_message()) {
