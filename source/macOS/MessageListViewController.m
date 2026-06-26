@@ -1376,9 +1376,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     [session_ sessionIdentifier], @"session_id",
     nil];
   startError = nil;
-  if (![session_ beginStreamingPrompt:promptToSend
-                              context:streamContext
-                                error:&startError]) {
+  if (![session_ beginNonStreamingPrompt:promptToSend
+                                 context:streamContext
+                                   error:&startError]) {
     NSMutableDictionary *result;
     NSString *errorMessage;
 

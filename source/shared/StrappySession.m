@@ -37,9 +37,14 @@ typedef struct StrappySessionStreamContext {
 - (void)postStreamEventAndRelease:(NSDictionary *)event;
 - (NSDictionary *)submitPrompt:(NSString *)prompt
                          error:(NSError **)error;
-- (NSDictionary *)submitPromptStreaming:(NSString *)prompt
-                                context:(NSDictionary *)context
-                                  error:(NSError **)error;
+- (NSDictionary *)submitPrompt:(NSString *)prompt
+                      streaming:(BOOL)streaming
+                        context:(NSDictionary *)context
+                          error:(NSError **)error;
+- (BOOL)beginPrompt:(NSString *)prompt
+            context:(NSDictionary *)context
+          streaming:(BOOL)streaming
+              error:(NSError **)error;
 - (void)sendPromptInBackground:(NSDictionary *)request;
 - (void)streamingPromptDidFinish:(NSDictionary *)result;
 @end
@@ -1210,9 +1215,10 @@ static int StrappySessionHandleStreamEvent(
   return session;
 }
 
-- (NSDictionary *)submitPromptStreaming:(NSString *)prompt
-                                context:(NSDictionary *)context
-                                  error:(NSError **)error
+- (NSDictionary *)submitPrompt:(NSString *)prompt
+                      streaming:(BOOL)streaming
+                        context:(NSDictionary *)context
+                          error:(NSError **)error
 {
   NSString *databasePath;
   NSString *systemPromptTemplatePath;
@@ -1268,15 +1274,27 @@ static int StrappySessionHandleStreamEvent(
   streamContext.context = [context retain];
 
   strappyError = NULL;
-  response = strappy_assistant_stream_prompt_for_session_and_store(
-    [prompt UTF8String],
-    NULL,
-    [systemPromptTemplatePath fileSystemRepresentation],
-    [databasePath UTF8String],
-    sessionId,
-    StrappySessionHandleStreamEvent,
-    &streamContext,
-    &strappyError);
+  if (streaming) {
+    response = strappy_assistant_stream_prompt_for_session_and_store(
+      [prompt UTF8String],
+      NULL,
+      [systemPromptTemplatePath fileSystemRepresentation],
+      [databasePath UTF8String],
+      sessionId,
+      StrappySessionHandleStreamEvent,
+      &streamContext,
+      &strappyError);
+  } else {
+    response = strappy_assistant_send_prompt_for_session_and_store_with_events(
+      [prompt UTF8String],
+      NULL,
+      [systemPromptTemplatePath fileSystemRepresentation],
+      [databasePath UTF8String],
+      sessionId,
+      StrappySessionHandleStreamEvent,
+      &streamContext,
+      &strappyError);
+  }
 
   [streamContext.context release];
   if (response == NULL) {
@@ -1307,9 +1325,10 @@ static int StrappySessionHandleStreamEvent(
   return session;
 }
 
-- (BOOL)beginStreamingPrompt:(NSString *)prompt
-                     context:(NSDictionary *)context
-                       error:(NSError **)error
+- (BOOL)beginPrompt:(NSString *)prompt
+            context:(NSDictionary *)context
+          streaming:(BOOL)streaming
+              error:(NSError **)error
 {
   NSMutableDictionary *request;
 
@@ -1353,6 +1372,7 @@ static int StrappySessionHandleStreamEvent(
 
   request = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
     prompt, @"prompt",
+    [NSNumber numberWithBool:streaming], @"streaming",
     nil];
   if (context != nil) {
     [request setObject:context forKey:@"context"];
@@ -1365,6 +1385,20 @@ static int StrappySessionHandleStreamEvent(
   return YES;
 }
 
+- (BOOL)beginStreamingPrompt:(NSString *)prompt
+                     context:(NSDictionary *)context
+                       error:(NSError **)error
+{
+  return [self beginPrompt:prompt context:context streaming:YES error:error];
+}
+
+- (BOOL)beginNonStreamingPrompt:(NSString *)prompt
+                         context:(NSDictionary *)context
+                           error:(NSError **)error
+{
+  return [self beginPrompt:prompt context:context streaming:NO error:error];
+}
+
 - (void)sendPromptInBackground:(NSDictionary *)request
 {
   NSAutoreleasePool *pool;
@@ -1374,6 +1408,8 @@ static int StrappySessionHandleStreamEvent(
   NSMutableDictionary *result;
   NSString *prompt;
   NSString *errorMessage;
+  NSNumber *streamingValue;
+  BOOL shouldStream;
 
   pool = [[NSAutoreleasePool alloc] init];
 
@@ -1385,6 +1421,9 @@ static int StrappySessionHandleStreamEvent(
   if (![context isKindOfClass:[NSDictionary class]]) {
     context = nil;
   }
+  streamingValue = [request objectForKey:@"streaming"];
+  shouldStream = (![streamingValue isKindOfClass:[NSNumber class]] ||
+                  [streamingValue boolValue]) ? YES : NO;
 
   result = [[NSMutableDictionary alloc] init];
   if (context != nil) {
@@ -1392,9 +1431,10 @@ static int StrappySessionHandleStreamEvent(
   }
 
   error = nil;
-  session = [self submitPromptStreaming:prompt
-                                context:context
-                                  error:&error];
+  session = [self submitPrompt:prompt
+                     streaming:shouldStream
+                       context:context
+                         error:&error];
   if (session != nil) {
     [result setObject:session forKey:@"session"];
   } else {

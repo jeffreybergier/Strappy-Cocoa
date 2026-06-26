@@ -1331,7 +1331,7 @@ static char *strappy_client_build_messages_request_json(
        strappy_http_buffer_append_cstring(&buffer,
                                           should_stream ? "true" : "false");
 
-  if (ok && should_stream && strappy_client_should_request_reasoning(config)) {
+  if (ok && strappy_client_should_request_reasoning(config)) {
     ok = strappy_http_buffer_append_cstring(
       &buffer,
       ",\"reasoning\":{\"enabled\":true,\"exclude\":false}");

@@ -37,6 +37,9 @@ extern NSString * const StrappySessionStreamEventNotification;
 - (BOOL)beginStreamingPrompt:(NSString *)prompt
                      context:(NSDictionary *)context
                        error:(NSError **)error;
+- (BOOL)beginNonStreamingPrompt:(NSString *)prompt
+                         context:(NSDictionary *)context
+                           error:(NSError **)error;
 - (void)cancelPrompt;
 
 @end
