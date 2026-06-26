@@ -7,12 +7,9 @@
 static const NSUInteger kStrappyInitialMessageLimit = 80U;
 static const NSUInteger kStrappyMessagePageSize = 40U;
 
-static NSString *StrappyHTMLCacheDirectory(void)
+static NSString *StrappyHTMLDirectory(void)
 {
-  NSString *basePath;
-
-  basePath = [[StrappySession sessionsDatabasePath] stringByDeletingLastPathComponent];
-  return [basePath stringByAppendingPathComponent:@"WebView"];
+  return [[StrappySession sessionsDatabasePath] stringByDeletingLastPathComponent];
 }
 
 static BOOL StrappyEnsureDirectory(NSString *path)
@@ -610,7 +607,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   NSString *directoryPath;
   NSURL *baseURL;
 
-  directoryPath = StrappyHTMLCacheDirectory();
+  directoryPath = StrappyHTMLDirectory();
   StrappyEnsureDirectory(directoryPath);
   baseURL = [NSURL fileURLWithPath:[directoryPath stringByAppendingString:@"/"]];
 
@@ -760,7 +757,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   }
 
   streamFlushTimer_ =
-    [[NSTimer scheduledTimerWithTimeInterval:2.0
+    [[NSTimer scheduledTimerWithTimeInterval:0.5
                                       target:self
                                     selector:@selector(flushStreamDeltasFromTimer:)
                                     userInfo:nil
@@ -1026,7 +1023,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   NSArray *messages;
   NSError *error;
 
-  path = [htmlDirectoryPath_ stringByAppendingPathComponent:@"messages.html"];
+  path = [htmlDirectoryPath_ stringByAppendingPathComponent:@"session.html"];
   if (!StrappyEnsureDirectory(htmlDirectoryPath_)) {
     return nil;
   }
