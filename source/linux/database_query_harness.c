@@ -577,6 +577,8 @@ static int harness_run_tool_registry_tests(void)
                 STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) != NULL) &&
         (strstr(tools_json,
                 STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET) != NULL) &&
+        (strstr(tools_json,
+                STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH) != NULL) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_USER_INFO_READ) &&
@@ -586,6 +588,7 @@ static int harness_run_tool_registry_tests(void)
         strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_CONTEXT_READ) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH) &&
         !strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_QUERY) &&
         !strappy_tools_is_helper("helper_convert_dates") &&
         (strstr(tools_json, "helper_database_info_read") == NULL) &&
@@ -700,6 +703,38 @@ static int harness_run_helper_datetime_tests(void)
         STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
         "{\"datetimes\":\"2026-02-30\"}",
         "date is invalid")) {
+    return 0;
+  }
+
+  return 1;
+}
+
+static int harness_run_helper_fontawesome_tests(void)
+{
+  if (!harness_expect_output_contains_without(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH,
+        "{\"query\":\"warning\",\"limit\":5}",
+        "\"shortcode\":\"[fa:triangle-exclamation]\"",
+        "\"label\":\"Triangle Exclamation\"",
+        "codepoint")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH,
+        "{\"query\":\"github\",\"style\":\"brands\",\"limit\":3}",
+        "\"shortcode\":\"[fa:brands:github]\"",
+        "\"style\":\"brands\"")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH,
+        "{\"style\":\"duotone\"}",
+        "style must be solid, regular, or brands")) {
     return 0;
   }
 
@@ -1937,6 +1972,7 @@ int main(void)
   harness_context_init(&context);
   ok = harness_run_tool_registry_tests() &&
        harness_run_helper_datetime_tests() &&
+       harness_run_helper_fontawesome_tests() &&
        harness_make_temp_dir(&context) &&
        harness_run_empty_database_list_info_tests(&context) &&
        harness_create_user_database(context.database_path) &&

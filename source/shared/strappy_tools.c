@@ -16,6 +16,7 @@
 #define STRAPPY_TOOLS_AVAILABILITY_AVAILABLE "available"
 #define STRAPPY_TOOL_GUIDANCE_RESOURCE "GuidanceTools.json"
 #define STRAPPY_DATABASE_GUIDANCE_RESOURCE "GuidanceDatabase.json"
+#define STRAPPY_FONTAWESOME_ICONS_RESOURCE "FontAwesomeIcons.json"
 #define STRAPPY_DATABASE_INFO_MAX_TABLES 64
 #define STRAPPY_DATABASE_QUERY_MAX_ROWS 100
 #define STRAPPY_DATABASE_QUERY_MAX_COLUMNS 64
@@ -38,6 +39,8 @@
 #define STRAPPY_HELPER_INFO_DEFAULT_LIMIT 20
 #define STRAPPY_HELPER_INFO_MAX_LIMIT 50
 #define STRAPPY_HELPER_SESSION_NAME_MAX_BYTES 96U
+#define STRAPPY_HELPER_FONTAWESOME_MAX_QUERY_BYTES 128U
+#define STRAPPY_HELPER_FONTAWESOME_MAX_STYLE_BYTES 16U
 
 typedef enum strappy_tool_kind {
   STRAPPY_TOOL_KIND_DATABASE = 1,
@@ -106,6 +109,12 @@ typedef struct strappy_database_context_read_arguments {
   int limit;
 } strappy_database_context_read_arguments;
 
+typedef struct strappy_helper_fontawesome_icons_search_arguments {
+  char *query;
+  char *style;
+  int limit;
+} strappy_helper_fontawesome_icons_search_arguments;
+
 typedef struct strappy_helper_text_buffer {
   char *data;
   size_t length;
@@ -138,7 +147,8 @@ static const strappy_tool_definition strappy_tool_definitions[] = {
   { STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_DATABASE_CONTEXT_READ, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER, STRAPPY_TOOL_KIND_HELPER },
-  { STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET, STRAPPY_TOOL_KIND_HELPER }
+  { STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH, STRAPPY_TOOL_KIND_HELPER }
 };
 
 static const size_t strappy_tool_definition_count =
@@ -362,6 +372,30 @@ static void strappy_database_context_read_arguments_destroy(
   free(arguments->query);
   free(arguments->kind);
   strappy_database_context_read_arguments_init(arguments);
+}
+
+static void strappy_helper_fontawesome_icons_search_arguments_init(
+  strappy_helper_fontawesome_icons_search_arguments *arguments)
+{
+  if (arguments == NULL) {
+    return;
+  }
+
+  arguments->query = NULL;
+  arguments->style = NULL;
+  arguments->limit = STRAPPY_HELPER_INFO_DEFAULT_LIMIT;
+}
+
+static void strappy_helper_fontawesome_icons_search_arguments_destroy(
+  strappy_helper_fontawesome_icons_search_arguments *arguments)
+{
+  if (arguments == NULL) {
+    return;
+  }
+
+  free(arguments->query);
+  free(arguments->style);
+  strappy_helper_fontawesome_icons_search_arguments_init(arguments);
 }
 
 static void strappy_helper_text_buffer_init(strappy_helper_text_buffer *buffer)
@@ -2255,6 +2289,88 @@ static int strappy_tools_parse_database_context_read_arguments(
     strappy_database_context_read_arguments_destroy(arguments);
   }
   return ok;
+}
+
+static int strappy_tools_fontawesome_style_is_valid(const char *style)
+{
+  if (!strappy_tools_string_has_value(style)) {
+    return 1;
+  }
+
+  return ((strcmp(style, "solid") == 0) ||
+          (strcmp(style, "regular") == 0) ||
+          (strcmp(style, "brands") == 0)) ? 1 : 0;
+}
+
+static int strappy_tools_parse_helper_fontawesome_icons_search_arguments(
+  const char *arguments_json,
+  strappy_helper_fontawesome_icons_search_arguments *arguments,
+  char **error_out)
+{
+  static const char *const allowed_names[] = {
+    "query", "style", "limit"
+  };
+  cJSON *root;
+  int ok;
+
+  if (arguments == NULL) {
+    strappy_set_error(
+      error_out,
+      "helper_fontawesome_icons_search argument output is missing.");
+    return 0;
+  }
+  strappy_helper_fontawesome_icons_search_arguments_init(arguments);
+
+  root = strappy_tools_parse_arguments_object(
+    STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH,
+    arguments_json,
+    error_out);
+  if (root == NULL) {
+    return 0;
+  }
+
+  ok = strappy_tools_json_object_accepts_only(
+         root,
+         STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH,
+         allowed_names,
+         sizeof(allowed_names) / sizeof(allowed_names[0]),
+         error_out) &&
+       strappy_tools_copy_string_argument(
+         STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH,
+         root,
+         "query",
+         0,
+         STRAPPY_HELPER_FONTAWESOME_MAX_QUERY_BYTES,
+         &arguments->query,
+         error_out) &&
+       strappy_tools_copy_string_argument(
+         STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH,
+         root,
+         "style",
+         0,
+         STRAPPY_HELPER_FONTAWESOME_MAX_STYLE_BYTES,
+         &arguments->style,
+         error_out) &&
+       strappy_tools_parse_limit_argument(
+         STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH,
+         root,
+         &arguments->limit,
+         error_out);
+  cJSON_Delete(root);
+  if (!ok) {
+    strappy_helper_fontawesome_icons_search_arguments_destroy(arguments);
+    return 0;
+  }
+
+  if (!strappy_tools_fontawesome_style_is_valid(arguments->style)) {
+    strappy_helper_fontawesome_icons_search_arguments_destroy(arguments);
+    strappy_set_error(
+      error_out,
+      "helper_fontawesome_icons_search style must be solid, regular, or brands.");
+    return 0;
+  }
+
+  return 1;
 }
 
 static int strappy_tools_parse_helper_database_info_remember_arguments(
@@ -5112,6 +5228,588 @@ static char *strappy_tools_execute_helper_datetime_from_iso8601(
     error_out);
 }
 
+static unsigned char strappy_tools_ascii_lower(unsigned char value)
+{
+  if ((value >= 'A') && (value <= 'Z')) {
+    return (unsigned char)(value + ('a' - 'A'));
+  }
+
+  return value;
+}
+
+static int strappy_tools_ascii_equal_length_ignore_case(
+  const char *text,
+  const char *needle,
+  size_t needle_length)
+{
+  size_t index;
+
+  if ((text == NULL) || (needle == NULL)) {
+    return 0;
+  }
+  if (strlen(text) != needle_length) {
+    return 0;
+  }
+
+  for (index = 0U; index < needle_length; index++) {
+    if (strappy_tools_ascii_lower((unsigned char)text[index]) !=
+        strappy_tools_ascii_lower((unsigned char)needle[index])) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+static int strappy_tools_ascii_contains_length_ignore_case(
+  const char *text,
+  const char *needle,
+  size_t needle_length)
+{
+  size_t text_length;
+  size_t offset;
+  size_t index;
+
+  if ((text == NULL) || (needle == NULL) || (needle_length == 0U)) {
+    return 0;
+  }
+
+  text_length = strlen(text);
+  if (needle_length > text_length) {
+    return 0;
+  }
+
+  for (offset = 0U; offset <= (text_length - needle_length); offset++) {
+    for (index = 0U; index < needle_length; index++) {
+      if (strappy_tools_ascii_lower((unsigned char)text[offset + index]) !=
+          strappy_tools_ascii_lower((unsigned char)needle[index])) {
+        break;
+      }
+    }
+    if (index == needle_length) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int strappy_tools_fontawesome_query_char(char value)
+{
+  if ((value >= 'A') && (value <= 'Z')) {
+    return 1;
+  }
+  if ((value >= 'a') && (value <= 'z')) {
+    return 1;
+  }
+  if ((value >= '0') && (value <= '9')) {
+    return 1;
+  }
+  return ((value == '-') || (value == '_')) ? 1 : 0;
+}
+
+static int strappy_tools_fontawesome_text_score(const char *text,
+                                                const char *query)
+{
+  const char *cursor;
+  size_t query_length;
+  int score;
+
+  if (!strappy_tools_string_has_value(text) ||
+      !strappy_tools_string_has_value(query)) {
+    return 0;
+  }
+
+  query_length = strlen(query);
+  score = 0;
+  if (strappy_tools_ascii_equal_length_ignore_case(text,
+                                                   query,
+                                                   query_length)) {
+    score += 240;
+  } else if (strappy_tools_ascii_contains_length_ignore_case(text,
+                                                            query,
+                                                            query_length)) {
+    score += 120;
+  }
+
+  cursor = query;
+  while (*cursor != '\0') {
+    const char *token_start;
+    size_t token_length;
+
+    while ((*cursor != '\0') &&
+           !strappy_tools_fontawesome_query_char(*cursor)) {
+      cursor++;
+    }
+
+    token_start = cursor;
+    while ((*cursor != '\0') &&
+           strappy_tools_fontawesome_query_char(*cursor)) {
+      cursor++;
+    }
+
+    token_length = (size_t)(cursor - token_start);
+    if (token_length == 0U) {
+      continue;
+    }
+
+    if (strappy_tools_ascii_equal_length_ignore_case(text,
+                                                     token_start,
+                                                     token_length)) {
+      score += 80;
+    } else if (strappy_tools_ascii_contains_length_ignore_case(text,
+                                                              token_start,
+                                                              token_length)) {
+      score += 30;
+    }
+  }
+
+  return score;
+}
+
+static int strappy_tools_fontawesome_string_array_score(cJSON *icon,
+                                                        const char *key,
+                                                        const char *query,
+                                                        char **error_out)
+{
+  cJSON *array;
+  cJSON *item;
+  int score;
+
+  if ((icon == NULL) || (key == NULL)) {
+    strappy_set_error(error_out, "Font Awesome icon search is incomplete.");
+    return -1;
+  }
+
+  array = cJSON_GetObjectItemCaseSensitive(icon, key);
+  if (array == NULL) {
+    return 0;
+  }
+  if (!cJSON_IsArray(array)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Font Awesome icon resource contains malformed %s.",
+      key);
+    return -1;
+  }
+
+  score = 0;
+  for (item = array->child; item != NULL; item = item->next) {
+    if (!cJSON_IsString(item)) {
+      strappy_set_formatted_error(
+        error_out,
+        "Font Awesome icon resource contains malformed %s item.",
+        key);
+      return -1;
+    }
+    score += strappy_tools_fontawesome_text_score(item->valuestring, query);
+  }
+
+  return score;
+}
+
+static int strappy_tools_fontawesome_copy_string_array(cJSON *object,
+                                                       const char *key,
+                                                       cJSON *source,
+                                                       char **error_out)
+{
+  cJSON *array;
+  cJSON *item;
+  int count;
+
+  if ((object == NULL) || (key == NULL) || (source == NULL)) {
+    return 1;
+  }
+  if (!cJSON_IsArray(source)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Font Awesome icon resource contains malformed %s.",
+      key);
+    return 0;
+  }
+
+  array = cJSON_CreateArray();
+  if (array == NULL) {
+    strappy_set_error(error_out, "Could not allocate Font Awesome result array.");
+    return 0;
+  }
+
+  count = 0;
+  for (item = source->child; item != NULL; item = item->next) {
+    cJSON *copy;
+
+    if (!cJSON_IsString(item)) {
+      cJSON_Delete(array);
+      strappy_set_formatted_error(
+        error_out,
+        "Font Awesome icon resource contains malformed %s item.",
+        key);
+      return 0;
+    }
+    copy = cJSON_CreateString(item->valuestring);
+    if ((copy == NULL) || !cJSON_AddItemToArray(array, copy)) {
+      cJSON_Delete(copy);
+      cJSON_Delete(array);
+      strappy_set_error(error_out, "Could not build Font Awesome result array.");
+      return 0;
+    }
+    count++;
+  }
+
+  if (count == 0) {
+    cJSON_Delete(array);
+    return 1;
+  }
+
+  if (!cJSON_AddItemToObject(object, key, array)) {
+    cJSON_Delete(array);
+    strappy_set_error(error_out, "Could not add Font Awesome result array.");
+    return 0;
+  }
+
+  return 1;
+}
+
+static int strappy_tools_fontawesome_icon_score(
+  cJSON *icon,
+  const strappy_helper_fontawesome_icons_search_arguments *arguments,
+  char **error_out)
+{
+  cJSON *name;
+  cJSON *label;
+  cJSON *style;
+  cJSON *shortcode;
+  int score;
+  int array_score;
+
+  if ((icon == NULL) || (arguments == NULL)) {
+    strappy_set_error(error_out, "Font Awesome icon search is incomplete.");
+    return -1;
+  }
+
+  name = cJSON_GetObjectItemCaseSensitive(icon, "name");
+  label = cJSON_GetObjectItemCaseSensitive(icon, "label");
+  style = cJSON_GetObjectItemCaseSensitive(icon, "style");
+  shortcode = cJSON_GetObjectItemCaseSensitive(icon, "shortcode");
+  if (!cJSON_IsString(name) ||
+      !cJSON_IsString(label) ||
+      !cJSON_IsString(style) ||
+      !cJSON_IsString(shortcode)) {
+    strappy_set_error(error_out,
+                      "Font Awesome icon resource contains a malformed icon.");
+    return -1;
+  }
+
+  if (strappy_tools_string_has_value(arguments->style) &&
+      (strcmp(arguments->style, style->valuestring) != 0)) {
+    return 0;
+  }
+
+  if (!strappy_tools_string_has_value(arguments->query)) {
+    return 1;
+  }
+
+  score = 0;
+  score += 4 * strappy_tools_fontawesome_text_score(name->valuestring,
+                                                    arguments->query);
+  score += 3 * strappy_tools_fontawesome_text_score(label->valuestring,
+                                                    arguments->query);
+  score += strappy_tools_fontawesome_text_score(shortcode->valuestring,
+                                                arguments->query);
+  array_score = strappy_tools_fontawesome_string_array_score(icon,
+                                                             "aliases",
+                                                             arguments->query,
+                                                             error_out);
+  if (array_score < 0) {
+    return -1;
+  }
+  score += 4 * array_score;
+  array_score = strappy_tools_fontawesome_string_array_score(icon,
+                                                             "search_terms",
+                                                             arguments->query,
+                                                             error_out);
+  if (array_score < 0) {
+    return -1;
+  }
+  score += 2 * array_score;
+  array_score = strappy_tools_fontawesome_string_array_score(icon,
+                                                             "categories",
+                                                             arguments->query,
+                                                             error_out);
+  if (array_score < 0) {
+    return -1;
+  }
+  score += array_score;
+
+  return score;
+}
+
+static cJSON *strappy_tools_fontawesome_copy_result_icon(cJSON *icon,
+                                                         char **error_out)
+{
+  cJSON *name;
+  cJSON *label;
+  cJSON *style;
+  cJSON *shortcode;
+  cJSON *aliases;
+  cJSON *copy;
+
+  name = cJSON_GetObjectItemCaseSensitive(icon, "name");
+  label = cJSON_GetObjectItemCaseSensitive(icon, "label");
+  style = cJSON_GetObjectItemCaseSensitive(icon, "style");
+  shortcode = cJSON_GetObjectItemCaseSensitive(icon, "shortcode");
+  aliases = cJSON_GetObjectItemCaseSensitive(icon, "aliases");
+  if (!cJSON_IsString(name) ||
+      !cJSON_IsString(label) ||
+      !cJSON_IsString(style) ||
+      !cJSON_IsString(shortcode) ||
+      ((aliases != NULL) && !cJSON_IsArray(aliases))) {
+    strappy_set_error(error_out,
+                      "Font Awesome icon resource contains a malformed icon.");
+    return NULL;
+  }
+
+  copy = cJSON_CreateObject();
+  if ((copy == NULL) ||
+      (cJSON_AddStringToObject(copy, "name", name->valuestring) == NULL) ||
+      (cJSON_AddStringToObject(copy, "label", label->valuestring) == NULL) ||
+      (cJSON_AddStringToObject(copy, "style", style->valuestring) == NULL) ||
+      (cJSON_AddStringToObject(copy,
+                               "shortcode",
+                               shortcode->valuestring) == NULL)) {
+    cJSON_Delete(copy);
+    strappy_set_error(error_out, "Could not build Font Awesome icon result.");
+    return NULL;
+  }
+
+  if (!strappy_tools_fontawesome_copy_string_array(copy,
+                                                   "aliases",
+                                                   aliases,
+                                                   error_out)) {
+    cJSON_Delete(copy);
+    return NULL;
+  }
+
+  return copy;
+}
+
+static int strappy_tools_fontawesome_add_candidate(
+  cJSON *icon,
+  int score,
+  cJSON **candidates,
+  int *scores,
+  int *candidate_count,
+  int limit,
+  char **error_out)
+{
+  cJSON *copy;
+  int position;
+  int shift_start;
+  int index;
+
+  if ((candidates == NULL) || (scores == NULL) ||
+      (candidate_count == NULL) || (limit <= 0)) {
+    strappy_set_error(error_out, "Font Awesome candidate storage is incomplete.");
+    return 0;
+  }
+
+  if (score <= 0) {
+    return 1;
+  }
+
+  position = 0;
+  while ((position < *candidate_count) && (scores[position] >= score)) {
+    position++;
+  }
+  if (position >= limit) {
+    return 1;
+  }
+
+  copy = strappy_tools_fontawesome_copy_result_icon(icon, error_out);
+  if (copy == NULL) {
+    return 0;
+  }
+
+  if (*candidate_count < limit) {
+    shift_start = *candidate_count;
+    (*candidate_count)++;
+  } else {
+    cJSON_Delete(candidates[limit - 1]);
+    shift_start = limit - 1;
+  }
+
+  for (index = shift_start; index > position; index--) {
+    candidates[index] = candidates[index - 1];
+    scores[index] = scores[index - 1];
+  }
+
+  candidates[position] = copy;
+  scores[position] = score;
+  return 1;
+}
+
+static void strappy_tools_fontawesome_clear_candidates(cJSON **candidates,
+                                                       int candidate_count)
+{
+  int index;
+
+  if (candidates == NULL) {
+    return;
+  }
+
+  for (index = 0; index < candidate_count; index++) {
+    cJSON_Delete(candidates[index]);
+    candidates[index] = NULL;
+  }
+}
+
+static char *strappy_tools_execute_helper_fontawesome_icons_search(
+  const char *resource_dir,
+  const char *arguments_json,
+  char **error_out)
+{
+  strappy_helper_fontawesome_icons_search_arguments arguments;
+  cJSON *catalog;
+  cJSON *catalog_icons;
+  cJSON *catalog_icon;
+  cJSON *root;
+  cJSON *icons;
+  cJSON *version;
+  cJSON *candidates[STRAPPY_HELPER_INFO_MAX_LIMIT];
+  int scores[STRAPPY_HELPER_INFO_MAX_LIMIT];
+  int index;
+  int candidate_count;
+  int matched_count;
+  char *json;
+
+  strappy_helper_fontawesome_icons_search_arguments_init(&arguments);
+  if (!strappy_tools_parse_helper_fontawesome_icons_search_arguments(
+        arguments_json,
+        &arguments,
+        error_out)) {
+    return NULL;
+  }
+
+  catalog = strappy_tools_read_json_resource(resource_dir,
+                                             STRAPPY_FONTAWESOME_ICONS_RESOURCE,
+                                             error_out);
+  if (catalog == NULL) {
+    strappy_helper_fontawesome_icons_search_arguments_destroy(&arguments);
+    return NULL;
+  }
+
+  catalog_icons = cJSON_GetObjectItemCaseSensitive(catalog, "icons");
+  if (!cJSON_IsArray(catalog_icons)) {
+    cJSON_Delete(catalog);
+    strappy_helper_fontawesome_icons_search_arguments_destroy(&arguments);
+    strappy_set_error(error_out,
+                      "Font Awesome icon resource must contain an icons array.");
+    return NULL;
+  }
+
+  for (index = 0; index < STRAPPY_HELPER_INFO_MAX_LIMIT; index++) {
+    candidates[index] = NULL;
+    scores[index] = 0;
+  }
+  candidate_count = 0;
+  matched_count = 0;
+
+  for (catalog_icon = catalog_icons->child;
+       catalog_icon != NULL;
+       catalog_icon = catalog_icon->next) {
+    int score;
+
+    score = strappy_tools_fontawesome_icon_score(catalog_icon,
+                                                 &arguments,
+                                                 error_out);
+    if (score < 0) {
+      strappy_tools_fontawesome_clear_candidates(candidates, candidate_count);
+      cJSON_Delete(catalog);
+      strappy_helper_fontawesome_icons_search_arguments_destroy(&arguments);
+      return NULL;
+    }
+    if (score > 0) {
+      matched_count++;
+      if (!strappy_tools_fontawesome_add_candidate(catalog_icon,
+                                                   score,
+                                                   candidates,
+                                                   scores,
+                                                   &candidate_count,
+                                                   arguments.limit,
+                                                   error_out)) {
+        strappy_tools_fontawesome_clear_candidates(candidates, candidate_count);
+        cJSON_Delete(catalog);
+        strappy_helper_fontawesome_icons_search_arguments_destroy(&arguments);
+        return NULL;
+      }
+    }
+  }
+
+  root = cJSON_CreateObject();
+  icons = cJSON_CreateArray();
+  version = cJSON_GetObjectItemCaseSensitive(catalog, "version");
+  if ((root == NULL) || (icons == NULL) ||
+      !strappy_tools_add_bool_to_object(root, "ok", 1) ||
+      (cJSON_AddStringToObject(root,
+                               "version",
+                               cJSON_IsString(version) ?
+                               version->valuestring :
+                               "Font Awesome 7 Free") == NULL) ||
+      !strappy_tools_add_optional_string_to_object(root,
+                                                   "query",
+                                                   arguments.query) ||
+      !strappy_tools_add_optional_string_to_object(root,
+                                                   "style",
+                                                   arguments.style) ||
+      (cJSON_AddNumberToObject(root,
+                               "count",
+                               (double)candidate_count) == NULL) ||
+      (cJSON_AddNumberToObject(root,
+                               "matched_count",
+                               (double)matched_count) == NULL) ||
+      !strappy_tools_add_bool_to_object(root,
+                                        "truncated",
+                                        matched_count > candidate_count) ||
+      !cJSON_AddItemToObject(root, "icons", icons)) {
+    cJSON_Delete(icons);
+    cJSON_Delete(root);
+    strappy_tools_fontawesome_clear_candidates(candidates, candidate_count);
+    cJSON_Delete(catalog);
+    strappy_helper_fontawesome_icons_search_arguments_destroy(&arguments);
+    strappy_set_error(error_out, "Could not build Font Awesome search result.");
+    return NULL;
+  }
+  icons = NULL;
+
+  for (index = 0; index < candidate_count; index++) {
+    if (!cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(root, "icons"),
+                              candidates[index])) {
+      cJSON_Delete(candidates[index]);
+      candidates[index] = NULL;
+      cJSON_Delete(root);
+      strappy_tools_fontawesome_clear_candidates(candidates, candidate_count);
+      cJSON_Delete(catalog);
+      strappy_helper_fontawesome_icons_search_arguments_destroy(&arguments);
+      strappy_set_error(error_out,
+                        "Could not add Font Awesome icon to search result.");
+      return NULL;
+    }
+    candidates[index] = NULL;
+  }
+
+  json = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  cJSON_Delete(catalog);
+  strappy_helper_fontawesome_icons_search_arguments_destroy(&arguments);
+  if (json == NULL) {
+    strappy_set_error(error_out,
+                      "Could not serialize Font Awesome search result.");
+    return NULL;
+  }
+
+  return json;
+}
+
 static char *strappy_tools_execute_helper_user_info_read(
   const char *session_db_path,
   const char *arguments_json,
@@ -5628,6 +6326,12 @@ char *strappy_tools_execute(const char *session_db_path,
     return strappy_tools_execute_helper_database_info_forget(session_db_path,
                                                              arguments_json,
                                                              error_out);
+  }
+
+  if (strcmp(tool_name, STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH) == 0) {
+    return strappy_tools_execute_helper_fontawesome_icons_search(resource_dir,
+                                                                 arguments_json,
+                                                                 error_out);
   }
 
   strappy_set_formatted_error(error_out, "Tool is not registered: %s", tool_name);

@@ -120,6 +120,37 @@
     {
       "type": "function",
       "function": {
+        "name": "helper_fontawesome_icons_search",
+        "description": "Search Strappy's Font Awesome shortcode catalog by icon purpose or name. Use when an assistant response would benefit from a visual marker and the right shortcode is not obvious.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Optional icon purpose or name to search, such as warning, calendar, database, github, or send."
+            },
+            "style": {
+              "type": "string",
+              "description": "Optional Font Awesome style filter.",
+              "enum": [
+                "solid",
+                "regular",
+                "brands"
+              ]
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Optional maximum icons. Defaults to 20; maximum is 50."
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "helper_user_info_read",
         "description": "Read remembered stable user facts when personal context may help.",
         "parameters": {

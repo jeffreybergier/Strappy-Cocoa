@@ -18,6 +18,7 @@ extern "C" {
 #define STRAPPY_TOOL_DATABASE_CONTEXT_READ "database_context_read"
 #define STRAPPY_TOOL_HELPER_DATABASE_INFO_REMEMBER "helper_database_info_remember"
 #define STRAPPY_TOOL_HELPER_DATABASE_INFO_FORGET "helper_database_info_forget"
+#define STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH "helper_fontawesome_icons_search"
 
 char *strappy_tools_request_json(const char *resource_dir,
                                  char **error_out);

@@ -59,7 +59,7 @@ static int harness_check_page_scripts(void)
 
   ok = harness_expect_contains(page_html, "@font-face") &&
        harness_expect_contains(page_html, "function faIconHTML") &&
-       harness_expect_contains(page_html, "'heart':'F004'") &&
+       harness_expect_contains(page_html, "\"heart\":'F004'") &&
        harness_expect_contains(page_html, "[fa(?::(solid|regular|brands))?") &&
        harness_expect_contains(page_html, "function toolJSONHTML") &&
        harness_expect_contains(page_html, "function toolObjectArrayTable") &&
@@ -117,7 +117,9 @@ static int harness_check_fontawesome_rendering(void)
   memset(&message, 0, sizeof(message));
   message.element_id = "assistant-icon";
   message.role = "assistant";
-  message.text = "Ready [fa:heart] [fa:regular:face-smile] [fa:solid:F004].";
+  message.text =
+    "Ready [fa:heart] [fa:regular:face-smile] [fa:brands:github] "
+    "[fa:alarm-clock] [fa:solid:F004].";
 
   message_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
   if (message_html == NULL) {
@@ -140,6 +142,8 @@ static int harness_check_fontawesome_rendering(void)
        harness_expect_contains(page_html, "file:///tmp/Strappy%20Fonts/FA7-Regular-400.otf") &&
        harness_expect_contains(page_html, "file:///tmp/Strappy%20Fonts/FA7-Brands-400.otf") &&
        harness_expect_contains(page_html, ".fa-regular{font-family:'FA7R';}") &&
+       harness_expect_contains(page_html, "\"alarm-clock\":'F34E'") &&
+       harness_expect_contains(page_html, "\"github\":'F09B'") &&
        harness_expect_contains(page_html, "Ready [fa:heart]") &&
        harness_expect_contains(page_html, "faIconHTML(st,n,m)");
 
