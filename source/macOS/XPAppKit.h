@@ -57,6 +57,14 @@
   #define XPProgressIndicatorStyleSpinning NSProgressIndicatorSpinningStyle
 #endif
 
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101200
+  #define XPControlStateValueOn      NSControlStateValueOn
+  #define XPControlStateValueOff     NSControlStateValueOff
+#else
+  #define XPControlStateValueOn      NSOnState
+  #define XPControlStateValueOff     NSOffState
+#endif
+
 #if defined(MAC_OS_X_VERSION_MIN_REQUIRED) && MAC_OS_X_VERSION_MIN_REQUIRED >= 110000
   #define XPColorWindowFrame [NSColor windowBackgroundColor]
 #else

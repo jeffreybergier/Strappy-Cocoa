@@ -154,6 +154,7 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
            object:barView_];
 
   [self setEnabled:enabled_];
+  [self setStreamingEnabled:streamingEnabled_];
 }
 
 - (void)viewDidLayout
@@ -347,10 +348,11 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 
 - (void)setStreamingEnabled:(BOOL)enabled
 {
+  streamingEnabled_ = enabled ? YES : NO;
   if (actionsSegmented_ == nil) {
     return;
   }
-  [actionsSegmented_ setSelected:(enabled ? YES : NO)
+  [actionsSegmented_ setSelected:streamingEnabled_
                       forSegment:kPromptActionStream];
 }
 

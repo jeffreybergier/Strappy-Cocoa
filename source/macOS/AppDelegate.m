@@ -113,6 +113,45 @@
                      action:@selector(terminate:)
               keyEquivalent:@"q"];
 
+  NSMenuItem *chatMenuItem =
+    [mainMenu addItemWithTitle:NSLocalizedString(@"Chat", nil)
+                        action:NULL
+                 keyEquivalent:@""];
+  NSMenu *chatMenu = [[[NSMenu alloc]
+      initWithTitle:NSLocalizedString(@"Chat", nil)] autorelease];
+  [mainMenu setSubmenu:chatMenu forItem:chatMenuItem];
+  {
+    NSMenuItem *newSession =
+      [chatMenu addItemWithTitle:NSLocalizedString(@"New Session", nil)
+                           action:@selector(newSession:)
+                    keyEquivalent:@"n"];
+    [newSession setTarget:nil];
+  }
+  {
+    NSMenuItem *sendPrompt =
+      [chatMenu addItemWithTitle:NSLocalizedString(@"Send Prompt", nil)
+                           action:@selector(sendCurrentPrompt:)
+                    keyEquivalent:@"\r"];
+    [sendPrompt setKeyEquivalentModifierMask:XPEventModifierFlagCommand];
+    [sendPrompt setTarget:nil];
+  }
+  {
+    NSMenuItem *cancelPrompt =
+      [chatMenu addItemWithTitle:NSLocalizedString(@"Cancel Prompt", nil)
+                           action:@selector(cancelCurrentPrompt:)
+                    keyEquivalent:@"."];
+    [cancelPrompt setKeyEquivalentModifierMask:XPEventModifierFlagCommand];
+    [cancelPrompt setTarget:nil];
+  }
+  [chatMenu addItem:[NSMenuItem separatorItem]];
+  {
+    NSMenuItem *streaming =
+      [chatMenu addItemWithTitle:NSLocalizedString(@"Streaming", nil)
+                          action:@selector(toggleStreaming:)
+                   keyEquivalent:@""];
+    [streaming setTarget:nil];
+  }
+
   NSMenuItem *editMenuItem = [mainMenu addItemWithTitle:NSLocalizedString(@"Edit", nil)
                                                  action:NULL
                                           keyEquivalent:@""];
@@ -138,29 +177,6 @@
   [editMenu addItemWithTitle:NSLocalizedString(@"Select All", nil)
                       action:@selector(selectAll:)
                keyEquivalent:@"a"];
-
-  NSMenuItem *conversationMenuItem =
-    [mainMenu addItemWithTitle:NSLocalizedString(@"Conversation", nil)
-                        action:NULL
-                 keyEquivalent:@""];
-  NSMenu *conversationMenu = [[[NSMenu alloc]
-      initWithTitle:NSLocalizedString(@"Conversation", nil)] autorelease];
-  [mainMenu setSubmenu:conversationMenu forItem:conversationMenuItem];
-  {
-    NSMenuItem *newSession =
-      [conversationMenu addItemWithTitle:NSLocalizedString(@"New Session", nil)
-                                  action:@selector(newSession:)
-                           keyEquivalent:@"n"];
-    [newSession setTarget:nil];
-  }
-  {
-    NSMenuItem *sendPrompt =
-      [conversationMenu addItemWithTitle:NSLocalizedString(@"Send Prompt", nil)
-                                  action:@selector(sendCurrentPrompt:)
-                           keyEquivalent:@"\r"];
-    [sendPrompt setKeyEquivalentModifierMask:XPEventModifierFlagCommand];
-    [sendPrompt setTarget:nil];
-  }
 
   NSMenuItem *viewMenuItem = [mainMenu addItemWithTitle:NSLocalizedString(@"View", nil)
                                                  action:NULL

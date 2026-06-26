@@ -958,6 +958,63 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [sendController_ performSend:sender];
 }
 
+- (BOOL)canCancelCurrentPrompt
+{
+  if ((session_ == nil) || !sending_ || [self promptCancellationRequested]) {
+    return NO;
+  }
+  return YES;
+}
+
+- (void)cancelCurrentPrompt:(id)sender
+{
+  (void)sender;
+  if (![self canCancelCurrentPrompt]) {
+    return;
+  }
+  [self promptSendViewControllerDidCancelPrompt:sendController_];
+}
+
+- (BOOL)canToggleStreaming
+{
+  if ((session_ == nil) || sending_ || [session_ isPromptInFlight]) {
+    return NO;
+  }
+  return YES;
+}
+
+- (BOOL)streamingEnabled
+{
+  return (session_ != nil) ? [session_ streamingEnabled] : NO;
+}
+
+- (void)toggleStreaming:(id)sender
+{
+  (void)sender;
+  if (![self canToggleStreaming]) {
+    return;
+  }
+  (void)[self promptSendViewController:sendController_
+                   setStreamingEnabled:![self streamingEnabled]];
+}
+
+- (BOOL)validateMenuItem:(NSMenuItem *)item
+{
+  SEL action;
+
+  action = [item action];
+  if (action == @selector(sendCurrentPrompt:)) {
+    return [self canSendCurrentPrompt];
+  } else if (action == @selector(cancelCurrentPrompt:)) {
+    return [self canCancelCurrentPrompt];
+  } else if (action == @selector(toggleStreaming:)) {
+    [item setState:([self streamingEnabled] ?
+      XPControlStateValueOn : XPControlStateValueOff)];
+    return [self canToggleStreaming];
+  }
+  return YES;
+}
+
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
               setStreamingEnabled:(BOOL)enabled
 {

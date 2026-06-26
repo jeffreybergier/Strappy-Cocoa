@@ -22,6 +22,10 @@
 "Show All" = "すべてを表示";
 "Quit Strappy" = "Strappy を終了";
 
+"Chat" = "チャット";
+"Cancel Prompt" = "プロンプトをキャンセル";
+"Streaming" = "ストリーミング";
+
 "Edit" = "編集";
 "Undo" = "取り消す";
 "Redo" = "やり直す";

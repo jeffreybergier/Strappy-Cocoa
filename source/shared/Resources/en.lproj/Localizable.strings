@@ -22,6 +22,10 @@
 "Show All" = "Show All";
 "Quit Strappy" = "Quit Strappy";
 
+"Chat" = "Chat";
+"Cancel Prompt" = "Cancel Prompt";
+"Streaming" = "Streaming";
+
 "Edit" = "Edit";
 "Undo" = "Undo";
 "Redo" = "Redo";

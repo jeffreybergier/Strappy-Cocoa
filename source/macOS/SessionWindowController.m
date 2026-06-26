@@ -52,6 +52,35 @@
   [messagesController_ sendCurrentPrompt:sender];
 }
 
+- (BOOL)canCancelCurrentPrompt
+{
+  return [messagesController_ canCancelCurrentPrompt];
+}
+
+- (void)cancelCurrentPrompt:(id)sender
+{
+  [messagesController_ cancelCurrentPrompt:sender];
+}
+
+- (BOOL)canToggleStreaming
+{
+  return [messagesController_ canToggleStreaming];
+}
+
+- (BOOL)streamingEnabled
+{
+  return [messagesController_ streamingEnabled];
+}
+
+- (void)toggleStreaming:(id)sender
+{
+  [messagesController_ toggleStreaming:sender];
+  if ([sender isKindOfClass:[NSMenuItem class]]) {
+    [(NSMenuItem *)sender setState:([self streamingEnabled] ?
+      XPControlStateValueOn : XPControlStateValueOff)];
+  }
+}
+
 - (void)sessionListViewController:(SessionListViewController *)controller
                  didSelectSession:(StrappySession *)session
 {
@@ -92,6 +121,12 @@
   action = [item action];
   if (action == @selector(sendCurrentPrompt:)) {
     return [self canSendCurrentPrompt];
+  } else if (action == @selector(cancelCurrentPrompt:)) {
+    return [self canCancelCurrentPrompt];
+  } else if (action == @selector(toggleStreaming:)) {
+    [item setState:([self streamingEnabled] ?
+      XPControlStateValueOn : XPControlStateValueOff)];
+    return [self canToggleStreaming];
   }
   return YES;
 }

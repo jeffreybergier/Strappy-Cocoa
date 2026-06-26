@@ -27,6 +27,7 @@
   BOOL          expanded_;
   BOOL          sending_;
   BOOL          cancellationRequested_;
+  BOOL          streamingEnabled_;
 }
 
 - (void)setDelegate:(id<PromptSendViewControllerDelegate>)delegate;

@@ -58,5 +58,10 @@
 - (void)reloadData;
 - (BOOL)canSendCurrentPrompt;
 - (void)sendCurrentPrompt:(id)sender;
+- (BOOL)canCancelCurrentPrompt;
+- (void)cancelCurrentPrompt:(id)sender;
+- (BOOL)canToggleStreaming;
+- (BOOL)streamingEnabled;
+- (void)toggleStreaming:(id)sender;
 
 @end
