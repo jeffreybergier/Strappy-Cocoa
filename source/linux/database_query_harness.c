@@ -190,6 +190,95 @@ static int harness_exec_sql(sqlite3 *db, const char *sql)
   return 1;
 }
 
+static int harness_expect_catalog_sql_ok(const char *database_path,
+                                         const char *sql,
+                                         const char *description)
+{
+  sqlite3 *db;
+  char *message;
+  int rc;
+
+  if ((database_path == NULL) || (database_path[0] == '\0') ||
+      (sql == NULL) || (description == NULL)) {
+    fprintf(stderr, "Catalog schema check is incomplete.\n");
+    return 0;
+  }
+
+  db = NULL;
+  rc = sqlite3_open_v2(database_path, &db, SQLITE_OPEN_READWRITE, NULL);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr,
+            "Could not open catalog for schema check: %s\n",
+            (db != NULL) ? sqlite3_errmsg(db) : "unknown");
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    return 0;
+  }
+
+  message = NULL;
+  rc = sqlite3_exec(db, sql, NULL, NULL, &message);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr,
+            "Fresh catalog schema missing %s: %s\n",
+            description,
+            (message != NULL) ? message : "unknown");
+    sqlite3_free(message);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  sqlite3_close(db);
+  return 1;
+}
+
+static int harness_run_fresh_catalog_schema_tests(
+  const harness_context *context)
+{
+  char *error;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  error = NULL;
+  if (!strappy_db_initialize(context->catalog_path, &error)) {
+    fprintf(stderr,
+            "Could not initialize fresh catalog: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  return harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT id, name, prompt, response, model, http_status, "
+           "streaming_enabled, created_at FROM sessions LIMIT 0;",
+           "sessions columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT id, session_id, turn_key, prompt_group_key, actor, "
+           "api_role, render_role, context_policy, prompt, status, created_at "
+           "FROM session_turns LIMIT 0;",
+           "session_turns columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT id, session_id, turn_id, turn_key, prompt_group_key, "
+           "actor, kind, api_role, render_role, role, content, model, "
+           "http_status, metadata_json, render_state_json, message_json, "
+           "reasoning, message_key, target_message_key, tool_call_id, "
+           "tool_name, arguments_json, result_json, include_in_context, "
+           "is_error, created_at FROM session_messages LIMIT 0;",
+           "session_messages columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT id, assistant_database_id, path, size, modified_at, "
+           "device, inode, is_valid_sqlite, validation_error, scan_status, "
+           "user_decision, scan_root, first_seen_at, last_seen_at, "
+           "last_scanned_at FROM discovered_databases LIMIT 0;",
+           "discovered_databases columns");
+}
+
 static char *harness_read_file(const char *path)
 {
   FILE *file;
@@ -2203,6 +2292,7 @@ int main(void)
        harness_run_helper_datetime_tests() &&
        harness_run_helper_fontawesome_tests() &&
        harness_make_temp_dir(&context) &&
+       harness_run_fresh_catalog_schema_tests(&context) &&
        harness_run_empty_database_list_info_tests(&context) &&
        harness_create_user_database(context.database_path) &&
        harness_register_database(&context) &&

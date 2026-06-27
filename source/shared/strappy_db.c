@@ -289,92 +289,6 @@ static int strappy_db_exec(sqlite3 *db,
   return 1;
 }
 
-static int strappy_db_table_has_column(sqlite3 *db,
-                                       const char *table_name,
-                                       const char *column_name,
-                                       int *has_column_out,
-                                       char **error_out)
-{
-  sqlite3_stmt *stmt;
-  char sql[128];
-  int written;
-  int rc;
-
-  if ((db == NULL) || (table_name == NULL) || (column_name == NULL) ||
-      (has_column_out == NULL)) {
-    strappy_set_error(error_out, "Schema column lookup is incomplete.");
-    return 0;
-  }
-
-  written = snprintf(sql,
-                     sizeof(sql),
-                     "PRAGMA table_info(%s);",
-                     table_name);
-  if ((written <= 0) || ((size_t)written >= sizeof(sql))) {
-    strappy_set_error(error_out, "Schema table name is too long.");
-    return 0;
-  }
-
-  *has_column_out = 0;
-  stmt = NULL;
-  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-  if (rc != SQLITE_OK) {
-    strappy_set_formatted_error(error_out,
-                                "Could not inspect session schema: %s",
-                                sqlite3_errmsg(db));
-    return 0;
-  }
-
-  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-    const unsigned char *name;
-
-    name = sqlite3_column_text(stmt, 1);
-    if ((name != NULL) &&
-        (strcmp((const char *)name, column_name) == 0)) {
-      *has_column_out = 1;
-      break;
-    }
-  }
-
-  sqlite3_finalize(stmt);
-  if ((rc != SQLITE_DONE) && (rc != SQLITE_ROW)) {
-    strappy_set_formatted_error(error_out,
-                                "Could not read session schema: %s",
-                                sqlite3_errmsg(db));
-    return 0;
-  }
-
-  return 1;
-}
-
-static int strappy_db_ensure_table_column(sqlite3 *db,
-                                          const char *table_name,
-                                          const char *column_name,
-                                          const char *alter_sql,
-                                          const char *error_prefix,
-                                          char **error_out)
-{
-  int has_column;
-
-  has_column = 0;
-  if (!strappy_db_table_has_column(db,
-                                   table_name,
-                                   column_name,
-                                   &has_column,
-                                   error_out)) {
-    return 0;
-  }
-
-  if (has_column) {
-    return 1;
-  }
-
-  return strappy_db_exec(db,
-                         alter_sql,
-                         error_prefix,
-                         error_out);
-}
-
 static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
 {
   static const char *sessions_sql =
@@ -481,17 +395,6 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
     return 0;
   }
 
-  if (!strappy_db_ensure_table_column(
-        db,
-        "sessions",
-        "streaming_enabled",
-        "ALTER TABLE sessions "
-        "ADD COLUMN streaming_enabled INTEGER NOT NULL DEFAULT 0;",
-        "Could not migrate session schema",
-        error_out)) {
-    return 0;
-  }
-
   if (!strappy_db_exec(db,
                        turns_sql,
                        "Could not create session turn schema",
@@ -510,16 +413,6 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
                        messages_sql,
                        "Could not create session message schema",
                        error_out)) {
-    return 0;
-  }
-
-  if (!strappy_db_ensure_table_column(
-        db,
-        "session_messages",
-        "render_state_json",
-        "ALTER TABLE session_messages ADD COLUMN render_state_json TEXT;",
-        "Could not migrate session message schema",
-        error_out)) {
     return 0;
   }
 
