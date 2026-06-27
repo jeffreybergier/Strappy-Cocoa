@@ -701,6 +701,55 @@ static char *strappy_db_column_string(sqlite3_stmt *stmt, int column)
   return strappy_string_duplicate((const char *)value);
 }
 
+static char *strappy_db_like_pattern_for_search(const char *search_text,
+                                                char **error_out)
+{
+  char *pattern;
+  size_t index;
+  size_t input_length;
+  size_t output_index;
+  size_t pattern_length;
+
+  if ((search_text == NULL) || (search_text[0] == '\0')) {
+    return NULL;
+  }
+
+  input_length = strlen(search_text);
+  pattern_length = 2U;
+  for (index = 0U; index < input_length; index++) {
+    size_t character_length;
+
+    character_length = ((search_text[index] == '%') ||
+                        (search_text[index] == '_') ||
+                        (search_text[index] == '\\')) ? 2U : 1U;
+    if (pattern_length > (((size_t)-1) - character_length - 1U)) {
+      strappy_set_error(error_out, "OpenRouter model search text is too large.");
+      return NULL;
+    }
+    pattern_length += character_length;
+  }
+
+  pattern = (char *)malloc(pattern_length + 1U);
+  if (pattern == NULL) {
+    strappy_set_error(error_out, "Could not allocate OpenRouter model search.");
+    return NULL;
+  }
+
+  output_index = 0U;
+  pattern[output_index++] = '%';
+  for (index = 0U; index < input_length; index++) {
+    if ((search_text[index] == '%') ||
+        (search_text[index] == '_') ||
+        (search_text[index] == '\\')) {
+      pattern[output_index++] = '\\';
+    }
+    pattern[output_index++] = search_text[index];
+  }
+  pattern[output_index++] = '%';
+  pattern[output_index] = '\0';
+  return pattern;
+}
+
 static int strappy_db_assign_record_from_statement(strappy_session_record *record,
                                                    sqlite3_stmt *stmt,
                                                    char **error_out)
@@ -4665,7 +4714,19 @@ int strappy_db_list_openrouter_models(
   strappy_openrouter_model_record_list *list,
   char **error_out)
 {
-  static const char *sql =
+  return strappy_db_list_openrouter_models_matching(db_path,
+                                                    NULL,
+                                                    list,
+                                                    error_out);
+}
+
+int strappy_db_list_openrouter_models_matching(
+  const char *db_path,
+  const char *search_text,
+  strappy_openrouter_model_record_list *list,
+  char **error_out)
+{
+  static const char *unfiltered_sql =
     "SELECT m.id, m.canonical_slug, m.hugging_face_id, m.name, "
     "m.description, m.context_length, m.created, m.architecture_modality, "
     "m.architecture_tokenizer, m.architecture_instruct_type, "
@@ -4683,6 +4744,60 @@ int strappy_db_list_openrouter_models(
     "ON s.key = '" STRAPPY_DB_SELECTED_OPENROUTER_MODEL_KEY "' "
     "ORDER BY CASE WHEN s.value = m.id THEN 0 ELSE 1 END, "
     "LOWER(COALESCE(NULLIF(m.name, ''), m.id)), m.id;";
+  static const char *filtered_sql =
+    "SELECT m.id, m.canonical_slug, m.hugging_face_id, m.name, "
+    "m.description, m.context_length, m.created, m.architecture_modality, "
+    "m.architecture_tokenizer, m.architecture_instruct_type, "
+    "m.pricing_prompt, m.pricing_completion, m.pricing_request, "
+    "m.pricing_image, m.pricing_audio, m.pricing_web_search, "
+    "m.pricing_internal_reasoning, m.pricing_input_cache_read, "
+    "m.pricing_input_cache_write, m.top_provider_context_length, "
+    "m.top_provider_max_completion_tokens, m.top_provider_is_moderated, "
+    "m.knowledge_cutoff, m.expiration_date, m.links_details, m.links_json, "
+    "m.reasoning_json, m.benchmarks_json, m.default_parameters_json, "
+    "m.per_request_limits_json, m.raw_json, m.fetched_at, "
+    "CASE WHEN s.value = m.id THEN 1 ELSE 0 END "
+    "FROM openrouter_models m "
+    "LEFT JOIN app_settings s "
+    "ON s.key = '" STRAPPY_DB_SELECTED_OPENROUTER_MODEL_KEY "' "
+    "WHERE (m.id LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.canonical_slug, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.hugging_face_id, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.name, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.description, '') LIKE ?1 ESCAPE '\\' "
+    "OR CAST(m.context_length AS TEXT) LIKE ?1 ESCAPE '\\' "
+    "OR CAST(m.created AS TEXT) LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.architecture_modality, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.architecture_tokenizer, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.architecture_instruct_type, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.pricing_prompt, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.pricing_completion, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.pricing_request, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.pricing_image, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.pricing_audio, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.pricing_web_search, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.pricing_internal_reasoning, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.pricing_input_cache_read, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.pricing_input_cache_write, '') LIKE ?1 ESCAPE '\\' "
+    "OR CAST(m.top_provider_context_length AS TEXT) LIKE ?1 ESCAPE '\\' "
+    "OR CAST(m.top_provider_max_completion_tokens AS TEXT) LIKE ?1 ESCAPE '\\' "
+    "OR CAST(m.top_provider_is_moderated AS TEXT) LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.knowledge_cutoff, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.expiration_date, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.links_details, '') LIKE ?1 ESCAPE '\\' "
+    "OR COALESCE(m.fetched_at, '') LIKE ?1 ESCAPE '\\' "
+    "OR EXISTS (SELECT 1 FROM openrouter_model_input_modalities im "
+    "WHERE im.model_id = m.id AND im.modality LIKE ?1 ESCAPE '\\') "
+    "OR EXISTS (SELECT 1 FROM openrouter_model_output_modalities om "
+    "WHERE om.model_id = m.id AND om.modality LIKE ?1 ESCAPE '\\') "
+    "OR EXISTS (SELECT 1 FROM openrouter_model_supported_parameters sp "
+    "WHERE sp.model_id = m.id AND sp.parameter LIKE ?1 ESCAPE '\\') "
+    "OR EXISTS (SELECT 1 FROM openrouter_model_supported_voices sv "
+    "WHERE sv.model_id = m.id AND sv.voice LIKE ?1 ESCAPE '\\')) "
+    "ORDER BY CASE WHEN s.value = m.id THEN 0 ELSE 1 END, "
+    "LOWER(COALESCE(NULLIF(m.name, ''), m.id)), m.id;";
+  const char *sql;
+  char *search_pattern;
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;
@@ -4693,11 +4808,23 @@ int strappy_db_list_openrouter_models(
   }
   strappy_openrouter_model_record_list_init(list);
 
+  sql = unfiltered_sql;
+  search_pattern = NULL;
+  if ((search_text != NULL) && (search_text[0] != '\0')) {
+    search_pattern = strappy_db_like_pattern_for_search(search_text, error_out);
+    if (search_pattern == NULL) {
+      return 0;
+    }
+    sql = filtered_sql;
+  }
+
   if (!strappy_db_open(db_path, &db, error_out)) {
+    free(search_pattern);
     return 0;
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
+    free(search_pattern);
     sqlite3_close(db);
     return 0;
   }
@@ -4708,8 +4835,24 @@ int strappy_db_list_openrouter_models(
     strappy_set_formatted_error(error_out,
                                 "Could not prepare OpenRouter model list: %s",
                                 sqlite3_errmsg(db));
+    free(search_pattern);
     sqlite3_close(db);
     return 0;
+  }
+
+  if (search_pattern != NULL) {
+    rc = sqlite3_bind_text(stmt, 1, search_pattern, -1, SQLITE_TRANSIENT);
+    if (rc != SQLITE_OK) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not bind OpenRouter model search: %s",
+                                  sqlite3_errmsg(db));
+      free(search_pattern);
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      return 0;
+    }
+    free(search_pattern);
+    search_pattern = NULL;
   }
 
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {

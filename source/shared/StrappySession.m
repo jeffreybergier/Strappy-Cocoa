@@ -1062,12 +1062,14 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   return YES;
 }
 
-+ (NSArray *)openRouterModelCatalogWithError:(NSError **)error
++ (NSArray *)openRouterModelCatalogMatchingSearchText:(NSString *)searchText
+                                                error:(NSError **)error
 {
   NSString *databasePath;
   strappy_openrouter_model_record_list list;
   NSMutableArray *models;
   char *strappyError;
+  const char *searchCString;
   size_t index;
 
   databasePath = [StrappySession sessionsDatabasePath];
@@ -1078,9 +1080,12 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 
   strappy_openrouter_model_record_list_init(&list);
   strappyError = NULL;
-  if (!strappy_db_list_openrouter_models([databasePath UTF8String],
-                                         &list,
-                                         &strappyError)) {
+  searchCString = ((searchText != nil) && ([searchText length] > 0U)) ?
+    [searchText UTF8String] : NULL;
+  if (!strappy_db_list_openrouter_models_matching([databasePath UTF8String],
+                                                  searchCString,
+                                                  &list,
+                                                  &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
@@ -1100,6 +1105,12 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 
   strappy_openrouter_model_record_list_destroy(&list);
   return models;
+}
+
++ (NSArray *)openRouterModelCatalogWithError:(NSError **)error
+{
+  return [StrappySession openRouterModelCatalogMatchingSearchText:nil
+                                                            error:error];
 }
 
 + (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error

@@ -30,6 +30,8 @@ extern NSString * const StrappySessionModelCatalogDidChangeNotification;
 + (NSArray *)sessionSummariesWithError:(NSError **)error;
 + (NSDictionary *)sessionSummaryForSessionIdentifier:(NSNumber *)sessionIdentifier
                                                error:(NSError **)error;
++ (NSArray *)openRouterModelCatalogMatchingSearchText:(NSString *)searchText
+                                                error:(NSError **)error;
 + (NSArray *)openRouterModelCatalogWithError:(NSError **)error;
 + (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error;
 + (BOOL)setSelectedOpenRouterModelIdentifier:(NSString *)modelIdentifier

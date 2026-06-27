@@ -8,6 +8,7 @@
   NSTextField         *apiEndpointField_;
   NSSecureTextField   *apiTokenField_;
   NSTextField         *apiTokenStatusLabel_;
+  NSSearchField       *modelSearchField_;
   NSTableView         *modelTableView_;
   NSButton            *fetchModelsButton_;
   NSProgressIndicator *modelProgressIndicator_;
@@ -18,8 +19,10 @@
   NSProgressIndicator *scanProgressIndicator_;
   NSArray             *modelRows_;
   NSArray             *databaseRows_;
+  NSString            *pendingOpenRouterModelIdentifier_;
   BOOL                 scanning_;
   BOOL                 refreshingModels_;
+  BOOL                 suppressingModelSelectionChange_;
 }
 
 - (id)init;

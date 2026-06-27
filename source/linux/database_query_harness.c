@@ -2589,6 +2589,48 @@ static int harness_run_openrouter_model_catalog_tests(
     return 0;
   }
 
+  error = NULL;
+  strappy_openrouter_model_record_list_init(&list);
+  if (!strappy_db_list_openrouter_models_matching(context->catalog_path,
+                                                  "alloy",
+                                                  &list,
+                                                  &error)) {
+    fprintf(stderr,
+            "Could not filter OpenRouter models: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_openrouter_model_record_list_destroy(&list);
+    return 0;
+  }
+  ok = (list.count == 1U) &&
+       (list.records[0].model_id != NULL) &&
+       (strcmp(list.records[0].model_id, "google/gemma-4-31b-it") == 0);
+  strappy_openrouter_model_record_list_destroy(&list);
+  if (!ok) {
+    fprintf(stderr, "OpenRouter model filtered list did not match expected values.\n");
+    return 0;
+  }
+
+  error = NULL;
+  strappy_openrouter_model_record_list_init(&list);
+  if (!strappy_db_list_openrouter_models_matching(context->catalog_path,
+                                                  "not-a-model",
+                                                  &list,
+                                                  &error)) {
+    fprintf(stderr,
+            "Could not filter OpenRouter models with no matches: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_openrouter_model_record_list_destroy(&list);
+    return 0;
+  }
+  ok = (list.count == 0U);
+  strappy_openrouter_model_record_list_destroy(&list);
+  if (!ok) {
+    fprintf(stderr, "OpenRouter model filtered list should have been empty.\n");
+    return 0;
+  }
+
   if (!harness_expect_catalog_integer(
         context->catalog_path,
         "SELECT COUNT(*) FROM openrouter_model_input_modalities "

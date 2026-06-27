@@ -219,6 +219,28 @@
 
 @end
 
+@implementation NSAlert (XPAppKit)
+
+- (void)XP_beginSheetModalForWindow:(NSWindow *)window
+                      modalDelegate:(id)delegate
+                     didEndSelector:(SEL)didEndSelector
+                        contextInfo:(void *)contextInfo
+{
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+  [self beginSheetModalForWindow:window
+                   modalDelegate:delegate
+                  didEndSelector:didEndSelector
+                     contextInfo:contextInfo];
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+}
+
+@end
+
 @implementation NSTableView (XPAppKit)
 
 - (void)XP_setFloatsGroupRows:(BOOL)floats

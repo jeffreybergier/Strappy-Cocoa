@@ -282,6 +282,11 @@ int strappy_db_list_session_context_messages(
 int strappy_db_save_openrouter_models_json(const char *db_path,
                                            const char *json,
                                            char **error_out);
+int strappy_db_list_openrouter_models_matching(
+  const char *db_path,
+  const char *search_text,
+  strappy_openrouter_model_record_list *list,
+  char **error_out);
 int strappy_db_list_openrouter_models(
   const char *db_path,
   strappy_openrouter_model_record_list *list,

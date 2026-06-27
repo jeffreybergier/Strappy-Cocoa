@@ -117,6 +117,13 @@
 - (void)XP_setToolTip:(NSString *)tip forSegment:(XPInteger)segment;
 @end
 
+@interface NSAlert (XPAppKit)
+- (void)XP_beginSheetModalForWindow:(NSWindow *)window
+                      modalDelegate:(id)delegate
+                     didEndSelector:(SEL)didEndSelector
+                        contextInfo:(void *)contextInfo;
+@end
+
 #if defined(MAC_OS_X_VERSION_MIN_REQUIRED) && MAC_OS_X_VERSION_MIN_REQUIRED >= 110000
   #define XPFontTextStyleBody       [NSFont preferredFontForTextStyle:NSFontTextStyleBody options:@{}]
   #define XPFontTextStyleBoldBody   [NSFont preferredFontForTextStyle:NSFontTextStyleHeadline options:@{}]
