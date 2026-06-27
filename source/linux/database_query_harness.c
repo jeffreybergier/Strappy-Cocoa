@@ -926,7 +926,9 @@ static int harness_run_tool_registry_tests(void)
         (strstr(tools_json,
                 STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET) != NULL) &&
         (strstr(tools_json,
-                STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH) != NULL) &&
+                STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH) != NULL) &&
+        (strstr(tools_json,
+                STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM) != NULL) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) &&
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) &&
         strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_USER_FACT_READ) &&
@@ -936,7 +938,8 @@ static int harness_run_tool_registry_tests(void)
         strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_CONTEXT_READ) &&
         strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
         strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM) &&
         !strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_QUERY) &&
         !strappy_tools_is_helper("helper_convert_dates") &&
         (strstr(tools_json, "memory_database_hint_read") == NULL) &&
@@ -1064,7 +1067,7 @@ static int harness_run_helper_fontawesome_tests(void)
 {
   if (!harness_expect_output_contains_without(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
         "{\"query\":\"warning\",\"limit\":5}",
         "\"shortcode\":\"[fa:triangle-exclamation]\"",
         "\"label\":\"Triangle Exclamation\"",
@@ -1074,7 +1077,7 @@ static int harness_run_helper_fontawesome_tests(void)
 
   if (!harness_expect_output_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
         "{\"query\":\"github\",\"style\":\"brands\",\"limit\":3}",
         "\"shortcode\":\"[fa:brands:github]\"",
         "\"style\":\"brands\"")) {
@@ -1083,9 +1086,35 @@ static int harness_run_helper_fontawesome_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_ICONS_SEARCH,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
         "{\"style\":\"duotone\"}",
         "style must be solid, regular, or brands")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        "{\"shortcodes\":[\"[fa:heart]\",\"database\",\"[fa:not-real]\"]}",
+        "\"available_count\":2",
+        "\"unavailable_count\":1")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        "{\"shortcodes\":[\"[fa:brands:github]\",\"[fa:regular:heart]\"]}",
+        "\"shortcode\":\"[fa:brands:github]\"",
+        "\"shortcode\":\"[fa:regular:heart]\"")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        "{\"shortcodes\":\"[fa:heart]\"}",
+        "requires a shortcodes array")) {
     return 0;
   }
 

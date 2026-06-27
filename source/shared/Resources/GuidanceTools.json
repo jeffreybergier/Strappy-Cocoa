@@ -120,8 +120,8 @@
     {
       "type": "function",
       "function": {
-        "name": "helper_fontawesome_icons_search",
-        "description": "Call helper_fontawesome_icons_search to find a Font Awesome shortcode by icon purpose or name.",
+        "name": "helper_fontawesome_shortcode_search",
+        "description": "Call helper_fontawesome_shortcode_search to find a Font Awesome shortcode by icon purpose or name.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -144,6 +144,31 @@
             }
           },
           "required": [],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "helper_fontawesome_shortcode_confirm",
+        "description": "Call helper_fontawesome_shortcode_confirm to confirm exact Font Awesome shortcodes before using them.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "shortcodes": {
+              "type": "array",
+              "description": "Font Awesome shortcodes to confirm. Items may be full shortcodes like [fa:heart] or [fa:brands:github], or bare names like heart.",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 32
+            }
+          },
+          "required": [
+            "shortcodes"
+          ],
           "additionalProperties": false
         }
       }
