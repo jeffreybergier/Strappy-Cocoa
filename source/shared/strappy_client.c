@@ -14,6 +14,10 @@
 #include <sys/time.h>
 #include <time.h>
 
+#define STRAPPY_CLIENT_GENERATION_METADATA_TIMEOUT_SECONDS 60L
+#define STRAPPY_CLIENT_NON_STREAMING_TIMEOUT_SECONDS 300L
+#define STRAPPY_CLIENT_STREAM_LOW_SPEED_TIME_SECONDS 60L
+
 typedef struct strappy_http_buffer {
   char *data;
   size_t length;
@@ -2862,7 +2866,9 @@ static void strappy_client_fetch_openrouter_generation_metadata(
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, strappy_client_write_callback);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response_buffer);
   curl_easy_setopt(curl, CURLOPT_USERAGENT, "Strappy/0.1");
-  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+  curl_easy_setopt(curl,
+                   CURLOPT_TIMEOUT,
+                   STRAPPY_CLIENT_GENERATION_METADATA_TIMEOUT_SECONDS);
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
   if ((strappy_cainfo_path != NULL) && (strappy_cainfo_path[0] != '\0')) {
     curl_easy_setopt(curl, CURLOPT_CAINFO, strappy_cainfo_path);
@@ -3017,7 +3023,9 @@ static int strappy_client_send_request_json(const strappy_config *config,
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, strappy_client_write_callback);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response_buffer);
   curl_easy_setopt(curl, CURLOPT_USERAGENT, "Strappy/0.1");
-  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
+  curl_easy_setopt(curl,
+                   CURLOPT_TIMEOUT,
+                   STRAPPY_CLIENT_NON_STREAMING_TIMEOUT_SECONDS);
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
   if ((strappy_cainfo_path != NULL) && (strappy_cainfo_path[0] != '\0')) {
     curl_easy_setopt(curl, CURLOPT_CAINFO, strappy_cainfo_path);
@@ -3135,7 +3143,9 @@ static int strappy_client_stream_request_json(const strappy_config *config,
   curl_easy_setopt(curl, CURLOPT_USERAGENT, "Strappy/0.1");
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
   curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
-  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 120L);
+  curl_easy_setopt(curl,
+                   CURLOPT_LOW_SPEED_TIME,
+                   STRAPPY_CLIENT_STREAM_LOW_SPEED_TIME_SECONDS);
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
   if ((strappy_cainfo_path != NULL) && (strappy_cainfo_path[0] != '\0')) {
     curl_easy_setopt(curl, CURLOPT_CAINFO, strappy_cainfo_path);
