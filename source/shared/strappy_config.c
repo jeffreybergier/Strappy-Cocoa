@@ -1,6 +1,9 @@
 #include "strappy_config.h"
 
 #include "strappy_core.h"
+#ifdef __APPLE__
+#include "strappy_keychain.h"
+#endif
 
 #include <ctype.h>
 #include <stdio.h>
@@ -101,6 +104,8 @@ static int strappy_config_apply_pair(strappy_config *config,
 static int strappy_config_load_file(strappy_config *config,
                                  const char *path,
                                  int path_is_required,
+                                 int *api_endpoint_configured,
+                                 int *api_token_configured,
                                  char **error_out)
 {
   FILE *file;
@@ -141,6 +146,15 @@ static int strappy_config_load_file(strappy_config *config,
       fclose(file);
       return 0;
     }
+    if (value[0] != '\0') {
+      if ((api_endpoint_configured != NULL) &&
+          (strcmp(key, "APIENDPOINT") == 0)) {
+        *api_endpoint_configured = 1;
+      } else if ((api_token_configured != NULL) &&
+                 (strcmp(key, "APITOKEN") == 0)) {
+        *api_token_configured = 1;
+      }
+    }
   }
 
   fclose(file);
@@ -148,6 +162,8 @@ static int strappy_config_load_file(strappy_config *config,
 }
 
 static int strappy_config_apply_environment(strappy_config *config,
+                                         int *api_endpoint_configured,
+                                         int *api_token_configured,
                                          char **error_out)
 {
   const char *value;
@@ -157,11 +173,19 @@ static int strappy_config_apply_environment(strappy_config *config,
       !strappy_config_apply_pair(config, "APIENDPOINT", value, error_out)) {
     return 0;
   }
+  if ((value != NULL) && (value[0] != '\0') &&
+      (api_endpoint_configured != NULL)) {
+    *api_endpoint_configured = 1;
+  }
 
   value = getenv("APITOKEN");
   if ((value != NULL) &&
       !strappy_config_apply_pair(config, "APITOKEN", value, error_out)) {
     return 0;
+  }
+  if ((value != NULL) && (value[0] != '\0') &&
+      (api_token_configured != NULL)) {
+    *api_token_configured = 1;
   }
 
   value = getenv("APIMODEL");
@@ -171,6 +195,45 @@ static int strappy_config_apply_environment(strappy_config *config,
   }
 
   return 1;
+}
+
+static int strappy_config_apply_keychain(strappy_config *config,
+                                         int needs_api_endpoint,
+                                         int needs_api_token,
+                                         char **error_out)
+{
+#ifdef __APPLE__
+  char *api_endpoint;
+  char *api_token;
+  int ok;
+
+  if ((config == NULL) || (!needs_api_endpoint && !needs_api_token)) {
+    return 1;
+  }
+
+  api_endpoint = needs_api_endpoint ? strappy_keychain_copy_api_endpoint() : NULL;
+  api_token = needs_api_token ? strappy_keychain_copy_api_token() : NULL;
+
+  ok = 1;
+  if ((api_endpoint != NULL) &&
+      !strappy_config_apply_pair(config, "APIENDPOINT", api_endpoint, error_out)) {
+    ok = 0;
+  }
+  if (ok && (api_token != NULL) &&
+      !strappy_config_apply_pair(config, "APITOKEN", api_token, error_out)) {
+    ok = 0;
+  }
+
+  free(api_endpoint);
+  free(api_token);
+  return ok;
+#else
+  (void)config;
+  (void)needs_api_endpoint;
+  (void)needs_api_token;
+  (void)error_out;
+  return 1;
+#endif
 }
 
 void strappy_config_init(strappy_config *config)
@@ -221,6 +284,8 @@ int strappy_config_load(strappy_config *config,
 {
   const char *path;
   int path_is_required;
+  int api_endpoint_configured;
+  int api_token_configured;
 
   if (config == NULL) {
     strappy_set_error(error_out, "strappy_config_load received no config.");
@@ -228,6 +293,8 @@ int strappy_config_load(strappy_config *config,
   }
 
   strappy_config_init(config);
+  api_endpoint_configured = 0;
+  api_token_configured = 0;
 
   if (!strappy_config_set_string(&config->api_endpoint,
                               STRAPPY_CONFIG_DEFAULT_API_ENDPOINT,
@@ -250,12 +317,28 @@ int strappy_config_load(strappy_config *config,
     path_is_required = 0;
   }
 
-  if (!strappy_config_load_file(config, path, path_is_required, error_out)) {
+  if (!strappy_config_load_file(config,
+                                path,
+                                path_is_required,
+                                &api_endpoint_configured,
+                                &api_token_configured,
+                                error_out)) {
     strappy_config_destroy(config);
     return 0;
   }
 
-  if (!strappy_config_apply_environment(config, error_out)) {
+  if (!strappy_config_apply_environment(config,
+                                        &api_endpoint_configured,
+                                        &api_token_configured,
+                                        error_out)) {
+    strappy_config_destroy(config);
+    return 0;
+  }
+
+  if (!strappy_config_apply_keychain(config,
+                                     !api_endpoint_configured,
+                                     !api_token_configured,
+                                     error_out)) {
     strappy_config_destroy(config);
     return 0;
   }

@@ -16,6 +16,24 @@
 "Sending prompt..." = "プロンプトを送信中...";
 "Prompt failed." = "プロンプトに失敗しました。";
 
+"Preferences" = "環境設定";
+"API Token" = "API トークン";
+"API Endpoint:" = "API エンドポイント:";
+"API Token:" = "API トークン:";
+"https://openrouter.ai/api/v1/chat/completions" = "https://openrouter.ai/api/v1/chat/completions";
+"Paste API token" = "API トークンを貼り付け";
+"Database Search" = "データベース検索";
+"System Prompt" = "システムプロンプト";
+"Scan Databases" = "データベースをスキャン";
+"APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set." = ".env またはプロセス環境の APIENDPOINT / APITOKEN が設定されている間はキーチェーンより優先されます。";
+"API credentials saved to keychain." = "API 認証情報をキーチェーンに保存しました。";
+"API credentials are available." = "API 認証情報を利用できます。";
+"No API credentials are saved in the keychain." = "キーチェーンに API 認証情報が保存されていません。";
+"API credentials are required" = "API 認証情報が必要です";
+"Enter an API endpoint and token before saving them to the keychain." = "キーチェーンに保存する前に API エンドポイントとトークンを入力してください。";
+"Could not save API credentials" = "API 認証情報を保存できませんでした";
+"The keychain refused the write." = "キーチェーンが書き込みを拒否しました。";
+
 "About Strappy" = "Strappy について";
 "Hide Strappy" = "Strappy を隠す";
 "Hide Others" = "ほかを隠す";

@@ -16,6 +16,24 @@
 "Sending prompt..." = "Sending prompt...";
 "Prompt failed." = "Prompt failed.";
 
+"Preferences" = "Preferences";
+"API Token" = "API Token";
+"API Endpoint:" = "API Endpoint:";
+"API Token:" = "API Token:";
+"https://openrouter.ai/api/v1/chat/completions" = "https://openrouter.ai/api/v1/chat/completions";
+"Paste API token" = "Paste API token";
+"Database Search" = "Database Search";
+"System Prompt" = "System Prompt";
+"Scan Databases" = "Scan Databases";
+"APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set." = "APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set.";
+"API credentials saved to keychain." = "API credentials saved to keychain.";
+"API credentials are available." = "API credentials are available.";
+"No API credentials are saved in the keychain." = "No API credentials are saved in the keychain.";
+"API credentials are required" = "API credentials are required";
+"Enter an API endpoint and token before saving them to the keychain." = "Enter an API endpoint and token before saving them to the keychain.";
+"Could not save API credentials" = "Could not save API credentials";
+"The keychain refused the write." = "The keychain refused the write.";
+
 "About Strappy" = "About Strappy";
 "Hide Strappy" = "Hide Strappy";
 "Hide Others" = "Hide Others";

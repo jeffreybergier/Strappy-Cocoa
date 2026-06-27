@@ -5,6 +5,9 @@
     <XPTableViewDataSource, XPTableViewDelegate> {
  @private
   NSTabView           *tabView_;
+  NSTextField         *apiEndpointField_;
+  NSSecureTextField   *apiTokenField_;
+  NSTextField         *apiTokenStatusLabel_;
   NSTextView          *systemPromptTextView_;
   NSTableView         *databaseTableView_;
   NSButton            *scanButton_;

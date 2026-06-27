@@ -1,6 +1,8 @@
 #import "PreferencesWindowController.h"
 
 #import "FileScanner.h"
+#import "strappy_config.h"
+#import "strappy_keychain.h"
 
 static const CGFloat kStrappyPreferencesWidth = 720.0;
 static const CGFloat kStrappyPreferencesHeight = 480.0;
@@ -121,8 +123,11 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
 
 @interface PreferencesWindowController ()
 - (void)buildContentView;
+- (NSView *)apiTokenPaneWithFrame:(NSRect)frame;
 - (NSView *)systemPromptPaneWithFrame:(NSRect)frame;
 - (NSView *)databaseScanningPaneWithFrame:(NSRect)frame;
+- (NSTextField *)labelWithFrame:(NSRect)frame text:(NSString *)text;
+- (void)refreshAPITokenStatusWithSaved:(BOOL)saved;
 - (void)loadSystemPrompt;
 - (void)loadCatalogedDatabases;
 - (void)setScanning:(BOOL)scanning;
@@ -176,6 +181,7 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
 - (void)buildContentView
 {
   NSView *contentView;
+  NSTabViewItem *apiTokenItem;
   NSTabViewItem *systemPromptItem;
   NSTabViewItem *databaseItem;
   NSRect bounds;
@@ -193,19 +199,137 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
                          bounds.size.width - 48.0,
                          bounds.size.height - 72.0);
 
+  apiTokenItem =
+    [[[NSTabViewItem alloc] initWithIdentifier:@"api_token"] autorelease];
+  [apiTokenItem setLabel:NSLocalizedString(@"API Token", nil)];
+  [apiTokenItem setView:[self apiTokenPaneWithFrame:paneFrame]];
+  [tabView_ addTabViewItem:apiTokenItem];
+
+  databaseItem =
+    [[[NSTabViewItem alloc] initWithIdentifier:@"databases"] autorelease];
+  [databaseItem setLabel:NSLocalizedString(@"Database Search", nil)];
+  [databaseItem setView:[self databaseScanningPaneWithFrame:paneFrame]];
+  [tabView_ addTabViewItem:databaseItem];
+
   systemPromptItem =
     [[[NSTabViewItem alloc] initWithIdentifier:@"system_prompt"] autorelease];
   [systemPromptItem setLabel:NSLocalizedString(@"System Prompt", nil)];
   [systemPromptItem setView:[self systemPromptPaneWithFrame:paneFrame]];
   [tabView_ addTabViewItem:systemPromptItem];
 
-  databaseItem =
-    [[[NSTabViewItem alloc] initWithIdentifier:@"databases"] autorelease];
-  [databaseItem setLabel:NSLocalizedString(@"Databases", nil)];
-  [databaseItem setView:[self databaseScanningPaneWithFrame:paneFrame]];
-  [tabView_ addTabViewItem:databaseItem];
-
   [contentView addSubview:tabView_];
+}
+
+- (NSView *)apiTokenPaneWithFrame:(NSRect)frame
+{
+  NSView *view;
+  NSTextField *endpointLabel;
+  NSTextField *tokenLabel;
+  NSTextField *hintLabel;
+  NSButton *saveButton;
+  NSString *apiEndpoint;
+  NSString *apiToken;
+  NSRect bounds;
+  CGFloat labelWidth;
+  CGFloat topY;
+  CGFloat tokenY;
+  CGFloat fieldX;
+  CGFloat fieldWidth;
+
+  view = [[[NSView alloc] initWithFrame:frame] autorelease];
+  [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+
+  bounds = [view bounds];
+  labelWidth = 104.0;
+  topY = NSMaxY(bounds) - kStrappyPreferencesInset - 28.0;
+  tokenY = topY - 34.0;
+  fieldX = kStrappyPreferencesInset + labelWidth;
+  fieldWidth = NSWidth(bounds) - fieldX - kStrappyPreferencesInset;
+
+  endpointLabel = [self labelWithFrame:NSMakeRect(kStrappyPreferencesInset,
+                                                  topY + 3.0,
+                                                  labelWidth - 8.0,
+                                                  20.0)
+                                  text:NSLocalizedString(@"API Endpoint:", nil)];
+  [view addSubview:endpointLabel];
+
+  apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
+  if ([apiEndpoint length] == 0U) {
+    apiEndpoint = [NSString stringWithUTF8String:STRAPPY_CONFIG_DEFAULT_API_ENDPOINT];
+  }
+  apiEndpointField_ =
+    [[NSTextField alloc] initWithFrame:NSMakeRect(fieldX,
+                                                  topY,
+                                                  fieldWidth,
+                                                  24.0)];
+  [apiEndpointField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
+  [apiEndpointField_ setStringValue:(apiEndpoint != nil) ? apiEndpoint : @""];
+  [[apiEndpointField_ cell] setPlaceholderString:
+    NSLocalizedString(@"https://openrouter.ai/api/v1/chat/completions", nil)];
+  [view addSubview:apiEndpointField_];
+
+  tokenLabel = [self labelWithFrame:NSMakeRect(kStrappyPreferencesInset,
+                                               tokenY + 3.0,
+                                               labelWidth - 8.0,
+                                               20.0)
+                               text:NSLocalizedString(@"API Token:", nil)];
+  [view addSubview:tokenLabel];
+
+  apiToken = [[StrappyKeychain sharedKeychain] apiToken];
+  apiTokenField_ =
+    [[NSSecureTextField alloc] initWithFrame:NSMakeRect(fieldX,
+                                                        tokenY,
+                                                        fieldWidth,
+                                                        24.0)];
+  [apiTokenField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
+  [apiTokenField_ setStringValue:(apiToken != nil) ? apiToken : @""];
+  [[apiTokenField_ cell] setPlaceholderString:
+    NSLocalizedString(@"Paste API token", nil)];
+  [view addSubview:apiTokenField_];
+
+  hintLabel = [self labelWithFrame:NSMakeRect(fieldX,
+                                              tokenY - 46.0,
+                                              fieldWidth,
+                                              38.0)
+                              text:NSLocalizedString(
+    @"APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set.",
+    nil)];
+  [hintLabel setFont:[NSFont systemFontOfSize:11.0]];
+  [hintLabel setTextColor:[NSColor disabledControlTextColor]];
+  [hintLabel setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
+  [[hintLabel cell] setWraps:YES];
+  [view addSubview:hintLabel];
+
+  saveButton = [[[NSButton alloc]
+    initWithFrame:NSMakeRect(NSMaxX(bounds) - kStrappyPreferencesInset - 96.0,
+                             kStrappyPreferencesInset,
+                             96.0,
+                             24.0)] autorelease];
+  [saveButton setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
+  [saveButton setTitle:NSLocalizedString(@"Save", nil)];
+  [saveButton setBezelStyle:XPBezelStyleRounded];
+  [saveButton setButtonType:XPButtonTypeMomentaryLight];
+  [saveButton setKeyEquivalent:@"\r"];
+  [saveButton setTarget:self];
+  [saveButton setAction:@selector(saveAPICredentials:)];
+  [view addSubview:saveButton];
+
+  apiTokenStatusLabel_ =
+    [[NSTextField alloc] initWithFrame:NSMakeRect(kStrappyPreferencesInset,
+                                                  kStrappyPreferencesInset + 2.0,
+                                                  NSWidth(bounds) - 132.0,
+                                                  20.0)];
+  [apiTokenStatusLabel_ setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
+  [apiTokenStatusLabel_ setBezeled:NO];
+  [apiTokenStatusLabel_ setDrawsBackground:NO];
+  [apiTokenStatusLabel_ setEditable:NO];
+  [apiTokenStatusLabel_ setSelectable:NO];
+  [apiTokenStatusLabel_ setFont:[NSFont systemFontOfSize:11.0]];
+  [apiTokenStatusLabel_ setTextColor:[NSColor disabledControlTextColor]];
+  [view addSubview:apiTokenStatusLabel_];
+  [self refreshAPITokenStatusWithSaved:NO];
+
+  return view;
 }
 
 - (NSView *)systemPromptPaneWithFrame:(NSRect)frame
@@ -359,6 +483,38 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
   return view;
 }
 
+- (NSTextField *)labelWithFrame:(NSRect)frame text:(NSString *)text
+{
+  NSTextField *label;
+
+  label = [[[NSTextField alloc] initWithFrame:frame] autorelease];
+  [label setStringValue:(text != nil) ? text : @""];
+  [label setBezeled:NO];
+  [label setDrawsBackground:NO];
+  [label setEditable:NO];
+  [label setSelectable:NO];
+  [label setFont:[NSFont systemFontOfSize:13.0]];
+  return label;
+}
+
+- (void)refreshAPITokenStatusWithSaved:(BOOL)saved
+{
+  NSString *message;
+
+  if (apiTokenStatusLabel_ == nil) {
+    return;
+  }
+
+  if (saved) {
+    message = NSLocalizedString(@"API credentials saved to keychain.", nil);
+  } else if ([[StrappyKeychain sharedKeychain] hasAPICredentials]) {
+    message = NSLocalizedString(@"API credentials are available.", nil);
+  } else {
+    message = NSLocalizedString(@"No API credentials are saved in the keychain.", nil);
+  }
+  [apiTokenStatusLabel_ setStringValue:message];
+}
+
 - (void)loadSystemPrompt
 {
   NSString *path;
@@ -404,6 +560,41 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
   } else {
     [scanProgressIndicator_ stopAnimation:self];
   }
+}
+
+- (void)saveAPICredentials:(id)sender
+{
+  NSString *apiEndpoint;
+  NSString *apiToken;
+  NSAlert *alert;
+
+  (void)sender;
+  apiEndpoint = [[apiEndpointField_ stringValue]
+    stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  apiToken = [[apiTokenField_ stringValue]
+    stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if (([apiEndpoint length] == 0U) || ([apiToken length] == 0U)) {
+    alert = [[[NSAlert alloc] init] autorelease];
+    [alert setMessageText:NSLocalizedString(@"API credentials are required", nil)];
+    [alert setInformativeText:NSLocalizedString(
+      @"Enter an API endpoint and token before saving them to the keychain.", nil)];
+    [alert runModal];
+    return;
+  }
+
+  if (![[StrappyKeychain sharedKeychain] saveAPIEndpoint:apiEndpoint
+                                                   token:apiToken]) {
+    alert = [[[NSAlert alloc] init] autorelease];
+    [alert setMessageText:NSLocalizedString(@"Could not save API credentials", nil)];
+    [alert setInformativeText:NSLocalizedString(
+      @"The keychain refused the write.", nil)];
+    [alert runModal];
+    return;
+  }
+
+  [apiEndpointField_ setStringValue:apiEndpoint];
+  [apiTokenField_ setStringValue:apiToken];
+  [self refreshAPITokenStatusWithSaved:YES];
 }
 
 - (void)scanDatabases:(id)sender
@@ -703,6 +894,9 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
 - (void)dealloc
 {
   [tabView_ release];
+  [apiEndpointField_ release];
+  [apiTokenField_ release];
+  [apiTokenStatusLabel_ release];
   [systemPromptTextView_ release];
   [databaseTableView_ release];
   [scanButton_ release];
