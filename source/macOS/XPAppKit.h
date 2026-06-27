@@ -33,8 +33,10 @@
 
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101200
   #define XPTextAlignmentCenter NSTextAlignmentCenter
+  #define XPTextAlignmentRight  NSTextAlignmentRight
 #else
   #define XPTextAlignmentCenter NSCenterTextAlignment
+  #define XPTextAlignmentRight  NSRightTextAlignment
 #endif
 
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101000

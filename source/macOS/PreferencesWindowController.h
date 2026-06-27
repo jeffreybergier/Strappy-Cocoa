@@ -9,7 +9,6 @@
   NSTableView         *databaseTableView_;
   NSButton            *scanButton_;
   NSProgressIndicator *scanProgressIndicator_;
-  NSTextField         *scanStatusField_;
   NSArray             *databaseRows_;
   BOOL                 scanning_;
 }
