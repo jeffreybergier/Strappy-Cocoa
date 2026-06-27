@@ -98,6 +98,9 @@ House style for Strappy source:
     Linux environment has the required dependencies. Keep the harnesses updated
     as new shared behavior is added or existing behavior changes, so regressions
     can be caught without waiting for full Apple-target builds.
+18. SQLite `PRAGMA user_version` is intentionally pinned at `1`. Do not
+    increase it or add migration steps without explicit user permission; this
+    database has not shipped yet.
 
 The iOS App is a bit special because it's not sandboxed. It must be installed
 via .deb file, not .ipa file so that it can scan the whole filesystem for

@@ -232,6 +232,112 @@ static int harness_expect_catalog_sql_ok(const char *database_path,
   return 1;
 }
 
+static int harness_expect_catalog_user_version(const char *database_path,
+                                               int expected_version)
+{
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+  int version;
+
+  db = NULL;
+  rc = sqlite3_open_v2(database_path, &db, SQLITE_OPEN_READWRITE, NULL);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr,
+            "Could not open catalog for user_version check: %s\n",
+            (db != NULL) ? sqlite3_errmsg(db) : "unknown");
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, "PRAGMA user_version;", -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr, "Could not prepare user_version check: %s\n", sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_ROW) {
+    fprintf(stderr, "Could not read user_version.\n");
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  version = sqlite3_column_int(stmt, 0);
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  if (version != expected_version) {
+    fprintf(stderr,
+            "Expected user_version %d, got %d.\n",
+            expected_version,
+            version);
+    return 0;
+  }
+
+  return 1;
+}
+
+static int harness_expect_catalog_integer(const char *database_path,
+                                          const char *sql,
+                                          long long expected,
+                                          const char *description)
+{
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+  long long value;
+
+  db = NULL;
+  rc = sqlite3_open_v2(database_path, &db, SQLITE_OPEN_READWRITE, NULL);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr,
+            "Could not open catalog for integer check: %s\n",
+            (db != NULL) ? sqlite3_errmsg(db) : "unknown");
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr,
+            "Could not prepare %s check: %s\n",
+            description,
+            sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_ROW) {
+    fprintf(stderr, "Could not read %s check.\n", description);
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  value = (long long)sqlite3_column_int64(stmt, 0);
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  if (value != expected) {
+    fprintf(stderr,
+            "Expected %s to be %lld, got %lld.\n",
+            description,
+            expected,
+            value);
+    return 0;
+  }
+
+  return 1;
+}
+
 static int harness_run_fresh_catalog_schema_tests(
   const harness_context *context)
 {
@@ -250,7 +356,8 @@ static int harness_run_fresh_catalog_schema_tests(
     return 0;
   }
 
-  return harness_expect_catalog_sql_ok(
+  return harness_expect_catalog_user_version(context->catalog_path, 1) &&
+         harness_expect_catalog_sql_ok(
            context->catalog_path,
            "SELECT id, name, prompt, response, model, http_status, "
            "streaming_enabled, created_at FROM sessions LIMIT 0;",
@@ -276,7 +383,46 @@ static int harness_run_fresh_catalog_schema_tests(
            "device, inode, is_valid_sqlite, validation_error, scan_status, "
            "user_decision, scan_root, first_seen_at, last_seen_at, "
            "last_scanned_at FROM discovered_databases LIMIT 0;",
-           "discovered_databases columns");
+           "discovered_databases columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT key, value, updated_at FROM app_settings LIMIT 0;",
+           "app_settings columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT id, canonical_slug, hugging_face_id, name, description, "
+           "context_length, created, architecture_modality, "
+           "architecture_tokenizer, architecture_instruct_type, "
+           "pricing_prompt, pricing_completion, pricing_request, "
+           "pricing_image, pricing_audio, pricing_web_search, "
+           "pricing_internal_reasoning, "
+           "pricing_input_cache_read, pricing_input_cache_write, "
+           "top_provider_context_length, top_provider_max_completion_tokens, "
+           "top_provider_is_moderated, knowledge_cutoff, expiration_date, "
+           "links_details, links_json, reasoning_json, benchmarks_json, "
+           "default_parameters_json, per_request_limits_json, raw_json, fetched_at "
+           "FROM openrouter_models LIMIT 0;",
+           "openrouter_models columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT model_id, modality "
+           "FROM openrouter_model_input_modalities LIMIT 0;",
+           "openrouter_model_input_modalities columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT model_id, modality "
+           "FROM openrouter_model_output_modalities LIMIT 0;",
+           "openrouter_model_output_modalities columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT model_id, parameter "
+           "FROM openrouter_model_supported_parameters LIMIT 0;",
+           "openrouter_model_supported_parameters columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT model_id, voice "
+           "FROM openrouter_model_supported_voices LIMIT 0;",
+           "openrouter_model_supported_voices columns");
 }
 
 static char *harness_read_file(const char *path)
@@ -2311,6 +2457,212 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
   return ok;
 }
 
+static int harness_run_openrouter_model_catalog_tests(
+  const harness_context *context)
+{
+  static const char *models_json =
+    "{"
+    "\"data\":["
+    "{"
+    "\"id\":\"google/gemma-4-31b-it\","
+    "\"canonical_slug\":\"google/gemma-4-31b-it\","
+    "\"hugging_face_id\":\"google/gemma-4-31b-it\","
+    "\"name\":\"Gemma 4 31B IT\","
+    "\"description\":\"Harness model\","
+    "\"knowledge_cutoff\":\"2025-01\","
+    "\"expiration_date\":null,"
+    "\"context_length\":131072,"
+    "\"created\":1760000000,"
+    "\"architecture\":{"
+    "\"modality\":\"text->text\","
+    "\"tokenizer\":\"Gemini\","
+    "\"instruct_type\":\"gemma\","
+    "\"input_modalities\":[\"text\"],"
+    "\"output_modalities\":[\"text\"]"
+    "},"
+    "\"pricing\":{"
+    "\"prompt\":\"0.00000015\","
+    "\"completion\":\"0.00000045\","
+    "\"request\":\"0\","
+    "\"image\":\"0\","
+    "\"audio\":\"0\","
+    "\"web_search\":\"0\","
+    "\"internal_reasoning\":\"0\","
+    "\"input_cache_read\":\"0.00000001\","
+    "\"input_cache_write\":\"0.00000002\""
+    "},"
+    "\"top_provider\":{"
+    "\"context_length\":131072,"
+    "\"max_completion_tokens\":8192,"
+    "\"is_moderated\":true"
+    "},"
+    "\"default_parameters\":{\"temperature\":0.2},"
+    "\"per_request_limits\":{\"prompt_tokens\":\"1000\"},"
+    "\"links\":{\"details\":\"https://openrouter.ai/models/google/gemma\"},"
+    "\"reasoning\":{\"effort\":\"medium\"},"
+    "\"benchmarks\":{\"mmlu\":0.91},"
+    "\"supported_parameters\":[\"tools\",\"temperature\"],"
+    "\"supported_voices\":[\"alloy\"]"
+    "},"
+    "{"
+    "\"id\":\"openai/gpt-4.1-mini\","
+    "\"name\":\"GPT 4.1 Mini\","
+    "\"context_length\":1048576,"
+    "\"architecture\":{\"input_modalities\":[\"text\",\"image\"],"
+    "\"output_modalities\":[\"text\"]},"
+    "\"pricing\":{\"prompt\":\"0.0000004\",\"completion\":\"0.0000016\"},"
+    "\"supported_parameters\":[\"tools\"]"
+    "}"
+    "]"
+    "}";
+  strappy_openrouter_model_record_list list;
+  char *selected_model;
+  char *error;
+  size_t index;
+  int found_gemma;
+  int found_openai;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  error = NULL;
+  if (!strappy_db_save_openrouter_models_json(context->catalog_path,
+                                              models_json,
+                                              &error)) {
+    fprintf(stderr,
+            "Could not save OpenRouter model JSON: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  strappy_openrouter_model_record_list_init(&list);
+  if (!strappy_db_list_openrouter_models(context->catalog_path, &list, &error)) {
+    fprintf(stderr,
+            "Could not list OpenRouter models: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_openrouter_model_record_list_destroy(&list);
+    return 0;
+  }
+
+  found_gemma = 0;
+  found_openai = 0;
+  for (index = 0U; index < list.count; index++) {
+    strappy_openrouter_model_record *record;
+
+    record = &list.records[index];
+    if ((record->model_id != NULL) &&
+        (strcmp(record->model_id, "google/gemma-4-31b-it") == 0)) {
+      found_gemma =
+        (record->name != NULL) &&
+        (strcmp(record->name, "Gemma 4 31B IT") == 0) &&
+        (record->context_length == 131072LL) &&
+        (record->top_provider_max_completion_tokens == 8192LL) &&
+        record->top_provider_is_moderated &&
+        (record->pricing_prompt != NULL) &&
+        (strcmp(record->pricing_prompt, "0.00000015") == 0) &&
+        (record->knowledge_cutoff != NULL) &&
+        (strcmp(record->knowledge_cutoff, "2025-01") == 0) &&
+        (record->links_details != NULL) &&
+        (strstr(record->links_details, "openrouter.ai") != NULL) &&
+        (record->reasoning_json != NULL) &&
+        (strstr(record->reasoning_json, "medium") != NULL) &&
+        (record->benchmarks_json != NULL) &&
+        (strstr(record->benchmarks_json, "mmlu") != NULL) &&
+        (record->default_parameters_json != NULL) &&
+        (strstr(record->default_parameters_json, "temperature") != NULL) &&
+        (record->raw_json != NULL) &&
+        (strstr(record->raw_json, "Harness model") != NULL);
+    }
+    if ((record->model_id != NULL) &&
+        (strcmp(record->model_id, "openai/gpt-4.1-mini") == 0)) {
+      found_openai = 1;
+    }
+  }
+  ok = (list.count == 2U) && found_gemma && found_openai;
+  strappy_openrouter_model_record_list_destroy(&list);
+  if (!ok) {
+    fprintf(stderr, "OpenRouter model rows did not match expected values.\n");
+    return 0;
+  }
+
+  if (!harness_expect_catalog_integer(
+        context->catalog_path,
+        "SELECT COUNT(*) FROM openrouter_model_input_modalities "
+        "WHERE model_id = 'openai/gpt-4.1-mini' AND modality = 'image';",
+        1LL,
+        "OpenRouter input modality count") ||
+      !harness_expect_catalog_integer(
+        context->catalog_path,
+        "SELECT COUNT(*) FROM openrouter_model_supported_parameters "
+        "WHERE model_id = 'google/gemma-4-31b-it' AND parameter = 'tools';",
+        1LL,
+        "OpenRouter supported parameter count") ||
+      !harness_expect_catalog_integer(
+        context->catalog_path,
+        "SELECT COUNT(*) FROM openrouter_model_supported_voices "
+        "WHERE model_id = 'google/gemma-4-31b-it' AND voice = 'alloy';",
+        1LL,
+        "OpenRouter supported voice count")) {
+    return 0;
+  }
+
+  error = NULL;
+  if (!strappy_db_set_selected_openrouter_model(context->catalog_path,
+                                                "openai/gpt-4.1-mini",
+                                                &error)) {
+    fprintf(stderr,
+            "Could not set selected OpenRouter model: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  selected_model = NULL;
+  if (!strappy_db_get_selected_openrouter_model(context->catalog_path,
+                                                &selected_model,
+                                                &error)) {
+    fprintf(stderr,
+            "Could not get selected OpenRouter model: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  ok = (selected_model != NULL) &&
+       (strcmp(selected_model, "openai/gpt-4.1-mini") == 0);
+  strappy_free_string(selected_model);
+  if (!ok) {
+    fprintf(stderr, "Selected OpenRouter model did not persist.\n");
+    return 0;
+  }
+
+  strappy_openrouter_model_record_list_init(&list);
+  if (!strappy_db_list_openrouter_models(context->catalog_path, &list, &error)) {
+    fprintf(stderr,
+            "Could not list selected OpenRouter models: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_openrouter_model_record_list_destroy(&list);
+    return 0;
+  }
+
+  ok = (list.count == 2U) &&
+       (list.records[0].model_id != NULL) &&
+       (strcmp(list.records[0].model_id, "openai/gpt-4.1-mini") == 0) &&
+       list.records[0].selected;
+  strappy_openrouter_model_record_list_destroy(&list);
+  if (!ok) {
+    fprintf(stderr, "Selected OpenRouter model was not listed first.\n");
+    return 0;
+  }
+
+  return 1;
+}
+
 int main(void)
 {
   harness_context context;
@@ -2330,6 +2682,7 @@ int main(void)
        harness_run_helper_info_tests(&context) &&
        harness_run_empty_session_storage_tests(&context) &&
        harness_run_session_turn_storage_tests(&context) &&
+       harness_run_openrouter_model_catalog_tests(&context) &&
        harness_run_sms_guidance_tests(&context) &&
        harness_run_mail_guidance_tests(&context);
 

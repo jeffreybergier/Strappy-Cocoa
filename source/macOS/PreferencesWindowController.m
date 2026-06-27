@@ -1,6 +1,7 @@
 #import "PreferencesWindowController.h"
 
 #import "FileScanner.h"
+#import "StrappySession.h"
 #import "strappy_config.h"
 #import "strappy_keychain.h"
 
@@ -93,6 +94,50 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
   return directory;
 }
 
+static NSString *StrappyStringForModelRow(NSDictionary *row, NSString *key)
+{
+  NSString *value;
+
+  value = [row objectForKey:key];
+  if (![value isKindOfClass:[NSString class]]) {
+    return @"";
+  }
+  return value;
+}
+
+static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
+{
+  NSString *name;
+
+  name = StrappyStringForModelRow(row, @"name");
+  if ([name length] > 0U) {
+    return name;
+  }
+  return StrappyStringForModelRow(row, @"id");
+}
+
+static NSString *StrappyModelNumberString(NSDictionary *row, NSString *key)
+{
+  NSNumber *value;
+
+  value = [row objectForKey:key];
+  if (![value isKindOfClass:[NSNumber class]] || ([value longLongValue] <= 0LL)) {
+    return @"";
+  }
+  return [value stringValue];
+}
+
+static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
+{
+  NSString *value;
+
+  value = StrappyStringForModelRow(row, key);
+  if ([value length] == 0U) {
+    return @"";
+  }
+  return value;
+}
+
 @interface StrappyDatabaseTableView : NSTableView
 @end
 
@@ -124,11 +169,17 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
 @interface PreferencesWindowController ()
 - (void)buildContentView;
 - (NSView *)apiTokenPaneWithFrame:(NSRect)frame;
+- (NSView *)modelPaneWithFrame:(NSRect)frame;
 - (NSView *)systemPromptPaneWithFrame:(NSRect)frame;
 - (NSView *)databaseScanningPaneWithFrame:(NSRect)frame;
 - (NSTextField *)labelWithFrame:(NSRect)frame text:(NSString *)text;
 - (void)refreshAPITokenStatusWithSaved:(BOOL)saved;
 - (void)loadSystemPrompt;
+- (void)loadOpenRouterModels;
+- (void)setModelCatalogRefreshing:(BOOL)refreshing;
+- (void)modelCatalogRefreshDidStart:(NSNotification *)notification;
+- (void)modelCatalogRefreshDidFinish:(NSNotification *)notification;
+- (void)modelCatalogDidChange:(NSNotification *)notification;
 - (void)loadCatalogedDatabases;
 - (void)setScanning:(BOOL)scanning;
 - (void)scanDatabasesInBackground:(NSString *)rootPath;
@@ -167,9 +218,27 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
   [window setFrameAutosaveName:kStrappyPreferencesFrameAutosaveName];
 
   if ((self = [super initWithWindow:window])) {
+    modelRows_ = [[NSArray alloc] init];
     databaseRows_ = [[NSArray alloc] init];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(modelCatalogRefreshDidStart:)
+             name:StrappySessionModelCatalogRefreshDidStartNotification
+           object:nil];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(modelCatalogRefreshDidFinish:)
+             name:StrappySessionModelCatalogRefreshDidFinishNotification
+           object:nil];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(modelCatalogDidChange:)
+             name:StrappySessionModelCatalogDidChangeNotification
+           object:nil];
     [self buildContentView];
     [self loadSystemPrompt];
+    [self setModelCatalogRefreshing:[StrappySession isModelCatalogRefreshInFlight]];
+    [self loadOpenRouterModels];
     [self setScanning:NO];
     [self loadCatalogedDatabases];
   }
@@ -182,6 +251,7 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
 {
   NSView *contentView;
   NSTabViewItem *apiTokenItem;
+  NSTabViewItem *modelItem;
   NSTabViewItem *systemPromptItem;
   NSTabViewItem *databaseItem;
   NSRect bounds;
@@ -204,6 +274,12 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
   [apiTokenItem setLabel:NSLocalizedString(@"API Token", nil)];
   [apiTokenItem setView:[self apiTokenPaneWithFrame:paneFrame]];
   [tabView_ addTabViewItem:apiTokenItem];
+
+  modelItem =
+    [[[NSTabViewItem alloc] initWithIdentifier:@"models"] autorelease];
+  [modelItem setLabel:NSLocalizedString(@"Model", nil)];
+  [modelItem setView:[self modelPaneWithFrame:paneFrame]];
+  [tabView_ addTabViewItem:modelItem];
 
   databaseItem =
     [[[NSTabViewItem alloc] initWithIdentifier:@"databases"] autorelease];
@@ -329,6 +405,159 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
   [view addSubview:apiTokenStatusLabel_];
   [self refreshAPITokenStatusWithSaved:NO];
 
+  return view;
+}
+
+- (NSView *)modelPaneWithFrame:(NSRect)frame
+{
+  NSView *view;
+  NSScrollView *scrollView;
+  NSTableColumn *selectedColumn;
+  NSTableColumn *nameColumn;
+  NSTableColumn *idColumn;
+  NSTableColumn *contextColumn;
+  NSTableColumn *promptColumn;
+  NSTableColumn *completionColumn;
+  NSButtonCell *selectedCell;
+  NSTextFieldCell *textCell;
+  NSTextFieldCell *rightCell;
+  CGFloat topY;
+
+  view = [[[NSView alloc] initWithFrame:frame] autorelease];
+  [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+  topY = NSMaxY([view bounds]) - kStrappyPreferencesInset - 24.0;
+
+  fetchModelsButton_ = [[NSButton alloc]
+      initWithFrame:NSMakeRect(kStrappyPreferencesInset, topY, 116.0, 24.0)];
+  [fetchModelsButton_ setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
+  [fetchModelsButton_ setTitle:NSLocalizedString(@"Fetch Models", nil)];
+  [fetchModelsButton_ setBezelStyle:XPBezelStyleRounded];
+  [fetchModelsButton_ setButtonType:XPButtonTypeMomentaryLight];
+  [fetchModelsButton_ setToolTip:
+    NSLocalizedString(@"Refresh the OpenRouter model list.", nil)];
+  [fetchModelsButton_ setTarget:self];
+  [fetchModelsButton_ setAction:@selector(refreshModels:)];
+  [view addSubview:fetchModelsButton_];
+
+  modelProgressIndicator_ = [[NSProgressIndicator alloc]
+      initWithFrame:NSMakeRect(NSMaxX([fetchModelsButton_ frame]) + 10.0,
+                               topY + 2.0,
+                               20.0,
+                               20.0)];
+  [modelProgressIndicator_ setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
+  [modelProgressIndicator_ setStyle:XPProgressIndicatorStyleSpinning];
+  [modelProgressIndicator_ setIndeterminate:YES];
+  [modelProgressIndicator_ setDisplayedWhenStopped:NO];
+  [view addSubview:modelProgressIndicator_];
+
+  modelStatusLabel_ =
+    [[NSTextField alloc] initWithFrame:NSMakeRect(NSMaxX([modelProgressIndicator_ frame]) + 8.0,
+                                                  topY + 3.0,
+                                                  NSWidth([view bounds]) -
+                                                    NSMaxX([modelProgressIndicator_ frame]) -
+                                                    20.0,
+                                                  20.0)];
+  [modelStatusLabel_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
+  [modelStatusLabel_ setBezeled:NO];
+  [modelStatusLabel_ setDrawsBackground:NO];
+  [modelStatusLabel_ setEditable:NO];
+  [modelStatusLabel_ setSelectable:NO];
+  [modelStatusLabel_ setFont:[NSFont systemFontOfSize:11.0]];
+  [modelStatusLabel_ setTextColor:[NSColor disabledControlTextColor]];
+  [view addSubview:modelStatusLabel_];
+
+  scrollView = [[[NSScrollView alloc]
+      initWithFrame:NSMakeRect(kStrappyPreferencesInset,
+                               kStrappyPreferencesInset,
+                               NSWidth([view bounds]) - (kStrappyPreferencesInset * 2.0),
+                               topY - (kStrappyPreferencesInset * 2.0))]
+      autorelease];
+  [scrollView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+  [scrollView setBorderType:NSBezelBorder];
+  [scrollView setHasVerticalScroller:YES];
+  [scrollView setHasHorizontalScroller:YES];
+  [scrollView setAutohidesScrollers:YES];
+
+  modelTableView_ =
+    [[NSTableView alloc] initWithFrame:[[scrollView contentView] bounds]];
+  [modelTableView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+  [modelTableView_ setDataSource:self];
+  [modelTableView_ setDelegate:self];
+  [modelTableView_ setAllowsMultipleSelection:NO];
+  [modelTableView_ setUsesAlternatingRowBackgroundColors:YES];
+  [modelTableView_ setRowHeight:22.0];
+  [modelTableView_ setColumnAutoresizingStyle:NSTableViewSequentialColumnAutoresizingStyle];
+
+  selectedColumn =
+    [[[NSTableColumn alloc] initWithIdentifier:@"model_selected"] autorelease];
+  [[selectedColumn headerCell] setStringValue:NSLocalizedString(@"Use", nil)];
+  [selectedColumn setWidth:48.0];
+  [selectedColumn setMinWidth:44.0];
+  [selectedColumn setMaxWidth:54.0];
+  [selectedColumn setEditable:YES];
+  selectedCell = [[[NSButtonCell alloc] init] autorelease];
+  [selectedCell setButtonType:XPButtonTypeSwitch];
+  [selectedCell setTitle:@""];
+  [selectedCell setAlignment:XPTextAlignmentCenter];
+  [selectedColumn setDataCell:selectedCell];
+  [modelTableView_ addTableColumn:selectedColumn];
+
+  nameColumn = [[[NSTableColumn alloc] initWithIdentifier:@"model_name"] autorelease];
+  [[nameColumn headerCell] setStringValue:NSLocalizedString(@"Model", nil)];
+  [nameColumn setWidth:190.0];
+  [nameColumn setMinWidth:120.0];
+  [nameColumn setEditable:NO];
+  textCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
+  [textCell setLineBreakMode:NSLineBreakByTruncatingTail];
+  [nameColumn setDataCell:textCell];
+  [modelTableView_ addTableColumn:nameColumn];
+
+  idColumn = [[[NSTableColumn alloc] initWithIdentifier:@"model_id"] autorelease];
+  [[idColumn headerCell] setStringValue:NSLocalizedString(@"ID", nil)];
+  [idColumn setWidth:240.0];
+  [idColumn setMinWidth:160.0];
+  [idColumn setEditable:NO];
+  textCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
+  [textCell setLineBreakMode:NSLineBreakByTruncatingMiddle];
+  [textCell setTextColor:[NSColor disabledControlTextColor]];
+  [idColumn setDataCell:textCell];
+  [modelTableView_ addTableColumn:idColumn];
+
+  contextColumn =
+    [[[NSTableColumn alloc] initWithIdentifier:@"model_context"] autorelease];
+  [[contextColumn headerCell] setStringValue:NSLocalizedString(@"Context", nil)];
+  [contextColumn setWidth:82.0];
+  [contextColumn setMinWidth:70.0];
+  [contextColumn setEditable:NO];
+  rightCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
+  [rightCell setAlignment:XPTextAlignmentRight];
+  [contextColumn setDataCell:rightCell];
+  [modelTableView_ addTableColumn:contextColumn];
+
+  promptColumn =
+    [[[NSTableColumn alloc] initWithIdentifier:@"model_prompt_price"] autorelease];
+  [[promptColumn headerCell] setStringValue:NSLocalizedString(@"Prompt", nil)];
+  [promptColumn setWidth:84.0];
+  [promptColumn setMinWidth:70.0];
+  [promptColumn setEditable:NO];
+  rightCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
+  [rightCell setAlignment:XPTextAlignmentRight];
+  [promptColumn setDataCell:rightCell];
+  [modelTableView_ addTableColumn:promptColumn];
+
+  completionColumn =
+    [[[NSTableColumn alloc] initWithIdentifier:@"model_completion_price"] autorelease];
+  [[completionColumn headerCell] setStringValue:NSLocalizedString(@"Completion", nil)];
+  [completionColumn setWidth:96.0];
+  [completionColumn setMinWidth:82.0];
+  [completionColumn setEditable:NO];
+  rightCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
+  [rightCell setAlignment:XPTextAlignmentRight];
+  [completionColumn setDataCell:rightCell];
+  [modelTableView_ addTableColumn:completionColumn];
+
+  [scrollView setDocumentView:modelTableView_];
+  [view addSubview:scrollView];
   return view;
 }
 
@@ -536,6 +765,108 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
   [systemPromptTextView_ setString:prompt];
 }
 
+- (void)loadOpenRouterModels
+{
+  NSArray *rows;
+
+  rows = [StrappySession openRouterModelCatalogWithError:nil];
+  if (rows != nil) {
+    [modelRows_ release];
+    modelRows_ = [rows copy];
+    [modelTableView_ reloadData];
+    if (!refreshingModels_) {
+      if ([modelRows_ count] == 0U) {
+        [modelStatusLabel_ setStringValue:
+          NSLocalizedString(@"No models have been fetched yet.", nil)];
+      } else {
+        [modelStatusLabel_ setStringValue:
+          [NSString stringWithFormat:NSLocalizedString(@"%lu models available.", nil),
+            (unsigned long)[modelRows_ count]]];
+      }
+    }
+    return;
+  }
+
+  [modelStatusLabel_ setStringValue:
+    NSLocalizedString(@"Model list could not be loaded.", nil)];
+}
+
+- (void)setModelCatalogRefreshing:(BOOL)refreshing
+{
+  refreshingModels_ = refreshing;
+  [fetchModelsButton_ setEnabled:(refreshingModels_ ? NO : YES)];
+  if (refreshingModels_) {
+    [modelProgressIndicator_ startAnimation:self];
+    [modelStatusLabel_ setStringValue:NSLocalizedString(@"Fetching models...", nil)];
+  } else {
+    [modelProgressIndicator_ stopAnimation:self];
+  }
+}
+
+- (void)refreshModels:(id)sender
+{
+  NSError *error;
+  NSString *message;
+  NSAlert *alert;
+
+  (void)sender;
+  if (refreshingModels_) {
+    return;
+  }
+
+  error = nil;
+  if (![StrappySession beginOpenRouterModelCatalogRefreshWithError:&error]) {
+    message = [error localizedDescription];
+    if ([message length] == 0U) {
+      message = NSLocalizedString(@"Model refresh could not start.", nil);
+    }
+    alert = [[[NSAlert alloc] init] autorelease];
+    [alert setMessageText:NSLocalizedString(@"Could not fetch models", nil)];
+    [alert setInformativeText:message];
+    [alert runModal];
+    return;
+  }
+
+  [self setModelCatalogRefreshing:YES];
+}
+
+- (void)modelCatalogRefreshDidStart:(NSNotification *)notification
+{
+  (void)notification;
+  [self setModelCatalogRefreshing:YES];
+}
+
+- (void)modelCatalogRefreshDidFinish:(NSNotification *)notification
+{
+  NSDictionary *userInfo;
+  NSString *errorMessage;
+  NSNumber *count;
+
+  userInfo = [notification userInfo];
+  errorMessage = [userInfo objectForKey:@"error"];
+  [self setModelCatalogRefreshing:NO];
+  if ([errorMessage isKindOfClass:[NSString class]] &&
+      ([errorMessage length] > 0U)) {
+    [modelStatusLabel_ setStringValue:errorMessage];
+    NSBeep();
+    return;
+  }
+
+  [self loadOpenRouterModels];
+  count = [userInfo objectForKey:@"model_count"];
+  if ([count isKindOfClass:[NSNumber class]]) {
+    [modelStatusLabel_ setStringValue:
+      [NSString stringWithFormat:NSLocalizedString(@"%lu models available.", nil),
+        (unsigned long)[count unsignedIntegerValue]]];
+  }
+}
+
+- (void)modelCatalogDidChange:(NSNotification *)notification
+{
+  (void)notification;
+  [self loadOpenRouterModels];
+}
+
 - (void)loadCatalogedDatabases
 {
   NSArray *rows;
@@ -723,7 +1054,9 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView
 {
-  (void)tableView;
+  if (tableView == modelTableView_) {
+    return (NSInteger)[modelRows_ count];
+  }
   return (NSInteger)[databaseRows_ count];
 }
 
@@ -732,9 +1065,41 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
                           row:(NSInteger)row
 {
   NSDictionary *database;
+  NSDictionary *model;
   NSString *identifier;
 
-  (void)tableView;
+  if (tableView == modelTableView_) {
+    if ((row < 0) || (row >= (NSInteger)[modelRows_ count])) {
+      return nil;
+    }
+
+    model = [modelRows_ objectAtIndex:(NSUInteger)row];
+    identifier = [tableColumn identifier];
+    if ([identifier isEqualToString:@"model_selected"]) {
+      NSNumber *selected;
+
+      selected = [model objectForKey:@"selected"];
+      return [NSNumber numberWithBool:([selected isKindOfClass:[NSNumber class]] &&
+                                       [selected boolValue])];
+    }
+    if ([identifier isEqualToString:@"model_name"]) {
+      return StrappyModelDisplayNameForRow(model);
+    }
+    if ([identifier isEqualToString:@"model_id"]) {
+      return StrappyStringForModelRow(model, @"id");
+    }
+    if ([identifier isEqualToString:@"model_context"]) {
+      return StrappyModelNumberString(model, @"context_length");
+    }
+    if ([identifier isEqualToString:@"model_prompt_price"]) {
+      return StrappyModelPricingString(model, @"pricing_prompt");
+    }
+    if ([identifier isEqualToString:@"model_completion_price"]) {
+      return StrappyModelPricingString(model, @"pricing_completion");
+    }
+    return nil;
+  }
+
   if ((row < 0) || (row >= (NSInteger)[databaseRows_ count])) {
     return nil;
   }
@@ -765,13 +1130,35 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
           mouseLocation:(NSPoint)mouseLocation
 {
   NSDictionary *database;
+  NSDictionary *model;
   NSString *identifier;
   NSString *validationError;
 
-  (void)tableView;
   (void)cell;
   (void)rect;
   (void)mouseLocation;
+  if (tableView == modelTableView_) {
+    if ((row < 0) || (row >= (NSInteger)[modelRows_ count])) {
+      return nil;
+    }
+
+    model = [modelRows_ objectAtIndex:(NSUInteger)row];
+    identifier = [tableColumn identifier];
+    if ([identifier isEqualToString:@"model_name"]) {
+      NSString *description;
+
+      description = StrappyStringForModelRow(model, @"description");
+      if ([description length] > 0U) {
+        return description;
+      }
+      return StrappyStringForModelRow(model, @"id");
+    }
+    if ([identifier isEqualToString:@"model_id"]) {
+      return StrappyStringForModelRow(model, @"id");
+    }
+    return nil;
+  }
+
   if ((row < 0) || (row >= (NSInteger)[databaseRows_ count])) {
     return nil;
   }
@@ -801,11 +1188,49 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
               row:(NSInteger)row
 {
   NSDictionary *database;
+  NSDictionary *model;
   NSString *identifier;
   NSNumber *catalogId;
   BOOL allowed;
 
-  (void)tableView;
+  if (tableView == modelTableView_) {
+    NSString *modelId;
+    BOOL selected;
+
+    if ((row < 0) || (row >= (NSInteger)[modelRows_ count])) {
+      return;
+    }
+    identifier = [tableColumn identifier];
+    if (![identifier isEqualToString:@"model_selected"]) {
+      return;
+    }
+
+    selected = ([object respondsToSelector:@selector(boolValue)] &&
+                [object boolValue]) ? YES : NO;
+    if (!selected) {
+      [modelTableView_ reloadData];
+      return;
+    }
+
+    model = [modelRows_ objectAtIndex:(NSUInteger)row];
+    modelId = StrappyStringForModelRow(model, @"id");
+    if ([modelId length] == 0U) {
+      NSBeep();
+      [modelTableView_ reloadData];
+      return;
+    }
+
+    if (![StrappySession setSelectedOpenRouterModelIdentifier:modelId
+                                                       error:nil]) {
+      NSBeep();
+      [modelTableView_ reloadData];
+      return;
+    }
+
+    [self loadOpenRouterModels];
+    return;
+  }
+
   if ((row < 0) || (row >= (NSInteger)[databaseRows_ count])) {
     return;
   }
@@ -842,7 +1267,17 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
 {
   NSDictionary *database;
 
-  (void)tableView;
+  if (tableView == modelTableView_) {
+    if (![[tableColumn identifier] isEqualToString:@"model_selected"]) {
+      return NO;
+    }
+    if ((row < 0) || (row >= (NSInteger)[modelRows_ count])) {
+      return NO;
+    }
+    return ([StrappyStringForModelRow([modelRows_ objectAtIndex:(NSUInteger)row],
+                                      @"id") length] > 0U) ? YES : NO;
+  }
+
   if (![[tableColumn identifier] isEqualToString:@"allowed"]) {
     return NO;
   }
@@ -861,7 +1296,21 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
 {
   NSDictionary *database;
 
-  (void)tableView;
+  if (tableView == modelTableView_) {
+    if (![[tableColumn identifier] isEqualToString:@"model_selected"] ||
+        ![cell respondsToSelector:@selector(setEnabled:)]) {
+      return;
+    }
+    if ((row < 0) || (row >= (NSInteger)[modelRows_ count])) {
+      [cell setEnabled:NO];
+      return;
+    }
+    [cell setEnabled:
+      ([StrappyStringForModelRow([modelRows_ objectAtIndex:(NSUInteger)row],
+                                 @"id") length] > 0U) ? YES : NO];
+    return;
+  }
+
   if (![[tableColumn identifier] isEqualToString:@"allowed"] ||
       ![cell respondsToSelector:@selector(setEnabled:)]) {
     return;
@@ -893,14 +1342,20 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
 
 - (void)dealloc
 {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   [tabView_ release];
   [apiEndpointField_ release];
   [apiTokenField_ release];
   [apiTokenStatusLabel_ release];
+  [modelTableView_ release];
+  [fetchModelsButton_ release];
+  [modelProgressIndicator_ release];
+  [modelStatusLabel_ release];
   [systemPromptTextView_ release];
   [databaseTableView_ release];
   [scanButton_ release];
   [scanProgressIndicator_ release];
+  [modelRows_ release];
   [databaseRows_ release];
   [super dealloc];
 }

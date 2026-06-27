@@ -4,6 +4,9 @@ extern NSString * const StrappySessionDidUpdateNotification;
 extern NSString * const StrappySessionPromptDidStartNotification;
 extern NSString * const StrappySessionPromptDidFinishNotification;
 extern NSString * const StrappySessionStreamEventNotification;
+extern NSString * const StrappySessionModelCatalogRefreshDidStartNotification;
+extern NSString * const StrappySessionModelCatalogRefreshDidFinishNotification;
+extern NSString * const StrappySessionModelCatalogDidChangeNotification;
 
 @interface StrappySession : NSObject {
  @private
@@ -23,9 +26,15 @@ extern NSString * const StrappySessionStreamEventNotification;
 + (NSUInteger)inFlightSessionCount;
 + (BOOL)hasInFlightSessions;
 + (BOOL)isPromptInFlightForSessionIdentifier:(NSNumber *)sessionIdentifier;
++ (BOOL)isModelCatalogRefreshInFlight;
 + (NSArray *)sessionSummariesWithError:(NSError **)error;
 + (NSDictionary *)sessionSummaryForSessionIdentifier:(NSNumber *)sessionIdentifier
                                                error:(NSError **)error;
++ (NSArray *)openRouterModelCatalogWithError:(NSError **)error;
++ (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error;
++ (BOOL)setSelectedOpenRouterModelIdentifier:(NSString *)modelIdentifier
+                                       error:(NSError **)error;
++ (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error;
 
 - (id)initWithSessionIdentifier:(NSNumber *)sessionIdentifier
                         summary:(NSDictionary *)summary;

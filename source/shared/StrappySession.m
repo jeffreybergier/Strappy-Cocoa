@@ -4,6 +4,7 @@
 #import "strappy_client.h"
 #import "strappy_core.h"
 #import "strappy_db.h"
+#import "strappy_model_catalog.h"
 #import "strappy_prompt.h"
 #import "strappy_webview.h"
 #import "XPFoundation.h"
@@ -16,8 +17,15 @@ NSString * const StrappySessionPromptDidFinishNotification =
   @"StrappySessionPromptDidFinishNotification";
 NSString * const StrappySessionStreamEventNotification =
   @"StrappySessionStreamEventNotification";
+NSString * const StrappySessionModelCatalogRefreshDidStartNotification =
+  @"StrappySessionModelCatalogRefreshDidStartNotification";
+NSString * const StrappySessionModelCatalogRefreshDidFinishNotification =
+  @"StrappySessionModelCatalogRefreshDidFinishNotification";
+NSString * const StrappySessionModelCatalogDidChangeNotification =
+  @"StrappySessionModelCatalogDidChangeNotification";
 
 static NSMutableDictionary *StrappySessionInFlightSessions = nil;
+static BOOL StrappySessionModelCatalogRefreshInFlight = NO;
 
 typedef struct StrappySessionStreamContext {
   StrappySession *session;
@@ -31,6 +39,10 @@ typedef struct StrappySessionStreamContext {
 + (StrappySession *)inFlightSessionForIdentifier:(NSNumber *)identifier;
 + (NSArray *)messagesForSessionIdentifier:(NSNumber *)sessionIdentifier
                                     error:(NSError **)error;
++ (NSDictionary *)dictionaryFromOpenRouterModelRecord:
+    (const strappy_openrouter_model_record *)record;
++ (void)refreshOpenRouterModelCatalogInBackground:(id)ignored;
++ (void)openRouterModelCatalogRefreshDidFinish:(NSDictionary *)result;
 - (void)updateCachedSummary:(NSDictionary *)summary;
 - (BOOL)shouldCancelStreamEventOfType:(strappy_chat_stream_event_type)eventType;
 - (int)handleStreamEvent:(const strappy_chat_stream_event *)event
@@ -328,6 +340,16 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 
   session = [self inFlightSessionForIdentifier:sessionIdentifier];
   return ((session != nil) && [session isPromptInFlight]) ? YES : NO;
+}
+
++ (BOOL)isModelCatalogRefreshInFlight
+{
+  BOOL inFlight;
+
+  @synchronized(self) {
+    inFlight = StrappySessionModelCatalogRefreshInFlight;
+  }
+  return inFlight;
 }
 
 + (StrappySession *)sessionWithIdentifier:(NSNumber *)sessionIdentifier
@@ -677,6 +699,130 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
     nil];
 }
 
++ (NSDictionary *)dictionaryFromOpenRouterModelRecord:
+    (const strappy_openrouter_model_record *)record
+{
+  NSString *modelId;
+  NSString *canonicalSlug;
+  NSString *huggingFaceId;
+  NSString *name;
+  NSString *description;
+  NSString *architectureModality;
+  NSString *architectureTokenizer;
+  NSString *architectureInstructType;
+  NSString *pricingPrompt;
+  NSString *pricingCompletion;
+  NSString *pricingRequest;
+  NSString *pricingImage;
+  NSString *pricingAudio;
+  NSString *pricingWebSearch;
+  NSString *pricingInternalReasoning;
+  NSString *pricingInputCacheRead;
+  NSString *pricingInputCacheWrite;
+  NSString *knowledgeCutoff;
+  NSString *expirationDate;
+  NSString *linksDetails;
+  NSString *linksJSON;
+  NSString *reasoningJSON;
+  NSString *benchmarksJSON;
+  NSString *defaultParametersJSON;
+  NSString *perRequestLimitsJSON;
+  NSString *rawJSON;
+  NSString *fetchedAt;
+
+  if (record == NULL) {
+    return nil;
+  }
+
+  modelId = [StrappySession stringFromCStringOrEmpty:record->model_id];
+  canonicalSlug =
+    [StrappySession stringFromCStringOrEmpty:record->canonical_slug];
+  huggingFaceId =
+    [StrappySession stringFromCStringOrEmpty:record->hugging_face_id];
+  name = [StrappySession stringFromCStringOrEmpty:record->name];
+  description = [StrappySession stringFromCStringOrEmpty:record->description];
+  architectureModality =
+    [StrappySession stringFromCStringOrEmpty:record->architecture_modality];
+  architectureTokenizer =
+    [StrappySession stringFromCStringOrEmpty:record->architecture_tokenizer];
+  architectureInstructType =
+    [StrappySession stringFromCStringOrEmpty:record->architecture_instruct_type];
+  pricingPrompt =
+    [StrappySession stringFromCStringOrEmpty:record->pricing_prompt];
+  pricingCompletion =
+    [StrappySession stringFromCStringOrEmpty:record->pricing_completion];
+  pricingRequest =
+    [StrappySession stringFromCStringOrEmpty:record->pricing_request];
+  pricingImage =
+    [StrappySession stringFromCStringOrEmpty:record->pricing_image];
+  pricingAudio =
+    [StrappySession stringFromCStringOrEmpty:record->pricing_audio];
+  pricingWebSearch =
+    [StrappySession stringFromCStringOrEmpty:record->pricing_web_search];
+  pricingInternalReasoning =
+    [StrappySession stringFromCStringOrEmpty:record->pricing_internal_reasoning];
+  pricingInputCacheRead =
+    [StrappySession stringFromCStringOrEmpty:record->pricing_input_cache_read];
+  pricingInputCacheWrite =
+    [StrappySession stringFromCStringOrEmpty:record->pricing_input_cache_write];
+  knowledgeCutoff =
+    [StrappySession stringFromCStringOrEmpty:record->knowledge_cutoff];
+  expirationDate =
+    [StrappySession stringFromCStringOrEmpty:record->expiration_date];
+  linksDetails =
+    [StrappySession stringFromCStringOrEmpty:record->links_details];
+  linksJSON = [StrappySession stringFromCStringOrEmpty:record->links_json];
+  reasoningJSON =
+    [StrappySession stringFromCStringOrEmpty:record->reasoning_json];
+  benchmarksJSON =
+    [StrappySession stringFromCStringOrEmpty:record->benchmarks_json];
+  defaultParametersJSON =
+    [StrappySession stringFromCStringOrEmpty:record->default_parameters_json];
+  perRequestLimitsJSON =
+    [StrappySession stringFromCStringOrEmpty:record->per_request_limits_json];
+  rawJSON = [StrappySession stringFromCStringOrEmpty:record->raw_json];
+  fetchedAt = [StrappySession stringFromCStringOrEmpty:record->fetched_at];
+
+  return [NSDictionary dictionaryWithObjectsAndKeys:
+    modelId, @"id",
+    canonicalSlug, @"canonical_slug",
+    huggingFaceId, @"hugging_face_id",
+    name, @"name",
+    description, @"description",
+    [NSNumber numberWithLongLong:record->context_length], @"context_length",
+    [NSNumber numberWithLongLong:record->created], @"created",
+    architectureModality, @"architecture_modality",
+    architectureTokenizer, @"architecture_tokenizer",
+    architectureInstructType, @"architecture_instruct_type",
+    pricingPrompt, @"pricing_prompt",
+    pricingCompletion, @"pricing_completion",
+    pricingRequest, @"pricing_request",
+    pricingImage, @"pricing_image",
+    pricingAudio, @"pricing_audio",
+    pricingWebSearch, @"pricing_web_search",
+    pricingInternalReasoning, @"pricing_internal_reasoning",
+    pricingInputCacheRead, @"pricing_input_cache_read",
+    pricingInputCacheWrite, @"pricing_input_cache_write",
+    [NSNumber numberWithLongLong:record->top_provider_context_length],
+    @"top_provider_context_length",
+    [NSNumber numberWithLongLong:record->top_provider_max_completion_tokens],
+    @"top_provider_max_completion_tokens",
+    [NSNumber numberWithBool:(record->top_provider_is_moderated ? YES : NO)],
+    @"top_provider_is_moderated",
+    knowledgeCutoff, @"knowledge_cutoff",
+    expirationDate, @"expiration_date",
+    linksDetails, @"links_details",
+    linksJSON, @"links_json",
+    reasoningJSON, @"reasoning_json",
+    benchmarksJSON, @"benchmarks_json",
+    defaultParametersJSON, @"default_parameters_json",
+    perRequestLimitsJSON, @"per_request_limits_json",
+    rawJSON, @"raw_json",
+    fetchedAt, @"fetched_at",
+    [NSNumber numberWithBool:(record->selected ? YES : NO)], @"selected",
+    nil];
+}
+
 + (NSDictionary *)enrichedSummaryFromSession:(NSDictionary *)session
                                     messages:(NSArray *)messages
 {
@@ -914,6 +1060,235 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   }
 
   return YES;
+}
+
++ (NSArray *)openRouterModelCatalogWithError:(NSError **)error
+{
+  NSString *databasePath;
+  strappy_openrouter_model_record_list list;
+  NSMutableArray *models;
+  char *strappyError;
+  size_t index;
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+
+  strappy_openrouter_model_record_list_init(&list);
+  strappyError = NULL;
+  if (!strappy_db_list_openrouter_models([databasePath UTF8String],
+                                         &list,
+                                         &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    strappy_openrouter_model_record_list_destroy(&list);
+    return nil;
+  }
+
+  models = [NSMutableArray arrayWithCapacity:list.count];
+  for (index = 0U; index < list.count; index++) {
+    NSDictionary *model =
+      [StrappySession dictionaryFromOpenRouterModelRecord:&list.records[index]];
+    if (model != nil) {
+      [models addObject:model];
+    }
+  }
+
+  strappy_openrouter_model_record_list_destroy(&list);
+  return models;
+}
+
++ (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error
+{
+  NSString *databasePath;
+  char *modelId;
+  char *strappyError;
+  NSString *result;
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+
+  modelId = NULL;
+  strappyError = NULL;
+  if (!strappy_db_get_selected_openrouter_model([databasePath UTF8String],
+                                                &modelId,
+                                                &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return nil;
+  }
+
+  result = nil;
+  if (modelId != NULL) {
+    result = [NSString stringWithUTF8String:modelId];
+  }
+  strappy_free_string(modelId);
+  return result;
+}
+
++ (BOOL)setSelectedOpenRouterModelIdentifier:(NSString *)modelIdentifier
+                                       error:(NSError **)error
+{
+  NSString *databasePath;
+  char *strappyError;
+  int ok;
+
+  if (![modelIdentifier isKindOfClass:[NSString class]] ||
+      ([modelIdentifier length] == 0U)) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Model is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:9
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+
+  strappyError = NULL;
+  ok = strappy_db_set_selected_openrouter_model([databasePath UTF8String],
+                                                [modelIdentifier UTF8String],
+                                                &strappyError);
+  if (!ok) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return NO;
+  }
+
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionModelCatalogDidChangeNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObject:modelIdentifier
+                                                     forKey:@"selected_model_id"]];
+  return YES;
+}
+
++ (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error
+{
+  NSString *databasePath;
+
+  @synchronized(self) {
+    if (StrappySessionModelCatalogRefreshInFlight) {
+      if (error != nil) {
+        NSDictionary *userInfo =
+          [NSDictionary dictionaryWithObject:NSLocalizedString(@"Model refresh is already running.", nil)
+                                      forKey:NSLocalizedDescriptionKey];
+        *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                     code:10
+                                 userInfo:userInfo];
+      }
+      return NO;
+    }
+    StrappySessionModelCatalogRefreshInFlight = YES;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    @synchronized(self) {
+      StrappySessionModelCatalogRefreshInFlight = NO;
+    }
+    return NO;
+  }
+
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionModelCatalogRefreshDidStartNotification
+                  object:self];
+  [NSThread detachNewThreadSelector:@selector(refreshOpenRouterModelCatalogInBackground:)
+                           toTarget:self
+                         withObject:nil];
+  return YES;
+}
+
++ (void)refreshOpenRouterModelCatalogInBackground:(id)ignored
+{
+  NSAutoreleasePool *pool;
+  NSString *databasePath;
+  NSMutableDictionary *result;
+  char *strappyError;
+  int ok;
+
+  (void)ignored;
+  pool = [[NSAutoreleasePool alloc] init];
+  databasePath = [StrappySession sessionsDatabasePath];
+  result = [[NSMutableDictionary alloc] init];
+
+  strappyError = NULL;
+  ok = strappy_model_catalog_refresh_openrouter_user_models(
+    NULL,
+    [databasePath UTF8String],
+    &strappyError);
+  if (!ok) {
+    NSError *error;
+    NSString *message;
+
+    error = [StrappySession errorFromCString:strappyError];
+    message = [error localizedDescription];
+    if ([message length] == 0U) {
+      message = NSLocalizedString(@"Model refresh failed.", nil);
+    }
+    [result setObject:message forKey:@"error"];
+  } else {
+    NSArray *models;
+
+    models = [StrappySession openRouterModelCatalogWithError:nil];
+    if (models != nil) {
+      [result setObject:[NSNumber XP_numberWithUnsignedInteger:[models count]]
+                 forKey:@"model_count"];
+    }
+  }
+  strappy_free_string(strappyError);
+
+  [self performSelectorOnMainThread:@selector(openRouterModelCatalogRefreshDidFinish:)
+                         withObject:result
+                      waitUntilDone:NO];
+  [result release];
+  [pool release];
+}
+
++ (void)openRouterModelCatalogRefreshDidFinish:(NSDictionary *)result
+{
+  NSMutableDictionary *userInfo;
+
+  userInfo = [[NSMutableDictionary alloc] init];
+  if ([result isKindOfClass:[NSDictionary class]]) {
+    [userInfo addEntriesFromDictionary:result];
+  }
+
+  @synchronized(self) {
+    StrappySessionModelCatalogRefreshInFlight = NO;
+  }
+
+  if ([userInfo objectForKey:@"error"] == nil) {
+    [[NSNotificationCenter defaultCenter]
+      postNotificationName:StrappySessionModelCatalogDidChangeNotification
+                    object:self
+                  userInfo:userInfo];
+  }
+
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionModelCatalogRefreshDidFinishNotification
+                  object:self
+                userInfo:userInfo];
+  [userInfo release];
 }
 
 + (StrappySession *)createSessionWithError:(NSError **)error

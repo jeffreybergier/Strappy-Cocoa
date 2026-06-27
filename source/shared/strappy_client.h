@@ -74,6 +74,11 @@ int strappy_client_send_messages(const strappy_config *config,
                                  size_t message_count,
                                  strappy_chat_result *result,
                                  char **error_out);
+int strappy_client_fetch_openrouter_user_models_json(
+  const strappy_config *config,
+  char **json_out,
+  long *http_status_out,
+  char **error_out);
 int strappy_client_stream_messages(const strappy_config *config,
                                    const strappy_chat_message *messages,
                                    size_t message_count,

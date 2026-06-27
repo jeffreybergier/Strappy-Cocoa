@@ -322,6 +322,49 @@ static char *strappy_client_build_chat_url(const char *endpoint)
   return url;
 }
 
+static char *strappy_client_build_openrouter_user_models_url(
+  const char *endpoint)
+{
+  const char *api_marker = "/api/v1";
+  const char *models_path = "/models/user";
+  const char *default_path = "/api/v1/models/user";
+  const char *marker;
+  size_t endpoint_length;
+  size_t base_length;
+  char *base;
+  char *url;
+
+  if (endpoint == NULL) {
+    return NULL;
+  }
+
+  marker = strstr(endpoint, api_marker);
+  if (marker != NULL) {
+    base_length = (size_t)(marker - endpoint) + strlen(api_marker);
+    base = strappy_string_duplicate_length(endpoint, base_length);
+    if (base == NULL) {
+      return NULL;
+    }
+    url = strappy_join_strings(base, models_path);
+    free(base);
+    return url;
+  }
+
+  endpoint_length = strlen(endpoint);
+  while ((endpoint_length > 0U) && (endpoint[endpoint_length - 1U] == '/')) {
+    endpoint_length--;
+  }
+
+  base = strappy_string_duplicate_length(endpoint, endpoint_length);
+  if (base == NULL) {
+    return NULL;
+  }
+
+  url = strappy_join_strings(base, default_path);
+  free(base);
+  return url;
+}
+
 static int strappy_client_should_request_reasoning(const strappy_config *config)
 {
   if ((config == NULL) || (config->api_endpoint == NULL)) {
@@ -3370,6 +3413,151 @@ int strappy_client_send_messages(const strappy_config *config,
   }
 
   return strappy_client_send_request_json(config, request_json, result, error_out);
+}
+
+int strappy_client_fetch_openrouter_user_models_json(
+  const strappy_config *config,
+  char **json_out,
+  long *http_status_out,
+  char **error_out)
+{
+  CURL *curl;
+  CURLcode code;
+  struct curl_slist *headers;
+  strappy_http_buffer response_buffer;
+  char *auth_header;
+  char *url;
+  long http_status;
+  int ok;
+
+  if (json_out == NULL) {
+    strappy_set_error(error_out, "OpenRouter model JSON output is missing.");
+    return 0;
+  }
+  *json_out = NULL;
+  if (http_status_out != NULL) {
+    *http_status_out = 0L;
+  }
+
+  if (config == NULL) {
+    strappy_set_error(error_out, "OpenRouter model request is incomplete.");
+    return 0;
+  }
+  if ((config->api_endpoint == NULL) || (config->api_endpoint[0] == '\0')) {
+    strappy_set_error(error_out, "APIENDPOINT is not configured.");
+    return 0;
+  }
+  if ((config->api_token == NULL) || (config->api_token[0] == '\0')) {
+    strappy_set_error(error_out, "APITOKEN is not configured.");
+    return 0;
+  }
+
+  if (!strappy_client_ensure_curl_initialized(error_out)) {
+    return 0;
+  }
+
+  url = strappy_client_build_openrouter_user_models_url(config->api_endpoint);
+  if (url == NULL) {
+    strappy_set_error(error_out, "Could not allocate OpenRouter model URL.");
+    return 0;
+  }
+
+  auth_header = strappy_join_strings("Authorization: Bearer ", config->api_token);
+  if (auth_header == NULL) {
+    free(url);
+    strappy_set_error(error_out, "Could not allocate OpenRouter auth header.");
+    return 0;
+  }
+
+  headers = NULL;
+  ok = strappy_client_add_header(&headers, "Accept: application/json", error_out) &&
+       strappy_client_add_header(&headers, "X-OpenRouter-Title: Strappy", error_out) &&
+       strappy_client_add_header(&headers, auth_header, error_out);
+  free(auth_header);
+  if (!ok) {
+    curl_slist_free_all(headers);
+    free(url);
+    return 0;
+  }
+
+  curl = curl_easy_init();
+  if (curl == NULL) {
+    curl_slist_free_all(headers);
+    free(url);
+    strappy_set_error(error_out, "Could not create curl handle.");
+    return 0;
+  }
+
+  strappy_http_buffer_init(&response_buffer);
+  http_status = 0L;
+
+  curl_easy_setopt(curl, CURLOPT_URL, url);
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, strappy_client_write_callback);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response_buffer);
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, "Strappy/0.1");
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+  if ((strappy_cainfo_path != NULL) && (strappy_cainfo_path[0] != '\0')) {
+    curl_easy_setopt(curl, CURLOPT_CAINFO, strappy_cainfo_path);
+  }
+
+  code = curl_easy_perform(curl);
+  if (code == CURLE_OK) {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_status);
+  }
+
+  curl_easy_cleanup(curl);
+  curl_slist_free_all(headers);
+  free(url);
+  if (http_status_out != NULL) {
+    *http_status_out = http_status;
+  }
+
+  if (code != CURLE_OK) {
+    strappy_http_buffer_destroy(&response_buffer);
+    strappy_set_formatted_error(error_out,
+                                "OpenRouter model request failed: %s",
+                                curl_easy_strerror(code));
+    return 0;
+  }
+
+  if ((http_status < 200L) || (http_status >= 300L)) {
+    cJSON *root;
+    char *api_error;
+
+    api_error = NULL;
+    root = cJSON_Parse(response_buffer.data);
+    if (root != NULL) {
+      api_error = strappy_client_extract_api_error(root);
+      cJSON_Delete(root);
+    }
+    if (api_error != NULL) {
+      strappy_set_formatted_error(error_out,
+                                  "OpenRouter model request failed (%ld): %s",
+                                  http_status,
+                                  api_error);
+      free(api_error);
+    } else {
+      strappy_set_formatted_error(error_out,
+                                  "OpenRouter model request failed with HTTP %ld.",
+                                  http_status);
+    }
+    strappy_http_buffer_destroy(&response_buffer);
+    return 0;
+  }
+
+  if ((response_buffer.data == NULL) || (response_buffer.data[0] == '\0')) {
+    strappy_http_buffer_destroy(&response_buffer);
+    strappy_set_error(error_out, "OpenRouter model response was empty.");
+    return 0;
+  }
+
+  *json_out = response_buffer.data;
+  response_buffer.data = NULL;
+  response_buffer.length = 0U;
+  strappy_http_buffer_destroy(&response_buffer);
+  return 1;
 }
 
 int strappy_client_stream_messages(const strappy_config *config,

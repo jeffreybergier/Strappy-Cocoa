@@ -219,6 +219,110 @@ void strappy_discovered_database_record_list_destroy(
   strappy_discovered_database_record_list_init(list);
 }
 
+void strappy_openrouter_model_record_init(strappy_openrouter_model_record *record)
+{
+  if (record == NULL) {
+    return;
+  }
+
+  record->model_id = NULL;
+  record->canonical_slug = NULL;
+  record->hugging_face_id = NULL;
+  record->name = NULL;
+  record->description = NULL;
+  record->context_length = 0;
+  record->created = 0;
+  record->architecture_modality = NULL;
+  record->architecture_tokenizer = NULL;
+  record->architecture_instruct_type = NULL;
+  record->pricing_prompt = NULL;
+  record->pricing_completion = NULL;
+  record->pricing_request = NULL;
+  record->pricing_image = NULL;
+  record->pricing_audio = NULL;
+  record->pricing_web_search = NULL;
+  record->pricing_internal_reasoning = NULL;
+  record->pricing_input_cache_read = NULL;
+  record->pricing_input_cache_write = NULL;
+  record->top_provider_context_length = 0;
+  record->top_provider_max_completion_tokens = 0;
+  record->top_provider_is_moderated = 0;
+  record->knowledge_cutoff = NULL;
+  record->expiration_date = NULL;
+  record->links_details = NULL;
+  record->links_json = NULL;
+  record->reasoning_json = NULL;
+  record->benchmarks_json = NULL;
+  record->default_parameters_json = NULL;
+  record->per_request_limits_json = NULL;
+  record->raw_json = NULL;
+  record->fetched_at = NULL;
+  record->selected = 0;
+}
+
+void strappy_openrouter_model_record_destroy(strappy_openrouter_model_record *record)
+{
+  if (record == NULL) {
+    return;
+  }
+
+  free(record->model_id);
+  free(record->canonical_slug);
+  free(record->hugging_face_id);
+  free(record->name);
+  free(record->description);
+  free(record->architecture_modality);
+  free(record->architecture_tokenizer);
+  free(record->architecture_instruct_type);
+  free(record->pricing_prompt);
+  free(record->pricing_completion);
+  free(record->pricing_request);
+  free(record->pricing_image);
+  free(record->pricing_audio);
+  free(record->pricing_web_search);
+  free(record->pricing_internal_reasoning);
+  free(record->pricing_input_cache_read);
+  free(record->pricing_input_cache_write);
+  free(record->knowledge_cutoff);
+  free(record->expiration_date);
+  free(record->links_details);
+  free(record->links_json);
+  free(record->reasoning_json);
+  free(record->benchmarks_json);
+  free(record->default_parameters_json);
+  free(record->per_request_limits_json);
+  free(record->raw_json);
+  free(record->fetched_at);
+  strappy_openrouter_model_record_init(record);
+}
+
+void strappy_openrouter_model_record_list_init(
+  strappy_openrouter_model_record_list *list)
+{
+  if (list == NULL) {
+    return;
+  }
+
+  list->records = NULL;
+  list->count = 0U;
+}
+
+void strappy_openrouter_model_record_list_destroy(
+  strappy_openrouter_model_record_list *list)
+{
+  size_t index;
+
+  if (list == NULL) {
+    return;
+  }
+
+  for (index = 0U; index < list->count; index++) {
+    strappy_openrouter_model_record_destroy(&list->records[index]);
+  }
+  free(list->records);
+  strappy_openrouter_model_record_list_init(list);
+}
+
 static int strappy_db_open(const char *db_path,
                            sqlite3 **db_out,
                            char **error_out)
@@ -388,6 +492,81 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
   static const char *discovered_databases_decision_index_sql =
     "CREATE INDEX IF NOT EXISTS discovered_databases_user_decision_idx "
     "ON discovered_databases(user_decision);";
+  static const char *app_settings_sql =
+    "CREATE TABLE IF NOT EXISTS app_settings ("
+    "key TEXT PRIMARY KEY,"
+    "value TEXT,"
+    "updated_at TEXT NOT NULL DEFAULT "
+    "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+    ");";
+  static const char *openrouter_models_sql =
+    "CREATE TABLE IF NOT EXISTS openrouter_models ("
+    "id TEXT PRIMARY KEY,"
+    "canonical_slug TEXT,"
+    "hugging_face_id TEXT,"
+    "name TEXT,"
+    "description TEXT,"
+    "context_length INTEGER NOT NULL DEFAULT 0,"
+    "created INTEGER NOT NULL DEFAULT 0,"
+    "architecture_modality TEXT,"
+    "architecture_tokenizer TEXT,"
+    "architecture_instruct_type TEXT,"
+    "pricing_prompt TEXT,"
+    "pricing_completion TEXT,"
+    "pricing_request TEXT,"
+    "pricing_image TEXT,"
+    "pricing_audio TEXT,"
+    "pricing_web_search TEXT,"
+    "pricing_internal_reasoning TEXT,"
+    "pricing_input_cache_read TEXT,"
+    "pricing_input_cache_write TEXT,"
+    "top_provider_context_length INTEGER NOT NULL DEFAULT 0,"
+    "top_provider_max_completion_tokens INTEGER NOT NULL DEFAULT 0,"
+    "top_provider_is_moderated INTEGER NOT NULL DEFAULT 0,"
+    "knowledge_cutoff TEXT,"
+    "expiration_date TEXT,"
+    "links_details TEXT,"
+    "links_json TEXT,"
+    "reasoning_json TEXT,"
+    "benchmarks_json TEXT,"
+    "default_parameters_json TEXT,"
+    "per_request_limits_json TEXT,"
+    "raw_json TEXT,"
+    "fetched_at TEXT NOT NULL DEFAULT "
+    "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+    ");";
+  static const char *openrouter_models_name_index_sql =
+    "CREATE INDEX IF NOT EXISTS openrouter_models_name_idx "
+    "ON openrouter_models(name, id);";
+  static const char *openrouter_model_input_modalities_sql =
+    "CREATE TABLE IF NOT EXISTS openrouter_model_input_modalities ("
+    "model_id TEXT NOT NULL,"
+    "modality TEXT NOT NULL,"
+    "PRIMARY KEY(model_id, modality),"
+    "FOREIGN KEY(model_id) REFERENCES openrouter_models(id) ON DELETE CASCADE"
+    ");";
+  static const char *openrouter_model_output_modalities_sql =
+    "CREATE TABLE IF NOT EXISTS openrouter_model_output_modalities ("
+    "model_id TEXT NOT NULL,"
+    "modality TEXT NOT NULL,"
+    "PRIMARY KEY(model_id, modality),"
+    "FOREIGN KEY(model_id) REFERENCES openrouter_models(id) ON DELETE CASCADE"
+    ");";
+  static const char *openrouter_model_supported_parameters_sql =
+    "CREATE TABLE IF NOT EXISTS openrouter_model_supported_parameters ("
+    "model_id TEXT NOT NULL,"
+    "parameter TEXT NOT NULL,"
+    "PRIMARY KEY(model_id, parameter),"
+    "FOREIGN KEY(model_id) REFERENCES openrouter_models(id) ON DELETE CASCADE"
+    ");";
+  static const char *openrouter_model_supported_voices_sql =
+    "CREATE TABLE IF NOT EXISTS openrouter_model_supported_voices ("
+    "model_id TEXT NOT NULL,"
+    "voice TEXT NOT NULL,"
+    "PRIMARY KEY(model_id, voice),"
+    "FOREIGN KEY(model_id) REFERENCES openrouter_models(id) ON DELETE CASCADE"
+    ");";
+  static const char *user_version_sql = "PRAGMA user_version = 1;";
   if (!strappy_db_exec(db,
                        sessions_sql,
                        "Could not create session schema",
@@ -447,6 +626,62 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
   if (!strappy_db_exec(db,
                        discovered_databases_decision_index_sql,
                        "Could not create discovered database decision index",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       app_settings_sql,
+                       "Could not create app settings schema",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       openrouter_models_sql,
+                       "Could not create OpenRouter model schema",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       openrouter_models_name_index_sql,
+                       "Could not create OpenRouter model name index",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       openrouter_model_input_modalities_sql,
+                       "Could not create OpenRouter input modality schema",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       openrouter_model_output_modalities_sql,
+                       "Could not create OpenRouter output modality schema",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       openrouter_model_supported_parameters_sql,
+                       "Could not create OpenRouter supported parameter schema",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       openrouter_model_supported_voices_sql,
+                       "Could not create OpenRouter supported voice schema",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       user_version_sql,
+                       "Could not set database user_version",
                        error_out)) {
     return 0;
   }
@@ -2128,6 +2363,676 @@ static int strappy_db_session_exists(sqlite3 *db,
   return 0;
 }
 
+#define STRAPPY_DB_SELECTED_OPENROUTER_MODEL_KEY "selected_openrouter_model_id"
+
+static char *strappy_db_json_copy_value_text(cJSON *value)
+{
+  if ((value == NULL) || cJSON_IsNull(value)) {
+    return NULL;
+  }
+
+  if (cJSON_IsString(value) && (value->valuestring != NULL)) {
+    return strappy_string_duplicate(value->valuestring);
+  }
+
+  return cJSON_PrintUnformatted(value);
+}
+
+static char *strappy_db_json_copy_object_text(cJSON *object, const char *key)
+{
+  if ((object == NULL) || (key == NULL)) {
+    return NULL;
+  }
+
+  return strappy_db_json_copy_value_text(cJSON_GetObjectItem(object, key));
+}
+
+static cJSON *strappy_db_json_object_child(cJSON *object, const char *key)
+{
+  cJSON *child;
+
+  if ((object == NULL) || (key == NULL)) {
+    return NULL;
+  }
+
+  child = cJSON_GetObjectItem(object, key);
+  return cJSON_IsObject(child) ? child : NULL;
+}
+
+static char *strappy_db_json_copy_nested_text(cJSON *object,
+                                              const char *parent_key,
+                                              const char *child_key)
+{
+  return strappy_db_json_copy_object_text(
+    strappy_db_json_object_child(object, parent_key),
+    child_key);
+}
+
+static long long strappy_db_json_integer(cJSON *value)
+{
+  if (cJSON_IsNumber(value)) {
+    return (long long)value->valuedouble;
+  }
+
+  if (cJSON_IsString(value) && (value->valuestring != NULL)) {
+    return (long long)strtoll(value->valuestring, NULL, 10);
+  }
+
+  return 0;
+}
+
+static long long strappy_db_json_object_integer(cJSON *object, const char *key)
+{
+  if ((object == NULL) || (key == NULL)) {
+    return 0;
+  }
+
+  return strappy_db_json_integer(cJSON_GetObjectItem(object, key));
+}
+
+static long long strappy_db_json_nested_integer(cJSON *object,
+                                                const char *parent_key,
+                                                const char *child_key)
+{
+  return strappy_db_json_object_integer(
+    strappy_db_json_object_child(object, parent_key),
+    child_key);
+}
+
+static int strappy_db_json_bool(cJSON *value)
+{
+  if (cJSON_IsTrue(value)) {
+    return 1;
+  }
+  if (cJSON_IsFalse(value) || (value == NULL) || cJSON_IsNull(value)) {
+    return 0;
+  }
+  if (cJSON_IsNumber(value) && (value->valuedouble != 0.0)) {
+    return 1;
+  }
+  if (cJSON_IsString(value) && (value->valuestring != NULL)) {
+    return ((strcmp(value->valuestring, "true") == 0) ||
+            (strcmp(value->valuestring, "1") == 0)) ? 1 : 0;
+  }
+  return 0;
+}
+
+static int strappy_db_json_nested_bool(cJSON *object,
+                                       const char *parent_key,
+                                       const char *child_key)
+{
+  cJSON *parent;
+
+  parent = strappy_db_json_object_child(object, parent_key);
+  return strappy_db_json_bool(cJSON_GetObjectItem(parent, child_key));
+}
+
+static int strappy_db_bind_text_or_null(sqlite3 *db,
+                                        sqlite3_stmt *stmt,
+                                        int index,
+                                        const char *value,
+                                        const char *error_prefix,
+                                        char **error_out)
+{
+  return strappy_db_bind_optional_text(db,
+                                       stmt,
+                                       index,
+                                       value,
+                                       error_prefix,
+                                       error_out);
+}
+
+static int strappy_db_insert_openrouter_model_string(
+  sqlite3 *db,
+  const char *sql,
+  const char *model_id,
+  const char *value,
+  const char *error_prefix,
+  char **error_out)
+{
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if ((value == NULL) || (value[0] == '\0')) {
+    return 1;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "%s: %s",
+                                error_prefix,
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 2, value, -1, SQLITE_TRANSIENT);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "%s: %s",
+                                error_prefix,
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "%s: %s",
+                                error_prefix,
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+static int strappy_db_insert_openrouter_model_value_array(
+  sqlite3 *db,
+  const char *sql,
+  const char *model_id,
+  cJSON *value,
+  const char *error_prefix,
+  char **error_out)
+{
+  int count;
+  int index;
+
+  if ((value == NULL) || cJSON_IsNull(value)) {
+    return 1;
+  }
+
+  if (!cJSON_IsArray(value)) {
+    char *text;
+    int ok;
+
+    text = strappy_db_json_copy_value_text(value);
+    ok = strappy_db_insert_openrouter_model_string(db,
+                                                   sql,
+                                                   model_id,
+                                                   text,
+                                                   error_prefix,
+                                                   error_out);
+    free(text);
+    return ok;
+  }
+
+  count = cJSON_GetArraySize(value);
+  for (index = 0; index < count; index++) {
+    cJSON *item;
+    char *text;
+    int ok;
+
+    item = cJSON_GetArrayItem(value, index);
+    text = strappy_db_json_copy_value_text(item);
+    ok = strappy_db_insert_openrouter_model_string(db,
+                                                   sql,
+                                                   model_id,
+                                                   text,
+                                                   error_prefix,
+                                                   error_out);
+    free(text);
+    if (!ok) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+static int strappy_db_insert_openrouter_model_arrays(sqlite3 *db,
+                                                     const char *model_id,
+                                                     cJSON *model,
+                                                     char **error_out)
+{
+  static const char *input_sql =
+    "INSERT OR IGNORE INTO openrouter_model_input_modalities "
+    "(model_id, modality) VALUES (?, ?);";
+  static const char *output_sql =
+    "INSERT OR IGNORE INTO openrouter_model_output_modalities "
+    "(model_id, modality) VALUES (?, ?);";
+  static const char *parameters_sql =
+    "INSERT OR IGNORE INTO openrouter_model_supported_parameters "
+    "(model_id, parameter) VALUES (?, ?);";
+  static const char *voices_sql =
+    "INSERT OR IGNORE INTO openrouter_model_supported_voices "
+    "(model_id, voice) VALUES (?, ?);";
+  cJSON *architecture;
+
+  architecture = strappy_db_json_object_child(model, "architecture");
+  if (!strappy_db_insert_openrouter_model_value_array(
+        db,
+        input_sql,
+        model_id,
+        cJSON_GetObjectItem(architecture, "input_modalities"),
+        "Could not save OpenRouter input modality",
+        error_out)) {
+    return 0;
+  }
+  if (!strappy_db_insert_openrouter_model_value_array(
+        db,
+        output_sql,
+        model_id,
+        cJSON_GetObjectItem(architecture, "output_modalities"),
+        "Could not save OpenRouter output modality",
+        error_out)) {
+    return 0;
+  }
+  if (!strappy_db_insert_openrouter_model_value_array(
+        db,
+        parameters_sql,
+        model_id,
+        cJSON_GetObjectItem(model, "supported_parameters"),
+        "Could not save OpenRouter supported parameter",
+        error_out)) {
+    return 0;
+  }
+  if (!strappy_db_insert_openrouter_model_value_array(
+        db,
+        voices_sql,
+        model_id,
+        cJSON_GetObjectItem(model, "supported_voices"),
+        "Could not save OpenRouter supported voice",
+        error_out)) {
+    return 0;
+  }
+
+  return 1;
+}
+
+static int strappy_db_insert_openrouter_model(sqlite3 *db,
+                                              cJSON *model,
+                                              char **error_out)
+{
+  static const char *sql =
+    "INSERT OR REPLACE INTO openrouter_models "
+    "(id, canonical_slug, hugging_face_id, name, description, "
+    "context_length, created, architecture_modality, "
+    "architecture_tokenizer, architecture_instruct_type, pricing_prompt, "
+    "pricing_completion, pricing_request, pricing_image, pricing_audio, "
+    "pricing_web_search, pricing_internal_reasoning, "
+    "pricing_input_cache_read, pricing_input_cache_write, "
+    "top_provider_context_length, top_provider_max_completion_tokens, "
+    "top_provider_is_moderated, knowledge_cutoff, expiration_date, "
+    "links_details, links_json, reasoning_json, benchmarks_json, "
+    "default_parameters_json, per_request_limits_json, raw_json, fetched_at) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+    "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'));";
+  sqlite3_stmt *stmt;
+  strappy_openrouter_model_record record;
+  int rc;
+  int ok;
+
+  if (!cJSON_IsObject(model)) {
+    strappy_set_error(error_out, "OpenRouter model entry is not an object.");
+    return 0;
+  }
+
+  strappy_openrouter_model_record_init(&record);
+  record.model_id = strappy_db_json_copy_object_text(model, "id");
+  if ((record.model_id == NULL) || (record.model_id[0] == '\0')) {
+    strappy_openrouter_model_record_destroy(&record);
+    strappy_set_error(error_out, "OpenRouter model entry is missing id.");
+    return 0;
+  }
+
+  record.canonical_slug =
+    strappy_db_json_copy_object_text(model, "canonical_slug");
+  record.hugging_face_id =
+    strappy_db_json_copy_object_text(model, "hugging_face_id");
+  record.name = strappy_db_json_copy_object_text(model, "name");
+  record.description = strappy_db_json_copy_object_text(model, "description");
+  record.context_length = strappy_db_json_object_integer(model, "context_length");
+  record.created = strappy_db_json_object_integer(model, "created");
+  record.architecture_modality =
+    strappy_db_json_copy_nested_text(model, "architecture", "modality");
+  record.architecture_tokenizer =
+    strappy_db_json_copy_nested_text(model, "architecture", "tokenizer");
+  record.architecture_instruct_type =
+    strappy_db_json_copy_nested_text(model, "architecture", "instruct_type");
+  record.pricing_prompt =
+    strappy_db_json_copy_nested_text(model, "pricing", "prompt");
+  record.pricing_completion =
+    strappy_db_json_copy_nested_text(model, "pricing", "completion");
+  record.pricing_request =
+    strappy_db_json_copy_nested_text(model, "pricing", "request");
+  record.pricing_image =
+    strappy_db_json_copy_nested_text(model, "pricing", "image");
+  record.pricing_audio =
+    strappy_db_json_copy_nested_text(model, "pricing", "audio");
+  record.pricing_web_search =
+    strappy_db_json_copy_nested_text(model, "pricing", "web_search");
+  record.pricing_internal_reasoning =
+    strappy_db_json_copy_nested_text(model, "pricing", "internal_reasoning");
+  record.pricing_input_cache_read =
+    strappy_db_json_copy_nested_text(model, "pricing", "input_cache_read");
+  record.pricing_input_cache_write =
+    strappy_db_json_copy_nested_text(model, "pricing", "input_cache_write");
+  record.top_provider_context_length =
+    strappy_db_json_nested_integer(model, "top_provider", "context_length");
+  record.top_provider_max_completion_tokens =
+    strappy_db_json_nested_integer(model,
+                                   "top_provider",
+                                   "max_completion_tokens");
+  record.top_provider_is_moderated =
+    strappy_db_json_nested_bool(model, "top_provider", "is_moderated");
+  record.knowledge_cutoff =
+    strappy_db_json_copy_object_text(model, "knowledge_cutoff");
+  record.expiration_date =
+    strappy_db_json_copy_object_text(model, "expiration_date");
+  record.links_details =
+    strappy_db_json_copy_nested_text(model, "links", "details");
+  record.links_json = strappy_db_json_copy_object_text(model, "links");
+  record.reasoning_json = strappy_db_json_copy_object_text(model, "reasoning");
+  record.benchmarks_json =
+    strappy_db_json_copy_object_text(model, "benchmarks");
+  record.default_parameters_json =
+    strappy_db_json_copy_object_text(model, "default_parameters");
+  record.per_request_limits_json =
+    strappy_db_json_copy_object_text(model, "per_request_limits");
+  record.raw_json = cJSON_PrintUnformatted(model);
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare OpenRouter model insert: %s",
+                                sqlite3_errmsg(db));
+    strappy_openrouter_model_record_destroy(&record);
+    return 0;
+  }
+
+  ok = 1;
+  if (sqlite3_bind_text(stmt, 1, record.model_id, -1, SQLITE_TRANSIENT) !=
+      SQLITE_OK) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db, stmt, 2, record.canonical_slug,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db, stmt, 3, record.hugging_face_id,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db, stmt, 4, record.name,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db, stmt, 5, record.description,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_int64(stmt, 6, (sqlite3_int64)record.context_length) !=
+             SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && (sqlite3_bind_int64(stmt, 7, (sqlite3_int64)record.created) !=
+             SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db, stmt, 8,
+                                          record.architecture_modality,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db, stmt, 9,
+                                          record.architecture_tokenizer,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db, stmt, 10,
+                                          record.architecture_instruct_type,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db, stmt, 11, record.pricing_prompt,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db, stmt, 12, record.pricing_completion,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db, stmt, 13, record.pricing_request,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db, stmt, 14, record.pricing_image,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db, stmt, 15, record.pricing_audio,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db, stmt, 16, record.pricing_web_search,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(
+              db,
+              stmt,
+              17,
+              record.pricing_internal_reasoning,
+              "Could not bind OpenRouter model insert",
+              error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(
+              db,
+              stmt,
+              18,
+              record.pricing_input_cache_read,
+              "Could not bind OpenRouter model insert",
+              error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(
+              db,
+              stmt,
+              19,
+              record.pricing_input_cache_write,
+              "Could not bind OpenRouter model insert",
+              error_out)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt,
+                          20,
+                          (sqlite3_int64)record.top_provider_context_length) !=
+       SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(
+         stmt,
+         21,
+         (sqlite3_int64)record.top_provider_max_completion_tokens) !=
+       SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int(stmt, 22, record.top_provider_is_moderated ? 1 : 0) !=
+       SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db,
+                                          stmt,
+                                          23,
+                                          record.knowledge_cutoff,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db,
+                                          stmt,
+                                          24,
+                                          record.expiration_date,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db,
+                                          stmt,
+                                          25,
+                                          record.links_details,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db,
+                                          stmt,
+                                          26,
+                                          record.links_json,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db,
+                                          stmt,
+                                          27,
+                                          record.reasoning_json,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db,
+                                          stmt,
+                                          28,
+                                          record.benchmarks_json,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db,
+                                          stmt,
+                                          29,
+                                          record.default_parameters_json,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db,
+                                          stmt,
+                                          30,
+                                          record.per_request_limits_json,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_text_or_null(db, stmt, 31, record.raw_json,
+                                          "Could not bind OpenRouter model insert",
+                                          error_out)) {
+    ok = 0;
+  }
+
+  if (!ok) {
+    if ((error_out != NULL) && (*error_out == NULL)) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not bind OpenRouter model insert: %s",
+                                  sqlite3_errmsg(db));
+    }
+    sqlite3_finalize(stmt);
+    strappy_openrouter_model_record_destroy(&record);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save OpenRouter model: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_openrouter_model_record_destroy(&record);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+
+  ok = strappy_db_insert_openrouter_model_arrays(db,
+                                                 record.model_id,
+                                                 model,
+                                                 error_out);
+  strappy_openrouter_model_record_destroy(&record);
+  return ok;
+}
+
+static int strappy_db_assign_openrouter_model_from_statement(
+  strappy_openrouter_model_record *record,
+  sqlite3_stmt *stmt,
+  char **error_out)
+{
+  if ((record == NULL) || (stmt == NULL)) {
+    strappy_set_error(error_out, "OpenRouter model row request is incomplete.");
+    return 0;
+  }
+
+  strappy_openrouter_model_record_destroy(record);
+  record->context_length = (long long)sqlite3_column_int64(stmt, 5);
+  record->created = (long long)sqlite3_column_int64(stmt, 6);
+  record->top_provider_context_length = (long long)sqlite3_column_int64(stmt, 19);
+  record->top_provider_max_completion_tokens =
+    (long long)sqlite3_column_int64(stmt, 20);
+  record->top_provider_is_moderated = sqlite3_column_int(stmt, 21) ? 1 : 0;
+  record->selected = sqlite3_column_int(stmt, 32) ? 1 : 0;
+
+  record->model_id = strappy_db_column_string(stmt, 0);
+  record->canonical_slug = strappy_db_column_string(stmt, 1);
+  record->hugging_face_id = strappy_db_column_string(stmt, 2);
+  record->name = strappy_db_column_string(stmt, 3);
+  record->description = strappy_db_column_string(stmt, 4);
+  record->architecture_modality = strappy_db_column_string(stmt, 7);
+  record->architecture_tokenizer = strappy_db_column_string(stmt, 8);
+  record->architecture_instruct_type = strappy_db_column_string(stmt, 9);
+  record->pricing_prompt = strappy_db_column_string(stmt, 10);
+  record->pricing_completion = strappy_db_column_string(stmt, 11);
+  record->pricing_request = strappy_db_column_string(stmt, 12);
+  record->pricing_image = strappy_db_column_string(stmt, 13);
+  record->pricing_audio = strappy_db_column_string(stmt, 14);
+  record->pricing_web_search = strappy_db_column_string(stmt, 15);
+  record->pricing_internal_reasoning = strappy_db_column_string(stmt, 16);
+  record->pricing_input_cache_read = strappy_db_column_string(stmt, 17);
+  record->pricing_input_cache_write = strappy_db_column_string(stmt, 18);
+  record->knowledge_cutoff = strappy_db_column_string(stmt, 22);
+  record->expiration_date = strappy_db_column_string(stmt, 23);
+  record->links_details = strappy_db_column_string(stmt, 24);
+  record->links_json = strappy_db_column_string(stmt, 25);
+  record->reasoning_json = strappy_db_column_string(stmt, 26);
+  record->benchmarks_json = strappy_db_column_string(stmt, 27);
+  record->default_parameters_json = strappy_db_column_string(stmt, 28);
+  record->per_request_limits_json = strappy_db_column_string(stmt, 29);
+  record->raw_json = strappy_db_column_string(stmt, 30);
+  record->fetched_at = strappy_db_column_string(stmt, 31);
+
+  if ((record->model_id == NULL) || (record->fetched_at == NULL)) {
+    strappy_openrouter_model_record_destroy(record);
+    strappy_set_error(error_out, "Could not allocate OpenRouter model row.");
+    return 0;
+  }
+
+  return 1;
+}
+
 int strappy_db_initialize(const char *db_path, char **error_out)
 {
   sqlite3 *db;
@@ -3639,4 +4544,437 @@ int strappy_db_list_session_context_messages(
     "ORDER BY id ASC;",
     list,
     error_out);
+}
+
+int strappy_db_save_openrouter_models_json(const char *db_path,
+                                           const char *json,
+                                           char **error_out)
+{
+  sqlite3 *db;
+  cJSON *root;
+  cJSON *data;
+  int count;
+  int index;
+
+  if ((json == NULL) || (json[0] == '\0')) {
+    strappy_set_error(error_out, "OpenRouter model JSON is empty.");
+    return 0;
+  }
+
+  root = cJSON_Parse(json);
+  if (root == NULL) {
+    strappy_set_error(error_out, "OpenRouter model JSON could not be parsed.");
+    return 0;
+  }
+
+  data = cJSON_GetObjectItem(root, "data");
+  if (!cJSON_IsArray(data) && cJSON_IsArray(root)) {
+    data = root;
+  }
+  if (!cJSON_IsArray(data)) {
+    cJSON_Delete(root);
+    strappy_set_error(error_out, "OpenRouter model JSON is missing data array.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    cJSON_Delete(root);
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    cJSON_Delete(root);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin OpenRouter model catalog save",
+                       error_out)) {
+    sqlite3_close(db);
+    cJSON_Delete(root);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       "DELETE FROM openrouter_model_supported_voices;",
+                       "Could not clear OpenRouter supported voices",
+                       error_out) ||
+      !strappy_db_exec(db,
+                       "DELETE FROM openrouter_model_supported_parameters;",
+                       "Could not clear OpenRouter supported parameters",
+                       error_out) ||
+      !strappy_db_exec(db,
+                       "DELETE FROM openrouter_model_output_modalities;",
+                       "Could not clear OpenRouter output modalities",
+                       error_out) ||
+      !strappy_db_exec(db,
+                       "DELETE FROM openrouter_model_input_modalities;",
+                       "Could not clear OpenRouter input modalities",
+                       error_out) ||
+      !strappy_db_exec(db,
+                       "DELETE FROM openrouter_models;",
+                       "Could not clear OpenRouter model catalog",
+                       error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back OpenRouter model catalog save",
+                    NULL);
+    sqlite3_close(db);
+    cJSON_Delete(root);
+    return 0;
+  }
+
+  count = cJSON_GetArraySize(data);
+  for (index = 0; index < count; index++) {
+    cJSON *model;
+
+    model = cJSON_GetArrayItem(data, index);
+    if (!strappy_db_insert_openrouter_model(db, model, error_out)) {
+      strappy_db_exec(db,
+                      "ROLLBACK;",
+                      "Could not roll back OpenRouter model catalog save",
+                      NULL);
+      sqlite3_close(db);
+      cJSON_Delete(root);
+      return 0;
+    }
+  }
+
+  if (!strappy_db_exec(db,
+                       "COMMIT;",
+                       "Could not commit OpenRouter model catalog save",
+                       error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back OpenRouter model catalog save",
+                    NULL);
+    sqlite3_close(db);
+    cJSON_Delete(root);
+    return 0;
+  }
+
+  sqlite3_close(db);
+  cJSON_Delete(root);
+  return 1;
+}
+
+int strappy_db_list_openrouter_models(
+  const char *db_path,
+  strappy_openrouter_model_record_list *list,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT m.id, m.canonical_slug, m.hugging_face_id, m.name, "
+    "m.description, m.context_length, m.created, m.architecture_modality, "
+    "m.architecture_tokenizer, m.architecture_instruct_type, "
+    "m.pricing_prompt, m.pricing_completion, m.pricing_request, "
+    "m.pricing_image, m.pricing_audio, m.pricing_web_search, "
+    "m.pricing_internal_reasoning, m.pricing_input_cache_read, "
+    "m.pricing_input_cache_write, m.top_provider_context_length, "
+    "m.top_provider_max_completion_tokens, m.top_provider_is_moderated, "
+    "m.knowledge_cutoff, m.expiration_date, m.links_details, m.links_json, "
+    "m.reasoning_json, m.benchmarks_json, m.default_parameters_json, "
+    "m.per_request_limits_json, m.raw_json, m.fetched_at, "
+    "CASE WHEN s.value = m.id THEN 1 ELSE 0 END "
+    "FROM openrouter_models m "
+    "LEFT JOIN app_settings s "
+    "ON s.key = '" STRAPPY_DB_SELECTED_OPENROUTER_MODEL_KEY "' "
+    "ORDER BY CASE WHEN s.value = m.id THEN 0 ELSE 1 END, "
+    "LOWER(COALESCE(NULLIF(m.name, ''), m.id)), m.id;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (list == NULL) {
+    strappy_set_error(error_out, "strappy_db_list_openrouter_models received no output.");
+    return 0;
+  }
+  strappy_openrouter_model_record_list_init(list);
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare OpenRouter model list: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    strappy_openrouter_model_record *next_records;
+
+    if (list->count >= (((size_t)-1) /
+                        sizeof(strappy_openrouter_model_record))) {
+      strappy_set_error(error_out, "OpenRouter model list is too large.");
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      strappy_openrouter_model_record_list_destroy(list);
+      return 0;
+    }
+
+    next_records = (strappy_openrouter_model_record *)realloc(
+      list->records,
+      (list->count + 1U) * sizeof(strappy_openrouter_model_record));
+    if (next_records == NULL) {
+      strappy_set_error(error_out, "Could not allocate OpenRouter model list.");
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      strappy_openrouter_model_record_list_destroy(list);
+      return 0;
+    }
+
+    list->records = next_records;
+    strappy_openrouter_model_record_init(&list->records[list->count]);
+    if (!strappy_db_assign_openrouter_model_from_statement(
+          &list->records[list->count],
+          stmt,
+          error_out)) {
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      strappy_openrouter_model_record_list_destroy(list);
+      return 0;
+    }
+
+    list->count++;
+  }
+
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read OpenRouter model list: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    strappy_openrouter_model_record_list_destroy(list);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  return 1;
+}
+
+int strappy_db_set_selected_openrouter_model(const char *db_path,
+                                             const char *model_id,
+                                             char **error_out)
+{
+  static const char *exists_sql =
+    "SELECT 1 FROM openrouter_models WHERE id = ?;";
+  static const char *update_sql =
+    "UPDATE app_settings "
+    "SET value = ?, updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now')) "
+    "WHERE key = ?;";
+  static const char *insert_sql =
+    "INSERT INTO app_settings (key, value) VALUES (?, ?);";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if ((model_id == NULL) || (model_id[0] == '\0')) {
+    strappy_set_error(error_out, "OpenRouter model id is empty.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, exists_sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare OpenRouter model lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+  rc = sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind OpenRouter model lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+  rc = sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+  if (rc == SQLITE_DONE) {
+    sqlite3_close(db);
+    strappy_set_error(error_out, "OpenRouter model was not found.");
+    return 0;
+  }
+  if (rc != SQLITE_ROW) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read OpenRouter model lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, update_sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare selected model update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+  rc = sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt,
+                           2,
+                           STRAPPY_DB_SELECTED_OPENROUTER_MODEL_KEY,
+                           -1,
+                           SQLITE_TRANSIENT);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind selected model update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not update selected model: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+
+  if (sqlite3_changes(db) == 0) {
+    stmt = NULL;
+    rc = sqlite3_prepare_v2(db, insert_sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not prepare selected model insert: %s",
+                                  sqlite3_errmsg(db));
+      sqlite3_close(db);
+      return 0;
+    }
+    rc = sqlite3_bind_text(stmt,
+                           1,
+                           STRAPPY_DB_SELECTED_OPENROUTER_MODEL_KEY,
+                           -1,
+                           SQLITE_TRANSIENT);
+    if (rc == SQLITE_OK) {
+      rc = sqlite3_bind_text(stmt, 2, model_id, -1, SQLITE_TRANSIENT);
+    }
+    if (rc != SQLITE_OK) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not bind selected model insert: %s",
+                                  sqlite3_errmsg(db));
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      return 0;
+    }
+    rc = sqlite3_step(stmt);
+    if (rc != SQLITE_DONE) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not save selected model: %s",
+                                  sqlite3_errmsg(db));
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      return 0;
+    }
+    sqlite3_finalize(stmt);
+  }
+
+  sqlite3_close(db);
+  return 1;
+}
+
+int strappy_db_get_selected_openrouter_model(const char *db_path,
+                                             char **model_id_out,
+                                             char **error_out)
+{
+  static const char *sql =
+    "SELECT s.value FROM app_settings s "
+    "INNER JOIN openrouter_models m ON m.id = s.value "
+    "WHERE s.key = ?;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (model_id_out == NULL) {
+    strappy_set_error(error_out, "Selected OpenRouter model output is missing.");
+    return 0;
+  }
+  *model_id_out = NULL;
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare selected model lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+  rc = sqlite3_bind_text(stmt,
+                         1,
+                         STRAPPY_DB_SELECTED_OPENROUTER_MODEL_KEY,
+                         -1,
+                         SQLITE_TRANSIENT);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind selected model lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    *model_id_out = strappy_db_column_string(stmt, 0);
+    if (*model_id_out == NULL) {
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      strappy_set_error(error_out, "Could not allocate selected model id.");
+      return 0;
+    }
+  } else if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read selected model lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  return 1;
 }

@@ -117,6 +117,47 @@ typedef struct strappy_discovered_database_record_list {
   size_t count;
 } strappy_discovered_database_record_list;
 
+typedef struct strappy_openrouter_model_record {
+  char *model_id;
+  char *canonical_slug;
+  char *hugging_face_id;
+  char *name;
+  char *description;
+  long long context_length;
+  long long created;
+  char *architecture_modality;
+  char *architecture_tokenizer;
+  char *architecture_instruct_type;
+  char *pricing_prompt;
+  char *pricing_completion;
+  char *pricing_request;
+  char *pricing_image;
+  char *pricing_audio;
+  char *pricing_web_search;
+  char *pricing_internal_reasoning;
+  char *pricing_input_cache_read;
+  char *pricing_input_cache_write;
+  long long top_provider_context_length;
+  long long top_provider_max_completion_tokens;
+  int top_provider_is_moderated;
+  char *knowledge_cutoff;
+  char *expiration_date;
+  char *links_details;
+  char *links_json;
+  char *reasoning_json;
+  char *benchmarks_json;
+  char *default_parameters_json;
+  char *per_request_limits_json;
+  char *raw_json;
+  char *fetched_at;
+  int selected;
+} strappy_openrouter_model_record;
+
+typedef struct strappy_openrouter_model_record_list {
+  strappy_openrouter_model_record *records;
+  size_t count;
+} strappy_openrouter_model_record_list;
+
 void strappy_session_record_init(strappy_session_record *record);
 void strappy_session_record_destroy(strappy_session_record *record);
 void strappy_session_record_list_init(strappy_session_record_list *list);
@@ -129,6 +170,10 @@ void strappy_discovered_database_record_init(strappy_discovered_database_record 
 void strappy_discovered_database_record_destroy(strappy_discovered_database_record *record);
 void strappy_discovered_database_record_list_init(strappy_discovered_database_record_list *list);
 void strappy_discovered_database_record_list_destroy(strappy_discovered_database_record_list *list);
+void strappy_openrouter_model_record_init(strappy_openrouter_model_record *record);
+void strappy_openrouter_model_record_destroy(strappy_openrouter_model_record *record);
+void strappy_openrouter_model_record_list_init(strappy_openrouter_model_record_list *list);
+void strappy_openrouter_model_record_list_destroy(strappy_openrouter_model_record_list *list);
 
 int strappy_db_initialize(const char *db_path, char **error_out);
 int strappy_db_save_discovered_databases(
@@ -234,6 +279,19 @@ int strappy_db_list_session_context_messages(
   long long session_id,
   strappy_session_message_record_list *list,
   char **error_out);
+int strappy_db_save_openrouter_models_json(const char *db_path,
+                                           const char *json,
+                                           char **error_out);
+int strappy_db_list_openrouter_models(
+  const char *db_path,
+  strappy_openrouter_model_record_list *list,
+  char **error_out);
+int strappy_db_set_selected_openrouter_model(const char *db_path,
+                                             const char *model_id,
+                                             char **error_out);
+int strappy_db_get_selected_openrouter_model(const char *db_path,
+                                             char **model_id_out,
+                                             char **error_out);
 
 #ifdef __cplusplus
 }
