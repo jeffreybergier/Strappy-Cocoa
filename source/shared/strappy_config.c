@@ -91,17 +91,6 @@ static int strappy_config_apply_pair(strappy_config *config,
     return strappy_config_set_string(&config->api_token, value, error_out);
   }
 
-  if (strcmp(key, "APIMODEL") == 0) {
-    if (value[0] == '\0') {
-      return 1;
-    }
-    if (!strappy_config_set_string(&config->api_model, value, error_out)) {
-      return 0;
-    }
-    config->api_model_configured = 1;
-    return 1;
-  }
-
   return 1;
 }
 
@@ -192,12 +181,6 @@ static int strappy_config_apply_environment(strappy_config *config,
     *api_token_configured = 1;
   }
 
-  value = getenv("APIMODEL");
-  if ((value != NULL) &&
-      !strappy_config_apply_pair(config, "APIMODEL", value, error_out)) {
-    return 0;
-  }
-
   return 1;
 }
 
@@ -249,7 +232,6 @@ void strappy_config_init(strappy_config *config)
   config->api_endpoint = NULL;
   config->api_token = NULL;
   config->api_model = NULL;
-  config->api_model_configured = 0;
   config->guidance_resource_dir = NULL;
   config->tool_allowlist = NULL;
   config->tool_allowlist_count = 0U;
@@ -274,7 +256,7 @@ int strappy_config_set_api_model(strappy_config *config,
                                  char **error_out)
 {
   if ((config == NULL) || (api_model == NULL) || (api_model[0] == '\0')) {
-    strappy_set_error(error_out, "APIMODEL is not configured.");
+    strappy_set_error(error_out, "API model is not configured.");
     return 0;
   }
 

@@ -2562,6 +2562,7 @@ static int strappy_assistant_run_learning_summary(
 
 static int strappy_assistant_apply_selected_model(strappy_config *config,
                                                   const char *session_db_path,
+                                                  long long session_id,
                                                   char **error_out)
 {
   char *selected_model;
@@ -2572,14 +2573,11 @@ static int strappy_assistant_apply_selected_model(strappy_config *config,
     return 0;
   }
 
-  if (config->api_model_configured) {
-    return 1;
-  }
-
   selected_model = NULL;
-  if (!strappy_db_get_selected_openrouter_model(session_db_path,
-                                                &selected_model,
-                                                error_out)) {
+  if (!strappy_db_get_session_model(session_db_path,
+                                    session_id,
+                                    &selected_model,
+                                    error_out)) {
     return 0;
   }
 
@@ -2664,6 +2662,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
 
   if (!strappy_assistant_apply_selected_model(&config,
                                               session_db_path,
+                                              session_id,
                                               error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
@@ -2954,6 +2953,7 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
 
   if (!strappy_assistant_apply_selected_model(&config,
                                               session_db_path,
+                                              session_id,
                                               error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);

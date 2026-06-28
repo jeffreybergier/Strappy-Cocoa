@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "strappy_core.h"
+#include "strappy_config.h"
 #include "strappy_db.h"
 #include "strappy_tools.h"
 #include "cJSON.h"
@@ -2516,9 +2517,13 @@ static int harness_run_openrouter_model_catalog_tests(
     "]"
     "}";
   strappy_openrouter_model_record_list list;
+  char *default_model;
   char *selected_model;
+  char *session_model;
   char *error;
+  long long session_id;
   size_t index;
+  int found_builtin_default;
   int found_gemma;
   int found_openai;
   int ok;
@@ -2548,12 +2553,17 @@ static int harness_run_openrouter_model_catalog_tests(
     return 0;
   }
 
+  found_builtin_default = 0;
   found_gemma = 0;
   found_openai = 0;
   for (index = 0U; index < list.count; index++) {
     strappy_openrouter_model_record *record;
 
     record = &list.records[index];
+    if ((record->model_id != NULL) &&
+        (strcmp(record->model_id, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0)) {
+      found_builtin_default = record->selected && record->allowed;
+    }
     if ((record->model_id != NULL) &&
         (strcmp(record->model_id, "google/gemma-4-31b-it") == 0)) {
       found_gemma =
@@ -2582,10 +2592,51 @@ static int harness_run_openrouter_model_catalog_tests(
       found_openai = 1;
     }
   }
-  ok = (list.count == 2U) && found_gemma && found_openai;
+  ok = (list.count == 3U) && found_builtin_default && found_gemma && found_openai;
   strappy_openrouter_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "OpenRouter model rows did not match expected values.\n");
+    return 0;
+  }
+
+  default_model = NULL;
+  error = NULL;
+  if (!strappy_db_get_default_openrouter_model(context->catalog_path,
+                                               &default_model,
+                                               &error)) {
+    fprintf(stderr,
+            "Could not get default OpenRouter model: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  ok = (default_model != NULL) &&
+       (strcmp(default_model, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0);
+  strappy_free_string(default_model);
+  if (!ok) {
+    fprintf(stderr, "Built-in OpenRouter default model did not persist.\n");
+    return 0;
+  }
+
+  error = NULL;
+  strappy_openrouter_model_record_list_init(&list);
+  if (!strappy_db_list_allowed_openrouter_models(context->catalog_path,
+                                                 &list,
+                                                 &error)) {
+    fprintf(stderr,
+            "Could not list allowed OpenRouter models: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_openrouter_model_record_list_destroy(&list);
+    return 0;
+  }
+  ok = (list.count == 1U) &&
+       (list.records[0].model_id != NULL) &&
+       (strcmp(list.records[0].model_id, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0) &&
+       list.records[0].allowed;
+  strappy_openrouter_model_record_list_destroy(&list);
+  if (!ok) {
+    fprintf(stderr, "Built-in OpenRouter default was not the only allowed model.\n");
     return 0;
   }
 
@@ -2608,6 +2659,50 @@ static int harness_run_openrouter_model_catalog_tests(
   strappy_openrouter_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "OpenRouter model filtered list did not match expected values.\n");
+    return 0;
+  }
+
+  error = NULL;
+  strappy_openrouter_model_record_list_init(&list);
+  if (!strappy_db_list_openrouter_models_matching(context->catalog_path,
+                                                  "GPT 4.1 Mini",
+                                                  &list,
+                                                  &error)) {
+    fprintf(stderr,
+            "Could not filter OpenRouter models by name: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_openrouter_model_record_list_destroy(&list);
+    return 0;
+  }
+  ok = (list.count == 1U) &&
+       (list.records[0].model_id != NULL) &&
+       (strcmp(list.records[0].model_id, "openai/gpt-4.1-mini") == 0);
+  strappy_openrouter_model_record_list_destroy(&list);
+  if (!ok) {
+    fprintf(stderr, "OpenRouter model name filter did not match expected values.\n");
+    return 0;
+  }
+
+  error = NULL;
+  strappy_openrouter_model_record_list_init(&list);
+  if (!strappy_db_list_openrouter_models_matching(context->catalog_path,
+                                                  "openai/gpt-4.1-mini",
+                                                  &list,
+                                                  &error)) {
+    fprintf(stderr,
+            "Could not filter OpenRouter models by id: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_openrouter_model_record_list_destroy(&list);
+    return 0;
+  }
+  ok = (list.count == 1U) &&
+       (list.records[0].model_id != NULL) &&
+       (strcmp(list.records[0].model_id, "openai/gpt-4.1-mini") == 0);
+  strappy_openrouter_model_record_list_destroy(&list);
+  if (!ok) {
+    fprintf(stderr, "OpenRouter model id filter did not match expected values.\n");
     return 0;
   }
 
@@ -2653,13 +2748,32 @@ static int harness_run_openrouter_model_catalog_tests(
   }
 
   error = NULL;
-  if (!strappy_db_set_selected_openrouter_model(context->catalog_path,
-                                                "openai/gpt-4.1-mini",
-                                                &error)) {
+  if (!strappy_db_set_default_openrouter_model(context->catalog_path,
+                                               "openai/gpt-4.1-mini",
+                                               &error)) {
     fprintf(stderr,
-            "Could not set selected OpenRouter model: %s\n",
+            "Could not set default OpenRouter model: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
+    return 0;
+  }
+
+  default_model = NULL;
+  if (!strappy_db_get_default_openrouter_model(context->catalog_path,
+                                               &default_model,
+                                               &error)) {
+    fprintf(stderr,
+            "Could not get default OpenRouter model after update: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  ok = (default_model != NULL) &&
+       (strcmp(default_model, "openai/gpt-4.1-mini") == 0);
+  strappy_free_string(default_model);
+  if (!ok) {
+    fprintf(stderr, "Default OpenRouter model did not persist.\n");
     return 0;
   }
 
@@ -2678,9 +2792,20 @@ static int harness_run_openrouter_model_catalog_tests(
        (strcmp(selected_model, "openai/gpt-4.1-mini") == 0);
   strappy_free_string(selected_model);
   if (!ok) {
-    fprintf(stderr, "Selected OpenRouter model did not persist.\n");
+    fprintf(stderr, "Selected OpenRouter compatibility wrapper did not persist.\n");
     return 0;
   }
+
+  error = NULL;
+  if (strappy_db_set_openrouter_model_allowed(context->catalog_path,
+                                              "openai/gpt-4.1-mini",
+                                              0,
+                                              &error)) {
+    fprintf(stderr, "Default OpenRouter model should not be removable.\n");
+    return 0;
+  }
+  strappy_free_string(error);
+  error = NULL;
 
   strappy_openrouter_model_record_list_init(&list);
   if (!strappy_db_list_openrouter_models(context->catalog_path, &list, &error)) {
@@ -2692,13 +2817,169 @@ static int harness_run_openrouter_model_catalog_tests(
     return 0;
   }
 
-  ok = (list.count == 2U) &&
+  ok = (list.count == 3U) &&
        (list.records[0].model_id != NULL) &&
        (strcmp(list.records[0].model_id, "openai/gpt-4.1-mini") == 0) &&
-       list.records[0].selected;
+       list.records[0].selected &&
+       list.records[0].allowed;
   strappy_openrouter_model_record_list_destroy(&list);
   if (!ok) {
-    fprintf(stderr, "Selected OpenRouter model was not listed first.\n");
+    fprintf(stderr, "Default OpenRouter model was not listed first.\n");
+    return 0;
+  }
+
+  error = NULL;
+  strappy_openrouter_model_record_list_init(&list);
+  if (!strappy_db_list_allowed_openrouter_models(context->catalog_path,
+                                                 &list,
+                                                 &error)) {
+    fprintf(stderr,
+            "Could not list updated allowed OpenRouter models: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_openrouter_model_record_list_destroy(&list);
+    return 0;
+  }
+  ok = (list.count == 1U) &&
+       (list.records[0].model_id != NULL) &&
+       (strcmp(list.records[0].model_id, "openai/gpt-4.1-mini") == 0);
+  strappy_openrouter_model_record_list_destroy(&list);
+  if (!ok) {
+    fprintf(stderr, "Default OpenRouter model was not the only allowed model.\n");
+    return 0;
+  }
+
+  error = NULL;
+  if (!strappy_db_set_openrouter_model_allowed(context->catalog_path,
+                                               "google/gemma-4-31b-it",
+                                               1,
+                                               &error)) {
+    fprintf(stderr,
+            "Could not allow OpenRouter model: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  error = NULL;
+  strappy_openrouter_model_record_list_init(&list);
+  if (!strappy_db_list_allowed_openrouter_models(context->catalog_path,
+                                                 &list,
+                                                 &error)) {
+    fprintf(stderr,
+            "Could not list allowed OpenRouter models after allow: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_openrouter_model_record_list_destroy(&list);
+    return 0;
+  }
+  found_gemma = 0;
+  found_openai = 0;
+  for (index = 0U; index < list.count; index++) {
+    if ((list.records[index].model_id != NULL) &&
+        (strcmp(list.records[index].model_id, "google/gemma-4-31b-it") == 0)) {
+      found_gemma = 1;
+    }
+    if ((list.records[index].model_id != NULL) &&
+        (strcmp(list.records[index].model_id, "openai/gpt-4.1-mini") == 0)) {
+      found_openai = 1;
+    }
+  }
+  ok = (list.count == 2U) && found_gemma && found_openai;
+  strappy_openrouter_model_record_list_destroy(&list);
+  if (!ok) {
+    fprintf(stderr, "Allowed OpenRouter models did not match expected values.\n");
+    return 0;
+  }
+
+  session_id = 0LL;
+  error = NULL;
+  if (!strappy_db_create_session(context->catalog_path, &session_id, &error)) {
+    fprintf(stderr,
+            "Could not create model selection session: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  session_model = NULL;
+  if (!strappy_db_get_session_model(context->catalog_path,
+                                    session_id,
+                                    &session_model,
+                                    &error)) {
+    fprintf(stderr,
+            "Could not get model selection session model: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  ok = (session_model != NULL) &&
+       (strcmp(session_model, "openai/gpt-4.1-mini") == 0);
+  strappy_free_string(session_model);
+  if (!ok) {
+    fprintf(stderr, "New session did not copy default OpenRouter model.\n");
+    return 0;
+  }
+
+  error = NULL;
+  if (!strappy_db_update_session_model(context->catalog_path,
+                                       session_id,
+                                       "google/gemma-4-31b-it",
+                                       &error)) {
+    fprintf(stderr,
+            "Could not update session OpenRouter model: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  session_model = NULL;
+  if (!strappy_db_get_session_model(context->catalog_path,
+                                    session_id,
+                                    &session_model,
+                                    &error)) {
+    fprintf(stderr,
+            "Could not read updated session OpenRouter model: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  ok = (session_model != NULL) &&
+       (strcmp(session_model, "google/gemma-4-31b-it") == 0);
+  strappy_free_string(session_model);
+  if (!ok) {
+    fprintf(stderr, "Session OpenRouter model did not persist.\n");
+    return 0;
+  }
+
+  error = NULL;
+  if (!strappy_db_set_openrouter_model_allowed(context->catalog_path,
+                                               "google/gemma-4-31b-it",
+                                               0,
+                                               &error)) {
+    fprintf(stderr,
+            "Could not disallow non-default OpenRouter model: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  session_model = NULL;
+  if (!strappy_db_get_session_model(context->catalog_path,
+                                    session_id,
+                                    &session_model,
+                                    &error)) {
+    fprintf(stderr,
+            "Could not read stale session OpenRouter model fallback: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  ok = (session_model != NULL) &&
+       (strcmp(session_model, "openai/gpt-4.1-mini") == 0);
+  strappy_free_string(session_model);
+  if (!ok) {
+    fprintf(stderr, "Stale session OpenRouter model did not fall back.\n");
     return 0;
   }
 

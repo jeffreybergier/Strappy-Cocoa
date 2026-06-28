@@ -16,7 +16,6 @@ typedef struct strappy_config {
   char *api_endpoint;
   char *api_token;
   char *api_model;
-  int api_model_configured;
   char *guidance_resource_dir;
   const char * const *tool_allowlist;
   size_t tool_allowlist_count;

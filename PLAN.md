@@ -66,8 +66,8 @@ Deliverables:
 
 - [x] C request builder for chat messages and model selection.
 - [x] OpenRouter `/models/user` catalog fetch, local persistence, searchable
-  macOS model picker UI, and request-time selected-model override when
-  `APIMODEL` is not explicitly configured.
+  macOS model picker UI, per-session model selection, and default model
+  selection for new chats.
 - [x] C request builder support for loading tool definitions from
   `GuidanceTools.json`, including a tool allowlist for memory-audit turns.
 - [ ] Additional model-setting configuration beyond endpoint, model, streaming,

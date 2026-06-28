@@ -39,6 +39,8 @@ typedef struct StrappySessionStreamContext {
 + (StrappySession *)inFlightSessionForIdentifier:(NSNumber *)identifier;
 + (NSArray *)messagesForSessionIdentifier:(NSNumber *)sessionIdentifier
                                     error:(NSError **)error;
++ (NSArray *)openRouterModelCatalogFromList:
+    (const strappy_openrouter_model_record_list *)list;
 + (NSDictionary *)dictionaryFromOpenRouterModelRecord:
     (const strappy_openrouter_model_record *)record;
 + (void)refreshOpenRouterModelCatalogInBackground:(id)ignored;
@@ -820,6 +822,7 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
     rawJSON, @"raw_json",
     fetchedAt, @"fetched_at",
     [NSNumber numberWithBool:(record->selected ? YES : NO)], @"selected",
+    [NSNumber numberWithBool:(record->allowed ? YES : NO)], @"allowed",
     nil];
 }
 
@@ -1062,15 +1065,35 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   return YES;
 }
 
++ (NSArray *)openRouterModelCatalogFromList:
+    (const strappy_openrouter_model_record_list *)list
+{
+  NSMutableArray *models;
+  size_t index;
+
+  if (list == NULL) {
+    return nil;
+  }
+
+  models = [NSMutableArray arrayWithCapacity:list->count];
+  for (index = 0U; index < list->count; index++) {
+    NSDictionary *model =
+      [StrappySession dictionaryFromOpenRouterModelRecord:&list->records[index]];
+    if (model != nil) {
+      [models addObject:model];
+    }
+  }
+  return models;
+}
+
 + (NSArray *)openRouterModelCatalogMatchingSearchText:(NSString *)searchText
                                                 error:(NSError **)error
 {
   NSString *databasePath;
   strappy_openrouter_model_record_list list;
-  NSMutableArray *models;
+  NSArray *models;
   char *strappyError;
   const char *searchCString;
-  size_t index;
 
   databasePath = [StrappySession sessionsDatabasePath];
   if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
@@ -1094,15 +1117,7 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
     return nil;
   }
 
-  models = [NSMutableArray arrayWithCapacity:list.count];
-  for (index = 0U; index < list.count; index++) {
-    NSDictionary *model =
-      [StrappySession dictionaryFromOpenRouterModelRecord:&list.records[index]];
-    if (model != nil) {
-      [models addObject:model];
-    }
-  }
-
+  models = [StrappySession openRouterModelCatalogFromList:&list];
   strappy_openrouter_model_record_list_destroy(&list);
   return models;
 }
@@ -1113,7 +1128,38 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
                                                             error:error];
 }
 
-+ (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error
++ (NSArray *)allowedOpenRouterModelCatalogWithError:(NSError **)error
+{
+  NSString *databasePath;
+  strappy_openrouter_model_record_list list;
+  NSArray *models;
+  char *strappyError;
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+
+  strappy_openrouter_model_record_list_init(&list);
+  strappyError = NULL;
+  if (!strappy_db_list_allowed_openrouter_models([databasePath UTF8String],
+                                                 &list,
+                                                 &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    strappy_openrouter_model_record_list_destroy(&list);
+    return nil;
+  }
+
+  models = [StrappySession openRouterModelCatalogFromList:&list];
+  strappy_openrouter_model_record_list_destroy(&list);
+  return models;
+}
+
++ (NSString *)defaultOpenRouterModelIdentifierWithError:(NSError **)error
 {
   NSString *databasePath;
   char *modelId;
@@ -1128,9 +1174,9 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 
   modelId = NULL;
   strappyError = NULL;
-  if (!strappy_db_get_selected_openrouter_model([databasePath UTF8String],
-                                                &modelId,
-                                                &strappyError)) {
+  if (!strappy_db_get_default_openrouter_model([databasePath UTF8String],
+                                               &modelId,
+                                               &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
@@ -1146,8 +1192,8 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   return result;
 }
 
-+ (BOOL)setSelectedOpenRouterModelIdentifier:(NSString *)modelIdentifier
-                                       error:(NSError **)error
++ (BOOL)setDefaultOpenRouterModelIdentifier:(NSString *)modelIdentifier
+                                      error:(NSError **)error
 {
   NSString *databasePath;
   char *strappyError;
@@ -1173,9 +1219,9 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   }
 
   strappyError = NULL;
-  ok = strappy_db_set_selected_openrouter_model([databasePath UTF8String],
-                                                [modelIdentifier UTF8String],
-                                                &strappyError);
+  ok = strappy_db_set_default_openrouter_model([databasePath UTF8String],
+                                               [modelIdentifier UTF8String],
+                                               &strappyError);
   if (!ok) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
@@ -1187,8 +1233,72 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   [[NSNotificationCenter defaultCenter]
     postNotificationName:StrappySessionModelCatalogDidChangeNotification
                   object:self
-                userInfo:[NSDictionary dictionaryWithObject:modelIdentifier
-                                                     forKey:@"selected_model_id"]];
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  modelIdentifier, @"default_model_id",
+                  modelIdentifier, @"selected_model_id",
+                  nil]];
+  return YES;
+}
+
++ (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error
+{
+  return [StrappySession defaultOpenRouterModelIdentifierWithError:error];
+}
+
++ (BOOL)setSelectedOpenRouterModelIdentifier:(NSString *)modelIdentifier
+                                       error:(NSError **)error
+{
+  return [StrappySession setDefaultOpenRouterModelIdentifier:modelIdentifier
+                                                       error:error];
+}
+
++ (BOOL)setOpenRouterModelAllowed:(BOOL)allowed
+                forModelIdentifier:(NSString *)modelIdentifier
+                             error:(NSError **)error
+{
+  NSString *databasePath;
+  char *strappyError;
+  int ok;
+
+  if (![modelIdentifier isKindOfClass:[NSString class]] ||
+      ([modelIdentifier length] == 0U)) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Model is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:9
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+
+  strappyError = NULL;
+  ok = strappy_db_set_openrouter_model_allowed([databasePath UTF8String],
+                                               [modelIdentifier UTF8String],
+                                               allowed ? 1 : 0,
+                                               &strappyError);
+  if (!ok) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return NO;
+  }
+
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionModelCatalogDidChangeNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  modelIdentifier, @"model_id",
+                  [NSNumber numberWithBool:(allowed ? YES : NO)], @"allowed",
+                  nil]];
   return YES;
 }
 
@@ -1609,6 +1719,136 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
         [[NSDictionary alloc] initWithObjectsAndKeys:
           sessionIdentifier_, @"id",
           streamingEnabled, @"streaming_enabled",
+          nil];
+    }
+  }
+
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionDidUpdateNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObject:notificationSession
+                                                     forKey:@"session"]];
+  [notificationSession release];
+  return YES;
+}
+
+- (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error
+{
+  NSString *databasePath;
+  char *modelId;
+  char *strappyError;
+  NSString *result;
+  long long sessionId;
+
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  if (sessionId <= 0) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return nil;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+
+  modelId = NULL;
+  strappyError = NULL;
+  if (!strappy_db_get_session_model([databasePath UTF8String],
+                                    sessionId,
+                                    &modelId,
+                                    &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return nil;
+  }
+
+  result = nil;
+  if (modelId != NULL) {
+    result = [NSString stringWithUTF8String:modelId];
+  }
+  strappy_free_string(modelId);
+  return result;
+}
+
+- (BOOL)setSelectedOpenRouterModelIdentifier:(NSString *)modelIdentifier
+                                       error:(NSError **)error
+{
+  NSString *databasePath;
+  NSDictionary *notificationSession;
+  char *strappyError;
+  long long sessionId;
+
+  if (![modelIdentifier isKindOfClass:[NSString class]] ||
+      ([modelIdentifier length] == 0U)) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Model is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:9
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  if (sessionId <= 0) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+
+  strappyError = NULL;
+  if (!strappy_db_update_session_model([databasePath UTF8String],
+                                       sessionId,
+                                       [modelIdentifier UTF8String],
+                                       &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return NO;
+  }
+
+  notificationSession = nil;
+  @synchronized(self) {
+    NSMutableDictionary *summary;
+
+    if (cachedSummary_ != nil) {
+      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
+      [summary setObject:modelIdentifier forKey:@"model"];
+      [cachedSummary_ release];
+      cachedSummary_ = summary;
+      notificationSession = [cachedSummary_ retain];
+    } else {
+      notificationSession =
+        [[NSDictionary alloc] initWithObjectsAndKeys:
+          sessionIdentifier_, @"id",
+          modelIdentifier, @"model",
           nil];
     }
   }

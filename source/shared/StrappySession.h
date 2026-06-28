@@ -33,9 +33,16 @@ extern NSString * const StrappySessionModelCatalogDidChangeNotification;
 + (NSArray *)openRouterModelCatalogMatchingSearchText:(NSString *)searchText
                                                 error:(NSError **)error;
 + (NSArray *)openRouterModelCatalogWithError:(NSError **)error;
++ (NSArray *)allowedOpenRouterModelCatalogWithError:(NSError **)error;
++ (NSString *)defaultOpenRouterModelIdentifierWithError:(NSError **)error;
++ (BOOL)setDefaultOpenRouterModelIdentifier:(NSString *)modelIdentifier
+                                      error:(NSError **)error;
 + (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error;
 + (BOOL)setSelectedOpenRouterModelIdentifier:(NSString *)modelIdentifier
                                        error:(NSError **)error;
++ (BOOL)setOpenRouterModelAllowed:(BOOL)allowed
+                forModelIdentifier:(NSString *)modelIdentifier
+                             error:(NSError **)error;
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error;
 
 - (id)initWithSessionIdentifier:(NSNumber *)sessionIdentifier
@@ -46,6 +53,9 @@ extern NSString * const StrappySessionModelCatalogDidChangeNotification;
 - (NSArray *)messagesWithError:(NSError **)error;
 - (BOOL)streamingEnabled;
 - (BOOL)setStreamingEnabled:(BOOL)enabled error:(NSError **)error;
+- (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error;
+- (BOOL)setSelectedOpenRouterModelIdentifier:(NSString *)modelIdentifier
+                                       error:(NSError **)error;
 - (BOOL)isPromptInFlight;
 - (BOOL)promptCancellationRequested;
 - (BOOL)beginStreamingPrompt:(NSString *)prompt

@@ -151,6 +151,7 @@ typedef struct strappy_openrouter_model_record {
   char *raw_json;
   char *fetched_at;
   int selected;
+  int allowed;
 } strappy_openrouter_model_record;
 
 typedef struct strappy_openrouter_model_record_list {
@@ -291,12 +292,34 @@ int strappy_db_list_openrouter_models(
   const char *db_path,
   strappy_openrouter_model_record_list *list,
   char **error_out);
+int strappy_db_list_allowed_openrouter_models(
+  const char *db_path,
+  strappy_openrouter_model_record_list *list,
+  char **error_out);
+int strappy_db_set_openrouter_model_allowed(const char *db_path,
+                                            const char *model_id,
+                                            int allowed,
+                                            char **error_out);
+int strappy_db_set_default_openrouter_model(const char *db_path,
+                                            const char *model_id,
+                                            char **error_out);
+int strappy_db_get_default_openrouter_model(const char *db_path,
+                                            char **model_id_out,
+                                            char **error_out);
 int strappy_db_set_selected_openrouter_model(const char *db_path,
                                              const char *model_id,
                                              char **error_out);
 int strappy_db_get_selected_openrouter_model(const char *db_path,
                                              char **model_id_out,
                                              char **error_out);
+int strappy_db_update_session_model(const char *db_path,
+                                    long long session_id,
+                                    const char *model_id,
+                                    char **error_out);
+int strappy_db_get_session_model(const char *db_path,
+                                 long long session_id,
+                                 char **model_id_out,
+                                 char **error_out);
 
 #ifdef __cplusplus
 }

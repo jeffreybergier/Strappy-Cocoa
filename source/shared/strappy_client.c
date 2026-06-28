@@ -3394,7 +3394,7 @@ int strappy_client_send_messages(const strappy_config *config,
   }
 
   if ((config->api_model == NULL) || (config->api_model[0] == '\0')) {
-    strappy_set_error(error_out, "APIMODEL is not configured.");
+    strappy_set_error(error_out, "API model is not configured.");
     return 0;
   }
 
@@ -3592,7 +3592,7 @@ int strappy_client_stream_messages(const strappy_config *config,
   }
 
   if ((config->api_model == NULL) || (config->api_model[0] == '\0')) {
-    strappy_set_error(error_out, "APIMODEL is not configured.");
+    strappy_set_error(error_out, "API model is not configured.");
     return 0;
   }
 

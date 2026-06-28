@@ -7,6 +7,12 @@
 @protocol PromptSendViewControllerDelegate
 - (void)promptSendViewController:(PromptSendViewController *)controller
                  didSubmitPrompt:(NSString *)prompt;
+- (NSArray *)allowedModelsForPromptSendViewController:
+    (PromptSendViewController *)controller;
+- (NSString *)selectedModelIdentifierForPromptSendViewController:
+    (PromptSendViewController *)controller;
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
+        setSelectedModelIdentifier:(NSString *)modelIdentifier;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
               setStreamingEnabled:(BOOL)enabled;
 - (void)promptSendViewControllerDidCancelPrompt:
@@ -21,7 +27,7 @@
   NSView       *bezelView_;
   NSScrollView *scrollView_;
   NSTextView   *textView_;
-  NSPopUpButton *streamingPopUpButton_;
+  NSPopUpButton *optionsPopUpButton_;
   NSMenuItem    *streamingMenuItem_;
   NSButton      *sendButton_;
   id<PromptSendViewControllerDelegate> delegate_;
@@ -39,6 +45,7 @@
 - (void)setSending:(BOOL)sending;
 - (void)setCancellationRequested:(BOOL)requested;
 - (void)setStreamingEnabled:(BOOL)enabled;
+- (void)reloadOptionsMenu;
 - (BOOL)canSendCurrentPrompt;
 - (void)performSend:(id)sender;
 

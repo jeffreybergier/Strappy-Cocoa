@@ -563,6 +563,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 @interface MessageListViewController ()
 - (void)sessionStreamEvent:(NSNotification *)notification;
 - (void)sessionPromptDidFinish:(NSNotification *)notification;
+- (void)modelCatalogDidChange:(NSNotification *)notification;
 - (void)sendPromptDidFinish:(NSDictionary *)result;
 - (void)streamContentDeltaDidArrive:(NSDictionary *)delta;
 - (void)streamReasoningDeltaDidArrive:(NSDictionary *)delta;
@@ -615,6 +616,11 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     htmlDirectoryPath_ = [directoryPath copy];
     sendController_ = [[PromptSendViewController alloc] init];
     [sendController_ setDelegate:self];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(modelCatalogDidChange:)
+             name:StrappySessionModelCatalogDidChangeNotification
+           object:nil];
     [self setDrawsBackground:NO];
   }
   return self;
@@ -937,6 +943,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [sendController_ setSending:sending_];
   [sendController_ setStreamingEnabled:(session_ != nil) ?
     [session_ streamingEnabled] : NO];
+  [sendController_ reloadOptionsMenu];
   [self reloadContent];
 }
 
@@ -1012,6 +1019,58 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
       XPControlStateValueOn : XPControlStateValueOff)];
     return [self canToggleStreaming];
   }
+  return YES;
+}
+
+- (NSArray *)allowedModelsForPromptSendViewController:
+    (PromptSendViewController *)controller
+{
+  NSArray *models;
+
+  (void)controller;
+  models = [StrappySession allowedOpenRouterModelCatalogWithError:nil];
+  return (models != nil) ? models : [NSArray array];
+}
+
+- (NSString *)selectedModelIdentifierForPromptSendViewController:
+    (PromptSendViewController *)controller
+{
+  NSString *modelIdentifier;
+
+  (void)controller;
+  if (session_ == nil) {
+    return @"";
+  }
+
+  modelIdentifier = [session_ selectedOpenRouterModelIdentifierWithError:nil];
+  return (modelIdentifier != nil) ? modelIdentifier : @"";
+}
+
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
+        setSelectedModelIdentifier:(NSString *)modelIdentifier
+{
+  NSError *error;
+
+  (void)controller;
+  if (session_ == nil) {
+    return NO;
+  }
+
+  error = nil;
+  if (![session_ setSelectedOpenRouterModelIdentifier:modelIdentifier
+                                                error:&error]) {
+    NSString *errorMessage;
+
+    errorMessage = [error localizedDescription];
+    if ([errorMessage length] == 0U) {
+      errorMessage = NSLocalizedString(@"Could not update model setting.", nil);
+    }
+    [statusText_ release];
+    statusText_ = [errorMessage retain];
+    [self reloadContent];
+    return NO;
+  }
+
   return YES;
 }
 
@@ -1497,6 +1556,12 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     return;
   }
   [self beginSendingPrompt:pendingPrompt_ reusingPendingMessage:YES];
+}
+
+- (void)modelCatalogDidChange:(NSNotification *)notification
+{
+  (void)notification;
+  [sendController_ reloadOptionsMenu];
 }
 
 - (void)sessionStreamEvent:(NSNotification *)notification
