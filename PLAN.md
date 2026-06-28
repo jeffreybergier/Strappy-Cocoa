@@ -41,8 +41,10 @@ Deliverables:
   bounded read-only `database_query` execution exist; reusable shared sqlite
   helper APIs are still mostly local to `strappy_db.c` and `strappy_tools.c`.
 - [ ] Configuration loading for OpenRouter API key, base URL, model, timeout,
-  and request limits. API key/base URL/model exist; timeout and request-limit
-  configuration are still open.
+  and request limits. API key/base URL/model exist; macOS can save
+  endpoint and token credentials in Keychain and persist a selected OpenRouter
+  model while preserving `.env` and process-environment overrides. Timeout and
+  request-limit configuration are still open.
 - [x] Build system updates so shared core code and third-party libraries link
   into both iOS and macOS targets.
 
@@ -63,6 +65,9 @@ APIs and parse assistant responses reliably.
 Deliverables:
 
 - [x] C request builder for chat messages and model selection.
+- [x] OpenRouter `/models/user` catalog fetch, local persistence, searchable
+  macOS model picker UI, and request-time selected-model override when
+  `APIMODEL` is not explicitly configured.
 - [x] C request builder support for loading tool definitions from
   `GuidanceTools.json`, including a tool allowlist for memory-audit turns.
 - [ ] Additional model-setting configuration beyond endpoint, model, streaming,
@@ -74,8 +79,9 @@ Deliverables:
 - [ ] Public stable parsed tool-call result API outside the assistant loop.
 - [x] Timeout policy for network requests.
 - [ ] Retry policy for transient network failures.
-- [ ] Request cancellation hook for the UI layer. The streaming callback can
-  reject/cancel a stream, but a user-facing native cancel action is still open.
+- [x] Request cancellation hook for the UI layer. The macOS prompt bar and Chat
+  menu can request cancellation, and streamed requests propagate that request
+  through `StrappySession` to the client/assistant loop.
 - [ ] Redacted diagnostic logging that never prints API keys or full personal
   database contents.
 - [x] Minimal Objective-C bridge functions to submit a prompt and receive
@@ -122,7 +128,9 @@ Deliverables:
   selected live schema and remembered hints, and bounded read-only
   `database_query` calls for concrete data lookups.
 - [x] Native macOS Preferences allow checkbox whitelisting for valid cataloged
-  SQLite databases.
+  SQLite databases, with a polished database table showing Use, Database,
+  Location, and Size columns, disabled invalid rows, validation tooltips, and
+  multi-row spacebar toggling.
 - [ ] Fixed native UI state for deny decisions and ignored locations.
 - [ ] Platform-specific safeguards for permission failures, symlinks, loops,
   large directories, and unreadable files. Symlink avoidance, unreadable path
@@ -182,7 +190,8 @@ Deliverables:
   `strappy://database-manage`; WebView/native bridge interception that opens
   `PreferencesWindowController` remains open.
 - [x] Runtime prompt, tool, and database guidance resources:
-  `PromptSystem.txt`, `GuidanceTools.json`, and `GuidanceDatabase.json`.
+  `PromptSystem.txt`, `GuidanceTools.json`, and `GuidanceDatabase.json`,
+  synchronized with the stable tool names and simplified current guidance.
 - [ ] Proactive prompt context builder that injects available-database summaries
   before a tool call. Current behavior relies on tool guidance and
   `database_list_info` / `database_context_read`.
@@ -225,9 +234,12 @@ Deliverables:
 - [x] Embedded web chat UI suitable for legacy WebKit/UIWebView-era platforms.
 - [x] Native bridge between the web UI and Objective-C/C assistant core for
   prompt submission, streaming text, reasoning, tool events, and turn events.
-- [ ] Conversation list, active conversation view, message composer, loading
-  state, error state, and cancel action. Conversation list/view/composer and
-  error states exist; a user-facing cancel action remains open.
+- [x] Conversation list, active conversation view, message composer, loading
+  state, error state, and cancel action. macOS exposes send/stream/stop controls
+  in the prompt bar plus Chat menu commands for New Session, Send Prompt, Cancel
+  Prompt, and Streaming.
+- [x] macOS Preferences tabs for API credentials, model catalog browsing/search,
+  database scanning/approval, and read-only system prompt inspection.
 - [x] Local conversation persistence in sqlite using `sessions`,
   `session_turns`, and `session_messages`; the old empty/non-started session
   path has been removed.
@@ -239,10 +251,11 @@ Deliverables:
   with collapsed rendering for completed reasoning blocks.
 - [ ] Scan/schema/query-specific activity labels beyond generic tool rows.
 - [ ] Database permission flow that lets the user approve, deny, or forget a
-  found database. macOS approval checkboxes exist; deny, forget, rescan, and the
-  WebView `database_manage` bridge remain open.
+  found database. macOS home-folder scan/rescan and approval checkboxes exist;
+  deny, forget, and the WebView `database_manage` bridge remain open.
 - [x] Localized strings for English and Japanese for new visible UI touched by
-  the current chat/session flow.
+  the current chat/session, Preferences, model picker, database scanning, and
+  menu flows.
 
 Validation:
 
@@ -267,6 +280,8 @@ Deliverables:
 - Update `.altivec-release.yml` and iOS Makefile/package scripts to publish the
   `.deb` artifact.
 - Clear local configuration path for API keys that avoids committing secrets.
+  macOS now stores endpoint and token credentials in Keychain while leaving `.env`
+  and process-environment overrides available for development and automation.
 - Data retention controls for scanned database catalog, conversation history,
   and tool audit logs.
 - Release checklist for clean builds, warning review, static analysis, and
