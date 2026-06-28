@@ -1,19 +1,19 @@
 {
-  "default_description": "Approved SQLite database for read-only local-data questions. Call database_context_read to read schema and saved hints.",
-  "default_description_short": "Approved SQLite database for read-only local-data questions.",
+  "default_description": "Approved SQLite database for read-only local-data questions. ALWAYS call database_context_read before querying. NEVER invent schema, joins, timestamp units, or private facts.",
+  "default_description_short": "Approved SQLite database. Use database_context_read before querying.",
   "user_actions": {
     "manage_action": "database_manage",
     "manage_label": "Manage databases",
     "manage_href": "strappy://database-manage",
-    "manage_needed": "No approved databases are available. Ask the user to open manage_href."
+    "manage_needed": "No approved databases are available. Tell the user to open manage_href."
   },
   "recovery_guidance": {
-    "database_query_unavailable_database_id": "Call database_list_info to choose an available database_id.",
-    "database_query_missing_database_id": "Call database_list_info first.",
-    "database_context_read_unavailable_database_id": "Call database_list_info to choose an available database_id.",
-    "database_context_read_missing_database_id": "Call database_list_info first.",
-    "memory_database_hint_remember_unavailable_database_id": "Call database_list_info to choose an available database_id.",
-    "memory_database_hint_remember_missing_database_id": "Call database_list_info first."
+    "database_query_unavailable_database_id": "ALWAYS call database_list_info and choose an available database_id.",
+    "database_query_missing_database_id": "ALWAYS call database_list_info first.",
+    "database_context_read_unavailable_database_id": "ALWAYS call database_list_info and choose an available database_id.",
+    "database_context_read_missing_database_id": "ALWAYS call database_list_info first.",
+    "memory_database_hint_remember_unavailable_database_id": "ALWAYS call database_list_info and choose an available database_id.",
+    "memory_database_hint_remember_missing_database_id": "ALWAYS call database_list_info first."
   },
   "database_descriptions": [
     {
@@ -21,8 +21,8 @@
       "match": {
         "filename": "sms.db"
       },
-      "description_short": "Apple Messages conversations. Handles are phone/email identifiers; resolve names through Contacts or Recents.",
-      "description": "Apple Messages SMS/iMessage conversations. Handles are phone/email identifiers, not names. For full conversations, join chats through chat_handle_join and chat_message_join. Message dates use Apple epoch values. Call helper_datetime_to_iso8601 to display message dates. Read message text from message.text. Use attributedBody as fallback. Attachments join through message_attachment_join.",
+      "description_short": "Apple Messages conversations. Handles are phone/email identifiers. Resolve names through Contacts or Recents.",
+      "description": "Apple Messages SMS/iMessage conversations. ALWAYS resolve people to handle ids through Contacts or Recents. Handles are phone/email identifiers, NEVER names. For full conversations, ALWAYS join chat -> chat_message_join -> message and chat -> chat_handle_join -> handle. ALWAYS read message text from message.text. Use attributedBody only after message.text is empty. Message dates use Apple epoch seconds. ALWAYS call helper_datetime_to_iso8601 with unit apple_seconds. NEVER omit the timestamp unit. If database_query returns truncated true, ALWAYS query the next page or say the answer is based only on returned rows. Attachments join through message_attachment_join.",
       "related_databases": [
         "AddressBook.sqlitedb",
         "Recents"
@@ -34,7 +34,7 @@
         "filename": "AddressBook.sqlitedb"
       },
       "description_short": "Apple Contacts names, organizations, phone numbers, emails, addresses, groups, and notes.",
-      "description": "Apple Contacts address book. Use for contact questions. Use for resolving names, phone numbers, and email addresses used by Messages, Mail, Calendar, and Recents. Contact details commonly join ABPerson.ROWID to ABMultiValue.record_id. Sample property values before choosing joins.",
+      "description": "Apple Contacts address book. ALWAYS use Contacts to resolve names, phone numbers, and email addresses for Messages, Mail, Calendar, and Recents. ALWAYS inspect schema and sample property values before choosing ABMultiValue joins. NEVER assume first_name, last_name, phone, or email columns exist. Contact details join ABPerson.ROWID to ABMultiValue.record_id.",
       "related_databases": [
         "AddressBookImages.sqlitedb",
         "sms.db",
@@ -50,7 +50,7 @@
         "filename": "AddressBookImages.sqlitedb"
       },
       "description_short": "Apple Contacts thumbnails and full-size contact photos.",
-      "description": "Apple Contacts image database. Use for contact photos. Pair with AddressBook.sqlitedb for names and details.",
+      "description": "Apple Contacts image database. Use ONLY for contact photos. ALWAYS pair with AddressBook.sqlitedb for names and contact details. NEVER use this database as the source for conversation facts.",
       "related_databases": [
         "AddressBook.sqlitedb"
       ]
@@ -61,7 +61,7 @@
         "filename": "Calendar.sqlitedb"
       },
       "description_short": "Apple Calendar events, calendars, attendees, organizers, alarms, notes, and locations.",
-      "description": "Apple Calendar events and metadata. start_date and end_date commonly use Apple seconds. Call helper_datetime_from_iso8601 to create date bounds. Call helper_datetime_to_iso8601 to display dates. Use Contacts for attendee and organizer identity.",
+      "description": "Apple Calendar events and metadata. ALWAYS use Calendar.sqlitedb for event questions. start_date and end_date use Apple epoch seconds. ALWAYS call helper_datetime_from_iso8601 with unit apple_seconds for date bounds. ALWAYS call helper_datetime_to_iso8601 with unit apple_seconds to display dates. ALWAYS use Contacts for attendee and organizer identity. NEVER report raw numeric dates.",
       "related_databases": [
         "Extras.db",
         "AddressBook.sqlitedb"
@@ -73,7 +73,7 @@
         "path_suffix": "/Library/Calendar/Extras.db"
       },
       "description_short": "Apple Calendar supplemental reminder and notification settings.",
-      "description": "Apple Calendar supplemental reminder, notification, and acknowledged-alarm metadata. Use as support for Calendar.sqlitedb. Prefer Calendar.sqlitedb for event questions.",
+      "description": "Apple Calendar supplemental reminder, notification, and acknowledged-alarm metadata. Use ONLY as support for Calendar.sqlitedb. ALWAYS use Calendar.sqlitedb for event facts. NEVER treat Extras.db as the primary calendar source.",
       "related_databases": [
         "Calendar.sqlitedb"
       ]
@@ -84,7 +84,7 @@
         "path_suffix": "/Library/Mail/Envelope Index"
       },
       "description_short": "Apple Mail mailbox, message date, flag, folder, and thread metadata.",
-      "description": "Apple Mail metadata index. For Inbox, identify the mailbox row first. Then filter messages by mailbox id. Flags may be typeless text. Query typeof() and sample values. Join to Protected Index by Envelope messages.ROWID -> Protected messages.message_id. date_received and date_sent are Unix seconds.",
+      "description": "Apple Mail metadata index. ALWAYS use this database for mailbox, folder, thread, flag, date_received, and date_sent metadata. For Inbox, ALWAYS identify the mailbox row first and filter by mailbox id. ALWAYS query typeof() and sample values before filtering flags. ALWAYS join to Protected Index by Envelope messages.ROWID -> Protected messages.message_id. date_received and date_sent are Unix seconds. ALWAYS call helper_datetime_to_iso8601 with unit unix_seconds. NEVER use Apple epoch for Envelope Index dates.",
       "related_databases": [
         "Protected Index",
         "AddressBook.sqlitedb"
@@ -96,7 +96,7 @@
         "path_suffix": "/Library/Mail/Protected Index"
       },
       "description_short": "Apple Mail senders, recipients, subjects, body fragments, and protected message data.",
-      "description": "Apple Mail protected content index. Use for senders, recipients, subjects, and bounded body snippets. Pair with Envelope Index for mailbox, dates, flags, and thread context. Inbox rows require an Envelope mailbox filter.",
+      "description": "Apple Mail protected content index. Use for senders, recipients, subjects, and bounded body snippets. ALWAYS pair with Envelope Index for mailbox, dates, flags, and thread context. ALWAYS apply an Envelope mailbox filter for Inbox questions. NEVER use Protected Index alone to claim Inbox membership or message dates.",
       "related_databases": [
         "Envelope Index",
         "AddressBook.sqlitedb"
@@ -108,7 +108,7 @@
         "path_suffix": "/Library/Mail/Recents"
       },
       "description_short": "Apple Mail recent email addresses, display names, sending addresses, and last-used dates.",
-      "description": "Apple Mail recent-address database. Use for autocomplete and recent-recipient questions. Use Contacts for full identity and contact details. Use Mail indexes for message contents.",
+      "description": "Apple Mail recent-address database. Use ONLY for autocomplete, recent-recipient, and address-resolution questions. ALWAYS use Contacts for full identity and contact details. ALWAYS use Mail indexes for message contents. NEVER treat Recents as proof that an email conversation occurred.",
       "related_databases": [
         "Envelope Index",
         "Protected Index",
@@ -121,7 +121,7 @@
         "filename": "Photos.sqlite"
       },
       "description_short": "Apple Photos asset, album, filename, date, identifier, comment, and keyword metadata.",
-      "description": "Apple Photos metadata for assets, albums, filenames, dates, identifiers, comments, keywords, and sidecars. It does not contain original image or video bytes.",
+      "description": "Apple Photos metadata for assets, albums, filenames, dates, identifiers, comments, keywords, and sidecars. NEVER claim this database contains original image or video bytes. ALWAYS report that it is metadata only.",
       "related_databases": [
         "ModelInterest.sqlite",
         "changes"
@@ -133,7 +133,7 @@
         "path_suffix": "/Media/PhotoData/ModelInterest.sqlite"
       },
       "description_short": "Apple Photos supplemental model-interest and activity counters.",
-      "description": "Apple Photos supplemental activity and model-interest counters. Use as support for Photos.sqlite.",
+      "description": "Apple Photos supplemental activity and model-interest counters. Use ONLY as support for Photos.sqlite. NEVER use this database as the primary source for photo-library facts.",
       "related_databases": [
         "Photos.sqlite"
       ]
@@ -144,7 +144,7 @@
         "path_suffix": "/Media/PhotoData/changes"
       },
       "description_short": "Apple Photos change-tracking database for sync metadata.",
-      "description": "Apple Photos change-tracking database. Prefer Photos.sqlite for photo-library content questions.",
+      "description": "Apple Photos change-tracking database. Use ONLY for sync/change metadata. ALWAYS use Photos.sqlite for photo-library content questions.",
       "related_databases": [
         "Photos.sqlite"
       ]
@@ -156,7 +156,7 @@
         "path_contains": "/Application Support/ENIL/"
       },
       "description_short": "LINE Messenger account, contact, chat, message, read receipt, sticker, and media metadata.",
-      "description": "LINE Messenger data. Use for LINE chat, contact, and message questions. This database is self-contained and separate from native Apple databases.",
+      "description": "LINE Messenger data. ALWAYS use this database for LINE chat, contact, and message questions. This database is self-contained and separate from native Apple databases. ALWAYS inspect schema before querying quoted column names such as from or to. ALWAYS sample timestamp columns before conversion. NEVER use Apple Messages timestamp rules for LINE.",
       "related_databases": [
       ]
     },
@@ -167,7 +167,7 @@
         "path_contains": "/Library/Caches/com.altivecintelligence.ENIL/"
       },
       "description_short": "ENIL URL cache for cached HTTP data.",
-      "description": "ENIL URL cache. Use for cache/debug questions. Prefer enil.sqlite for messages, contacts, chats, and stickers.",
+      "description": "ENIL URL cache. Use ONLY for cache/debug questions and cached HTTP data. ALWAYS use enil.sqlite for messages, contacts, chats, and stickers. NEVER treat cache rows as the primary message source.",
       "related_databases": [
         "enil.sqlite"
       ]
@@ -178,7 +178,7 @@
         "filename": "rkit.db"
       },
       "description_short": "Reeder accounts, feeds, folders, articles, unread/starred state, and stream metadata.",
-      "description": "Reeder RSS metadata. Use for feed lists, article metadata, read/unread state, and starred-item questions. Pair with rkit-data.db for article body text.",
+      "description": "Reeder RSS metadata. ALWAYS use rkit.db for feed lists, article metadata, folders, read/unread state, starred state, and stream metadata. ALWAYS pair with rkit-data.db for article body text. NEVER claim full article content from rkit.db alone.",
       "related_databases": [
         "rkit-data.db",
         "rkit-edit.db",
@@ -191,7 +191,7 @@
         "filename": "rkit-data.db"
       },
       "description_short": "Reeder article titles, authors, links, extracted content, and readability content.",
-      "description": "Reeder article-content database. Use for article body text and extracted content. Pair with rkit.db for feed, folder, status, and date context.",
+      "description": "Reeder article-content database. ALWAYS use this database for article body text and extracted content. ALWAYS pair with rkit.db for feed, folder, status, and date context. NEVER infer read/starred state from this database alone.",
       "related_databases": [
         "rkit.db"
       ]
@@ -202,7 +202,7 @@
         "filename": "rkit-edit.db"
       },
       "description_short": "Reeder pending local edits and sync actions.",
-      "description": "Reeder edit/sync-queue database. Use for unsynced edit and local action diagnostics.",
+      "description": "Reeder edit/sync-queue database. Use ONLY for unsynced edit and local action diagnostics. NEVER use it as the primary source for feed or article content.",
       "related_databases": [
         "rkit.db"
       ]
@@ -213,7 +213,7 @@
         "filename": "rkit-backup.db"
       },
       "description_short": "Reeder backup users, accounts, streams, feeds, folders, and starred articles.",
-      "description": "Reeder backup database. Use for recovery and historical context. Prefer live rkit.db and rkit-data.db for current article questions.",
+      "description": "Reeder backup database. Use ONLY for recovery and historical context. ALWAYS use live rkit.db and rkit-data.db for current article questions. NEVER mix backup data with live data without saying so.",
       "related_databases": [
         "rkit.db",
         "rkit-data.db"
@@ -226,7 +226,7 @@
         "path_contains": "/Library/Caches/com.reederapp.rkit2.ios/"
       },
       "description_short": "Reeder URL cache for cached HTTP requests, responses, receiver data, and blobs.",
-      "description": "Reeder URL cache. Use for cache/debug questions and cached response data. Prefer rkit.db and rkit-data.db for feed and article questions.",
+      "description": "Reeder URL cache. Use ONLY for cache/debug questions and cached response data. ALWAYS use rkit.db and rkit-data.db for feed and article questions. NEVER treat cache rows as the primary article source.",
       "related_databases": [
         "rkit.db",
         "rkit-data.db"

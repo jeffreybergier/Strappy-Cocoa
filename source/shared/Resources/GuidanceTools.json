@@ -1,6 +1,6 @@
 {
   "assistant_prompts": {
-    "learning_summary": "Memory Audit (internal harness task, not user request):\n- Do not answer the user.\n- Do not revise the user-visible answer.\n- Call helper_session_name_write to write one short title.\n- Call memory_user_fact_remember to save each new stable user fact from the completed turn.\n- Call memory_database_hint_remember to save each reusable database hint from the completed turn.\n- No new fact or hint means no memory write.\n- Store no secrets, sensitive identifiers, long copied content, or private row contents.\n- Reply exactly: Learning Summary Complete",
+    "learning_summary": "Learning (internal harness task, not user request):\n- NEVER answer the user.\n- NEVER revise the user-visible answer.\n- ALWAYS call helper_session_name_write with one short title.\n- ALWAYS call memory_user_fact_remember for each new stable user fact from the completed turn.\n- ALWAYS call memory_database_hint_remember for each reusable evidence-backed database hint from the completed turn.\n- NEVER write memory when there is no new fact or hint.\n- NEVER store secrets, credentials, sensitive identifiers, long copied content, private row contents, or raw message text.\n- Reply exactly: Learning Summary Complete",
     "learning_summary_completion": "Learning Summary Complete"
   },
   "assistant_messages": {
@@ -15,7 +15,7 @@
       "type": "function",
       "function": {
         "name": "database_list_info",
-        "description": "Call database_list_info to list approved SQLite databases with safe metadata and availability state.",
+        "description": "ALWAYS call database_list_info before choosing a database_id. It lists approved SQLite databases only. NEVER infer raw paths or full schema from this list.",
         "parameters": {
           "type": "object",
           "properties": {},
@@ -28,17 +28,17 @@
       "type": "function",
       "function": {
         "name": "database_query",
-        "description": "Call database_query to run one bounded read-only SELECT or EXPLAIN against an approved SQLite database.",
+        "description": "Call database_query to run exactly one bounded read-only SELECT or EXPLAIN against one approved database_id. NEVER use PRAGMA, ATTACH, writes, paths, multiple statements, or limit-changing SQL. If a result has truncated true, ALWAYS query the next page.",
         "parameters": {
           "type": "object",
           "properties": {
             "database_id": {
               "type": "string",
-              "description": "database_id returned by database_list_info."
+              "description": "ALWAYS use a database_id returned by database_list_info. NEVER use filenames or filesystem paths."
             },
             "sql": {
               "type": "string",
-              "description": "SQL text. Use one SELECT or EXPLAIN. No PRAGMA, ATTACH, writes, multiple statements, paths, or limit settings. For flag columns, query typeof() and sample values first."
+              "description": "SQL text. ALWAYS use one SELECT or EXPLAIN. NEVER use PRAGMA, ATTACH, writes, multiple statements, filesystem paths, or limit settings. ALWAYS include ORDER BY for timelines. ALWAYS inspect typeof() and sample values before filtering ambiguous flag or status columns."
             }
           },
           "required": [
@@ -53,17 +53,17 @@
       "type": "function",
       "function": {
         "name": "helper_datetime_to_iso8601",
-        "description": "Call helper_datetime_to_iso8601 to convert numeric timestamps to UTC ISO8601. Default unit is unix_seconds.",
+        "description": "Call helper_datetime_to_iso8601 to convert numeric timestamps to UTC ISO8601. ALWAYS include unit. NEVER rely on tool defaults. You are reading databases from Mac OS X or iPhone apps, so the timestamp COULD be UNIX or Apple. ALWAYS confirm the returned date make sense in context.",
         "parameters": {
           "type": "object",
           "properties": {
             "timestamps": {
               "type": "string",
-              "description": "Comma-separated numeric timestamps."
+              "description": "Comma-separated numeric timestamps from database rows. NEVER mix different timestamp columns or epochs in one call."
             },
             "unit": {
               "type": "string",
-              "description": "Timestamp unit and epoch.",
+              "description": "Timestamp unit and epoch. ALWAYS set this explicitly.",
               "enum": [
                 "unix_seconds",
                 "unix_milliseconds",
@@ -87,7 +87,7 @@
       "type": "function",
       "function": {
         "name": "helper_datetime_from_iso8601",
-        "description": "Call helper_datetime_from_iso8601 to convert UTC ISO8601 datetimes or YYYY-MM-DD dates to numeric timestamps. Default unit is apple_seconds.",
+        "description": "Call helper_datetime_from_iso8601 to convert UTC ISO8601 datetimes or YYYY-MM-DD dates to numeric timestamps. ALWAYS include unit. NEVER rely on tool defaults.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -97,7 +97,7 @@
             },
             "unit": {
               "type": "string",
-              "description": "Timestamp unit and epoch.",
+              "description": "Timestamp unit and epoch. ALWAYS set this explicitly.",
               "enum": [
                 "unix_seconds",
                 "unix_milliseconds",
@@ -121,13 +121,13 @@
       "type": "function",
       "function": {
         "name": "helper_fontawesome_shortcode_search",
-        "description": "Call helper_fontawesome_shortcode_search to find a Font Awesome shortcode by icon purpose or name.",
+        "description": "Call helper_fontawesome_shortcode_search to find available Font Awesome shortcodes by topic or keyword.",
         "parameters": {
           "type": "object",
           "properties": {
             "query": {
               "type": "string",
-              "description": "Icon purpose or name, such as warning, calendar, database, github, or send."
+              "description": "Icon purpose or name, such as warning, calendar, database, github, or send. Use short focused words."
             },
             "style": {
               "type": "string",
@@ -152,13 +152,13 @@
       "type": "function",
       "function": {
         "name": "helper_fontawesome_shortcode_confirm",
-        "description": "Call helper_fontawesome_shortcode_confirm to confirm exact Font Awesome shortcodes before using them.",
+        "description": "ALWAYS call helper_fontawesome_shortcode_confirm before using Font Awesome shortcodes in a user-facing answer. NEVER output unconfirmed Font Awesome shortcodes.",
         "parameters": {
           "type": "object",
           "properties": {
             "shortcodes": {
               "type": "array",
-              "description": "Font Awesome shortcodes to confirm. Items may be full shortcodes like [fa:heart] or [fa:brands:github], or bare names like heart.",
+              "description": "Font Awesome shortcodes to confirm. Use full shortcodes like [fa:heart] or [fa:brands:github]. NEVER include unicode emoji.",
               "items": {
                 "type": "string"
               },
@@ -177,13 +177,13 @@
       "type": "function",
       "function": {
         "name": "memory_user_fact_read",
-        "description": "Call memory_user_fact_read to read remembered stable user facts.",
+        "description": "ALWAYS call memory_user_fact_read before answering personal-context questions. Read stable remembered user facts only.",
         "parameters": {
           "type": "object",
           "properties": {
             "query": {
               "type": "string",
-              "description": "Text search."
+              "description": "Text search. Use the person, project, place, or topic from the user's request."
             },
             "kind": {
               "type": "string",
@@ -203,13 +203,13 @@
       "type": "function",
       "function": {
         "name": "memory_user_fact_remember",
-        "description": "Call memory_user_fact_remember to save one small stable user fact. Store no secrets, sensitive identifiers, or long copied content.",
+        "description": "Call memory_user_fact_remember to save one small stable user fact. ALWAYS store only durable facts. NEVER store secrets, credentials, sensitive identifiers, raw message text, private row contents, or long copied content.",
         "parameters": {
           "type": "object",
           "properties": {
             "kind": {
               "type": "string",
-              "description": "Fact category."
+              "description": "Fact category. Use a short stable category."
             },
             "subject": {
               "type": "string",
@@ -221,7 +221,7 @@
             },
             "value": {
               "type": "string",
-              "description": "Small stable fact value."
+              "description": "Small stable fact value. NEVER paste private row content."
             },
             "confidence": {
               "type": "number",
@@ -229,7 +229,7 @@
             },
             "source": {
               "type": "string",
-              "description": "Short source label."
+              "description": "Short source label. Use the database filename or tool source."
             }
           },
           "required": [
@@ -246,7 +246,7 @@
       "type": "function",
       "function": {
         "name": "memory_user_fact_forget",
-        "description": "Call memory_user_fact_forget to forget one remembered user fact by exact id.",
+        "description": "Call memory_user_fact_forget to forget one remembered user fact by exact id. NEVER guess ids.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -266,13 +266,13 @@
       "type": "function",
       "function": {
         "name": "helper_session_name_write",
-        "description": "Call helper_session_name_write to set a short title for the active chat. Existing titles stay unchanged.",
+        "description": "Call helper_session_name_write during memory audit to set one short title for an untitled active chat. NEVER write a long title.",
         "parameters": {
           "type": "object",
           "properties": {
             "name": {
               "type": "string",
-              "description": "Short title based on the user's request."
+              "description": "Short title based on the user's request. ALWAYS use plain professional wording."
             }
           },
           "required": [
@@ -286,17 +286,17 @@
       "type": "function",
       "function": {
         "name": "database_context_read",
-        "description": "Call database_context_read to read database metadata, schema, and saved database hints. Provide database_id, query, kind, or limit.",
+        "description": "ALWAYS call database_context_read before querying a database. It returns metadata, live simplified schema, and saved hints. NEVER invent table names, columns, joins, timestamp units, or database facts.",
         "parameters": {
           "type": "object",
           "properties": {
             "database_id": {
               "type": "string",
-              "description": "database_id returned by database_list_info."
+              "description": "database_id returned by database_list_info. ALWAYS use this before database_query."
             },
             "query": {
               "type": "string",
-              "description": "Text search across hints."
+              "description": "Text search across saved database hints."
             },
             "kind": {
               "type": "string",
@@ -317,13 +317,13 @@
       "type": "function",
       "function": {
         "name": "memory_database_hint_remember",
-        "description": "Call memory_database_hint_remember to save one evidence-backed database hint. Store no private row content.",
+        "description": "Call memory_database_hint_remember to save one reusable evidence-backed database hint. ALWAYS include evidence. NEVER store secrets, sensitive identifiers, private row content, raw message text, or long copied content.",
         "parameters": {
           "type": "object",
           "properties": {
             "database_id": {
               "type": "string",
-              "description": "database_id returned by database_list_info."
+              "description": "database_id returned by database_list_info. NEVER use filenames or filesystem paths."
             },
             "kind": {
               "type": "string",
@@ -331,15 +331,15 @@
             },
             "title": {
               "type": "string",
-              "description": "Short title."
+              "description": "Short title. Use plain professional wording."
             },
             "content": {
               "type": "string",
-              "description": "Reusable database hint."
+              "description": "Reusable database hint. Store schema, join, timestamp, or query-shape guidance only."
             },
             "evidence": {
               "type": "string",
-              "description": "Short evidence or sample-query note."
+              "description": "Short evidence or sample-query note. NEVER include private row contents."
             },
             "confidence": {
               "type": "number",
@@ -360,7 +360,7 @@
       "type": "function",
       "function": {
         "name": "memory_database_hint_forget",
-        "description": "Call memory_database_hint_forget to forget one remembered database hint by exact id.",
+        "description": "Call memory_database_hint_forget to forget one remembered database hint by exact id. NEVER guess ids.",
         "parameters": {
           "type": "object",
           "properties": {
