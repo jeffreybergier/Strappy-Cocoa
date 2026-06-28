@@ -12,7 +12,11 @@
 "Agent" = "エージェント";
 "Tool Call" = "ツール呼び出し";
 "Tool Result" = "ツール結果";
+"Options" = "オプション";
+"Prompt Options" = "プロンプトオプション";
 "Send" = "送信";
+"Send Prompt" = "プロンプトを送信";
+"Stream Responses" = "応答をストリーミング";
 "Sending prompt..." = "プロンプトを送信中...";
 "Prompt failed." = "プロンプトに失敗しました。";
 

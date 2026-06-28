@@ -1,16 +1,12 @@
 #import "PromptSendViewController.h"
-#import "AIFontAwesome.h"
 #import "StrappyBottomToolbarView.h"
 
 static const CGFloat kPromptSendHeightCollapsed = 32.0;
 static const CGFloat kPromptSendHeightExpanded = 108.0;
 static const CGFloat kPromptSendPad = 4.0;
-
-enum {
-  kPromptActionStop = 0,
-  kPromptActionStream = 1,
-  kPromptActionSend = 2
-};
+static const CGFloat kPromptOptionsButtonWidth = 94.0;
+static const CGFloat kPromptSendButtonWidth = 96.0;
+static const CGFloat kPromptActionButtonHeight = 24.0;
 
 static NSColor *StrappyInputBezelBackgroundColor(void) { return [NSColor controlBackgroundColor]; }
 static NSColor *StrappyInputBezelBorderColor(void) { return [NSColor gridColor]; }
@@ -49,11 +45,11 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 
 @interface PromptSendViewController ()
 - (void)updateExpansion;
-- (void)updateActionSegments;
-- (void)rebuildActionSegmentIcons;
-- (void)barDidMoveToWindow:(id)sender;
+- (void)updateActionControls;
+- (void)updateSendButtonAppearance;
 - (void)barViewFrameDidChange:(NSNotification *)notification;
-- (void)actionSegmentClicked:(id)sender;
+- (void)sendButtonClicked:(id)sender;
+- (void)streamingMenuItemClicked:(id)sender;
 @end
 
 @implementation PromptSendViewController
@@ -84,7 +80,6 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
       initWithFrame:NSMakeRect(0.0, 0.0, 400.0, kPromptSendHeightCollapsed)];
   barView_ = bar;
   [barView_ setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
-  [bar setWindowChangeTarget:self action:@selector(barDidMoveToWindow:)];
   [self setView:barView_];
   [barView_ release];
 }
@@ -130,21 +125,29 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   [textView_ setDelegate:self];
   [scrollView_ setDocumentView:textView_];
 
-  actionsSegmented_ = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
-  [actionsSegmented_ setSegmentCount:3];
-  [[actionsSegmented_ cell] setTrackingMode:NSSegmentSwitchTrackingSelectAny];
-  if ([[actionsSegmented_ cell] respondsToSelector:@selector(setSegmentStyle:)]) {
-    [[actionsSegmented_ cell] setSegmentStyle:NSSegmentStyleTexturedRounded];
-  }
-  [actionsSegmented_ setLabel:NSLocalizedString(@"Stream", nil)
-                   forSegment:kPromptActionStream];
-  [actionsSegmented_ setLabel:NSLocalizedString(@"Send", nil)
-                   forSegment:kPromptActionSend];
-  [actionsSegmented_ setTarget:self];
-  [actionsSegmented_ setAction:@selector(actionSegmentClicked:)];
-  [actionsSegmented_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
-  [self rebuildActionSegmentIcons];
-  [barView_ addSubview:actionsSegmented_];
+  streamingPopUpButton_ =
+    [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:YES];
+  [streamingPopUpButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
+  [streamingPopUpButton_ setBezelStyle:XPBezelStyleRounded];
+  [streamingPopUpButton_ setToolTip:NSLocalizedString(@"Prompt Options", nil)];
+  [streamingPopUpButton_ removeAllItems];
+  [streamingPopUpButton_ addItemWithTitle:NSLocalizedString(@"Options", nil)];
+  [streamingPopUpButton_ addItemWithTitle:
+    NSLocalizedString(@"Stream Responses", nil)];
+  [[streamingPopUpButton_ menu] setAutoenablesItems:NO];
+  streamingMenuItem_ = [[streamingPopUpButton_ itemAtIndex:1] retain];
+  [streamingMenuItem_ setTarget:self];
+  [streamingMenuItem_ setAction:@selector(streamingMenuItemClicked:)];
+  [barView_ addSubview:streamingPopUpButton_];
+
+  sendButton_ = [[NSButton alloc] initWithFrame:NSZeroRect];
+  [sendButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
+  [sendButton_ setBezelStyle:XPBezelStyleRounded];
+  [sendButton_ setButtonType:XPButtonTypeMomentaryLight];
+  [sendButton_ setTarget:self];
+  [sendButton_ setAction:@selector(sendButtonClicked:)];
+  [barView_ addSubview:sendButton_];
+  [self updateSendButtonAppearance];
 
   [barView_ setPostsFrameChangedNotifications:YES];
   [[NSNotificationCenter defaultCenter]
@@ -160,23 +163,32 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 - (void)viewDidLayout
 {
   NSRect bounds;
-  CGFloat segmentWidth;
-  CGFloat segmentHeight;
+  CGFloat sendButtonWidth;
+  CGFloat optionsButtonWidth;
   CGFloat inputWidth;
+  CGFloat sendX;
+  CGFloat optionsX;
 
   [super viewDidLayout];
   bounds = [barView_ bounds];
-  segmentWidth = [actionsSegmented_ frame].size.width;
-  segmentHeight = [actionsSegmented_ frame].size.height;
-  inputWidth = bounds.size.width - segmentWidth - (kPromptSendPad * 3.0);
+  sendButtonWidth = kPromptSendButtonWidth;
+  optionsButtonWidth = kPromptOptionsButtonWidth;
+  inputWidth = bounds.size.width - sendButtonWidth - optionsButtonWidth -
+    (kPromptSendPad * 4.0);
   if (inputWidth < 0.0) {
     inputWidth = 0.0;
   }
 
-  [actionsSegmented_ setFrame:NSMakeRect(NSMaxX(bounds) - kPromptSendPad - segmentWidth,
-                                         kPromptSendPad,
-                                         segmentWidth,
-                                         segmentHeight)];
+  sendX = NSMaxX(bounds) - kPromptSendPad - sendButtonWidth;
+  optionsX = sendX - kPromptSendPad - optionsButtonWidth;
+  [streamingPopUpButton_ setFrame:NSMakeRect(optionsX,
+                                             kPromptSendPad,
+                                             optionsButtonWidth,
+                                             kPromptActionButtonHeight)];
+  [sendButton_ setFrame:NSMakeRect(sendX,
+                                   kPromptSendPad,
+                                   sendButtonWidth,
+                                   kPromptActionButtonHeight)];
   [bezelView_ setFrame:NSMakeRect(kPromptSendPad,
                                   kPromptSendPad,
                                   inputWidth,
@@ -189,89 +201,40 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   return expanded_ ? kPromptSendHeightExpanded : kPromptSendHeightCollapsed;
 }
 
-- (void)barDidMoveToWindow:(id)sender
-{
-  (void)sender;
-  [self rebuildActionSegmentIcons];
-}
-
 - (void)barViewFrameDidChange:(NSNotification *)notification
 {
   (void)notification;
   [self updateExpansion];
 }
 
-- (void)rebuildActionSegmentIcons
+- (void)updateSendButtonAppearance
 {
-  CGFloat scale;
-  NSImage *stopImage;
-  NSImage *streamImage;
-  NSImage *sendImage;
-
-  if (actionsSegmented_ == nil) {
+  if (sendButton_ == nil) {
     return;
   }
 
-  scale = 1.0;
-  if ([[barView_ window] respondsToSelector:@selector(XP_backingScaleFactor)]) {
-    scale = [[barView_ window] XP_backingScaleFactor];
-  }
-  if (scale < 1.0) {
-    scale = 1.0;
-  }
-
-  stopImage = [AIFontAwesome imageForIcon:AIFACircleStop
-                                    style:AIFontAwesomeStyleRegular
-                                 iconSize:14.0
-                               canvasSize:20.0
-                                    scale:scale];
-  streamImage = [AIFontAwesome imageForIcon:AIFATowerBroadcast
-                                      style:AIFontAwesomeStyleSolid
-                                   iconSize:14.0
-                                 canvasSize:20.0
-                                      scale:scale];
-  sendImage = [AIFontAwesome imageForIcon:AIFAPaperPlane
-                                    style:AIFontAwesomeStyleRegular
-                                 iconSize:14.0
-                               canvasSize:20.0
-                                    scale:scale];
-
-  if (stopImage != nil) {
-    [actionsSegmented_ setImage:stopImage forSegment:kPromptActionStop];
-    [actionsSegmented_ setLabel:@"" forSegment:kPromptActionStop];
+  if (sending_) {
+    [sendButton_ setTitle:NSLocalizedString(@"Cancel", nil)];
+    [sendButton_ setToolTip:NSLocalizedString(@"Cancel Prompt", nil)];
   } else {
-    [actionsSegmented_ setLabel:NSLocalizedString(@"Stop", nil)
-                     forSegment:kPromptActionStop];
+    [sendButton_ setTitle:NSLocalizedString(@"Send", nil)];
+    [sendButton_ setToolTip:NSLocalizedString(@"Send Prompt", nil)];
   }
-
-  if (streamImage != nil) {
-    [actionsSegmented_ setImage:streamImage forSegment:kPromptActionStream];
-    [actionsSegmented_ setLabel:@"" forSegment:kPromptActionStream];
-  } else {
-    [actionsSegmented_ setLabel:NSLocalizedString(@"Stream", nil)
-                     forSegment:kPromptActionStream];
-  }
-
-  if (sendImage != nil) {
-    [actionsSegmented_ setImage:sendImage forSegment:kPromptActionSend];
-  }
-  [actionsSegmented_ XP_setToolTip:NSLocalizedString(@"Stop Prompt Request", nil)
-                         forSegment:kPromptActionStop];
-  [actionsSegmented_ XP_setToolTip:NSLocalizedString(@"Stream Responses", nil)
-                         forSegment:kPromptActionStream];
-  [actionsSegmented_ XP_setToolTip:NSLocalizedString(@"Send Prompt", nil)
-                         forSegment:kPromptActionSend];
-  [actionsSegmented_ sizeToFit];
 }
 
-- (void)updateActionSegments
+- (void)updateActionControls
 {
-  [actionsSegmented_ setEnabled:(enabled_ && sending_ && !cancellationRequested_)
-                     forSegment:kPromptActionStop];
-  [actionsSegmented_ setEnabled:(enabled_ && !sending_)
-                     forSegment:kPromptActionStream];
-  [actionsSegmented_ setEnabled:[self canSendCurrentPrompt]
-                     forSegment:kPromptActionSend];
+  [self updateSendButtonAppearance];
+
+  [streamingPopUpButton_ setEnabled:(enabled_ && !sending_)];
+  if ([streamingPopUpButton_ numberOfItems] > 0) {
+    [streamingPopUpButton_ selectItemAtIndex:0];
+  }
+  [streamingMenuItem_ setEnabled:(enabled_ && !sending_)];
+  [streamingMenuItem_ setState:(streamingEnabled_ ?
+    XPControlStateValueOn : XPControlStateValueOff)];
+  [sendButton_ setEnabled:(sending_ ?
+    (enabled_ && !cancellationRequested_) : [self canSendCurrentPrompt])];
 }
 
 - (void)updateExpansion
@@ -325,10 +288,7 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   [textView_ setBackgroundColor:enabled_
     ? [NSColor controlBackgroundColor]
     : [NSColor disabledControlTextColor]];
-  if (actionsSegmented_ != nil) {
-    [actionsSegmented_ setEnabled:enabled_];
-    [self updateActionSegments];
-  }
+  [self updateActionControls];
 }
 
 - (void)setSending:(BOOL)sending
@@ -337,23 +297,19 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   if (!sending_) {
     cancellationRequested_ = NO;
   }
-  [self updateActionSegments];
+  [self updateActionControls];
 }
 
 - (void)setCancellationRequested:(BOOL)requested
 {
   cancellationRequested_ = requested ? YES : NO;
-  [self updateActionSegments];
+  [self updateActionControls];
 }
 
 - (void)setStreamingEnabled:(BOOL)enabled
 {
   streamingEnabled_ = enabled ? YES : NO;
-  if (actionsSegmented_ == nil) {
-    return;
-  }
-  [actionsSegmented_ setSelected:streamingEnabled_
-                      forSegment:kPromptActionStream];
+  [self updateActionControls];
 }
 
 - (BOOL)canSendCurrentPrompt
@@ -371,34 +327,39 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   return ([trimmed length] > 0U) ? YES : NO;
 }
 
-- (void)actionSegmentClicked:(id)sender
+- (void)sendButtonClicked:(id)sender
 {
-  NSInteger selectedSegment;
-
-  selectedSegment = [(NSSegmentedControl *)sender selectedSegment];
-  if (selectedSegment == kPromptActionStop) {
-    [actionsSegmented_ setSelected:NO forSegment:kPromptActionStop];
-    if (sending_ && !cancellationRequested_) {
+  if (sending_) {
+    if (!cancellationRequested_) {
       [self setCancellationRequested:YES];
       if (delegate_ != nil) {
         [delegate_ promptSendViewControllerDidCancelPrompt:self];
       }
     }
-  } else if (selectedSegment == kPromptActionStream) {
-    BOOL enabled;
-
-    enabled = [actionsSegmented_ isSelectedForSegment:kPromptActionStream] ?
-      YES : NO;
-    if ((delegate_ == nil) ||
-        ![delegate_ promptSendViewController:self
-                         setStreamingEnabled:enabled]) {
-      [actionsSegmented_ setSelected:(!enabled ? YES : NO)
-                          forSegment:kPromptActionStream];
-    }
-  } else if (selectedSegment == kPromptActionSend) {
-    [actionsSegmented_ setSelected:NO forSegment:kPromptActionSend];
-    [self performSend:sender];
+    return;
   }
+
+  [self performSend:sender];
+}
+
+- (void)streamingMenuItemClicked:(id)sender
+{
+  BOOL enabled;
+  BOOL changed;
+
+  (void)sender;
+  if (sending_) {
+    return;
+  }
+
+  enabled = streamingEnabled_ ? NO : YES;
+  changed = ((delegate_ != nil) &&
+             [delegate_ promptSendViewController:self
+                              setStreamingEnabled:enabled]) ? YES : NO;
+  if (changed) {
+    streamingEnabled_ = enabled;
+  }
+  [self updateActionControls];
 }
 
 - (void)performSend:(id)sender
@@ -423,14 +384,14 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   }
 
   [textView_ setString:@""];
-  [self updateActionSegments];
+  [self updateActionControls];
   [self updateExpansion];
 }
 
 - (void)textDidChange:(NSNotification *)notification
 {
   (void)notification;
-  [self updateActionSegments];
+  [self updateActionControls];
   [self updateExpansion];
 }
 
@@ -448,6 +409,10 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
     return NO;
   }
 
+  if (sending_ || cancellationRequested_) {
+    return YES;
+  }
+
   [self performSend:textView_];
   return YES;
 }
@@ -457,7 +422,9 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [scrollView_ release];
   [textView_ release];
-  [actionsSegmented_ release];
+  [streamingPopUpButton_ release];
+  [streamingMenuItem_ release];
+  [sendButton_ release];
   [super dealloc];
 }
 

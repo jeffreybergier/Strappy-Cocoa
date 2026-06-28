@@ -12,7 +12,11 @@
 "Agent" = "Agent";
 "Tool Call" = "Tool Call";
 "Tool Result" = "Tool Result";
+"Options" = "Options";
+"Prompt Options" = "Prompt Options";
 "Send" = "Send";
+"Send Prompt" = "Send Prompt";
+"Stream Responses" = "Stream Responses";
 "Sending prompt..." = "Sending prompt...";
 "Prompt failed." = "Prompt failed.";
 
