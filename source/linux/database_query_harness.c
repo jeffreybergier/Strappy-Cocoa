@@ -339,6 +339,113 @@ static int harness_expect_catalog_integer(const char *database_path,
   return 1;
 }
 
+static int harness_run_legacy_default_model_migration_test(
+  const harness_context *context)
+{
+  static const char *legacy_sql =
+    "INSERT INTO app_settings (key, value) VALUES "
+    "('default_openrouter_model_id', 'gemma-4-31b-it');"
+    "INSERT INTO app_settings (key, value) VALUES "
+    "('selected_openrouter_model_id', 'gemma-4-31b-it');"
+    "INSERT INTO sessions (prompt, response, model, http_status) "
+    "VALUES ('', '', 'gemma-4-31b-it', 0);"
+    "INSERT INTO openrouter_models (id, name, description) VALUES "
+    "('gemma-4-31b-it', 'gemma-4-31b-it', 'Built-in default model.');"
+    "INSERT INTO openrouter_model_settings (model_id, allowed) VALUES "
+    "('gemma-4-31b-it', 1);";
+  sqlite3 *db;
+  char *default_model;
+  char *error;
+  char database_path[1200];
+  int rc;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+  if (!harness_join_path(database_path,
+                         sizeof(database_path),
+                         context->temp_dir,
+                         "legacy-default-model.sqlite")) {
+    fprintf(stderr, "Could not build legacy model migration fixture path.\n");
+    return 0;
+  }
+  unlink(database_path);
+
+  error = NULL;
+  if (!strappy_db_initialize(database_path, &error)) {
+    fprintf(stderr,
+            "Could not initialize catalog for legacy model migration: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    unlink(database_path);
+    return 0;
+  }
+
+  db = NULL;
+  rc = sqlite3_open_v2(database_path, &db, SQLITE_OPEN_READWRITE, NULL);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr,
+            "Could not open catalog for legacy model migration: %s\n",
+            (db != NULL) ? sqlite3_errmsg(db) : "unknown");
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    unlink(database_path);
+    return 0;
+  }
+  ok = harness_exec_sql(db, legacy_sql);
+  sqlite3_close(db);
+  if (!ok) {
+    unlink(database_path);
+    return 0;
+  }
+
+  default_model = NULL;
+  error = NULL;
+  if (!strappy_db_get_default_openrouter_model(database_path,
+                                               &default_model,
+                                               &error)) {
+    fprintf(stderr,
+            "Could not migrate legacy default OpenRouter model: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    unlink(database_path);
+    return 0;
+  }
+
+  ok = (default_model != NULL) &&
+       (strcmp(default_model, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0);
+  strappy_free_string(default_model);
+  if (!ok) {
+    fprintf(stderr, "Legacy default OpenRouter model was not canonicalized.\n");
+    unlink(database_path);
+    return 0;
+  }
+
+  ok =
+    harness_expect_catalog_integer(
+      database_path,
+      "SELECT COUNT(*) FROM openrouter_models "
+      "WHERE id = 'gemma-4-31b-it';",
+      0LL,
+      "legacy default OpenRouter model row") &&
+    harness_expect_catalog_integer(
+      database_path,
+      "SELECT COUNT(*) FROM openrouter_model_settings "
+      "WHERE model_id = 'gemma-4-31b-it';",
+      0LL,
+      "legacy default OpenRouter model setting") &&
+    harness_expect_catalog_integer(
+      database_path,
+      "SELECT COUNT(*) FROM sessions "
+      "WHERE model = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "';",
+      1LL,
+      "canonicalized legacy session model");
+  unlink(database_path);
+  return ok;
+}
+
 static int harness_run_fresh_catalog_schema_tests(
   const harness_context *context)
 {
@@ -2113,7 +2220,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (session.response != NULL) &&
        (strcmp(session.response, "First answer") == 0) &&
        (session.model != NULL) &&
-       (strcmp(session.model, "harness-model") == 0) &&
+       (strcmp(session.model, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0) &&
        (session.streaming_enabled == 1) &&
        (session.http_status == 200L);
   strappy_session_record_destroy(&session);
@@ -2592,7 +2699,7 @@ static int harness_run_openrouter_model_catalog_tests(
       found_openai = 1;
     }
   }
-  ok = (list.count == 3U) && found_builtin_default && found_gemma && found_openai;
+  ok = (list.count == 2U) && found_builtin_default && found_gemma && found_openai;
   strappy_openrouter_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "OpenRouter model rows did not match expected values.\n");
@@ -2817,7 +2924,7 @@ static int harness_run_openrouter_model_catalog_tests(
     return 0;
   }
 
-  ok = (list.count == 3U) &&
+  ok = (list.count == 2U) &&
        (list.records[0].model_id != NULL) &&
        (strcmp(list.records[0].model_id, "openai/gpt-4.1-mini") == 0) &&
        list.records[0].selected &&
@@ -2953,6 +3060,77 @@ static int harness_run_openrouter_model_catalog_tests(
   }
 
   error = NULL;
+  if (!strappy_db_append_exchange_to_session(context->catalog_path,
+                                             session_id,
+                                             "summary prompt",
+                                             "summary response",
+                                             "openai/gpt-4.1-mini",
+                                             200L,
+                                             NULL,
+                                             NULL,
+                                             NULL,
+                                             &error)) {
+    fprintf(stderr,
+            "Could not append model selection exchange: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  session_model = NULL;
+  if (!strappy_db_get_session_model(context->catalog_path,
+                                    session_id,
+                                    &session_model,
+                                    &error)) {
+    fprintf(stderr,
+            "Could not read session model after exchange append: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  ok = (session_model != NULL) &&
+       (strcmp(session_model, "google/gemma-4-31b-it") == 0);
+  strappy_free_string(session_model);
+  if (!ok) {
+    fprintf(stderr, "Session exchange append reset OpenRouter model.\n");
+    return 0;
+  }
+
+  error = NULL;
+  if (!strappy_db_append_message_sequence_to_session(context->catalog_path,
+                                                     session_id,
+                                                     "sequence prompt",
+                                                     "sequence response",
+                                                     "openai/gpt-4.1-mini",
+                                                     200L,
+                                                     NULL,
+                                                     0U,
+                                                     &error)) {
+    fprintf(stderr,
+            "Could not append model selection sequence: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  session_model = NULL;
+  if (!strappy_db_get_session_model(context->catalog_path,
+                                    session_id,
+                                    &session_model,
+                                    &error)) {
+    fprintf(stderr,
+            "Could not read session model after sequence append: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  ok = (session_model != NULL) &&
+       (strcmp(session_model, "google/gemma-4-31b-it") == 0);
+  strappy_free_string(session_model);
+  if (!ok) {
+    fprintf(stderr, "Session sequence append reset OpenRouter model.\n");
+    return 0;
+  }
+
+  error = NULL;
   if (!strappy_db_set_openrouter_model_allowed(context->catalog_path,
                                                "google/gemma-4-31b-it",
                                                0,
@@ -3005,6 +3183,7 @@ int main(void)
        harness_run_helper_info_tests(&context) &&
        harness_run_empty_session_storage_tests(&context) &&
        harness_run_session_turn_storage_tests(&context) &&
+       harness_run_legacy_default_model_migration_test(&context) &&
        harness_run_openrouter_model_catalog_tests(&context) &&
        harness_run_sms_guidance_tests(&context) &&
        harness_run_mail_guidance_tests(&context);

@@ -726,6 +726,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   pendingPromptGroupKey_ = nil;
   [pendingPrompt_ release];
   pendingPrompt_ = nil;
+  [pendingErrorText_ release];
+  pendingErrorText_ = nil;
   [sendingSessionId_ release];
   sendingSessionId_ = nil;
   [streamingAssistantText_ release];
@@ -1165,6 +1167,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   NSUInteger count;
   NSUInteger start;
   NSString *emptyText;
+  NSString *failureIdentifier;
+  NSString *failureStatusHTML;
   BOOL hasPending;
   BOOL hasMessages;
 
@@ -1202,23 +1206,44 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     [messagesHTML appendString:StrappyMessagesHTMLForRange(messages, start, count)];
   }
   if (hasPending) {
+    failureIdentifier = nil;
+    failureStatusHTML = nil;
+    if (!sending_) {
+      NSString *failureText;
+
+      failureText = ([pendingErrorText_ length] > 0U) ?
+        pendingErrorText_ : NSLocalizedString(@"Failed to send.", nil);
+      failureStatusHTML = StrappyStatusHTML(failureText, YES);
+      if (pendingHarnessAssistantMessageIdentifier_ != nil) {
+        failureIdentifier = pendingHarnessAssistantMessageIdentifier_;
+      } else if (pendingAssistantMessageIdentifier_ != nil) {
+        failureIdentifier = pendingAssistantMessageIdentifier_;
+      } else {
+        failureIdentifier = pendingMessageIdentifier_;
+      }
+    }
+
     [messagesHTML appendString:
       StrappyPendingMessageHTML(pendingPrompt_,
                                 pendingMessageIdentifier_,
-                                (sending_ ? nil : @"error"),
-                                (sending_
-                                 ? nil
-                                 : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), YES)),
+                                ([failureIdentifier isEqualToString:pendingMessageIdentifier_] ?
+                                 @"error" : nil),
+                                ([failureIdentifier isEqualToString:pendingMessageIdentifier_] ?
+                                 failureStatusHTML : nil),
                                 pendingPromptGroupKey_)];
     if (pendingToolActivityIdentifier_ != nil) {
       [messagesHTML appendString:
         StrappyToolActivityMessageHTML(
           pendingToolActivityIdentifier_,
           streamingToolActivityText_,
-          (sending_ ? @"pending" : @"error"),
+          (sending_
+           ? @"pending"
+           : ([failureIdentifier isEqualToString:pendingToolActivityIdentifier_] ?
+              @"error" : nil)),
           (sending_
            ? StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO)
-          : StrappyStatusHTML(NSLocalizedString(@"Failed to run tools.", nil), NO)),
+           : ([failureIdentifier isEqualToString:pendingToolActivityIdentifier_] ?
+              failureStatusHTML : nil)),
           @"user",
           pendingPromptGroupKey_,
           pendingAssistantMessageIdentifier_)];
@@ -1228,10 +1253,16 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
         StrappyStreamingAssistantMessageHTML(pendingAssistantMessageIdentifier_,
                                              streamingAssistantText_,
                                              streamingReasoningText_,
-                                             (sending_ ? @"pending" : @"error"),
+                                             (sending_
+                                              ? @"pending"
+                                              : ([failureIdentifier isEqualToString:
+                                                  pendingAssistantMessageIdentifier_] ?
+                                                 @"error" : nil)),
                                              (sending_
                                               ? StrappyElapsedThinkingStatusHTML(pendingStartedAt_)
-                                              : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), NO)),
+                                              : ([failureIdentifier isEqualToString:
+                                                  pendingAssistantMessageIdentifier_] ?
+                                                 failureStatusHTML : nil)),
                                              @"user",
                                              pendingPromptGroupKey_)];
     }
@@ -1239,18 +1270,28 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
       [messagesHTML appendString:
         StrappyHarnessMessageHTML(pendingHarnessPrompt_,
                                   pendingHarnessMessageIdentifier_,
-                                  (sending_ ? nil : @"error"),
-                                  nil,
+                                  ([failureIdentifier isEqualToString:
+                                    pendingHarnessMessageIdentifier_] ?
+                                   @"error" : nil),
+                                  ([failureIdentifier isEqualToString:
+                                    pendingHarnessMessageIdentifier_] ?
+                                   failureStatusHTML : nil),
                                   pendingPromptGroupKey_)];
       if (pendingHarnessToolActivityIdentifier_ != nil) {
         [messagesHTML appendString:
           StrappyToolActivityMessageHTML(
             pendingHarnessToolActivityIdentifier_,
             streamingHarnessToolActivityText_,
-            (sending_ ? @"pending" : @"error"),
+            (sending_
+             ? @"pending"
+             : ([failureIdentifier isEqualToString:
+                 pendingHarnessToolActivityIdentifier_] ?
+                @"error" : nil)),
             (sending_
              ? StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO)
-             : StrappyStatusHTML(NSLocalizedString(@"Failed to run tools.", nil), NO)),
+             : ([failureIdentifier isEqualToString:
+                 pendingHarnessToolActivityIdentifier_] ?
+                failureStatusHTML : nil)),
             @"harness",
             pendingPromptGroupKey_,
             pendingHarnessAssistantMessageIdentifier_)];
@@ -1261,10 +1302,16 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
             pendingHarnessAssistantMessageIdentifier_,
             streamingHarnessAssistantText_,
             streamingHarnessReasoningText_,
-            (sending_ ? @"pending" : @"error"),
+            (sending_
+             ? @"pending"
+             : ([failureIdentifier isEqualToString:
+                 pendingHarnessAssistantMessageIdentifier_] ?
+                @"error" : nil)),
             (sending_
              ? StrappyElapsedThinkingStatusHTML(pendingHarnessStartedAt_)
-             : StrappyStatusHTML(NSLocalizedString(@"Failed to send.", nil), NO)),
+             : ([failureIdentifier isEqualToString:
+                 pendingHarnessAssistantMessageIdentifier_] ?
+                failureStatusHTML : nil)),
             @"harness",
             pendingPromptGroupKey_)];
       }
@@ -1455,21 +1502,39 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   } else {
     NSMutableString *js;
 
-    if (pendingAssistantMessageIdentifier_ == nil) {
-      pendingCounter++;
-      pendingAssistantMessageIdentifier_ =
-        [[NSString stringWithFormat:@"pending-%lu-assistant", pendingCounter] retain];
-    }
-    if (pendingToolActivityIdentifier_ == nil) {
-      pendingToolActivityIdentifier_ =
-        [[NSString stringWithFormat:@"pending-%lu-tools", pendingCounter] retain];
-    }
+    [pendingErrorText_ release];
+    pendingErrorText_ = nil;
+    [pendingAssistantMessageIdentifier_ release];
+    pendingAssistantMessageIdentifier_ = nil;
+    [pendingToolActivityIdentifier_ release];
+    pendingToolActivityIdentifier_ = nil;
+    [pendingHarnessMessageIdentifier_ release];
+    pendingHarnessMessageIdentifier_ = nil;
+    [pendingHarnessAssistantMessageIdentifier_ release];
+    pendingHarnessAssistantMessageIdentifier_ = nil;
+    [pendingHarnessToolActivityIdentifier_ release];
+    pendingHarnessToolActivityIdentifier_ = nil;
+    [pendingHarnessPrompt_ release];
+    pendingHarnessPrompt_ = nil;
+
+    pendingCounter++;
+    pendingAssistantMessageIdentifier_ =
+      [[NSString stringWithFormat:@"pending-%lu-assistant", pendingCounter] retain];
+    pendingToolActivityIdentifier_ =
+      [[NSString stringWithFormat:@"pending-%lu-tools", pendingCounter] retain];
+
     [streamingAssistantText_ release];
     streamingAssistantText_ = [[NSMutableString alloc] init];
     [streamingReasoningText_ release];
     streamingReasoningText_ = [[NSMutableString alloc] init];
     [streamingToolActivityText_ release];
     streamingToolActivityText_ = [[NSMutableString alloc] init];
+    [streamingHarnessAssistantText_ release];
+    streamingHarnessAssistantText_ = nil;
+    [streamingHarnessReasoningText_ release];
+    streamingHarnessReasoningText_ = nil;
+    [streamingHarnessToolActivityText_ release];
+    streamingHarnessToolActivityText_ = nil;
     pendingStartedAt_ = [NSDate timeIntervalSinceReferenceDate];
     pendingHarnessStartedAt_ = 0.0;
     [pendingAssistantTextDelta_ release];
@@ -1490,10 +1555,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
       StrappySetMessageStateJavaScript(pendingMessageIdentifier_,
                                        nil,
                                        nil)];
-    [js appendString:StrappyRemoveMessageJavaScript(pendingToolActivityIdentifier_)];
     [js appendString:
-      StrappyInsertMessageBeforeJavaScript(
-        pendingAssistantMessageIdentifier_,
+      StrappyAppendMessageJavaScript(
         StrappyToolActivityMessageHTML(
           pendingToolActivityIdentifier_,
           streamingToolActivityText_,
@@ -2405,67 +2468,85 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   }
 
   if (pendingIsCurrent) {
+    NSArray *messages;
     NSMutableString *js;
+    NSString *failureIdentifier;
+    NSString *failureStatusHTML;
+    NSUInteger index;
+    long long newestIdentifier;
 
+    [pendingErrorText_ release];
+    pendingErrorText_ = [errorMessage copy];
+    messages = (session_ != nil) ? [session_ messagesWithError:nil] : nil;
+    if ([messages isKindOfClass:[NSArray class]]) {
+      newestIdentifier = lastKnownMessageIdentifier_;
+      for (index = 0U; index < [messages count]; index++) {
+        NSDictionary *message;
+        long long messageIdentifier;
+
+        message = [messages objectAtIndex:index];
+        if (![message isKindOfClass:[NSDictionary class]]) {
+          continue;
+        }
+        messageIdentifier = StrappyMessageNumericIdentifier(message);
+        if (messageIdentifier > newestIdentifier) {
+          newestIdentifier = messageIdentifier;
+        }
+      }
+      lastKnownMessageIdentifier_ = newestIdentifier;
+    }
+
+    failureIdentifier = pendingIdentifier;
+    if (pendingHarnessAssistantMessageIdentifier_ != nil) {
+      failureIdentifier = pendingHarnessAssistantMessageIdentifier_;
+    } else if (pendingAssistantMessageIdentifier_ != nil) {
+      failureIdentifier = pendingAssistantMessageIdentifier_;
+    }
+    failureStatusHTML = StrappyStatusHTML(errorMessage, YES);
     js = [NSMutableString string];
-    if ([assistantPendingIdentifier length] > 0U) {
-      [js appendString:StrappyRemoveMessageJavaScript(assistantPendingIdentifier)];
+    if (![failureIdentifier isEqualToString:pendingIdentifier]) {
+      [js appendString:StrappySetMessageStateJavaScript(pendingIdentifier,
+                                                       nil,
+                                                       nil)];
     }
     if (pendingToolActivityIdentifier_ != nil) {
-      [js appendString:StrappyRemoveMessageJavaScript(pendingToolActivityIdentifier_)];
+      [js appendString:StrappySetMessageStateJavaScript(
+        pendingToolActivityIdentifier_,
+        nil,
+        nil)];
     }
-    if (pendingHarnessMessageIdentifier_ != nil) {
-      [js appendString:StrappyRemoveMessageJavaScript(pendingHarnessMessageIdentifier_)];
+    if ((pendingAssistantMessageIdentifier_ != nil) &&
+        ![failureIdentifier isEqualToString:pendingAssistantMessageIdentifier_]) {
+      [js appendString:StrappySetMessageStateJavaScript(
+        pendingAssistantMessageIdentifier_,
+        nil,
+        nil)];
+    }
+    if ((pendingHarnessMessageIdentifier_ != nil) &&
+        ![failureIdentifier isEqualToString:pendingHarnessMessageIdentifier_]) {
+      [js appendString:StrappySetMessageStateJavaScript(
+        pendingHarnessMessageIdentifier_,
+        nil,
+        nil)];
     }
     if (pendingHarnessToolActivityIdentifier_ != nil) {
-      [js appendString:
-        StrappyRemoveMessageJavaScript(pendingHarnessToolActivityIdentifier_)];
+      [js appendString:StrappySetMessageStateJavaScript(
+        pendingHarnessToolActivityIdentifier_,
+        nil,
+        nil)];
     }
-    if (pendingHarnessAssistantMessageIdentifier_ != nil) {
-      [js appendString:
-        StrappyRemoveMessageJavaScript(pendingHarnessAssistantMessageIdentifier_)];
+    if ((pendingHarnessAssistantMessageIdentifier_ != nil) &&
+        ![failureIdentifier isEqualToString:pendingHarnessAssistantMessageIdentifier_]) {
+      [js appendString:StrappySetMessageStateJavaScript(
+        pendingHarnessAssistantMessageIdentifier_,
+        nil,
+        nil)];
     }
     [js appendString:
-      StrappySetMessageStateJavaScript(pendingIdentifier,
-                                       StrappyStatusHTML(errorMessage, YES),
+      StrappySetMessageStateJavaScript(failureIdentifier,
+                                       failureStatusHTML,
                                        @"error")];
     [self pushJavaScript:js];
-    [pendingAssistantMessageIdentifier_ release];
-    pendingAssistantMessageIdentifier_ = nil;
-    [pendingToolActivityIdentifier_ release];
-    pendingToolActivityIdentifier_ = nil;
-    [pendingHarnessMessageIdentifier_ release];
-    pendingHarnessMessageIdentifier_ = nil;
-    [pendingHarnessAssistantMessageIdentifier_ release];
-    pendingHarnessAssistantMessageIdentifier_ = nil;
-    [pendingHarnessToolActivityIdentifier_ release];
-    pendingHarnessToolActivityIdentifier_ = nil;
-    [pendingHarnessPrompt_ release];
-    pendingHarnessPrompt_ = nil;
-    [streamingAssistantText_ release];
-    streamingAssistantText_ = nil;
-    [streamingReasoningText_ release];
-    streamingReasoningText_ = nil;
-    [streamingToolActivityText_ release];
-    streamingToolActivityText_ = nil;
-    [streamingHarnessAssistantText_ release];
-    streamingHarnessAssistantText_ = nil;
-    [streamingHarnessReasoningText_ release];
-    streamingHarnessReasoningText_ = nil;
-    [streamingHarnessToolActivityText_ release];
-    streamingHarnessToolActivityText_ = nil;
-    [pendingAssistantTextDelta_ release];
-    pendingAssistantTextDelta_ = nil;
-    [pendingReasoningTextDelta_ release];
-    pendingReasoningTextDelta_ = nil;
-    [pendingToolActivityTextDelta_ release];
-    pendingToolActivityTextDelta_ = nil;
-    [pendingHarnessAssistantTextDelta_ release];
-    pendingHarnessAssistantTextDelta_ = nil;
-    [pendingHarnessReasoningTextDelta_ release];
-    pendingHarnessReasoningTextDelta_ = nil;
-    [pendingHarnessToolActivityTextDelta_ release];
-    pendingHarnessToolActivityTextDelta_ = nil;
   } else {
     return;
   }
@@ -2528,6 +2609,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [pendingHarnessPrompt_ release];
   [pendingPromptGroupKey_ release];
   [pendingPrompt_ release];
+  [pendingErrorText_ release];
   [sendingSessionId_ release];
   [streamingAssistantText_ release];
   [streamingReasoningText_ release];

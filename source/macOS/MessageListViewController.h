@@ -27,6 +27,7 @@
   NSString                 *pendingHarnessPrompt_;
   NSString                 *pendingPromptGroupKey_;
   NSString                 *pendingPrompt_;
+  NSString                 *pendingErrorText_;
   NSNumber                 *sendingSessionId_;
   NSMutableString          *streamingAssistantText_;
   NSMutableString          *streamingReasoningText_;

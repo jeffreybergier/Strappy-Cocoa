@@ -77,6 +77,7 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
 - (void)updateExpansion;
 - (void)updateActionControls;
 - (void)updateSendButtonAppearance;
+- (void)selectCurrentModelMenuItem;
 - (void)barViewFrameDidChange:(NSNotification *)notification;
 - (void)modelMenuItemClicked:(id)sender;
 - (void)sendButtonClicked:(id)sender;
@@ -157,7 +158,7 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   [scrollView_ setDocumentView:textView_];
 
   optionsPopUpButton_ =
-    [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:YES];
+    [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
   [optionsPopUpButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
   [optionsPopUpButton_ setBezelStyle:XPBezelStyleRounded];
   [optionsPopUpButton_ setToolTip:NSLocalizedString(@"Prompt Options", nil)];
@@ -251,7 +252,7 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
 {
   NSArray *models;
   NSString *selectedModelIdentifier;
-  NSString *buttonTitle;
+  NSUInteger selectedIndex;
   NSUInteger index;
   BOOL foundSelectedModel;
 
@@ -276,30 +277,12 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
     selectedModelIdentifier = @"";
   }
 
-  buttonTitle = NSLocalizedString(@"Model", nil);
   foundSelectedModel = NO;
-  for (index = 0U; index < [models count]; index++) {
-    NSDictionary *model;
-    NSString *modelIdentifier;
-
-    model = [models objectAtIndex:index];
-    modelIdentifier = StrappyPromptStringForModelRow(model, @"id");
-    if (([modelIdentifier length] > 0U) &&
-        [modelIdentifier isEqualToString:selectedModelIdentifier]) {
-      buttonTitle = StrappyPromptDisplayNameForModelRow(model);
-      foundSelectedModel = YES;
-      break;
-    }
-  }
-  if (!foundSelectedModel && ([selectedModelIdentifier length] > 0U)) {
-    buttonTitle = selectedModelIdentifier;
-  }
+  selectedIndex = NSNotFound;
 
   [streamingMenuItem_ release];
   streamingMenuItem_ = nil;
   [optionsPopUpButton_ removeAllItems];
-  [optionsPopUpButton_ addItemWithTitle:buttonTitle];
-  [optionsPopUpButton_ setTitle:buttonTitle];
 
   for (index = 0U; index < [models count]; index++) {
     NSDictionary *model;
@@ -320,11 +303,36 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
     [item setTarget:self];
     [item setAction:@selector(modelMenuItemClicked:)];
     [item setRepresentedObject:modelIdentifier];
-    [item setState:[modelIdentifier isEqualToString:selectedModelIdentifier] ?
-      XPControlStateValueOn : XPControlStateValueOff];
+    if ([modelIdentifier isEqualToString:selectedModelIdentifier]) {
+      [item setState:XPControlStateValueOn];
+      selectedIndex = ([optionsPopUpButton_ numberOfItems] - 1);
+      foundSelectedModel = YES;
+    } else {
+      [item setState:XPControlStateValueOff];
+    }
   }
 
-  if ([models count] > 0U) {
+  if (!foundSelectedModel && ([selectedModelIdentifier length] > 0U)) {
+    NSMenuItem *item;
+
+    [optionsPopUpButton_ addItemWithTitle:selectedModelIdentifier];
+    selectedIndex = ([optionsPopUpButton_ numberOfItems] - 1);
+    item = [optionsPopUpButton_ itemAtIndex:selectedIndex];
+    [item setEnabled:NO];
+    [item setRepresentedObject:selectedModelIdentifier];
+    [item setState:XPControlStateValueOn];
+  }
+
+  if ([optionsPopUpButton_ numberOfItems] == 0) {
+    NSMenuItem *item;
+
+    [optionsPopUpButton_ addItemWithTitle:NSLocalizedString(@"Model", nil)];
+    selectedIndex = 0U;
+    item = [optionsPopUpButton_ itemAtIndex:0];
+    [item setEnabled:NO];
+  }
+
+  if ([optionsPopUpButton_ numberOfItems] > 0) {
     [[optionsPopUpButton_ menu] addItem:[NSMenuItem separatorItem]];
   }
 
@@ -334,8 +342,58 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
     ([optionsPopUpButton_ numberOfItems] - 1)] retain];
   [streamingMenuItem_ setTarget:self];
   [streamingMenuItem_ setAction:@selector(streamingMenuItemClicked:)];
+  if (selectedIndex == NSNotFound) {
+    selectedIndex = 0U;
+  }
+  [optionsPopUpButton_ selectItemAtIndex:selectedIndex];
+  [optionsPopUpButton_ synchronizeTitleAndSelectedItem];
   [optionsPopUpButton_ setNeedsDisplay:YES];
   [self updateActionControls];
+}
+
+- (void)selectCurrentModelMenuItem
+{
+  NSString *selectedModelIdentifier;
+  NSInteger count;
+  NSInteger index;
+
+  if (optionsPopUpButton_ == nil) {
+    return;
+  }
+
+  selectedModelIdentifier = nil;
+  if (delegate_ != nil) {
+    selectedModelIdentifier =
+      [delegate_ selectedModelIdentifierForPromptSendViewController:self];
+  }
+  if (![selectedModelIdentifier isKindOfClass:[NSString class]]) {
+    selectedModelIdentifier = @"";
+  }
+
+  count = [optionsPopUpButton_ numberOfItems];
+  for (index = 0; index < count; index++) {
+    NSMenuItem *item;
+    id representedObject;
+
+    item = [optionsPopUpButton_ itemAtIndex:index];
+    representedObject = [item representedObject];
+    if ([representedObject isKindOfClass:[NSString class]] &&
+        ([(NSString *)representedObject length] > 0U) &&
+        [representedObject isEqualToString:selectedModelIdentifier]) {
+      [item setState:XPControlStateValueOn];
+      [optionsPopUpButton_ selectItemAtIndex:index];
+      [optionsPopUpButton_ synchronizeTitleAndSelectedItem];
+      return;
+    }
+    if (item != streamingMenuItem_) {
+      [item setState:XPControlStateValueOff];
+    }
+  }
+
+  if (count > 0) {
+    [optionsPopUpButton_ selectItemAtIndex:0];
+    [optionsPopUpButton_ synchronizeTitleAndSelectedItem];
+  }
 }
 
 - (void)updateActionControls
@@ -343,9 +401,7 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   [self updateSendButtonAppearance];
 
   [optionsPopUpButton_ setEnabled:(enabled_ && !sending_)];
-  if ([optionsPopUpButton_ numberOfItems] > 0) {
-    [optionsPopUpButton_ selectItemAtIndex:0];
-  }
+  [self selectCurrentModelMenuItem];
   if (streamingMenuItem_ != nil) {
     [streamingMenuItem_ setEnabled:(enabled_ && !sending_)];
     [streamingMenuItem_ setState:(streamingEnabled_ ?
@@ -506,6 +562,9 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
     streamingEnabled_ = enabled;
   }
   [self updateActionControls];
+  [self performSelector:@selector(selectCurrentModelMenuItem)
+             withObject:nil
+             afterDelay:0.0];
 }
 
 - (void)performSend:(id)sender

@@ -10,7 +10,7 @@ extern "C" {
 #define STRAPPY_CONFIG_DEFAULT_ENV_PATH ".env"
 #define STRAPPY_CONFIG_DEFAULT_API_ENDPOINT \
   "https://openrouter.ai/api/v1/chat/completions"
-#define STRAPPY_CONFIG_DEFAULT_API_MODEL "gemma-4-31b-it"
+#define STRAPPY_CONFIG_DEFAULT_API_MODEL "google/gemma-4-31b-it"
 
 typedef struct strappy_config {
   char *api_endpoint;

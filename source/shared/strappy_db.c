@@ -13,6 +13,8 @@
   "default_openrouter_model_id"
 #define STRAPPY_DB_SELECTED_OPENROUTER_MODEL_KEY \
   "selected_openrouter_model_id"
+#define STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "gemma-4-31b-it"
+#define STRAPPY_DB_BUILTIN_DEFAULT_MODEL_DESCRIPTION "Built-in default model."
 #define STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL \
   "COALESCE((SELECT s.value FROM app_settings s " \
   "WHERE s.key = '" STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_KEY "' " \
@@ -24,7 +26,8 @@
 #define STRAPPY_DB_INSERT_BUILTIN_DEFAULT_MODEL_SQL \
   "INSERT OR IGNORE INTO openrouter_models " \
   "(id, name, description) VALUES ('" STRAPPY_CONFIG_DEFAULT_API_MODEL "', '" \
-  STRAPPY_CONFIG_DEFAULT_API_MODEL "', 'Built-in default model.');"
+  STRAPPY_CONFIG_DEFAULT_API_MODEL "', '" \
+  STRAPPY_DB_BUILTIN_DEFAULT_MODEL_DESCRIPTION "');"
 
 static int strappy_db_copy_default_openrouter_model(sqlite3 *db,
                                                     char **model_id_out,
@@ -416,6 +419,89 @@ static int strappy_db_exec(sqlite3 *db,
   return 1;
 }
 
+static int strappy_db_migrate_legacy_default_openrouter_model(
+  sqlite3 *db,
+  char **error_out)
+{
+  static const char *settings_sql =
+    "UPDATE app_settings "
+    "SET value = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "', "
+    "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+    "WHERE value = '" STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "' "
+    "AND key IN ('" STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_KEY "', "
+    "'" STRAPPY_DB_SELECTED_OPENROUTER_MODEL_KEY "');";
+  static const char *sessions_sql =
+    "UPDATE sessions "
+    "SET model = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "' "
+    "WHERE model = '" STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "';";
+  static const char *preserve_allowed_sql =
+    "UPDATE openrouter_model_settings "
+    "SET allowed = 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+    "WHERE model_id = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "' "
+    "AND EXISTS (SELECT 1 FROM openrouter_model_settings "
+    "WHERE model_id = '" STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "' "
+    "AND allowed = 1);";
+  static const char *move_allowed_sql =
+    "UPDATE openrouter_model_settings "
+    "SET model_id = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "', "
+    "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+    "WHERE model_id = '" STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "' "
+    "AND NOT EXISTS (SELECT 1 FROM openrouter_model_settings "
+    "WHERE model_id = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "');";
+  static const char *delete_legacy_settings_sql =
+    "DELETE FROM openrouter_model_settings "
+    "WHERE model_id = '" STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "';";
+  static const char *delete_legacy_model_sql =
+    "DELETE FROM openrouter_models "
+    "WHERE id = '" STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "' "
+    "AND name = '" STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "' "
+    "AND description = '" STRAPPY_DB_BUILTIN_DEFAULT_MODEL_DESCRIPTION "';";
+
+  if (strcmp(STRAPPY_CONFIG_DEFAULT_API_MODEL,
+             STRAPPY_DB_LEGACY_DEFAULT_API_MODEL) == 0) {
+    return 1;
+  }
+
+  if (!strappy_db_exec(db,
+                       settings_sql,
+                       "Could not migrate default OpenRouter model settings",
+                       error_out)) {
+    return 0;
+  }
+  if (!strappy_db_exec(db,
+                       sessions_sql,
+                       "Could not migrate session OpenRouter models",
+                       error_out)) {
+    return 0;
+  }
+  if (!strappy_db_exec(db,
+                       preserve_allowed_sql,
+                       "Could not migrate OpenRouter model allowlist",
+                       error_out)) {
+    return 0;
+  }
+  if (!strappy_db_exec(db,
+                       move_allowed_sql,
+                       "Could not migrate OpenRouter model allowlist",
+                       error_out)) {
+    return 0;
+  }
+  if (!strappy_db_exec(db,
+                       delete_legacy_settings_sql,
+                       "Could not remove legacy OpenRouter model setting",
+                       error_out)) {
+    return 0;
+  }
+  if (!strappy_db_exec(db,
+                       delete_legacy_model_sql,
+                       "Could not remove legacy OpenRouter default model",
+                       error_out)) {
+    return 0;
+  }
+
+  return 1;
+}
+
 static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
 {
   static const char *sessions_sql =
@@ -692,6 +778,9 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
                        STRAPPY_DB_INSERT_BUILTIN_DEFAULT_MODEL_SQL,
                        "Could not create built-in OpenRouter default model",
                        error_out)) {
+    return 0;
+  }
+  if (!strappy_db_migrate_legacy_default_openrouter_model(db, error_out)) {
     return 0;
   }
 
@@ -3585,7 +3674,7 @@ static int strappy_db_update_session_summary(sqlite3 *db,
   static const char *update_sql =
     "UPDATE sessions "
     "SET prompt = CASE WHEN prompt = '' THEN ? ELSE prompt END, "
-    "response = ?, model = ?, http_status = ? "
+    "response = ?, http_status = ? "
     "WHERE id = ?;";
   sqlite3_stmt *stmt;
   int rc;
@@ -3595,6 +3684,7 @@ static int strappy_db_update_session_summary(sqlite3 *db,
     strappy_set_error(error_out, "Session summary update is incomplete.");
     return 0;
   }
+  (void)model;
 
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, update_sql, -1, &stmt, NULL);
@@ -3613,19 +3703,12 @@ static int strappy_db_update_session_summary(sqlite3 *db,
       (sqlite3_bind_text(stmt, 2, response, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
     ok = 0;
   }
-  if (ok && (model != NULL) &&
-      (sqlite3_bind_text(stmt, 3, model, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
-    ok = 0;
-  }
-  if (ok && (model == NULL) && (sqlite3_bind_null(stmt, 3) != SQLITE_OK)) {
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)http_status) != SQLITE_OK)) {
     ok = 0;
   }
   if (ok &&
-      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)http_status) != SQLITE_OK)) {
-    ok = 0;
-  }
-  if (ok &&
-      (sqlite3_bind_int64(stmt, 5, (sqlite3_int64)session_id) != SQLITE_OK)) {
+      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)session_id) != SQLITE_OK)) {
     ok = 0;
   }
 
@@ -4176,7 +4259,7 @@ int strappy_db_append_exchange_to_session(const char *db_path,
   static const char *update_sql =
     "UPDATE sessions "
     "SET prompt = CASE WHEN prompt = '' THEN ? ELSE prompt END, "
-    "response = ?, model = ?, http_status = ? "
+    "response = ?, http_status = ? "
     "WHERE id = ?;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
@@ -4265,19 +4348,12 @@ int strappy_db_append_exchange_to_session(const char *db_path,
       (sqlite3_bind_text(stmt, 2, response, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
     ok = 0;
   }
-  if (ok && (model != NULL) &&
-      (sqlite3_bind_text(stmt, 3, model, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
-    ok = 0;
-  }
-  if (ok && (model == NULL) && (sqlite3_bind_null(stmt, 3) != SQLITE_OK)) {
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)http_status) != SQLITE_OK)) {
     ok = 0;
   }
   if (ok &&
-      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)http_status) != SQLITE_OK)) {
-    ok = 0;
-  }
-  if (ok &&
-      (sqlite3_bind_int64(stmt, 5, (sqlite3_int64)session_id) != SQLITE_OK)) {
+      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)session_id) != SQLITE_OK)) {
     ok = 0;
   }
 

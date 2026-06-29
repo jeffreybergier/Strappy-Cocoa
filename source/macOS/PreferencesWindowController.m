@@ -1134,7 +1134,7 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
   NSString *searchText;
 
   searchText = [self currentModelSearchText];
-  selectedModelIdentifier = [self selectedModelTableRowIdentifier];
+  selectedModelIdentifier = [[self selectedModelTableRowIdentifier] retain];
   rows = [StrappySession openRouterModelCatalogMatchingSearchText:searchText
                                                             error:nil];
   if (rows != nil) {
@@ -1143,6 +1143,7 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
     [self sortModelRows];
     [modelTableView_ reloadData];
     [self selectModelTableRowWithIdentifier:selectedModelIdentifier];
+    [selectedModelIdentifier release];
     [self reloadDefaultModelPopUpButton];
     if (!refreshingModels_) {
       if ([modelRows_ count] == 0U) {
@@ -1168,6 +1169,7 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
     return;
   }
 
+  [selectedModelIdentifier release];
   [modelStatusLabel_ setStringValue:
     NSLocalizedString(@"Model list could not be loaded.", nil)];
 }

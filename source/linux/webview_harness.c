@@ -69,6 +69,7 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "database_context_read") &&
        harness_expect_contains(page_html, "function beginMessageBatch") &&
        harness_expect_contains(page_html, "function scrollBottomNow") &&
+       harness_expect_contains(page_html, "function shouldAutoScroll") &&
        harness_expect_contains(page_html, "function shouldRenderMarkdownBubble") &&
        harness_expect_contains(page_html, "ancestorHasClass(n,'assistant')") &&
        harness_expect_contains(page_html, "appendMessageTextByMessageKey") &&
