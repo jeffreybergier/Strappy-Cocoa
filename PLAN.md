@@ -29,33 +29,14 @@ duplicating assistant logic.
 Deliverables:
 
 - [x] Shared source layout for Strappy core modules under `source/shared`.
-- [ ] C API boundaries for logging, errors, memory ownership, and string
-  buffers. Errors, memory ownership, and internal buffers exist; a logging
-  boundary is still open.
-- [ ] cJSON integration with small wrapper helpers for safe object/array/string
-  access. cJSON is integrated, but the safe helpers are still mostly local to
-  client code instead of reusable shared wrappers.
 - [x] libcurl integration with a reusable HTTP client abstraction.
-- [ ] sqlite integration with read-only connection helpers, statement lifecycle
-  helpers, and result serialization helpers. Session/catalog persistence and
-  bounded read-only `database_query` execution exist; reusable shared sqlite
-  helper APIs are still mostly local to `strappy_db.c` and `strappy_tools.c`.
-- [ ] Configuration loading for OpenRouter API key, base URL, model, timeout,
-  and request limits. API key/base URL/model exist; macOS can save
-  endpoint and token credentials in Keychain and persist a selected OpenRouter
-  model while preserving `.env` and process-environment overrides. Timeout and
-  request-limit configuration are still open.
+- [x] Configuration loading for OpenRouter API key, base URL, and model.
+  API key/base URL exist with `.env` and process-environment overrides; macOS
+  can save endpoint and token credentials in Keychain. Model choice is
+  catalog-backed through default/per-session settings and an allowed-model
+  whitelist.
 - [x] Build system updates so shared core code and third-party libraries link
   into both iOS and macOS targets.
-
-Validation:
-
-- [x] Clean debug build for macOS.
-- [x] Clean debug build for iOS.
-- [x] Linux shared-core smoke harnesses under `source/linux` for database/tool
-  behavior and webview rendering, run with `make -C source/linux clean test`.
-- [ ] No memory ownership warnings from Clang static analysis on the shared C
-  core once non-trivial allocation code exists.
 
 ## Phase 2: OpenRouter Assistant Client
 
@@ -66,35 +47,22 @@ Deliverables:
 
 - [x] C request builder for chat messages and model selection.
 - [x] OpenRouter `/models/user` catalog fetch, local persistence, searchable
-  macOS model picker UI, per-session model selection, and default model
-  selection for new chats.
+  and sortable macOS model picker UI, default model selection for new chats,
+  user-managed allowed-model whitelist, and per-session model selection from
+  allowed models.
 - [x] C request builder support for loading tool definitions from
   `GuidanceTools.json`, including a tool allowlist for memory-audit turns.
-- [ ] Additional model-setting configuration beyond endpoint, model, streaming,
-  reasoning, and stream usage options.
 - [x] C response parser for assistant text, finish reasons, and API errors.
 - [x] C client preservation of non-streamed and streamed assistant
   `tool_calls`, streamed tool-call deltas, and reasoning text for the assistant
   loop.
-- [ ] Public stable parsed tool-call result API outside the assistant loop.
 - [x] Timeout policy for network requests.
-- [ ] Retry policy for transient network failures.
 - [x] Request cancellation hook for the UI layer. The macOS prompt bar and Chat
   menu can request cancellation, and streamed requests propagate that request
   through `StrappySession` to the client/assistant loop.
-- [ ] Redacted diagnostic logging that never prints API keys or full personal
-  database contents.
 - [x] Minimal Objective-C bridge functions to submit a prompt and receive
   streamed or complete response text, reasoning deltas, tool events, and turn
   events.
-
-Validation:
-
-- [ ] Mocked API responses covering success, malformed JSON, HTTP errors, and
-  tool calls.
-- [ ] Manual end-to-end request from both apps using a non-sensitive test
-  prompt.
-- [x] Clean builds with full warning logs captured.
 
 ## Phase 3: SQLite Discovery And Catalog
 
@@ -102,7 +70,7 @@ Goal: discover local SQLite databases and maintain a safe catalog of what the
 assistant is allowed to inspect.
 
 Architecture decision: use deterministic native scanning, cataloging, and
-allow/deny approval as the foundation. The assistant may guide the user through
+whitelist approval as the foundation. The assistant may guide the user through
 the process conversationally later, but permission state and filesystem access
 must be owned by Strappy UI/core code, not inferred from model output.
 
@@ -117,12 +85,11 @@ Deliverables:
 - [x] Read-only database validation path with a short busy timeout and
   defensive error handling for invalid candidates.
 - [x] Local Strappy catalog database for discovered paths, file metadata, scan
-  status, and user allow/deny decisions.
-- [ ] Catalog schema for persisted deterministic database facts:
-  assistant-visible database ID, tables, columns, indexes, foreign keys, row
-  counts where cheap, file metadata, and scan timestamps. Live simplified schema
-  is available through `database_context_read`, but it is not yet stored as
-  catalog facts.
+  status, and user whitelist decisions.
+- [x] Catalog schema for deterministic discovered-database metadata:
+  assistant-visible database ID, path, file size, modified time, device/inode,
+  validation state, scan status, user decision, scan root, first/last seen
+  timestamps, and last scanned timestamp.
 - [x] Removed the database summary-cache catalog path. The assistant now relies
   on `database_list_info` for database availability, `database_context_read` for
   selected live schema and remembered hints, and bounded read-only
@@ -131,19 +98,6 @@ Deliverables:
   SQLite databases, with a polished database table showing Use, Database,
   Location, and Size columns, disabled invalid rows, validation tooltips, and
   multi-row spacebar toggling.
-- [ ] Fixed native UI state for deny decisions and ignored locations.
-- [ ] Platform-specific safeguards for permission failures, symlinks, loops,
-  large directories, and unreadable files. Symlink avoidance, unreadable path
-  handling, and validation errors exist in the C scanner; ignored locations and
-  large-directory policy are still open.
-
-Validation:
-
-- [ ] Scanner test fixtures with valid SQLite files, non-SQLite files, corrupt
-  files, symlinks, and permission failures.
-- [x] Manual scan on macOS from Preferences against the user's home directory.
-- [ ] Manual scan on jailbroken iOS package install once `.deb` packaging exists.
-- [x] Clean builds with full warning logs captured.
 
 ## Phase 4: Database Tools For The Agent
 
@@ -191,10 +145,9 @@ Deliverables:
   `PreferencesWindowController` remains open.
 - [x] Runtime prompt, tool, and database guidance resources:
   `PromptSystem.txt`, `GuidanceTools.json`, and `GuidanceDatabase.json`,
-  synchronized with the stable tool names and simplified current guidance.
-- [ ] Proactive prompt context builder that injects available-database summaries
-  before a tool call. Current behavior relies on tool guidance and
-  `database_list_info` / `database_context_read`.
+  synchronized with the stable tool names and stricter current guidance that
+  requires `database_list_info` / `database_context_read` before querying,
+  explicit timestamp units, and no invented schema or private facts.
 - [x] Bounded multi-round tool execution loop for chat completions: capture
   assistant `tool_calls`, execute registered local tools, send `role: "tool"`
   results back to the model, and repeat until the model returns final text or
@@ -204,25 +157,16 @@ Deliverables:
   allowlisted tool set and `context_policy = omit`.
 - [x] Persisted prompt, assistant, tool-call, tool-result, and harness messages
   in `session_messages`, with `session_turns`, `turn_key`, `prompt_group_key`,
-  raw message JSON, reasoning text, and context inclusion flags.
+  raw message JSON, reasoning text, context inclusion flags, tool names,
+  tool-call IDs, tool arguments, tool results, and tool-error state.
 - [x] Webview rendering for tool-call inputs and tool outputs as full-width
   tool activity rows, with dynamic JSON object display and improved tool-error
   visualization.
-- [ ] Audit log of tool calls, query text, row counts, errors, and truncation.
-
-Validation:
-
-- [x] Linux `database_query_harness` coverage for tool schema loading/filtering,
-  database-list output shape, SQL safety checks, timestamp helpers, remembered
-  user/database helper memory, session naming, and message persistence.
-- [x] Linux `webview_harness` coverage for webview rendering of JSON objects,
-  tool events, reasoning, and harness turns.
-- [ ] Fixture databases for common schemas, empty databases, large tables, and
-  malformed requests.
-- [ ] Static analysis pass focused on JSON parsing, sqlite statement cleanup, and
-  error paths.
-- [x] Clean builds with full warning logs captured for the current
-  `database_list_info` vertical slice.
+- [x] Session-backed audit persistence for tool calls, query text, row counts,
+  errors, and truncation. Tool invocations are stored in `session_messages`
+  using `tool_name`, `tool_call_id`, `arguments_json`, `result_json`, and
+  `is_error`; `database_query` result JSON includes `row_count`, `truncated`,
+  and specific truncation flags.
 
 ## Phase 5: Chat Interface And User Workflow
 
@@ -235,10 +179,12 @@ Deliverables:
 - [x] Native bridge between the web UI and Objective-C/C assistant core for
   prompt submission, streaming text, reasoning, tool events, and turn events.
 - [x] Conversation list, active conversation view, message composer, loading
-  state, error state, and cancel action. macOS exposes send/stream/stop controls
-  in the prompt bar plus Chat menu commands for New Session, Send Prompt, Cancel
-  Prompt, and Streaming.
-- [x] macOS Preferences tabs for API credentials, model catalog browsing/search,
+  state, error state, and cancel action. macOS exposes a Send/Cancel button and
+  an options menu for allowed model selection and streaming in the prompt bar,
+  plus Chat menu commands for New Session, Send Prompt, Cancel Prompt, and
+  Streaming.
+- [x] macOS Preferences tabs for API credentials, sortable model catalog
+  browsing/search with allowed-model checkboxes and a default-model picker,
   database scanning/approval, and read-only system prompt inspection.
 - [x] Local conversation persistence in sqlite using `sessions`,
   `session_turns`, and `session_messages`; the old empty/non-started session
@@ -249,23 +195,13 @@ Deliverables:
   dynamic JSON object rendering and tool-error visualization.
 - [x] Reasoning display for streamed and persisted assistant/harness messages,
   with collapsed rendering for completed reasoning blocks.
-- [ ] Scan/schema/query-specific activity labels beyond generic tool rows.
-- [ ] Database permission flow that lets the user approve, deny, or forget a
-  found database. macOS home-folder scan/rescan and approval checkboxes exist;
-  deny, forget, and the WebView `database_manage` bridge remain open.
+- [x] Database approval flow that lets the user whitelist found databases.
+  macOS home-folder scan/rescan and approval checkboxes exist; explicit deny
+  and forget states are intentionally out of scope because unapproved databases
+  remain unavailable.
 - [x] Localized strings for English and Japanese for new visible UI touched by
-  the current chat/session, Preferences, model picker, database scanning, and
-  menu flows.
-
-Validation:
-
-- Manual UI pass on macOS and iOS build outputs.
-- Browser/webview compatibility pass for the oldest supported platform APIs.
-- Linux `webview_harness` smoke coverage for generated webview HTML/JS.
-- Linux `database_query_harness` smoke coverage for session message
-  persistence.
-- Persistence test covering app restart and failed request recovery.
-- Clean builds with full warning logs captured.
+  the current chat/session, Preferences, model picker/default/whitelist,
+  database scanning, and menu flows.
 
 ## Phase 6: Packaging, Security, And Release Hardening
 
@@ -280,23 +216,101 @@ Deliverables:
 - Update `.altivec-release.yml` and iOS Makefile/package scripts to publish the
   `.deb` artifact.
 - Clear local configuration path for API keys that avoids committing secrets.
-  macOS now stores endpoint and token credentials in Keychain while leaving `.env`
-  and process-environment overrides available for development and automation.
+  macOS now stores endpoint and token credentials in Keychain while leaving
+  `.env` and process-environment overrides available for endpoint/token
+  development and automation. Model choice is catalog-backed instead of
+  `APIMODEL`-driven.
 - Data retention controls for scanned database catalog, conversation history,
   and tool audit logs.
 - Release checklist for clean builds, warning review, static analysis, and
   basic manual smoke tests.
 - README update documenting setup, build, packaging, and first-run behavior.
 
-Validation:
+## Testing
 
-- Clean release build for macOS with full logs captured.
-- Clean release build for iOS with full logs captured.
-- Install and launch macOS `.app`.
-- Install and launch iOS `.deb` on a jailbroken test device.
-- Confirm iOS filesystem scan behavior from the `.deb` install context.
-- Confirm no secrets appear in logs, app bundle resources, release artifacts,
+Goal: keep automated, manual, build, static-analysis, and release validation
+centralized so phase deliverables do not duplicate test-plan details.
+
+- [x] Build: clean debug build for macOS.
+- [x] Build: clean debug build for iOS.
+- [x] Build: clean builds with full warning logs captured for completed
+  core, assistant, scanner, and database-tool slices.
+- [ ] Build: clean release build for macOS with full logs captured.
+- [ ] Build: clean release build for iOS with full logs captured.
+- [x] Static analysis: no memory ownership warnings from Clang static analysis
+  on the shared C core once non-trivial allocation code exists.
+- [ ] Static analysis: pass focused on JSON parsing, sqlite statement cleanup,
+  and error paths.
+- [x] Linux shared-core smoke harnesses under `source/linux` for database/tool
+  behavior and webview rendering, run with `make -C source/linux clean test`.
+- [x] Linux `database_query_harness` coverage for OpenRouter model catalog
+  persistence, catalog search, default model persistence, allowed-model
+  whitelisting, per-session model selection, and stale session-model fallback.
+- [x] Linux `database_query_harness` coverage for tool schema loading/filtering,
+  database-list output shape, SQL safety checks, timestamp helpers, remembered
+  user/database helper memory, session naming, session-backed tool audit fields,
+  and message persistence.
+- [x] Linux `webview_harness` coverage for webview rendering of generated
+  HTML/JS, JSON objects, tool events, reasoning, and harness turns.
+- [ ] Mocked API responses covering success, malformed JSON, HTTP errors, and
+  tool calls.
+- [ ] Linux scanner harness with temporary fixtures for valid SQLite files,
+  non-SQLite files, corrupt SQLite candidates, symlink avoidance, and
+  unreadable-path handling.
+- [ ] Fixture databases for common schemas, empty databases, large tables, and
+  malformed requests.
+- [ ] Persistence test covering app restart and failed request recovery.
+- [ ] Manual end-to-end request from both apps using a non-sensitive test
+  prompt.
+- [x] Manual scan on macOS from Preferences against the user's home directory.
+- [ ] Manual scan on jailbroken iOS package install once `.deb` packaging exists.
+- [ ] Manual UI pass on macOS and iOS build outputs.
+- [ ] Browser/webview compatibility pass for the oldest supported platform APIs.
+- [ ] Install and launch macOS `.app`.
+- [ ] Install and launch iOS `.deb` on a jailbroken test device.
+- [ ] Confirm iOS filesystem scan behavior from the `.deb` install context.
+- [ ] Confirm no secrets appear in logs, app bundle resources, release artifacts,
   or git status.
+
+## Won't Do
+
+These ideas were considered and are intentionally out of scope for the current
+implementation plan:
+
+- Shared cJSON wrapper helpers. Existing local safe access helpers are enough;
+  adding a global wrapper layer would mainly be refactor churn.
+- Shared sqlite helper API. SQLite lifecycle and serialization helpers should
+  stay local to `strappy_db.c` and `strappy_tools.c` until another module needs
+  a stable shared API.
+- Configuration loading for timeout and request-limit tunables. Network timeout
+  policies and database/query limits stay code constants so safety behavior is
+  deterministic across deployments.
+- Additional generation-setting configuration. Endpoint, model selection,
+  allowed-model whitelisting, streaming, reasoning, and stream usage are enough
+  for now; extra provider knobs would add UI/config noise.
+- Public stable parsed tool-call result API outside the assistant loop. Stream
+  events and persisted `session_messages` are the supported surface.
+- Retry policy for transient network failures. Manual retry is preferred to
+  avoid duplicating paid model requests or local tool work.
+- Persisted deterministic schema facts for approved databases. Live schema via
+  `database_context_read` avoids stale catalog facts and migration burden.
+- Proactive prompt context builder for available-database summaries. Tool-first
+  discovery keeps prompts smaller and avoids stale injected summaries.
+- Scan/schema/query-specific activity labels beyond generic tool rows. Generic
+  tool activity rows already expose tool names, inputs, outputs, and errors.
+- Explicit native UI state for database deny decisions, forget actions, and
+  ignored locations. Database and model access are controlled by whitelists, so
+  unapproved databases remain unavailable without a separate deny state.
+- Additional platform-specific scanner policy for ignored locations and large
+  directory trees. The current C scanner already avoids symlink traversal,
+  handles unreadable path errors, validates candidates defensively, and leaves
+  access gated by database whitelist approval.
+- Shared C logging boundary. Shared C stays quiet for now; diagnostics remain at
+  the app or harness layer unless a concrete cross-platform logging need appears.
+- Redacted diagnostic logging feature. Strappy avoids logging API keys and full
+  personal database contents by keeping diagnostics minimal; release validation
+  still checks that secrets do not appear in logs, resources, artifacts, or git
+  status.
 
 ## Suggested Build Order
 

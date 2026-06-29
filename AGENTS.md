@@ -18,7 +18,10 @@ Linux-only shared-core harnesses live under `source/linux`. They are fast
 developer smoke tests for portable C code and do not replace the required
 Altivec iOS/macOS clean builds. The current harness targets are
 `database_query_harness` and `webview_harness`, run through
-`make -C source/linux clean test`.
+`make -C source/linux clean test`. `database_query_harness` also covers
+OpenRouter model catalog persistence, catalog search, default model selection,
+allowed-model whitelisting, per-session model selection, and stale
+session-model fallback.
 
 House style for Strappy source:
 
@@ -30,11 +33,11 @@ House style for Strappy source:
    Objective-C classes.
 3. C type and function names use lowercase snake_case. Public C functions use
    the `strappy_` prefix.
-4. The shared SQLite storage module is named `strappy_db`. Do not name it
+4. The shared SQLite storage module is named `strappy.sqlite`. Do not name it
    `session_store`; it will hold app-wide database responsibilities over time.
 5. C files must not import macOS-only framework headers such as
-   `CoreFoundation`. Shared C code must stay portable across the iOS and macOS
-   targets.
+   `CoreFoundation`. Shared C code must stay portable across Apple and potential
+   future targets.
 6. `StrappySession.m` owns the Objective-C/C boundary for AI agent sessions.
    Keep filesystem scanning and database discovery out of `StrappySession`.
 7. `FileScanner.m` owns the Objective-C/C boundary for filesystem scanning and
@@ -74,7 +77,9 @@ House style for Strappy source:
     `GuidanceDatabase.json`. Keep tool schemas in `GuidanceTools.json` in sync
     with the tool-name constants in `strappy_tools.h` and the executor in
     `strappy_tools.c`; do not duplicate prompt or tool guidance in
-    Objective-C UI code.
+    Objective-C UI code. Strict assistant workflow rules, timestamp guidance,
+    memory guidance, and database-specific instructions belong in these
+    resources, not in scattered C or Objective-C strings.
 14. Database tool flow is split by responsibility. `database_list_info` lists
     approved databases by assistant-visible IDs with safe metadata and short
     descriptions only. `database_context_read` returns selected database
@@ -93,12 +98,21 @@ House style for Strappy source:
     reasoning text. Harness and post-answer memory-audit turns should use
     `context_policy = omit` so they can render in history without being replayed
     as normal user context.
-17. When changing shared C behavior, especially database, tool, prompt, client,
+17. OpenRouter model catalog and selection state live in shared SQLite storage.
+    `strappy_db` owns `openrouter_models`, `openrouter_model_settings`, the
+    default model app setting, and `sessions.model`; `StrappySession` owns the
+    Objective-C bridge. `APIMODEL` is not a user configuration key. Load
+    endpoint/token from `.env`, process environment, or Keychain, then resolve
+    the default or per-session model through the catalog and call
+    `strappy_config_set_api_model`. Model pickers and prompt options must use
+    the allowed-model catalog APIs and must not bypass the whitelist or allow a
+    stale disallowed session model to keep running.
+18. When changing shared C behavior, especially database, tool, prompt, client,
     or JSON parsing code, run `make -C source/linux clean test` where the host
     Linux environment has the required dependencies. Keep the harnesses updated
     as new shared behavior is added or existing behavior changes, so regressions
     can be caught without waiting for full Apple-target builds.
-18. SQLite `PRAGMA user_version` is intentionally pinned at `1`. Do not
+19. SQLite `PRAGMA user_version` is intentionally pinned at `1`. Do not
     increase it or add migration steps without explicit user permission; this
     database has not shipped yet.
 
@@ -111,12 +125,15 @@ Strappy is an OpenRouter based AI Assistant that has the following basic
 infrastructure:
 
 1. C based API client for OpenRouter/OpenAI API
-2. C based API JSON parsing with cJSON; SQLite JSON columns stay opaque on read
-3. C based networking with libcurl
-4. C based storage with sqlite
-5. Web based chat interface for showing the response from the model
-6. Filesystem search to search the host device for sqlite databases
-7. Tools that allow the Agent to discover the schema of a sqlite database found
-8. Tools that allow the Agent to answer questions the user asks from the personal context found in the sqlite databases
-9. Helper tools for timestamp conversion, remembered user facts, remembered database hints, and session naming
-10. Runtime prompt/tool/database guidance resources that steer database selection, SQL workflow, and memory behavior
+2. OpenRouter model catalog persistence with searchable/sortable browsing,
+   default model selection, allowed-model whitelisting, and per-session model
+   selection
+3. C based API JSON parsing with cJSON; SQLite JSON columns stay opaque on read
+4. C based networking with libcurl
+5. C based storage with sqlite
+6. Web based chat interface for showing the response from the model
+7. Filesystem search to search the host device for sqlite databases
+8. Tools that allow the Agent to discover the schema of a sqlite database found
+9. Tools that allow the Agent to answer questions the user asks from the personal context found in the sqlite databases
+10. Helper tools for timestamp conversion, remembered user facts, remembered database hints, and session naming
+11. Runtime prompt/tool/database guidance resources that steer database selection, SQL workflow, and memory behavior
