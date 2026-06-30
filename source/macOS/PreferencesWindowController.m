@@ -2,7 +2,10 @@
 
 #import "FileScanner.h"
 #import "StrappySession.h"
-#import "strappy_config.h"
+#import "StrappyPreferencesAuthenticationView.h"
+#import "StrappyPreferencesDatabaseWhitelistView.h"
+#import "StrappyPreferencesModelWhitelistView.h"
+#import "StrappyPreferencesSystemPromptsView.h"
 #import "strappy_keychain.h"
 
 static const CGFloat kStrappyPreferencesWidth = 720.0;
@@ -404,41 +407,8 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
   return effective;
 }
 
-@interface StrappyDatabaseTableView : NSTableView
-@end
-
-@implementation StrappyDatabaseTableView
-
-- (void)keyDown:(NSEvent *)event
-{
-  NSString *characters;
-  id delegate;
-  SEL selector;
-
-  characters = [event charactersIgnoringModifiers];
-  if (([characters length] == 1U) &&
-      ([characters characterAtIndex:0] == ' ') &&
-      ([[self selectedRowIndexes] count] > 0U)) {
-    delegate = [self delegate];
-    selector = @selector(databaseTableViewDidPressSpace:);
-    if ([delegate respondsToSelector:selector]) {
-      [delegate performSelector:selector withObject:self];
-      return;
-    }
-  }
-
-  [super keyDown:event];
-}
-
-@end
-
 @interface PreferencesWindowController ()
 - (void)buildContentView;
-- (NSView *)apiTokenPaneWithFrame:(NSRect)frame;
-- (NSView *)modelPaneWithFrame:(NSRect)frame;
-- (NSView *)systemPromptPaneWithFrame:(NSRect)frame;
-- (NSView *)databaseScanningPaneWithFrame:(NSRect)frame;
-- (NSTextField *)labelWithFrame:(NSRect)frame text:(NSString *)text;
 - (void)refreshAPITokenStatusWithSaved:(BOOL)saved;
 - (void)loadSystemPrompt;
 - (NSString *)currentModelSearchText;
@@ -526,10 +496,14 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
 - (void)buildContentView
 {
   NSView *contentView;
-  NSTabViewItem *apiTokenItem;
+  NSTabViewItem *authenticationItem;
   NSTabViewItem *modelItem;
   NSTabViewItem *systemPromptItem;
   NSTabViewItem *databaseItem;
+  StrappyPreferencesAuthenticationView *authenticationView;
+  StrappyPreferencesModelWhitelistView *modelView;
+  StrappyPreferencesDatabaseWhitelistView *databaseView;
+  StrappyPreferencesSystemPromptsView *systemPromptsView;
   NSRect bounds;
   NSRect paneFrame;
 
@@ -545,531 +519,74 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
                          bounds.size.width - 48.0,
                          bounds.size.height - 72.0);
 
-  apiTokenItem =
-    [[[NSTabViewItem alloc] initWithIdentifier:@"api_token"] autorelease];
-  [apiTokenItem setLabel:NSLocalizedString(@"API Token", nil)];
-  [apiTokenItem setView:[self apiTokenPaneWithFrame:paneFrame]];
-  [tabView_ addTabViewItem:apiTokenItem];
-
-  modelItem =
-    [[[NSTabViewItem alloc] initWithIdentifier:@"models"] autorelease];
-  [modelItem setLabel:NSLocalizedString(@"Model", nil)];
-  [modelItem setView:[self modelPaneWithFrame:paneFrame]];
-  [tabView_ addTabViewItem:modelItem];
-
-  databaseItem =
-    [[[NSTabViewItem alloc] initWithIdentifier:@"databases"] autorelease];
-  [databaseItem setLabel:NSLocalizedString(@"Database Search", nil)];
-  [databaseItem setView:[self databaseScanningPaneWithFrame:paneFrame]];
-  [tabView_ addTabViewItem:databaseItem];
-
-  systemPromptItem =
-    [[[NSTabViewItem alloc] initWithIdentifier:@"system_prompt"] autorelease];
-  [systemPromptItem setLabel:NSLocalizedString(@"System Prompt", nil)];
-  [systemPromptItem setView:[self systemPromptPaneWithFrame:paneFrame]];
-  [tabView_ addTabViewItem:systemPromptItem];
-
-  [contentView addSubview:tabView_];
-}
-
-- (NSView *)apiTokenPaneWithFrame:(NSRect)frame
-{
-  NSView *view;
-  NSTextField *endpointLabel;
-  NSTextField *tokenLabel;
-  NSTextField *hintLabel;
-  NSButton *saveButton;
-  NSString *apiEndpoint;
-  NSString *apiToken;
-  NSRect bounds;
-  CGFloat labelWidth;
-  CGFloat topY;
-  CGFloat tokenY;
-  CGFloat fieldX;
-  CGFloat fieldWidth;
-
-  view = [[[NSView alloc] initWithFrame:frame] autorelease];
-  [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-
-  bounds = [view bounds];
-  labelWidth = 104.0;
-  topY = NSMaxY(bounds) - kStrappyPreferencesInset - 28.0;
-  tokenY = topY - 34.0;
-  fieldX = kStrappyPreferencesInset + labelWidth;
-  fieldWidth = NSWidth(bounds) - fieldX - kStrappyPreferencesInset;
-
-  endpointLabel = [self labelWithFrame:NSMakeRect(kStrappyPreferencesInset,
-                                                  topY + 3.0,
-                                                  labelWidth - 8.0,
-                                                  20.0)
-                                  text:NSLocalizedString(@"API Endpoint:", nil)];
-  [view addSubview:endpointLabel];
-
-  apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
-  if ([apiEndpoint length] == 0U) {
-    apiEndpoint = [NSString stringWithUTF8String:STRAPPY_CONFIG_DEFAULT_API_ENDPOINT];
-  }
-  apiEndpointField_ =
-    [[NSTextField alloc] initWithFrame:NSMakeRect(fieldX,
-                                                  topY,
-                                                  fieldWidth,
-                                                  24.0)];
-  [apiEndpointField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
-  [apiEndpointField_ setStringValue:(apiEndpoint != nil) ? apiEndpoint : @""];
-  [[apiEndpointField_ cell] setPlaceholderString:
-    NSLocalizedString(@"https://openrouter.ai/api/v1/chat/completions", nil)];
-  [view addSubview:apiEndpointField_];
-
-  tokenLabel = [self labelWithFrame:NSMakeRect(kStrappyPreferencesInset,
-                                               tokenY + 3.0,
-                                               labelWidth - 8.0,
-                                               20.0)
-                               text:NSLocalizedString(@"API Token:", nil)];
-  [view addSubview:tokenLabel];
-
-  apiToken = [[StrappyKeychain sharedKeychain] apiToken];
-  apiTokenField_ =
-    [[NSSecureTextField alloc] initWithFrame:NSMakeRect(fieldX,
-                                                        tokenY,
-                                                        fieldWidth,
-                                                        24.0)];
-  [apiTokenField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
-  [apiTokenField_ setStringValue:(apiToken != nil) ? apiToken : @""];
-  [[apiTokenField_ cell] setPlaceholderString:
-    NSLocalizedString(@"Paste API token", nil)];
-  [view addSubview:apiTokenField_];
-
-  hintLabel = [self labelWithFrame:NSMakeRect(fieldX,
-                                              tokenY - 46.0,
-                                              fieldWidth,
-                                              38.0)
-                              text:NSLocalizedString(
-    @"APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set.",
-    nil)];
-  [hintLabel setFont:[NSFont systemFontOfSize:11.0]];
-  [hintLabel setTextColor:[NSColor disabledControlTextColor]];
-  [hintLabel setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
-  [[hintLabel cell] setWraps:YES];
-  [view addSubview:hintLabel];
-
-  saveButton = [[[NSButton alloc]
-    initWithFrame:NSMakeRect(NSMaxX(bounds) - kStrappyPreferencesInset - 96.0,
-                             kStrappyPreferencesInset,
-                             96.0,
-                             24.0)] autorelease];
-  [saveButton setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
-  [saveButton setTitle:NSLocalizedString(@"Save", nil)];
-  [saveButton setBezelStyle:XPBezelStyleRounded];
-  [saveButton setButtonType:XPButtonTypeMomentaryLight];
-  [saveButton setKeyEquivalent:@"\r"];
-  [saveButton setTarget:self];
-  [saveButton setAction:@selector(saveAPICredentials:)];
-  [view addSubview:saveButton];
-
-  apiTokenStatusLabel_ =
-    [[NSTextField alloc] initWithFrame:NSMakeRect(kStrappyPreferencesInset,
-                                                  kStrappyPreferencesInset + 2.0,
-                                                  NSWidth(bounds) - 132.0,
-                                                  20.0)];
-  [apiTokenStatusLabel_ setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
-  [apiTokenStatusLabel_ setBezeled:NO];
-  [apiTokenStatusLabel_ setDrawsBackground:NO];
-  [apiTokenStatusLabel_ setEditable:NO];
-  [apiTokenStatusLabel_ setSelectable:NO];
-  [apiTokenStatusLabel_ setFont:[NSFont systemFontOfSize:11.0]];
-  [apiTokenStatusLabel_ setTextColor:[NSColor disabledControlTextColor]];
-  [view addSubview:apiTokenStatusLabel_];
+  authenticationView =
+    [[[StrappyPreferencesAuthenticationView alloc] initWithFrame:paneFrame
+                                                          target:self]
+      autorelease];
+  apiEndpointField_ = [[authenticationView apiEndpointField] retain];
+  apiTokenField_ = [[authenticationView apiTokenField] retain];
+  apiTokenStatusLabel_ = [[authenticationView statusLabel] retain];
   [self refreshAPITokenStatusWithSaved:NO];
 
-  return view;
-}
+  authenticationItem =
+    [[[NSTabViewItem alloc] initWithIdentifier:@"authentication"] autorelease];
+  [authenticationItem setLabel:NSLocalizedString(@"Authentication", nil)];
+  [authenticationItem setView:authenticationView];
+  [tabView_ addTabViewItem:authenticationItem];
 
-- (NSView *)modelPaneWithFrame:(NSRect)frame
-{
-  NSView *view;
-  NSScrollView *scrollView;
-  NSTableColumn *allowedColumn;
-  NSTableColumn *nameColumn;
-  NSTableColumn *idColumn;
-  NSTableColumn *contextColumn;
-  NSTableColumn *promptColumn;
-  NSTableColumn *completionColumn;
-  NSButtonCell *allowedCell;
-  NSTextFieldCell *textCell;
-  NSTextFieldCell *rightCell;
-  CGFloat topY;
-  CGFloat searchY;
-  CGFloat defaultModelPopupWidth;
-  CGFloat searchWidth;
-
-  view = [[[NSView alloc] initWithFrame:frame] autorelease];
-  [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  topY = NSMaxY([view bounds]) - kStrappyPreferencesInset - 24.0;
-
-  fetchModelsButton_ = [[NSButton alloc]
-      initWithFrame:NSMakeRect(kStrappyPreferencesInset, topY, 116.0, 24.0)];
-  [fetchModelsButton_ setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
-  [fetchModelsButton_ setTitle:NSLocalizedString(@"Fetch Models", nil)];
-  [fetchModelsButton_ setBezelStyle:XPBezelStyleRounded];
-  [fetchModelsButton_ setButtonType:XPButtonTypeMomentaryLight];
-  [fetchModelsButton_ setToolTip:
-    NSLocalizedString(@"Refresh the OpenRouter model list.", nil)];
-  [fetchModelsButton_ setTarget:self];
-  [fetchModelsButton_ setAction:@selector(refreshModels:)];
-  [view addSubview:fetchModelsButton_];
-
-  modelProgressIndicator_ = [[NSProgressIndicator alloc]
-      initWithFrame:NSMakeRect(NSMaxX([fetchModelsButton_ frame]) + 10.0,
-                               topY + 2.0,
-                               20.0,
-                               20.0)];
-  [modelProgressIndicator_ setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
-  [modelProgressIndicator_ setStyle:XPProgressIndicatorStyleSpinning];
-  [modelProgressIndicator_ setIndeterminate:YES];
-  [modelProgressIndicator_ setDisplayedWhenStopped:NO];
-  [view addSubview:modelProgressIndicator_];
-
-  modelStatusLabel_ =
-    [[NSTextField alloc] initWithFrame:NSMakeRect(NSMaxX([modelProgressIndicator_ frame]) + 8.0,
-                                                  topY + 3.0,
-                                                  NSWidth([view bounds]) -
-                                                    NSMaxX([modelProgressIndicator_ frame]) -
-                                                    20.0,
-                                                  20.0)];
-  [modelStatusLabel_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
-  [modelStatusLabel_ setBezeled:NO];
-  [modelStatusLabel_ setDrawsBackground:NO];
-  [modelStatusLabel_ setEditable:NO];
-  [modelStatusLabel_ setSelectable:NO];
-  [modelStatusLabel_ setFont:[NSFont systemFontOfSize:11.0]];
-  [modelStatusLabel_ setTextColor:[NSColor disabledControlTextColor]];
-  [view addSubview:modelStatusLabel_];
-
-  searchY = topY - 34.0;
-  defaultModelPopupWidth = 220.0;
-  searchWidth = NSWidth([view bounds]) - (kStrappyPreferencesInset * 2.0) -
-    defaultModelPopupWidth - 8.0;
-  if (searchWidth < 140.0) {
-    searchWidth = 140.0;
-  }
-  modelSearchField_ =
-    [[NSSearchField alloc] initWithFrame:NSMakeRect(kStrappyPreferencesInset,
-                                                    searchY,
-                                                    searchWidth,
-                                                    24.0)];
-  [modelSearchField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
-  [modelSearchField_ setTarget:self];
-  [modelSearchField_ setAction:@selector(modelSearchChanged:)];
-  [view addSubview:modelSearchField_];
-
-  defaultModelPopUpButton_ =
-    [[NSPopUpButton alloc] initWithFrame:NSMakeRect(NSWidth([view bounds]) -
-                                                      kStrappyPreferencesInset -
-                                                      defaultModelPopupWidth,
-                                                    searchY,
-                                                    defaultModelPopupWidth,
-                                                    24.0)
-                               pullsDown:NO];
-  [defaultModelPopUpButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
-  [defaultModelPopUpButton_ setBezelStyle:XPBezelStyleRounded];
-  [defaultModelPopUpButton_ setToolTip:
-    NSLocalizedString(@"Default model for new chats", nil)];
-  [defaultModelPopUpButton_ setTarget:self];
-  [defaultModelPopUpButton_ setAction:@selector(defaultModelPopUpButtonChanged:)];
-  [[defaultModelPopUpButton_ menu] setAutoenablesItems:NO];
-  [view addSubview:defaultModelPopUpButton_];
+  modelView =
+    [[[StrappyPreferencesModelWhitelistView alloc] initWithFrame:paneFrame
+                                                          target:self
+                                                      dataSource:self
+                                                        delegate:self]
+      autorelease];
+  modelSearchField_ = [[modelView searchField] retain];
+  defaultModelPopUpButton_ = [[modelView defaultModelPopUpButton] retain];
+  modelTableView_ = [[modelView tableView] retain];
+  fetchModelsButton_ = [[modelView fetchButton] retain];
+  modelProgressIndicator_ = [[modelView progressIndicator] retain];
+  modelStatusLabel_ = [[modelView statusLabel] retain];
   [self reloadDefaultModelPopUpButton];
-
   [[NSNotificationCenter defaultCenter]
     addObserver:self
        selector:@selector(modelSearchTextDidChange:)
            name:NSControlTextDidChangeNotification
          object:modelSearchField_];
 
-  scrollView = [[[NSScrollView alloc]
-      initWithFrame:NSMakeRect(kStrappyPreferencesInset,
-                               kStrappyPreferencesInset,
-                               NSWidth([view bounds]) - (kStrappyPreferencesInset * 2.0),
-                               searchY - (kStrappyPreferencesInset * 2.0))]
+  modelItem =
+    [[[NSTabViewItem alloc] initWithIdentifier:@"model_whitelist"] autorelease];
+  [modelItem setLabel:NSLocalizedString(@"Model Whitelist", nil)];
+  [modelItem setView:modelView];
+  [tabView_ addTabViewItem:modelItem];
+
+  databaseView =
+    [[[StrappyPreferencesDatabaseWhitelistView alloc] initWithFrame:paneFrame
+                                                             target:self
+                                                         dataSource:self
+                                                           delegate:self]
       autorelease];
-  [scrollView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  [scrollView setBorderType:NSBezelBorder];
-  [scrollView setHasVerticalScroller:YES];
-  [scrollView setHasHorizontalScroller:YES];
-  [scrollView setAutohidesScrollers:YES];
+  databaseTableView_ = [[databaseView tableView] retain];
+  scanButton_ = [[databaseView scanButton] retain];
+  scanProgressIndicator_ = [[databaseView progressIndicator] retain];
 
-  modelTableView_ =
-    [[NSTableView alloc] initWithFrame:[[scrollView contentView] bounds]];
-  [modelTableView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  [modelTableView_ setDataSource:self];
-  [modelTableView_ setDelegate:self];
-  [modelTableView_ setAllowsMultipleSelection:NO];
-  [modelTableView_ setUsesAlternatingRowBackgroundColors:YES];
-  [modelTableView_ setRowHeight:22.0];
-  [modelTableView_ setColumnAutoresizingStyle:NSTableViewSequentialColumnAutoresizingStyle];
+  databaseItem =
+    [[[NSTabViewItem alloc] initWithIdentifier:@"database_whitelist"] autorelease];
+  [databaseItem setLabel:NSLocalizedString(@"Database Whitelist", nil)];
+  [databaseItem setView:databaseView];
+  [tabView_ addTabViewItem:databaseItem];
 
-  allowedColumn =
-    [[[NSTableColumn alloc] initWithIdentifier:@"model_allowed"] autorelease];
-  [[allowedColumn headerCell] setStringValue:NSLocalizedString(@"Use", nil)];
-  [allowedColumn setWidth:44.0];
-  [allowedColumn setMinWidth:40.0];
-  [allowedColumn setMaxWidth:48.0];
-  [allowedColumn setEditable:YES];
-  [allowedColumn setSortDescriptorPrototype:
-    [[[NSSortDescriptor alloc] initWithKey:@"model_allowed"
-                                 ascending:NO] autorelease]];
-  allowedCell = [[[NSButtonCell alloc] init] autorelease];
-  [allowedCell setButtonType:XPButtonTypeSwitch];
-  [allowedCell setTitle:@""];
-  [allowedCell setAlignment:XPTextAlignmentCenter];
-  [allowedColumn setDataCell:allowedCell];
-  [modelTableView_ addTableColumn:allowedColumn];
-
-  nameColumn = [[[NSTableColumn alloc] initWithIdentifier:@"model_name"] autorelease];
-  [[nameColumn headerCell] setStringValue:NSLocalizedString(@"Model", nil)];
-  [nameColumn setWidth:148.0];
-  [nameColumn setMinWidth:100.0];
-  [nameColumn setEditable:NO];
-  [nameColumn setSortDescriptorPrototype:
-    [[[NSSortDescriptor alloc] initWithKey:@"model_name"
-                                 ascending:YES] autorelease]];
-  textCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
-  [textCell setLineBreakMode:NSLineBreakByTruncatingTail];
-  [nameColumn setDataCell:textCell];
-  [modelTableView_ addTableColumn:nameColumn];
-
-  idColumn = [[[NSTableColumn alloc] initWithIdentifier:@"model_id"] autorelease];
-  [[idColumn headerCell] setStringValue:NSLocalizedString(@"ID", nil)];
-  [idColumn setWidth:174.0];
-  [idColumn setMinWidth:120.0];
-  [idColumn setEditable:NO];
-  [idColumn setSortDescriptorPrototype:
-    [[[NSSortDescriptor alloc] initWithKey:@"model_id"
-                                 ascending:YES] autorelease]];
-  textCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
-  [textCell setLineBreakMode:NSLineBreakByTruncatingMiddle];
-  [textCell setTextColor:[NSColor disabledControlTextColor]];
-  [idColumn setDataCell:textCell];
-  [modelTableView_ addTableColumn:idColumn];
-
-  contextColumn =
-    [[[NSTableColumn alloc] initWithIdentifier:@"model_context"] autorelease];
-  [[contextColumn headerCell] setStringValue:NSLocalizedString(@"Context", nil)];
-  [[contextColumn headerCell] setAlignment:XPTextAlignmentRight];
-  [contextColumn setWidth:58.0];
-  [contextColumn setMinWidth:50.0];
-  [contextColumn setEditable:NO];
-  [contextColumn setSortDescriptorPrototype:
-    [[[NSSortDescriptor alloc] initWithKey:@"model_context"
-                                 ascending:NO] autorelease]];
-  rightCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
-  [rightCell setAlignment:XPTextAlignmentRight];
-  [contextColumn setDataCell:rightCell];
-  [modelTableView_ addTableColumn:contextColumn];
-
-  promptColumn =
-    [[[NSTableColumn alloc] initWithIdentifier:@"model_prompt_price"] autorelease];
-  [[promptColumn headerCell] setStringValue:NSLocalizedString(@"Cost In (1M)", nil)];
-  [[promptColumn headerCell] setAlignment:XPTextAlignmentRight];
-  [promptColumn setWidth:88.0];
-  [promptColumn setMinWidth:76.0];
-  [promptColumn setEditable:NO];
-  [promptColumn setSortDescriptorPrototype:
-    [[[NSSortDescriptor alloc] initWithKey:@"model_prompt_price"
-                                 ascending:YES] autorelease]];
-  rightCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
-  [rightCell setAlignment:XPTextAlignmentRight];
-  [promptColumn setDataCell:rightCell];
-  [modelTableView_ addTableColumn:promptColumn];
-
-  completionColumn =
-    [[[NSTableColumn alloc] initWithIdentifier:@"model_completion_price"] autorelease];
-  [[completionColumn headerCell] setStringValue:NSLocalizedString(@"Cost Out (1M)", nil)];
-  [[completionColumn headerCell] setAlignment:XPTextAlignmentRight];
-  [completionColumn setWidth:94.0];
-  [completionColumn setMinWidth:82.0];
-  [completionColumn setEditable:NO];
-  [completionColumn setSortDescriptorPrototype:
-    [[[NSSortDescriptor alloc] initWithKey:@"model_completion_price"
-                                 ascending:YES] autorelease]];
-  rightCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
-  [rightCell setAlignment:XPTextAlignmentRight];
-  [completionColumn setDataCell:rightCell];
-  [modelTableView_ addTableColumn:completionColumn];
-
-  [modelTableView_ setSortDescriptors:[NSArray arrayWithObjects:
-    [[[NSSortDescriptor alloc] initWithKey:@"model_id"
-                                 ascending:YES] autorelease],
-    nil]];
-
-  [scrollView setDocumentView:modelTableView_];
-  [view addSubview:scrollView];
-  return view;
-}
-
-- (NSView *)systemPromptPaneWithFrame:(NSRect)frame
-{
-  NSView *view;
-  NSScrollView *scrollView;
-
-  view = [[[NSView alloc] initWithFrame:frame] autorelease];
-  [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-
-  scrollView = [[[NSScrollView alloc]
-      initWithFrame:NSInsetRect([view bounds],
-                                kStrappyPreferencesInset,
-                                kStrappyPreferencesInset)] autorelease];
-  [scrollView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  [scrollView setBorderType:NSBezelBorder];
-  [scrollView setHasVerticalScroller:YES];
-  [scrollView setHasHorizontalScroller:NO];
-  [scrollView setAutohidesScrollers:YES];
-
-  systemPromptTextView_ =
-    [[NSTextView alloc] initWithFrame:[[scrollView contentView] bounds]];
-  [systemPromptTextView_ setMinSize:NSMakeSize(0.0, 0.0)];
-  [systemPromptTextView_ setMaxSize:NSMakeSize(100000.0, 100000.0)];
-  [systemPromptTextView_ setVerticallyResizable:YES];
-  [systemPromptTextView_ setHorizontallyResizable:NO];
-  [systemPromptTextView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  [[systemPromptTextView_ textContainer] setWidthTracksTextView:YES];
-  [systemPromptTextView_ setEditable:NO];
-  [systemPromptTextView_ setSelectable:YES];
-  [systemPromptTextView_ setRichText:NO];
-  [systemPromptTextView_ setFont:[NSFont userFixedPitchFontOfSize:12.0]];
-  [systemPromptTextView_ setString:@""];
-
-  [scrollView setDocumentView:systemPromptTextView_];
-  [view addSubview:scrollView];
-  return view;
-}
-
-- (NSView *)databaseScanningPaneWithFrame:(NSRect)frame
-{
-  NSView *view;
-  NSTableColumn *allowedColumn;
-  NSTableColumn *nameColumn;
-  NSTableColumn *locationColumn;
-  NSTableColumn *sizeColumn;
-  NSButtonCell *allowedCell;
-  NSTextFieldCell *nameCell;
-  NSTextFieldCell *locationCell;
-  NSTextFieldCell *sizeCell;
-  NSScrollView *scrollView;
-  CGFloat topY;
-
-  view = [[[NSView alloc] initWithFrame:frame] autorelease];
-  [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  topY = NSMaxY([view bounds]) - kStrappyPreferencesInset - 24.0;
-
-  scanButton_ = [[NSButton alloc]
-      initWithFrame:NSMakeRect(kStrappyPreferencesInset, topY, 128.0, 24.0)];
-  [scanButton_ setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
-  [scanButton_ setTitle:NSLocalizedString(@"Scan Databases", nil)];
-  [scanButton_ setBezelStyle:XPBezelStyleRounded];
-  [scanButton_ setButtonType:XPButtonTypeMomentaryLight];
-  [scanButton_ setToolTip:
-    NSLocalizedString(@"Scan your home folder for SQLite databases.", nil)];
-  [scanButton_ setTarget:self];
-  [scanButton_ setAction:@selector(scanDatabases:)];
-  [view addSubview:scanButton_];
-
-  scanProgressIndicator_ = [[NSProgressIndicator alloc]
-      initWithFrame:NSMakeRect(NSMaxX([scanButton_ frame]) + 10.0,
-                               topY + 2.0,
-                               20.0,
-                               20.0)];
-  [scanProgressIndicator_ setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
-  [scanProgressIndicator_ setStyle:XPProgressIndicatorStyleSpinning];
-  [scanProgressIndicator_ setIndeterminate:YES];
-  [scanProgressIndicator_ setDisplayedWhenStopped:NO];
-  [view addSubview:scanProgressIndicator_];
-
-  scrollView = [[[NSScrollView alloc]
-      initWithFrame:NSMakeRect(kStrappyPreferencesInset,
-                               kStrappyPreferencesInset,
-                               NSWidth([view bounds]) - (kStrappyPreferencesInset * 2.0),
-                               topY - (kStrappyPreferencesInset * 2.0))]
+  systemPromptsView =
+    [[[StrappyPreferencesSystemPromptsView alloc] initWithFrame:paneFrame]
       autorelease];
-  [scrollView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  [scrollView setBorderType:NSBezelBorder];
-  [scrollView setHasVerticalScroller:YES];
-  [scrollView setHasHorizontalScroller:NO];
-  [scrollView setAutohidesScrollers:YES];
+  systemPromptTextView_ = [[systemPromptsView textView] retain];
 
-  databaseTableView_ =
-    [[StrappyDatabaseTableView alloc] initWithFrame:[[scrollView contentView] bounds]];
-  [databaseTableView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  [databaseTableView_ setDataSource:self];
-  [databaseTableView_ setDelegate:self];
-  [databaseTableView_ setAllowsMultipleSelection:YES];
-  [databaseTableView_ setUsesAlternatingRowBackgroundColors:YES];
-  [databaseTableView_ setRowHeight:22.0];
-  [databaseTableView_ setColumnAutoresizingStyle:NSTableViewSequentialColumnAutoresizingStyle];
+  systemPromptItem =
+    [[[NSTabViewItem alloc] initWithIdentifier:@"system_prompts"] autorelease];
+  [systemPromptItem setLabel:NSLocalizedString(@"System Prompts", nil)];
+  [systemPromptItem setView:systemPromptsView];
+  [tabView_ addTabViewItem:systemPromptItem];
 
-  allowedColumn =
-    [[[NSTableColumn alloc] initWithIdentifier:@"allowed"] autorelease];
-  [[allowedColumn headerCell] setStringValue:NSLocalizedString(@"Use", nil)];
-  [allowedColumn setWidth:48.0];
-  [allowedColumn setMinWidth:44.0];
-  [allowedColumn setMaxWidth:54.0];
-  [allowedColumn setEditable:YES];
-  allowedCell = [[[NSButtonCell alloc] init] autorelease];
-  [allowedCell setButtonType:XPButtonTypeSwitch];
-  [allowedCell setTitle:@""];
-  [allowedCell setAlignment:XPTextAlignmentCenter];
-  [allowedColumn setDataCell:allowedCell];
-  [databaseTableView_ addTableColumn:allowedColumn];
-
-  nameColumn = [[[NSTableColumn alloc] initWithIdentifier:@"name"] autorelease];
-  [[nameColumn headerCell] setStringValue:NSLocalizedString(@"Database", nil)];
-  [nameColumn setWidth:210.0];
-  [nameColumn setMinWidth:120.0];
-  [nameColumn setEditable:NO];
-  nameCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
-  [nameCell setLineBreakMode:NSLineBreakByTruncatingTail];
-  [nameColumn setDataCell:nameCell];
-  [databaseTableView_ addTableColumn:nameColumn];
-
-  locationColumn =
-    [[[NSTableColumn alloc] initWithIdentifier:@"location"] autorelease];
-  [[locationColumn headerCell] setStringValue:NSLocalizedString(@"Location", nil)];
-  [locationColumn setWidth:270.0];
-  [locationColumn setMinWidth:160.0];
-  [locationColumn setEditable:NO];
-  locationCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
-  [locationCell setLineBreakMode:NSLineBreakByTruncatingMiddle];
-  [locationCell setTextColor:[NSColor disabledControlTextColor]];
-  [locationColumn setDataCell:locationCell];
-  [databaseTableView_ addTableColumn:locationColumn];
-
-  sizeColumn = [[[NSTableColumn alloc] initWithIdentifier:@"size"] autorelease];
-  [[sizeColumn headerCell] setStringValue:NSLocalizedString(@"Size", nil)];
-  [sizeColumn setWidth:76.0];
-  [sizeColumn setMinWidth:66.0];
-  [sizeColumn setEditable:NO];
-  sizeCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
-  [sizeCell setAlignment:XPTextAlignmentRight];
-  [sizeColumn setDataCell:sizeCell];
-  [databaseTableView_ addTableColumn:sizeColumn];
-
-  [scrollView setDocumentView:databaseTableView_];
-  [view addSubview:scrollView];
-  return view;
-}
-
-- (NSTextField *)labelWithFrame:(NSRect)frame text:(NSString *)text
-{
-  NSTextField *label;
-
-  label = [[[NSTextField alloc] initWithFrame:frame] autorelease];
-  [label setStringValue:(text != nil) ? text : @""];
-  [label setBezeled:NO];
-  [label setDrawsBackground:NO];
-  [label setEditable:NO];
-  [label setSelectable:NO];
-  [label setFont:[NSFont systemFontOfSize:13.0]];
-  return label;
+  [contentView addSubview:tabView_];
 }
 
 - (void)refreshAPITokenStatusWithSaved:(BOOL)saved
