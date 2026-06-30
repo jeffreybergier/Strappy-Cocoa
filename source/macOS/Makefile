@@ -1,6 +1,7 @@
 # Altivec Intelligence - Strappy (Mac)
 APP_NAME = Strappy
 SOURCES = main.m AppDelegate.m XPAppKit.m PreferencesWindowController.m \
+          StrappyPreferencesWhitelistView.m \
           StrappyPreferencesAuthenticationView.m \
           StrappyPreferencesModelWhitelistView.m \
           StrappyPreferencesDatabaseWhitelistView.m \

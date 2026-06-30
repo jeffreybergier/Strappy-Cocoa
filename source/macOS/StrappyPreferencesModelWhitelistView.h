@@ -1,24 +1,15 @@
-#import <AppKit/AppKit.h>
+#import "StrappyPreferencesWhitelistView.h"
 
-@interface StrappyPreferencesModelWhitelistView : NSView {
+@interface StrappyPreferencesModelWhitelistView : StrappyPreferencesWhitelistView {
  @private
-  NSSearchField       *searchField_;
   NSPopUpButton       *defaultModelPopUpButton_;
-  NSTableView         *tableView_;
-  NSButton            *fetchButton_;
-  NSProgressIndicator *progressIndicator_;
-  NSTextField         *statusLabel_;
 }
 
 - (id)initWithFrame:(NSRect)frame
              target:(id)target
          dataSource:(id)dataSource
            delegate:(id)delegate;
-- (NSSearchField *)searchField;
 - (NSPopUpButton *)defaultModelPopUpButton;
-- (NSTableView *)tableView;
 - (NSButton *)fetchButton;
-- (NSProgressIndicator *)progressIndicator;
-- (NSTextField *)statusLabel;
 
 @end

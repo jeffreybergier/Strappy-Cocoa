@@ -1,18 +1,11 @@
-#import <AppKit/AppKit.h>
+#import "StrappyPreferencesWhitelistView.h"
 
-@interface StrappyPreferencesDatabaseWhitelistView : NSView {
- @private
-  NSTableView         *tableView_;
-  NSButton            *scanButton_;
-  NSProgressIndicator *progressIndicator_;
-}
+@interface StrappyPreferencesDatabaseWhitelistView : StrappyPreferencesWhitelistView
 
 - (id)initWithFrame:(NSRect)frame
              target:(id)target
          dataSource:(id)dataSource
            delegate:(id)delegate;
-- (NSTableView *)tableView;
 - (NSButton *)scanButton;
-- (NSProgressIndicator *)progressIndicator;
 
 @end

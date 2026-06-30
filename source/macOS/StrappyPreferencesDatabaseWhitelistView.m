@@ -2,41 +2,89 @@
 
 #import "XPAppKit.h"
 
-static const CGFloat kStrappyPreferencesInset = 12.0;
-
-@interface StrappyDatabaseTableView : NSTableView
-@end
-
-@implementation StrappyDatabaseTableView
-
-- (void)keyDown:(NSEvent *)event
+static NSString *StrappyDatabaseWhitelistPathForRow(NSDictionary *row)
 {
-  NSString *characters;
-  id delegate;
-  SEL selector;
+  NSString *path;
 
-  characters = [event charactersIgnoringModifiers];
-  if (([characters length] == 1U) &&
-      ([characters characterAtIndex:0] == ' ') &&
-      ([[self selectedRowIndexes] count] > 0U)) {
-    delegate = [self delegate];
-    selector = @selector(databaseTableViewDidPressSpace:);
-    if ([delegate respondsToSelector:selector]) {
-      [delegate performSelector:selector withObject:self];
-      return;
+  path = [row objectForKey:@"path"];
+  if (![path isKindOfClass:[NSString class]]) {
+    return @"";
+  }
+  return path;
+}
+
+static NSString *StrappyDatabaseWhitelistNameForRow(NSDictionary *row)
+{
+  NSString *path;
+  NSString *name;
+
+  path = StrappyDatabaseWhitelistPathForRow(row);
+  name = [path lastPathComponent];
+  if ([name length] == 0U) {
+    return path;
+  }
+  return name;
+}
+
+static NSString *StrappyDatabaseWhitelistLocationForRow(NSDictionary *row)
+{
+  NSString *path;
+  NSString *directory;
+  NSString *homeDirectory;
+  NSUInteger homeLength;
+
+  path = StrappyDatabaseWhitelistPathForRow(row);
+  directory = [path stringByDeletingLastPathComponent];
+  if (([directory length] == 0U) || [directory isEqualToString:path]) {
+    return @"";
+  }
+
+  homeDirectory = NSHomeDirectory();
+  homeLength = [homeDirectory length];
+  if ((homeLength > 0U) && [directory hasPrefix:homeDirectory]) {
+    if ([directory length] == homeLength) {
+      return @"~";
+    }
+    if ([directory characterAtIndex:homeLength] == '/') {
+      return [@"~" stringByAppendingString:
+        [directory substringFromIndex:homeLength]];
     }
   }
 
-  [super keyDown:event];
+  return directory;
 }
 
-@end
+static BOOL StrappyDatabaseWhitelistRowIsAllowed(NSDictionary *row)
+{
+  NSString *decision;
 
-@interface StrappyPreferencesDatabaseWhitelistView ()
-- (void)buildViewWithTarget:(id)target
-                 dataSource:(id)dataSource
-                   delegate:(id)delegate;
-@end
+  decision = [row objectForKey:@"user_decision"];
+  return [decision isEqualToString:@"allowed"];
+}
+
+static NSComparisonResult StrappyDatabaseWhitelistCompareStrings(NSString *left,
+                                                                 NSString *right)
+{
+  if (![left isKindOfClass:[NSString class]]) {
+    left = @"";
+  }
+  if (![right isKindOfClass:[NSString class]]) {
+    right = @"";
+  }
+  return [left caseInsensitiveCompare:right];
+}
+
+static NSComparisonResult StrappyDatabaseWhitelistCompareLongLong(long long left,
+                                                                  long long right)
+{
+  if (left < right) {
+    return NSOrderedAscending;
+  }
+  if (left > right) {
+    return NSOrderedDescending;
+  }
+  return NSOrderedSame;
+}
 
 @implementation StrappyPreferencesDatabaseWhitelistView
 
@@ -53,18 +101,17 @@ static const CGFloat kStrappyPreferencesInset = 12.0;
          dataSource:(id)dataSource
            delegate:(id)delegate
 {
-  if ((self = [super initWithFrame:frame])) {
-    [self setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-    [self buildViewWithTarget:target
+  return [super initWithFrame:frame
+                       target:target
+                refreshAction:@selector(scanDatabases:)
+                 searchAction:NULL
+               refreshToolTip:NSLocalizedString(
+                 @"Scan your home folder for SQLite databases.", nil)
                    dataSource:dataSource
                      delegate:delegate];
-  }
-  return self;
 }
 
-- (void)buildViewWithTarget:(id)target
-                 dataSource:(id)dataSource
-                   delegate:(id)delegate
+- (void)addTableColumnsToTableView:(NSTableView *)tableView
 {
   NSTableColumn *allowedColumn;
   NSTableColumn *nameColumn;
@@ -74,55 +121,6 @@ static const CGFloat kStrappyPreferencesInset = 12.0;
   NSTextFieldCell *nameCell;
   NSTextFieldCell *locationCell;
   NSTextFieldCell *sizeCell;
-  NSScrollView *scrollView;
-  CGFloat topY;
-
-  topY = NSMaxY([self bounds]) - kStrappyPreferencesInset - 24.0;
-
-  scanButton_ = [[NSButton alloc]
-      initWithFrame:NSMakeRect(kStrappyPreferencesInset, topY, 128.0, 24.0)];
-  [scanButton_ setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
-  [scanButton_ setTitle:NSLocalizedString(@"Scan Databases", nil)];
-  [scanButton_ setBezelStyle:XPBezelStyleRounded];
-  [scanButton_ setButtonType:XPButtonTypeMomentaryLight];
-  [scanButton_ setToolTip:
-    NSLocalizedString(@"Scan your home folder for SQLite databases.", nil)];
-  [scanButton_ setTarget:target];
-  [scanButton_ setAction:@selector(scanDatabases:)];
-  [self addSubview:scanButton_];
-
-  progressIndicator_ = [[NSProgressIndicator alloc]
-      initWithFrame:NSMakeRect(NSMaxX([scanButton_ frame]) + 10.0,
-                               topY + 2.0,
-                               20.0,
-                               20.0)];
-  [progressIndicator_ setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
-  [progressIndicator_ setStyle:XPProgressIndicatorStyleSpinning];
-  [progressIndicator_ setIndeterminate:YES];
-  [progressIndicator_ setDisplayedWhenStopped:NO];
-  [self addSubview:progressIndicator_];
-
-  scrollView = [[[NSScrollView alloc]
-      initWithFrame:NSMakeRect(kStrappyPreferencesInset,
-                               kStrappyPreferencesInset,
-                               NSWidth([self bounds]) - (kStrappyPreferencesInset * 2.0),
-                               topY - (kStrappyPreferencesInset * 2.0))]
-      autorelease];
-  [scrollView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  [scrollView setBorderType:NSBezelBorder];
-  [scrollView setHasVerticalScroller:YES];
-  [scrollView setHasHorizontalScroller:NO];
-  [scrollView setAutohidesScrollers:YES];
-
-  tableView_ =
-    [[StrappyDatabaseTableView alloc] initWithFrame:[[scrollView contentView] bounds]];
-  [tableView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  [tableView_ setDataSource:dataSource];
-  [tableView_ setDelegate:delegate];
-  [tableView_ setAllowsMultipleSelection:YES];
-  [tableView_ setUsesAlternatingRowBackgroundColors:YES];
-  [tableView_ setRowHeight:22.0];
-  [tableView_ setColumnAutoresizingStyle:NSTableViewSequentialColumnAutoresizingStyle];
 
   allowedColumn =
     [[[NSTableColumn alloc] initWithIdentifier:@"allowed"] autorelease];
@@ -131,22 +129,28 @@ static const CGFloat kStrappyPreferencesInset = 12.0;
   [allowedColumn setMinWidth:44.0];
   [allowedColumn setMaxWidth:54.0];
   [allowedColumn setEditable:YES];
+  [allowedColumn setSortDescriptorPrototype:
+    [[[NSSortDescriptor alloc] initWithKey:@"allowed"
+                                 ascending:NO] autorelease]];
   allowedCell = [[[NSButtonCell alloc] init] autorelease];
   [allowedCell setButtonType:XPButtonTypeSwitch];
   [allowedCell setTitle:@""];
   [allowedCell setAlignment:XPTextAlignmentCenter];
   [allowedColumn setDataCell:allowedCell];
-  [tableView_ addTableColumn:allowedColumn];
+  [tableView addTableColumn:allowedColumn];
 
   nameColumn = [[[NSTableColumn alloc] initWithIdentifier:@"name"] autorelease];
   [[nameColumn headerCell] setStringValue:NSLocalizedString(@"Database", nil)];
   [nameColumn setWidth:210.0];
   [nameColumn setMinWidth:120.0];
   [nameColumn setEditable:NO];
+  [nameColumn setSortDescriptorPrototype:
+    [[[NSSortDescriptor alloc] initWithKey:@"name"
+                                 ascending:YES] autorelease]];
   nameCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
   [nameCell setLineBreakMode:NSLineBreakByTruncatingTail];
   [nameColumn setDataCell:nameCell];
-  [tableView_ addTableColumn:nameColumn];
+  [tableView addTableColumn:nameColumn];
 
   locationColumn =
     [[[NSTableColumn alloc] initWithIdentifier:@"location"] autorelease];
@@ -154,47 +158,108 @@ static const CGFloat kStrappyPreferencesInset = 12.0;
   [locationColumn setWidth:270.0];
   [locationColumn setMinWidth:160.0];
   [locationColumn setEditable:NO];
+  [locationColumn setSortDescriptorPrototype:
+    [[[NSSortDescriptor alloc] initWithKey:@"location"
+                                 ascending:YES] autorelease]];
   locationCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
   [locationCell setLineBreakMode:NSLineBreakByTruncatingMiddle];
   [locationCell setTextColor:[NSColor disabledControlTextColor]];
   [locationColumn setDataCell:locationCell];
-  [tableView_ addTableColumn:locationColumn];
+  [tableView addTableColumn:locationColumn];
 
   sizeColumn = [[[NSTableColumn alloc] initWithIdentifier:@"size"] autorelease];
   [[sizeColumn headerCell] setStringValue:NSLocalizedString(@"Size", nil)];
   [sizeColumn setWidth:76.0];
   [sizeColumn setMinWidth:66.0];
   [sizeColumn setEditable:NO];
+  [sizeColumn setSortDescriptorPrototype:
+    [[[NSSortDescriptor alloc] initWithKey:@"size"
+                                 ascending:NO] autorelease]];
   sizeCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
   [sizeCell setAlignment:XPTextAlignmentRight];
   [sizeColumn setDataCell:sizeCell];
-  [tableView_ addTableColumn:sizeColumn];
+  [tableView addTableColumn:sizeColumn];
 
-  [scrollView setDocumentView:tableView_];
-  [self addSubview:scrollView];
+  [tableView setSortDescriptors:[NSArray arrayWithObjects:
+    [[[NSSortDescriptor alloc] initWithKey:@"location"
+                                 ascending:YES] autorelease],
+    nil]];
 }
 
-- (NSTableView *)tableView
+- (NSSortDescriptor *)requiredSortDescriptor
 {
-  return tableView_;
+  return [[[NSSortDescriptor alloc] initWithKey:@"allowed"
+                                      ascending:NO] autorelease];
+}
+
+- (NSSortDescriptor *)defaultPrimarySortDescriptor
+{
+  return [[[NSSortDescriptor alloc] initWithKey:@"location"
+                                      ascending:YES] autorelease];
+}
+
+- (NSArray *)fallbackSortDescriptors
+{
+  return [NSArray arrayWithObjects:
+    [[[NSSortDescriptor alloc] initWithKey:@"size"
+                                 ascending:NO] autorelease],
+    nil];
+}
+
+- (NSString *)stableSortKey
+{
+  return @"path";
+}
+
+- (BOOL)sortKeyIsKnown:(NSString *)key
+{
+  return ([key isEqualToString:@"allowed"] ||
+          [key isEqualToString:@"name"] ||
+          [key isEqualToString:@"location"] ||
+          [key isEqualToString:@"size"] ||
+          [key isEqualToString:@"path"]) ? YES : NO;
+}
+
+- (NSComparisonResult)compareRow:(NSDictionary *)left
+                             row:(NSDictionary *)right
+                      forSortKey:(NSString *)key
+{
+  if ([key isEqualToString:@"allowed"]) {
+    return StrappyDatabaseWhitelistCompareLongLong(
+      StrappyDatabaseWhitelistRowIsAllowed(left) ? 1LL : 0LL,
+      StrappyDatabaseWhitelistRowIsAllowed(right) ? 1LL : 0LL);
+  }
+  if ([key isEqualToString:@"name"]) {
+    return StrappyDatabaseWhitelistCompareStrings(
+      StrappyDatabaseWhitelistNameForRow(left),
+      StrappyDatabaseWhitelistNameForRow(right));
+  }
+  if ([key isEqualToString:@"location"]) {
+    return StrappyDatabaseWhitelistCompareStrings(
+      StrappyDatabaseWhitelistLocationForRow(left),
+      StrappyDatabaseWhitelistLocationForRow(right));
+  }
+  if ([key isEqualToString:@"size"]) {
+    NSNumber *leftValue;
+    NSNumber *rightValue;
+
+    leftValue = [left objectForKey:@"size"];
+    rightValue = [right objectForKey:@"size"];
+    return StrappyDatabaseWhitelistCompareLongLong(
+      [leftValue isKindOfClass:[NSNumber class]] ? [leftValue longLongValue] : 0LL,
+      [rightValue isKindOfClass:[NSNumber class]] ? [rightValue longLongValue] : 0LL);
+  }
+  if ([key isEqualToString:@"path"]) {
+    return StrappyDatabaseWhitelistCompareStrings(
+      StrappyDatabaseWhitelistPathForRow(left),
+      StrappyDatabaseWhitelistPathForRow(right));
+  }
+  return NSOrderedSame;
 }
 
 - (NSButton *)scanButton
 {
-  return scanButton_;
-}
-
-- (NSProgressIndicator *)progressIndicator
-{
-  return progressIndicator_;
-}
-
-- (void)dealloc
-{
-  [tableView_ release];
-  [scanButton_ release];
-  [progressIndicator_ release];
-  [super dealloc];
+  return [self refreshButton];
 }
 
 @end

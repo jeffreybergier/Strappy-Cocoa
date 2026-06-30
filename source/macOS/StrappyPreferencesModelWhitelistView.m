@@ -2,13 +2,88 @@
 
 #import "XPAppKit.h"
 
-static const CGFloat kStrappyPreferencesInset = 12.0;
+static const CGFloat kStrappyModelControlHeight = 24.0;
+static const CGFloat kStrappyModelDefaultPopupWidth = 260.0;
 
-@interface StrappyPreferencesModelWhitelistView ()
-- (void)buildViewWithTarget:(id)target
-                 dataSource:(id)dataSource
-                   delegate:(id)delegate;
-@end
+static NSString *StrappyModelWhitelistStringForRow(NSDictionary *row,
+                                                   NSString *key)
+{
+  NSString *value;
+
+  value = [row objectForKey:key];
+  if (![value isKindOfClass:[NSString class]]) {
+    return @"";
+  }
+  return value;
+}
+
+static BOOL StrappyModelWhitelistRowIsDefault(NSDictionary *row)
+{
+  NSNumber *selected;
+
+  selected = [row objectForKey:@"selected"];
+  return ([selected isKindOfClass:[NSNumber class]] && [selected boolValue]) ?
+    YES : NO;
+}
+
+static BOOL StrappyModelWhitelistRowIsAllowed(NSDictionary *row)
+{
+  NSNumber *allowed;
+
+  if (StrappyModelWhitelistRowIsDefault(row)) {
+    return YES;
+  }
+
+  allowed = [row objectForKey:@"allowed"];
+  return ([allowed isKindOfClass:[NSNumber class]] && [allowed boolValue]) ?
+    YES : NO;
+}
+
+static NSString *StrappyModelWhitelistDisplayNameForRow(NSDictionary *row)
+{
+  NSString *name;
+
+  name = StrappyModelWhitelistStringForRow(row, @"name");
+  if ([name length] > 0U) {
+    return name;
+  }
+  return StrappyModelWhitelistStringForRow(row, @"id");
+}
+
+static NSComparisonResult StrappyWhitelistCompareStrings(NSString *left,
+                                                         NSString *right)
+{
+  if (![left isKindOfClass:[NSString class]]) {
+    left = @"";
+  }
+  if (![right isKindOfClass:[NSString class]]) {
+    right = @"";
+  }
+  return [left caseInsensitiveCompare:right];
+}
+
+static NSComparisonResult StrappyWhitelistCompareLongLong(long long left,
+                                                          long long right)
+{
+  if (left < right) {
+    return NSOrderedAscending;
+  }
+  if (left > right) {
+    return NSOrderedDescending;
+  }
+  return NSOrderedSame;
+}
+
+static NSComparisonResult StrappyWhitelistCompareDouble(double left, double right)
+{
+  if (left < right) {
+    return NSOrderedAscending;
+  }
+  if (left > right) {
+    return NSOrderedDescending;
+  }
+  return NSOrderedSame;
+}
 
 @implementation StrappyPreferencesModelWhitelistView
 
@@ -25,20 +100,48 @@ static const CGFloat kStrappyPreferencesInset = 12.0;
          dataSource:(id)dataSource
            delegate:(id)delegate
 {
-  if ((self = [super initWithFrame:frame])) {
-    [self setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-    [self buildViewWithTarget:target
+  return [super initWithFrame:frame
+                       target:target
+                refreshAction:@selector(refreshModels:)
+                 searchAction:NULL
+               refreshToolTip:NSLocalizedString(
+                 @"Refresh the OpenRouter model list.", nil)
                    dataSource:dataSource
                      delegate:delegate];
-  }
-  return self;
 }
 
-- (void)buildViewWithTarget:(id)target
-                 dataSource:(id)dataSource
-                   delegate:(id)delegate
+- (CGFloat)topAccessoryTrailingControlWidth
 {
-  NSScrollView *scrollView;
+  return kStrappyModelDefaultPopupWidth;
+}
+
+- (void)configureTopAccessoryView:(NSView *)view target:(id)target
+{
+  NSRect bounds;
+  CGFloat controlY;
+
+  bounds = [view bounds];
+  controlY = NSMaxY(bounds) - kStrappyModelControlHeight;
+
+  defaultModelPopUpButton_ =
+    [[NSPopUpButton alloc] initWithFrame:NSMakeRect(NSWidth(bounds) -
+                                                      kStrappyModelDefaultPopupWidth,
+                                                    controlY,
+                                                    kStrappyModelDefaultPopupWidth,
+                                                    kStrappyModelControlHeight)
+                               pullsDown:NO];
+  [defaultModelPopUpButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
+  [defaultModelPopUpButton_ setBezelStyle:XPBezelStyleRounded];
+  [defaultModelPopUpButton_ setToolTip:
+    NSLocalizedString(@"Default model for new chats", nil)];
+  [defaultModelPopUpButton_ setTarget:target];
+  [defaultModelPopUpButton_ setAction:@selector(defaultModelPopUpButtonChanged:)];
+  [[defaultModelPopUpButton_ menu] setAutoenablesItems:NO];
+  [view addSubview:defaultModelPopUpButton_];
+}
+
+- (void)addTableColumnsToTableView:(NSTableView *)tableView
+{
   NSTableColumn *allowedColumn;
   NSTableColumn *nameColumn;
   NSTableColumn *idColumn;
@@ -48,107 +151,6 @@ static const CGFloat kStrappyPreferencesInset = 12.0;
   NSButtonCell *allowedCell;
   NSTextFieldCell *textCell;
   NSTextFieldCell *rightCell;
-  CGFloat topY;
-  CGFloat searchY;
-  CGFloat defaultModelPopupWidth;
-  CGFloat searchWidth;
-
-  topY = NSMaxY([self bounds]) - kStrappyPreferencesInset - 24.0;
-
-  fetchButton_ = [[NSButton alloc]
-      initWithFrame:NSMakeRect(kStrappyPreferencesInset, topY, 116.0, 24.0)];
-  [fetchButton_ setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
-  [fetchButton_ setTitle:NSLocalizedString(@"Fetch Models", nil)];
-  [fetchButton_ setBezelStyle:XPBezelStyleRounded];
-  [fetchButton_ setButtonType:XPButtonTypeMomentaryLight];
-  [fetchButton_ setToolTip:
-    NSLocalizedString(@"Refresh the OpenRouter model list.", nil)];
-  [fetchButton_ setTarget:target];
-  [fetchButton_ setAction:@selector(refreshModels:)];
-  [self addSubview:fetchButton_];
-
-  progressIndicator_ = [[NSProgressIndicator alloc]
-      initWithFrame:NSMakeRect(NSMaxX([fetchButton_ frame]) + 10.0,
-                               topY + 2.0,
-                               20.0,
-                               20.0)];
-  [progressIndicator_ setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
-  [progressIndicator_ setStyle:XPProgressIndicatorStyleSpinning];
-  [progressIndicator_ setIndeterminate:YES];
-  [progressIndicator_ setDisplayedWhenStopped:NO];
-  [self addSubview:progressIndicator_];
-
-  statusLabel_ =
-    [[NSTextField alloc] initWithFrame:NSMakeRect(NSMaxX([progressIndicator_ frame]) + 8.0,
-                                                  topY + 3.0,
-                                                  NSWidth([self bounds]) -
-                                                    NSMaxX([progressIndicator_ frame]) -
-                                                    20.0,
-                                                  20.0)];
-  [statusLabel_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
-  [statusLabel_ setBezeled:NO];
-  [statusLabel_ setDrawsBackground:NO];
-  [statusLabel_ setEditable:NO];
-  [statusLabel_ setSelectable:NO];
-  [statusLabel_ setFont:[NSFont systemFontOfSize:11.0]];
-  [statusLabel_ setTextColor:[NSColor disabledControlTextColor]];
-  [self addSubview:statusLabel_];
-
-  searchY = topY - 34.0;
-  defaultModelPopupWidth = 220.0;
-  searchWidth = NSWidth([self bounds]) - (kStrappyPreferencesInset * 2.0) -
-    defaultModelPopupWidth - 8.0;
-  if (searchWidth < 140.0) {
-    searchWidth = 140.0;
-  }
-  searchField_ =
-    [[NSSearchField alloc] initWithFrame:NSMakeRect(kStrappyPreferencesInset,
-                                                    searchY,
-                                                    searchWidth,
-                                                    24.0)];
-  [searchField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
-  [searchField_ setTarget:target];
-  [searchField_ setAction:@selector(modelSearchChanged:)];
-  [self addSubview:searchField_];
-
-  defaultModelPopUpButton_ =
-    [[NSPopUpButton alloc] initWithFrame:NSMakeRect(NSWidth([self bounds]) -
-                                                      kStrappyPreferencesInset -
-                                                      defaultModelPopupWidth,
-                                                    searchY,
-                                                    defaultModelPopupWidth,
-                                                    24.0)
-                               pullsDown:NO];
-  [defaultModelPopUpButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
-  [defaultModelPopUpButton_ setBezelStyle:XPBezelStyleRounded];
-  [defaultModelPopUpButton_ setToolTip:
-    NSLocalizedString(@"Default model for new chats", nil)];
-  [defaultModelPopUpButton_ setTarget:target];
-  [defaultModelPopUpButton_ setAction:@selector(defaultModelPopUpButtonChanged:)];
-  [[defaultModelPopUpButton_ menu] setAutoenablesItems:NO];
-  [self addSubview:defaultModelPopUpButton_];
-
-  scrollView = [[[NSScrollView alloc]
-      initWithFrame:NSMakeRect(kStrappyPreferencesInset,
-                               kStrappyPreferencesInset,
-                               NSWidth([self bounds]) - (kStrappyPreferencesInset * 2.0),
-                               searchY - (kStrappyPreferencesInset * 2.0))]
-      autorelease];
-  [scrollView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  [scrollView setBorderType:NSBezelBorder];
-  [scrollView setHasVerticalScroller:YES];
-  [scrollView setHasHorizontalScroller:YES];
-  [scrollView setAutohidesScrollers:YES];
-
-  tableView_ =
-    [[NSTableView alloc] initWithFrame:[[scrollView contentView] bounds]];
-  [tableView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  [tableView_ setDataSource:dataSource];
-  [tableView_ setDelegate:delegate];
-  [tableView_ setAllowsMultipleSelection:NO];
-  [tableView_ setUsesAlternatingRowBackgroundColors:YES];
-  [tableView_ setRowHeight:22.0];
-  [tableView_ setColumnAutoresizingStyle:NSTableViewSequentialColumnAutoresizingStyle];
 
   allowedColumn =
     [[[NSTableColumn alloc] initWithIdentifier:@"model_allowed"] autorelease];
@@ -165,7 +167,7 @@ static const CGFloat kStrappyPreferencesInset = 12.0;
   [allowedCell setTitle:@""];
   [allowedCell setAlignment:XPTextAlignmentCenter];
   [allowedColumn setDataCell:allowedCell];
-  [tableView_ addTableColumn:allowedColumn];
+  [tableView addTableColumn:allowedColumn];
 
   nameColumn = [[[NSTableColumn alloc] initWithIdentifier:@"model_name"] autorelease];
   [[nameColumn headerCell] setStringValue:NSLocalizedString(@"Model", nil)];
@@ -178,7 +180,7 @@ static const CGFloat kStrappyPreferencesInset = 12.0;
   textCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
   [textCell setLineBreakMode:NSLineBreakByTruncatingTail];
   [nameColumn setDataCell:textCell];
-  [tableView_ addTableColumn:nameColumn];
+  [tableView addTableColumn:nameColumn];
 
   idColumn = [[[NSTableColumn alloc] initWithIdentifier:@"model_id"] autorelease];
   [[idColumn headerCell] setStringValue:NSLocalizedString(@"ID", nil)];
@@ -192,7 +194,7 @@ static const CGFloat kStrappyPreferencesInset = 12.0;
   [textCell setLineBreakMode:NSLineBreakByTruncatingMiddle];
   [textCell setTextColor:[NSColor disabledControlTextColor]];
   [idColumn setDataCell:textCell];
-  [tableView_ addTableColumn:idColumn];
+  [tableView addTableColumn:idColumn];
 
   contextColumn =
     [[[NSTableColumn alloc] initWithIdentifier:@"model_context"] autorelease];
@@ -207,7 +209,7 @@ static const CGFloat kStrappyPreferencesInset = 12.0;
   rightCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
   [rightCell setAlignment:XPTextAlignmentRight];
   [contextColumn setDataCell:rightCell];
-  [tableView_ addTableColumn:contextColumn];
+  [tableView addTableColumn:contextColumn];
 
   promptColumn =
     [[[NSTableColumn alloc] initWithIdentifier:@"model_prompt_price"] autorelease];
@@ -222,7 +224,7 @@ static const CGFloat kStrappyPreferencesInset = 12.0;
   rightCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
   [rightCell setAlignment:XPTextAlignmentRight];
   [promptColumn setDataCell:rightCell];
-  [tableView_ addTableColumn:promptColumn];
+  [tableView addTableColumn:promptColumn];
 
   completionColumn =
     [[[NSTableColumn alloc] initWithIdentifier:@"model_completion_price"] autorelease];
@@ -237,20 +239,91 @@ static const CGFloat kStrappyPreferencesInset = 12.0;
   rightCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
   [rightCell setAlignment:XPTextAlignmentRight];
   [completionColumn setDataCell:rightCell];
-  [tableView_ addTableColumn:completionColumn];
+  [tableView addTableColumn:completionColumn];
 
-  [tableView_ setSortDescriptors:[NSArray arrayWithObjects:
+  [tableView setSortDescriptors:[NSArray arrayWithObjects:
     [[[NSSortDescriptor alloc] initWithKey:@"model_id"
                                  ascending:YES] autorelease],
     nil]];
-
-  [scrollView setDocumentView:tableView_];
-  [self addSubview:scrollView];
 }
 
-- (NSSearchField *)searchField
+- (NSSortDescriptor *)requiredSortDescriptor
 {
-  return searchField_;
+  return [[[NSSortDescriptor alloc] initWithKey:@"model_allowed"
+                                      ascending:NO] autorelease];
+}
+
+- (NSSortDescriptor *)defaultPrimarySortDescriptor
+{
+  return [[[NSSortDescriptor alloc] initWithKey:@"model_id"
+                                      ascending:YES] autorelease];
+}
+
+- (NSArray *)fallbackSortDescriptors
+{
+  return [NSArray arrayWithObjects:
+    [[[NSSortDescriptor alloc] initWithKey:@"model_completion_price"
+                                 ascending:YES] autorelease],
+    [[[NSSortDescriptor alloc] initWithKey:@"model_prompt_price"
+                                 ascending:YES] autorelease],
+    nil];
+}
+
+- (NSString *)stableSortKey
+{
+  return @"model_id";
+}
+
+- (BOOL)sortKeyIsKnown:(NSString *)key
+{
+  return ([key isEqualToString:@"model_allowed"] ||
+          [key isEqualToString:@"model_name"] ||
+          [key isEqualToString:@"model_id"] ||
+          [key isEqualToString:@"model_context"] ||
+          [key isEqualToString:@"model_prompt_price"] ||
+          [key isEqualToString:@"model_completion_price"]) ? YES : NO;
+}
+
+- (NSComparisonResult)compareRow:(NSDictionary *)left
+                             row:(NSDictionary *)right
+                      forSortKey:(NSString *)key
+{
+  if ([key isEqualToString:@"model_allowed"]) {
+    return StrappyWhitelistCompareLongLong(
+      StrappyModelWhitelistRowIsAllowed(left) ? 1LL : 0LL,
+      StrappyModelWhitelistRowIsAllowed(right) ? 1LL : 0LL);
+  }
+  if ([key isEqualToString:@"model_name"]) {
+    return StrappyWhitelistCompareStrings(
+      StrappyModelWhitelistDisplayNameForRow(left),
+      StrappyModelWhitelistDisplayNameForRow(right));
+  }
+  if ([key isEqualToString:@"model_id"]) {
+    return StrappyWhitelistCompareStrings(
+      StrappyModelWhitelistStringForRow(left, @"id"),
+      StrappyModelWhitelistStringForRow(right, @"id"));
+  }
+  if ([key isEqualToString:@"model_context"]) {
+    NSNumber *leftValue;
+    NSNumber *rightValue;
+
+    leftValue = [left objectForKey:@"context_length"];
+    rightValue = [right objectForKey:@"context_length"];
+    return StrappyWhitelistCompareLongLong(
+      [leftValue isKindOfClass:[NSNumber class]] ? [leftValue longLongValue] : 0LL,
+      [rightValue isKindOfClass:[NSNumber class]] ? [rightValue longLongValue] : 0LL);
+  }
+  if ([key isEqualToString:@"model_prompt_price"]) {
+    return StrappyWhitelistCompareDouble(
+      [StrappyModelWhitelistStringForRow(left, @"pricing_prompt") doubleValue],
+      [StrappyModelWhitelistStringForRow(right, @"pricing_prompt") doubleValue]);
+  }
+  if ([key isEqualToString:@"model_completion_price"]) {
+    return StrappyWhitelistCompareDouble(
+      [StrappyModelWhitelistStringForRow(left, @"pricing_completion") doubleValue],
+      [StrappyModelWhitelistStringForRow(right, @"pricing_completion") doubleValue]);
+  }
+  return NSOrderedSame;
 }
 
 - (NSPopUpButton *)defaultModelPopUpButton
@@ -258,34 +331,14 @@ static const CGFloat kStrappyPreferencesInset = 12.0;
   return defaultModelPopUpButton_;
 }
 
-- (NSTableView *)tableView
-{
-  return tableView_;
-}
-
 - (NSButton *)fetchButton
 {
-  return fetchButton_;
-}
-
-- (NSProgressIndicator *)progressIndicator
-{
-  return progressIndicator_;
-}
-
-- (NSTextField *)statusLabel
-{
-  return statusLabel_;
+  return [self refreshButton];
 }
 
 - (void)dealloc
 {
-  [searchField_ release];
   [defaultModelPopUpButton_ release];
-  [tableView_ release];
-  [fetchButton_ release];
-  [progressIndicator_ release];
-  [statusLabel_ release];
   [super dealloc];
 }
 

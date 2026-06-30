@@ -13,6 +13,8 @@ static const CGFloat kStrappyPreferencesHeight = 480.0;
 static const CGFloat kStrappyPreferencesInset = 12.0;
 static NSString * const kStrappyPreferencesFrameAutosaveName =
   @"StrappyPreferencesWindow";
+static NSString * const kStrappyModelSearchTextKey =
+  @"_strappy_model_search_text";
 
 static NSString *StrappyByteCountString(NSNumber *sizeNumber)
 {
@@ -108,28 +110,6 @@ static NSString *StrappyStringForModelRow(NSDictionary *row, NSString *key)
   return value;
 }
 
-static BOOL StrappyModelRowIsDefault(NSDictionary *row)
-{
-  NSNumber *selected;
-
-  selected = [row objectForKey:@"selected"];
-  return ([selected isKindOfClass:[NSNumber class]] && [selected boolValue]) ?
-    YES : NO;
-}
-
-static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
-{
-  NSNumber *allowed;
-
-  if (StrappyModelRowIsDefault(row)) {
-    return YES;
-  }
-
-  allowed = [row objectForKey:@"allowed"];
-  return ([allowed isKindOfClass:[NSNumber class]] && [allowed boolValue]) ?
-    YES : NO;
-}
-
 static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
 {
   NSString *name;
@@ -187,224 +167,106 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
   return (formatted != nil) ? formatted : @"";
 }
 
-static NSComparisonResult StrappyCompareModelStrings(NSString *left,
-                                                     NSString *right)
+static NSArray *StrappyModelSearchKeys(void)
 {
-  if (![left isKindOfClass:[NSString class]]) {
-    left = @"";
+  static NSArray *keys = nil;
+
+  if (keys == nil) {
+    keys = [[NSArray alloc] initWithObjects:
+      @"id",
+      @"canonical_slug",
+      @"hugging_face_id",
+      @"name",
+      @"description",
+      @"context_length",
+      @"created",
+      @"architecture_modality",
+      @"architecture_tokenizer",
+      @"architecture_instruct_type",
+      @"pricing_prompt",
+      @"pricing_completion",
+      @"pricing_request",
+      @"pricing_image",
+      @"pricing_audio",
+      @"pricing_web_search",
+      @"pricing_internal_reasoning",
+      @"pricing_input_cache_read",
+      @"pricing_input_cache_write",
+      @"top_provider_context_length",
+      @"top_provider_max_completion_tokens",
+      @"knowledge_cutoff",
+      @"expiration_date",
+      @"fetched_at",
+      nil];
   }
-  if (![right isKindOfClass:[NSString class]]) {
-    right = @"";
-  }
-  return [left caseInsensitiveCompare:right];
+
+  return keys;
 }
 
-static NSComparisonResult StrappyCompareModelLongLong(long long left,
-                                                      long long right)
+static void StrappyAppendModelSearchValue(NSMutableString *searchText, id value)
 {
-  if (left < right) {
-    return NSOrderedAscending;
-  }
-  if (left > right) {
-    return NSOrderedDescending;
-  }
-  return NSOrderedSame;
-}
+  NSString *stringValue;
 
-static NSComparisonResult StrappyCompareModelDouble(double left, double right)
-{
-  if (left < right) {
-    return NSOrderedAscending;
-  }
-  if (left > right) {
-    return NSOrderedDescending;
-  }
-  return NSOrderedSame;
-}
-
-static NSComparisonResult StrappyCompareModelRowsByKey(NSDictionary *left,
-                                                       NSDictionary *right,
-                                                       NSString *key)
-{
-  if ([key isEqualToString:@"model_allowed"]) {
-    return StrappyCompareModelLongLong(StrappyModelRowIsAllowed(left) ? 1LL : 0LL,
-                                       StrappyModelRowIsAllowed(right) ? 1LL : 0LL);
-  }
-  if ([key isEqualToString:@"model_name"]) {
-    return StrappyCompareModelStrings(StrappyModelDisplayNameForRow(left),
-                                      StrappyModelDisplayNameForRow(right));
-  }
-  if ([key isEqualToString:@"model_id"]) {
-    return StrappyCompareModelStrings(StrappyStringForModelRow(left, @"id"),
-                                      StrappyStringForModelRow(right, @"id"));
-  }
-  if ([key isEqualToString:@"model_context"]) {
-    NSNumber *leftValue;
-    NSNumber *rightValue;
-
-    leftValue = [left objectForKey:@"context_length"];
-    rightValue = [right objectForKey:@"context_length"];
-    return StrappyCompareModelLongLong(
-      [leftValue isKindOfClass:[NSNumber class]] ? [leftValue longLongValue] : 0LL,
-      [rightValue isKindOfClass:[NSNumber class]] ? [rightValue longLongValue] : 0LL);
-  }
-  if ([key isEqualToString:@"model_prompt_price"]) {
-    return StrappyCompareModelDouble(
-      [StrappyStringForModelRow(left, @"pricing_prompt") doubleValue],
-      [StrappyStringForModelRow(right, @"pricing_prompt") doubleValue]);
-  }
-  if ([key isEqualToString:@"model_completion_price"]) {
-    return StrappyCompareModelDouble(
-      [StrappyStringForModelRow(left, @"pricing_completion") doubleValue],
-      [StrappyStringForModelRow(right, @"pricing_completion") doubleValue]);
-  }
-  return NSOrderedSame;
-}
-
-static NSComparisonResult StrappyCompareModelRows(id leftObject,
-                                                  id rightObject,
-                                                  void *context)
-{
-  NSArray *sortDescriptors;
-  NSUInteger index;
-
-  if (![leftObject isKindOfClass:[NSDictionary class]] ||
-      ![rightObject isKindOfClass:[NSDictionary class]]) {
-    return NSOrderedSame;
-  }
-
-  sortDescriptors = (NSArray *)context;
-  for (index = 0U; index < [sortDescriptors count]; index++) {
-    NSSortDescriptor *sortDescriptor;
-    NSComparisonResult result;
-
-    sortDescriptor = [sortDescriptors objectAtIndex:index];
-    if (![sortDescriptor isKindOfClass:[NSSortDescriptor class]]) {
-      continue;
-    }
-
-    result = StrappyCompareModelRowsByKey(leftObject,
-                                          rightObject,
-                                          [sortDescriptor key]);
-    if (result != NSOrderedSame) {
-      return [sortDescriptor ascending] ? result : -result;
-    }
-  }
-
-  return StrappyCompareModelStrings(StrappyStringForModelRow(leftObject, @"id"),
-                                    StrappyStringForModelRow(rightObject, @"id"));
-}
-
-static BOOL StrappyModelSortKeyIsKnown(NSString *key)
-{
-  return ([key isEqualToString:@"model_allowed"] ||
-          [key isEqualToString:@"model_name"] ||
-          [key isEqualToString:@"model_id"] ||
-          [key isEqualToString:@"model_context"] ||
-          [key isEqualToString:@"model_prompt_price"] ||
-          [key isEqualToString:@"model_completion_price"]) ? YES : NO;
-}
-
-static NSSortDescriptor *StrappyModelSortDescriptorWithKey(NSString *key,
-                                                           BOOL ascending)
-{
-  return [[[NSSortDescriptor alloc] initWithKey:key
-                                      ascending:ascending] autorelease];
-}
-
-static NSSortDescriptor *StrappyModelSortDescriptorForKey(NSArray *descriptors,
-                                                          NSString *key)
-{
-  NSUInteger index;
-
-  for (index = 0U; index < [descriptors count]; index++) {
-    NSSortDescriptor *descriptor;
-
-    descriptor = [descriptors objectAtIndex:index];
-    if (![descriptor isKindOfClass:[NSSortDescriptor class]]) {
-      continue;
-    }
-    if ([[descriptor key] isEqualToString:key]) {
-      return descriptor;
-    }
-  }
-
-  return nil;
-}
-
-static NSSortDescriptor *StrappyPrimaryModelSortDescriptor(NSArray *descriptors)
-{
-  NSUInteger index;
-
-  for (index = 0U; index < [descriptors count]; index++) {
-    NSSortDescriptor *descriptor;
-    NSString *key;
-
-    descriptor = [descriptors objectAtIndex:index];
-    if (![descriptor isKindOfClass:[NSSortDescriptor class]]) {
-      continue;
-    }
-
-    key = [descriptor key];
-    if (StrappyModelSortKeyIsKnown(key) &&
-        ![key isEqualToString:@"model_allowed"]) {
-      return descriptor;
-    }
-  }
-
-  return nil;
-}
-
-static BOOL StrappyModelSortDescriptorListHasKey(NSArray *descriptors,
-                                                 NSString *key)
-{
-  return (StrappyModelSortDescriptorForKey(descriptors, key) != nil) ? YES : NO;
-}
-
-static void StrappyAddModelSortDescriptorIfMissing(NSMutableArray *descriptors,
-                                                   NSString *key,
-                                                   BOOL ascending)
-{
-  if (StrappyModelSortDescriptorListHasKey(descriptors, key)) {
+  if ([value isKindOfClass:[NSString class]]) {
+    stringValue = value;
+  } else if ([value isKindOfClass:[NSNumber class]]) {
+    stringValue = [value stringValue];
+  } else {
     return;
   }
 
-  [descriptors addObject:StrappyModelSortDescriptorWithKey(key, ascending)];
+  if ([stringValue length] == 0U) {
+    return;
+  }
+
+  if ([searchText length] > 0U) {
+    [searchText appendString:@" "];
+  }
+  [searchText appendString:stringValue];
 }
 
-static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
+static NSString *StrappyModelSearchTextForRow(NSDictionary *row)
 {
-  NSMutableArray *effective;
-  NSSortDescriptor *useDescriptor;
-  NSSortDescriptor *primaryDescriptor;
-  BOOL useAscending;
+  NSMutableString *searchText;
+  NSArray *keys;
+  NSUInteger index;
 
-  if (![descriptors isKindOfClass:[NSArray class]]) {
-    descriptors = [NSArray array];
+  searchText = [NSMutableString string];
+  keys = StrappyModelSearchKeys();
+  for (index = 0U; index < [keys count]; index++) {
+    StrappyAppendModelSearchValue(searchText,
+                                  [row objectForKey:[keys objectAtIndex:index]]);
   }
 
-  effective = [NSMutableArray arrayWithCapacity:4U];
-  useDescriptor = StrappyModelSortDescriptorForKey(descriptors, @"model_allowed");
-  useAscending = (useDescriptor != nil) ? [useDescriptor ascending] : NO;
-  [effective addObject:StrappyModelSortDescriptorWithKey(@"model_allowed",
-                                                         useAscending)];
+  return [searchText lowercaseString];
+}
 
-  primaryDescriptor = StrappyPrimaryModelSortDescriptor(descriptors);
-  if (primaryDescriptor != nil) {
-    [effective addObject:StrappyModelSortDescriptorWithKey(
-      [primaryDescriptor key],
-      [primaryDescriptor ascending])];
-  } else {
-    [effective addObject:StrappyModelSortDescriptorWithKey(@"model_id", YES)];
+static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
+{
+  NSMutableArray *preparedRows;
+  NSUInteger index;
+
+  if (![rows isKindOfClass:[NSArray class]]) {
+    return [NSArray array];
   }
 
-  StrappyAddModelSortDescriptorIfMissing(effective,
-                                         @"model_completion_price",
-                                         YES);
-  StrappyAddModelSortDescriptorIfMissing(effective,
-                                         @"model_prompt_price",
-                                         YES);
-  return effective;
+  preparedRows = [NSMutableArray arrayWithCapacity:[rows count]];
+  for (index = 0U; index < [rows count]; index++) {
+    NSDictionary *row;
+    NSMutableDictionary *preparedRow;
+
+    row = [rows objectAtIndex:index];
+    if (![row isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+
+    preparedRow = [NSMutableDictionary dictionaryWithDictionary:row];
+    [preparedRow setObject:StrappyModelSearchTextForRow(row)
+                    forKey:kStrappyModelSearchTextKey];
+    [preparedRows addObject:preparedRow];
+  }
+
+  return preparedRows;
 }
 
 @interface PreferencesWindowController ()
@@ -412,11 +274,16 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
 - (void)refreshAPITokenStatusWithSaved:(BOOL)saved;
 - (void)loadSystemPrompt;
 - (NSString *)currentModelSearchText;
+- (NSArray *)modelRows:(NSArray *)rows matchingSearchText:(NSString *)searchText;
+- (void)applyModelRows;
+- (void)refreshModelStatus;
 - (void)loadOpenRouterModels;
 - (void)reloadDefaultModelPopUpButton;
-- (void)sortModelRows;
+- (void)sortAllModelRows;
 - (NSString *)selectedModelTableRowIdentifier;
 - (void)selectModelTableRowWithIdentifier:(NSString *)modelIdentifier;
+- (NSArray *)selectedDatabaseTableRowPaths;
+- (void)selectDatabaseTableRowsWithPaths:(NSArray *)paths;
 - (void)modelSearchChanged:(id)sender;
 - (void)defaultModelPopUpButtonChanged:(id)sender;
 - (void)modelSearchTextDidChange:(NSNotification *)notification;
@@ -424,11 +291,20 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
 - (void)modelCatalogRefreshDidStart:(NSNotification *)notification;
 - (void)modelCatalogRefreshDidFinish:(NSNotification *)notification;
 - (void)modelCatalogDidChange:(NSNotification *)notification;
+- (NSString *)currentDatabaseSearchText;
+- (NSArray *)databaseRows:(NSArray *)rows
+  matchingSearchText:(NSString *)searchText;
+- (void)applyDatabaseRows;
 - (void)loadCatalogedDatabases;
 - (void)setScanning:(BOOL)scanning;
+- (void)databaseSearchChanged:(id)sender;
+- (void)databaseSearchTextDidChange:(NSNotification *)notification;
 - (void)scanDatabasesInBackground:(NSString *)rootPath;
 - (void)scanDatabasesDidFinish:(NSDictionary *)result;
-- (void)databaseTableViewDidPressSpace:(NSTableView *)tableView;
+- (void)refreshDatabaseStatus;
+- (void)whitelistTableViewDidPressSpace:(NSTableView *)tableView;
+- (void)toggleSelectedModelRows;
+- (void)toggleSelectedDatabaseRows;
 - (NSNumber *)allowedValueForModelRow:(NSDictionary *)row;
 - (BOOL)modelRowIsDefault:(NSDictionary *)row;
 - (BOOL)databaseRowCanBeAllowed:(NSDictionary *)row;
@@ -464,7 +340,9 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
   [window setFrameAutosaveName:kStrappyPreferencesFrameAutosaveName];
 
   if ((self = [super initWithWindow:window])) {
+    allModelRows_ = [[NSArray alloc] init];
     modelRows_ = [[NSArray alloc] init];
+    allDatabaseRows_ = [[NSArray alloc] init];
     databaseRows_ = [[NSArray alloc] init];
     [[NSNotificationCenter defaultCenter]
       addObserver:self
@@ -540,6 +418,7 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
                                                       dataSource:self
                                                         delegate:self]
       autorelease];
+  modelWhitelistView_ = [modelView retain];
   modelSearchField_ = [[modelView searchField] retain];
   defaultModelPopUpButton_ = [[modelView defaultModelPopUpButton] retain];
   modelTableView_ = [[modelView tableView] retain];
@@ -565,9 +444,17 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
                                                          dataSource:self
                                                            delegate:self]
       autorelease];
+  databaseWhitelistView_ = [databaseView retain];
+  databaseSearchField_ = [[databaseView searchField] retain];
   databaseTableView_ = [[databaseView tableView] retain];
   scanButton_ = [[databaseView scanButton] retain];
   scanProgressIndicator_ = [[databaseView progressIndicator] retain];
+  databaseStatusLabel_ = [[databaseView statusLabel] retain];
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(databaseSearchTextDidChange:)
+           name:NSControlTextDidChangeNotification
+         object:databaseSearchField_];
 
   databaseItem =
     [[[NSTabViewItem alloc] initWithIdentifier:@"database_whitelist"] autorelease];
@@ -644,56 +531,115 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
   return searchText;
 }
 
-- (void)loadOpenRouterModels
+- (NSArray *)modelRows:(NSArray *)rows matchingSearchText:(NSString *)searchText
+{
+  NSMutableArray *matchingRows;
+  NSString *needle;
+  NSUInteger index;
+
+  if (![rows isKindOfClass:[NSArray class]]) {
+    return [NSArray array];
+  }
+  if ([searchText length] == 0U) {
+    return rows;
+  }
+
+  needle = [searchText lowercaseString];
+  matchingRows = [NSMutableArray arrayWithCapacity:[rows count]];
+  for (index = 0U; index < [rows count]; index++) {
+    NSDictionary *row;
+    NSString *rowSearchText;
+
+    row = [rows objectAtIndex:index];
+    if (![row isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+
+    rowSearchText = [row objectForKey:kStrappyModelSearchTextKey];
+    if (![rowSearchText isKindOfClass:[NSString class]]) {
+      rowSearchText = StrappyModelSearchTextForRow(row);
+    }
+
+    if ([rowSearchText rangeOfString:needle].location != NSNotFound) {
+      [matchingRows addObject:row];
+    }
+  }
+
+  return matchingRows;
+}
+
+- (void)applyModelRows
 {
   NSArray *rows;
   NSString *selectedModelIdentifier;
+
+  selectedModelIdentifier = [[self selectedModelTableRowIdentifier] retain];
+  rows = [self modelRows:allModelRows_
+      matchingSearchText:[self currentModelSearchText]];
+  [modelRows_ release];
+  modelRows_ = [rows copy];
+  [modelTableView_ reloadData];
+  [self selectModelTableRowWithIdentifier:selectedModelIdentifier];
+  [selectedModelIdentifier release];
+  [self refreshModelStatus];
+}
+
+- (void)refreshModelStatus
+{
+  NSUInteger count;
   NSString *searchText;
 
-  searchText = [self currentModelSearchText];
-  selectedModelIdentifier = [[self selectedModelTableRowIdentifier] retain];
-  rows = [StrappySession openRouterModelCatalogMatchingSearchText:searchText
-                                                            error:nil];
-  if (rows != nil) {
-    [modelRows_ release];
-    modelRows_ = [rows copy];
-    [self sortModelRows];
-    [modelTableView_ reloadData];
-    [self selectModelTableRowWithIdentifier:selectedModelIdentifier];
-    [selectedModelIdentifier release];
-    [self reloadDefaultModelPopUpButton];
-    if (!refreshingModels_) {
-      if ([modelRows_ count] == 0U) {
-        if ([searchText length] > 0U) {
-          [modelStatusLabel_ setStringValue:
-            NSLocalizedString(@"No matching models.", nil)];
-        } else {
-          [modelStatusLabel_ setStringValue:
-            NSLocalizedString(@"No models have been fetched yet.", nil)];
-        }
-      } else {
-        if ([searchText length] > 0U) {
-          [modelStatusLabel_ setStringValue:
-            [NSString stringWithFormat:NSLocalizedString(@"%lu models shown.", nil),
-              (unsigned long)[modelRows_ count]]];
-        } else {
-          [modelStatusLabel_ setStringValue:
-            [NSString stringWithFormat:NSLocalizedString(@"%lu models available.", nil),
-              (unsigned long)[modelRows_ count]]];
-        }
-      }
-    }
+  if ((modelStatusLabel_ == nil) || refreshingModels_) {
     return;
   }
 
-  [selectedModelIdentifier release];
+  count = [modelRows_ count];
+  searchText = [self currentModelSearchText];
+  if ([searchText length] > 0U) {
+    if (count == 0U) {
+      [modelStatusLabel_ setStringValue:
+        NSLocalizedString(@"No matching models.", nil)];
+    } else if (count == 1U) {
+      [modelStatusLabel_ setStringValue:
+        NSLocalizedString(@"1 model shown.", nil)];
+    } else {
+      [modelStatusLabel_ setStringValue:
+        [NSString stringWithFormat:NSLocalizedString(@"%lu models shown.", nil),
+          (unsigned long)count]];
+    }
+  } else if (count == 0U) {
+    [modelStatusLabel_ setStringValue:
+      NSLocalizedString(@"No models have been fetched yet.", nil)];
+  } else if (count == 1U) {
+    [modelStatusLabel_ setStringValue:
+      NSLocalizedString(@"1 model available.", nil)];
+  } else {
+    [modelStatusLabel_ setStringValue:
+      [NSString stringWithFormat:NSLocalizedString(@"%lu models available.", nil),
+        (unsigned long)count]];
+  }
+}
+
+- (void)loadOpenRouterModels
+{
+  NSArray *rows;
+
+  rows = [StrappySession openRouterModelCatalogWithError:nil];
+  if (rows != nil) {
+    [allModelRows_ release];
+    allModelRows_ = [StrappyPreparedModelRowsForRows(rows) copy];
+    [self sortAllModelRows];
+    [self applyModelRows];
+    [self reloadDefaultModelPopUpButton];
+    return;
+  }
+
   [modelStatusLabel_ setStringValue:
     NSLocalizedString(@"Model list could not be loaded.", nil)];
 }
 
 - (void)reloadDefaultModelPopUpButton
 {
-  NSArray *allowedModels;
   NSString *defaultModelIdentifier;
   NSInteger selectedIndex;
   NSUInteger index;
@@ -702,26 +648,20 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
     return;
   }
 
-  allowedModels = [StrappySession allowedOpenRouterModelCatalogWithError:nil];
-  if (![allowedModels isKindOfClass:[NSArray class]]) {
-    allowedModels = [NSArray array];
-  }
-  defaultModelIdentifier =
-    [StrappySession defaultOpenRouterModelIdentifierWithError:nil];
-  if (![defaultModelIdentifier isKindOfClass:[NSString class]]) {
-    defaultModelIdentifier = @"";
-  }
-
   [defaultModelPopUpButton_ removeAllItems];
+  defaultModelIdentifier = @"";
   selectedIndex = -1;
-  for (index = 0U; index < [allowedModels count]; index++) {
+  for (index = 0U; index < [allModelRows_ count]; index++) {
     NSDictionary *model;
     NSString *modelIdentifier;
     NSString *title;
     NSMenuItem *item;
 
-    model = [allowedModels objectAtIndex:index];
+    model = [allModelRows_ objectAtIndex:index];
     if (![model isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    if (![[self allowedValueForModelRow:model] boolValue]) {
       continue;
     }
 
@@ -736,7 +676,8 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
     item = [defaultModelPopUpButton_ itemAtIndex:
       ([defaultModelPopUpButton_ numberOfItems] - 1)];
     [item setRepresentedObject:modelIdentifier];
-    if ([modelIdentifier isEqualToString:defaultModelIdentifier]) {
+    if ([self modelRowIsDefault:model]) {
+      defaultModelIdentifier = modelIdentifier;
       selectedIndex = [defaultModelPopUpButton_ numberOfItems] - 1;
     }
   }
@@ -746,6 +687,14 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
     [[defaultModelPopUpButton_ itemAtIndex:0] setEnabled:NO];
     [defaultModelPopUpButton_ setEnabled:NO];
     return;
+  }
+
+  if (selectedIndex < 0) {
+    defaultModelIdentifier =
+      [StrappySession defaultOpenRouterModelIdentifierWithError:nil];
+    if (![defaultModelIdentifier isKindOfClass:[NSString class]]) {
+      defaultModelIdentifier = @"";
+    }
   }
 
   if ((selectedIndex < 0) && ([defaultModelIdentifier length] > 0U)) {
@@ -763,21 +712,17 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
   [defaultModelPopUpButton_ setEnabled:YES];
 }
 
-- (void)sortModelRows
+- (void)sortAllModelRows
 {
-  NSArray *effectiveSortDescriptors;
   NSArray *sortedRows;
 
-  if ((modelTableView_ == nil) || (modelRows_ == nil)) {
+  if ((modelWhitelistView_ == nil) || (allModelRows_ == nil)) {
     return;
   }
 
-  effectiveSortDescriptors =
-    StrappyEffectiveModelSortDescriptors([modelTableView_ sortDescriptors]);
-  sortedRows = [modelRows_ sortedArrayUsingFunction:StrappyCompareModelRows
-                                            context:effectiveSortDescriptors];
-  [modelRows_ release];
-  modelRows_ = [sortedRows copy];
+  sortedRows = [modelWhitelistView_ sortedRows:allModelRows_];
+  [allModelRows_ release];
+  allModelRows_ = [sortedRows copy];
 }
 
 - (NSString *)selectedModelTableRowIdentifier
@@ -827,10 +772,77 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
   [modelTableView_ deselectAll:self];
 }
 
+- (NSArray *)selectedDatabaseTableRowPaths
+{
+  NSMutableArray *paths;
+  NSIndexSet *selectedRows;
+  NSUInteger rowIndex;
+
+  paths = [NSMutableArray array];
+  if (databaseTableView_ == nil) {
+    return paths;
+  }
+
+  selectedRows = [databaseTableView_ selectedRowIndexes];
+  for (rowIndex = [selectedRows firstIndex];
+       rowIndex != NSNotFound;
+       rowIndex = [selectedRows indexGreaterThanIndex:rowIndex]) {
+    NSString *path;
+
+    if (rowIndex >= [databaseRows_ count]) {
+      continue;
+    }
+
+    path = StrappyDatabasePathForRow([databaseRows_ objectAtIndex:rowIndex]);
+    if ([path length] > 0U) {
+      [paths addObject:path];
+    }
+  }
+
+  return paths;
+}
+
+- (void)selectDatabaseTableRowsWithPaths:(NSArray *)paths
+{
+  NSMutableIndexSet *indexes;
+  NSUInteger index;
+
+  if (databaseTableView_ == nil) {
+    return;
+  }
+
+  if (![paths isKindOfClass:[NSArray class]] || ([paths count] == 0U)) {
+    [databaseTableView_ deselectAll:self];
+    return;
+  }
+
+  indexes = [NSMutableIndexSet indexSet];
+  for (index = 0U; index < [databaseRows_ count]; index++) {
+    NSString *path;
+
+    path = StrappyDatabasePathForRow([databaseRows_ objectAtIndex:index]);
+    if ([paths containsObject:path]) {
+      [indexes addIndex:index];
+    }
+  }
+
+  if ([indexes count] == 0U) {
+    [databaseTableView_ deselectAll:self];
+    return;
+  }
+  [databaseTableView_ selectRowIndexes:indexes byExtendingSelection:NO];
+}
+
 - (void)modelSearchChanged:(id)sender
 {
   (void)sender;
-  [self loadOpenRouterModels];
+  [self applyModelRows];
+}
+
+- (void)databaseSearchChanged:(id)sender
+{
+  (void)sender;
+  [self applyDatabaseRows];
 }
 
 - (void)defaultModelPopUpButtonChanged:(id)sender
@@ -863,7 +875,14 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
 - (void)modelSearchTextDidChange:(NSNotification *)notification
 {
   if ([notification object] == modelSearchField_) {
-    [self loadOpenRouterModels];
+    [self applyModelRows];
+  }
+}
+
+- (void)databaseSearchTextDidChange:(NSNotification *)notification
+{
+  if ([notification object] == databaseSearchField_) {
+    [self applyDatabaseRows];
   }
 }
 
@@ -944,15 +963,84 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
   [self loadOpenRouterModels];
 }
 
+- (NSString *)currentDatabaseSearchText
+{
+  NSString *searchText;
+
+  if (databaseSearchField_ == nil) {
+    return nil;
+  }
+
+  searchText = [[databaseSearchField_ stringValue]
+    stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([searchText length] == 0U) {
+    return nil;
+  }
+  return searchText;
+}
+
+- (NSArray *)databaseRows:(NSArray *)rows matchingSearchText:(NSString *)searchText
+{
+  NSMutableArray *matchingRows;
+  NSUInteger index;
+
+  if (![rows isKindOfClass:[NSArray class]]) {
+    return [NSArray array];
+  }
+  if ([searchText length] == 0U) {
+    return rows;
+  }
+
+  matchingRows = [NSMutableArray arrayWithCapacity:[rows count]];
+  for (index = 0U; index < [rows count]; index++) {
+    NSDictionary *row;
+    NSString *name;
+    NSString *location;
+    NSString *path;
+
+    row = [rows objectAtIndex:index];
+    if (![row isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+
+    name = StrappyDatabaseNameForRow(row);
+    location = StrappyDatabaseLocationForRow(row);
+    path = StrappyDatabasePathForRow(row);
+    if (([name rangeOfString:searchText
+                     options:NSCaseInsensitiveSearch].location != NSNotFound) ||
+        ([location rangeOfString:searchText
+                         options:NSCaseInsensitiveSearch].location != NSNotFound) ||
+        ([path rangeOfString:searchText
+                     options:NSCaseInsensitiveSearch].location != NSNotFound)) {
+      [matchingRows addObject:row];
+    }
+  }
+
+  return matchingRows;
+}
+
+- (void)applyDatabaseRows
+{
+  NSArray *rows;
+
+  rows = [self databaseRows:allDatabaseRows_
+        matchingSearchText:[self currentDatabaseSearchText]];
+  rows = [databaseWhitelistView_ sortedRows:rows];
+  [databaseRows_ release];
+  databaseRows_ = [rows copy];
+  [databaseTableView_ reloadData];
+  [self refreshDatabaseStatus];
+}
+
 - (void)loadCatalogedDatabases
 {
   NSArray *rows;
 
   rows = [[FileScanner sharedScanner] catalogedSQLiteDatabasesWithError:nil];
   if (rows != nil) {
-    [databaseRows_ release];
-    databaseRows_ = [rows copy];
-    [databaseTableView_ reloadData];
+    [allDatabaseRows_ release];
+    allDatabaseRows_ = [rows copy];
+    [self applyDatabaseRows];
     return;
   }
 
@@ -967,6 +1055,49 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
     [scanProgressIndicator_ startAnimation:self];
   } else {
     [scanProgressIndicator_ stopAnimation:self];
+  }
+  [self refreshDatabaseStatus];
+}
+
+- (void)refreshDatabaseStatus
+{
+  NSUInteger count;
+  NSString *searchText;
+
+  if (databaseStatusLabel_ == nil) {
+    return;
+  }
+
+  if (scanning_) {
+    [databaseStatusLabel_ setStringValue:
+      NSLocalizedString(@"Scanning databases...", nil)];
+    return;
+  }
+
+  count = [databaseRows_ count];
+  searchText = [self currentDatabaseSearchText];
+  if ([searchText length] > 0U) {
+    if (count == 1U) {
+      [databaseStatusLabel_ setStringValue:
+        NSLocalizedString(@"1 database shown.", nil)];
+    } else if (count == 0U) {
+      [databaseStatusLabel_ setStringValue:
+        NSLocalizedString(@"No matching databases.", nil)];
+    } else {
+      [databaseStatusLabel_ setStringValue:
+        [NSString stringWithFormat:NSLocalizedString(@"%lu databases shown.", nil),
+          (unsigned long)count]];
+    }
+  } else if (count == 1U) {
+    [databaseStatusLabel_ setStringValue:
+      NSLocalizedString(@"1 database available.", nil)];
+  } else if (count == 0U) {
+    [databaseStatusLabel_ setStringValue:
+      NSLocalizedString(@"No databases available.", nil)];
+  } else {
+    [databaseStatusLabel_ setStringValue:
+      [NSString stringWithFormat:NSLocalizedString(@"%lu databases available.", nil),
+        (unsigned long)count]];
   }
 }
 
@@ -1051,9 +1182,9 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
 
   rows = [result objectForKey:@"rows"];
   if ([rows isKindOfClass:[NSArray class]]) {
-    [databaseRows_ release];
-    databaseRows_ = [rows copy];
-    [databaseTableView_ reloadData];
+    [allDatabaseRows_ release];
+    allDatabaseRows_ = [rows copy];
+    [self applyDatabaseRows];
   } else {
     NSBeep();
   }
@@ -1061,7 +1192,83 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
   [self setScanning:NO];
 }
 
-- (void)databaseTableViewDidPressSpace:(NSTableView *)tableView
+- (void)whitelistTableViewDidPressSpace:(NSTableView *)tableView
+{
+  if (tableView == modelTableView_) {
+    [self toggleSelectedModelRows];
+  } else if (tableView == databaseTableView_) {
+    [self toggleSelectedDatabaseRows];
+  }
+}
+
+- (void)toggleSelectedModelRows
+{
+  NSIndexSet *selectedRows;
+  NSUInteger rowIndex;
+  NSDictionary *model;
+  BOOL shouldAllow;
+  NSUInteger eligibleCount;
+
+  selectedRows = [modelTableView_ selectedRowIndexes];
+  if ([selectedRows count] == 0U) {
+    return;
+  }
+
+  shouldAllow = NO;
+  eligibleCount = 0U;
+  for (rowIndex = [selectedRows firstIndex];
+       rowIndex != NSNotFound;
+       rowIndex = [selectedRows indexGreaterThanIndex:rowIndex]) {
+    if (rowIndex >= [modelRows_ count]) {
+      continue;
+    }
+
+    model = [modelRows_ objectAtIndex:rowIndex];
+    if ([self modelRowIsDefault:model]) {
+      continue;
+    }
+
+    eligibleCount++;
+    if (![[self allowedValueForModelRow:model] boolValue]) {
+      shouldAllow = YES;
+    }
+  }
+
+  if (eligibleCount == 0U) {
+    NSBeep();
+    return;
+  }
+
+  for (rowIndex = [selectedRows firstIndex];
+       rowIndex != NSNotFound;
+       rowIndex = [selectedRows indexGreaterThanIndex:rowIndex]) {
+    NSString *modelId;
+
+    if (rowIndex >= [modelRows_ count]) {
+      continue;
+    }
+
+    model = [modelRows_ objectAtIndex:rowIndex];
+    if ([self modelRowIsDefault:model] ||
+        ([[self allowedValueForModelRow:model] boolValue] == shouldAllow)) {
+      continue;
+    }
+
+    modelId = StrappyStringForModelRow(model, @"id");
+    if (([modelId length] == 0U) ||
+        ![StrappySession setOpenRouterModelAllowed:shouldAllow
+                                forModelIdentifier:modelId
+                                             error:nil]) {
+      NSBeep();
+      [modelTableView_ reloadData];
+      return;
+    }
+  }
+
+  [self loadOpenRouterModels];
+}
+
+- (void)toggleSelectedDatabaseRows
 {
   NSIndexSet *selectedRows;
   NSUInteger rowIndex;
@@ -1070,7 +1277,6 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
   BOOL shouldAllow;
   NSUInteger eligibleCount;
 
-  (void)tableView;
   selectedRows = [databaseTableView_ selectedRowIndexes];
   if ([selectedRows count] == 0U) {
     return;
@@ -1140,17 +1346,21 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
 - (void)tableView:(NSTableView *)tableView
   sortDescriptorsDidChange:(NSArray *)oldDescriptors
 {
-  NSString *selectedModelIdentifier;
+  NSArray *selectedDatabasePaths;
 
   (void)oldDescriptors;
-  if (tableView != modelTableView_) {
+  if (tableView == modelTableView_) {
+    [self sortAllModelRows];
+    [self applyModelRows];
     return;
   }
 
-  selectedModelIdentifier = [self selectedModelTableRowIdentifier];
-  [self sortModelRows];
-  [modelTableView_ reloadData];
-  [self selectModelTableRowWithIdentifier:selectedModelIdentifier];
+  if (tableView == databaseTableView_) {
+    selectedDatabasePaths = [[self selectedDatabaseTableRowPaths] retain];
+    [self applyDatabaseRows];
+    [self selectDatabaseTableRowsWithPaths:selectedDatabasePaths];
+    [selectedDatabasePaths release];
+  }
 }
 
 - (id)tableView:(NSTableView *)tableView
@@ -1471,14 +1681,20 @@ static NSArray *StrappyEffectiveModelSortDescriptors(NSArray *descriptors)
   [modelSearchField_ release];
   [defaultModelPopUpButton_ release];
   [modelTableView_ release];
+  [modelWhitelistView_ release];
   [fetchModelsButton_ release];
   [modelProgressIndicator_ release];
   [modelStatusLabel_ release];
   [systemPromptTextView_ release];
+  [databaseSearchField_ release];
   [databaseTableView_ release];
+  [databaseWhitelistView_ release];
   [scanButton_ release];
   [scanProgressIndicator_ release];
+  [databaseStatusLabel_ release];
+  [allModelRows_ release];
   [modelRows_ release];
+  [allDatabaseRows_ release];
   [databaseRows_ release];
   [super dealloc];
 }
