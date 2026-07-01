@@ -1,5 +1,6 @@
 #import "PreferencesWindowController.h"
 
+#import "AIFontAwesome.h"
 #import "FileScanner.h"
 #import "StrappySession.h"
 #import "StrappyPreferencesAuthenticationView.h"
@@ -11,8 +12,20 @@
 static const CGFloat kStrappyPreferencesWidth = 720.0;
 static const CGFloat kStrappyPreferencesHeight = 480.0;
 static const CGFloat kStrappyPreferencesInset = 12.0;
+static const CGFloat kStrappyPreferencesToolbarIconPoint = 24.0;
+static const CGFloat kStrappyPreferencesToolbarIconCanvas = 32.0;
 static NSString * const kStrappyPreferencesFrameAutosaveName =
   @"StrappyPreferencesWindow";
+static NSString * const kStrappyPreferencesToolbarIdentifier =
+  @"StrappyPreferencesToolbar";
+static NSString * const kStrappyPreferencesToolbarAuthentication =
+  @"StrappyPreferencesToolbar.Authentication";
+static NSString * const kStrappyPreferencesToolbarModels =
+  @"StrappyPreferencesToolbar.Models";
+static NSString * const kStrappyPreferencesToolbarDatabases =
+  @"StrappyPreferencesToolbar.Databases";
+static NSString * const kStrappyPreferencesToolbarPrompts =
+  @"StrappyPreferencesToolbar.Prompts";
 static NSString * const kStrappyModelSearchTextKey =
   @"_strappy_model_search_text";
 
@@ -271,6 +284,13 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 @interface PreferencesWindowController ()
 - (void)buildContentView;
+- (void)setupToolbar;
+- (NSArray *)toolbarPaneIdentifiers;
+- (void)switchPreferencePane:(id)sender;
+- (void)selectPreferencePaneWithIdentifier:(NSString *)identifier;
+- (NSToolbarItem *)makeToolbarItemWithIdentifier:(NSString *)identifier
+                                            icon:(AIFontAwesomeIcon)icon
+                                           label:(NSString *)label;
 - (void)refreshAPITokenStatusWithSaved:(BOOL)saved;
 - (void)loadSystemPrompt;
 - (NSString *)currentModelSearchText;
@@ -332,6 +352,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
                     defer:NO];
   [window setTitle:NSLocalizedString(@"Preferences", nil)];
   [window setReleasedWhenClosed:NO];
+  [window setShowsToolbarButton:NO];
   if (![window setFrameUsingName:kStrappyPreferencesFrameAutosaveName]) {
     [window setContentSize:NSMakeSize(kStrappyPreferencesWidth,
                                       kStrappyPreferencesHeight)];
@@ -344,6 +365,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     modelRows_ = [[NSArray alloc] init];
     allDatabaseRows_ = [[NSArray alloc] init];
     databaseRows_ = [[NSArray alloc] init];
+    [self setupToolbar];
     [[NSNotificationCenter defaultCenter]
       addObserver:self
          selector:@selector(modelCatalogRefreshDidStart:)
@@ -374,57 +396,39 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)buildContentView
 {
   NSView *contentView;
-  NSTabViewItem *authenticationItem;
-  NSTabViewItem *modelItem;
-  NSTabViewItem *systemPromptItem;
-  NSTabViewItem *databaseItem;
-  StrappyPreferencesAuthenticationView *authenticationView;
-  StrappyPreferencesModelWhitelistView *modelView;
-  StrappyPreferencesDatabaseWhitelistView *databaseView;
-  StrappyPreferencesSystemPromptsView *systemPromptsView;
   NSRect bounds;
   NSRect paneFrame;
 
   contentView = [[self window] contentView];
   bounds = [contentView bounds];
-  tabView_ = [[NSTabView alloc] initWithFrame:NSInsetRect(bounds,
-                                                          kStrappyPreferencesInset,
-                                                          kStrappyPreferencesInset)];
-  [tabView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+  contentPaneView_ =
+    [[NSView alloc] initWithFrame:NSInsetRect(bounds,
+                                              kStrappyPreferencesInset,
+                                              kStrappyPreferencesInset)];
+  [contentPaneView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
 
-  paneFrame = NSMakeRect(0.0,
-                         0.0,
-                         bounds.size.width - 48.0,
-                         bounds.size.height - 72.0);
+  paneFrame = [contentPaneView_ bounds];
 
-  authenticationView =
-    [[[StrappyPreferencesAuthenticationView alloc] initWithFrame:paneFrame
-                                                          target:self]
-      autorelease];
-  apiEndpointField_ = [[authenticationView apiEndpointField] retain];
-  apiTokenField_ = [[authenticationView apiTokenField] retain];
-  apiTokenStatusLabel_ = [[authenticationView statusLabel] retain];
+  authenticationPaneView_ =
+    [[StrappyPreferencesAuthenticationView alloc] initWithFrame:paneFrame
+                                                         target:self];
+  apiEndpointField_ = [[authenticationPaneView_ apiEndpointField] retain];
+  apiTokenField_ = [[authenticationPaneView_ apiTokenField] retain];
+  apiTokenStatusLabel_ = [[authenticationPaneView_ statusLabel] retain];
   [self refreshAPITokenStatusWithSaved:NO];
 
-  authenticationItem =
-    [[[NSTabViewItem alloc] initWithIdentifier:@"authentication"] autorelease];
-  [authenticationItem setLabel:NSLocalizedString(@"Authentication", nil)];
-  [authenticationItem setView:authenticationView];
-  [tabView_ addTabViewItem:authenticationItem];
-
-  modelView =
-    [[[StrappyPreferencesModelWhitelistView alloc] initWithFrame:paneFrame
-                                                          target:self
-                                                      dataSource:self
-                                                        delegate:self]
-      autorelease];
-  modelWhitelistView_ = [modelView retain];
-  modelSearchField_ = [[modelView searchField] retain];
-  defaultModelPopUpButton_ = [[modelView defaultModelPopUpButton] retain];
-  modelTableView_ = [[modelView tableView] retain];
-  fetchModelsButton_ = [[modelView fetchButton] retain];
-  modelProgressIndicator_ = [[modelView progressIndicator] retain];
-  modelStatusLabel_ = [[modelView statusLabel] retain];
+  modelWhitelistView_ =
+    [[StrappyPreferencesModelWhitelistView alloc] initWithFrame:paneFrame
+                                                         target:self
+                                                     dataSource:self
+                                                       delegate:self];
+  modelSearchField_ = [[modelWhitelistView_ searchField] retain];
+  defaultModelPopUpButton_ =
+    [[modelWhitelistView_ defaultModelPopUpButton] retain];
+  modelTableView_ = [[modelWhitelistView_ tableView] retain];
+  fetchModelsButton_ = [[modelWhitelistView_ fetchButton] retain];
+  modelProgressIndicator_ = [[modelWhitelistView_ progressIndicator] retain];
+  modelStatusLabel_ = [[modelWhitelistView_ statusLabel] retain];
   [self reloadDefaultModelPopUpButton];
   [[NSNotificationCenter defaultCenter]
     addObserver:self
@@ -432,49 +436,183 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
            name:NSControlTextDidChangeNotification
          object:modelSearchField_];
 
-  modelItem =
-    [[[NSTabViewItem alloc] initWithIdentifier:@"model_whitelist"] autorelease];
-  [modelItem setLabel:NSLocalizedString(@"Model Whitelist", nil)];
-  [modelItem setView:modelView];
-  [tabView_ addTabViewItem:modelItem];
-
-  databaseView =
-    [[[StrappyPreferencesDatabaseWhitelistView alloc] initWithFrame:paneFrame
-                                                             target:self
-                                                         dataSource:self
-                                                           delegate:self]
-      autorelease];
-  databaseWhitelistView_ = [databaseView retain];
-  databaseSearchField_ = [[databaseView searchField] retain];
-  databaseTableView_ = [[databaseView tableView] retain];
-  scanButton_ = [[databaseView scanButton] retain];
-  scanProgressIndicator_ = [[databaseView progressIndicator] retain];
-  databaseStatusLabel_ = [[databaseView statusLabel] retain];
+  databaseWhitelistView_ =
+    [[StrappyPreferencesDatabaseWhitelistView alloc] initWithFrame:paneFrame
+                                                            target:self
+                                                        dataSource:self
+                                                          delegate:self];
+  databaseSearchField_ = [[databaseWhitelistView_ searchField] retain];
+  databaseTableView_ = [[databaseWhitelistView_ tableView] retain];
+  scanButton_ = [[databaseWhitelistView_ scanButton] retain];
+  scanProgressIndicator_ = [[databaseWhitelistView_ progressIndicator] retain];
+  databaseStatusLabel_ = [[databaseWhitelistView_ statusLabel] retain];
   [[NSNotificationCenter defaultCenter]
     addObserver:self
        selector:@selector(databaseSearchTextDidChange:)
            name:NSControlTextDidChangeNotification
          object:databaseSearchField_];
 
-  databaseItem =
-    [[[NSTabViewItem alloc] initWithIdentifier:@"database_whitelist"] autorelease];
-  [databaseItem setLabel:NSLocalizedString(@"Database Whitelist", nil)];
-  [databaseItem setView:databaseView];
-  [tabView_ addTabViewItem:databaseItem];
+  systemPromptsPaneView_ =
+    [[StrappyPreferencesSystemPromptsView alloc] initWithFrame:paneFrame];
+  systemPromptTextView_ = [[systemPromptsPaneView_ textView] retain];
 
-  systemPromptsView =
-    [[[StrappyPreferencesSystemPromptsView alloc] initWithFrame:paneFrame]
-      autorelease];
-  systemPromptTextView_ = [[systemPromptsView textView] retain];
-
-  systemPromptItem =
-    [[[NSTabViewItem alloc] initWithIdentifier:@"system_prompts"] autorelease];
-  [systemPromptItem setLabel:NSLocalizedString(@"System Prompts", nil)];
-  [systemPromptItem setView:systemPromptsView];
-  [tabView_ addTabViewItem:systemPromptItem];
-
-  [contentView addSubview:tabView_];
+  [contentView addSubview:contentPaneView_];
+  [self selectPreferencePaneWithIdentifier:kStrappyPreferencesToolbarAuthentication];
 }
+
+- (void)setupToolbar
+{
+  NSToolbar *toolbar;
+
+  toolbar =
+    [[[NSToolbar alloc] initWithIdentifier:kStrappyPreferencesToolbarIdentifier]
+      autorelease];
+  [toolbar setDelegate:self];
+  [toolbar setAllowsUserCustomization:NO];
+  [toolbar setAutosavesConfiguration:NO];
+  [toolbar setDisplayMode:NSToolbarDisplayModeIconAndLabel];
+  [toolbar setSizeMode:NSToolbarSizeModeDefault];
+  [toolbar setSelectedItemIdentifier:kStrappyPreferencesToolbarAuthentication];
+  [[self window] setToolbar:toolbar];
+  [[self window] XP_setToolbarPreferenceStyle];
+}
+
+- (NSArray *)toolbarPaneIdentifiers
+{
+  return [NSArray arrayWithObjects:
+    kStrappyPreferencesToolbarAuthentication,
+    kStrappyPreferencesToolbarModels,
+    kStrappyPreferencesToolbarDatabases,
+    kStrappyPreferencesToolbarPrompts,
+    nil];
+}
+
+- (void)switchPreferencePane:(id)sender
+{
+  NSString *identifier;
+
+  if (![sender isKindOfClass:[NSToolbarItem class]]) {
+    return;
+  }
+
+  identifier = [(NSToolbarItem *)sender itemIdentifier];
+  if ([identifier length] == 0U) {
+    return;
+  }
+
+  [self selectPreferencePaneWithIdentifier:identifier];
+}
+
+- (void)selectPreferencePaneWithIdentifier:(NSString *)identifier
+{
+  NSView *paneView;
+  NSArray *subviews;
+  NSUInteger index;
+
+  if (contentPaneView_ == nil) {
+    return;
+  }
+
+  paneView = nil;
+  if ([identifier isEqualToString:kStrappyPreferencesToolbarAuthentication]) {
+    paneView = authenticationPaneView_;
+  } else if ([identifier isEqualToString:kStrappyPreferencesToolbarModels]) {
+    paneView = modelWhitelistView_;
+  } else if ([identifier isEqualToString:kStrappyPreferencesToolbarDatabases]) {
+    paneView = databaseWhitelistView_;
+  } else if ([identifier isEqualToString:kStrappyPreferencesToolbarPrompts]) {
+    paneView = systemPromptsPaneView_;
+  }
+  if (paneView == nil) {
+    return;
+  }
+
+  subviews = [[contentPaneView_ subviews] copy];
+  for (index = 0U; index < [subviews count]; index++) {
+    [[subviews objectAtIndex:index] removeFromSuperview];
+  }
+  [subviews release];
+
+  [paneView setFrame:[contentPaneView_ bounds]];
+  [paneView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+  [contentPaneView_ addSubview:paneView];
+  [[[self window] toolbar] setSelectedItemIdentifier:identifier];
+}
+
+#pragma mark - NSToolbar Delegate
+
+- (NSArray *)toolbarAllowedItemIdentifiers:(NSToolbar *)toolbar
+{
+  (void)toolbar;
+  return [self toolbarPaneIdentifiers];
+}
+
+- (NSArray *)toolbarDefaultItemIdentifiers:(NSToolbar *)toolbar
+{
+  (void)toolbar;
+  return [self toolbarPaneIdentifiers];
+}
+
+- (NSArray *)toolbarSelectableItemIdentifiers:(NSToolbar *)toolbar
+{
+  (void)toolbar;
+  return [self toolbarPaneIdentifiers];
+}
+
+- (NSToolbarItem *)toolbar:(NSToolbar *)toolbar
+     itemForItemIdentifier:(NSString *)identifier
+ willBeInsertedIntoToolbar:(BOOL)flag
+{
+  (void)toolbar;
+  (void)flag;
+
+  if ([identifier isEqualToString:kStrappyPreferencesToolbarAuthentication]) {
+    return [self makeToolbarItemWithIdentifier:identifier
+                                          icon:AIFAKey
+                                         label:NSLocalizedString(@"Authentication", nil)];
+  }
+  if ([identifier isEqualToString:kStrappyPreferencesToolbarModels]) {
+    return [self makeToolbarItemWithIdentifier:identifier
+                                          icon:AIFAMicrochip
+                                         label:NSLocalizedString(@"Models", nil)];
+  }
+  if ([identifier isEqualToString:kStrappyPreferencesToolbarDatabases]) {
+    return [self makeToolbarItemWithIdentifier:identifier
+                                          icon:AIFADatabase
+                                         label:NSLocalizedString(@"Databases", nil)];
+  }
+  if ([identifier isEqualToString:kStrappyPreferencesToolbarPrompts]) {
+    return [self makeToolbarItemWithIdentifier:identifier
+                                          icon:AIFAScroll
+                                         label:NSLocalizedString(@"Prompts", nil)];
+  }
+  return nil;
+}
+
+- (NSToolbarItem *)makeToolbarItemWithIdentifier:(NSString *)identifier
+                                            icon:(AIFontAwesomeIcon)icon
+                                           label:(NSString *)label
+{
+  NSToolbarItem *item;
+
+  if ((identifier == nil) || (label == nil)) {
+    return nil;
+  }
+
+  item = [[[NSToolbarItem alloc] initWithItemIdentifier:identifier] autorelease];
+  [item setLabel:label];
+  [item setPaletteLabel:label];
+  [item setImage:[AIFontAwesome imageForIcon:icon
+                                       style:AIFontAwesomeStyleSolid
+                                    iconSize:kStrappyPreferencesToolbarIconPoint
+                                  canvasSize:kStrappyPreferencesToolbarIconCanvas
+                                       scale:[[self window] XP_backingScaleFactor]]];
+  [item setTarget:self];
+  [item setAction:@selector(switchPreferencePane:)];
+  return item;
+}
+
+#pragma mark - Authentication
 
 - (void)refreshAPITokenStatusWithSaved:(BOOL)saved
 {
@@ -953,7 +1091,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
       [count isKindOfClass:[NSNumber class]]) {
     [modelStatusLabel_ setStringValue:
       [NSString stringWithFormat:NSLocalizedString(@"%lu models available.", nil),
-        (unsigned long)[count unsignedIntegerValue]]];
+        (unsigned long)[count XP_unsignedIntegerValue]]];
   }
 }
 
@@ -1673,8 +1811,13 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)dealloc
 {
+  NSToolbar *toolbar;
+
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [tabView_ release];
+  toolbar = [[self window] toolbar];
+  [toolbar setDelegate:nil];
+  [contentPaneView_ release];
+  [authenticationPaneView_ release];
   [apiEndpointField_ release];
   [apiTokenField_ release];
   [apiTokenStatusLabel_ release];
@@ -1685,6 +1828,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [fetchModelsButton_ release];
   [modelProgressIndicator_ release];
   [modelStatusLabel_ release];
+  [systemPromptsPaneView_ release];
   [systemPromptTextView_ release];
   [databaseSearchField_ release];
   [databaseTableView_ release];

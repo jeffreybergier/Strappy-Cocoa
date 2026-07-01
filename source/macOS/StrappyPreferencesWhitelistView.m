@@ -345,7 +345,7 @@ static NSComparisonResult StrappyWhitelistCompareRows(id leftObject,
   }
   statusLabel_ =
     [[NSTextField alloc] initWithFrame:NSMakeRect(statusX,
-                                                  kStrappyPreferencesInset + 2.0,
+                                                  kStrappyPreferencesInset,
                                                   statusWidth,
                                                   20.0)];
   [statusLabel_ setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];

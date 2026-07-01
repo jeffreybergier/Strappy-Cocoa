@@ -1,13 +1,16 @@
 #import <AppKit/AppKit.h>
 #import "XPAppKit.h"
 
+@class StrappyPreferencesAuthenticationView;
 @class StrappyPreferencesDatabaseWhitelistView;
 @class StrappyPreferencesModelWhitelistView;
+@class StrappyPreferencesSystemPromptsView;
 
 @interface PreferencesWindowController : NSWindowController
-    <XPTableViewDataSource, XPTableViewDelegate> {
+    <XPTableViewDataSource, XPTableViewDelegate, XPToolbarDelegate> {
  @private
-  NSTabView           *tabView_;
+  NSView              *contentPaneView_;
+  StrappyPreferencesAuthenticationView *authenticationPaneView_;
   NSTextField         *apiEndpointField_;
   NSSecureTextField   *apiTokenField_;
   NSTextField         *apiTokenStatusLabel_;
@@ -18,6 +21,7 @@
   NSButton            *fetchModelsButton_;
   NSProgressIndicator *modelProgressIndicator_;
   NSTextField         *modelStatusLabel_;
+  StrappyPreferencesSystemPromptsView *systemPromptsPaneView_;
   NSTextView          *systemPromptTextView_;
   NSSearchField       *databaseSearchField_;
   NSTableView         *databaseTableView_;

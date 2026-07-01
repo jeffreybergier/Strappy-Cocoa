@@ -8,11 +8,13 @@
   #define XPTableViewDataSource NSTableViewDataSource
   #define XPTableViewDelegate   NSTableViewDelegate
   #define XPTextViewDelegate    NSTextViewDelegate
+  #define XPToolbarDelegate     NSToolbarDelegate
 #else
   @protocol XPApplicationDelegate @end
   @protocol XPTableViewDataSource @end
   @protocol XPTableViewDelegate   @end
   @protocol XPTextViewDelegate    @end
+  @protocol XPToolbarDelegate     @end
 #endif
 
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101200
@@ -89,8 +91,18 @@
   #define XPCompositingOperationSourceIn   NSCompositeSourceIn
 #endif
 
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && \
+    MAC_OS_X_VERSION_MAX_ALLOWED >= 110000 && \
+    defined(MAC_OS_X_VERSION_MIN_REQUIRED) && \
+    MAC_OS_X_VERSION_MIN_REQUIRED >= 110000
+  #define XPWindowToolbarStylePreference NSWindowToolbarStylePreference
+#else
+  #define XPWindowToolbarStylePreference 2
+#endif
+
 @interface NSWindow (XPAppKit)
 - (void)XP_setTitle:(NSString *)title;
+- (void)XP_setToolbarPreferenceStyle;
 - (CGFloat)XP_titlebarHeight;
 - (CGFloat)XP_backingScaleFactor;
 @end

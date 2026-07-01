@@ -32,6 +32,31 @@
   return NSHeight([[self contentView] bounds]) - NSHeight(layoutRect);
 }
 
+- (void)XP_setToolbarPreferenceStyle
+{
+  SEL selector;
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+  NSInteger toolbarStyle;
+
+  if (AICCCurrentTier() < AICCTierModern) {
+    return;
+  }
+
+  selector = @selector(setToolbarStyle:);
+  signature = [self methodSignatureForSelector:selector];
+  if (!signature) {
+    return;
+  }
+
+  toolbarStyle = XPWindowToolbarStylePreference;
+  invocation = [NSInvocation invocationWithMethodSignature:signature];
+  [invocation setTarget:self];
+  [invocation setSelector:selector];
+  [invocation setArgument:&toolbarStyle atIndex:2];
+  [invocation invoke];
+}
+
 - (CGFloat)XP_backingScaleFactor
 {
   SEL selector = @selector(backingScaleFactor);
