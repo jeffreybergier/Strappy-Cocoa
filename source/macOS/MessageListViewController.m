@@ -247,11 +247,13 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
 @interface MessageListViewController ()
 - (void)sessionStreamEvent:(NSNotification *)notification;
+- (void)sessionPromptDidStart:(NSNotification *)notification;
 - (void)sessionPromptDidFinish:(NSNotification *)notification;
 - (void)modelCatalogDidChange:(NSNotification *)notification;
 - (void)sendPromptDidFinish:(NSDictionary *)result;
-- (void)scheduleDatabaseReload;
-- (void)reloadDatabaseContentFromTimer:(NSTimer *)timer;
+- (BOOL)pushDatabaseMessageForStreamEvent:(NSDictionary *)event;
+- (BOOL)sessionPromptIsInFlight;
+- (void)updateSendingStateFromSession;
 - (void)beginSendingPrompt:(NSString *)prompt;
 - (void)setPromptCancellationRequested:(BOOL)requested;
 - (BOOL)promptCancellationRequested;
@@ -343,45 +345,49 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
 - (void)clearRequestState
 {
-  [databaseReloadTimer_ invalidate];
-  [databaseReloadTimer_ release];
-  databaseReloadTimer_ = nil;
 }
 
-- (void)scheduleDatabaseReload
+- (BOOL)sessionPromptIsInFlight
 {
-  if (databaseReloadTimer_ != nil) {
-    return;
+  NSNumber *identifier;
+
+  if (session_ == nil) {
+    return NO;
+  }
+  if ([session_ isPromptInFlight]) {
+    return YES;
   }
 
-  databaseReloadTimer_ =
-    [[NSTimer scheduledTimerWithTimeInterval:0.25
-                                      target:self
-                                    selector:@selector(reloadDatabaseContentFromTimer:)
-                                    userInfo:nil
-                                     repeats:NO] retain];
+  identifier = [session_ sessionIdentifier];
+  return [StrappySession isPromptInFlightForSessionIdentifier:identifier];
 }
 
-- (void)reloadDatabaseContentFromTimer:(NSTimer *)timer
+- (void)updateSendingStateFromSession
 {
-  if (timer != databaseReloadTimer_) {
-    return;
-  }
+  BOOL inFlight;
 
-  [databaseReloadTimer_ release];
-  databaseReloadTimer_ = nil;
-  [self reloadContent];
+  inFlight = [self sessionPromptIsInFlight];
+  sending_ = inFlight ? YES : NO;
+  [sendController_ setSending:sending_];
+  [sendController_ setCancellationRequested:
+    (sending_ && [self promptCancellationRequested]) ? YES : NO];
 }
 
 - (void)reloadWithSession:(StrappySession *)session
 {
+  BOOL sessionChanged;
+
   if (![session isKindOfClass:[StrappySession class]]) {
     session = nil;
   }
 
-  if (session_ != session) {
+  sessionChanged = (session_ != session) ? YES : NO;
+  if (sessionChanged) {
     [self clearRequestState];
     if (session_ != nil) {
+      [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                      name:StrappySessionPromptDidStartNotification
+                                                    object:session_];
       [[NSNotificationCenter defaultCenter] removeObserver:self
                                                       name:StrappySessionPromptDidFinishNotification
                                                     object:session_];
@@ -392,6 +398,11 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     [session_ release];
     session_ = [session retain];
     if (session_ != nil) {
+      [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(sessionPromptDidStart:)
+               name:StrappySessionPromptDidStartNotification
+             object:session_];
       [[NSNotificationCenter defaultCenter]
         addObserver:self
            selector:@selector(sessionPromptDidFinish:)
@@ -405,23 +416,23 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     }
   }
 
-  sending_ = (session_ != nil) && [session_ isPromptInFlight];
   [sendController_ setEnabled:(session_ != nil)];
-  [sendController_ setSending:sending_];
+  [self updateSendingStateFromSession];
   [sendController_ setStreamingEnabled:(session_ != nil) ?
     [session_ streamingEnabled] : NO];
   [sendController_ reloadOptionsMenu];
-  [self reloadContent];
+  if (sessionChanged) {
+    [self reloadContent];
+  }
 }
 
 - (void)reloadData
 {
-  [self reloadContent];
 }
 
 - (BOOL)canSendCurrentPrompt
 {
-  if ((session_ == nil) || [session_ isPromptInFlight]) {
+  if ((session_ == nil) || sending_ || [self sessionPromptIsInFlight]) {
     return NO;
   }
   return [sendController_ canSendCurrentPrompt];
@@ -434,7 +445,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
 - (BOOL)canCancelCurrentPrompt
 {
-  if ((session_ == nil) || !sending_ || [self promptCancellationRequested]) {
+  if ((session_ == nil) || ![self sessionPromptIsInFlight] ||
+      [self promptCancellationRequested]) {
     return NO;
   }
   return YES;
@@ -451,7 +463,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
 - (BOOL)canToggleStreaming
 {
-  if ((session_ == nil) || sending_ || [session_ isPromptInFlight]) {
+  if ((session_ == nil) || sending_ || [self sessionPromptIsInFlight]) {
     return NO;
   }
   return YES;
@@ -534,7 +546,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     }
     [statusText_ release];
     statusText_ = [errorMessage retain];
-    [self reloadContent];
     return NO;
   }
 
@@ -562,7 +573,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     [statusText_ release];
     statusText_ = [errorMessage retain];
     [sendController_ setStreamingEnabled:[session_ streamingEnabled]];
-    [self reloadContent];
     return NO;
   }
 
@@ -725,7 +735,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     return;
   }
 
-  if ((session_ == nil) || [session_ isPromptInFlight]) {
+  if ((session_ == nil) || [self sessionPromptIsInFlight]) {
     return;
   }
 
@@ -743,7 +753,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [sendController_ setCancellationRequested:NO];
 
   [self clearRequestState];
-  [self reloadContent];
 
   startError = nil;
   shouldStream = [session_ streamingEnabled];
@@ -772,6 +781,14 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [promptToSend release];
 }
 
+- (void)sessionPromptDidStart:(NSNotification *)notification
+{
+  if ([notification object] != session_) {
+    return;
+  }
+  [self updateSendingStateFromSession];
+}
+
 - (void)modelCatalogDidChange:(NSNotification *)notification
 {
   (void)notification;
@@ -791,7 +808,10 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     return;
   }
 
-  [self scheduleDatabaseReload];
+  [self updateSendingStateFromSession];
+  if (![self pushDatabaseMessageForStreamEvent:event]) {
+    return;
+  }
 }
 
 - (void)sessionPromptDidFinish:(NSNotification *)notification
@@ -807,10 +827,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   NSDictionary *session;
   NSString *errorMessage;
 
-  sending_ = NO;
   [self setPromptCancellationRequested:NO];
-  [sendController_ setSending:NO];
-  [sendController_ setCancellationRequested:NO];
+  [self updateSendingStateFromSession];
 
   session = [result objectForKey:@"session"];
   if ([session isKindOfClass:[NSDictionary class]]) {
@@ -828,7 +846,26 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   }
 
   [self clearRequestState];
-  [self reloadContent];
+  [self updateSendingStateFromSession];
+}
+
+- (BOOL)pushDatabaseMessageForStreamEvent:(NSDictionary *)event
+{
+  NSString *js;
+  NSError *error;
+
+  if ((session_ == nil) || ![event isKindOfClass:[NSDictionary class]]) {
+    return NO;
+  }
+
+  error = nil;
+  js = [session_ webViewJavaScriptForStreamEvent:event error:&error];
+  if ([js length] == 0U) {
+    return NO;
+  }
+
+  [self pushJavaScript:js];
+  return YES;
 }
 
 - (void)loadEarlierMessages
@@ -878,8 +915,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [session_ release];
   [sendController_ release];
   [statusText_ release];
-  [databaseReloadTimer_ invalidate];
-  [databaseReloadTimer_ release];
   [super dealloc];
 }
 

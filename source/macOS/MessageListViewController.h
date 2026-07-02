@@ -18,7 +18,6 @@
   PromptSendViewController *sendController_;
   id<MessageListViewControllerDelegate> delegate_;
   NSString                 *statusText_;
-  NSTimer                  *databaseReloadTimer_;
   NSUInteger                oldestRenderedMessageIndex_;
   BOOL                      sending_;
   BOOL                      cancelPromptRequested_;

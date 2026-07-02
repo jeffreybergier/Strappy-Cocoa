@@ -1944,6 +1944,44 @@ char *strappy_webview_append_message_js(const char *message_html)
   return strappy_webview_buffer_finish(&buffer);
 }
 
+static char *strappy_webview_message_element_id(
+  const strappy_webview_message *message)
+{
+  strappy_webview_buffer buffer;
+
+  strappy_webview_buffer_init(&buffer);
+  if (!strappy_webview_append_element_id(&buffer, message)) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_message_update_js(
+  const strappy_webview_message *message,
+  const strappy_webview_labels *labels)
+{
+  char *element_id;
+  char *message_html;
+  char *js;
+
+  message_html = strappy_webview_message_html(message, labels, NULL, NULL);
+  if (message_html == NULL) {
+    return NULL;
+  }
+
+  element_id = strappy_webview_message_element_id(message);
+  if (element_id == NULL) {
+    free(message_html);
+    return NULL;
+  }
+
+  js = strappy_webview_replace_message_js(element_id, message_html);
+  free(element_id);
+  free(message_html);
+  return js;
+}
+
 char *strappy_webview_replace_message_js(const char *element_id,
                                          const char *message_html)
 {

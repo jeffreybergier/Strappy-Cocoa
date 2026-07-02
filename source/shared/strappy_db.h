@@ -275,6 +275,12 @@ int strappy_db_list_session_messages(const char *db_path,
                                      long long session_id,
                                      strappy_session_message_record_list *list,
                                      char **error_out);
+int strappy_db_load_session_message_by_key(
+  const char *db_path,
+  long long session_id,
+  const char *message_key,
+  strappy_session_message_record *record,
+  char **error_out);
 int strappy_db_list_session_context_messages(
   const char *db_path,
   long long session_id,

@@ -2562,6 +2562,94 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
     return 0;
   }
 
+  messages[0].content = "Hello final without reasoning";
+  messages[0].reasoning = NULL;
+  if (!strappy_db_append_message_sequence_to_session(context->catalog_path,
+                                                     session_id,
+                                                     "Stream prompt",
+                                                     "Hello final without reasoning",
+                                                     "harness-model",
+                                                     200L,
+                                                     &messages[0],
+                                                     1U,
+                                                     &error)) {
+    fprintf(stderr,
+            "Could not upsert final streamed message without reasoning: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  strappy_session_message_record_list_init(&all_messages);
+  ok = strappy_db_list_session_messages(context->catalog_path,
+                                        session_id,
+                                        &all_messages,
+                                        &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not list preserved reasoning message rows: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_message_record_list_destroy(&all_messages);
+    return 0;
+  }
+
+  ok = (all_messages.count == 6U) &&
+       (strcmp(all_messages.records[5].message_key,
+               "stream-turn-test-assistant") == 0) &&
+       (strcmp(all_messages.records[5].content,
+               "Hello final without reasoning") == 0) &&
+       (strcmp(all_messages.records[5].reasoning, "final reasoning") == 0);
+  strappy_session_message_record_list_destroy(&all_messages);
+  if (!ok) {
+    fprintf(stderr, "Final streamed message upsert erased existing reasoning.\n");
+    return 0;
+  }
+
+  messages[0].content = "Hello final with empty reasoning";
+  messages[0].reasoning = "";
+  if (!strappy_db_append_message_sequence_to_session(context->catalog_path,
+                                                     session_id,
+                                                     "Stream prompt",
+                                                     "Hello final with empty reasoning",
+                                                     "harness-model",
+                                                     200L,
+                                                     &messages[0],
+                                                     1U,
+                                                     &error)) {
+    fprintf(stderr,
+            "Could not upsert final streamed message with empty reasoning: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  strappy_session_message_record_list_init(&all_messages);
+  ok = strappy_db_list_session_messages(context->catalog_path,
+                                        session_id,
+                                        &all_messages,
+                                        &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not list empty-reasoning message rows: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_message_record_list_destroy(&all_messages);
+    return 0;
+  }
+
+  ok = (all_messages.count == 6U) &&
+       (strcmp(all_messages.records[5].message_key,
+               "stream-turn-test-assistant") == 0) &&
+       (strcmp(all_messages.records[5].content,
+               "Hello final with empty reasoning") == 0) &&
+       (strcmp(all_messages.records[5].reasoning, "final reasoning") == 0);
+  strappy_session_message_record_list_destroy(&all_messages);
+  if (!ok) {
+    fprintf(stderr, "Empty final reasoning erased existing reasoning.\n");
+    return 0;
+  }
+
   return ok;
 }
 

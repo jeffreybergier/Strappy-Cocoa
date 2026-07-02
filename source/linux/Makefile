@@ -23,6 +23,7 @@ CFLAGS ?= -std=c99 -Wall -Wextra -Wconversion -Wsign-conversion -Wfloat-conversi
 SQLITE_LIBS ?= -lsqlite3
 DATABASE_QUERY_HARNESS := $(BUILD_DIR)/database_query_harness
 WEBVIEW_HARNESS := $(BUILD_DIR)/webview_harness
+CLIENT_STREAM_HARNESS := $(BUILD_DIR)/client_stream_harness
 
 DATABASE_QUERY_HARNESS_SOURCES = \
 	database_query_harness.c \
@@ -36,11 +37,20 @@ WEBVIEW_HARNESS_SOURCES = \
 	webview_harness.c \
 	$(SHARED_DIR)/strappy_webview.c
 
+CLIENT_STREAM_HARNESS_SOURCES = \
+	client_stream_harness.c \
+	$(SHARED_DIR)/strappy_cocoa.c \
+	$(SHARED_DIR)/strappy_core.c \
+	$(SHARED_DIR)/strappy_tools.c \
+	$(SHARED_DIR)/strappy_db.c \
+	$(CJSON_DIR)/cJSON.c
+
 .PHONY: test clean
 
-test: $(DATABASE_QUERY_HARNESS) $(WEBVIEW_HARNESS)
+test: $(DATABASE_QUERY_HARNESS) $(WEBVIEW_HARNESS) $(CLIENT_STREAM_HARNESS)
 	./$(DATABASE_QUERY_HARNESS)
 	./$(WEBVIEW_HARNESS)
+	./$(CLIENT_STREAM_HARNESS)
 
 $(BUILD_DIR):
 	mkdir -p $@
@@ -54,5 +64,8 @@ $(DATABASE_QUERY_HARNESS): $(DATABASE_QUERY_HARNESS_SOURCES) $(FONTAWESOME_GENER
 $(WEBVIEW_HARNESS): $(WEBVIEW_HARNESS_SOURCES) $(FONTAWESOME_GENERATED) | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(WEBVIEW_HARNESS_SOURCES)
 
+$(CLIENT_STREAM_HARNESS): $(CLIENT_STREAM_HARNESS_SOURCES) $(FONTAWESOME_GENERATED) | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(CLIENT_STREAM_HARNESS_SOURCES) $(SQLITE_LIBS) -lcurl
+
 clean:
-	rm -rf $(BUILD_DIR) database_query_harness webview_harness
+	rm -rf $(BUILD_DIR) database_query_harness webview_harness client_stream_harness

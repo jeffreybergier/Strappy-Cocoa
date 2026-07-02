@@ -51,6 +51,8 @@ extern NSString * const StrappySessionModelCatalogDidChangeNotification;
 - (NSDictionary *)cachedSummary;
 - (NSDictionary *)summaryWithError:(NSError **)error;
 - (NSArray *)messagesWithError:(NSError **)error;
+- (NSString *)webViewJavaScriptForStreamEvent:(NSDictionary *)event
+                                        error:(NSError **)error;
 - (BOOL)streamingEnabled;
 - (BOOL)setStreamingEnabled:(BOOL)enabled error:(NSError **)error;
 - (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error;
