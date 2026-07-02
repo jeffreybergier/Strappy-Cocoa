@@ -1016,6 +1016,36 @@ static int strappy_assistant_tool_is_allowed(
   return 1;
 }
 
+static int strappy_assistant_tool_sequence_has_tool(
+  const strappy_assistant_tool_sequence *sequence,
+  const char *tool_name)
+{
+  size_t round_index;
+
+  if ((sequence == NULL) || (tool_name == NULL) || (tool_name[0] == '\0')) {
+    return 0;
+  }
+
+  for (round_index = 0U; round_index < sequence->round_count; round_index++) {
+    const strappy_assistant_tool_round *round;
+    size_t tool_index;
+
+    round = &sequence->rounds[round_index];
+    if (round->tool_names == NULL) {
+      continue;
+    }
+
+    for (tool_index = 0U; tool_index < round->tool_count; tool_index++) {
+      if ((round->tool_names[tool_index] != NULL) &&
+          (strcmp(round->tool_names[tool_index], tool_name) == 0)) {
+        return 1;
+      }
+    }
+  }
+
+  return 0;
+}
+
 static int strappy_assistant_final_request_context(
   const strappy_assistant_request_messages *request_messages,
   const strappy_assistant_tool_sequence *sequence,
@@ -2422,6 +2452,12 @@ static int strappy_assistant_run_learning_summary(
   /* This flag belongs to the current user turn; older session tool rows do
      not participate in deciding whether this harness turn is worth running. */
   if (!original_did_run_tool_round) {
+    return 1;
+  }
+
+  if (strappy_assistant_tool_sequence_has_tool(
+        sequence,
+        STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE)) {
     return 1;
   }
 
