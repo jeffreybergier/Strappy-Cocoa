@@ -2084,7 +2084,8 @@ static int strappy_db_update_message(sqlite3 *db,
     "SET turn_id = ?, turn_key = ?, prompt_group_key = ?, actor = ?, "
     "kind = ?, api_role = ?, render_role = ?, role = ?, content = ?, "
     "model = ?, http_status = ?, metadata_json = ?, message_json = ?, "
-    "reasoning = ?, target_message_key = ?, tool_call_id = ?, "
+    "reasoning = COALESCE(NULLIF(?, ''), reasoning), "
+    "target_message_key = ?, tool_call_id = ?, "
     "tool_name = ?, arguments_json = ?, result_json = ?, render_state_json = ?, "
     "include_in_context = ?, is_error = ? "
     "WHERE id = ? AND session_id = ?;";
@@ -4717,6 +4718,113 @@ int strappy_db_list_session_messages(const char *db_path,
     "WHERE session_id = ? ORDER BY id ASC;",
     list,
     error_out);
+}
+
+int strappy_db_load_session_message_by_key(
+  const char *db_path,
+  long long session_id,
+  const char *message_key,
+  strappy_session_message_record *record,
+  char **error_out)
+{
+  static const char *where_suffix =
+    "WHERE session_id = ? AND message_key = ? ORDER BY id DESC LIMIT 1;";
+  char *sql;
+  size_t select_length;
+  size_t suffix_length;
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (record == NULL) {
+    strappy_set_error(error_out, "Session message output is missing.");
+    return 0;
+  }
+  strappy_session_message_record_init(record);
+
+  if ((message_key == NULL) || (message_key[0] == '\0')) {
+    strappy_set_error(error_out, "Session message key is missing.");
+    return 0;
+  }
+
+  select_length = strlen(strappy_db_session_message_select_clause());
+  suffix_length = strlen(where_suffix);
+  if (select_length > (((size_t)-1) - suffix_length - 1U)) {
+    strappy_set_error(error_out, "Session message query is too large.");
+    return 0;
+  }
+  sql = (char *)malloc(select_length + suffix_length + 1U);
+  if (sql == NULL) {
+    strappy_set_error(error_out, "Could not allocate session message query.");
+    return 0;
+  }
+  memcpy(sql, strappy_db_session_message_select_clause(), select_length);
+  memcpy(sql + select_length, where_suffix, suffix_length);
+  sql[select_length + suffix_length] = '\0';
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    free(sql);
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    free(sql);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_session_exists(db, session_id, error_out)) {
+    free(sql);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  free(sql);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare session message lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 2, message_key, -1, SQLITE_TRANSIENT);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind session message lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    if (!strappy_db_assign_message_from_statement(record, stmt, error_out)) {
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      return 0;
+    }
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 1;
+  }
+
+  if (rc == SQLITE_DONE) {
+    strappy_set_error(error_out, "Session message was not found.");
+  } else {
+    strappy_set_formatted_error(error_out,
+                                "Could not read session message lookup: %s",
+                                sqlite3_errmsg(db));
+  }
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  return 0;
 }
 
 int strappy_db_list_session_context_messages(

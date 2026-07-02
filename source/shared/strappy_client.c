@@ -1381,7 +1381,8 @@ static char *strappy_client_build_messages_request_json(
   if (ok && strappy_client_should_request_reasoning(config)) {
     ok = strappy_http_buffer_append_cstring(
       &buffer,
-      ",\"reasoning\":{\"enabled\":true,\"exclude\":false}");
+      ",\"reasoning\":{\"enabled\":true,\"exclude\":false},"
+      "\"include_reasoning\":true");
   }
 
   if (ok && should_stream && strappy_client_should_request_stream_usage(config)) {
@@ -1664,6 +1665,8 @@ typedef struct strappy_stream_context {
   strappy_http_buffer reasoning;
   cJSON *reasoning_details;
   cJSON *tool_calls;
+  int *tool_call_stream_indices;
+  size_t tool_call_stream_index_count;
   strappy_chat_result *result;
   strappy_chat_stream_callback callback;
   void *callback_data;
@@ -1688,6 +1691,8 @@ static void strappy_stream_context_init(strappy_stream_context *context)
   strappy_http_buffer_init(&context->reasoning);
   context->reasoning_details = NULL;
   context->tool_calls = NULL;
+  context->tool_call_stream_indices = NULL;
+  context->tool_call_stream_index_count = 0U;
   context->result = NULL;
   context->callback = NULL;
   context->callback_data = NULL;
@@ -1712,6 +1717,7 @@ static void strappy_stream_context_destroy(strappy_stream_context *context)
   strappy_http_buffer_destroy(&context->reasoning);
   cJSON_Delete(context->reasoning_details);
   cJSON_Delete(context->tool_calls);
+  free(context->tool_call_stream_indices);
   free(context->message_role);
   free(context->stream_error);
   strappy_stream_context_init(context);
@@ -1895,18 +1901,74 @@ static int strappy_client_json_append_string_member(cJSON *object,
   return ok;
 }
 
-static cJSON *strappy_client_stream_ensure_tool_call(
+static int strappy_client_stream_tool_call_count(
+  const strappy_stream_context *context)
+{
+  if ((context == NULL) || (context->tool_calls == NULL)) {
+    return 0;
+  }
+
+  return cJSON_GetArraySize(context->tool_calls);
+}
+
+static int strappy_client_stream_find_tool_call_index_by_stream_index(
+  const strappy_stream_context *context,
+  int stream_index)
+{
+  size_t index;
+
+  if ((context == NULL) || (context->tool_call_stream_indices == NULL)) {
+    return -1;
+  }
+
+  for (index = 0U; index < context->tool_call_stream_index_count; index++) {
+    if (context->tool_call_stream_indices[index] == stream_index) {
+      return (int)index;
+    }
+  }
+
+  return -1;
+}
+
+static int strappy_client_stream_find_tool_call_index_by_id(
+  const strappy_stream_context *context,
+  const char *id)
+{
+  int count;
+  int index;
+
+  if ((context == NULL) || (context->tool_calls == NULL) ||
+      (id == NULL) || (id[0] == '\0')) {
+    return -1;
+  }
+
+  count = cJSON_GetArraySize(context->tool_calls);
+  for (index = 0; index < count; index++) {
+    cJSON *call;
+    cJSON *existing_id;
+
+    call = cJSON_GetArrayItem(context->tool_calls, index);
+    existing_id = cJSON_GetObjectItem(call, "id");
+    if (cJSON_IsString(existing_id) &&
+        (existing_id->valuestring != NULL) &&
+        (strcmp(existing_id->valuestring, id) == 0)) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+static cJSON *strappy_client_stream_append_tool_call(
   strappy_stream_context *context,
-  int index)
+  int stream_index)
 {
   cJSON *call;
+  int *next_indices;
+  size_t next_count;
 
   if (context == NULL) {
     return NULL;
-  }
-
-  if (index < 0) {
-    index = 0;
   }
 
   if (context->tool_calls == NULL) {
@@ -1916,23 +1978,67 @@ static cJSON *strappy_client_stream_ensure_tool_call(
     }
   }
 
-  while (cJSON_GetArraySize(context->tool_calls) <= index) {
-    call = cJSON_CreateObject();
-    if (call == NULL) {
-      return NULL;
-    }
-    if (!cJSON_AddItemToArray(context->tool_calls, call)) {
-      cJSON_Delete(call);
-      return NULL;
-    }
-  }
-
-  call = cJSON_GetArrayItem(context->tool_calls, index);
-  if (!cJSON_IsObject(call)) {
+  if (context->tool_call_stream_index_count >
+      (((size_t)-1) / sizeof(int)) - 1U) {
     return NULL;
   }
 
+  next_count = context->tool_call_stream_index_count + 1U;
+  next_indices = (int *)realloc(context->tool_call_stream_indices,
+                                next_count * sizeof(int));
+  if (next_indices == NULL) {
+    return NULL;
+  }
+  context->tool_call_stream_indices = next_indices;
+
+  call = cJSON_CreateObject();
+  if (!cJSON_IsObject(call)) {
+    return NULL;
+  }
+  if (!cJSON_AddItemToArray(context->tool_calls, call)) {
+    cJSON_Delete(call);
+    return NULL;
+  }
+
+  context->tool_call_stream_indices[context->tool_call_stream_index_count] =
+    stream_index;
+  context->tool_call_stream_index_count = next_count;
+
   return call;
+}
+
+static cJSON *strappy_client_stream_get_tool_call(
+  strappy_stream_context *context,
+  int stream_index,
+  int has_stream_index,
+  int position,
+  const char *id)
+{
+  int target_index;
+  int count;
+
+  target_index =
+    strappy_client_stream_find_tool_call_index_by_id(context, id);
+  if ((target_index < 0) && has_stream_index) {
+    target_index =
+      strappy_client_stream_find_tool_call_index_by_stream_index(
+        context,
+        stream_index);
+  }
+  if ((target_index < 0) && !has_stream_index) {
+    count = strappy_client_stream_tool_call_count(context);
+    if ((position >= 0) && (position < count)) {
+      target_index = position;
+    }
+  }
+
+  if (target_index >= 0) {
+    return cJSON_GetArrayItem(context->tool_calls, target_index);
+  }
+
+  return strappy_client_stream_append_tool_call(
+    context,
+    has_stream_index ? stream_index : position);
 }
 
 static int strappy_client_stream_capture_tool_calls(
@@ -1958,6 +2064,8 @@ static int strappy_client_stream_capture_tool_calls(
     cJSON *name;
     cJSON *arguments;
     int index;
+    int has_index;
+    const char *id_text;
 
     delta = cJSON_GetArrayItem(tool_calls, position);
     if (!cJSON_IsObject(delta)) {
@@ -1965,19 +2073,28 @@ static int strappy_client_stream_capture_tool_calls(
     }
 
     index = position;
+    has_index = 0;
     index_item = cJSON_GetObjectItem(delta, "index");
-    if (cJSON_IsNumber(index_item)) {
+    if (cJSON_IsNumber(index_item) && (index_item->valueint >= 0)) {
       index = index_item->valueint;
+      has_index = 1;
     }
 
-    target = strappy_client_stream_ensure_tool_call(context, index);
+    id = cJSON_GetObjectItem(delta, "id");
+    id_text = (cJSON_IsString(id) && (id->valuestring != NULL)) ?
+      id->valuestring : NULL;
+
+    target = strappy_client_stream_get_tool_call(context,
+                                                 index,
+                                                 has_index,
+                                                 position,
+                                                 id_text);
     if (target == NULL) {
       return strappy_client_stream_set_error(context, "Could not allocate streamed tool calls.");
     }
 
-    id = cJSON_GetObjectItem(delta, "id");
-    if (cJSON_IsString(id) && (id->valuestring != NULL) &&
-        !strappy_client_json_replace_string(target, "id", id->valuestring)) {
+    if ((id_text != NULL) &&
+        !strappy_client_json_replace_string(target, "id", id_text)) {
       return strappy_client_stream_set_error(context, "Could not allocate streamed tool call id.");
     }
 
@@ -2015,6 +2132,265 @@ static int strappy_client_stream_capture_tool_calls(
     }
   }
 
+  return 1;
+}
+
+static const char *strappy_client_skip_json_whitespace(const char *text)
+{
+  while ((text != NULL) && (*text != '\0') &&
+         isspace((unsigned char)*text)) {
+    text++;
+  }
+  return text;
+}
+
+static void strappy_client_free_string_array(char **values, size_t count)
+{
+  size_t index;
+
+  if (values == NULL) {
+    return;
+  }
+
+  for (index = 0U; index < count; index++) {
+    free(values[index]);
+  }
+  free(values);
+}
+
+static int strappy_client_split_concatenated_json_values(
+  const char *text,
+  char ***values_out,
+  size_t *count_out,
+  strappy_stream_context *context)
+{
+  char **values;
+  size_t count;
+  const char *cursor;
+
+  if (values_out != NULL) {
+    *values_out = NULL;
+  }
+  if (count_out != NULL) {
+    *count_out = 0U;
+  }
+
+  if ((text == NULL) || (values_out == NULL) || (count_out == NULL)) {
+    return 1;
+  }
+
+  values = NULL;
+  count = 0U;
+  cursor = strappy_client_skip_json_whitespace(text);
+  while ((cursor != NULL) && (*cursor != '\0')) {
+    const char *end;
+    cJSON *value;
+    char *segment;
+    char **next_values;
+
+    end = NULL;
+    value = cJSON_ParseWithOpts(cursor, &end, 0);
+    if ((value == NULL) || (end == NULL) || (end <= cursor)) {
+      cJSON_Delete(value);
+      strappy_client_free_string_array(values, count);
+      return 1;
+    }
+    cJSON_Delete(value);
+
+    segment = strappy_string_duplicate_length(cursor, (size_t)(end - cursor));
+    if (segment == NULL) {
+      strappy_client_free_string_array(values, count);
+      return strappy_client_stream_set_error(
+        context,
+        "Could not allocate normalized tool arguments.");
+    }
+
+    if (count >= (((size_t)-1) / sizeof(char *))) {
+      free(segment);
+      strappy_client_free_string_array(values, count);
+      return strappy_client_stream_set_error(
+        context,
+        "Streamed tool argument list is too large.");
+    }
+    next_values = (char **)realloc(values, (count + 1U) * sizeof(char *));
+    if (next_values == NULL) {
+      free(segment);
+      strappy_client_free_string_array(values, count);
+      return strappy_client_stream_set_error(
+        context,
+        "Could not allocate normalized tool arguments.");
+    }
+
+    values = next_values;
+    values[count] = segment;
+    count++;
+    cursor = strappy_client_skip_json_whitespace(end);
+  }
+
+  *values_out = values;
+  *count_out = count;
+  return 1;
+}
+
+static int strappy_client_tool_call_copy_with_arguments(
+  cJSON *normalized,
+  cJSON *tool_call,
+  const char *arguments,
+  size_t split_index,
+  strappy_stream_context *context)
+{
+  cJSON *copy;
+  cJSON *function;
+  cJSON *id;
+  const char *id_text;
+
+  copy = cJSON_Duplicate(tool_call, 1);
+  if (copy == NULL) {
+    return strappy_client_stream_set_error(
+      context,
+      "Could not allocate normalized tool call.");
+  }
+
+  function = cJSON_GetObjectItem(copy, "function");
+  if (!cJSON_IsObject(function) ||
+      !strappy_client_json_replace_string(function, "arguments", arguments)) {
+    cJSON_Delete(copy);
+    return strappy_client_stream_set_error(
+      context,
+      "Could not normalize streamed tool arguments.");
+  }
+
+  if (split_index > 0U) {
+    char suffix[64];
+    char *synthetic_id;
+
+    id = cJSON_GetObjectItem(copy, "id");
+    id_text = (cJSON_IsString(id) && (id->valuestring != NULL) &&
+               (id->valuestring[0] != '\0')) ?
+      id->valuestring : "tool-call";
+    snprintf(suffix, sizeof(suffix), "-split-%lu",
+             (unsigned long)split_index);
+    suffix[sizeof(suffix) - 1U] = '\0';
+    synthetic_id = strappy_join_strings(id_text, suffix);
+    if (synthetic_id == NULL) {
+      cJSON_Delete(copy);
+      return strappy_client_stream_set_error(
+        context,
+        "Could not allocate normalized tool call id.");
+    }
+    if (!strappy_client_json_replace_string(copy, "id", synthetic_id)) {
+      free(synthetic_id);
+      cJSON_Delete(copy);
+      return strappy_client_stream_set_error(
+        context,
+        "Could not normalize streamed tool call id.");
+    }
+    free(synthetic_id);
+  }
+
+  if (!cJSON_AddItemToArray(normalized, copy)) {
+    cJSON_Delete(copy);
+    return strappy_client_stream_set_error(
+      context,
+      "Could not store normalized tool call.");
+  }
+
+  return 1;
+}
+
+static int strappy_client_stream_normalize_tool_calls(
+  strappy_stream_context *context)
+{
+  cJSON *normalized;
+  int count;
+  int index;
+  int changed;
+
+  if ((context == NULL) || (context->tool_calls == NULL) ||
+      !cJSON_IsArray(context->tool_calls)) {
+    return 1;
+  }
+
+  count = cJSON_GetArraySize(context->tool_calls);
+  if (count <= 0) {
+    return 1;
+  }
+
+  normalized = cJSON_CreateArray();
+  if (normalized == NULL) {
+    return strappy_client_stream_set_error(
+      context,
+      "Could not allocate normalized tool calls.");
+  }
+
+  changed = 0;
+  for (index = 0; index < count; index++) {
+    cJSON *tool_call;
+    cJSON *function;
+    cJSON *arguments;
+    char **segments;
+    size_t segment_count;
+    size_t segment_index;
+
+    tool_call = cJSON_GetArrayItem(context->tool_calls, index);
+    function = cJSON_GetObjectItem(tool_call, "function");
+    arguments = cJSON_GetObjectItem(function, "arguments");
+    segments = NULL;
+    segment_count = 0U;
+
+    if (cJSON_IsString(arguments) && (arguments->valuestring != NULL) &&
+        !strappy_client_split_concatenated_json_values(arguments->valuestring,
+                                                       &segments,
+                                                       &segment_count,
+                                                       context)) {
+      cJSON_Delete(normalized);
+      return 0;
+    }
+
+    if (segment_count > 1U) {
+      changed = 1;
+      for (segment_index = 0U; segment_index < segment_count; segment_index++) {
+        if (!strappy_client_tool_call_copy_with_arguments(normalized,
+                                                          tool_call,
+                                                          segments[segment_index],
+                                                          segment_index,
+                                                          context)) {
+          strappy_client_free_string_array(segments, segment_count);
+          cJSON_Delete(normalized);
+          return 0;
+        }
+      }
+      strappy_client_free_string_array(segments, segment_count);
+      continue;
+    }
+    strappy_client_free_string_array(segments, segment_count);
+
+    tool_call = cJSON_Duplicate(tool_call, 1);
+    if (tool_call == NULL) {
+      cJSON_Delete(normalized);
+      return strappy_client_stream_set_error(
+        context,
+        "Could not allocate normalized tool call.");
+    }
+    if (!cJSON_AddItemToArray(normalized, tool_call)) {
+      cJSON_Delete(tool_call);
+      cJSON_Delete(normalized);
+      return strappy_client_stream_set_error(
+        context,
+        "Could not store normalized tool call.");
+    }
+  }
+
+  if (!changed) {
+    cJSON_Delete(normalized);
+    return 1;
+  }
+
+  cJSON_Delete(context->tool_calls);
+  context->tool_calls = normalized;
+  free(context->tool_call_stream_indices);
+  context->tool_call_stream_indices = NULL;
+  context->tool_call_stream_index_count = 0U;
   return 1;
 }
 
@@ -2084,6 +2460,10 @@ static int strappy_client_stream_finalize_message(strappy_stream_context *contex
 
   if ((context == NULL) || (context->result == NULL)) {
     return 1;
+  }
+
+  if (!strappy_client_stream_normalize_tool_calls(context)) {
+    return 0;
   }
 
   message = cJSON_CreateObject();

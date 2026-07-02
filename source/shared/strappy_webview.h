@@ -43,6 +43,9 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                    const strappy_webview_labels *labels,
                                    const char *state,
                                    const char *status_html);
+char *strappy_webview_message_update_js(
+  const strappy_webview_message *message,
+  const strappy_webview_labels *labels);
 char *strappy_webview_pending_message_html(
   const char *prompt,
   const char *element_id,

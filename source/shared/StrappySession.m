@@ -32,6 +32,72 @@ typedef struct StrappySessionStreamContext {
   NSDictionary *context;
 } StrappySessionStreamContext;
 
+static const char *StrappySessionCString(NSString *string)
+{
+  if (![string isKindOfClass:[NSString class]]) {
+    return "";
+  }
+  return [string UTF8String];
+}
+
+static NSString *StrappySessionStringFromWebViewCString(char *value)
+{
+  NSString *string;
+
+  if (value == NULL) {
+    return @"";
+  }
+
+  string = [NSString stringWithUTF8String:value];
+  strappy_webview_free(value);
+  return (string != nil) ? string : @"";
+}
+
+static strappy_webview_labels StrappySessionWebViewLabels(void)
+{
+  strappy_webview_labels labels;
+
+  labels.agent = StrappySessionCString(NSLocalizedString(@"Agent", nil));
+  labels.you = StrappySessionCString(NSLocalizedString(@"You", nil));
+  labels.harness = StrappySessionCString(NSLocalizedString(@"Harness", nil));
+  labels.thinking = StrappySessionCString(NSLocalizedString(@"Thinking", nil));
+  labels.request_metadata =
+    StrappySessionCString(NSLocalizedString(@"Request Metadata", nil));
+  labels.tool_call = StrappySessionCString(NSLocalizedString(@"Tool Call", nil));
+  labels.tool_result =
+    StrappySessionCString(NSLocalizedString(@"Tool Result", nil));
+  labels.retry = StrappySessionCString(NSLocalizedString(@"Retry", nil));
+  return labels;
+}
+
+static void StrappySessionWebViewMessageFromRecord(
+  const strappy_session_message_record *record,
+  strappy_webview_message *message)
+{
+  if (message == NULL) {
+    return;
+  }
+
+  memset(message, 0, sizeof(*message));
+  if (record == NULL) {
+    return;
+  }
+
+  message->message_id = record->message_id;
+  message->http_status = record->http_status;
+  message->role = record->role;
+  message->kind = record->kind;
+  message->actor = record->actor;
+  message->prompt_group_key = record->prompt_group_key;
+  message->message_key = record->message_key;
+  message->target_message_key = record->target_message_key;
+  message->text = record->content;
+  message->reasoning = record->reasoning;
+  message->metadata_json = record->metadata_json;
+  message->render_state_json = record->render_state_json;
+  message->created_at = record->created_at;
+}
+
 @interface StrappySession ()
 + (NSMutableDictionary *)inFlightSessions;
 + (void)registerInFlightSession:(StrappySession *)session;
@@ -1650,6 +1716,83 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 {
   return [StrappySession messagesForSessionIdentifier:sessionIdentifier_
                                                error:error];
+}
+
+- (NSString *)webViewJavaScriptForStreamEvent:(NSDictionary *)event
+                                        error:(NSError **)error
+{
+  NSString *databasePath;
+  NSString *messageKey;
+  NSString *streamEvent;
+  NSString *delta;
+  char *strappyError;
+  char *js;
+  long long sessionId;
+  strappy_session_message_record record;
+  strappy_webview_message message;
+  strappy_webview_labels labels;
+
+  if (![event isKindOfClass:[NSDictionary class]]) {
+    return @"";
+  }
+
+  messageKey = [event objectForKey:@"message_key"];
+  if (![messageKey isKindOfClass:[NSString class]] ||
+      ([messageKey length] == 0U)) {
+    return @"";
+  }
+
+  streamEvent = [event objectForKey:@"stream_event"];
+  delta = [event objectForKey:@"delta"];
+  if (![delta isKindOfClass:[NSString class]]) {
+    delta = @"";
+  }
+
+  if ([streamEvent isEqualToString:@"content_delta"]) {
+    return StrappySessionStringFromWebViewCString(
+      strappy_webview_append_message_text_by_key_js(
+        [messageKey UTF8String],
+        [delta UTF8String]));
+  }
+  if ([streamEvent isEqualToString:@"reasoning_delta"]) {
+    return StrappySessionStringFromWebViewCString(
+      strappy_webview_append_reasoning_text_by_key_js(
+        [messageKey UTF8String],
+        [delta UTF8String]));
+  }
+
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  if (sessionId <= 0) {
+    return @"";
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return @"";
+  }
+
+  strappy_session_message_record_init(&record);
+  strappyError = NULL;
+  if (!strappy_db_load_session_message_by_key([databasePath UTF8String],
+                                              sessionId,
+                                              [messageKey UTF8String],
+                                              &record,
+                                              &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    strappy_session_message_record_destroy(&record);
+    return @"";
+  }
+
+  labels = StrappySessionWebViewLabels();
+  StrappySessionWebViewMessageFromRecord(&record, &message);
+  js = strappy_webview_message_update_js(&message, &labels);
+  strappy_session_message_record_destroy(&record);
+  return StrappySessionStringFromWebViewCString(js);
 }
 
 - (BOOL)streamingEnabled
