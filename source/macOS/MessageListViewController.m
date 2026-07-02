@@ -91,26 +91,6 @@ static long long StrappyMessageNumericIdentifier(NSDictionary *message)
   return [identifier longLongValue];
 }
 
-static NSString *StrappyMessageRole(NSDictionary *message)
-{
-  NSString *role;
-
-  if (![message isKindOfClass:[NSDictionary class]]) {
-    return @"";
-  }
-
-  role = [message objectForKey:@"role"];
-  if (![role isKindOfClass:[NSString class]]) {
-    return @"";
-  }
-  return role;
-}
-
-static BOOL StrappyMessageHasRole(NSDictionary *message, NSString *role)
-{
-  return [StrappyMessageRole(message) isEqualToString:role];
-}
-
 static const char *StrappyCString(NSString *string)
 {
   if (![string isKindOfClass:[NSString class]]) {
@@ -202,76 +182,6 @@ static void StrappyWebViewMessageFromDictionary(
   message->created_at = StrappyCString(createdAt);
 }
 
-static NSString *StrappyStatusHTML(NSString *text, BOOL retry)
-{
-  strappy_webview_labels labels;
-
-  labels = StrappyWebViewLabels();
-  return StrappyStringFromWebViewCString(
-    strappy_webview_status_html(StrappyCString(text), retry ? 1 : 0, &labels));
-}
-
-static NSString *StrappyElapsedThinkingText(NSTimeInterval startedAt)
-{
-  NSTimeInterval now;
-  NSTimeInterval interval;
-  unsigned long elapsed;
-  unsigned long minutes;
-  unsigned long seconds;
-
-  if (startedAt <= 0.0) {
-    return NSLocalizedString(@"Thinking", nil);
-  }
-
-  now = [NSDate timeIntervalSinceReferenceDate];
-  interval = now - startedAt;
-  if (interval < 0.0) {
-    interval = 0.0;
-  }
-
-  elapsed = (unsigned long)interval;
-  minutes = elapsed / 60UL;
-  seconds = elapsed % 60UL;
-  if (minutes > 0UL) {
-    return [NSString stringWithFormat:@"%@ %lum %02lus",
-                                      NSLocalizedString(@"Thinking", nil),
-                                      minutes,
-                                      seconds];
-  }
-
-  return [NSString stringWithFormat:@"%@ %lus",
-                                    NSLocalizedString(@"Thinking", nil),
-                                    seconds];
-}
-
-static NSString *StrappyElapsedThinkingStatusHTML(NSTimeInterval startedAt)
-{
-  return StrappyStatusHTML(StrappyElapsedThinkingText(startedAt), NO);
-}
-
-static NSString *StrappyElapsedCancelledText(NSTimeInterval startedAt)
-{
-  NSTimeInterval now;
-  NSTimeInterval interval;
-  unsigned long elapsed;
-
-  if (startedAt <= 0.0) {
-    elapsed = 0UL;
-  } else {
-    now = [NSDate timeIntervalSinceReferenceDate];
-    interval = now - startedAt;
-    if (interval < 0.0) {
-      interval = 0.0;
-    }
-    elapsed = (unsigned long)interval;
-  }
-
-  return [NSString stringWithFormat:@"%@ - %lu %@",
-                                    NSLocalizedString(@"Cancelled", nil),
-                                    elapsed,
-                                    NSLocalizedString(@"seconds", nil)];
-}
-
 static NSString *StrappyMessageHTML(NSDictionary *message,
                                     NSString *elementIdentifier,
                                     NSString *state,
@@ -288,123 +198,6 @@ static NSString *StrappyMessageHTML(NSDictionary *message,
                                  &labels,
                                  StrappyCString(state),
                                  StrappyCString(statusHTML)));
-}
-
-static NSString *StrappyPendingMessageHTML(NSString *prompt,
-                                           NSString *elementIdentifier,
-                                           NSString *state,
-                                           NSString *statusHTML,
-                                           NSString *promptGroupKey)
-{
-  strappy_webview_labels labels;
-  strappy_webview_message message;
-
-  labels = StrappyWebViewLabels();
-  memset(&message, 0, sizeof(message));
-  message.element_id = StrappyCString(elementIdentifier);
-  message.role = "user";
-  message.actor = "user";
-  message.kind = "prompt";
-  message.prompt_group_key = StrappyCString(promptGroupKey);
-  message.text = StrappyCString(prompt);
-  return StrappyStringFromWebViewCString(
-    strappy_webview_message_html(&message,
-                                 &labels,
-                                 StrappyCString(state),
-                                 StrappyCString(statusHTML)));
-}
-
-static NSString *StrappyHarnessMessageHTML(NSString *prompt,
-                                           NSString *elementIdentifier,
-                                           NSString *state,
-                                           NSString *statusHTML,
-                                           NSString *promptGroupKey)
-{
-  strappy_webview_labels labels;
-  strappy_webview_message message;
-
-  labels = StrappyWebViewLabels();
-  memset(&message, 0, sizeof(message));
-  message.element_id = StrappyCString(elementIdentifier);
-  message.role = "harness";
-  message.actor = "harness";
-  message.kind = "prompt";
-  message.prompt_group_key = StrappyCString(promptGroupKey);
-  message.text = StrappyCString(prompt);
-  return StrappyStringFromWebViewCString(
-    strappy_webview_message_html(&message,
-                                 &labels,
-                                 StrappyCString(state),
-                                 StrappyCString(statusHTML)));
-}
-
-static NSString *StrappyStreamingAssistantMessageHTML(NSString *elementIdentifier,
-                                                      NSString *text,
-                                                      NSString *reasoning,
-                                                      NSString *state,
-                                                      NSString *statusHTML,
-                                                      NSString *actor,
-                                                      NSString *promptGroupKey)
-{
-  strappy_webview_labels labels;
-
-  labels = StrappyWebViewLabels();
-  return StrappyStringFromWebViewCString(
-    strappy_webview_streaming_assistant_message_html(
-      StrappyCString(elementIdentifier),
-      StrappyCString(text),
-                                                 StrappyCString(reasoning),
-                                                 StrappyCString(state),
-                                                 StrappyCString(statusHTML),
-                                                 StrappyCString(actor),
-                                                 StrappyCString(promptGroupKey),
-                                                 &labels));
-}
-
-static NSString *StrappyToolActivityMessageHTML(NSString *elementIdentifier,
-                                                NSString *text,
-                                                NSString *state,
-                                                NSString *statusHTML,
-                                                NSString *actor,
-                                                NSString *promptGroupKey,
-                                                NSString *targetElementIdentifier)
-{
-  strappy_webview_labels labels;
-
-  labels = StrappyWebViewLabels();
-  return StrappyStringFromWebViewCString(
-    strappy_webview_tool_activity_message_html(StrappyCString(elementIdentifier),
-                                                   StrappyCString(text),
-                                                   StrappyCString(state),
-                                                   StrappyCString(statusHTML),
-                                                   StrappyCString(actor),
-                                                   StrappyCString(promptGroupKey),
-                                                   StrappyCString(targetElementIdentifier),
-                                                   &labels));
-}
-
-static NSString *StrappySetMessagePromptGroupJavaScript(NSString *elementIdentifier,
-                                                        NSString *promptGroupKey,
-                                                        NSString *actor)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_set_message_prompt_group_js(StrappyCString(elementIdentifier),
-                                                StrappyCString(promptGroupKey),
-                                                StrappyCString(actor)));
-}
-
-static NSString *StrappyMessageHTMLWithReasoning(NSDictionary *message,
-                                                 NSString *reasoning)
-{
-  strappy_webview_labels labels;
-  strappy_webview_message webMessage;
-
-  labels = StrappyWebViewLabels();
-  StrappyWebViewMessageFromDictionary(message, &webMessage);
-  return StrappyStringFromWebViewCString(
-    strappy_webview_message_html_with_reasoning(&webMessage,
-                                                StrappyCString(reasoning),
-                                                &labels));
 }
 
 static NSString *StrappyMessagesHTMLForRange(NSArray *messages,
@@ -428,114 +221,6 @@ static NSString *StrappyMessagesHTMLForRange(NSArray *messages,
     [html appendString:StrappyMessageHTML(message, nil, nil, nil)];
   }
   return html;
-}
-
-static NSString *StrappyAppendMessageJavaScript(NSString *messageHTML)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_append_message_js(StrappyCString(messageHTML)));
-}
-
-static NSString *StrappyReplaceMessageJavaScript(NSString *elementIdentifier,
-                                                 NSString *messageHTML)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_replace_message_js(StrappyCString(elementIdentifier),
-                                       StrappyCString(messageHTML)));
-}
-
-static NSString *StrappyInsertMessageBeforeJavaScript(NSString *beforeElementIdentifier,
-                                                      NSString *messageHTML)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_insert_message_before_js(StrappyCString(beforeElementIdentifier),
-                                             StrappyCString(messageHTML)));
-}
-
-static NSString *StrappySetMessageStateJavaScript(NSString *elementIdentifier,
-                                                  NSString *statusHTML,
-                                                  NSString *state)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_set_message_state_js(StrappyCString(elementIdentifier),
-                                         StrappyCString(statusHTML),
-                                         StrappyCString(state)));
-}
-
-static NSString *StrappySetMessageThinkingJavaScript(NSString *elementIdentifier,
-                                                     NSString *statusHTML)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_set_message_thinking_js(StrappyCString(elementIdentifier),
-                                            StrappyCString(statusHTML)));
-}
-
-static NSString *StrappyAppendMessageTextJavaScript(NSString *elementIdentifier,
-                                                    NSString *delta)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_append_message_text_js(StrappyCString(elementIdentifier),
-                                           StrappyCString(delta)));
-}
-
-static NSString *StrappyAppendReasoningTextJavaScript(NSString *elementIdentifier,
-                                                      NSString *delta)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_append_reasoning_text_js(StrappyCString(elementIdentifier),
-                                             StrappyCString(delta)));
-}
-
-static NSString *StrappyAppendMessageTextByKeyJavaScript(NSString *messageKey,
-                                                         NSString *delta)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_append_message_text_by_key_js(StrappyCString(messageKey),
-                                                  StrappyCString(delta)));
-}
-
-static NSString *StrappyAppendReasoningTextByKeyJavaScript(NSString *messageKey,
-                                                           NSString *delta)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_append_reasoning_text_by_key_js(StrappyCString(messageKey),
-                                                    StrappyCString(delta)));
-}
-
-static NSString *StrappyMoveMessageTextToReasoningJavaScript(
-  NSString *elementIdentifier)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_move_message_text_to_reasoning_js(
-      StrappyCString(elementIdentifier)));
-}
-
-static NSString *StrappyToolEventText(NSString *eventType,
-                                      NSString *toolCallIdentifier,
-                                      NSString *toolName,
-                                      NSString *argumentsJSON,
-                                      NSString *resultJSON)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_tool_event_text(StrappyCString(eventType),
-                                    StrappyCString(toolCallIdentifier),
-                                    StrappyCString(toolName),
-                                    StrappyCString(argumentsJSON),
-                                    StrappyCString(resultJSON)));
-}
-
-static NSString *StrappyAppendToolEventTextJavaScript(NSString *elementIdentifier,
-                                                      NSString *eventText)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_append_tool_event_text_js(StrappyCString(elementIdentifier),
-                                              StrappyCString(eventText)));
-}
-
-static NSString *StrappyRemoveMessageJavaScript(NSString *elementIdentifier)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_remove_message_js(StrappyCString(elementIdentifier)));
 }
 
 static NSString *StrappyPrependMessagesJavaScript(NSString *messagesHTML,
@@ -565,40 +250,16 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 - (void)sessionPromptDidFinish:(NSNotification *)notification;
 - (void)modelCatalogDidChange:(NSNotification *)notification;
 - (void)sendPromptDidFinish:(NSDictionary *)result;
-- (void)streamContentDeltaDidArrive:(NSDictionary *)delta;
-- (void)streamReasoningDeltaDidArrive:(NSDictionary *)delta;
-- (void)streamToolCallDidArrive:(NSDictionary *)event;
-- (void)streamToolResultDidArrive:(NSDictionary *)event;
-- (void)streamToolErrorDidArrive:(NSDictionary *)event;
-- (void)streamTurnDidStart:(NSDictionary *)event;
-- (void)streamTurnDidFinish:(NSDictionary *)event;
-- (void)applyStreamContentDeltaAndRelease:(NSDictionary *)delta;
-- (void)applyStreamReasoningDeltaAndRelease:(NSDictionary *)delta;
-- (void)applyStreamToolEventAndRelease:(NSDictionary *)event;
-- (void)applyStreamTurnStartAndRelease:(NSDictionary *)event;
-- (void)applyStreamTurnFinishAndRelease:(NSDictionary *)event;
-- (BOOL)applyDatabaseStreamEventIfPossible:(NSDictionary *)event;
-- (void)ensurePendingHarnessTurnWithPrompt:(NSString *)prompt;
-- (BOOL)streamEventUsesHarnessTarget:(NSDictionary *)event;
-- (void)scheduleStreamFlush;
 - (void)scheduleDatabaseReload;
-- (void)flushStreamDeltas;
-- (void)flushStreamDeltasFromTimer:(NSTimer *)timer;
 - (void)reloadDatabaseContentFromTimer:(NSTimer *)timer;
-- (void)appendPendingThinkingJavaScriptToString:(NSMutableString *)js;
-- (void)beginSendingPrompt:(NSString *)prompt reusingPendingMessage:(BOOL)reuse;
+- (void)beginSendingPrompt:(NSString *)prompt;
 - (void)setPromptCancellationRequested:(BOOL)requested;
 - (BOOL)promptCancellationRequested;
-- (void)showPromptCancellationRequested;
-- (void)retryFailedPrompt;
 - (void)loadEarlierMessages;
 - (NSString *)writeCurrentHTML;
 - (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error;
 - (void)layoutWebViewAndPromptBar;
-- (BOOL)streamDeltaAppliesToCurrentPendingMessage:(NSDictionary *)delta;
-- (BOOL)pendingAppliesToSessionIdentifier:(NSNumber *)identifier;
-- (BOOL)pendingAppliesToCurrentSession;
-- (void)clearPendingMessageState;
+- (void)clearRequestState;
 @end
 
 @implementation MessageListViewController
@@ -680,96 +341,11 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [super viewDidLayout];
 }
 
-- (BOOL)pendingAppliesToSessionIdentifier:(NSNumber *)identifier
+- (void)clearRequestState
 {
-  if (pendingMessageIdentifier_ == nil) {
-    return NO;
-  }
-  if ((sendingSessionId_ == nil) && (identifier == nil)) {
-    return YES;
-  }
-  if ((sendingSessionId_ != nil) && (identifier != nil) &&
-      [sendingSessionId_ isEqualToNumber:identifier]) {
-    return YES;
-  }
-  return NO;
-}
-
-- (BOOL)pendingAppliesToCurrentSession
-{
-  return [self pendingAppliesToSessionIdentifier:[session_ sessionIdentifier]];
-}
-
-- (void)clearPendingMessageState
-{
-  [streamFlushTimer_ invalidate];
-  [streamFlushTimer_ release];
-  streamFlushTimer_ = nil;
   [databaseReloadTimer_ invalidate];
   [databaseReloadTimer_ release];
   databaseReloadTimer_ = nil;
-  [pendingMessageIdentifier_ release];
-  pendingMessageIdentifier_ = nil;
-  [pendingAssistantMessageIdentifier_ release];
-  pendingAssistantMessageIdentifier_ = nil;
-  [pendingToolActivityIdentifier_ release];
-  pendingToolActivityIdentifier_ = nil;
-  [pendingHarnessMessageIdentifier_ release];
-  pendingHarnessMessageIdentifier_ = nil;
-  [pendingHarnessAssistantMessageIdentifier_ release];
-  pendingHarnessAssistantMessageIdentifier_ = nil;
-  [pendingHarnessToolActivityIdentifier_ release];
-  pendingHarnessToolActivityIdentifier_ = nil;
-  [pendingHarnessPrompt_ release];
-  pendingHarnessPrompt_ = nil;
-  [pendingPromptGroupKey_ release];
-  pendingPromptGroupKey_ = nil;
-  [pendingPrompt_ release];
-  pendingPrompt_ = nil;
-  [pendingErrorText_ release];
-  pendingErrorText_ = nil;
-  [sendingSessionId_ release];
-  sendingSessionId_ = nil;
-  [streamingAssistantText_ release];
-  streamingAssistantText_ = nil;
-  [streamingReasoningText_ release];
-  streamingReasoningText_ = nil;
-  [streamingToolActivityText_ release];
-  streamingToolActivityText_ = nil;
-  [streamingHarnessAssistantText_ release];
-  streamingHarnessAssistantText_ = nil;
-  [streamingHarnessReasoningText_ release];
-  streamingHarnessReasoningText_ = nil;
-  [streamingHarnessToolActivityText_ release];
-  streamingHarnessToolActivityText_ = nil;
-  [pendingAssistantTextDelta_ release];
-  pendingAssistantTextDelta_ = nil;
-  [pendingReasoningTextDelta_ release];
-  pendingReasoningTextDelta_ = nil;
-  [pendingToolActivityTextDelta_ release];
-  pendingToolActivityTextDelta_ = nil;
-  [pendingHarnessAssistantTextDelta_ release];
-  pendingHarnessAssistantTextDelta_ = nil;
-  [pendingHarnessReasoningTextDelta_ release];
-  pendingHarnessReasoningTextDelta_ = nil;
-  [pendingHarnessToolActivityTextDelta_ release];
-  pendingHarnessToolActivityTextDelta_ = nil;
-  pendingStartedAt_ = 0.0;
-  pendingHarnessStartedAt_ = 0.0;
-}
-
-- (void)scheduleStreamFlush
-{
-  if (streamFlushTimer_ != nil) {
-    return;
-  }
-
-  streamFlushTimer_ =
-    [[NSTimer scheduledTimerWithTimeInterval:0.5
-                                      target:self
-                                    selector:@selector(flushStreamDeltasFromTimer:)
-                                    userInfo:nil
-                                     repeats:NO] retain];
 }
 
 - (void)scheduleDatabaseReload
@@ -786,17 +362,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
                                      repeats:NO] retain];
 }
 
-- (void)flushStreamDeltasFromTimer:(NSTimer *)timer
-{
-  if (timer != streamFlushTimer_) {
-    return;
-  }
-
-  [streamFlushTimer_ release];
-  streamFlushTimer_ = nil;
-  [self flushStreamDeltas];
-}
-
 - (void)reloadDatabaseContentFromTimer:(NSTimer *)timer
 {
   if (timer != databaseReloadTimer_) {
@@ -808,114 +373,14 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [self reloadContent];
 }
 
-- (void)appendPendingThinkingJavaScriptToString:(NSMutableString *)js
-{
-  if (js == nil) {
-    return;
-  }
-
-  if ((pendingAssistantMessageIdentifier_ != nil) &&
-      (pendingStartedAt_ > 0.0)) {
-    [js appendString:
-      StrappySetMessageThinkingJavaScript(
-        pendingAssistantMessageIdentifier_,
-        StrappyElapsedThinkingStatusHTML(pendingStartedAt_))];
-  }
-
-  if ((pendingHarnessAssistantMessageIdentifier_ != nil) &&
-      (pendingHarnessStartedAt_ > 0.0)) {
-    [js appendString:
-      StrappySetMessageThinkingJavaScript(
-        pendingHarnessAssistantMessageIdentifier_,
-        StrappyElapsedThinkingStatusHTML(pendingHarnessStartedAt_))];
-  }
-}
-
-- (void)flushStreamDeltas
-{
-  NSMutableString *js;
-
-  if (streamFlushTimer_ != nil) {
-    [streamFlushTimer_ invalidate];
-    [streamFlushTimer_ release];
-    streamFlushTimer_ = nil;
-  }
-
-  js = [NSMutableString string];
-  if ((pendingAssistantMessageIdentifier_ != nil) &&
-      ([pendingAssistantTextDelta_ length] > 0U)) {
-    [js appendString:
-      StrappyAppendMessageTextJavaScript(pendingAssistantMessageIdentifier_,
-                                         pendingAssistantTextDelta_)];
-    [pendingAssistantTextDelta_ setString:@""];
-  }
-  if ((pendingAssistantMessageIdentifier_ != nil) &&
-      ([pendingReasoningTextDelta_ length] > 0U)) {
-    [js appendString:
-      StrappyAppendReasoningTextJavaScript(pendingAssistantMessageIdentifier_,
-                                           pendingReasoningTextDelta_)];
-    [pendingReasoningTextDelta_ setString:@""];
-  }
-  if ((pendingToolActivityIdentifier_ != nil) &&
-      ([pendingToolActivityTextDelta_ length] > 0U)) {
-    [js appendString:
-      StrappyAppendToolEventTextJavaScript(pendingToolActivityIdentifier_,
-                                           pendingToolActivityTextDelta_)];
-    [pendingToolActivityTextDelta_ setString:@""];
-  }
-  if ((pendingHarnessAssistantMessageIdentifier_ != nil) &&
-      ([pendingHarnessAssistantTextDelta_ length] > 0U)) {
-    [js appendString:
-      StrappyAppendMessageTextJavaScript(pendingHarnessAssistantMessageIdentifier_,
-                                         pendingHarnessAssistantTextDelta_)];
-    [pendingHarnessAssistantTextDelta_ setString:@""];
-  }
-  if ((pendingHarnessAssistantMessageIdentifier_ != nil) &&
-      ([pendingHarnessReasoningTextDelta_ length] > 0U)) {
-    [js appendString:
-      StrappyAppendReasoningTextJavaScript(pendingHarnessAssistantMessageIdentifier_,
-                                           pendingHarnessReasoningTextDelta_)];
-    [pendingHarnessReasoningTextDelta_ setString:@""];
-  }
-  if ((pendingHarnessToolActivityIdentifier_ != nil) &&
-      ([pendingHarnessToolActivityTextDelta_ length] > 0U)) {
-    [js appendString:
-      StrappyAppendToolEventTextJavaScript(pendingHarnessToolActivityIdentifier_,
-                                           pendingHarnessToolActivityTextDelta_)];
-    [pendingHarnessToolActivityTextDelta_ setString:@""];
-  }
-
-  if (sending_ && [self pendingAppliesToCurrentSession]) {
-    [self appendPendingThinkingJavaScriptToString:js];
-  }
-
-  if ([js length] > 0U) {
-    [self pushJavaScript:js];
-  }
-
-  if (sending_ && [self pendingAppliesToCurrentSession]) {
-    [self scheduleStreamFlush];
-  }
-}
-
 - (void)reloadWithSession:(StrappySession *)session
 {
-  NSNumber *identifier;
-
   if (![session isKindOfClass:[StrappySession class]]) {
     session = nil;
   }
 
-  identifier = [session sessionIdentifier];
-  if (![identifier isKindOfClass:[NSNumber class]]) {
-    identifier = nil;
-  }
-
-  if (![self pendingAppliesToSessionIdentifier:identifier]) {
-    [self clearPendingMessageState];
-  }
-
   if (session_ != session) {
+    [self clearRequestState];
     if (session_ != nil) {
       [[NSNotificationCenter defaultCenter] removeObserver:self
                                                       name:StrappySessionPromptDidFinishNotification
@@ -1115,9 +580,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   NSString *host;
 
   host = [url host];
-  if ([host isEqualToString:@"retry"]) {
-    [self retryFailedPrompt];
-  } else if ([host isEqualToString:@"load-more"]) {
+  if ([host isEqualToString:@"load-more"]) {
     [self loadEarlierMessages];
   }
 }
@@ -1167,9 +630,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   NSUInteger count;
   NSUInteger start;
   NSString *emptyText;
-  NSString *failureIdentifier;
-  NSString *failureStatusHTML;
-  BOOL hasPending;
   BOOL hasMessages;
 
   if (![messages isKindOfClass:[NSArray class]]) {
@@ -1182,15 +642,8 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     start = count - kStrappyInitialMessageLimit;
   }
   oldestRenderedMessageIndex_ = start;
-  renderedMessageCount_ = count - start;
-  lastKnownMessageIdentifier_ = 0LL;
-  if (count > 0U) {
-    lastKnownMessageIdentifier_ =
-      StrappyMessageNumericIdentifier([messages objectAtIndex:(count - 1U)]);
-  }
 
-  hasPending = [self pendingAppliesToCurrentSession];
-  hasMessages = ((count > 0U) || hasPending) ? YES : NO;
+  hasMessages = (count > 0U) ? YES : NO;
   if ([statusText_ length] > 0U) {
     emptyText = statusText_;
   } else if (error != nil) {
@@ -1205,118 +658,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   if (count > 0U) {
     [messagesHTML appendString:StrappyMessagesHTMLForRange(messages, start, count)];
   }
-  if (hasPending) {
-    failureIdentifier = nil;
-    failureStatusHTML = nil;
-    if (!sending_) {
-      NSString *failureText;
-
-      failureText = ([pendingErrorText_ length] > 0U) ?
-        pendingErrorText_ : NSLocalizedString(@"Failed to send.", nil);
-      failureStatusHTML = StrappyStatusHTML(failureText, YES);
-      if (pendingHarnessAssistantMessageIdentifier_ != nil) {
-        failureIdentifier = pendingHarnessAssistantMessageIdentifier_;
-      } else if (pendingAssistantMessageIdentifier_ != nil) {
-        failureIdentifier = pendingAssistantMessageIdentifier_;
-      } else {
-        failureIdentifier = pendingMessageIdentifier_;
-      }
-    }
-
-    [messagesHTML appendString:
-      StrappyPendingMessageHTML(pendingPrompt_,
-                                pendingMessageIdentifier_,
-                                ([failureIdentifier isEqualToString:pendingMessageIdentifier_] ?
-                                 @"error" : nil),
-                                ([failureIdentifier isEqualToString:pendingMessageIdentifier_] ?
-                                 failureStatusHTML : nil),
-                                pendingPromptGroupKey_)];
-    if (pendingToolActivityIdentifier_ != nil) {
-      [messagesHTML appendString:
-        StrappyToolActivityMessageHTML(
-          pendingToolActivityIdentifier_,
-          streamingToolActivityText_,
-          (sending_
-           ? @"pending"
-           : ([failureIdentifier isEqualToString:pendingToolActivityIdentifier_] ?
-              @"error" : nil)),
-          (sending_
-           ? StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO)
-           : ([failureIdentifier isEqualToString:pendingToolActivityIdentifier_] ?
-              failureStatusHTML : nil)),
-          @"user",
-          pendingPromptGroupKey_,
-          pendingAssistantMessageIdentifier_)];
-    }
-    if (pendingAssistantMessageIdentifier_ != nil) {
-      [messagesHTML appendString:
-        StrappyStreamingAssistantMessageHTML(pendingAssistantMessageIdentifier_,
-                                             streamingAssistantText_,
-                                             streamingReasoningText_,
-                                             (sending_
-                                              ? @"pending"
-                                              : ([failureIdentifier isEqualToString:
-                                                  pendingAssistantMessageIdentifier_] ?
-                                                 @"error" : nil)),
-                                             (sending_
-                                              ? StrappyElapsedThinkingStatusHTML(pendingStartedAt_)
-                                              : ([failureIdentifier isEqualToString:
-                                                  pendingAssistantMessageIdentifier_] ?
-                                                 failureStatusHTML : nil)),
-                                             @"user",
-                                             pendingPromptGroupKey_)];
-    }
-    if (pendingHarnessMessageIdentifier_ != nil) {
-      [messagesHTML appendString:
-        StrappyHarnessMessageHTML(pendingHarnessPrompt_,
-                                  pendingHarnessMessageIdentifier_,
-                                  ([failureIdentifier isEqualToString:
-                                    pendingHarnessMessageIdentifier_] ?
-                                   @"error" : nil),
-                                  ([failureIdentifier isEqualToString:
-                                    pendingHarnessMessageIdentifier_] ?
-                                   failureStatusHTML : nil),
-                                  pendingPromptGroupKey_)];
-      if (pendingHarnessToolActivityIdentifier_ != nil) {
-        [messagesHTML appendString:
-          StrappyToolActivityMessageHTML(
-            pendingHarnessToolActivityIdentifier_,
-            streamingHarnessToolActivityText_,
-            (sending_
-             ? @"pending"
-             : ([failureIdentifier isEqualToString:
-                 pendingHarnessToolActivityIdentifier_] ?
-                @"error" : nil)),
-            (sending_
-             ? StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO)
-             : ([failureIdentifier isEqualToString:
-                 pendingHarnessToolActivityIdentifier_] ?
-                failureStatusHTML : nil)),
-            @"harness",
-            pendingPromptGroupKey_,
-            pendingHarnessAssistantMessageIdentifier_)];
-      }
-      if (pendingHarnessAssistantMessageIdentifier_ != nil) {
-        [messagesHTML appendString:
-          StrappyStreamingAssistantMessageHTML(
-            pendingHarnessAssistantMessageIdentifier_,
-            streamingHarnessAssistantText_,
-            streamingHarnessReasoningText_,
-            (sending_
-             ? @"pending"
-             : ([failureIdentifier isEqualToString:
-                 pendingHarnessAssistantMessageIdentifier_] ?
-                @"error" : nil)),
-            (sending_
-             ? StrappyElapsedThinkingStatusHTML(pendingHarnessStartedAt_)
-             : ([failureIdentifier isEqualToString:
-                 pendingHarnessAssistantMessageIdentifier_] ?
-                failureStatusHTML : nil)),
-            @"harness",
-            pendingPromptGroupKey_)];
-      }
-    }
-  }
 
   return StrappyMessagesPageHTML(messagesHTML,
                                  emptyText,
@@ -1328,7 +669,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
                  didSubmitPrompt:(NSString *)prompt
 {
   (void)controller;
-  [self beginSendingPrompt:prompt reusingPendingMessage:NO];
+  [self beginSendingPrompt:prompt];
 }
 
 - (void)promptSendViewControllerDidCancelPrompt:
@@ -1340,7 +681,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   }
   [self setPromptCancellationRequested:YES];
   [sendController_ setCancellationRequested:YES];
-  [self showPromptCancellationRequested];
 }
 
 - (void)promptSendViewControllerDidChangeHeight:
@@ -1374,55 +714,12 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   return requested;
 }
 
-- (void)showPromptCancellationRequested
+- (void)beginSendingPrompt:(NSString *)prompt
 {
-  NSMutableString *js;
-  NSMutableString *assistantText;
-  NSString *assistantIdentifier;
-  NSString *cancelledText;
-  NSString *appendText;
-
-  if (![self pendingAppliesToCurrentSession]) {
-    return;
-  }
-
-  [self flushStreamDeltas];
-
-  assistantIdentifier = pendingAssistantMessageIdentifier_;
-  assistantText = streamingAssistantText_;
-  cancelledText = StrappyElapsedCancelledText(pendingStartedAt_);
-
-  if (assistantIdentifier == nil) {
-    return;
-  }
-  if (assistantText == nil) {
-    streamingAssistantText_ = [[NSMutableString alloc] init];
-    assistantText = streamingAssistantText_;
-  }
-
-  appendText = ([assistantText length] > 0U) ?
-    [@"\n\n" stringByAppendingString:cancelledText] :
-    cancelledText;
-  [assistantText appendString:appendText];
-
-  js = [NSMutableString string];
-  [js appendString:StrappyAppendMessageTextJavaScript(assistantIdentifier,
-                                                     appendText)];
-  [js appendString:
-    StrappySetMessageStateJavaScript(assistantIdentifier,
-                                     StrappyStatusHTML(cancelledText, NO),
-                                     @"cancelled")];
-  [self pushJavaScript:js];
-}
-
-- (void)beginSendingPrompt:(NSString *)prompt reusingPendingMessage:(BOOL)reuse
-{
-  NSMutableDictionary *streamContext;
   NSString *promptToSend;
   NSError *startError;
   BOOL shouldStream;
   BOOL didStartPrompt;
-  static unsigned long pendingCounter = 0UL;
 
   if (sending_) {
     return;
@@ -1445,154 +742,18 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [sendController_ setSending:YES];
   [sendController_ setCancellationRequested:NO];
 
-  if (!reuse || (pendingMessageIdentifier_ == nil)) {
-    NSMutableString *js;
+  [self clearRequestState];
+  [self reloadContent];
 
-    [self clearPendingMessageState];
-    pendingCounter++;
-    pendingMessageIdentifier_ =
-      [[NSString stringWithFormat:@"pending-%lu", pendingCounter] retain];
-    pendingAssistantMessageIdentifier_ =
-      [[NSString stringWithFormat:@"pending-%lu-assistant", pendingCounter] retain];
-    pendingToolActivityIdentifier_ =
-      [[NSString stringWithFormat:@"pending-%lu-tools", pendingCounter] retain];
-    pendingPrompt_ = [promptToSend copy];
-    sendingSessionId_ = [[session_ sessionIdentifier] retain];
-    pendingStartedAt_ = [NSDate timeIntervalSinceReferenceDate];
-    pendingHarnessStartedAt_ = 0.0;
-    streamingAssistantText_ = [[NSMutableString alloc] init];
-    streamingReasoningText_ = [[NSMutableString alloc] init];
-    streamingToolActivityText_ = [[NSMutableString alloc] init];
-    pendingAssistantTextDelta_ = [[NSMutableString alloc] init];
-    pendingReasoningTextDelta_ = [[NSMutableString alloc] init];
-    pendingToolActivityTextDelta_ = [[NSMutableString alloc] init];
-    pendingHarnessAssistantTextDelta_ = [[NSMutableString alloc] init];
-    pendingHarnessReasoningTextDelta_ = [[NSMutableString alloc] init];
-    pendingHarnessToolActivityTextDelta_ = [[NSMutableString alloc] init];
-
-    js = [NSMutableString string];
-    [js appendString:
-      StrappyAppendMessageJavaScript(
-        StrappyPendingMessageHTML(promptToSend,
-                                  pendingMessageIdentifier_,
-                                  nil,
-                                  nil,
-                                  nil))];
-    [js appendString:
-      StrappyAppendMessageJavaScript(
-        StrappyToolActivityMessageHTML(
-          pendingToolActivityIdentifier_,
-          streamingToolActivityText_,
-          @"pending",
-          StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO),
-          @"user",
-          pendingPromptGroupKey_,
-          pendingAssistantMessageIdentifier_))];
-    [js appendString:
-      StrappyAppendMessageJavaScript(
-        StrappyStreamingAssistantMessageHTML(
-          pendingAssistantMessageIdentifier_,
-          streamingAssistantText_,
-          streamingReasoningText_,
-          @"pending",
-          StrappyElapsedThinkingStatusHTML(pendingStartedAt_),
-          @"user",
-          pendingPromptGroupKey_))];
-    [self pushJavaScript:js];
-  } else {
-    NSMutableString *js;
-
-    [pendingErrorText_ release];
-    pendingErrorText_ = nil;
-    [pendingAssistantMessageIdentifier_ release];
-    pendingAssistantMessageIdentifier_ = nil;
-    [pendingToolActivityIdentifier_ release];
-    pendingToolActivityIdentifier_ = nil;
-    [pendingHarnessMessageIdentifier_ release];
-    pendingHarnessMessageIdentifier_ = nil;
-    [pendingHarnessAssistantMessageIdentifier_ release];
-    pendingHarnessAssistantMessageIdentifier_ = nil;
-    [pendingHarnessToolActivityIdentifier_ release];
-    pendingHarnessToolActivityIdentifier_ = nil;
-    [pendingHarnessPrompt_ release];
-    pendingHarnessPrompt_ = nil;
-
-    pendingCounter++;
-    pendingAssistantMessageIdentifier_ =
-      [[NSString stringWithFormat:@"pending-%lu-assistant", pendingCounter] retain];
-    pendingToolActivityIdentifier_ =
-      [[NSString stringWithFormat:@"pending-%lu-tools", pendingCounter] retain];
-
-    [streamingAssistantText_ release];
-    streamingAssistantText_ = [[NSMutableString alloc] init];
-    [streamingReasoningText_ release];
-    streamingReasoningText_ = [[NSMutableString alloc] init];
-    [streamingToolActivityText_ release];
-    streamingToolActivityText_ = [[NSMutableString alloc] init];
-    [streamingHarnessAssistantText_ release];
-    streamingHarnessAssistantText_ = nil;
-    [streamingHarnessReasoningText_ release];
-    streamingHarnessReasoningText_ = nil;
-    [streamingHarnessToolActivityText_ release];
-    streamingHarnessToolActivityText_ = nil;
-    pendingStartedAt_ = [NSDate timeIntervalSinceReferenceDate];
-    pendingHarnessStartedAt_ = 0.0;
-    [pendingAssistantTextDelta_ release];
-    pendingAssistantTextDelta_ = [[NSMutableString alloc] init];
-    [pendingReasoningTextDelta_ release];
-    pendingReasoningTextDelta_ = [[NSMutableString alloc] init];
-    [pendingToolActivityTextDelta_ release];
-    pendingToolActivityTextDelta_ = [[NSMutableString alloc] init];
-    [pendingHarnessAssistantTextDelta_ release];
-    pendingHarnessAssistantTextDelta_ = [[NSMutableString alloc] init];
-    [pendingHarnessReasoningTextDelta_ release];
-    pendingHarnessReasoningTextDelta_ = [[NSMutableString alloc] init];
-    [pendingHarnessToolActivityTextDelta_ release];
-    pendingHarnessToolActivityTextDelta_ = [[NSMutableString alloc] init];
-
-    js = [NSMutableString string];
-    [js appendString:
-      StrappySetMessageStateJavaScript(pendingMessageIdentifier_,
-                                       nil,
-                                       nil)];
-    [js appendString:
-      StrappyAppendMessageJavaScript(
-        StrappyToolActivityMessageHTML(
-          pendingToolActivityIdentifier_,
-          streamingToolActivityText_,
-          @"pending",
-          StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO),
-          @"user",
-          pendingPromptGroupKey_,
-          pendingAssistantMessageIdentifier_))];
-    [js appendString:
-      StrappyAppendMessageJavaScript(
-        StrappyStreamingAssistantMessageHTML(
-          pendingAssistantMessageIdentifier_,
-          streamingAssistantText_,
-          streamingReasoningText_,
-          @"pending",
-          StrappyElapsedThinkingStatusHTML(pendingStartedAt_),
-          @"user",
-          pendingPromptGroupKey_))];
-    [self pushJavaScript:js];
-  }
-
-  streamContext = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
-    pendingMessageIdentifier_, @"pending_id",
-    pendingAssistantMessageIdentifier_, @"assistant_pending_id",
-    [NSNumber numberWithLongLong:lastKnownMessageIdentifier_], @"previous_last_id",
-    [session_ sessionIdentifier], @"session_id",
-    nil];
   startError = nil;
   shouldStream = [session_ streamingEnabled];
   if (shouldStream) {
     didStartPrompt = [session_ beginStreamingPrompt:promptToSend
-                                           context:streamContext
+                                           context:nil
                                              error:&startError];
   } else {
     didStartPrompt = [session_ beginNonStreamingPrompt:promptToSend
-                                              context:streamContext
+                                              context:nil
                                                 error:&startError];
   }
   if (!didStartPrompt) {
@@ -1603,22 +764,12 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     if ([errorMessage length] == 0U) {
       errorMessage = NSLocalizedString(@"Prompt failed.", nil);
     }
-    result = [[NSMutableDictionary alloc] initWithDictionary:streamContext];
+    result = [[NSMutableDictionary alloc] init];
     [result setObject:errorMessage forKey:@"error"];
     [self sendPromptDidFinish:result];
     [result release];
   }
-  [streamContext release];
   [promptToSend release];
-  [self scheduleStreamFlush];
-}
-
-- (void)retryFailedPrompt
-{
-  if (sending_ || (pendingPrompt_ == nil)) {
-    return;
-  }
-  [self beginSendingPrompt:pendingPrompt_ reusingPendingMessage:YES];
 }
 
 - (void)modelCatalogDidChange:(NSNotification *)notification
@@ -1630,7 +781,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 - (void)sessionStreamEvent:(NSNotification *)notification
 {
   NSDictionary *event;
-  NSString *streamEvent;
 
   if ([notification object] != session_) {
     return;
@@ -1641,598 +791,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     return;
   }
 
-  if (![self streamDeltaAppliesToCurrentPendingMessage:event]) {
-    if ([self applyDatabaseStreamEventIfPossible:event]) {
-      return;
-    }
-    [self scheduleDatabaseReload];
-    return;
-  }
-
-  streamEvent = [event objectForKey:@"stream_event"];
-  if ([streamEvent isEqualToString:@"content_delta"]) {
-    [self streamContentDeltaDidArrive:event];
-  } else if ([streamEvent isEqualToString:@"reasoning_delta"]) {
-    [self streamReasoningDeltaDidArrive:event];
-  } else if ([streamEvent isEqualToString:@"tool_call"]) {
-    [self streamToolCallDidArrive:event];
-  } else if ([streamEvent isEqualToString:@"tool_result"]) {
-    [self streamToolResultDidArrive:event];
-  } else if ([streamEvent isEqualToString:@"tool_error"]) {
-    [self streamToolErrorDidArrive:event];
-  } else if ([streamEvent isEqualToString:@"turn_started"]) {
-    [self streamTurnDidStart:event];
-  } else if ([streamEvent isEqualToString:@"turn_finished"]) {
-    [self streamTurnDidFinish:event];
-  }
-}
-
-- (void)streamContentDeltaDidArrive:(NSDictionary *)delta
-{
-  NSDictionary *retainedDelta;
-
-  retainedDelta = [delta retain];
-  [self performSelectorOnMainThread:@selector(applyStreamContentDeltaAndRelease:)
-                         withObject:retainedDelta
-                      waitUntilDone:NO];
-}
-
-- (void)streamReasoningDeltaDidArrive:(NSDictionary *)delta
-{
-  NSDictionary *retainedDelta;
-
-  retainedDelta = [delta retain];
-  [self performSelectorOnMainThread:@selector(applyStreamReasoningDeltaAndRelease:)
-                         withObject:retainedDelta
-                      waitUntilDone:NO];
-}
-
-- (void)streamToolCallDidArrive:(NSDictionary *)event
-{
-  NSDictionary *retainedEvent;
-
-  retainedEvent = [event retain];
-  [self performSelectorOnMainThread:@selector(applyStreamToolEventAndRelease:)
-                         withObject:retainedEvent
-                      waitUntilDone:NO];
-}
-
-- (void)streamToolResultDidArrive:(NSDictionary *)event
-{
-  NSDictionary *retainedEvent;
-
-  retainedEvent = [event retain];
-  [self performSelectorOnMainThread:@selector(applyStreamToolEventAndRelease:)
-                         withObject:retainedEvent
-                      waitUntilDone:NO];
-}
-
-- (void)streamToolErrorDidArrive:(NSDictionary *)event
-{
-  NSDictionary *retainedEvent;
-
-  retainedEvent = [event retain];
-  [self performSelectorOnMainThread:@selector(applyStreamToolEventAndRelease:)
-                         withObject:retainedEvent
-                      waitUntilDone:NO];
-}
-
-- (void)streamTurnDidStart:(NSDictionary *)event
-{
-  NSDictionary *retainedEvent;
-
-  retainedEvent = [event retain];
-  [self performSelectorOnMainThread:@selector(applyStreamTurnStartAndRelease:)
-                         withObject:retainedEvent
-                      waitUntilDone:NO];
-}
-
-- (void)streamTurnDidFinish:(NSDictionary *)event
-{
-  NSDictionary *retainedEvent;
-
-  retainedEvent = [event retain];
-  [self performSelectorOnMainThread:@selector(applyStreamTurnFinishAndRelease:)
-                         withObject:retainedEvent
-                      waitUntilDone:NO];
-}
-
-- (BOOL)streamDeltaAppliesToCurrentPendingMessage:(NSDictionary *)delta
-{
-  NSDictionary *context;
-  NSString *pendingIdentifier;
-  NSString *assistantPendingIdentifier;
-
-  if (![delta isKindOfClass:[NSDictionary class]]) {
-    return NO;
-  }
-
-  context = [delta objectForKey:@"context"];
-  if (![context isKindOfClass:[NSDictionary class]]) {
-    return NO;
-  }
-
-  pendingIdentifier = [context objectForKey:@"pending_id"];
-  assistantPendingIdentifier = [context objectForKey:@"assistant_pending_id"];
-  if (![pendingIdentifier isKindOfClass:[NSString class]] ||
-      ![assistantPendingIdentifier isKindOfClass:[NSString class]]) {
-    return NO;
-  }
-
-  if ((pendingMessageIdentifier_ == nil) ||
-      ![pendingMessageIdentifier_ isEqualToString:pendingIdentifier]) {
-    return NO;
-  }
-
-  if ((pendingAssistantMessageIdentifier_ == nil) ||
-      ![pendingAssistantMessageIdentifier_ isEqualToString:assistantPendingIdentifier]) {
-    return NO;
-  }
-
-  return [self pendingAppliesToCurrentSession];
-}
-
-- (BOOL)applyDatabaseStreamEventIfPossible:(NSDictionary *)event
-{
-  NSString *streamEvent;
-  NSString *messageKey;
-  NSString *text;
-  NSString *js;
-
-  if (![event isKindOfClass:[NSDictionary class]]) {
-    return NO;
-  }
-
-  streamEvent = [event objectForKey:@"stream_event"];
-  messageKey = [event objectForKey:@"message_key"];
-  text = [event objectForKey:@"delta"];
-  if (![streamEvent isKindOfClass:[NSString class]] ||
-      ![messageKey isKindOfClass:[NSString class]] ||
-      ([messageKey length] == 0U) ||
-      ![text isKindOfClass:[NSString class]] ||
-      ([text length] == 0U)) {
-    return NO;
-  }
-
-  if ([streamEvent isEqualToString:@"content_delta"]) {
-    js = StrappyAppendMessageTextByKeyJavaScript(messageKey, text);
-  } else if ([streamEvent isEqualToString:@"reasoning_delta"]) {
-    js = StrappyAppendReasoningTextByKeyJavaScript(messageKey, text);
-  } else {
-    return NO;
-  }
-
-  if ([js length] == 0U) {
-    return NO;
-  }
-  [self pushJavaScript:js];
-  return YES;
-}
-
-- (BOOL)streamEventUsesHarnessTarget:(NSDictionary *)event
-{
-  NSString *actor;
-  NSString *renderRole;
-
-  actor = [event objectForKey:@"actor"];
-  if ([actor isKindOfClass:[NSString class]] &&
-      [actor isEqualToString:@"harness"]) {
-    return YES;
-  }
-
-  renderRole = [event objectForKey:@"render_role"];
-  return ([renderRole isKindOfClass:[NSString class]] &&
-          [renderRole isEqualToString:@"harness"]) ? YES : NO;
-}
-
-- (void)ensurePendingHarnessTurnWithPrompt:(NSString *)prompt
-{
-  NSMutableString *js;
-  NSString *promptText;
-
-  if (pendingHarnessMessageIdentifier_ != nil) {
-    return;
-  }
-
-  if ((pendingMessageIdentifier_ == nil) ||
-      (pendingAssistantMessageIdentifier_ == nil)) {
-    return;
-  }
-
-  promptText = ([prompt isKindOfClass:[NSString class]] &&
-                ([prompt length] > 0U)) ?
-    prompt : NSLocalizedString(@"Learning Summary", nil);
-
-  pendingHarnessMessageIdentifier_ =
-    [[pendingMessageIdentifier_ stringByAppendingString:@"-harness"] retain];
-  pendingHarnessAssistantMessageIdentifier_ =
-    [[pendingMessageIdentifier_ stringByAppendingString:@"-harness-assistant"] retain];
-  pendingHarnessToolActivityIdentifier_ =
-    [[pendingMessageIdentifier_ stringByAppendingString:@"-harness-tools"] retain];
-  pendingHarnessPrompt_ = [promptText copy];
-  pendingHarnessStartedAt_ = [NSDate timeIntervalSinceReferenceDate];
-  streamingHarnessAssistantText_ = [[NSMutableString alloc] init];
-  streamingHarnessReasoningText_ = [[NSMutableString alloc] init];
-  streamingHarnessToolActivityText_ = [[NSMutableString alloc] init];
-  if (pendingHarnessAssistantTextDelta_ == nil) {
-    pendingHarnessAssistantTextDelta_ = [[NSMutableString alloc] init];
-  }
-  if (pendingHarnessReasoningTextDelta_ == nil) {
-    pendingHarnessReasoningTextDelta_ = [[NSMutableString alloc] init];
-  }
-  if (pendingHarnessToolActivityTextDelta_ == nil) {
-    pendingHarnessToolActivityTextDelta_ = [[NSMutableString alloc] init];
-  }
-
-  js = [NSMutableString string];
-  [js appendString:
-    StrappyAppendMessageJavaScript(
-      StrappyHarnessMessageHTML(promptText,
-                                pendingHarnessMessageIdentifier_,
-                                nil,
-                                nil,
-                                pendingPromptGroupKey_))];
-  [js appendString:
-    StrappyAppendMessageJavaScript(
-      StrappyToolActivityMessageHTML(
-        pendingHarnessToolActivityIdentifier_,
-        streamingHarnessToolActivityText_,
-        @"pending",
-        StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO),
-        @"harness",
-        pendingPromptGroupKey_,
-        pendingHarnessAssistantMessageIdentifier_))];
-  [js appendString:
-    StrappyAppendMessageJavaScript(
-      StrappyStreamingAssistantMessageHTML(
-        pendingHarnessAssistantMessageIdentifier_,
-        streamingHarnessAssistantText_,
-        streamingHarnessReasoningText_,
-        @"pending",
-        StrappyElapsedThinkingStatusHTML(pendingHarnessStartedAt_),
-        @"harness",
-        pendingPromptGroupKey_))];
-  [self pushJavaScript:js];
-}
-
-- (void)applyStreamTurnStartAndRelease:(NSDictionary *)event
-{
-  NSMutableString *js;
-  NSString *prompt;
-  NSString *promptGroupKey;
-  BOOL harnessTarget;
-
-  if (![self streamDeltaAppliesToCurrentPendingMessage:event]) {
-    [event release];
-    return;
-  }
-
-  promptGroupKey = [event objectForKey:@"prompt_group_key"];
-  if ([promptGroupKey isKindOfClass:[NSString class]] &&
-      ([promptGroupKey length] > 0U)) {
-    [pendingPromptGroupKey_ release];
-    pendingPromptGroupKey_ = [promptGroupKey copy];
-  }
-
-  harnessTarget = [self streamEventUsesHarnessTarget:event];
-  if (harnessTarget) {
-    prompt = [event objectForKey:@"delta"];
-    if (![prompt isKindOfClass:[NSString class]]) {
-      prompt = nil;
-    }
-    [self ensurePendingHarnessTurnWithPrompt:prompt];
-  } else if (pendingPromptGroupKey_ != nil) {
-    js = [NSMutableString string];
-    if (pendingMessageIdentifier_ != nil) {
-      [js appendString:
-        StrappySetMessagePromptGroupJavaScript(pendingMessageIdentifier_,
-                                               pendingPromptGroupKey_,
-                                               @"user")];
-    }
-    if (pendingToolActivityIdentifier_ != nil) {
-      [js appendString:
-        StrappySetMessagePromptGroupJavaScript(pendingToolActivityIdentifier_,
-                                               pendingPromptGroupKey_,
-                                               @"user")];
-    }
-    if (pendingAssistantMessageIdentifier_ != nil) {
-      [js appendString:
-        StrappySetMessagePromptGroupJavaScript(pendingAssistantMessageIdentifier_,
-                                               pendingPromptGroupKey_,
-                                               @"user")];
-    }
-    if ([js length] > 0U) {
-      [self pushJavaScript:js];
-    }
-  }
-  [event release];
-}
-
-- (void)applyStreamTurnFinishAndRelease:(NSDictionary *)event
-{
-  if ([self streamDeltaAppliesToCurrentPendingMessage:event]) {
-    [self flushStreamDeltas];
-  }
-  [event release];
-}
-
-- (void)applyStreamContentDeltaAndRelease:(NSDictionary *)delta
-{
-  NSMutableString *assistantText;
-  NSString *assistantIdentifier;
-  NSString *text;
-  BOOL harnessTarget;
-
-  if (![self streamDeltaAppliesToCurrentPendingMessage:delta]) {
-    [delta release];
-    return;
-  }
-
-  text = [delta objectForKey:@"delta"];
-  if (![text isKindOfClass:[NSString class]] || ([text length] == 0U)) {
-    [delta release];
-    return;
-  }
-
-  harnessTarget = [self streamEventUsesHarnessTarget:delta];
-  if (harnessTarget) {
-    [self ensurePendingHarnessTurnWithPrompt:nil];
-    if (streamingHarnessAssistantText_ == nil) {
-      streamingHarnessAssistantText_ = [[NSMutableString alloc] init];
-    }
-    if (pendingHarnessAssistantTextDelta_ == nil) {
-      pendingHarnessAssistantTextDelta_ = [[NSMutableString alloc] init];
-    }
-    assistantText = streamingHarnessAssistantText_;
-    assistantIdentifier = pendingHarnessAssistantMessageIdentifier_;
-  } else {
-    if (streamingAssistantText_ == nil) {
-      streamingAssistantText_ = [[NSMutableString alloc] init];
-    }
-    if (pendingAssistantTextDelta_ == nil) {
-      pendingAssistantTextDelta_ = [[NSMutableString alloc] init];
-    }
-    assistantText = streamingAssistantText_;
-    assistantIdentifier = pendingAssistantMessageIdentifier_;
-  }
-
-  if (assistantIdentifier == nil) {
-    [delta release];
-    return;
-  }
-
-  [assistantText appendString:text];
-  if (harnessTarget) {
-    [pendingHarnessAssistantTextDelta_ appendString:text];
-  } else {
-    [pendingAssistantTextDelta_ appendString:text];
-  }
-  [self scheduleStreamFlush];
-
-  [delta release];
-}
-
-- (void)applyStreamReasoningDeltaAndRelease:(NSDictionary *)delta
-{
-  NSMutableString *reasoningText;
-  NSString *assistantIdentifier;
-  NSString *text;
-  BOOL harnessTarget;
-
-  if (![self streamDeltaAppliesToCurrentPendingMessage:delta]) {
-    [delta release];
-    return;
-  }
-
-  text = [delta objectForKey:@"delta"];
-  if (![text isKindOfClass:[NSString class]] || ([text length] == 0U)) {
-    [delta release];
-    return;
-  }
-
-  harnessTarget = [self streamEventUsesHarnessTarget:delta];
-  if (harnessTarget) {
-    [self ensurePendingHarnessTurnWithPrompt:nil];
-    if (streamingHarnessReasoningText_ == nil) {
-      streamingHarnessReasoningText_ = [[NSMutableString alloc] init];
-    }
-    if (pendingHarnessReasoningTextDelta_ == nil) {
-      pendingHarnessReasoningTextDelta_ = [[NSMutableString alloc] init];
-    }
-    reasoningText = streamingHarnessReasoningText_;
-    assistantIdentifier = pendingHarnessAssistantMessageIdentifier_;
-  } else {
-    if (streamingReasoningText_ == nil) {
-      streamingReasoningText_ = [[NSMutableString alloc] init];
-    }
-    if (pendingReasoningTextDelta_ == nil) {
-      pendingReasoningTextDelta_ = [[NSMutableString alloc] init];
-    }
-    reasoningText = streamingReasoningText_;
-    assistantIdentifier = pendingAssistantMessageIdentifier_;
-  }
-
-  if (assistantIdentifier == nil) {
-    [delta release];
-    return;
-  }
-
-  [reasoningText appendString:text];
-  if (harnessTarget) {
-    [pendingHarnessReasoningTextDelta_ appendString:text];
-  } else {
-    [pendingReasoningTextDelta_ appendString:text];
-  }
-  [self scheduleStreamFlush];
-
-  [delta release];
-}
-
-- (void)applyStreamToolEventAndRelease:(NSDictionary *)event
-{
-  NSMutableString *js;
-  NSString *eventType;
-  NSString *toolCallIdentifier;
-  NSString *toolName;
-  NSString *argumentsJSON;
-  NSString *resultJSON;
-  NSString *eventText;
-  NSString *assistantIdentifier;
-  NSString *toolActivityIdentifier;
-  NSMutableString *assistantText;
-  NSMutableString *reasoningText;
-  NSMutableString *toolActivityText;
-  BOOL harnessTarget;
-  BOOL createdToolActivity;
-  BOOL appendToolEventImmediately;
-
-  if (![self streamDeltaAppliesToCurrentPendingMessage:event]) {
-    [event release];
-    return;
-  }
-
-  eventType = [event objectForKey:@"event_type"];
-  if (![eventType isKindOfClass:[NSString class]] || ([eventType length] == 0U)) {
-    eventType = @"call";
-  }
-  toolCallIdentifier = [event objectForKey:@"tool_call_id"];
-  if (![toolCallIdentifier isKindOfClass:[NSString class]]) {
-    toolCallIdentifier = @"";
-  }
-  toolName = [event objectForKey:@"tool_name"];
-  if (![toolName isKindOfClass:[NSString class]]) {
-    toolName = @"";
-  }
-  argumentsJSON = [event objectForKey:@"arguments_json"];
-  if (![argumentsJSON isKindOfClass:[NSString class]]) {
-    argumentsJSON = @"";
-  }
-  resultJSON = [event objectForKey:@"result_json"];
-  if (![resultJSON isKindOfClass:[NSString class]]) {
-    resultJSON = @"";
-  }
-
-  eventText = StrappyToolEventText(eventType,
-                                   toolCallIdentifier,
-                                   toolName,
-                                   argumentsJSON,
-                                   resultJSON);
-  if ([eventText length] == 0U) {
-    [event release];
-    return;
-  }
-
-  harnessTarget = [self streamEventUsesHarnessTarget:event];
-  if (harnessTarget) {
-    [self ensurePendingHarnessTurnWithPrompt:nil];
-    assistantIdentifier = pendingHarnessAssistantMessageIdentifier_;
-    toolActivityIdentifier = pendingHarnessToolActivityIdentifier_;
-    if (streamingHarnessAssistantText_ == nil) {
-      streamingHarnessAssistantText_ = [[NSMutableString alloc] init];
-    }
-    if (streamingHarnessReasoningText_ == nil) {
-      streamingHarnessReasoningText_ = [[NSMutableString alloc] init];
-    }
-    if (streamingHarnessToolActivityText_ == nil) {
-      streamingHarnessToolActivityText_ = [[NSMutableString alloc] init];
-    }
-    if (pendingHarnessToolActivityTextDelta_ == nil) {
-      pendingHarnessToolActivityTextDelta_ = [[NSMutableString alloc] init];
-    }
-    assistantText = streamingHarnessAssistantText_;
-    reasoningText = streamingHarnessReasoningText_;
-    toolActivityText = streamingHarnessToolActivityText_;
-  } else {
-    assistantIdentifier = pendingAssistantMessageIdentifier_;
-    toolActivityIdentifier = pendingToolActivityIdentifier_;
-    if (streamingAssistantText_ == nil) {
-      streamingAssistantText_ = [[NSMutableString alloc] init];
-    }
-    if (streamingReasoningText_ == nil) {
-      streamingReasoningText_ = [[NSMutableString alloc] init];
-    }
-    if (streamingToolActivityText_ == nil) {
-      streamingToolActivityText_ = [[NSMutableString alloc] init];
-    }
-    if (pendingToolActivityTextDelta_ == nil) {
-      pendingToolActivityTextDelta_ = [[NSMutableString alloc] init];
-    }
-    assistantText = streamingAssistantText_;
-    reasoningText = streamingReasoningText_;
-    toolActivityText = streamingToolActivityText_;
-  }
-
-  if (assistantIdentifier == nil) {
-    [event release];
-    return;
-  }
-
-  createdToolActivity = NO;
-  if (toolActivityIdentifier == nil) {
-    toolActivityIdentifier = [assistantIdentifier stringByAppendingString:@"-tools"];
-    if (harnessTarget) {
-      pendingHarnessToolActivityIdentifier_ = [toolActivityIdentifier retain];
-    } else {
-      pendingToolActivityIdentifier_ = [toolActivityIdentifier retain];
-    }
-    createdToolActivity = YES;
-  }
-  [toolActivityText appendString:eventText];
-
-  appendToolEventImmediately = [eventType isEqualToString:@"call"];
-  if (appendToolEventImmediately) {
-    [self flushStreamDeltas];
-  }
-
-  js = [NSMutableString string];
-  if (appendToolEventImmediately &&
-      (assistantText != nil) &&
-      ([assistantText length] > 0U)) {
-    if ([reasoningText length] > 0U) {
-      [reasoningText appendString:@"\n"];
-    }
-    [reasoningText appendString:assistantText];
-    [assistantText setString:@""];
-    [js appendString:
-      StrappyMoveMessageTextToReasoningJavaScript(assistantIdentifier)];
-  }
-  if (createdToolActivity) {
-    NSString *html;
-
-    html = StrappyToolActivityMessageHTML(
-      toolActivityIdentifier,
-      @"",
-      @"pending",
-      StrappyStatusHTML(NSLocalizedString(@"Running tools...", nil), NO),
-      (harnessTarget ? @"harness" : @"user"),
-      pendingPromptGroupKey_,
-      assistantIdentifier);
-    if (assistantIdentifier != nil) {
-      [js appendString:
-        StrappyInsertMessageBeforeJavaScript(assistantIdentifier,
-                                             html)];
-    } else {
-      [js appendString:StrappyAppendMessageJavaScript(html)];
-    }
-  }
-  if (appendToolEventImmediately) {
-    [js appendString:
-      StrappyAppendToolEventTextJavaScript(toolActivityIdentifier,
-                                           eventText)];
-  }
-  if ([js length] > 0U) {
-    [self pushJavaScript:js];
-  }
-  if (!appendToolEventImmediately) {
-    if (harnessTarget) {
-      [pendingHarnessToolActivityTextDelta_ appendString:eventText];
-    } else {
-      [pendingToolActivityTextDelta_ appendString:eventText];
-    }
-    [self scheduleStreamFlush];
-  }
-
-  [event release];
+  [self scheduleDatabaseReload];
 }
 
 - (void)sessionPromptDidFinish:(NSNotification *)notification
@@ -2247,309 +806,29 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 {
   NSDictionary *session;
   NSString *errorMessage;
-  NSString *pendingIdentifier;
-  NSString *assistantPendingIdentifier;
-  NSNumber *previousLastIdentifier;
-  NSNumber *resultSessionId;
-  NSNumber *currentSessionId;
-  BOOL pendingIsCurrent;
 
   sending_ = NO;
   [self setPromptCancellationRequested:NO];
   [sendController_ setSending:NO];
   [sendController_ setCancellationRequested:NO];
-  [self flushStreamDeltas];
-
-  pendingIdentifier = [result objectForKey:@"pending_id"];
-  if (![pendingIdentifier isKindOfClass:[NSString class]]) {
-    pendingIdentifier = @"";
-  }
-  assistantPendingIdentifier = [result objectForKey:@"assistant_pending_id"];
-  if (![assistantPendingIdentifier isKindOfClass:[NSString class]]) {
-    assistantPendingIdentifier = @"";
-  }
-  previousLastIdentifier = [result objectForKey:@"previous_last_id"];
-  if (![previousLastIdentifier isKindOfClass:[NSNumber class]]) {
-    previousLastIdentifier = [NSNumber numberWithLongLong:0LL];
-  }
-  currentSessionId = [session_ sessionIdentifier];
-  pendingIsCurrent = (pendingMessageIdentifier_ != nil &&
-                      [pendingMessageIdentifier_ isEqualToString:pendingIdentifier] &&
-                      [self pendingAppliesToCurrentSession]) ? YES : NO;
 
   session = [result objectForKey:@"session"];
   if ([session isKindOfClass:[NSDictionary class]]) {
-    NSArray *messages;
-    NSError *messagesError;
-    NSMutableString *js;
-    NSMutableArray *newMessages;
-    BOOL replacedPrompt;
-    BOOL replacedAssistant;
-    BOOL replacedHarnessPrompt;
-    BOOL replacedHarnessAssistant;
-    NSUInteger index;
-    long long newestIdentifier;
-    long long previousIdentifier;
-
-    resultSessionId = [session objectForKey:@"id"];
-    if (![resultSessionId isKindOfClass:[NSNumber class]]) {
-      resultSessionId = nil;
-    }
-
     if (delegate_ != nil) {
       [delegate_ messageListViewController:self didUpdateSession:session];
     }
-
-    if (!pendingIsCurrent) {
-      if ((resultSessionId != nil) &&
-          (currentSessionId != nil) &&
-          [currentSessionId isEqualToNumber:resultSessionId]) {
-        [self reloadContent];
-      }
-      return;
-    }
-
-    messagesError = nil;
-    messages = nil;
-    if (session_ != nil) {
-      messages = [session_ messagesWithError:&messagesError];
-    }
-
-    if (messages == nil) {
-      [self clearPendingMessageState];
-      if (messagesError != nil) {
-        [statusText_ release];
-        statusText_ = [[messagesError localizedDescription] retain];
-      }
-      [self reloadContent];
-      return;
-    }
-
-    previousIdentifier = [previousLastIdentifier longLongValue];
-    newestIdentifier = previousIdentifier;
-    newMessages = [NSMutableArray array];
-
-    for (index = 0U; index < [messages count]; index++) {
-      NSDictionary *message;
-      long long messageIdentifier;
-
-      message = [messages objectAtIndex:index];
-      if (![message isKindOfClass:[NSDictionary class]]) {
-        continue;
-      }
-
-      messageIdentifier = StrappyMessageNumericIdentifier(message);
-      if (messageIdentifier <= previousIdentifier) {
-        continue;
-      }
-
-      [newMessages addObject:message];
-      if (messageIdentifier > newestIdentifier) {
-        newestIdentifier = messageIdentifier;
-      }
-    }
-
-    if ([newMessages count] == 0U) {
-      [self clearPendingMessageState];
-      [self reloadContent];
-      return;
-    }
-
-    js = [NSMutableString string];
-    [js appendString:@"beginMessageBatch();"];
-    if (pendingToolActivityIdentifier_ != nil) {
-      [js appendString:StrappyRemoveMessageJavaScript(pendingToolActivityIdentifier_)];
-    }
-    if (pendingHarnessToolActivityIdentifier_ != nil) {
-      [js appendString:
-        StrappyRemoveMessageJavaScript(pendingHarnessToolActivityIdentifier_)];
-    }
-
-    replacedPrompt = NO;
-    replacedAssistant = NO;
-    replacedHarnessPrompt = NO;
-    replacedHarnessAssistant = NO;
-    for (index = 0U; index < [newMessages count]; index++) {
-      NSDictionary *message;
-      NSString *messageHTML;
-
-      message = [newMessages objectAtIndex:index];
-      if (!replacedPrompt) {
-        [js appendString:
-          StrappyReplaceMessageJavaScript(pendingIdentifier,
-                                          StrappyMessageHTML(message,
-                                                             nil,
-                                                             nil,
-                                                             nil))];
-        replacedPrompt = YES;
-        continue;
-      }
-
-      if (!replacedAssistant && StrappyMessageHasRole(message, @"assistant")) {
-        messageHTML = StrappyMessageHTMLWithReasoning(message,
-                                                      streamingReasoningText_);
-        if ([assistantPendingIdentifier length] > 0U) {
-          [js appendString:
-            StrappyReplaceMessageJavaScript(assistantPendingIdentifier,
-                                            messageHTML)];
-        } else {
-          [js appendString:StrappyAppendMessageJavaScript(messageHTML)];
-        }
-        replacedAssistant = YES;
-        continue;
-      }
-
-      if (replacedAssistant &&
-          !replacedHarnessPrompt &&
-          (pendingHarnessMessageIdentifier_ != nil) &&
-          StrappyMessageHasRole(message, @"harness")) {
-        [js appendString:
-          StrappyReplaceMessageJavaScript(pendingHarnessMessageIdentifier_,
-                                          StrappyMessageHTML(message,
-                                                             nil,
-                                                             nil,
-                                                             nil))];
-        replacedHarnessPrompt = YES;
-        continue;
-      }
-
-      if (replacedAssistant &&
-          !replacedHarnessAssistant &&
-          (pendingHarnessAssistantMessageIdentifier_ != nil) &&
-          StrappyMessageHasRole(message, @"assistant")) {
-        [js appendString:
-          StrappyReplaceMessageJavaScript(pendingHarnessAssistantMessageIdentifier_,
-                                          StrappyMessageHTMLWithReasoning(
-                                            message,
-                                            streamingHarnessReasoningText_))];
-        replacedHarnessAssistant = YES;
-        continue;
-      }
-
-      messageHTML = StrappyMessageHTML(message, nil, nil, nil);
-      if (!replacedAssistant && ([assistantPendingIdentifier length] > 0U)) {
-        [js appendString:
-          StrappyInsertMessageBeforeJavaScript(assistantPendingIdentifier,
-                                               messageHTML)];
-      } else if (replacedAssistant &&
-                 !replacedHarnessAssistant &&
-                 (pendingHarnessAssistantMessageIdentifier_ != nil)) {
-        [js appendString:
-          StrappyInsertMessageBeforeJavaScript(
-            pendingHarnessAssistantMessageIdentifier_,
-            messageHTML)];
-      } else {
-        [js appendString:StrappyAppendMessageJavaScript(messageHTML)];
-      }
-    }
-
-    if (!replacedAssistant && ([assistantPendingIdentifier length] > 0U)) {
-      [js appendString:StrappyRemoveMessageJavaScript(assistantPendingIdentifier)];
-    }
-    if (!replacedHarnessPrompt && (pendingHarnessMessageIdentifier_ != nil)) {
-      [js appendString:StrappyRemoveMessageJavaScript(pendingHarnessMessageIdentifier_)];
-    }
-    if (!replacedHarnessAssistant &&
-        (pendingHarnessAssistantMessageIdentifier_ != nil)) {
-      [js appendString:
-        StrappyRemoveMessageJavaScript(pendingHarnessAssistantMessageIdentifier_)];
-    }
-
-    [js appendString:@"endMessageBatch();"];
-    [self pushJavaScript:js];
-    lastKnownMessageIdentifier_ = newestIdentifier;
-    [self clearPendingMessageState];
-    return;
-  }
-
-  errorMessage = [result objectForKey:@"error"];
-  if (![errorMessage isKindOfClass:[NSString class]] || ([errorMessage length] == 0U)) {
-    errorMessage = NSLocalizedString(@"Prompt failed.", nil);
-  }
-
-  if (pendingIsCurrent) {
-    NSArray *messages;
-    NSMutableString *js;
-    NSString *failureIdentifier;
-    NSString *failureStatusHTML;
-    NSUInteger index;
-    long long newestIdentifier;
-
-    [pendingErrorText_ release];
-    pendingErrorText_ = [errorMessage copy];
-    messages = (session_ != nil) ? [session_ messagesWithError:nil] : nil;
-    if ([messages isKindOfClass:[NSArray class]]) {
-      newestIdentifier = lastKnownMessageIdentifier_;
-      for (index = 0U; index < [messages count]; index++) {
-        NSDictionary *message;
-        long long messageIdentifier;
-
-        message = [messages objectAtIndex:index];
-        if (![message isKindOfClass:[NSDictionary class]]) {
-          continue;
-        }
-        messageIdentifier = StrappyMessageNumericIdentifier(message);
-        if (messageIdentifier > newestIdentifier) {
-          newestIdentifier = messageIdentifier;
-        }
-      }
-      lastKnownMessageIdentifier_ = newestIdentifier;
-    }
-
-    failureIdentifier = pendingIdentifier;
-    if (pendingHarnessAssistantMessageIdentifier_ != nil) {
-      failureIdentifier = pendingHarnessAssistantMessageIdentifier_;
-    } else if (pendingAssistantMessageIdentifier_ != nil) {
-      failureIdentifier = pendingAssistantMessageIdentifier_;
-    }
-    failureStatusHTML = StrappyStatusHTML(errorMessage, YES);
-    js = [NSMutableString string];
-    if (![failureIdentifier isEqualToString:pendingIdentifier]) {
-      [js appendString:StrappySetMessageStateJavaScript(pendingIdentifier,
-                                                       nil,
-                                                       nil)];
-    }
-    if (pendingToolActivityIdentifier_ != nil) {
-      [js appendString:StrappySetMessageStateJavaScript(
-        pendingToolActivityIdentifier_,
-        nil,
-        nil)];
-    }
-    if ((pendingAssistantMessageIdentifier_ != nil) &&
-        ![failureIdentifier isEqualToString:pendingAssistantMessageIdentifier_]) {
-      [js appendString:StrappySetMessageStateJavaScript(
-        pendingAssistantMessageIdentifier_,
-        nil,
-        nil)];
-    }
-    if ((pendingHarnessMessageIdentifier_ != nil) &&
-        ![failureIdentifier isEqualToString:pendingHarnessMessageIdentifier_]) {
-      [js appendString:StrappySetMessageStateJavaScript(
-        pendingHarnessMessageIdentifier_,
-        nil,
-        nil)];
-    }
-    if (pendingHarnessToolActivityIdentifier_ != nil) {
-      [js appendString:StrappySetMessageStateJavaScript(
-        pendingHarnessToolActivityIdentifier_,
-        nil,
-        nil)];
-    }
-    if ((pendingHarnessAssistantMessageIdentifier_ != nil) &&
-        ![failureIdentifier isEqualToString:pendingHarnessAssistantMessageIdentifier_]) {
-      [js appendString:StrappySetMessageStateJavaScript(
-        pendingHarnessAssistantMessageIdentifier_,
-        nil,
-        nil)];
-    }
-    [js appendString:
-      StrappySetMessageStateJavaScript(failureIdentifier,
-                                       failureStatusHTML,
-                                       @"error")];
-    [self pushJavaScript:js];
   } else {
-    return;
+    errorMessage = [result objectForKey:@"error"];
+    if (![errorMessage isKindOfClass:[NSString class]] ||
+        ([errorMessage length] == 0U)) {
+      errorMessage = NSLocalizedString(@"Prompt failed.", nil);
+    }
+    [statusText_ release];
+    statusText_ = [errorMessage retain];
   }
+
+  [self clearRequestState];
+  [self reloadContent];
 }
 
 - (void)loadEarlierMessages
@@ -2587,7 +866,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
   html = StrappyMessagesHTMLForRange(messages, start, end);
   oldestRenderedMessageIndex_ = start;
-  renderedMessageCount_ += (end - start);
 
   js = StrappyPrependMessagesJavaScript(html, (start > 0U) ? YES : NO);
   [self pushJavaScript:js];
@@ -2600,31 +878,6 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [session_ release];
   [sendController_ release];
   [statusText_ release];
-  [pendingMessageIdentifier_ release];
-  [pendingAssistantMessageIdentifier_ release];
-  [pendingToolActivityIdentifier_ release];
-  [pendingHarnessMessageIdentifier_ release];
-  [pendingHarnessAssistantMessageIdentifier_ release];
-  [pendingHarnessToolActivityIdentifier_ release];
-  [pendingHarnessPrompt_ release];
-  [pendingPromptGroupKey_ release];
-  [pendingPrompt_ release];
-  [pendingErrorText_ release];
-  [sendingSessionId_ release];
-  [streamingAssistantText_ release];
-  [streamingReasoningText_ release];
-  [streamingToolActivityText_ release];
-  [streamingHarnessAssistantText_ release];
-  [streamingHarnessReasoningText_ release];
-  [streamingHarnessToolActivityText_ release];
-  [pendingAssistantTextDelta_ release];
-  [pendingReasoningTextDelta_ release];
-  [pendingToolActivityTextDelta_ release];
-  [pendingHarnessAssistantTextDelta_ release];
-  [pendingHarnessReasoningTextDelta_ release];
-  [pendingHarnessToolActivityTextDelta_ release];
-  [streamFlushTimer_ invalidate];
-  [streamFlushTimer_ release];
   [databaseReloadTimer_ invalidate];
   [databaseReloadTimer_ release];
   [super dealloc];

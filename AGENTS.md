@@ -107,12 +107,24 @@ House style for Strappy source:
     `strappy_config_set_api_model`. Model pickers and prompt options must use
     the allowed-model catalog APIs and must not bypass the whitelist or allow a
     stale disallowed session model to keep running.
-18. When changing shared C behavior, especially database, tool, prompt, client,
+18. The database is the source of truth for UI state. Do not update UI-visible
+    state first and persist it later; write the database change first, then
+    refresh or render the UI from the stored value.
+19. Shared C/database code owns conversation-visible state. Platform UI code
+    must not synthesize pending prompt, assistant, tool, harness, error, or
+    cancellation rows before they exist in SQLite; it should request the shared
+    core to persist the state, then render DB-backed records or store-first
+    stream events. If a WebView needs an incremental update, Objective-C should
+    only pass shared-core, DB-derived JavaScript through the controller's single
+    injection method; do not assemble conversation DOM state in platform UI
+    code. Keep temporary UI-only control state, such as disabled buttons or
+    spinners, out of persisted conversation rows.
+20. When changing shared C behavior, especially database, tool, prompt, client,
     or JSON parsing code, run `make -C source/linux clean test` where the host
     Linux environment has the required dependencies. Keep the harnesses updated
     as new shared behavior is added or existing behavior changes, so regressions
     can be caught without waiting for full Apple-target builds.
-19. SQLite `PRAGMA user_version` is intentionally pinned at `1`. Do not
+21. SQLite `PRAGMA user_version` is intentionally pinned at `1`. Do not
     increase it or add migration steps without explicit user permission; this
     database has not shipped yet.
 
