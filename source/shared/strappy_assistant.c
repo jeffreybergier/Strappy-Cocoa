@@ -28,6 +28,8 @@
 #define STRAPPY_ASSISTANT_STREAM_FLUSH_BYTES 512U
 #define STRAPPY_ASSISTANT_STREAM_FLUSH_MS 80LL
 #define STRAPPY_ASSISTANT_STREAM_BUFFER_BYTES 2048U
+#define STRAPPY_ASSISTANT_PROCESSING_STATUS_JSON_BYTES 4096U
+#define STRAPPY_ASSISTANT_PROCESSING_STATUS_KEY_BYTES 256U
 #define STRAPPY_ASSISTANT_MAX_FINAL_ANSWER_FOLLOWUPS 2U
 
 typedef struct strappy_assistant_guidance {
@@ -108,6 +110,7 @@ typedef struct strappy_assistant_stream_turn_context {
   strappy_chat_stream_callback callback;
   void *callback_data;
   const strappy_assistant_turn_spec *turn;
+  long long started_ms;
 } strappy_assistant_stream_turn_context;
 
 typedef struct strappy_assistant_stream_store_context {
@@ -122,7 +125,17 @@ typedef struct strappy_assistant_stream_store_context {
   size_t pending_content_length;
   size_t pending_reasoning_length;
   long long pending_started_ms;
+  long long processing_started_ms;
+  int processing_status_active;
+  char processing_status_message_key[
+    STRAPPY_ASSISTANT_PROCESSING_STATUS_KEY_BYTES];
+  char processing_status_json[
+    STRAPPY_ASSISTANT_PROCESSING_STATUS_JSON_BYTES];
 } strappy_assistant_stream_store_context;
+
+static long long strappy_assistant_stream_now_ms(void);
+static const char *strappy_assistant_stream_event_render_state_json(
+  const strappy_chat_stream_event *event);
 
 static void strappy_assistant_request_messages_init(
   strappy_assistant_request_messages *request)
@@ -393,6 +406,258 @@ static void strappy_assistant_tool_sequence_destroy(
   sequence->learning_summary_final_result = NULL;
 }
 
+static void strappy_assistant_copy_fixed(char *destination,
+                                         size_t destination_size,
+                                         const char *source)
+{
+  size_t length;
+
+  if ((destination == NULL) || (destination_size == 0U)) {
+    return;
+  }
+
+  if (source == NULL) {
+    source = "";
+  }
+
+  length = strlen(source);
+  if (length >= destination_size) {
+    length = destination_size - 1U;
+  }
+  memcpy(destination, source, length);
+  destination[length] = '\0';
+}
+
+static int strappy_assistant_json_add_string(cJSON *object,
+                                             const char *key,
+                                             const char *value)
+{
+  if ((object == NULL) || (key == NULL)) {
+    return 0;
+  }
+  return (cJSON_AddStringToObject(object,
+                                  key,
+                                  (value != NULL) ? value : "") != NULL) ?
+    1 : 0;
+}
+
+static int strappy_assistant_json_add_number(cJSON *object,
+                                             const char *key,
+                                             double value)
+{
+  if ((object == NULL) || (key == NULL)) {
+    return 0;
+  }
+  return (cJSON_AddNumberToObject(object, key, value) != NULL) ? 1 : 0;
+}
+
+static char *strappy_assistant_processing_status_json(
+  const strappy_assistant_turn_spec *turn,
+  const strappy_chat_stream_event *event)
+{
+  cJSON *root;
+  char *json;
+  const char *message_key;
+  const char *status_kind;
+  long long started_ms;
+  long long updated_ms;
+
+  if (event == NULL) {
+    return NULL;
+  }
+
+  message_key = event->message_key;
+  if (((message_key == NULL) || (message_key[0] == '\0')) &&
+      (turn != NULL)) {
+    message_key = turn->assistant_message_key;
+  }
+  status_kind =
+    ((event->status_kind != NULL) && (event->status_kind[0] != '\0')) ?
+      event->status_kind : "thinking";
+  started_ms = event->status_started_ms;
+  if (started_ms <= 0LL) {
+    started_ms = strappy_assistant_stream_now_ms();
+  }
+  updated_ms = event->status_updated_ms;
+  if (updated_ms <= 0LL) {
+    updated_ms = strappy_assistant_stream_now_ms();
+  }
+
+  root = cJSON_CreateObject();
+  if (root == NULL) {
+    return NULL;
+  }
+
+  if ((cJSON_AddBoolToObject(root, "active", 1) == NULL) ||
+      !strappy_assistant_json_add_string(root, "message_key", message_key) ||
+      !strappy_assistant_json_add_string(root, "status_kind", status_kind) ||
+      !strappy_assistant_json_add_number(root,
+                                         "started_ms",
+                                         (double)started_ms) ||
+      !strappy_assistant_json_add_number(root,
+                                         "updated_ms",
+                                         (double)updated_ms) ||
+      !strappy_assistant_json_add_number(root,
+                                         "retry_after_seconds",
+                                         (double)event->retry_after_seconds) ||
+      !strappy_assistant_json_add_number(root,
+                                         "retry_attempt",
+                                         (double)event->retry_attempt) ||
+      !strappy_assistant_json_add_number(root,
+                                         "retry_max_attempts",
+                                         (double)event->retry_max_attempts)) {
+    cJSON_Delete(root);
+    return NULL;
+  }
+
+  if (event->retry_until_ms > 0LL) {
+    if (!strappy_assistant_json_add_number(root,
+                                           "retry_until_ms",
+                                           (double)event->retry_until_ms)) {
+      cJSON_Delete(root);
+      return NULL;
+    }
+  }
+  if ((event->status_reason != NULL) && (event->status_reason[0] != '\0')) {
+    if (!strappy_assistant_json_add_string(root,
+                                           "retry_reason",
+                                           event->status_reason)) {
+      cJSON_Delete(root);
+      return NULL;
+    }
+  }
+
+  json = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  return json;
+}
+
+static char *strappy_assistant_render_state_with_processing_status(
+  const char *base_render_state_json,
+  const char *status_json)
+{
+  cJSON *root;
+  cJSON *status;
+  char *json;
+
+  if ((status_json == NULL) || (status_json[0] == '\0')) {
+    return NULL;
+  }
+
+  root = NULL;
+  if ((base_render_state_json != NULL) &&
+      (base_render_state_json[0] != '\0')) {
+    root = cJSON_Parse(base_render_state_json);
+  }
+  if (!cJSON_IsObject(root)) {
+    cJSON_Delete(root);
+    root = cJSON_CreateObject();
+  }
+  if (root == NULL) {
+    return NULL;
+  }
+
+  status = cJSON_Parse(status_json);
+  if (!cJSON_IsObject(status)) {
+    cJSON_Delete(status);
+    cJSON_Delete(root);
+    return NULL;
+  }
+
+  cJSON_DeleteItemFromObject(root, "processing_status");
+  cJSON_AddItemToObject(root, "processing_status", status);
+  json = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  return json;
+}
+
+static int strappy_assistant_status_matches_event(
+  const strappy_assistant_stream_store_context *context,
+  const strappy_chat_stream_event *event)
+{
+  if ((context == NULL) || !context->processing_status_active ||
+      (context->processing_status_json[0] == '\0') ||
+      (event == NULL) || (event->message_key == NULL) ||
+      (event->message_key[0] == '\0') ||
+      (context->processing_status_message_key[0] == '\0')) {
+    return 0;
+  }
+
+  return (strcmp(context->processing_status_message_key,
+                 event->message_key) == 0) ? 1 : 0;
+}
+
+static char *strappy_assistant_event_render_state_for_store(
+  const strappy_chat_stream_event *event,
+  const strappy_assistant_stream_store_context *context)
+{
+  const char *base_render_state_json;
+
+  if (!strappy_assistant_status_matches_event(context, event)) {
+    return NULL;
+  }
+
+  base_render_state_json =
+    strappy_assistant_stream_event_render_state_json(event);
+  if ((base_render_state_json == NULL) ||
+      (base_render_state_json[0] == '\0')) {
+    return NULL;
+  }
+
+  return strappy_assistant_render_state_with_processing_status(
+    base_render_state_json,
+    context->processing_status_json);
+}
+
+static int strappy_assistant_emit_processing_status_event(
+  const strappy_assistant_turn_spec *turn,
+  const char *status_kind,
+  long long started_ms,
+  strappy_chat_stream_callback callback,
+  void *callback_data,
+  char **error_out)
+{
+  strappy_chat_stream_event event;
+  char *status_json;
+  int ok;
+
+  if ((turn == NULL) || (callback == NULL)) {
+    return 1;
+  }
+
+  memset(&event, 0, sizeof(event));
+  event.type = STRAPPY_CHAT_STREAM_EVENT_PROCESSING_STATUS;
+  event.turn_key = turn->turn_key;
+  event.prompt_group_key = turn->prompt_group_key;
+  event.actor = turn->actor;
+  event.kind = "assistant";
+  event.render_role = "assistant";
+  event.api_role = "assistant";
+  event.message_key = turn->assistant_message_key;
+  event.status_kind =
+    ((status_kind != NULL) && (status_kind[0] != '\0')) ?
+      status_kind : "thinking";
+  event.status_started_ms =
+    (started_ms > 0LL) ? started_ms : strappy_assistant_stream_now_ms();
+  event.status_updated_ms = strappy_assistant_stream_now_ms();
+
+  status_json = strappy_assistant_processing_status_json(turn, &event);
+  if (status_json == NULL) {
+    strappy_set_error(error_out, "Could not allocate processing status JSON.");
+    return 0;
+  }
+  event.status_json = status_json;
+
+  ok = callback(&event, callback_data);
+  free(status_json);
+  if (!ok) {
+    strappy_set_error(error_out, "Stream callback rejected processing status.");
+    return 0;
+  }
+
+  return 1;
+}
+
 static int strappy_assistant_emit_turn_event(
   strappy_chat_stream_event_type type,
   const strappy_assistant_turn_spec *turn,
@@ -526,6 +791,8 @@ static int strappy_assistant_stream_turn_callback(
 {
   strappy_assistant_stream_turn_context *context;
   strappy_chat_stream_event turn_event;
+  char *status_json;
+  int ok;
 
   if (callback_data == NULL) {
     return 1;
@@ -564,7 +831,28 @@ static int strappy_assistant_stream_turn_callback(
       turn_event.message_key = context->turn->assistant_message_key;
     }
   }
-  return context->callback(&turn_event, context->callback_data);
+
+  status_json = NULL;
+  if (turn_event.type == STRAPPY_CHAT_STREAM_EVENT_PROCESSING_STATUS) {
+    if (context->started_ms > 0LL) {
+      turn_event.status_started_ms = context->started_ms;
+    }
+    if (turn_event.status_updated_ms <= 0LL) {
+      turn_event.status_updated_ms = strappy_assistant_stream_now_ms();
+    }
+    if (turn_event.status_json == NULL) {
+      status_json =
+        strappy_assistant_processing_status_json(context->turn, &turn_event);
+      if (status_json == NULL) {
+        return 0;
+      }
+      turn_event.status_json = status_json;
+    }
+  }
+
+  ok = context->callback(&turn_event, context->callback_data);
+  free(status_json);
+  return ok;
 }
 
 static int strappy_assistant_stream_event_included_in_context(
@@ -679,6 +967,9 @@ static const char *strappy_assistant_stream_event_render_state_json(
       (event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_ERROR)) {
     return tool_streaming_state;
   }
+  if (event->type == STRAPPY_CHAT_STREAM_EVENT_PROCESSING_STATUS) {
+    return reasoning_streaming_state;
+  }
   if ((event->type == STRAPPY_CHAT_STREAM_EVENT_TURN_STARTED) &&
       (event->kind != NULL) &&
       (strcmp(event->kind, "assistant") == 0)) {
@@ -730,9 +1021,10 @@ static void strappy_assistant_stream_message_input_from_event(
 
 static int strappy_assistant_store_stream_event(
   const strappy_chat_stream_event *event,
-  const strappy_assistant_stream_store_context *context)
+  strappy_assistant_stream_store_context *context)
 {
   strappy_session_message_input message;
+  char *owned_render_state_json;
   const char *content;
   const char *message_key;
 
@@ -745,6 +1037,7 @@ static int strappy_assistant_store_stream_event(
 
   message_key = event->message_key;
   content = (event->text != NULL) ? event->text : "";
+  owned_render_state_json = NULL;
 
   if (event->type == STRAPPY_CHAT_STREAM_EVENT_TURN_STARTED) {
     strappy_assistant_stream_message_input_from_event(event,
@@ -761,6 +1054,12 @@ static int strappy_assistant_store_stream_event(
   }
 
   if (event->type == STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED) {
+    if ((message_key != NULL) &&
+        (strcmp(context->processing_status_message_key, message_key) == 0)) {
+      context->processing_status_active = 0;
+      context->processing_status_message_key[0] = '\0';
+      context->processing_status_json[0] = '\0';
+    }
     strappy_assistant_stream_message_input_from_event(event,
                                                       message_key,
                                                       content,
@@ -771,19 +1070,68 @@ static int strappy_assistant_store_stream_event(
                                              context->error_out);
   }
 
+  if (event->type == STRAPPY_CHAT_STREAM_EVENT_PROCESSING_STATUS) {
+    const char *base_render_state_json;
+
+    if ((message_key == NULL) || (message_key[0] == '\0') ||
+        (event->status_json == NULL) || (event->status_json[0] == '\0')) {
+      return 1;
+    }
+
+    context->processing_status_active = 1;
+    strappy_assistant_copy_fixed(context->processing_status_message_key,
+                                 sizeof(context->processing_status_message_key),
+                                 message_key);
+    strappy_assistant_copy_fixed(context->processing_status_json,
+                                 sizeof(context->processing_status_json),
+                                 event->status_json);
+
+    base_render_state_json =
+      strappy_assistant_stream_event_render_state_json(event);
+    owned_render_state_json =
+      strappy_assistant_render_state_with_processing_status(
+        base_render_state_json,
+        event->status_json);
+    if (owned_render_state_json == NULL) {
+      return 0;
+    }
+
+    if (!strappy_db_update_session_message_render_state(
+          context->session_db_path,
+          context->session_id,
+          message_key,
+          owned_render_state_json,
+          context->error_out)) {
+      free(owned_render_state_json);
+      return 0;
+    }
+    free(owned_render_state_json);
+    return 1;
+  }
+
   if ((event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) ||
       (event->type == STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA)) {
     strappy_assistant_stream_message_input_from_event(event,
                                                       message_key,
                                                       "",
                                                       &message);
-    return strappy_db_append_session_message_content(
-      context->session_db_path,
-      context->session_id,
-      &message,
-      (event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) ? content : "",
-      (event->type == STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA) ? content : "",
-      context->error_out);
+    owned_render_state_json =
+      strappy_assistant_event_render_state_for_store(event, context);
+    if (owned_render_state_json != NULL) {
+      message.render_state_json = owned_render_state_json;
+    }
+    if (!strappy_db_append_session_message_content(
+          context->session_db_path,
+          context->session_id,
+          &message,
+          (event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) ? content : "",
+          (event->type == STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA) ? content : "",
+          context->error_out)) {
+      free(owned_render_state_json);
+      return 0;
+    }
+    free(owned_render_state_json);
+    return 1;
   }
 
   if (event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_RETRACTED) {
@@ -791,11 +1139,21 @@ static int strappy_assistant_store_stream_event(
                                                       message_key,
                                                       "",
                                                       &message);
-    return strappy_db_move_session_message_content_to_reasoning(
-      context->session_db_path,
-      context->session_id,
-      &message,
-      context->error_out);
+    owned_render_state_json =
+      strappy_assistant_event_render_state_for_store(event, context);
+    if (owned_render_state_json != NULL) {
+      message.render_state_json = owned_render_state_json;
+    }
+    if (!strappy_db_move_session_message_content_to_reasoning(
+          context->session_db_path,
+          context->session_id,
+          &message,
+          context->error_out)) {
+      free(owned_render_state_json);
+      return 0;
+    }
+    free(owned_render_state_json);
+    return 1;
   }
 
   if ((event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_CALL) ||
@@ -967,6 +1325,7 @@ static int strappy_assistant_stream_flush_pending(
 {
   strappy_chat_stream_event event;
   strappy_session_message_input message;
+  char *owned_render_state_json;
 
   if ((context == NULL) ||
       (strappy_assistant_stream_pending_length(context) == 0U)) {
@@ -983,6 +1342,11 @@ static int strappy_assistant_stream_flush_pending(
                                                     event.message_key,
                                                     "",
                                                     &message);
+  owned_render_state_json =
+    strappy_assistant_event_render_state_for_store(&event, context);
+  if (owned_render_state_json != NULL) {
+    message.render_state_json = owned_render_state_json;
+  }
   if (!strappy_db_append_session_message_content(
         context->session_db_path,
         context->session_id,
@@ -990,8 +1354,10 @@ static int strappy_assistant_stream_flush_pending(
         context->pending_content,
         context->pending_reasoning,
         context->error_out)) {
+    free(owned_render_state_json);
     return 0;
   }
+  free(owned_render_state_json);
 
   if (forward_events && (context->callback != NULL)) {
     if (context->pending_reasoning_length > 0U) {
@@ -1098,6 +1464,23 @@ static int strappy_assistant_stream_store_callback(
     return 0;
   }
   return strappy_assistant_stream_store_and_forward_event(event, context);
+}
+
+static long long strappy_assistant_callback_processing_started_ms(
+  strappy_chat_stream_callback callback,
+  void *callback_data)
+{
+  strappy_assistant_stream_store_context *context;
+
+  if ((callback == strappy_assistant_stream_store_callback) &&
+      (callback_data != NULL)) {
+    context = (strappy_assistant_stream_store_context *)callback_data;
+    if (context->processing_started_ms > 0LL) {
+      return context->processing_started_ms;
+    }
+  }
+
+  return strappy_assistant_stream_now_ms();
 }
 
 static char *strappy_assistant_create_basic_message_json(const char *role,
@@ -3186,6 +3569,9 @@ static int strappy_assistant_run_tool_sequence(
             turn_context.callback = callback;
             turn_context.callback_data = callback_data;
             turn_context.turn = turn;
+            turn_context.started_ms =
+              strappy_assistant_callback_processing_started_ms(callback,
+                                                               callback_data);
             stream_callback = strappy_assistant_stream_turn_callback;
             stream_callback_data = &turn_context;
           }
@@ -3216,15 +3602,39 @@ static int strappy_assistant_run_tool_sequence(
             strappy_assistant_request_messages_destroy(&final_answer_request);
             return 1;
           }
-        } else if (!strappy_client_send_messages(config,
-                                                 final_answer_request.messages,
-                                                 final_answer_request.count,
-                                                 next_result,
-                                                 error_out)) {
-          sequence->failed_result = next_result;
-          strappy_assistant_request_messages_destroy(&final_answer_request);
-          return 0;
-        } else if (emit_complete_model_events) {
+        } else {
+          strappy_assistant_stream_turn_context turn_context;
+          strappy_chat_stream_callback request_callback;
+          void *request_callback_data;
+
+          request_callback = NULL;
+          request_callback_data = NULL;
+          if ((turn != NULL) && (callback != NULL)) {
+            turn_context.callback = callback;
+            turn_context.callback_data = callback_data;
+            turn_context.turn = turn;
+            turn_context.started_ms =
+              strappy_assistant_callback_processing_started_ms(callback,
+                                                               callback_data);
+            request_callback = strappy_assistant_stream_turn_callback;
+            request_callback_data = &turn_context;
+          }
+
+          if (!strappy_client_send_messages_with_events(
+                config,
+                final_answer_request.messages,
+                final_answer_request.count,
+                next_result,
+                request_callback,
+                request_callback_data,
+                error_out)) {
+            sequence->failed_result = next_result;
+            strappy_assistant_request_messages_destroy(&final_answer_request);
+            return 0;
+          }
+        }
+
+        if (!stream_model_responses && emit_complete_model_events) {
           int next_has_tool_calls;
 
           next_has_tool_calls = 0;
@@ -3349,6 +3759,9 @@ static int strappy_assistant_run_tool_sequence(
         turn_context.callback = callback;
         turn_context.callback_data = callback_data;
         turn_context.turn = turn;
+        turn_context.started_ms =
+          strappy_assistant_callback_processing_started_ms(callback,
+                                                           callback_data);
         stream_callback = strappy_assistant_stream_turn_callback;
         stream_callback_data = &turn_context;
       }
@@ -3379,15 +3792,38 @@ static int strappy_assistant_run_tool_sequence(
         strappy_assistant_request_messages_destroy(&final_answer_request);
         return 1;
       }
-    } else if (!strappy_client_send_messages(config,
-                                             round->followup_messages,
-                                             round->followup_count,
-                                             next_result,
-                                             error_out)) {
-      sequence->failed_result = next_result;
-      strappy_assistant_request_messages_destroy(&final_answer_request);
-      return 0;
-    } else if (emit_complete_model_events) {
+    } else {
+      strappy_assistant_stream_turn_context turn_context;
+      strappy_chat_stream_callback request_callback;
+      void *request_callback_data;
+
+      request_callback = NULL;
+      request_callback_data = NULL;
+      if ((turn != NULL) && (callback != NULL)) {
+        turn_context.callback = callback;
+        turn_context.callback_data = callback_data;
+        turn_context.turn = turn;
+        turn_context.started_ms =
+          strappy_assistant_callback_processing_started_ms(callback,
+                                                           callback_data);
+        request_callback = strappy_assistant_stream_turn_callback;
+        request_callback_data = &turn_context;
+      }
+
+      if (!strappy_client_send_messages_with_events(config,
+                                                    round->followup_messages,
+                                                    round->followup_count,
+                                                    next_result,
+                                                    request_callback,
+                                                    request_callback_data,
+                                                    error_out)) {
+        sequence->failed_result = next_result;
+        strappy_assistant_request_messages_destroy(&final_answer_request);
+        return 0;
+      }
+    }
+
+    if (!stream_model_responses && emit_complete_model_events) {
       int next_has_tool_calls;
 
       next_has_tool_calls = 0;
@@ -3438,6 +3874,7 @@ static int strappy_assistant_run_learning_summary(
   strappy_config helper_config;
   strappy_assistant_stream_turn_context turn_context;
   const strappy_chat_result *helper_final_result;
+  long long helper_started_ms;
 
   if ((config == NULL) || (helper_turn == NULL) ||
       (guidance == NULL) ||
@@ -3497,6 +3934,8 @@ static int strappy_assistant_run_learning_summary(
   helper_config.tool_allowlist_count =
     sizeof(helper_tool_allowlist) / sizeof(helper_tool_allowlist[0]);
   emit_events = (callback != NULL) ? 1 : 0;
+  helper_started_ms =
+    strappy_assistant_callback_processing_started_ms(callback, callback_data);
 
   if (emit_events &&
       !strappy_assistant_emit_turn_event(STRAPPY_CHAT_STREAM_EVENT_TURN_STARTED,
@@ -3516,6 +3955,16 @@ static int strappy_assistant_run_learning_summary(
     strappy_assistant_request_messages_destroy(&helper_request);
     return 0;
   }
+  if (emit_events &&
+      !strappy_assistant_emit_processing_status_event(helper_turn,
+                                                     "thinking",
+                                                     helper_started_ms,
+                                                     callback,
+                                                     callback_data,
+                                                     error_out)) {
+    strappy_assistant_request_messages_destroy(&helper_request);
+    return 0;
+  }
 
   sequence->learning_summary_final_result = NULL;
   strappy_chat_result_destroy(&sequence->learning_summary_result);
@@ -3523,6 +3972,7 @@ static int strappy_assistant_run_learning_summary(
     turn_context.callback = callback;
     turn_context.callback_data = callback_data;
     turn_context.turn = helper_turn;
+    turn_context.started_ms = helper_started_ms;
     if (!strappy_client_stream_messages(&helper_config,
                                         helper_request.messages,
                                         helper_request.count,
@@ -3534,11 +3984,18 @@ static int strappy_assistant_run_learning_summary(
       return 0;
     }
   } else {
-    if (!strappy_client_send_messages(&helper_config,
-                                      helper_request.messages,
-                                      helper_request.count,
-                                      &sequence->learning_summary_result,
-                                      error_out)) {
+    turn_context.callback = callback;
+    turn_context.callback_data = callback_data;
+    turn_context.turn = helper_turn;
+    turn_context.started_ms = helper_started_ms;
+    if (!strappy_client_send_messages_with_events(
+          &helper_config,
+          helper_request.messages,
+          helper_request.count,
+          &sequence->learning_summary_result,
+          emit_events ? strappy_assistant_stream_turn_callback : NULL,
+          emit_events ? &turn_context : NULL,
+          error_out)) {
       strappy_assistant_request_messages_destroy(&helper_request);
       return 0;
     }
@@ -3660,6 +4117,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   strappy_assistant_turn_keys helper_keys;
   strappy_assistant_turn_spec main_turn;
   strappy_assistant_turn_spec helper_turn;
+  strappy_assistant_stream_turn_context turn_context;
   strappy_assistant_stream_store_context store_context;
   strappy_chat_stream_callback event_callback;
   void *event_callback_data;
@@ -3688,6 +4146,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   strappy_assistant_turn_keys_init(&helper_keys);
   memset(&main_turn, 0, sizeof(main_turn));
   memset(&helper_turn, 0, sizeof(helper_turn));
+  memset(&turn_context, 0, sizeof(turn_context));
   memset(&store_context, 0, sizeof(store_context));
   event_callback = callback;
   event_callback_data = callback_data;
@@ -3697,6 +4156,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
     store_context.callback = callback;
     store_context.callback_data = callback_data;
     store_context.error_out = error_out;
+    store_context.processing_started_ms = strappy_assistant_stream_now_ms();
     event_callback = strappy_assistant_stream_store_callback;
     event_callback_data = &store_context;
   }
@@ -3815,11 +4275,37 @@ static char *strappy_assistant_send_prompt_for_session_internal(
     return NULL;
   }
 
-  if (!strappy_client_send_messages(&config,
-                                    request_messages.messages,
-                                    request_messages.count,
-                                    &result,
-                                    error_out)) {
+  if ((event_callback != NULL) &&
+      !strappy_assistant_emit_processing_status_event(
+        &main_turn,
+        "thinking",
+        store_context.processing_started_ms,
+        event_callback,
+        event_callback_data,
+        error_out)) {
+    strappy_assistant_turn_keys_destroy(&helper_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
+    strappy_assistant_tool_sequence_destroy(&tool_sequence);
+    strappy_assistant_request_messages_destroy(&request_messages);
+    strappy_session_message_record_list_destroy(&message_list);
+    strappy_chat_result_destroy(&result);
+    strappy_assistant_guidance_destroy(&guidance);
+    strappy_config_destroy(&config);
+    return NULL;
+  }
+
+  turn_context.callback = event_callback;
+  turn_context.callback_data = event_callback_data;
+  turn_context.turn = &main_turn;
+  turn_context.started_ms = store_context.processing_started_ms;
+  if (!strappy_client_send_messages_with_events(
+        &config,
+        request_messages.messages,
+        request_messages.count,
+        &result,
+        (event_callback != NULL) ? strappy_assistant_stream_turn_callback : NULL,
+        (event_callback != NULL) ? &turn_context : NULL,
+        error_out)) {
     if (event_callback != NULL) {
       strappy_assistant_try_store_turn_error(session_db_path,
                                              session_id,
@@ -4239,6 +4725,7 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   store_context.callback = callback;
   store_context.callback_data = callback_data;
   store_context.error_out = error_out;
+  store_context.processing_started_ms = strappy_assistant_stream_now_ms();
 
   if (!strappy_assistant_emit_turn_event(STRAPPY_CHAT_STREAM_EVENT_TURN_STARTED,
                                          &main_turn,
@@ -4273,9 +4760,28 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
     return NULL;
   }
 
+  if (!strappy_assistant_emit_processing_status_event(
+        &main_turn,
+        "thinking",
+        store_context.processing_started_ms,
+        strappy_assistant_stream_store_callback,
+        &store_context,
+        error_out)) {
+    strappy_assistant_turn_keys_destroy(&helper_keys);
+    strappy_assistant_turn_keys_destroy(&main_keys);
+    strappy_assistant_tool_sequence_destroy(&tool_sequence);
+    strappy_assistant_request_messages_destroy(&request_messages);
+    strappy_session_message_record_list_destroy(&message_list);
+    strappy_chat_result_destroy(&result);
+    strappy_assistant_guidance_destroy(&guidance);
+    strappy_config_destroy(&config);
+    return NULL;
+  }
+
   turn_context.callback = strappy_assistant_stream_store_callback;
   turn_context.callback_data = &store_context;
   turn_context.turn = &main_turn;
+  turn_context.started_ms = store_context.processing_started_ms;
   if (!strappy_client_stream_messages(&config,
                                       request_messages.messages,
                                       request_messages.count,

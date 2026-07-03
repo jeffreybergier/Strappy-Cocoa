@@ -58,6 +58,10 @@ static int harness_check_page_scripts(void)
   }
 
   ok = harness_expect_contains(page_html, "@font-face") &&
+       harness_expect_contains(page_html,
+                               "font:13px -apple-system,Helvetica,Arial,sans-serif;") &&
+       harness_expect_contains(page_html,
+                               ".tool-panel{font:12px -apple-system,Helvetica,Arial,sans-serif;") &&
        harness_expect_contains(page_html, "function faIconHTML") &&
        harness_expect_contains(page_html, "\"heart\":'F004'") &&
        harness_expect_contains(page_html, "[fa(?::(solid|regular|brands))?") &&
@@ -70,6 +74,16 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function beginMessageBatch") &&
        harness_expect_contains(page_html, "function scrollBottomNow") &&
        harness_expect_contains(page_html, "function shouldAutoScroll") &&
+       harness_expect_contains(page_html, ".page{padding:18px 10px;}") &&
+       harness_expect_contains(page_html, ".processing-status{position:fixed") &&
+       harness_expect_contains(page_html,
+                               ".bubble,.reasoning,.tool-column,.request-metadata{") &&
+       harness_expect_contains(page_html,
+                               "box-shadow:0 2px 9px rgba(0,0,0,.12);") &&
+       harness_expect_contains(page_html, "function setProcessingStatus") &&
+       harness_expect_contains(page_html, "function clearProcessingStatus") &&
+       harness_expect_contains(page_html, "function initProcessingStatusFromRenderState") &&
+       harness_expect_contains(page_html, "processing_status") &&
        harness_expect_contains(page_html, "function shouldRenderMarkdownBubble") &&
        harness_expect_contains(page_html, "function shouldRenderMarkdownReasoning") &&
        harness_expect_contains(page_html, "ancestorHasClass(n,'assistant')") &&
@@ -240,9 +254,13 @@ static int harness_check_tool_column_state(void)
        harness_expect_contains(streaming_html,
                                "data-prompt-group-key=\"prompt-group-test\"") &&
        harness_expect_contains(streaming_html,
+                               "class=\"bubble\" style=\"display:none;\"") &&
+       harness_expect_contains(streaming_html,
                                "tool-column-disclosure\">&#9658;") &&
        harness_expect_not_contains(streaming_html,
                                    "tool-column-disclosure\">&#9660;") &&
+       harness_expect_not_contains(streaming_html,
+                                   "bubble bubble-status") &&
        harness_expect_contains(reloaded_streaming_html,
                                "row assistant streaming-active") &&
        harness_expect_contains(reloaded_streaming_html,
@@ -250,7 +268,9 @@ static int harness_check_tool_column_state(void)
        harness_expect_contains(reloaded_streaming_html,
                                "Thinking through it") &&
        harness_expect_contains(reloaded_streaming_html,
-                               "bubble bubble-status") &&
+                               "class=\"bubble\" style=\"display:none;\"") &&
+       harness_expect_not_contains(reloaded_streaming_html,
+                                   "bubble bubble-status") &&
        harness_expect_not_contains(reloaded_streaming_html,
                                    "reasoning-collapsed") &&
        harness_expect_contains(reloaded_content_html,
@@ -302,6 +322,37 @@ static int harness_check_tool_event_text(void)
 
   strappy_webview_free(script);
   strappy_webview_free(event_text);
+  return ok;
+}
+
+static int harness_check_processing_status_scripts(void)
+{
+  char *set_script;
+  char *clear_script;
+  int ok;
+
+  set_script = strappy_webview_set_processing_status_js(
+    "{\"active\":true,\"status_kind\":\"retry_wait\","
+    "\"retry_after_seconds\":7,\"retry_attempt\":2,"
+    "\"retry_max_attempts\":3}");
+  if (set_script == NULL) {
+    fprintf(stderr, "Could not generate processing status JS.\n");
+    return 0;
+  }
+
+  clear_script = strappy_webview_clear_processing_status_js();
+  if (clear_script == NULL) {
+    fprintf(stderr, "Could not generate processing status clear JS.\n");
+    strappy_webview_free(set_script);
+    return 0;
+  }
+
+  ok = harness_expect_contains(set_script, "setProcessingStatus('{\"active\":true") &&
+       harness_expect_contains(set_script, "\"status_kind\":\"retry_wait\"") &&
+       harness_expect_contains(clear_script, "clearProcessingStatus();");
+
+  strappy_webview_free(clear_script);
+  strappy_webview_free(set_script);
   return ok;
 }
 
@@ -590,6 +641,9 @@ int main(void)
     return 1;
   }
   if (!harness_check_tool_event_text()) {
+    return 1;
+  }
+  if (!harness_check_processing_status_scripts()) {
     return 1;
   }
   if (!harness_check_tool_activity_target()) {

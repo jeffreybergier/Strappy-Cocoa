@@ -276,6 +276,12 @@ int strappy_db_move_session_message_content_to_reasoning(
   long long session_id,
   const strappy_session_message_input *message,
   char **error_out);
+int strappy_db_update_session_message_render_state(
+  const char *db_path,
+  long long session_id,
+  const char *message_key,
+  const char *render_state_json,
+  char **error_out);
 int strappy_db_list_session_messages(const char *db_path,
                                      long long session_id,
                                      strappy_session_message_record_list *list,

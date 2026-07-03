@@ -101,6 +101,37 @@ static int harness_record_stream_event(const strappy_chat_stream_event *event,
   return 1;
 }
 
+static int harness_test_retry_after_and_server_error_type(void)
+{
+  strappy_chat_result result;
+  char retry_after_header[] = "Retry-After: 12\r\n";
+  char generation_header[] = "X-Generation-Id: gen-test\r\n";
+  int ok;
+
+  strappy_chat_result_init(&result);
+  ok = (strappy_client_header_callback(retry_after_header,
+                                       1U,
+                                       strlen(retry_after_header),
+                                       &result) ==
+        strlen(retry_after_header)) &&
+       (result.retry_after_seconds == 12L) &&
+       (strappy_client_header_callback(generation_header,
+                                       1U,
+                                       strlen(generation_header),
+                                       &result) ==
+        strlen(generation_header)) &&
+       (result.response_id != NULL) &&
+       (strcmp(result.response_id, "gen-test") == 0) &&
+       strappy_client_error_type_is_retryable("server");
+  strappy_chat_result_destroy(&result);
+
+  if (!ok) {
+    return harness_fail("Retry-After or server retry handling failed.");
+  }
+
+  return 1;
+}
+
 static int harness_expect_function_string(cJSON *tool_call,
                                           const char *key,
                                           const char *expected)
@@ -811,6 +842,10 @@ static int harness_test_stream_reasoning_detail_chunks_coalesced(void)
 
 int main(void)
 {
+  if (!harness_test_retry_after_and_server_error_type()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
   if (!harness_test_sparse_tool_call_indexes()) {
     fprintf(stderr, "client_stream_harness failed.\n");
     return 1;

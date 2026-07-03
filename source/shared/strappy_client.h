@@ -38,6 +38,7 @@ typedef struct strappy_chat_result {
   char *metadata_text;
   char *reasoning_text;
   long http_status;
+  long retry_after_seconds;
   int cancelled;
 } strappy_chat_result;
 
@@ -49,7 +50,8 @@ typedef enum strappy_chat_stream_event_type {
   STRAPPY_CHAT_STREAM_EVENT_TOOL_ERROR = 5,
   STRAPPY_CHAT_STREAM_EVENT_TURN_STARTED = 6,
   STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED = 7,
-  STRAPPY_CHAT_STREAM_EVENT_CONTENT_RETRACTED = 8
+  STRAPPY_CHAT_STREAM_EVENT_CONTENT_RETRACTED = 8,
+  STRAPPY_CHAT_STREAM_EVENT_PROCESSING_STATUS = 9
 } strappy_chat_stream_event_type;
 
 typedef struct strappy_chat_stream_event {
@@ -68,6 +70,15 @@ typedef struct strappy_chat_stream_event {
   const char *render_role;
   const char *api_role;
   const char *message_json;
+  const char *status_json;
+  const char *status_kind;
+  const char *status_reason;
+  long long status_started_ms;
+  long long status_updated_ms;
+  long long retry_until_ms;
+  unsigned int retry_after_seconds;
+  unsigned int retry_attempt;
+  unsigned int retry_max_attempts;
 } strappy_chat_stream_event;
 
 typedef int (*strappy_chat_stream_callback)(
@@ -82,6 +93,14 @@ int strappy_client_send_messages(const strappy_config *config,
                                  size_t message_count,
                                  strappy_chat_result *result,
                                  char **error_out);
+int strappy_client_send_messages_with_events(
+  const strappy_config *config,
+  const strappy_chat_message *messages,
+  size_t message_count,
+  strappy_chat_result *result,
+  strappy_chat_stream_callback callback,
+  void *callback_data,
+  char **error_out);
 int strappy_client_fetch_openrouter_user_models_json(
   const strappy_config *config,
   char **json_out,

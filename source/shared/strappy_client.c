@@ -7,6 +7,8 @@
 #include <cJSON.h>
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -184,13 +186,43 @@ static int strappy_client_string_starts_with(const char *value,
   return (strncmp(value, prefix, prefix_length) == 0) ? 1 : 0;
 }
 
+static long strappy_client_parse_retry_after_seconds(const char *value,
+                                                     size_t length)
+{
+  const char *cursor;
+  const char *end;
+  char *number_end;
+  long seconds;
+
+  if ((value == NULL) || (length == 0U)) {
+    return 0L;
+  }
+
+  cursor = value;
+  end = value + length;
+  while ((cursor < end) && isspace((unsigned char)*cursor)) {
+    cursor++;
+  }
+  if (cursor >= end) {
+    return 0L;
+  }
+
+  errno = 0;
+  seconds = strtol(cursor, &number_end, 10);
+  if ((number_end == cursor) || (errno != 0) || (seconds <= 0L)) {
+    return 0L;
+  }
+  return seconds;
+}
+
 static size_t strappy_client_header_callback(char *contents,
                                              size_t size,
                                              size_t nmemb,
                                              void *userp)
 {
   strappy_chat_result *result;
-  const char *header_name = "X-Generation-Id:";
+  const char *generation_header_name = "X-Generation-Id:";
+  const char *retry_after_header_name = "Retry-After:";
   size_t real_size;
   size_t header_name_length;
   size_t start;
@@ -206,36 +238,49 @@ static size_t strappy_client_header_callback(char *contents,
   }
 
   real_size = size * nmemb;
-  header_name_length = strlen(header_name);
-  if ((real_size <= header_name_length) ||
-      (strncasecmp(contents, header_name, header_name_length) != 0)) {
-    return real_size;
-  }
-
-  start = header_name_length;
-  while ((start < real_size) &&
-         isspace((unsigned char)contents[start])) {
-    start++;
-  }
-
-  end = real_size;
-  while ((end > start) &&
-         isspace((unsigned char)contents[end - 1U])) {
-    end--;
-  }
-
-  if (end <= start) {
-    return real_size;
-  }
-
-  copy = strappy_string_duplicate_length(contents + start, end - start);
-  if (copy == NULL) {
-    return 0U;
-  }
-
   result = (strappy_chat_result *)userp;
-  free(result->response_id);
-  result->response_id = copy;
+
+  header_name_length = strlen(generation_header_name);
+  if ((real_size > header_name_length) &&
+      (strncasecmp(contents,
+                   generation_header_name,
+                   header_name_length) == 0)) {
+    start = header_name_length;
+    while ((start < real_size) &&
+           isspace((unsigned char)contents[start])) {
+      start++;
+    }
+
+    end = real_size;
+    while ((end > start) &&
+           isspace((unsigned char)contents[end - 1U])) {
+      end--;
+    }
+
+    if (end <= start) {
+      return real_size;
+    }
+
+    copy = strappy_string_duplicate_length(contents + start, end - start);
+    if (copy == NULL) {
+      return 0U;
+    }
+
+    free(result->response_id);
+    result->response_id = copy;
+    return real_size;
+  }
+
+  header_name_length = strlen(retry_after_header_name);
+  if ((real_size > header_name_length) &&
+      (strncasecmp(contents,
+                   retry_after_header_name,
+                   header_name_length) == 0)) {
+    result->retry_after_seconds =
+      strappy_client_parse_retry_after_seconds(contents + header_name_length,
+                                               real_size - header_name_length);
+  }
+
   return real_size;
 }
 
@@ -426,6 +471,7 @@ static int strappy_client_error_type_is_retryable(const char *error_type)
           (strcmp(error_type, "provider_overloaded") == 0) ||
           (strcmp(error_type, "provider_unavailable") == 0) ||
           (strcmp(error_type, "timeout") == 0) ||
+          (strcmp(error_type, "server") == 0) ||
           (strcmp(error_type, "server_error") == 0)) ? 1 : 0;
 }
 
@@ -3906,6 +3952,7 @@ void strappy_chat_result_init(strappy_chat_result *result)
   result->metadata_text = NULL;
   result->reasoning_text = NULL;
   result->http_status = 0L;
+  result->retry_after_seconds = 0L;
   result->cancelled = 0;
 }
 
@@ -4020,6 +4067,130 @@ static void strappy_client_sleep_milliseconds(unsigned int milliseconds)
     delay.tv_usec = (long)((milliseconds % 1000U) * 1000U);
     result = select(0, NULL, NULL, NULL, &delay);
   } while ((result < 0) && (errno == EINTR));
+}
+
+static long long strappy_client_now_ms(void)
+{
+  struct timeval now;
+
+  if (gettimeofday(&now, NULL) != 0) {
+    return 0LL;
+  }
+
+  return ((long long)now.tv_sec * 1000LL) + ((long long)now.tv_usec / 1000LL);
+}
+
+static unsigned int strappy_client_retry_delay_milliseconds(
+  const strappy_chat_result *result,
+  unsigned int fallback_ms)
+{
+  unsigned long retry_after_ms;
+
+  if ((result == NULL) || (result->retry_after_seconds <= 0L)) {
+    return fallback_ms;
+  }
+
+  if (result->retry_after_seconds > ((long)(UINT_MAX / 1000U))) {
+    return UINT_MAX;
+  }
+
+  retry_after_ms = ((unsigned long)result->retry_after_seconds) * 1000UL;
+  return (retry_after_ms > (unsigned long)UINT_MAX) ?
+    UINT_MAX : (unsigned int)retry_after_ms;
+}
+
+static const char *strappy_client_retry_reason(
+  const strappy_chat_result *result,
+  const char *error,
+  char *buffer,
+  size_t buffer_size)
+{
+  if ((result != NULL) &&
+      (result->error_type != NULL) &&
+      (result->error_type[0] != '\0')) {
+    return result->error_type;
+  }
+  if ((result != NULL) &&
+      (result->provider_code != NULL) &&
+      (result->provider_code[0] != '\0')) {
+    return result->provider_code;
+  }
+  if ((result != NULL) &&
+      (result->error_code != NULL) &&
+      (result->error_code[0] != '\0')) {
+    return result->error_code;
+  }
+  if ((result != NULL) && (result->http_status > 0L) &&
+      (buffer != NULL) && (buffer_size > 0U)) {
+    snprintf(buffer, buffer_size, "HTTP %ld", result->http_status);
+    return buffer;
+  }
+  return (error != NULL) ? error : "";
+}
+
+static int strappy_client_emit_processing_status(
+  strappy_chat_stream_callback callback,
+  void *callback_data,
+  const char *kind,
+  long long started_ms,
+  unsigned int retry_after_seconds,
+  unsigned int retry_attempt,
+  unsigned int retry_max_attempts,
+  const char *reason)
+{
+  strappy_chat_stream_event event;
+  long long now_ms;
+
+  if (callback == NULL) {
+    return 1;
+  }
+
+  now_ms = strappy_client_now_ms();
+  memset(&event, 0, sizeof(event));
+  event.type = STRAPPY_CHAT_STREAM_EVENT_PROCESSING_STATUS;
+  event.status_kind = (kind != NULL) ? kind : "thinking";
+  event.status_reason = (reason != NULL) ? reason : "";
+  event.status_started_ms = started_ms;
+  event.status_updated_ms = now_ms;
+  event.retry_after_seconds = retry_after_seconds;
+  event.retry_attempt = retry_attempt;
+  event.retry_max_attempts = retry_max_attempts;
+  if ((retry_after_seconds > 0U) && (now_ms > 0LL)) {
+    event.retry_until_ms = now_ms + ((long long)retry_after_seconds * 1000LL);
+  }
+
+  return callback(&event, callback_data);
+}
+
+static int strappy_client_emit_retry_status(
+  strappy_chat_stream_callback callback,
+  void *callback_data,
+  const char *kind,
+  const strappy_chat_result *result,
+  const char *error,
+  long long started_ms,
+  unsigned int delay_ms,
+  unsigned int next_attempt,
+  unsigned int max_attempts)
+{
+  char reason_buffer[64];
+  unsigned int retry_after_seconds;
+  const char *reason;
+
+  retry_after_seconds = (delay_ms > (UINT_MAX - 999U)) ?
+    (UINT_MAX / 1000U) : ((delay_ms + 999U) / 1000U);
+  reason = strappy_client_retry_reason(result,
+                                       error,
+                                       reason_buffer,
+                                       sizeof(reason_buffer));
+  return strappy_client_emit_processing_status(callback,
+                                               callback_data,
+                                               kind,
+                                               started_ms,
+                                               retry_after_seconds,
+                                               next_attempt,
+                                               max_attempts,
+                                               reason);
 }
 
 static int strappy_client_generation_has_field(cJSON *data, const char *key)
@@ -4644,15 +4815,22 @@ static int strappy_client_stream_request_json(const strappy_config *config,
   return 1;
 }
 
-int strappy_client_send_messages(const strappy_config *config,
-                                 const strappy_chat_message *messages,
-                                 size_t message_count,
-                                 strappy_chat_result *result,
-                                 char **error_out)
+int strappy_client_send_messages_with_events(
+  const strappy_config *config,
+  const strappy_chat_message *messages,
+  size_t message_count,
+  strappy_chat_result *result,
+  strappy_chat_stream_callback callback,
+  void *callback_data,
+  char **error_out)
 {
   char *request_json;
+  const char *retry_error;
+  long long started_ms;
   unsigned int attempt;
   unsigned int delay_ms;
+  unsigned int retry_delay_ms;
+  unsigned int next_attempt;
 
   if (result == NULL) {
     strappy_set_error(error_out, "strappy_client_send_messages received no result.");
@@ -4685,6 +4863,7 @@ int strappy_client_send_messages(const strappy_config *config,
   }
 
   delay_ms = STRAPPY_CLIENT_CHAT_RETRY_INITIAL_DELAY_MS;
+  started_ms = strappy_client_now_ms();
   for (attempt = 0U; attempt < STRAPPY_CLIENT_CHAT_RETRY_ATTEMPTS; attempt++) {
     if (attempt > 0U) {
       strappy_chat_result_destroy(result);
@@ -4716,13 +4895,55 @@ int strappy_client_send_messages(const strappy_config *config,
       return 0;
     }
 
-    strappy_client_sleep_milliseconds(delay_ms);
+    retry_error = (error_out != NULL) ? *error_out : NULL;
+    retry_delay_ms = strappy_client_retry_delay_milliseconds(result, delay_ms);
+    next_attempt = attempt + 2U;
+    if (!strappy_client_emit_retry_status(callback,
+                                          callback_data,
+                                          "retry_wait",
+                                          result,
+                                          retry_error,
+                                          started_ms,
+                                          retry_delay_ms,
+                                          next_attempt,
+                                          STRAPPY_CLIENT_CHAT_RETRY_ATTEMPTS)) {
+      strappy_set_error(error_out, "Stream callback rejected retry status.");
+      return 0;
+    }
+    strappy_client_sleep_milliseconds(retry_delay_ms);
+    if (!strappy_client_emit_processing_status(
+          callback,
+          callback_data,
+          "retrying",
+          started_ms,
+          0U,
+          next_attempt,
+          STRAPPY_CLIENT_CHAT_RETRY_ATTEMPTS,
+          strappy_client_retry_reason(result, retry_error, NULL, 0U))) {
+      strappy_set_error(error_out, "Stream callback rejected retry status.");
+      return 0;
+    }
     if (delay_ms <= (((unsigned int)-1) / 2U)) {
       delay_ms *= 2U;
     }
   }
 
   return 0;
+}
+
+int strappy_client_send_messages(const strappy_config *config,
+                                 const strappy_chat_message *messages,
+                                 size_t message_count,
+                                 strappy_chat_result *result,
+                                 char **error_out)
+{
+  return strappy_client_send_messages_with_events(config,
+                                                  messages,
+                                                  message_count,
+                                                  result,
+                                                  NULL,
+                                                  NULL,
+                                                  error_out);
 }
 
 int strappy_client_fetch_openrouter_user_models_json(
@@ -4879,8 +5100,12 @@ int strappy_client_stream_messages(const strappy_config *config,
                                    char **error_out)
 {
   char *request_json;
+  const char *retry_error;
+  long long started_ms;
   unsigned int attempt;
   unsigned int delay_ms;
+  unsigned int retry_delay_ms;
+  unsigned int next_attempt;
 
   if (result == NULL) {
     strappy_set_error(error_out, "strappy_client_stream_messages received no result.");
@@ -4913,6 +5138,7 @@ int strappy_client_stream_messages(const strappy_config *config,
   }
 
   delay_ms = STRAPPY_CLIENT_CHAT_RETRY_INITIAL_DELAY_MS;
+  started_ms = strappy_client_now_ms();
   for (attempt = 0U; attempt < STRAPPY_CLIENT_CHAT_RETRY_ATTEMPTS; attempt++) {
     if (attempt > 0U) {
       strappy_chat_result_destroy(result);
@@ -4946,7 +5172,34 @@ int strappy_client_stream_messages(const strappy_config *config,
       return 0;
     }
 
-    strappy_client_sleep_milliseconds(delay_ms);
+    retry_error = (error_out != NULL) ? *error_out : NULL;
+    retry_delay_ms = strappy_client_retry_delay_milliseconds(result, delay_ms);
+    next_attempt = attempt + 2U;
+    if (!strappy_client_emit_retry_status(callback,
+                                          callback_data,
+                                          "retry_wait",
+                                          result,
+                                          retry_error,
+                                          started_ms,
+                                          retry_delay_ms,
+                                          next_attempt,
+                                          STRAPPY_CLIENT_CHAT_RETRY_ATTEMPTS)) {
+      strappy_set_error(error_out, "Stream callback rejected retry status.");
+      return 0;
+    }
+    strappy_client_sleep_milliseconds(retry_delay_ms);
+    if (!strappy_client_emit_processing_status(
+          callback,
+          callback_data,
+          "retrying",
+          started_ms,
+          0U,
+          next_attempt,
+          STRAPPY_CLIENT_CHAT_RETRY_ATTEMPTS,
+          strappy_client_retry_reason(result, retry_error, NULL, 0U))) {
+      strappy_set_error(error_out, "Stream callback rejected retry status.");
+      return 0;
+    }
     if (delay_ms <= (((unsigned int)-1) / 2U)) {
       delay_ms *= 2U;
     }

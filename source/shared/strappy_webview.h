@@ -104,6 +104,8 @@ char *strappy_webview_append_message_text_by_key_js(const char *message_key,
 char *strappy_webview_append_reasoning_text_by_key_js(const char *message_key,
                                                       const char *delta);
 char *strappy_webview_move_message_text_to_reasoning_js(const char *element_id);
+char *strappy_webview_set_processing_status_js(const char *status_json);
+char *strappy_webview_clear_processing_status_js(void);
 char *strappy_webview_tool_event_text(const char *event_type,
                                       const char *tool_call_id,
                                       const char *tool_name,

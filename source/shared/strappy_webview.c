@@ -718,12 +718,24 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
 {
   static const char * const chunks[] = {
     "html,body{margin:0;padding:0;background:transparent;color:#222;",
-    "font:13px Helvetica,Arial,sans-serif;}",
-    ".page{padding:18px 14px;}",
+    "font:13px -apple-system,Helvetica,Arial,sans-serif;}",
+    ".page{padding:18px 10px;}",
     ".empty{margin:90px auto 0;max-width:520px;color:#777;",
     "text-align:center;line-height:1.45;}",
     ".layout{width:100%;}",
     ".chat-column{width:100%;box-sizing:border-box;}",
+    "body.processing-status-active .page{padding-bottom:58px;}",
+    ".processing-status{position:fixed;left:10px;right:10px;bottom:10px;",
+    "z-index:20;box-sizing:border-box;border:1px solid #b8c7d4;",
+    "background:#f8fbfd;color:#26323d;padding:8px 10px;",
+    "box-shadow:0 2px 9px rgba(0,0,0,.12);font-size:12px;",
+    "line-height:16px;}",
+    ".processing-status-retry_wait{border-color:#caa85f;background:#fff9e8;",
+    "color:#4d3d15;}",
+    ".processing-status-retrying{border-color:#9eb8d0;background:#f1f7fc;",
+    "color:#253d54;}",
+    ".bubble,.reasoning,.tool-column,.request-metadata{",
+    "box-shadow:0 2px 9px rgba(0,0,0,.12);}",
     ".tool-column{max-width:100%;box-sizing:border-box;margin:0 0 7px;",
     "border:1px solid #cbd7e2;background:#f7fbff;color:#4d6478;",
     "padding:10px 12px;line-height:1.4;white-space:pre-wrap;word-wrap:break-word;}",
@@ -771,7 +783,7 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "font:12px Menlo,Consolas,Monaco,monospace;white-space:pre-wrap;}",
     ".tool_call .bubble{background:#fffdf2;border-color:#ded6a8;}",
     ".tool .bubble{background:#f7fbff;border-color:#cbd7e2;}",
-    ".tool-panel{font:12px Helvetica,Arial,sans-serif;line-height:1.35;",
+    ".tool-panel{font:12px -apple-system,Helvetica,Arial,sans-serif;line-height:1.35;",
     "white-space:normal;color:#24313d;}",
     ".tool-heading{font-weight:bold;margin:0 0 6px;color:#2f4150;}",
     ".tool-subtle{color:#687887;font-size:11px;}",
@@ -1010,6 +1022,49 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(typeof v=='string')return v;if(typeof v=='number'||typeof v=='boolean')",
     "return String(v);if(typeof JSON!='undefined'&&JSON.stringify)return JSON.stringify(v);",
     "return String(v);}",
+    "var strappyProcessingStatus=null;var strappyProcessingTimer=null;",
+    "function processingStatusObject(raw){var s=raw;if(!s)return null;",
+    "if(typeof s=='string'){try{s=JSON.parse(s);}catch(e){return null;}}",
+    "if(s&&s.processing_status)s=s.processing_status;return isObj(s)?s:null;}",
+    "function processingNumber(v){var n=parseInt(v,10);return isNaN(n)?0:n;}",
+    "function processingDuration(seconds){var s=processingNumber(seconds);var m,h;",
+    "if(s<0)s=0;if(s<60)return s+'s';m=Math.floor(s/60);s=s%60;",
+    "if(m<60)return m+'m '+(s<10?'0':'')+s+'s';h=Math.floor(m/60);",
+    "m=m%60;return h+'h '+(m<10?'0':'')+m+'m';}",
+    "function processingAttemptText(s){var a=processingNumber(s.retry_attempt);",
+    "var max=processingNumber(s.retry_max_attempts);if(a>0&&max>0)return 'attempt '+a+' of '+max;",
+    "if(a>0)return 'attempt '+a;return '';}",
+    "function processingStatusText(s){var now=(new Date()).getTime();var started=processingNumber(s.started_ms);",
+    "var elapsed=started>0?Math.floor((now-started)/1000):0;var kind=s.status_kind||'thinking';",
+    "var attempt=processingAttemptText(s);var reason=s.retry_reason||'';var remaining;",
+    "if(kind=='retry_wait'){remaining=processingNumber(s.retry_until_ms)>0?",
+    "Math.ceil((processingNumber(s.retry_until_ms)-now)/1000):processingNumber(s.retry_after_seconds);",
+    "if(remaining<0)remaining=0;return 'Retrying in '+processingDuration(remaining)",
+    "+(reason?' - '+reason:'')+(attempt?' - '+attempt:'');}",
+    "if(kind=='retrying')return 'Retrying'+(attempt?' - '+attempt:'')+' - '+processingDuration(elapsed)+' elapsed';",
+    "if(kind=='tools')return 'Using tools - '+processingDuration(elapsed);",
+    "return 'Thinking - '+processingDuration(elapsed);}",
+    "function processingStatusNode(){var n=byId('processing-status');if(n)return n;",
+    "n=document.createElement('div');n.id='processing-status';n.className='processing-status';",
+    "n.setAttribute('role','status');n.setAttribute('aria-live','polite');",
+    "(document.body||document.documentElement).appendChild(n);return n;}",
+    "function updateProcessingStatus(){var s=strappyProcessingStatus;var n,b=document.body;",
+    "if(!s||!s.active){clearProcessingStatus();return;}n=processingStatusNode();",
+    "n.className='processing-status processing-status-'+(s.status_kind||'thinking');",
+    "setNodeText(n,processingStatusText(s));if(b&&!hasClass(b,'processing-status-active'))",
+    "b.className+=' processing-status-active';}",
+    "function scheduleProcessingStatusTimer(){if(strappyProcessingTimer)return;",
+    "strappyProcessingTimer=setInterval(updateProcessingStatus,5000);}",
+    "function setProcessingStatus(raw){var s=processingStatusObject(raw);",
+    "if(!s||!s.active){clearProcessingStatus();return;}strappyProcessingStatus=s;",
+    "updateProcessingStatus();scheduleProcessingStatusTimer();}",
+    "function clearProcessingStatus(){var n=byId('processing-status');var b=document.body;",
+    "strappyProcessingStatus=null;if(strappyProcessingTimer){clearInterval(strappyProcessingTimer);",
+    "strappyProcessingTimer=null;}if(n&&n.parentNode)n.parentNode.removeChild(n);",
+    "if(b)b.className=b.className.replace(/\\sprocessing-status-active/g,'');}",
+    "function initProcessingStatusFromRenderState(){var n=document.getElementsByTagName('*');var i,raw,s;",
+    "for(i=n.length-1;i>=0;i--){raw=n[i].getAttribute?n[i].getAttribute('data-render-state'):'';",
+    "s=processingStatusObject(raw);if(s&&s.active){setProcessingStatus(s);return;}}}",
     "function addMetaLine(lines,label,value){var t=jsonText(value);",
     "if(t!=='')lines[lines.length]=label+': '+t;}",
     "function addNestedMetaLine(lines,label,root,parent,key){",
@@ -1452,9 +1507,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(body._strappyMarkdown!==''&&raw.charAt(0)!='\\n')body._strappyMarkdown+='\\n';",
     "body._strappyMarkdown+=raw;if(shouldRenderMarkdownReasoning(body))renderMarkdownNode(body);",
     "else body.innerHTML=body._strappyMarkdown;",
-    "b._strappyMarkdown='';b.className=b.className.replace(/\\sbubble-status/g,'')+' bubble-status';",
-    "b.innerHTML=escHTML((r.getAttribute?r.getAttribute('data-thinking-label'):'')||'Thinking');",
-    "b.style.display='block';",
+    "b._strappyMarkdown='';b.className=b.className.replace(/\\sbubble-status/g,'');",
+    "b.innerHTML='';b.style.display='none';",
     "box.style.display='block';",
     "if(!hasClass(r,'streaming-active'))r.className+=' streaming-active';",
     "setReasoningCollapsed(box,0);setMessageToolColumnCollapsed(id,1);scrollBottom(stick);}",
@@ -1471,6 +1525,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "b._strappyRawText+=t;renderAfterMutation(document);scrollBottom(stick);}",
     "function removeMessage(id){flushTextQueues();var r=byId(id);",
     "if(r&&r.parentNode)r.parentNode.removeChild(r);renderAfterMutation(document);}",
+    "setTimeout(initProcessingStatusFromRenderState,0);",
     "</script>",
     NULL
   };
@@ -1554,6 +1609,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   int reasoning_collapsed;
   int tool_column_collapsed;
   int render_bubble_status;
+  int hide_empty_answer_bubble;
   int suppress_status_meta;
   int ok;
 
@@ -1587,7 +1643,8 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     strappy_webview_json_bool(render_state_json,
                               "tool_column_collapsed",
                               1);
-  render_bubble_status =
+  render_bubble_status = 0;
+  hide_empty_answer_bubble =
     render_streaming &&
     strappy_webview_is_assistant_role(role) &&
     (text[0] == '\0');
@@ -1688,7 +1745,12 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   if (ok && render_bubble_status) {
     ok = strappy_webview_buffer_append_cstring(&buffer, " bubble-status");
   }
-  ok = ok && strappy_webview_buffer_append_cstring(&buffer, "\">");
+  ok = ok && strappy_webview_buffer_append_cstring(&buffer, "\"");
+  if (ok && hide_empty_answer_bubble) {
+    ok = strappy_webview_buffer_append_cstring(&buffer,
+                                               " style=\"display:none;\"");
+  }
+  ok = ok && strappy_webview_buffer_append_cstring(&buffer, ">");
   if (ok && render_bubble_status) {
     if (status_to_render[0] != '\0') {
       ok = strappy_webview_buffer_append_cstring(&buffer, status_to_render);
@@ -2143,6 +2205,33 @@ char *strappy_webview_move_message_text_to_reasoning_js(const char *element_id)
         "moveMessageTextToReasoning(") ||
       !strappy_webview_append_js_string(&buffer, element_id) ||
       !strappy_webview_buffer_append_cstring(&buffer, ");")) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_set_processing_status_js(const char *status_json)
+{
+  strappy_webview_buffer buffer;
+
+  strappy_webview_buffer_init(&buffer);
+  if (!strappy_webview_buffer_append_cstring(&buffer, "setProcessingStatus(") ||
+      !strappy_webview_append_js_string(&buffer, status_json) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_clear_processing_status_js(void)
+{
+  strappy_webview_buffer buffer;
+
+  strappy_webview_buffer_init(&buffer);
+  if (!strappy_webview_buffer_append_cstring(&buffer,
+                                             "clearProcessingStatus();")) {
     strappy_webview_buffer_destroy(&buffer);
     return NULL;
   }

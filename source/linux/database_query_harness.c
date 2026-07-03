@@ -2262,6 +2262,7 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
   strappy_session_message_record_list context_messages;
   const char *reasoning_streaming_state;
   const char *content_streaming_state;
+  const char *processing_streaming_state;
   long long session_id;
   char *error;
   int ok;
@@ -2277,6 +2278,11 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
     "{\"streaming\":true,\"reasoning_render_when_empty\":true,"
     "\"reasoning_collapsed\":false,\"tool_column_collapsed\":true,"
     "\"content_started\":true}";
+  processing_streaming_state =
+    "{\"streaming\":true,\"reasoning_render_when_empty\":true,"
+    "\"reasoning_collapsed\":false,\"tool_column_collapsed\":true,"
+    "\"content_started\":true,\"processing_status\":{\"active\":true,"
+    "\"status_kind\":\"thinking\",\"started_ms\":1000}}";
 
   memset(messages, 0, sizeof(messages));
 
@@ -2514,6 +2520,47 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
   strappy_session_message_record_list_destroy(&all_messages);
   if (!ok) {
     fprintf(stderr, "Streamed message append did not persist expected content.\n");
+    return 0;
+  }
+
+  if (!strappy_db_update_session_message_render_state(
+        context->catalog_path,
+        session_id,
+        "stream-turn-test-assistant",
+        processing_streaming_state,
+        &error)) {
+    fprintf(stderr,
+            "Could not update streamed message render state: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  strappy_session_message_record_list_init(&all_messages);
+  ok = strappy_db_list_session_messages(context->catalog_path,
+                                        session_id,
+                                        &all_messages,
+                                        &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not list render-state-only update rows: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_message_record_list_destroy(&all_messages);
+    return 0;
+  }
+
+  ok = (all_messages.count == 6U) &&
+       (strcmp(all_messages.records[5].message_key,
+               "stream-turn-test-assistant") == 0) &&
+       (strcmp(all_messages.records[5].content, "Hello") == 0) &&
+       (strcmp(all_messages.records[5].reasoning, "thinking late") == 0) &&
+       (all_messages.records[5].render_state_json != NULL) &&
+       (strcmp(all_messages.records[5].render_state_json,
+               processing_streaming_state) == 0);
+  strappy_session_message_record_list_destroy(&all_messages);
+  if (!ok) {
+    fprintf(stderr, "Render-state-only update changed streamed content.\n");
     return 0;
   }
 

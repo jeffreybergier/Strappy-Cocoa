@@ -249,6 +249,14 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
       [delta setObject:messageJSON forKey:@"message_json"];
     }
   }
+  if (event->status_json != NULL) {
+    NSString *statusJSON;
+
+    statusJSON = [NSString stringWithUTF8String:event->status_json];
+    if (statusJSON != nil) {
+      [delta setObject:statusJSON forKey:@"status_json"];
+    }
+  }
   if (event->turn_key != NULL) {
     NSString *turnKey;
 
@@ -330,6 +338,8 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
     [delta setObject:@"turn_finished" forKey:@"stream_event"];
   } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_RETRACTED) {
     [delta setObject:@"content_retracted" forKey:@"stream_event"];
+  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_PROCESSING_STATUS) {
+    [delta setObject:@"processing_status" forKey:@"stream_event"];
   }
 
   [self performSelectorOnMainThread:@selector(postStreamEventAndRelease:)
@@ -1734,6 +1744,7 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 {
   NSString *databasePath;
   NSString *messageKey;
+  NSString *statusJSON;
   NSString *streamEvent;
   NSString *delta;
   char *strappyError;
@@ -1771,6 +1782,14 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
         [messageKey UTF8String],
         [delta UTF8String]));
   }
+  if ([streamEvent isEqualToString:@"processing_status"]) {
+    statusJSON = [event objectForKey:@"status_json"];
+    if (![statusJSON isKindOfClass:[NSString class]]) {
+      statusJSON = @"";
+    }
+    return StrappySessionStringFromWebViewCString(
+      strappy_webview_set_processing_status_js([statusJSON UTF8String]));
+  }
 
   sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
     [sessionIdentifier_ longLongValue] : 0LL;
@@ -1803,6 +1822,15 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   StrappySessionWebViewMessageFromRecord(&record, &message);
   js = strappy_webview_message_update_js(&message, &labels);
   strappy_session_message_record_destroy(&record);
+  if ([streamEvent isEqualToString:@"turn_finished"]) {
+    NSString *clearJS;
+    NSString *updateJS;
+
+    clearJS = StrappySessionStringFromWebViewCString(
+      strappy_webview_clear_processing_status_js());
+    updateJS = StrappySessionStringFromWebViewCString(js);
+    return [clearJS stringByAppendingString:updateJS];
+  }
   return StrappySessionStringFromWebViewCString(js);
 }
 
