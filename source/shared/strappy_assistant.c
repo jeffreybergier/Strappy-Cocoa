@@ -2778,7 +2778,23 @@ static char *strappy_assistant_create_error_metadata_json(
        strappy_assistant_json_add_string_if_present(root,
                                                     "provider_native_finish_reason",
                                                     (result != NULL) ?
-                                                      result->native_finish_reason : NULL);
+                                                      result->native_finish_reason : NULL) &&
+       strappy_assistant_json_add_string_if_present(root,
+                                                    "error_code",
+                                                    (result != NULL) ?
+                                                      result->error_code : NULL) &&
+       strappy_assistant_json_add_string_if_present(root,
+                                                    "error_type",
+                                                    (result != NULL) ?
+                                                      result->error_type : NULL) &&
+       strappy_assistant_json_add_string_if_present(root,
+                                                    "provider",
+                                                    (result != NULL) ?
+                                                      result->provider_name : NULL) &&
+       strappy_assistant_json_add_string_if_present(root,
+                                                    "provider_code",
+                                                    (result != NULL) ?
+                                                      result->provider_code : NULL);
 
   if (!ok) {
     cJSON_Delete(root);

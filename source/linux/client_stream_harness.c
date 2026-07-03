@@ -542,6 +542,64 @@ static int harness_test_non_stream_choice_error_metadata(void)
   return 1;
 }
 
+static int harness_test_stream_midstream_error_metadata(void)
+{
+  const char *content_json =
+    "{\"id\":\"gen-stream-error\",\"object\":\"chat.completion.chunk\","
+    "\"model\":\"openai/gpt-4o\",\"provider\":\"OpenAI\","
+    "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},"
+    "\"finish_reason\":null}]}";
+  const char *error_json =
+    "{\"id\":\"gen-stream-error\",\"object\":\"chat.completion.chunk\","
+    "\"model\":\"openai/gpt-4o\",\"provider\":\"OpenAI\","
+    "\"error\":{\"code\":\"server_error\","
+    "\"message\":\"Provider disconnected unexpectedly\","
+    "\"error_type\":\"server\",\"provider_code\":\"upstream_disconnect\"},"
+    "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\"},"
+    "\"finish_reason\":\"error\"}]}";
+  strappy_stream_context context;
+  strappy_chat_result result;
+  harness_stream_record record;
+  int ok;
+
+  memset(&record, 0, sizeof(record));
+  strappy_chat_result_init(&result);
+  strappy_stream_context_init(&context);
+  context.result = &result;
+  context.callback = harness_record_stream_event;
+  context.callback_data = &record;
+
+  ok = strappy_client_stream_parse_json_event(&context, content_json) &&
+       !strappy_client_stream_parse_json_event(&context, error_json) &&
+       (context.stream_error != NULL) &&
+       (strstr(context.stream_error,
+               "Provider disconnected unexpectedly") != NULL) &&
+       (record.content_count == 0) &&
+       (result.response_id != NULL) &&
+       (strcmp(result.response_id, "gen-stream-error") == 0) &&
+       (result.model != NULL) &&
+       (strcmp(result.model, "openai/gpt-4o") == 0) &&
+       (result.provider_name != NULL) &&
+       (strcmp(result.provider_name, "OpenAI") == 0) &&
+       (result.error_code != NULL) &&
+       (strcmp(result.error_code, "server_error") == 0) &&
+       (result.error_type != NULL) &&
+       (strcmp(result.error_type, "server") == 0) &&
+       (result.provider_code != NULL) &&
+       (strcmp(result.provider_code, "upstream_disconnect") == 0) &&
+       (result.finish_reason != NULL) &&
+       (strcmp(result.finish_reason, "error") == 0);
+
+  strappy_stream_context_destroy(&context);
+  strappy_chat_result_destroy(&result);
+
+  if (!ok) {
+    return harness_fail("Mid-stream OpenRouter error metadata was not captured.");
+  }
+
+  return 1;
+}
+
 static int harness_test_non_stream_reasoning_detail_chunks_are_joined(void)
 {
   const char *response_json =
@@ -867,6 +925,10 @@ int main(void)
     return 1;
   }
   if (!harness_test_non_stream_choice_error_metadata()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_stream_midstream_error_metadata()) {
     fprintf(stderr, "client_stream_harness failed.\n");
     return 1;
   }

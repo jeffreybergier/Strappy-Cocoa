@@ -895,6 +895,7 @@ static int strappy_client_capture_response_metadata(cJSON *root,
 
   if (!strappy_client_capture_response_id(root, result) ||
       !strappy_client_capture_json_value(&result->created, root, "created") ||
+      !strappy_client_capture_json_string(&result->model, root, "model") ||
       !strappy_client_capture_json_string(&result->provider_name,
                                           root,
                                           "provider") ||
@@ -1090,6 +1091,19 @@ static int strappy_client_capture_api_error_metadata(cJSON *error,
     if (!ok) {
       return 0;
     }
+  }
+
+  ok = strappy_client_capture_json_string(&result->error_type,
+                                          error,
+                                          "error_type") &&
+       strappy_client_capture_json_string(&result->provider_code,
+                                          error,
+                                          "provider_code") &&
+       strappy_client_capture_json_string(&result->provider_name,
+                                          error,
+                                          "provider_name");
+  if (!ok) {
+    return 0;
   }
 
   metadata = cJSON_GetObjectItem(error, "metadata");
