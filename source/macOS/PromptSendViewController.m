@@ -4,9 +4,15 @@
 static const CGFloat kPromptSendHeightCollapsed = 32.0;
 static const CGFloat kPromptSendHeightExpanded = 108.0;
 static const CGFloat kPromptSendPad = 4.0;
-static const CGFloat kPromptOptionsButtonWidth = 180.0;
-static const CGFloat kPromptSendButtonWidth = 96.0;
+static const CGFloat kPromptOptionsSegmentWidth = 180.0;
+static const CGFloat kPromptSendSegmentWidth = 96.0;
+static const CGFloat kPromptActionSegmentCapSlack = 2.0;
 static const CGFloat kPromptActionButtonHeight = 24.0;
+
+enum {
+  kPromptActionSegmentOptions = 0,
+  kPromptActionSegmentSend = 1
+};
 
 static NSColor *StrappyInputBezelBackgroundColor(void) { return [NSColor controlBackgroundColor]; }
 static NSColor *StrappyInputBezelBorderColor(void) { return [NSColor gridColor]; }
@@ -77,9 +83,11 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
 - (void)updateExpansion;
 - (void)updateActionControls;
 - (void)updateSendButtonAppearance;
+- (void)updateOptionsSegmentTitle:(NSString *)title;
 - (void)selectCurrentModelMenuItem;
 - (void)barViewFrameDidChange:(NSNotification *)notification;
 - (void)modelMenuItemClicked:(id)sender;
+- (void)actionSegmentClicked:(id)sender;
 - (void)sendButtonClicked:(id)sender;
 - (void)streamingMenuItemClicked:(id)sender;
 @end
@@ -150,6 +158,8 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   [textView_ setHorizontallyResizable:NO];
   [textView_ setAutoresizingMask:NSViewWidthSizable];
   [[textView_ textContainer] setWidthTracksTextView:YES];
+  [textView_ setRichText:NO];
+  [textView_ setImportsGraphics:NO];
   [textView_ setFont:XPFontTextStyleBody];
   [textView_ setDrawsBackground:YES];
   [textView_ setBackgroundColor:[NSColor controlBackgroundColor]];
@@ -157,22 +167,28 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   [textView_ setDelegate:self];
   [scrollView_ setDocumentView:textView_];
 
-  optionsPopUpButton_ =
-    [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
-  [optionsPopUpButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
-  [optionsPopUpButton_ setBezelStyle:XPBezelStyleRounded];
-  [optionsPopUpButton_ setToolTip:NSLocalizedString(@"Prompt Options", nil)];
-  [[optionsPopUpButton_ menu] setAutoenablesItems:NO];
-  [barView_ addSubview:optionsPopUpButton_];
-  [self reloadOptionsMenu];
+  optionsMenu_ = [[NSMenu alloc]
+      initWithTitle:NSLocalizedString(@"Prompt Options", nil)];
+  [optionsMenu_ setAutoenablesItems:NO];
 
-  sendButton_ = [[NSButton alloc] initWithFrame:NSZeroRect];
-  [sendButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
-  [sendButton_ setBezelStyle:XPBezelStyleRounded];
-  [sendButton_ setButtonType:XPButtonTypeMomentaryLight];
-  [sendButton_ setTarget:self];
-  [sendButton_ setAction:@selector(sendButtonClicked:)];
-  [barView_ addSubview:sendButton_];
+  actionSegmented_ = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
+  [actionSegmented_ setSegmentCount:2];
+  [[actionSegmented_ cell] setTrackingMode:NSSegmentSwitchTrackingMomentary];
+  [actionSegmented_ XP_setToolbarSegmentStyle];
+  [actionSegmented_ setWidth:kPromptOptionsSegmentWidth
+                  forSegment:kPromptActionSegmentOptions];
+  [actionSegmented_ setWidth:kPromptSendSegmentWidth
+                  forSegment:kPromptActionSegmentSend];
+  [actionSegmented_ sizeToFit];
+  [actionSegmented_ setMenu:optionsMenu_
+                 forSegment:kPromptActionSegmentOptions];
+  [actionSegmented_ setTarget:self];
+  [actionSegmented_ setAction:@selector(actionSegmentClicked:)];
+  [actionSegmented_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
+  [actionSegmented_ XP_setToolTip:NSLocalizedString(@"Prompt Options", nil)
+                       forSegment:kPromptActionSegmentOptions];
+  [barView_ addSubview:actionSegmented_];
+  [self reloadOptionsMenu];
   [self updateSendButtonAppearance];
 
   [barView_ setPostsFrameChangedNotifications:YES];
@@ -189,32 +205,39 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
 - (void)viewDidLayout
 {
   NSRect bounds;
-  CGFloat sendButtonWidth;
-  CGFloat optionsButtonWidth;
+  NSSize actionSize;
+  CGFloat actionWidth;
+  CGFloat actionHeight;
   CGFloat inputWidth;
-  CGFloat sendX;
-  CGFloat optionsX;
+  CGFloat actionX;
 
   [super viewDidLayout];
   bounds = [barView_ bounds];
-  sendButtonWidth = kPromptSendButtonWidth;
-  optionsButtonWidth = kPromptOptionsButtonWidth;
-  inputWidth = bounds.size.width - sendButtonWidth - optionsButtonWidth -
-    (kPromptSendPad * 4.0);
+  [actionSegmented_ sizeToFit];
+  actionSize = [actionSegmented_ frame].size;
+  actionWidth = actionSize.width;
+  actionHeight = actionSize.height;
+  if (actionWidth <= 0.0) {
+    actionWidth = kPromptOptionsSegmentWidth + kPromptSendSegmentWidth;
+  }
+  if (actionWidth < (kPromptOptionsSegmentWidth + kPromptSendSegmentWidth +
+                     kPromptActionSegmentCapSlack)) {
+    actionWidth = kPromptOptionsSegmentWidth + kPromptSendSegmentWidth +
+      kPromptActionSegmentCapSlack;
+  }
+  if (actionHeight <= 0.0) {
+    actionHeight = kPromptActionButtonHeight;
+  }
+  inputWidth = bounds.size.width - actionWidth - (kPromptSendPad * 3.0);
   if (inputWidth < 0.0) {
     inputWidth = 0.0;
   }
 
-  sendX = NSMaxX(bounds) - kPromptSendPad - sendButtonWidth;
-  optionsX = sendX - kPromptSendPad - optionsButtonWidth;
-  [optionsPopUpButton_ setFrame:NSMakeRect(optionsX,
-                                           kPromptSendPad,
-                                           optionsButtonWidth,
-                                           kPromptActionButtonHeight)];
-  [sendButton_ setFrame:NSMakeRect(sendX,
-                                   kPromptSendPad,
-                                   sendButtonWidth,
-                                   kPromptActionButtonHeight)];
+  actionX = NSMaxX(bounds) - kPromptSendPad - actionWidth;
+  [actionSegmented_ setFrame:NSMakeRect(actionX,
+                                        kPromptSendPad,
+                                        actionWidth,
+                                        actionHeight)];
   [bezelView_ setFrame:NSMakeRect(kPromptSendPad,
                                   kPromptSendPad,
                                   inputWidth,
@@ -235,28 +258,43 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
 
 - (void)updateSendButtonAppearance
 {
-  if (sendButton_ == nil) {
+  if (actionSegmented_ == nil) {
     return;
   }
 
   if (sending_) {
-    [sendButton_ setTitle:NSLocalizedString(@"Cancel", nil)];
-    [sendButton_ setToolTip:NSLocalizedString(@"Cancel Prompt", nil)];
+    [actionSegmented_ setLabel:NSLocalizedString(@"Cancel", nil)
+                    forSegment:kPromptActionSegmentSend];
+    [actionSegmented_ XP_setToolTip:NSLocalizedString(@"Cancel Prompt", nil)
+                         forSegment:kPromptActionSegmentSend];
   } else {
-    [sendButton_ setTitle:NSLocalizedString(@"Send", nil)];
-    [sendButton_ setToolTip:NSLocalizedString(@"Send Prompt", nil)];
+    [actionSegmented_ setLabel:NSLocalizedString(@"Send", nil)
+                    forSegment:kPromptActionSegmentSend];
+    [actionSegmented_ XP_setToolTip:NSLocalizedString(@"Send Prompt", nil)
+                         forSegment:kPromptActionSegmentSend];
   }
+}
+
+- (void)updateOptionsSegmentTitle:(NSString *)title
+{
+  if (actionSegmented_ == nil) {
+    return;
+  }
+
+  [actionSegmented_ setLabel:(([title length] > 0U) ?
+                              title : NSLocalizedString(@"Model", nil))
+                  forSegment:kPromptActionSegmentOptions];
 }
 
 - (void)reloadOptionsMenu
 {
   NSArray *models;
   NSString *selectedModelIdentifier;
-  NSUInteger selectedIndex;
+  NSString *selectedTitle;
   NSUInteger index;
   BOOL foundSelectedModel;
 
-  if (optionsPopUpButton_ == nil) {
+  if (optionsMenu_ == nil) {
     return;
   }
 
@@ -278,11 +316,13 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   }
 
   foundSelectedModel = NO;
-  selectedIndex = NSNotFound;
+  selectedTitle = nil;
 
   [streamingMenuItem_ release];
   streamingMenuItem_ = nil;
-  [optionsPopUpButton_ removeAllItems];
+  while ([optionsMenu_ numberOfItems] > 0) {
+    [optionsMenu_ removeItemAtIndex:0];
+  }
 
   for (index = 0U; index < [models count]; index++) {
     NSDictionary *model;
@@ -297,15 +337,14 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
     }
 
     title = StrappyPromptDisplayNameForModelRow(model);
-    [optionsPopUpButton_ addItemWithTitle:title];
-    item = [optionsPopUpButton_ itemAtIndex:
-      ([optionsPopUpButton_ numberOfItems] - 1)];
+    item = [optionsMenu_ addItemWithTitle:title
+                                   action:@selector(modelMenuItemClicked:)
+                            keyEquivalent:@""];
     [item setTarget:self];
-    [item setAction:@selector(modelMenuItemClicked:)];
     [item setRepresentedObject:modelIdentifier];
     if ([modelIdentifier isEqualToString:selectedModelIdentifier]) {
       [item setState:XPControlStateValueOn];
-      selectedIndex = ([optionsPopUpButton_ numberOfItems] - 1);
+      selectedTitle = title;
       foundSelectedModel = YES;
     } else {
       [item setState:XPControlStateValueOff];
@@ -315,39 +354,35 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   if (!foundSelectedModel && ([selectedModelIdentifier length] > 0U)) {
     NSMenuItem *item;
 
-    [optionsPopUpButton_ addItemWithTitle:selectedModelIdentifier];
-    selectedIndex = ([optionsPopUpButton_ numberOfItems] - 1);
-    item = [optionsPopUpButton_ itemAtIndex:selectedIndex];
+    item = [optionsMenu_ addItemWithTitle:selectedModelIdentifier
+                                   action:nil
+                            keyEquivalent:@""];
     [item setEnabled:NO];
     [item setRepresentedObject:selectedModelIdentifier];
     [item setState:XPControlStateValueOn];
+    selectedTitle = selectedModelIdentifier;
   }
 
-  if ([optionsPopUpButton_ numberOfItems] == 0) {
+  if ([optionsMenu_ numberOfItems] == 0) {
     NSMenuItem *item;
 
-    [optionsPopUpButton_ addItemWithTitle:NSLocalizedString(@"Model", nil)];
-    selectedIndex = 0U;
-    item = [optionsPopUpButton_ itemAtIndex:0];
+    selectedTitle = NSLocalizedString(@"Model", nil);
+    item = [optionsMenu_ addItemWithTitle:selectedTitle
+                                   action:nil
+                            keyEquivalent:@""];
     [item setEnabled:NO];
   }
 
-  if ([optionsPopUpButton_ numberOfItems] > 0) {
-    [[optionsPopUpButton_ menu] addItem:[NSMenuItem separatorItem]];
+  if ([optionsMenu_ numberOfItems] > 0) {
+    [optionsMenu_ addItem:[NSMenuItem separatorItem]];
   }
 
-  [optionsPopUpButton_ addItemWithTitle:
-    NSLocalizedString(@"Stream Responses", nil)];
-  streamingMenuItem_ = [[optionsPopUpButton_ itemAtIndex:
-    ([optionsPopUpButton_ numberOfItems] - 1)] retain];
+  streamingMenuItem_ = [[optionsMenu_
+      addItemWithTitle:NSLocalizedString(@"Stream Responses", nil)
+                action:@selector(streamingMenuItemClicked:)
+         keyEquivalent:@""] retain];
   [streamingMenuItem_ setTarget:self];
-  [streamingMenuItem_ setAction:@selector(streamingMenuItemClicked:)];
-  if (selectedIndex == NSNotFound) {
-    selectedIndex = 0U;
-  }
-  [optionsPopUpButton_ selectItemAtIndex:selectedIndex];
-  [optionsPopUpButton_ synchronizeTitleAndSelectedItem];
-  [optionsPopUpButton_ setNeedsDisplay:YES];
+  [self updateOptionsSegmentTitle:selectedTitle];
   [self updateActionControls];
 }
 
@@ -356,8 +391,9 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   NSString *selectedModelIdentifier;
   NSInteger count;
   NSInteger index;
+  NSString *selectedTitle;
 
-  if (optionsPopUpButton_ == nil) {
+  if (optionsMenu_ == nil) {
     return;
   }
 
@@ -370,45 +406,45 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
     selectedModelIdentifier = @"";
   }
 
-  count = [optionsPopUpButton_ numberOfItems];
+  selectedTitle = nil;
+  count = [optionsMenu_ numberOfItems];
   for (index = 0; index < count; index++) {
     NSMenuItem *item;
     id representedObject;
 
-    item = [optionsPopUpButton_ itemAtIndex:index];
+    item = [optionsMenu_ itemAtIndex:index];
     representedObject = [item representedObject];
     if ([representedObject isKindOfClass:[NSString class]] &&
         ([(NSString *)representedObject length] > 0U) &&
         [representedObject isEqualToString:selectedModelIdentifier]) {
       [item setState:XPControlStateValueOn];
-      [optionsPopUpButton_ selectItemAtIndex:index];
-      [optionsPopUpButton_ synchronizeTitleAndSelectedItem];
-      return;
-    }
-    if (item != streamingMenuItem_) {
+      selectedTitle = [item title];
+    } else if (item != streamingMenuItem_) {
       [item setState:XPControlStateValueOff];
     }
   }
 
-  if (count > 0) {
-    [optionsPopUpButton_ selectItemAtIndex:0];
-    [optionsPopUpButton_ synchronizeTitleAndSelectedItem];
+  if (([selectedTitle length] == 0U) && (count > 0)) {
+    selectedTitle = [[optionsMenu_ itemAtIndex:0] title];
   }
+  [self updateOptionsSegmentTitle:selectedTitle];
 }
 
 - (void)updateActionControls
 {
   [self updateSendButtonAppearance];
 
-  [optionsPopUpButton_ setEnabled:(enabled_ && !sending_)];
+  [actionSegmented_ setEnabled:(enabled_ && !sending_)
+                    forSegment:kPromptActionSegmentOptions];
   [self selectCurrentModelMenuItem];
   if (streamingMenuItem_ != nil) {
     [streamingMenuItem_ setEnabled:(enabled_ && !sending_)];
     [streamingMenuItem_ setState:(streamingEnabled_ ?
       XPControlStateValueOn : XPControlStateValueOff)];
   }
-  [sendButton_ setEnabled:(sending_ ?
-    (enabled_ && !cancellationRequested_) : [self canSendCurrentPrompt])];
+  [actionSegmented_ setEnabled:(sending_ ?
+    (enabled_ && !cancellationRequested_) : [self canSendCurrentPrompt])
+                    forSegment:kPromptActionSegmentSend];
 }
 
 - (void)updateExpansion
@@ -499,6 +535,31 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   trimmed = [text stringByTrimmingCharactersInSet:
     [NSCharacterSet whitespaceAndNewlineCharacterSet]];
   return ([trimmed length] > 0U) ? YES : NO;
+}
+
+- (void)actionSegmentClicked:(id)sender
+{
+  NSEvent *event;
+  NSInteger segment;
+
+  if (![sender isKindOfClass:[NSSegmentedControl class]]) {
+    return;
+  }
+
+  segment = [(NSSegmentedControl *)sender selectedSegment];
+  if (segment == kPromptActionSegmentSend) {
+    [self sendButtonClicked:sender];
+  } else if ((segment == kPromptActionSegmentOptions) &&
+             (optionsMenu_ != nil) &&
+             ([optionsMenu_ numberOfItems] > 0)) {
+    event = [NSApp currentEvent];
+    if (event == nil) {
+      return;
+    }
+    [NSMenu popUpContextMenu:optionsMenu_
+                   withEvent:event
+                     forView:actionSegmented_];
+  }
 }
 
 - (void)sendButtonClicked:(id)sender
@@ -627,9 +688,9 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [scrollView_ release];
   [textView_ release];
-  [optionsPopUpButton_ release];
+  [actionSegmented_ release];
+  [optionsMenu_ release];
   [streamingMenuItem_ release];
-  [sendButton_ release];
   [super dealloc];
 }
 

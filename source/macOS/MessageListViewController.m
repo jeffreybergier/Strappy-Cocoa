@@ -306,6 +306,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 - (void)viewDidLoad
 {
   [super viewDidLoad];
+  [self setDrawsBackground:NO];
 
   [self AI_addChildViewController:sendController_];
   [[sendController_ view] setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];

@@ -54,6 +54,13 @@
   #define XPButtonTypeMomentaryLight NSButtonTypeMomentaryLight
   #define XPButtonTypeSwitch         NSButtonTypeSwitch
   #define XPProgressIndicatorStyleSpinning NSProgressIndicatorStyleSpinning
+#elif defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 1050
+  #define XPBezelStyleRounded        NSRoundedBezelStyle
+  #define XPBezelStyleTexturedSquare NSTexturedSquareBezelStyle
+  #define XPBezelStyleSmallSquare    NSSmallSquareBezelStyle
+  #define XPButtonTypeMomentaryLight NSMomentaryLightButton
+  #define XPButtonTypeSwitch         NSSwitchButton
+  #define XPProgressIndicatorStyleSpinning NSProgressIndicatorSpinningStyle
 #else
   #define XPBezelStyleRounded        NSRoundedBezelStyle
   #define XPBezelStyleTexturedSquare NSTexturedSquareBezelStyle
@@ -61,6 +68,12 @@
   #define XPButtonTypeMomentaryLight NSMomentaryLightButton
   #define XPButtonTypeSwitch         NSSwitchButton
   #define XPProgressIndicatorStyleSpinning NSProgressIndicatorSpinningStyle
+#endif
+
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 1050
+  #define XPSegmentStyleTexturedRounded NSSegmentStyleTexturedRounded
+#else
+  #define XPSegmentStyleTexturedRounded 2
 #endif
 
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101200
@@ -128,6 +141,7 @@
 @end
 
 @interface NSSegmentedControl (XPAppKit)
+- (void)XP_setToolbarSegmentStyle;
 - (void)XP_setToolTip:(NSString *)tip forSegment:(XPInteger)segment;
 @end
 

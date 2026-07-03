@@ -27,9 +27,9 @@
   NSView       *bezelView_;
   NSScrollView *scrollView_;
   NSTextView   *textView_;
-  NSPopUpButton *optionsPopUpButton_;
+  NSSegmentedControl *actionSegmented_;
+  NSMenu       *optionsMenu_;
   NSMenuItem    *streamingMenuItem_;
-  NSButton      *sendButton_;
   id<PromptSendViewControllerDelegate> delegate_;
   BOOL          enabled_;
   BOOL          expanded_;

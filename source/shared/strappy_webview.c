@@ -717,7 +717,7 @@ static int strappy_webview_append_font_faces(strappy_webview_buffer *buffer)
 static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
 {
   static const char * const chunks[] = {
-    "html,body{margin:0;padding:0;background:#f4f4f4;color:#222;",
+    "html,body{margin:0;padding:0;background:transparent;color:#222;",
     "font:13px Helvetica,Arial,sans-serif;}",
     ".page{padding:18px 14px;}",
     ".empty{margin:90px auto 0;max-width:520px;color:#777;",

@@ -1,6 +1,29 @@
 #import "XPAppKit.h"
 #import <objc/message.h>
 
+static void XPAppKitInvokeXPIntegerSetter(id target,
+                                          SEL selector,
+                                          XPInteger value)
+{
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+
+  if ((target == nil) || ![target respondsToSelector:selector]) {
+    return;
+  }
+
+  signature = [target methodSignatureForSelector:selector];
+  if (signature == nil) {
+    return;
+  }
+
+  invocation = [NSInvocation invocationWithMethodSignature:signature];
+  [invocation setTarget:target];
+  [invocation setSelector:selector];
+  [invocation setArgument:&value atIndex:2];
+  [invocation invoke];
+}
+
 @implementation NSWindow (XPAppKit)
 
 - (void)XP_setTitle:(NSString *)title
@@ -232,6 +255,16 @@
 @end
 
 @implementation NSSegmentedControl (XPAppKit)
+
+- (void)XP_setToolbarSegmentStyle
+{
+  id cell;
+
+  cell = [self cell];
+  XPAppKitInvokeXPIntegerSetter(cell,
+                                @selector(setSegmentStyle:),
+                                XPSegmentStyleTexturedRounded);
+}
 
 - (void)XP_setToolTip:(NSString *)tip forSegment:(XPInteger)segment
 {

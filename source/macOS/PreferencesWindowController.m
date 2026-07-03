@@ -1511,7 +1511,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
   if (tableView == modelTableView_) {
     if ((row < 0) || (row >= (NSInteger)[modelRows_ count])) {
-      return nil;
+      return @"";
     }
 
     model = [modelRows_ objectAtIndex:(NSUInteger)row];
@@ -1576,7 +1576,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   (void)mouseLocation;
   if (tableView == modelTableView_) {
     if ((row < 0) || (row >= (NSInteger)[modelRows_ count])) {
-      return nil;
+      return @"";
     }
 
     model = [modelRows_ objectAtIndex:(NSUInteger)row];
@@ -1585,7 +1585,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
       if ([self modelRowIsDefault:model]) {
         return NSLocalizedString(@"Default model is always allowed.", nil);
       }
-      return nil;
+      return @"";
     }
     if ([identifier isEqualToString:@"model_name"]) {
       NSString *description;
@@ -1599,11 +1599,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     if ([identifier isEqualToString:@"model_id"]) {
       return StrappyStringForModelRow(model, @"id");
     }
-    return nil;
+    return @"";
   }
 
   if ((row < 0) || (row >= (NSInteger)[databaseRows_ count])) {
-    return nil;
+    return @"";
   }
 
   database = [databaseRows_ objectAtIndex:(NSUInteger)row];
@@ -1615,14 +1615,14 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
         ([validationError length] > 0U)) {
       return validationError;
     }
-    return nil;
+    return @"";
   }
   if ([identifier isEqualToString:@"name"] ||
       [identifier isEqualToString:@"location"]) {
     return StrappyDatabasePathForRow(database);
   }
 
-  return nil;
+  return @"";
 }
 
 - (void)tableViewSelectionDidChange:(NSNotification *)notification

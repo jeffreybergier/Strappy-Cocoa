@@ -454,9 +454,7 @@ static void StrappyDrawTintedImage(NSImage *image,
   toolbarSegmented_ = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
   [toolbarSegmented_ setSegmentCount:2];
   [[toolbarSegmented_ cell] setTrackingMode:NSSegmentSwitchTrackingMomentary];
-  if ([[toolbarSegmented_ cell] respondsToSelector:@selector(setSegmentStyle:)]) {
-    [[toolbarSegmented_ cell] setSegmentStyle:NSSegmentStyleTexturedRounded];
-  }
+  [toolbarSegmented_ XP_setToolbarSegmentStyle];
   [toolbarSegmented_ setTarget:self];
   [toolbarSegmented_ setAction:@selector(toolbarSegmentClicked:)];
   [toolbarSegmented_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
