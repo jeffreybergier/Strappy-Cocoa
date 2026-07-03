@@ -42,7 +42,8 @@ typedef enum strappy_chat_stream_event_type {
   STRAPPY_CHAT_STREAM_EVENT_TOOL_RESULT = 4,
   STRAPPY_CHAT_STREAM_EVENT_TOOL_ERROR = 5,
   STRAPPY_CHAT_STREAM_EVENT_TURN_STARTED = 6,
-  STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED = 7
+  STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED = 7,
+  STRAPPY_CHAT_STREAM_EVENT_CONTENT_RETRACTED = 8
 } strappy_chat_stream_event_type;
 
 typedef struct strappy_chat_stream_event {
@@ -60,6 +61,7 @@ typedef struct strappy_chat_stream_event {
   const char *result_json;
   const char *render_role;
   const char *api_role;
+  const char *message_json;
 } strappy_chat_stream_event;
 
 typedef int (*strappy_chat_stream_callback)(

@@ -96,6 +96,7 @@ static void StrappySessionWebViewMessageFromRecord(
   message->metadata_json = record->metadata_json;
   message->render_state_json = record->render_state_json;
   message->created_at = record->created_at;
+  message->is_error = record->is_error ? 1 : 0;
 }
 
 @interface StrappySession ()
@@ -240,6 +241,14 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
       [delta setObject:resultJSON forKey:@"result_json"];
     }
   }
+  if (event->message_json != NULL) {
+    NSString *messageJSON;
+
+    messageJSON = [NSString stringWithUTF8String:event->message_json];
+    if (messageJSON != nil) {
+      [delta setObject:messageJSON forKey:@"message_json"];
+    }
+  }
   if (event->turn_key != NULL) {
     NSString *turnKey;
 
@@ -319,6 +328,8 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
     [delta setObject:@"turn_started" forKey:@"stream_event"];
   } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED) {
     [delta setObject:@"turn_finished" forKey:@"stream_event"];
+  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_RETRACTED) {
+    [delta setObject:@"content_retracted" forKey:@"stream_event"];
   }
 
   [self performSelectorOnMainThread:@selector(postStreamEventAndRelease:)

@@ -1608,6 +1608,10 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     state = "error";
     has_state = 1;
   }
+  if (!has_state && (message != NULL) && message->is_error) {
+    state = "error";
+    has_state = 1;
+  }
 
   strappy_webview_buffer_init(&buffer);
   ok = strappy_webview_buffer_append_cstring(&buffer, "<div id=\"") &&

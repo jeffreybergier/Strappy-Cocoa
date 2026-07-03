@@ -34,6 +34,73 @@ static int harness_expect_string(cJSON *object,
     (strcmp(value->valuestring, expected) == 0);
 }
 
+typedef struct harness_stream_record {
+  int content_count;
+  int reasoning_count;
+  int retracted_count;
+  char content[512];
+  char reasoning[512];
+} harness_stream_record;
+
+static int harness_append_recorded_text(char *buffer,
+                                        size_t buffer_size,
+                                        const char *text)
+{
+  size_t length;
+  size_t text_length;
+
+  if ((buffer == NULL) || (buffer_size == 0U) || (text == NULL)) {
+    return 0;
+  }
+
+  length = strlen(buffer);
+  text_length = strlen(text);
+  if (text_length > (buffer_size - length - 1U)) {
+    return 0;
+  }
+
+  memcpy(buffer + length, text, text_length + 1U);
+  return 1;
+}
+
+static int harness_record_stream_event(const strappy_chat_stream_event *event,
+                                       void *user_data)
+{
+  harness_stream_record *record;
+  const char *text;
+
+  if ((event == NULL) || (user_data == NULL)) {
+    return 1;
+  }
+
+  record = (harness_stream_record *)user_data;
+  text = (event->text != NULL) ? event->text : "";
+
+  if (event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) {
+    if (text[0] == '\0') {
+      return 1;
+    }
+    record->content_count++;
+    return harness_append_recorded_text(record->content,
+                                        sizeof(record->content),
+                                        text);
+  }
+  if (event->type == STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA) {
+    if (text[0] == '\0') {
+      return 1;
+    }
+    record->reasoning_count++;
+    return harness_append_recorded_text(record->reasoning,
+                                        sizeof(record->reasoning),
+                                        text);
+  }
+  if (event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_RETRACTED) {
+    record->retracted_count++;
+  }
+
+  return 1;
+}
+
 static int harness_expect_function_string(cJSON *tool_call,
                                           const char *key,
                                           const char *expected)
@@ -264,11 +331,367 @@ static int harness_test_openrouter_reasoning_request(void)
   ok = cJSON_IsObject(reasoning) &&
        cJSON_IsTrue(cJSON_GetObjectItem(reasoning, "enabled")) &&
        cJSON_IsFalse(cJSON_GetObjectItem(reasoning, "exclude")) &&
-       cJSON_IsTrue(include_reasoning);
+       (include_reasoning == NULL);
 
   cJSON_Delete(root);
   if (!ok) {
-    return harness_fail("OpenRouter request did not enable returned reasoning.");
+    return harness_fail("OpenRouter request did not use unified reasoning.");
+  }
+
+  return 1;
+}
+
+static int harness_test_request_replays_coalesced_reasoning_details(void)
+{
+  strappy_config config;
+  strappy_chat_message message;
+  char *request_json;
+  char *error;
+  cJSON *root;
+  cJSON *messages;
+  cJSON *assistant;
+  cJSON *reasoning;
+  cJSON *reasoning_content;
+  cJSON *reasoning_details;
+  cJSON *detail;
+  int ok;
+
+  memset(&config, 0, sizeof(config));
+  memset(&message, 0, sizeof(message));
+  config.api_endpoint = "https://openrouter.ai/api/v1/chat/completions";
+  config.api_model = "z-ai/glm-5.2";
+  message.role = "assistant";
+  message.content = "";
+  message.message_json =
+    "{\"role\":\"assistant\",\"content\":null,"
+    "\"reasoning\":\"duplicate text\","
+    "\"reasoning_content\":\"duplicate text\","
+    "\"reasoning_details\":["
+    "{\"type\":\"reasoning.text\",\"index\":0,"
+    "\"format\":\"unknown\",\"text\":\"There\"},"
+    "{\"type\":\"reasoning.text\",\"index\":0,"
+    "\"format\":\"unknown\",\"text\":\"\\n\"},"
+    "{\"type\":\"reasoning.text\",\"index\":0,"
+    "\"format\":\"unknown\",\"text\":\"'s\"}]}";
+  error = NULL;
+
+  request_json =
+    strappy_client_build_messages_request_json(&config,
+                                               &message,
+                                               1U,
+                                               0,
+                                               &error);
+  if (request_json == NULL) {
+    if (error != NULL) {
+      fprintf(stderr, "%s\n", error);
+      strappy_free_string(error);
+    }
+    return harness_fail("Could not build request with stored reasoning.");
+  }
+
+  root = cJSON_Parse(request_json);
+  free(request_json);
+  if (root == NULL) {
+    return harness_fail("Stored reasoning request JSON was invalid.");
+  }
+
+  messages = cJSON_GetObjectItem(root, "messages");
+  assistant = cJSON_GetArrayItem(messages, 0);
+  reasoning = cJSON_GetObjectItem(assistant, "reasoning");
+  reasoning_content = cJSON_GetObjectItem(assistant, "reasoning_content");
+  reasoning_details = cJSON_GetObjectItem(assistant, "reasoning_details");
+  detail = cJSON_GetArrayItem(reasoning_details, 0);
+  ok = (reasoning == NULL) &&
+       (reasoning_content == NULL) &&
+       cJSON_IsArray(reasoning_details) &&
+       (cJSON_GetArraySize(reasoning_details) == 1) &&
+       harness_expect_string(detail, "text", "There\n's");
+
+  cJSON_Delete(root);
+  if (!ok) {
+    return harness_fail("Stored reasoning details were not replayed canonically.");
+  }
+
+  return 1;
+}
+
+static int harness_test_content_parts_filter_non_text(void)
+{
+  const char *response_json =
+    "{\"id\":\"chatcmpl-test\",\"model\":\"test-model\",\"choices\":[{"
+    "\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\","
+    "\"content\":["
+    "{\"type\":\"reasoning\",\"text\":\"hidden thinking\"},"
+    "{\"type\":\"text\",\"text\":\"Visible answer.\"},"
+    "{\"type\":\"image_url\",\"text\":\"ignored media text\"}]}}]}";
+  strappy_chat_result result;
+  char *error;
+  int ok;
+
+  strappy_chat_result_init(&result);
+  error = NULL;
+
+  if (!strappy_client_parse_response(response_json, 200L, &result, &error)) {
+    if (error != NULL) {
+      fprintf(stderr, "%s\n", error);
+      strappy_free_string(error);
+    }
+    strappy_chat_result_destroy(&result);
+    return harness_fail("Content-part response parsing failed.");
+  }
+
+  ok = (result.response_text != NULL) &&
+       (strcmp(result.response_text, "Visible answer.") == 0);
+
+  strappy_chat_result_destroy(&result);
+  if (!ok) {
+    return harness_fail("Non-text content parts leaked into assistant text.");
+  }
+
+  return 1;
+}
+
+static int harness_test_stream_reasoning_details_context_message(void)
+{
+  strappy_stream_context context;
+  strappy_chat_result result;
+  cJSON *root;
+  cJSON *reasoning;
+  cJSON *reasoning_details;
+  int ok;
+
+  strappy_chat_result_init(&result);
+  strappy_stream_context_init(&context);
+  context.result = &result;
+
+  ok =
+    harness_feed_stream_event(
+      &context,
+      "{\"choices\":[{\"delta\":{\"role\":\"assistant\","
+      "\"reasoning\":\"hidden thinking\","
+      "\"reasoning_details\":[{\"type\":\"reasoning.text\","
+      "\"text\":\"hidden thinking\"}],"
+      "\"content\":\"Visible answer.\"},\"finish_reason\":\"stop\"}]}") &&
+    strappy_client_stream_finalize_message(&context);
+
+  if (!ok) {
+    strappy_stream_context_destroy(&context);
+    strappy_chat_result_destroy(&result);
+    return harness_fail("Streamed reasoning-details parsing failed.");
+  }
+
+  root = cJSON_Parse(result.message_json);
+  if (root == NULL) {
+    strappy_stream_context_destroy(&context);
+    strappy_chat_result_destroy(&result);
+    return harness_fail("Streamed reasoning message JSON was invalid.");
+  }
+
+  reasoning = cJSON_GetObjectItem(root, "reasoning");
+  reasoning_details = cJSON_GetObjectItem(root, "reasoning_details");
+  ok = (reasoning == NULL) &&
+       cJSON_IsArray(reasoning_details) &&
+       (cJSON_GetArraySize(reasoning_details) == 1) &&
+       harness_expect_string(root, "content", "Visible answer.") &&
+       (result.reasoning_text != NULL) &&
+       (strcmp(result.reasoning_text, "hidden thinking") == 0);
+
+  cJSON_Delete(root);
+  strappy_stream_context_destroy(&context);
+  strappy_chat_result_destroy(&result);
+
+  if (!ok) {
+    return harness_fail("Streamed reasoning details were not replayed canonically.");
+  }
+
+  return 1;
+}
+
+static int harness_test_tool_call_stream_content_retracted_live(void)
+{
+  strappy_stream_context context;
+  strappy_chat_result result;
+  harness_stream_record record;
+  cJSON *root;
+  int ok;
+
+  memset(&record, 0, sizeof(record));
+  strappy_chat_result_init(&result);
+  strappy_stream_context_init(&context);
+  context.result = &result;
+  context.callback = harness_record_stream_event;
+  context.callback_data = &record;
+
+  ok =
+    harness_feed_stream_event(
+      &context,
+      "{\"choices\":[{\"delta\":{\"role\":\"assistant\","
+      "\"content\":\"Let me check \"},\"finish_reason\":null}]}") &&
+    harness_feed_stream_event(
+      &context,
+      "{\"choices\":[{\"delta\":{\"tool_calls\":[{"
+      "\"index\":0,\"id\":\"call_db\",\"type\":\"function\","
+      "\"function\":{\"name\":\"database_query\","
+      "\"arguments\":\"{\\\"sql\\\":\\\"\"}}]},"
+      "\"finish_reason\":null}]}") &&
+    harness_feed_stream_event(
+      &context,
+      "{\"choices\":[{\"delta\":{\"content\":\"the database.\","
+      "\"tool_calls\":[{\"index\":0,"
+      "\"function\":{\"arguments\":\"SELECT 1\\\"}\"}}]},"
+      "\"finish_reason\":\"tool_calls\"}]}") &&
+    strappy_client_stream_finalize_message(&context);
+
+  if (!ok) {
+    strappy_stream_context_destroy(&context);
+    strappy_chat_result_destroy(&result);
+    return harness_fail("Tool-call content retraction stream failed.");
+  }
+
+  root = cJSON_Parse(result.message_json);
+  if (root == NULL) {
+    strappy_stream_context_destroy(&context);
+    strappy_chat_result_destroy(&result);
+    return harness_fail("Tool-call content retraction JSON was invalid.");
+  }
+
+  ok = (record.content_count == 1) &&
+       (record.retracted_count == 1) &&
+       (record.reasoning_count == 1) &&
+       (strcmp(record.content, "Let me check ") == 0) &&
+       (strcmp(record.reasoning, "the database.") == 0) &&
+       harness_expect_string(root, "content", "Let me check the database.");
+
+  cJSON_Delete(root);
+  strappy_stream_context_destroy(&context);
+  strappy_chat_result_destroy(&result);
+
+  if (!ok) {
+    return harness_fail("Tool-call content was not retracted live.");
+  }
+
+  return 1;
+}
+
+static int harness_test_same_chunk_tool_call_content_is_reasoning(void)
+{
+  strappy_stream_context context;
+  strappy_chat_result result;
+  harness_stream_record record;
+  cJSON *root;
+  int ok;
+
+  memset(&record, 0, sizeof(record));
+  strappy_chat_result_init(&result);
+  strappy_stream_context_init(&context);
+  context.result = &result;
+  context.callback = harness_record_stream_event;
+  context.callback_data = &record;
+
+  ok =
+    harness_feed_stream_event(
+      &context,
+      "{\"choices\":[{\"delta\":{\"role\":\"assistant\","
+      "\"content\":\"Planning the lookup.\","
+      "\"tool_calls\":[{\"index\":0,\"id\":\"call_db\","
+      "\"type\":\"function\",\"function\":{\"name\":\"database_query\","
+      "\"arguments\":\"{\\\"sql\\\":\\\"SELECT 1\\\"}\"}}]},"
+      "\"finish_reason\":\"tool_calls\"}]}") &&
+    strappy_client_stream_finalize_message(&context);
+
+  if (!ok) {
+    strappy_stream_context_destroy(&context);
+    strappy_chat_result_destroy(&result);
+    return harness_fail("Same-chunk tool-call content stream failed.");
+  }
+
+  root = cJSON_Parse(result.message_json);
+  if (root == NULL) {
+    strappy_stream_context_destroy(&context);
+    strappy_chat_result_destroy(&result);
+    return harness_fail("Same-chunk tool-call content JSON was invalid.");
+  }
+
+  ok = (record.content_count == 0) &&
+       (record.retracted_count == 0) &&
+       (record.reasoning_count == 1) &&
+       (strcmp(record.reasoning, "Planning the lookup.") == 0) &&
+       harness_expect_string(root, "content", "Planning the lookup.");
+
+  cJSON_Delete(root);
+  strappy_stream_context_destroy(&context);
+  strappy_chat_result_destroy(&result);
+
+  if (!ok) {
+    return harness_fail("Same-chunk tool-call content leaked as answer.");
+  }
+
+  return 1;
+}
+
+static int harness_test_stream_reasoning_detail_chunks_coalesced(void)
+{
+  strappy_stream_context context;
+  strappy_chat_result result;
+  cJSON *root;
+  cJSON *reasoning_details;
+  cJSON *detail;
+  int ok;
+
+  strappy_chat_result_init(&result);
+  strappy_stream_context_init(&context);
+  context.result = &result;
+
+  ok =
+    harness_feed_stream_event(
+      &context,
+      "{\"choices\":[{\"delta\":{\"role\":\"assistant\","
+      "\"reasoning_details\":[{\"type\":\"reasoning.text\","
+      "\"index\":0,\"format\":\"unknown\",\"text\":\"There\"}]},"
+      "\"finish_reason\":null}]}") &&
+    harness_feed_stream_event(
+      &context,
+      "{\"choices\":[{\"delta\":{\"reasoning_details\":[{"
+      "\"type\":\"reasoning.text\",\"index\":0,"
+      "\"format\":\"unknown\",\"text\":\"\\n\"}]},"
+      "\"finish_reason\":null}]}") &&
+    harness_feed_stream_event(
+      &context,
+      "{\"choices\":[{\"delta\":{\"reasoning_details\":[{"
+      "\"type\":\"reasoning.text\",\"index\":0,"
+      "\"format\":\"unknown\",\"text\":\"'s a clue\"}],"
+      "\"content\":\"Visible answer.\"},\"finish_reason\":\"stop\"}]}") &&
+    strappy_client_stream_finalize_message(&context);
+
+  if (!ok) {
+    strappy_stream_context_destroy(&context);
+    strappy_chat_result_destroy(&result);
+    return harness_fail("Streamed reasoning-detail chunk parsing failed.");
+  }
+
+  root = cJSON_Parse(result.message_json);
+  if (root == NULL) {
+    strappy_stream_context_destroy(&context);
+    strappy_chat_result_destroy(&result);
+    return harness_fail("Chunked reasoning message JSON was invalid.");
+  }
+
+  reasoning_details = cJSON_GetObjectItem(root, "reasoning_details");
+  detail = cJSON_GetArrayItem(reasoning_details, 0);
+  ok = cJSON_IsArray(reasoning_details) &&
+       (cJSON_GetArraySize(reasoning_details) == 1) &&
+       harness_expect_string(detail, "text", "There\n's a clue") &&
+       harness_expect_string(detail, "type", "reasoning.text") &&
+       harness_expect_string(root, "content", "Visible answer.") &&
+       (result.reasoning_text != NULL) &&
+       (strcmp(result.reasoning_text, "There\n's a clue") == 0);
+
+  cJSON_Delete(root);
+  strappy_stream_context_destroy(&context);
+  strappy_chat_result_destroy(&result);
+
+  if (!ok) {
+    return harness_fail("Streamed reasoning details were not coalesced.");
   }
 
   return 1;
@@ -285,6 +708,30 @@ int main(void)
     return 1;
   }
   if (!harness_test_openrouter_reasoning_request()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_request_replays_coalesced_reasoning_details()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_content_parts_filter_non_text()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_stream_reasoning_details_context_message()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_tool_call_stream_content_retracted_live()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_same_chunk_tool_call_content_is_reasoning()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_stream_reasoning_detail_chunks_coalesced()) {
     fprintf(stderr, "client_stream_harness failed.\n");
     return 1;
   }

@@ -31,6 +31,7 @@ typedef struct strappy_webview_message {
   const char *metadata_json;
   const char *render_state_json;
   const char *created_at;
+  int is_error;
 } strappy_webview_message;
 
 void strappy_webview_set_font_dir(const char *abs_dir);

@@ -143,6 +143,7 @@ static void StrappyWebViewMessageFromDictionary(
   NSString *renderStateJSON;
   NSString *createdAt;
   NSNumber *httpStatus;
+  NSNumber *isError;
 
   if (message == NULL) {
     return;
@@ -165,6 +166,7 @@ static void StrappyWebViewMessageFromDictionary(
   renderStateJSON = [dictionary objectForKey:@"render_state_json"];
   createdAt = [dictionary objectForKey:@"created_at"];
   httpStatus = [dictionary objectForKey:@"http_status"];
+  isError = [dictionary objectForKey:@"is_error"];
 
   message->message_id = StrappyMessageNumericIdentifier(dictionary);
   message->http_status =
@@ -180,6 +182,8 @@ static void StrappyWebViewMessageFromDictionary(
   message->metadata_json = StrappyCString(metadataJSON);
   message->render_state_json = StrappyCString(renderStateJSON);
   message->created_at = StrappyCString(createdAt);
+  message->is_error =
+    [isError isKindOfClass:[NSNumber class]] ? ([isError boolValue] ? 1 : 0) : 0;
 }
 
 static NSString *StrappyMessageHTML(NSDictionary *message,

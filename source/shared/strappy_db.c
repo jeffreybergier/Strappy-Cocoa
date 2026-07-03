@@ -2499,6 +2499,106 @@ static int strappy_db_append_message_content(sqlite3 *db,
   return 1;
 }
 
+static int strappy_db_move_message_content_to_reasoning(
+  sqlite3 *db,
+  long long session_id,
+  const strappy_session_message_input *message,
+  char **error_out)
+{
+  static const char *sql =
+    "UPDATE session_messages "
+    "SET reasoning = CASE "
+    "WHEN content = '' THEN reasoning "
+    "WHEN reasoning IS NULL OR reasoning = '' THEN content "
+    "WHEN substr(content, 1, 1) = ? THEN reasoning || content "
+    "ELSE reasoning || ? || content END, "
+    "content = '', "
+    "render_state_json = CASE WHEN ? IS NULL THEN render_state_json ELSE ? END "
+    "WHERE id = ? AND session_id = ?;";
+  sqlite3_stmt *stmt;
+  long long message_id;
+  int rc;
+
+  if ((session_id <= 0) || (message == NULL) ||
+      (message->message_key == NULL) ||
+      (message->message_key[0] == '\0')) {
+    strappy_set_error(error_out, "Streamed session message is incomplete.");
+    return 0;
+  }
+
+  if (!strappy_db_find_message_id_by_key(db,
+                                         session_id,
+                                         message->message_key,
+                                         &message_id,
+                                         error_out)) {
+    return 0;
+  }
+  if (message_id <= 0LL) {
+    return 1;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare streamed message move: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(stmt, 1, "\n", -1, SQLITE_STATIC);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 2, "\n", -1, SQLITE_STATIC);
+  }
+  if (rc == SQLITE_OK) {
+    if (message->render_state_json != NULL) {
+      rc = sqlite3_bind_text(stmt,
+                             3,
+                             message->render_state_json,
+                             -1,
+                             SQLITE_TRANSIENT);
+    } else {
+      rc = sqlite3_bind_null(stmt, 3);
+    }
+  }
+  if (rc == SQLITE_OK) {
+    if (message->render_state_json != NULL) {
+      rc = sqlite3_bind_text(stmt,
+                             4,
+                             message->render_state_json,
+                             -1,
+                             SQLITE_TRANSIENT);
+    } else {
+      rc = sqlite3_bind_null(stmt, 4);
+    }
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 5, (sqlite3_int64)message_id);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 6, (sqlite3_int64)session_id);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind streamed message move: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not move streamed message content: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
 static int strappy_db_session_exists(sqlite3 *db,
                                      long long session_id,
                                      char **error_out)
@@ -4556,6 +4656,57 @@ int strappy_db_append_session_message_content(
 
   if (!strappy_db_exec(db, "COMMIT;", "Could not commit streamed message append", error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back streamed message append", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  sqlite3_close(db);
+  return 1;
+}
+
+int strappy_db_move_session_message_content_to_reasoning(
+  const char *db_path,
+  long long session_id,
+  const strappy_session_message_input *message,
+  char **error_out)
+{
+  sqlite3 *db;
+
+  if ((session_id <= 0) || (message == NULL)) {
+    strappy_set_error(error_out, "Streamed session message move is incomplete.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_session_exists(db, session_id, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db, "BEGIN IMMEDIATE;", "Could not begin streamed message move", error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_move_message_content_to_reasoning(db,
+                                                    session_id,
+                                                    message,
+                                                    error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back streamed message move", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db, "COMMIT;", "Could not commit streamed message move", error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back streamed message move", NULL);
     sqlite3_close(db);
     return 0;
   }

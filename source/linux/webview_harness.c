@@ -540,6 +540,36 @@ static int harness_check_harness_assistant_metadata(void)
   return ok;
 }
 
+static int harness_check_error_message_state(void)
+{
+  strappy_webview_message message;
+  char *message_html;
+  int ok;
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "assistant-error-1";
+  message.role = "assistant";
+  message.text = "OpenRouter request failed: Timeout was reached";
+  message.metadata_json =
+    "{\"finish_reason\":\"error\",\"http_status\":0,"
+    "\"error\":\"OpenRouter request failed: Timeout was reached\"}";
+  message.is_error = 1;
+
+  message_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+  if (message_html == NULL) {
+    fprintf(stderr, "Could not generate error assistant HTML.\n");
+    return 0;
+  }
+
+  ok = harness_expect_contains(message_html,
+                               "class=\"row assistant state-error\"") &&
+       harness_expect_not_contains(message_html, "streaming-active") &&
+       harness_expect_contains(message_html, "request-metadata");
+
+  strappy_webview_free(message_html);
+  return ok;
+}
+
 int main(void)
 {
   strappy_webview_set_font_dir("/tmp/Strappy Fonts");
@@ -565,6 +595,9 @@ int main(void)
     return 1;
   }
   if (!harness_check_harness_assistant_metadata()) {
+    return 1;
+  }
+  if (!harness_check_error_message_state()) {
     return 1;
   }
 

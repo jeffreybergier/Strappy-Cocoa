@@ -2517,6 +2517,47 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
     return 0;
   }
 
+  messages[0].render_state_json = reasoning_streaming_state;
+  if (!strappy_db_move_session_message_content_to_reasoning(context->catalog_path,
+                                                            session_id,
+                                                            &messages[0],
+                                                            &error)) {
+    fprintf(stderr,
+            "Could not move streamed message content to reasoning: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  strappy_session_message_record_list_init(&all_messages);
+  ok = strappy_db_list_session_messages(context->catalog_path,
+                                        session_id,
+                                        &all_messages,
+                                        &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not list moved streamed message rows: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_message_record_list_destroy(&all_messages);
+    return 0;
+  }
+
+  ok = (all_messages.count == 6U) &&
+       (strcmp(all_messages.records[5].message_key,
+               "stream-turn-test-assistant") == 0) &&
+       (strcmp(all_messages.records[5].content, "") == 0) &&
+       (strcmp(all_messages.records[5].reasoning,
+               "thinking late\nHello") == 0) &&
+       (all_messages.records[5].render_state_json != NULL) &&
+       (strcmp(all_messages.records[5].render_state_json,
+               reasoning_streaming_state) == 0);
+  strappy_session_message_record_list_destroy(&all_messages);
+  if (!ok) {
+    fprintf(stderr, "Streamed message content was not moved into reasoning.\n");
+    return 0;
+  }
+
   messages[0].content = "Hello final";
   messages[0].reasoning = "final reasoning";
   messages[0].render_state_json = NULL;

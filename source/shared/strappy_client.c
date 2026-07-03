@@ -15,7 +15,7 @@
 #include <time.h>
 
 #define STRAPPY_CLIENT_GENERATION_METADATA_TIMEOUT_SECONDS 60L
-#define STRAPPY_CLIENT_NON_STREAMING_TIMEOUT_SECONDS 300L
+#define STRAPPY_CLIENT_NON_STREAMING_TIMEOUT_SECONDS 900L
 #define STRAPPY_CLIENT_STREAM_LOW_SPEED_TIME_SECONDS 60L
 
 typedef struct strappy_http_buffer {
@@ -25,6 +25,11 @@ typedef struct strappy_http_buffer {
 
 static int strappy_curl_initialized = 0;
 static char *strappy_cainfo_path = NULL;
+
+static int strappy_client_normalize_context_message(cJSON *message);
+static char *strappy_client_normalized_context_message_json(
+  const char *raw_message,
+  size_t raw_message_length);
 
 static void strappy_http_buffer_init(strappy_http_buffer *buffer)
 {
@@ -743,9 +748,58 @@ static int strappy_client_capture_response_metadata(cJSON *root,
   return 1;
 }
 
+static int strappy_client_message_has_reasoning_details(cJSON *message)
+{
+  cJSON *reasoning_details;
+
+  if (!cJSON_IsObject(message)) {
+    return 0;
+  }
+
+  reasoning_details = cJSON_GetObjectItem(message, "reasoning_details");
+  return (cJSON_IsArray(reasoning_details) &&
+          (cJSON_GetArraySize(reasoning_details) > 0)) ? 1 : 0;
+}
+
+static int strappy_client_message_has_reasoning(cJSON *message)
+{
+  cJSON *reasoning;
+
+  if (!cJSON_IsObject(message)) {
+    return 0;
+  }
+
+  reasoning = cJSON_GetObjectItem(message, "reasoning");
+  return (cJSON_IsString(reasoning) &&
+          (reasoning->valuestring != NULL) &&
+          (reasoning->valuestring[0] != '\0')) ? 1 : 0;
+}
+
+static cJSON *strappy_client_duplicate_context_message(cJSON *message)
+{
+  cJSON *copy;
+
+  if (!cJSON_IsObject(message)) {
+    return NULL;
+  }
+
+  copy = cJSON_Duplicate(message, 1);
+  if (copy == NULL) {
+    return NULL;
+  }
+
+  if (!strappy_client_normalize_context_message(copy)) {
+    cJSON_Delete(copy);
+    return NULL;
+  }
+
+  return copy;
+}
+
 static int strappy_client_capture_message_json(cJSON *message,
                                                strappy_chat_result *result)
 {
+  cJSON *context_message;
   char *message_json;
   char *reasoning_text;
 
@@ -753,7 +807,13 @@ static int strappy_client_capture_message_json(cJSON *message,
     return 1;
   }
 
-  message_json = cJSON_PrintUnformatted(message);
+  context_message = strappy_client_duplicate_context_message(message);
+  if (context_message == NULL) {
+    return 0;
+  }
+
+  message_json = cJSON_PrintUnformatted(context_message);
+  cJSON_Delete(context_message);
   if (message_json == NULL) {
     return 0;
   }
@@ -1201,6 +1261,31 @@ static int strappy_client_json_object_bounds(const char *json,
   return 1;
 }
 
+static int strappy_client_buffer_contains(const char *data,
+                                          size_t data_length,
+                                          const char *needle)
+{
+  size_t needle_length;
+  size_t index;
+
+  if ((data == NULL) || (needle == NULL)) {
+    return 0;
+  }
+
+  needle_length = strlen(needle);
+  if ((needle_length == 0U) || (needle_length > data_length)) {
+    return 0;
+  }
+
+  for (index = 0U; index <= data_length - needle_length; index++) {
+    if (memcmp(data + index, needle, needle_length) == 0) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
 static int strappy_client_append_basic_message_json(
   strappy_http_buffer *buffer,
   const strappy_chat_message *message)
@@ -1381,8 +1466,7 @@ static char *strappy_client_build_messages_request_json(
   if (ok && strappy_client_should_request_reasoning(config)) {
     ok = strappy_http_buffer_append_cstring(
       &buffer,
-      ",\"reasoning\":{\"enabled\":true,\"exclude\":false},"
-      "\"include_reasoning\":true");
+      ",\"reasoning\":{\"enabled\":true,\"exclude\":false}");
   }
 
   if (ok && should_stream && strappy_client_should_request_stream_usage(config)) {
@@ -1409,16 +1493,36 @@ static char *strappy_client_build_messages_request_json(
       break;
     }
 
-    /* Stored JSON columns are opaque on read; splice saved message objects
-       without round-tripping them through cJSON. */
+    /* Stored JSON columns are opaque on read; only reasoning-bearing
+       messages need a cJSON pass so streamed reasoning chunks replay as
+       complete OpenRouter reasoning blocks. */
     raw_message = NULL;
     raw_message_length = 0U;
     if (strappy_client_json_object_bounds(chat_messages[index].message_json,
                                           &raw_message,
                                           &raw_message_length)) {
-      ok = strappy_http_buffer_append(&buffer,
-                                      raw_message,
-                                      raw_message_length);
+      char *normalized_message;
+
+      normalized_message = NULL;
+      if (strappy_client_buffer_contains(raw_message,
+                                         raw_message_length,
+                                         "reasoning")) {
+        normalized_message =
+          strappy_client_normalized_context_message_json(raw_message,
+                                                        raw_message_length);
+        if (normalized_message == NULL) {
+          ok = 0;
+        }
+      }
+
+      if (ok && (normalized_message != NULL)) {
+        ok = strappy_http_buffer_append_cstring(&buffer, normalized_message);
+      } else if (ok) {
+        ok = strappy_http_buffer_append(&buffer,
+                                        raw_message,
+                                        raw_message_length);
+      }
+      free(normalized_message);
     } else {
       ok = strappy_client_append_basic_message_json(&buffer,
                                                    &chat_messages[index]);
@@ -1488,11 +1592,18 @@ static char *strappy_client_extract_assistant_content(cJSON *content)
 
   count = cJSON_GetArraySize(content);
   for (index = 0; index < count; index++) {
+    cJSON *type;
     cJSON *text;
     char *next_combined;
 
     item = cJSON_GetArrayItem(content, index);
     if (!cJSON_IsObject(item)) {
+      continue;
+    }
+
+    type = cJSON_GetObjectItem(item, "type");
+    if (cJSON_IsString(type) && (type->valuestring != NULL) &&
+        (strcmp(type->valuestring, "text") != 0)) {
       continue;
     }
 
@@ -1667,6 +1778,8 @@ typedef struct strappy_stream_context {
   cJSON *tool_calls;
   int *tool_call_stream_indices;
   size_t tool_call_stream_index_count;
+  int saw_tool_calls;
+  int retracted_content_for_tool_calls;
   strappy_chat_result *result;
   strappy_chat_stream_callback callback;
   void *callback_data;
@@ -1693,6 +1806,8 @@ static void strappy_stream_context_init(strappy_stream_context *context)
   context->tool_calls = NULL;
   context->tool_call_stream_indices = NULL;
   context->tool_call_stream_index_count = 0U;
+  context->saw_tool_calls = 0;
+  context->retracted_content_for_tool_calls = 0;
   context->result = NULL;
   context->callback = NULL;
   context->callback_data = NULL;
@@ -2135,6 +2250,15 @@ static int strappy_client_stream_capture_tool_calls(
   return 1;
 }
 
+static int strappy_client_stream_tool_call_delta_count(cJSON *tool_calls)
+{
+  if (!cJSON_IsArray(tool_calls)) {
+    return 0;
+  }
+
+  return cJSON_GetArraySize(tool_calls);
+}
+
 static const char *strappy_client_skip_json_whitespace(const char *text)
 {
   while ((text != NULL) && (*text != '\0') &&
@@ -2394,6 +2518,247 @@ static int strappy_client_stream_normalize_tool_calls(
   return 1;
 }
 
+static int strappy_client_reasoning_detail_stream_index(cJSON *detail,
+                                                        int *index_out)
+{
+  cJSON *index;
+
+  if (!cJSON_IsObject(detail) || (index_out == NULL)) {
+    return 0;
+  }
+
+  index = cJSON_GetObjectItem(detail, "index");
+  if (!cJSON_IsNumber(index)) {
+    return 0;
+  }
+
+  *index_out = index->valueint;
+  return 1;
+}
+
+static cJSON *strappy_client_stream_find_reasoning_detail_by_index(
+  cJSON *details,
+  int stream_index)
+{
+  int count;
+  int position;
+
+  if (!cJSON_IsArray(details)) {
+    return NULL;
+  }
+
+  count = cJSON_GetArraySize(details);
+  for (position = 0; position < count; position++) {
+    cJSON *detail;
+    int existing_index;
+
+    detail = cJSON_GetArrayItem(details, position);
+    existing_index = 0;
+    if (strappy_client_reasoning_detail_stream_index(detail,
+                                                     &existing_index) &&
+        (existing_index == stream_index)) {
+      return detail;
+    }
+  }
+
+  return NULL;
+}
+
+static int strappy_client_stream_merge_reasoning_string(
+  cJSON *target,
+  cJSON *fragment,
+  const char *key,
+  int append)
+{
+  cJSON *value;
+
+  if ((target == NULL) || (fragment == NULL) || (key == NULL)) {
+    return 1;
+  }
+
+  value = cJSON_GetObjectItem(fragment, key);
+  if (!cJSON_IsString(value) || (value->valuestring == NULL)) {
+    return 1;
+  }
+
+  if (append) {
+    return strappy_client_json_append_string_member(target,
+                                                   key,
+                                                   value->valuestring);
+  }
+
+  return strappy_client_json_replace_string(target, key, value->valuestring);
+}
+
+static int strappy_client_stream_merge_reasoning_detail(cJSON *target,
+                                                        cJSON *fragment)
+{
+  if (!cJSON_IsObject(target) || !cJSON_IsObject(fragment)) {
+    return 1;
+  }
+
+  return
+    strappy_client_stream_merge_reasoning_string(target,
+                                                 fragment,
+                                                 "text",
+                                                 1) &&
+    strappy_client_stream_merge_reasoning_string(target,
+                                                 fragment,
+                                                 "summary",
+                                                 1) &&
+    strappy_client_stream_merge_reasoning_string(target,
+                                                 fragment,
+                                                 "data",
+                                                 1) &&
+    strappy_client_stream_merge_reasoning_string(target,
+                                                 fragment,
+                                                 "type",
+                                                 0) &&
+    strappy_client_stream_merge_reasoning_string(target,
+                                                 fragment,
+                                                 "id",
+                                                 0) &&
+    strappy_client_stream_merge_reasoning_string(target,
+                                                 fragment,
+                                                 "format",
+                                                 0) &&
+    strappy_client_stream_merge_reasoning_string(target,
+                                                 fragment,
+                                                 "signature",
+                                                 0);
+}
+
+static int strappy_client_append_or_merge_reasoning_detail(cJSON *details,
+                                                           cJSON *item)
+{
+  cJSON *copy;
+  cJSON *target;
+  int stream_index;
+  int has_stream_index;
+
+  if (!cJSON_IsArray(details) || (item == NULL)) {
+    return 1;
+  }
+
+  stream_index = 0;
+  has_stream_index =
+    strappy_client_reasoning_detail_stream_index(item, &stream_index);
+  target = has_stream_index ?
+    strappy_client_stream_find_reasoning_detail_by_index(details,
+                                                         stream_index) : NULL;
+
+  if (target != NULL) {
+    return strappy_client_stream_merge_reasoning_detail(target, item);
+  }
+
+  copy = cJSON_Duplicate(item, 1);
+  if (copy == NULL) {
+    return 0;
+  }
+
+  if (!cJSON_AddItemToArray(details, copy)) {
+    cJSON_Delete(copy);
+    return 0;
+  }
+
+  return 1;
+}
+
+static int strappy_client_coalesce_reasoning_details(cJSON *message)
+{
+  cJSON *details;
+  cJSON *normalized;
+  int count;
+  int index;
+
+  if (!cJSON_IsObject(message)) {
+    return 0;
+  }
+
+  details = cJSON_GetObjectItem(message, "reasoning_details");
+  if (!cJSON_IsArray(details)) {
+    return 1;
+  }
+
+  normalized = cJSON_CreateArray();
+  if (normalized == NULL) {
+    return 0;
+  }
+
+  count = cJSON_GetArraySize(details);
+  for (index = 0; index < count; index++) {
+    cJSON *item;
+
+    item = cJSON_GetArrayItem(details, index);
+    if (!strappy_client_append_or_merge_reasoning_detail(normalized, item)) {
+      cJSON_Delete(normalized);
+      return 0;
+    }
+  }
+
+  cJSON_DeleteItemFromObjectCaseSensitive(message, "reasoning_details");
+  if (!cJSON_AddItemToObject(message, "reasoning_details", normalized)) {
+    cJSON_Delete(normalized);
+    return 0;
+  }
+
+  return 1;
+}
+
+static int strappy_client_normalize_context_message(cJSON *message)
+{
+  if (!cJSON_IsObject(message)) {
+    return 0;
+  }
+
+  if (!strappy_client_coalesce_reasoning_details(message)) {
+    return 0;
+  }
+
+  if (strappy_client_message_has_reasoning_details(message)) {
+    cJSON_DeleteItemFromObjectCaseSensitive(message, "reasoning");
+    cJSON_DeleteItemFromObjectCaseSensitive(message, "reasoning_content");
+  } else if (strappy_client_message_has_reasoning(message)) {
+    cJSON_DeleteItemFromObjectCaseSensitive(message, "reasoning_content");
+  }
+
+  return 1;
+}
+
+static char *strappy_client_normalized_context_message_json(
+  const char *raw_message,
+  size_t raw_message_length)
+{
+  cJSON *message;
+  char *segment;
+  char *json;
+
+  if ((raw_message == NULL) || (raw_message_length == 0U)) {
+    return NULL;
+  }
+
+  segment = strappy_string_duplicate_length(raw_message, raw_message_length);
+  if (segment == NULL) {
+    return NULL;
+  }
+
+  message = cJSON_Parse(segment);
+  free(segment);
+  if (!cJSON_IsObject(message)) {
+    cJSON_Delete(message);
+    return NULL;
+  }
+
+  if (!strappy_client_normalize_context_message(message)) {
+    cJSON_Delete(message);
+    return NULL;
+  }
+
+  json = cJSON_PrintUnformatted(message);
+  cJSON_Delete(message);
+  return json;
+}
+
 static int strappy_client_stream_capture_reasoning_details(
   strappy_stream_context *context,
   cJSON *details,
@@ -2417,7 +2782,6 @@ static int strappy_client_stream_capture_reasoning_details(
   count = cJSON_GetArraySize(details);
   for (index = 0; index < count; index++) {
     cJSON *item;
-    cJSON *copy;
     const char *text;
 
     item = cJSON_GetArrayItem(details, index);
@@ -2425,13 +2789,9 @@ static int strappy_client_stream_capture_reasoning_details(
       continue;
     }
 
-    copy = cJSON_Duplicate(item, 1);
-    if (copy == NULL) {
-      return strappy_client_stream_set_error(context, "Could not allocate streamed reasoning detail.");
-    }
-
-    if (!cJSON_AddItemToArray(context->reasoning_details, copy)) {
-      cJSON_Delete(copy);
+    if (!strappy_client_append_or_merge_reasoning_detail(
+          context->reasoning_details,
+          item)) {
       return strappy_client_stream_set_error(context, "Could not store streamed reasoning detail.");
     }
 
@@ -2457,6 +2817,7 @@ static int strappy_client_stream_finalize_message(strappy_stream_context *contex
   const char *content;
   int has_content;
   int has_tool_calls;
+  int has_reasoning_details;
 
   if ((context == NULL) || (context->result == NULL)) {
     return 1;
@@ -2478,6 +2839,9 @@ static int strappy_client_stream_finalize_message(strappy_stream_context *contex
   has_content = (content[0] != '\0') ? 1 : 0;
   has_tool_calls = ((context->tool_calls != NULL) &&
                     (cJSON_GetArraySize(context->tool_calls) > 0)) ? 1 : 0;
+  has_reasoning_details =
+    ((context->reasoning_details != NULL) &&
+     (cJSON_GetArraySize(context->reasoning_details) > 0)) ? 1 : 0;
 
   if (cJSON_AddStringToObject(message, "role", role) == NULL) {
     cJSON_Delete(message);
@@ -2494,7 +2858,9 @@ static int strappy_client_stream_finalize_message(strappy_stream_context *contex
     return strappy_client_stream_set_error(context, "Could not build assistant message JSON.");
   }
 
-  if ((context->reasoning.data != NULL) && (context->reasoning.length > 0U)) {
+  if (!has_reasoning_details &&
+      (context->reasoning.data != NULL) &&
+      (context->reasoning.length > 0U)) {
     if (cJSON_AddStringToObject(message,
                                 "reasoning",
                                 context->reasoning.data) == NULL) {
@@ -2503,8 +2869,7 @@ static int strappy_client_stream_finalize_message(strappy_stream_context *contex
     }
   }
 
-  if ((context->reasoning_details != NULL) &&
-      (cJSON_GetArraySize(context->reasoning_details) > 0)) {
+  if (has_reasoning_details) {
     copy = cJSON_Duplicate(context->reasoning_details, 1);
     if ((copy == NULL) ||
         !cJSON_AddItemToObject(message, "reasoning_details", copy)) {
@@ -2563,6 +2928,54 @@ static int strappy_client_stream_emit_delta(strappy_stream_context *context,
   event.text = text;
   if (!context->callback(&event, context->callback_data)) {
     return strappy_client_stream_mark_cancelled(context);
+  }
+
+  return 1;
+}
+
+static int strappy_client_stream_emit_content_retracted(
+  strappy_stream_context *context)
+{
+  strappy_chat_stream_event event;
+
+  if (context == NULL) {
+    return 1;
+  }
+
+  if (context->retracted_content_for_tool_calls) {
+    return 1;
+  }
+  context->retracted_content_for_tool_calls = 1;
+
+  if (context->callback == NULL) {
+    return 1;
+  }
+
+  memset(&event, 0, sizeof(event));
+  event.type = STRAPPY_CHAT_STREAM_EVENT_CONTENT_RETRACTED;
+  event.text = "";
+  if (!context->callback(&event, context->callback_data)) {
+    return strappy_client_stream_mark_cancelled(context);
+  }
+
+  return 1;
+}
+
+static int strappy_client_stream_note_tool_calls(strappy_stream_context *context,
+                                                 cJSON *tool_calls)
+{
+  if ((context == NULL) ||
+      (strappy_client_stream_tool_call_delta_count(tool_calls) <= 0)) {
+    return 1;
+  }
+
+  if (context->saw_tool_calls) {
+    return 1;
+  }
+
+  context->saw_tool_calls = 1;
+  if ((context->content.data != NULL) && (context->content.length > 0U)) {
+    return strappy_client_stream_emit_content_retracted(context);
   }
 
   return 1;
@@ -2795,6 +3208,12 @@ static int strappy_client_stream_parse_json_event(strappy_stream_context *contex
                                                       context);
   }
 
+  tool_calls = cJSON_GetObjectItem(delta, "tool_calls");
+  if (ok) {
+    ok = strappy_client_stream_note_tool_calls(context, tool_calls) &&
+         strappy_client_stream_capture_tool_calls(context, tool_calls);
+  }
+
   content = cJSON_GetObjectItem(delta, "content");
   content_text = strappy_client_extract_assistant_content(content);
   if (content_text != NULL) {
@@ -2803,7 +3222,9 @@ static int strappy_client_stream_parse_json_event(strappy_stream_context *contex
         ok = strappy_client_stream_set_error(context, "Could not allocate streamed assistant text.");
       } else if (!strappy_client_stream_emit_delta(
                    context,
-                   STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA,
+                   context->saw_tool_calls ?
+                     STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA :
+                     STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA,
                    content_text)) {
         ok = 0;
       }
@@ -2842,11 +3263,6 @@ static int strappy_client_stream_parse_json_event(strappy_stream_context *contex
                                                       reasoning_details,
                                                       reasoning_text,
                                                       reasoning_content_text);
-  }
-
-  tool_calls = cJSON_GetObjectItem(delta, "tool_calls");
-  if (ok) {
-    ok = strappy_client_stream_capture_tool_calls(context, tool_calls);
   }
 
   finish_reason = cJSON_GetObjectItem(first_choice, "finish_reason");
