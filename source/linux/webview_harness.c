@@ -71,7 +71,14 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function scrollBottomNow") &&
        harness_expect_contains(page_html, "function shouldAutoScroll") &&
        harness_expect_contains(page_html, "function shouldRenderMarkdownBubble") &&
+       harness_expect_contains(page_html, "function shouldRenderMarkdownReasoning") &&
        harness_expect_contains(page_html, "ancestorHasClass(n,'assistant')") &&
+       harness_expect_contains(page_html, ".reasoning-body{white-space:normal;}") &&
+       harness_expect_contains(page_html,
+                               "shouldRenderMarkdownBubble(n[i])||"
+                               "shouldRenderMarkdownReasoning(n[i])") &&
+       harness_expect_contains(page_html,
+                               "q.kind=='reasoning'){if(typeof n._strappyMarkdown") &&
        harness_expect_contains(page_html, "appendMessageTextByMessageKey") &&
        harness_expect_contains(page_html, "appendReasoningTextByMessageKey") &&
        harness_expect_contains(page_html, "function setToolBoxCount") &&

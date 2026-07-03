@@ -357,7 +357,7 @@ static int harness_test_openrouter_reasoning_request(void)
   return 1;
 }
 
-static int harness_test_request_replays_reasoning_details_unchanged(void)
+static int harness_test_request_replays_reasoning_details_canonically(void)
 {
   strappy_config config;
   strappy_chat_message message;
@@ -370,8 +370,6 @@ static int harness_test_request_replays_reasoning_details_unchanged(void)
   cJSON *reasoning_content;
   cJSON *reasoning_details;
   cJSON *first_detail;
-  cJSON *second_detail;
-  cJSON *third_detail;
   int ok;
 
   memset(&config, 0, sizeof(config));
@@ -419,19 +417,16 @@ static int harness_test_request_replays_reasoning_details_unchanged(void)
   reasoning_content = cJSON_GetObjectItem(assistant, "reasoning_content");
   reasoning_details = cJSON_GetObjectItem(assistant, "reasoning_details");
   first_detail = cJSON_GetArrayItem(reasoning_details, 0);
-  second_detail = cJSON_GetArrayItem(reasoning_details, 1);
-  third_detail = cJSON_GetArrayItem(reasoning_details, 2);
-  ok = cJSON_IsString(reasoning) &&
-       cJSON_IsString(reasoning_content) &&
+  ok = (reasoning == NULL) &&
+       (reasoning_content == NULL) &&
        cJSON_IsArray(reasoning_details) &&
-       (cJSON_GetArraySize(reasoning_details) == 3) &&
-       harness_expect_string(first_detail, "text", "There") &&
-       harness_expect_string(second_detail, "text", "\n") &&
-       harness_expect_string(third_detail, "text", "'s");
+       (cJSON_GetArraySize(reasoning_details) == 1) &&
+       harness_expect_string(first_detail, "text", "There\n's") &&
+       harness_expect_string(first_detail, "type", "reasoning.text");
 
   cJSON_Delete(root);
   if (!ok) {
-    return harness_fail("Stored reasoning details were not replayed unchanged.");
+    return harness_fail("Stored reasoning details were not replayed canonically.");
   }
 
   return 1;
@@ -511,6 +506,58 @@ static int harness_test_non_stream_choice_error_metadata(void)
 
   if (!ok) {
     return harness_fail("Choice error metadata was not captured.");
+  }
+
+  return 1;
+}
+
+static int harness_test_non_stream_reasoning_detail_chunks_are_joined(void)
+{
+  const char *response_json =
+    "{\"id\":\"gen-test\",\"choices\":[{\"finish_reason\":\"stop\","
+    "\"message\":{\"role\":\"assistant\",\"content\":\"Visible answer.\","
+    "\"reasoning\":\"There\\n's a clue\","
+    "\"reasoning_details\":["
+    "{\"type\":\"reasoning.text\",\"index\":0,"
+    "\"format\":\"unknown\",\"text\":\"There\"},"
+    "{\"type\":\"reasoning.text\",\"index\":0,"
+    "\"format\":\"unknown\",\"text\":\"\\n\"},"
+    "{\"type\":\"reasoning.text\",\"index\":0,"
+    "\"format\":\"unknown\",\"text\":\"'s a clue\"}]}}]}";
+  strappy_chat_result result;
+  char *error;
+  cJSON *message;
+  cJSON *reasoning;
+  cJSON *reasoning_details;
+  cJSON *detail;
+  int ok;
+
+  strappy_chat_result_init(&result);
+  error = NULL;
+
+  ok = strappy_client_parse_response(response_json, 200L, &result, &error) &&
+       (result.reasoning_text != NULL) &&
+       (strcmp(result.reasoning_text, "There\n's a clue") == 0) &&
+       (result.response_text != NULL) &&
+       (strcmp(result.response_text, "Visible answer.") == 0);
+  message = (result.message_json != NULL) ? cJSON_Parse(result.message_json) : NULL;
+  reasoning = cJSON_GetObjectItem(message, "reasoning");
+  reasoning_details = cJSON_GetObjectItem(message, "reasoning_details");
+  detail = cJSON_GetArrayItem(reasoning_details, 0);
+  ok = ok &&
+       (reasoning == NULL) &&
+       cJSON_IsArray(reasoning_details) &&
+       (cJSON_GetArraySize(reasoning_details) == 1) &&
+       harness_expect_string(detail, "text", "There\n's a clue");
+
+  if (error != NULL) {
+    strappy_free_string(error);
+  }
+  cJSON_Delete(message);
+  strappy_chat_result_destroy(&result);
+
+  if (!ok) {
+    return harness_fail("Non-streamed reasoning detail chunks were not joined.");
   }
 
   return 1;
@@ -744,8 +791,8 @@ static int harness_test_stream_reasoning_detail_chunks_coalesced(void)
   reasoning_details = cJSON_GetObjectItem(root, "reasoning_details");
   detail = cJSON_GetArrayItem(reasoning_details, 0);
   ok = cJSON_IsArray(reasoning_details) &&
-       (cJSON_GetArraySize(reasoning_details) == 3) &&
-       harness_expect_string(detail, "text", "There") &&
+       (cJSON_GetArraySize(reasoning_details) == 1) &&
+       harness_expect_string(detail, "text", "There\n's a clue") &&
        harness_expect_string(detail, "type", "reasoning.text") &&
        harness_expect_string(root, "content", "Visible answer.") &&
        (result.reasoning_text != NULL) &&
@@ -776,7 +823,7 @@ int main(void)
     fprintf(stderr, "client_stream_harness failed.\n");
     return 1;
   }
-  if (!harness_test_request_replays_reasoning_details_unchanged()) {
+  if (!harness_test_request_replays_reasoning_details_canonically()) {
     fprintf(stderr, "client_stream_harness failed.\n");
     return 1;
   }
@@ -785,6 +832,10 @@ int main(void)
     return 1;
   }
   if (!harness_test_non_stream_choice_error_metadata()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_non_stream_reasoning_detail_chunks_are_joined()) {
     fprintf(stderr, "client_stream_harness failed.\n");
     return 1;
   }

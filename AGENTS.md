@@ -17,8 +17,9 @@ analysis logs unless the user explicitly asks for them.
 Linux-only shared-core harnesses live under `source/linux`. They are fast
 developer smoke tests for portable C code and do not replace the required
 Altivec iOS/macOS clean builds. The current harness targets are
-`database_query_harness` and `webview_harness`, run through
-`make -C source/linux clean test`. `database_query_harness` also covers
+`database_query_harness`, `webview_harness`, `client_stream_harness`, and
+`assistant_reasoning_harness`, run through `make -C source/linux clean test`.
+`database_query_harness` also covers
 OpenRouter model catalog persistence, catalog search, default model selection,
 allowed-model whitelisting, per-session model selection, and stale
 session-model fallback.

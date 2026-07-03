@@ -96,6 +96,7 @@ typedef struct strappy_assistant_tool_sequence {
   strappy_chat_result final_answer_results[
     STRAPPY_ASSISTANT_MAX_FINAL_ANSWER_FOLLOWUPS];
   strappy_chat_result learning_summary_result;
+  char *reasoning_text;
   size_t round_count;
   size_t final_answer_result_count;
   strappy_chat_result *final_result;
@@ -351,6 +352,7 @@ static void strappy_assistant_tool_sequence_init(
     strappy_chat_result_init(&sequence->final_answer_results[index]);
   }
   strappy_chat_result_init(&sequence->learning_summary_result);
+  sequence->reasoning_text = NULL;
 
   sequence->round_count = 0U;
   sequence->final_answer_result_count = 0U;
@@ -381,6 +383,8 @@ static void strappy_assistant_tool_sequence_destroy(
     strappy_chat_result_destroy(&sequence->final_answer_results[index]);
   }
   strappy_chat_result_destroy(&sequence->learning_summary_result);
+  free(sequence->reasoning_text);
+  sequence->reasoning_text = NULL;
 
   sequence->round_count = 0U;
   sequence->final_answer_result_count = 0U;
@@ -2644,48 +2648,38 @@ static strappy_chat_result *strappy_assistant_next_final_answer_result(
   return result;
 }
 
-static int strappy_assistant_merge_prior_reasoning(
-  strappy_chat_result *result,
-  const strappy_chat_result *prior_result,
-  char **error_out)
+static int strappy_assistant_append_reasoning_block(char **target,
+                                                    const char *text,
+                                                    char **error_out)
 {
-  const char *prior;
-  const char *current;
   char *merged;
-  size_t prior_length;
-  size_t current_length;
+  size_t existing_length;
+  size_t text_length;
   size_t total_length;
 
-  if ((result == NULL) || (prior_result == NULL) ||
-      strappy_assistant_text_is_empty(prior_result->reasoning_text)) {
+  if ((target == NULL) || strappy_assistant_text_is_empty(text)) {
     return 1;
   }
 
-  prior = prior_result->reasoning_text;
-  current = result->reasoning_text;
-  if (strappy_assistant_text_is_empty(current)) {
-    merged = strappy_string_duplicate(prior);
+  if (strappy_assistant_text_is_empty(*target)) {
+    merged = strappy_string_duplicate(text);
     if (merged == NULL) {
       strappy_set_error(error_out, "Could not preserve assistant reasoning.");
       return 0;
     }
-    free(result->reasoning_text);
-    result->reasoning_text = merged;
+    free(*target);
+    *target = merged;
     return 1;
   }
 
-  if (strcmp(prior, current) == 0) {
-    return 1;
-  }
-
-  prior_length = strlen(prior);
-  current_length = strlen(current);
-  if ((prior_length > (((size_t)-1) - 2U)) ||
-      ((prior_length + 2U) > (((size_t)-1) - current_length))) {
+  existing_length = strlen(*target);
+  text_length = strlen(text);
+  if ((existing_length > (((size_t)-1) - 2U)) ||
+      ((existing_length + 2U) > (((size_t)-1) - text_length))) {
     strappy_set_error(error_out, "Assistant reasoning is too large.");
     return 0;
   }
-  total_length = prior_length + 2U + current_length;
+  total_length = existing_length + 2U + text_length;
 
   merged = (char *)malloc(total_length + 1U);
   if (merged == NULL) {
@@ -2693,13 +2687,50 @@ static int strappy_assistant_merge_prior_reasoning(
     return 0;
   }
 
-  memcpy(merged, prior, prior_length);
-  memcpy(merged + prior_length, "\n\n", 2U);
-  memcpy(merged + prior_length + 2U, current, current_length);
+  memcpy(merged, *target, existing_length);
+  memcpy(merged + existing_length, "\n\n", 2U);
+  memcpy(merged + existing_length + 2U, text, text_length);
   merged[total_length] = '\0';
 
+  free(*target);
+  *target = merged;
+  return 1;
+}
+
+static int strappy_assistant_accumulate_result_reasoning(
+  strappy_assistant_tool_sequence *sequence,
+  const strappy_chat_result *result,
+  char **error_out)
+{
+  if ((sequence == NULL) || (result == NULL)) {
+    return 1;
+  }
+
+  return strappy_assistant_append_reasoning_block(&sequence->reasoning_text,
+                                                  result->reasoning_text,
+                                                  error_out);
+}
+
+static int strappy_assistant_apply_accumulated_reasoning(
+  const strappy_assistant_tool_sequence *sequence,
+  strappy_chat_result *result,
+  char **error_out)
+{
+  char *copy;
+
+  if ((sequence == NULL) || (result == NULL) ||
+      strappy_assistant_text_is_empty(sequence->reasoning_text)) {
+    return 1;
+  }
+
+  copy = strappy_string_duplicate(sequence->reasoning_text);
+  if (copy == NULL) {
+    strappy_set_error(error_out, "Could not preserve assistant reasoning.");
+    return 0;
+  }
+
   free(result->reasoning_text);
-  result->reasoning_text = merged;
+  result->reasoning_text = copy;
   return 1;
 }
 
@@ -3092,7 +3123,23 @@ static int strappy_assistant_run_tool_sequence(
     strappy_chat_result *next_result;
     int has_tool_calls;
 
+    if (!strappy_assistant_accumulate_result_reasoning(sequence,
+                                                       current_result,
+                                                       error_out)) {
+      sequence->failed_result = (strappy_chat_result *)current_result;
+      strappy_assistant_request_messages_destroy(&final_answer_request);
+      return 0;
+    }
+
     if ((current_result != NULL) && current_result->cancelled) {
+      if (!strappy_assistant_apply_accumulated_reasoning(
+            sequence,
+            (strappy_chat_result *)current_result,
+            error_out)) {
+        sequence->failed_result = (strappy_chat_result *)current_result;
+        strappy_assistant_request_messages_destroy(&final_answer_request);
+        return 0;
+      }
       sequence->final_result = (strappy_chat_result *)current_result;
       strappy_assistant_request_messages_destroy(&final_answer_request);
       return 1;
@@ -3155,6 +3202,16 @@ static int strappy_assistant_run_tool_sequence(
             return 0;
           }
           if (next_result->cancelled) {
+            if (!strappy_assistant_accumulate_result_reasoning(sequence,
+                                                               next_result,
+                                                               error_out) ||
+                !strappy_assistant_apply_accumulated_reasoning(sequence,
+                                                               next_result,
+                                                               error_out)) {
+              sequence->failed_result = next_result;
+              strappy_assistant_request_messages_destroy(&final_answer_request);
+              return 0;
+            }
             sequence->final_result = next_result;
             strappy_assistant_request_messages_destroy(&final_answer_request);
             return 1;
@@ -3186,20 +3243,20 @@ static int strappy_assistant_run_tool_sequence(
           }
         }
 
-        if (!strappy_assistant_merge_prior_reasoning(next_result,
-                                                     current_result,
-                                                     error_out)) {
-          sequence->failed_result = next_result;
-          strappy_assistant_request_messages_destroy(&final_answer_request);
-          return 0;
-        }
-
         did_request_final_answer = 1;
         current_request = &final_answer_request;
         current_result = next_result;
         continue;
       }
 
+      if (!strappy_assistant_apply_accumulated_reasoning(
+            sequence,
+            (strappy_chat_result *)current_result,
+            error_out)) {
+        sequence->failed_result = (strappy_chat_result *)current_result;
+        strappy_assistant_request_messages_destroy(&final_answer_request);
+        return 0;
+      }
       sequence->final_result = (strappy_chat_result *)current_result;
       strappy_assistant_request_messages_destroy(&final_answer_request);
       return 1;
@@ -3211,6 +3268,13 @@ static int strappy_assistant_run_tool_sequence(
                                                    current_result,
                                                    guidance,
                                                    error_out)) {
+        strappy_assistant_request_messages_destroy(&final_answer_request);
+        return 0;
+      }
+      if (!strappy_assistant_apply_accumulated_reasoning(sequence,
+                                                        next_result,
+                                                        error_out)) {
+        sequence->failed_result = next_result;
         strappy_assistant_request_messages_destroy(&final_answer_request);
         return 0;
       }
@@ -3252,6 +3316,14 @@ static int strappy_assistant_run_tool_sequence(
     }
 
     if ((round->followup_messages == NULL) || (round->followup_count == 0U)) {
+      if (!strappy_assistant_apply_accumulated_reasoning(
+            sequence,
+            (strappy_chat_result *)current_result,
+            error_out)) {
+        sequence->failed_result = (strappy_chat_result *)current_result;
+        strappy_assistant_request_messages_destroy(&final_answer_request);
+        return 0;
+      }
       sequence->final_result = (strappy_chat_result *)current_result;
       strappy_assistant_request_messages_destroy(&final_answer_request);
       return 1;
@@ -3293,6 +3365,16 @@ static int strappy_assistant_run_tool_sequence(
         return 0;
       }
       if (next_result->cancelled) {
+        if (!strappy_assistant_accumulate_result_reasoning(sequence,
+                                                           next_result,
+                                                           error_out) ||
+            !strappy_assistant_apply_accumulated_reasoning(sequence,
+                                                           next_result,
+                                                           error_out)) {
+          sequence->failed_result = next_result;
+          strappy_assistant_request_messages_destroy(&final_answer_request);
+          return 0;
+        }
         sequence->final_result = next_result;
         strappy_assistant_request_messages_destroy(&final_answer_request);
         return 1;
