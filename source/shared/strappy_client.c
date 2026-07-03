@@ -3693,11 +3693,15 @@ static int strappy_client_stream_parse_json_event(strappy_stream_context *contex
               content_text)) {
           ok = 0;
         }
-      } else if (!strappy_http_buffer_append_cstring(&context->pending_content,
-                                                     content_text)) {
-        ok = strappy_client_stream_set_error(
-          context,
-          "Could not allocate pending assistant text.");
+      } else {
+        if (!strappy_client_stream_emit_delta(
+              context,
+              STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA,
+              content_text)) {
+          ok = 0;
+        } else {
+          context->emitted_content_delta = 1;
+        }
       }
     }
     free(content_text);

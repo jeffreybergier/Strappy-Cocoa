@@ -574,7 +574,8 @@ static int harness_test_stream_midstream_error_metadata(void)
        (context.stream_error != NULL) &&
        (strstr(context.stream_error,
                "Provider disconnected unexpectedly") != NULL) &&
-       (record.content_count == 0) &&
+       (record.content_count == 1) &&
+       (strcmp(record.content, "partial") == 0) &&
        (result.response_id != NULL) &&
        (strcmp(result.response_id, "gen-stream-error") == 0) &&
        (result.model != NULL) &&
@@ -708,6 +709,65 @@ static int harness_test_stream_reasoning_details_context_message(void)
   return 1;
 }
 
+static int harness_test_answer_content_streams_live(void)
+{
+  strappy_stream_context context;
+  strappy_chat_result result;
+  harness_stream_record record;
+  cJSON *root;
+  int ok;
+
+  memset(&record, 0, sizeof(record));
+  strappy_chat_result_init(&result);
+  strappy_stream_context_init(&context);
+  context.result = &result;
+  context.callback = harness_record_stream_event;
+  context.callback_data = &record;
+
+  ok =
+    harness_feed_stream_event(
+      &context,
+      "{\"choices\":[{\"delta\":{\"role\":\"assistant\","
+      "\"content\":\"Visible \"},\"finish_reason\":null}]}") &&
+    harness_feed_stream_event(
+      &context,
+      "{\"choices\":[{\"delta\":{\"content\":\"answer.\"},"
+      "\"finish_reason\":null}]}") &&
+    harness_feed_stream_event(
+      &context,
+      "{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}") &&
+    strappy_client_stream_finalize_message(&context);
+
+  if (!ok) {
+    strappy_stream_context_destroy(&context);
+    strappy_chat_result_destroy(&result);
+    return harness_fail("Live answer content stream failed.");
+  }
+
+  root = cJSON_Parse(result.message_json);
+  if (root == NULL) {
+    strappy_stream_context_destroy(&context);
+    strappy_chat_result_destroy(&result);
+    return harness_fail("Live answer content JSON was invalid.");
+  }
+
+  ok = (record.content_count == 2) &&
+       (record.reasoning_count == 0) &&
+       (record.retracted_count == 0) &&
+       (strcmp(record.content, "Visible answer.") == 0) &&
+       harness_expect_string(root, "content", "Visible answer.");
+
+  cJSON_Delete(root);
+  strappy_stream_context_destroy(&context);
+  strappy_chat_result_destroy(&result);
+
+  if (!ok) {
+    return harness_fail("Answer content was not streamed live.");
+  }
+
+  return 1;
+}
+
 static int harness_test_tool_call_stream_content_retracted_live(void)
 {
   strappy_stream_context context;
@@ -756,11 +816,11 @@ static int harness_test_tool_call_stream_content_retracted_live(void)
     return harness_fail("Tool-call content retraction JSON was invalid.");
   }
 
-  ok = (record.content_count == 0) &&
-       (record.retracted_count == 0) &&
-       (record.reasoning_count == 2) &&
-       (strcmp(record.content, "") == 0) &&
-       (strcmp(record.reasoning, "Let me check the database.") == 0) &&
+  ok = (record.content_count == 1) &&
+       (record.retracted_count == 1) &&
+       (record.reasoning_count == 1) &&
+       (strcmp(record.content, "Let me check ") == 0) &&
+       (strcmp(record.reasoning, "the database.") == 0) &&
        harness_expect_string(root, "content", "Let me check the database.");
 
   cJSON_Delete(root);
@@ -937,6 +997,10 @@ int main(void)
     return 1;
   }
   if (!harness_test_stream_reasoning_details_context_message()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_answer_content_streams_live()) {
     fprintf(stderr, "client_stream_harness failed.\n");
     return 1;
   }

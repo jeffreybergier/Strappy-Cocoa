@@ -91,8 +91,11 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "shouldRenderMarkdownBubble(n[i])||"
                                "shouldRenderMarkdownReasoning(n[i])") &&
+       harness_expect_contains(page_html, "_strappyMarkdownRendered") &&
+       harness_expect_contains(page_html, "function renderStreamingTextNode") &&
        harness_expect_contains(page_html,
                                "q.kind=='reasoning'){if(typeof n._strappyMarkdown") &&
+       harness_expect_contains(page_html, "queueTextAppend(id,t,'content')") &&
        harness_expect_contains(page_html, "appendMessageTextByMessageKey") &&
        harness_expect_contains(page_html, "appendReasoningTextByMessageKey") &&
        harness_expect_contains(page_html, "function setToolBoxCount") &&
