@@ -1,7 +1,8 @@
 {
   "assistant_prompts": {
     "learning_summary": "Learning (internal harness task, not user request):\n- NEVER answer the user.\n- NEVER revise the user-visible answer.\n- ALWAYS call helper_session_name_write with one short title.\n- ALWAYS call memory_user_fact_remember for each new stable user fact from the completed turn.\n- ALWAYS call memory_database_hint_remember for each reusable evidence-backed database hint from the completed turn.\n- NEVER write memory when there is no new fact or hint.\n- NEVER store secrets, credentials, sensitive identifiers, long copied content, private row contents, or raw message text.\n- Reply exactly: Learning Summary Complete",
-    "learning_summary_completion": "Learning Summary Complete"
+    "learning_summary_completion": "Learning Summary Complete",
+    "final_answer": "You were interrupted, please continue where you left off."
   },
   "assistant_messages": {
     "tool_round_limit": "I reached the 50-round tool limit while inspecting local data, so I could not finish a reliable answer. Please ask a narrower question or continue with a more specific follow-up."

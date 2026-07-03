@@ -296,12 +296,17 @@ static int harness_test_openrouter_reasoning_request(void)
   cJSON *root;
   cJSON *reasoning;
   cJSON *include_reasoning;
+  cJSON *provider;
+  cJSON *parallel_tool_calls;
+  cJSON *tool_choice;
+  cJSON *tools;
   int ok;
 
   memset(&config, 0, sizeof(config));
   memset(&message, 0, sizeof(message));
   config.api_endpoint = "https://openrouter.ai/api/v1/chat/completions";
   config.api_model = "google/gemma-4-31b-it";
+  config.guidance_resource_dir = "../shared/Resources";
   message.role = "user";
   message.content = "Hello";
   error = NULL;
@@ -328,9 +333,20 @@ static int harness_test_openrouter_reasoning_request(void)
 
   reasoning = cJSON_GetObjectItem(root, "reasoning");
   include_reasoning = cJSON_GetObjectItem(root, "include_reasoning");
+  provider = cJSON_GetObjectItem(root, "provider");
+  parallel_tool_calls = cJSON_GetObjectItem(root, "parallel_tool_calls");
+  tool_choice = cJSON_GetObjectItem(root, "tool_choice");
+  tools = cJSON_GetObjectItem(root, "tools");
   ok = cJSON_IsObject(reasoning) &&
        cJSON_IsTrue(cJSON_GetObjectItem(reasoning, "enabled")) &&
        cJSON_IsFalse(cJSON_GetObjectItem(reasoning, "exclude")) &&
+       cJSON_IsObject(provider) &&
+       cJSON_IsTrue(cJSON_GetObjectItem(provider, "require_parameters")) &&
+       cJSON_IsString(tool_choice) &&
+       (strcmp(tool_choice->valuestring, "auto") == 0) &&
+       cJSON_IsArray(tools) &&
+       (cJSON_GetArraySize(tools) > 0) &&
+       (parallel_tool_calls == NULL) &&
        (include_reasoning == NULL);
 
   cJSON_Delete(root);
@@ -341,7 +357,7 @@ static int harness_test_openrouter_reasoning_request(void)
   return 1;
 }
 
-static int harness_test_request_replays_coalesced_reasoning_details(void)
+static int harness_test_request_replays_reasoning_details_unchanged(void)
 {
   strappy_config config;
   strappy_chat_message message;
@@ -353,7 +369,9 @@ static int harness_test_request_replays_coalesced_reasoning_details(void)
   cJSON *reasoning;
   cJSON *reasoning_content;
   cJSON *reasoning_details;
-  cJSON *detail;
+  cJSON *first_detail;
+  cJSON *second_detail;
+  cJSON *third_detail;
   int ok;
 
   memset(&config, 0, sizeof(config));
@@ -400,16 +418,20 @@ static int harness_test_request_replays_coalesced_reasoning_details(void)
   reasoning = cJSON_GetObjectItem(assistant, "reasoning");
   reasoning_content = cJSON_GetObjectItem(assistant, "reasoning_content");
   reasoning_details = cJSON_GetObjectItem(assistant, "reasoning_details");
-  detail = cJSON_GetArrayItem(reasoning_details, 0);
-  ok = (reasoning == NULL) &&
-       (reasoning_content == NULL) &&
+  first_detail = cJSON_GetArrayItem(reasoning_details, 0);
+  second_detail = cJSON_GetArrayItem(reasoning_details, 1);
+  third_detail = cJSON_GetArrayItem(reasoning_details, 2);
+  ok = cJSON_IsString(reasoning) &&
+       cJSON_IsString(reasoning_content) &&
        cJSON_IsArray(reasoning_details) &&
-       (cJSON_GetArraySize(reasoning_details) == 1) &&
-       harness_expect_string(detail, "text", "There\n's");
+       (cJSON_GetArraySize(reasoning_details) == 3) &&
+       harness_expect_string(first_detail, "text", "There") &&
+       harness_expect_string(second_detail, "text", "\n") &&
+       harness_expect_string(third_detail, "text", "'s");
 
   cJSON_Delete(root);
   if (!ok) {
-    return harness_fail("Stored reasoning details were not replayed canonically.");
+    return harness_fail("Stored reasoning details were not replayed unchanged.");
   }
 
   return 1;
@@ -446,6 +468,49 @@ static int harness_test_content_parts_filter_non_text(void)
   strappy_chat_result_destroy(&result);
   if (!ok) {
     return harness_fail("Non-text content parts leaked into assistant text.");
+  }
+
+  return 1;
+}
+
+static int harness_test_non_stream_choice_error_metadata(void)
+{
+  const char *response_json =
+    "{\"id\":\"gen-test\",\"model\":\"google/gemma-4-31b-it-20260402\","
+    "\"provider\":\"DeepInfra\",\"choices\":[{"
+    "\"finish_reason\":\"error\",\"native_finish_reason\":\"error\","
+    "\"message\":{\"role\":\"assistant\",\"content\":null},"
+    "\"error\":{\"code\":429,\"message\":\"Provider returned error\","
+    "\"metadata\":{\"error_type\":\"rate_limit_exceeded\","
+    "\"provider_code\":\"rate_limited\"}}}]}";
+  strappy_chat_result result;
+  char *error;
+  int ok;
+
+  strappy_chat_result_init(&result);
+  error = NULL;
+
+  ok = !strappy_client_parse_response(response_json, 200L, &result, &error) &&
+       (error != NULL) &&
+       (strstr(error, "Provider returned error") != NULL) &&
+       (result.response_id != NULL) &&
+       (strcmp(result.response_id, "gen-test") == 0) &&
+       (result.provider_name != NULL) &&
+       (strcmp(result.provider_name, "DeepInfra") == 0) &&
+       (result.error_type != NULL) &&
+       (strcmp(result.error_type, "rate_limit_exceeded") == 0) &&
+       (result.provider_code != NULL) &&
+       (strcmp(result.provider_code, "rate_limited") == 0) &&
+       (result.finish_reason != NULL) &&
+       (strcmp(result.finish_reason, "error") == 0);
+
+  if (error != NULL) {
+    strappy_free_string(error);
+  }
+  strappy_chat_result_destroy(&result);
+
+  if (!ok) {
+    return harness_fail("Choice error metadata was not captured.");
   }
 
   return 1;
@@ -555,11 +620,11 @@ static int harness_test_tool_call_stream_content_retracted_live(void)
     return harness_fail("Tool-call content retraction JSON was invalid.");
   }
 
-  ok = (record.content_count == 1) &&
-       (record.retracted_count == 1) &&
-       (record.reasoning_count == 1) &&
-       (strcmp(record.content, "Let me check ") == 0) &&
-       (strcmp(record.reasoning, "the database.") == 0) &&
+  ok = (record.content_count == 0) &&
+       (record.retracted_count == 0) &&
+       (record.reasoning_count == 2) &&
+       (strcmp(record.content, "") == 0) &&
+       (strcmp(record.reasoning, "Let me check the database.") == 0) &&
        harness_expect_string(root, "content", "Let me check the database.");
 
   cJSON_Delete(root);
@@ -567,7 +632,7 @@ static int harness_test_tool_call_stream_content_retracted_live(void)
   strappy_chat_result_destroy(&result);
 
   if (!ok) {
-    return harness_fail("Tool-call content was not retracted live.");
+    return harness_fail("Tool-call content leaked into answer deltas.");
   }
 
   return 1;
@@ -679,8 +744,8 @@ static int harness_test_stream_reasoning_detail_chunks_coalesced(void)
   reasoning_details = cJSON_GetObjectItem(root, "reasoning_details");
   detail = cJSON_GetArrayItem(reasoning_details, 0);
   ok = cJSON_IsArray(reasoning_details) &&
-       (cJSON_GetArraySize(reasoning_details) == 1) &&
-       harness_expect_string(detail, "text", "There\n's a clue") &&
+       (cJSON_GetArraySize(reasoning_details) == 3) &&
+       harness_expect_string(detail, "text", "There") &&
        harness_expect_string(detail, "type", "reasoning.text") &&
        harness_expect_string(root, "content", "Visible answer.") &&
        (result.reasoning_text != NULL) &&
@@ -691,7 +756,7 @@ static int harness_test_stream_reasoning_detail_chunks_coalesced(void)
   strappy_chat_result_destroy(&result);
 
   if (!ok) {
-    return harness_fail("Streamed reasoning details were not coalesced.");
+    return harness_fail("Streamed reasoning details were not preserved in order.");
   }
 
   return 1;
@@ -711,11 +776,15 @@ int main(void)
     fprintf(stderr, "client_stream_harness failed.\n");
     return 1;
   }
-  if (!harness_test_request_replays_coalesced_reasoning_details()) {
+  if (!harness_test_request_replays_reasoning_details_unchanged()) {
     fprintf(stderr, "client_stream_harness failed.\n");
     return 1;
   }
   if (!harness_test_content_parts_filter_non_text()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_non_stream_choice_error_metadata()) {
     fprintf(stderr, "client_stream_harness failed.\n");
     return 1;
   }

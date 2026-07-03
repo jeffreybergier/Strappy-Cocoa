@@ -21,16 +21,19 @@
 #define STRAPPY_ASSISTANT_GUIDANCE_LEARNING_SUMMARY "learning_summary"
 #define STRAPPY_ASSISTANT_GUIDANCE_LEARNING_SUMMARY_COMPLETION \
   "learning_summary_completion"
+#define STRAPPY_ASSISTANT_GUIDANCE_FINAL_ANSWER "final_answer"
 #define STRAPPY_ASSISTANT_GUIDANCE_TOOL_ROUND_LIMIT "tool_round_limit"
 #define STRAPPY_ASSISTANT_GUIDANCE_TOOL_ERROR_DEFAULT "default"
 #define STRAPPY_ASSISTANT_GUIDANCE_TOOL_ERROR_NOT_ALLOWED "not_allowed_for_turn"
 #define STRAPPY_ASSISTANT_STREAM_FLUSH_BYTES 512U
 #define STRAPPY_ASSISTANT_STREAM_FLUSH_MS 80LL
 #define STRAPPY_ASSISTANT_STREAM_BUFFER_BYTES 2048U
+#define STRAPPY_ASSISTANT_MAX_FINAL_ANSWER_FOLLOWUPS 2U
 
 typedef struct strappy_assistant_guidance {
   char *learning_summary_prompt;
   char *learning_summary_completion_text;
+  char *final_answer_prompt;
   char *tool_round_limit_message;
   char *tool_error_default;
   char *tool_error_not_allowed_for_turn;
@@ -90,9 +93,13 @@ typedef struct strappy_assistant_turn_keys {
 typedef struct strappy_assistant_tool_sequence {
   strappy_assistant_tool_round rounds[STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS];
   strappy_chat_result results[STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS + 1U];
+  strappy_chat_result final_answer_results[
+    STRAPPY_ASSISTANT_MAX_FINAL_ANSWER_FOLLOWUPS];
   strappy_chat_result learning_summary_result;
   size_t round_count;
+  size_t final_answer_result_count;
   strappy_chat_result *final_result;
+  strappy_chat_result *failed_result;
   strappy_chat_result *learning_summary_final_result;
 } strappy_assistant_tool_sequence;
 
@@ -149,6 +156,7 @@ static void strappy_assistant_guidance_init(
 
   guidance->learning_summary_prompt = NULL;
   guidance->learning_summary_completion_text = NULL;
+  guidance->final_answer_prompt = NULL;
   guidance->tool_round_limit_message = NULL;
   guidance->tool_error_default = NULL;
   guidance->tool_error_not_allowed_for_turn = NULL;
@@ -163,6 +171,7 @@ static void strappy_assistant_guidance_destroy(
 
   free(guidance->learning_summary_prompt);
   free(guidance->learning_summary_completion_text);
+  free(guidance->final_answer_prompt);
   free(guidance->tool_round_limit_message);
   free(guidance->tool_error_default);
   free(guidance->tool_error_not_allowed_for_turn);
@@ -210,6 +219,12 @@ static int strappy_assistant_guidance_load(
         STRAPPY_ASSISTANT_GUIDANCE_PROMPTS,
         STRAPPY_ASSISTANT_GUIDANCE_LEARNING_SUMMARY_COMPLETION,
         &guidance->learning_summary_completion_text,
+        error_out) ||
+      !strappy_assistant_guidance_load_string(
+        resource_dir,
+        STRAPPY_ASSISTANT_GUIDANCE_PROMPTS,
+        STRAPPY_ASSISTANT_GUIDANCE_FINAL_ANSWER,
+        &guidance->final_answer_prompt,
         error_out) ||
       !strappy_assistant_guidance_load_string(
         resource_dir,
@@ -330,10 +345,17 @@ static void strappy_assistant_tool_sequence_init(
   for (index = 0U; index <= STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS; index++) {
     strappy_chat_result_init(&sequence->results[index]);
   }
+  for (index = 0U;
+       index < STRAPPY_ASSISTANT_MAX_FINAL_ANSWER_FOLLOWUPS;
+       index++) {
+    strappy_chat_result_init(&sequence->final_answer_results[index]);
+  }
   strappy_chat_result_init(&sequence->learning_summary_result);
 
   sequence->round_count = 0U;
+  sequence->final_answer_result_count = 0U;
   sequence->final_result = NULL;
+  sequence->failed_result = NULL;
   sequence->learning_summary_final_result = NULL;
 }
 
@@ -353,10 +375,17 @@ static void strappy_assistant_tool_sequence_destroy(
   for (index = 0U; index <= STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS; index++) {
     strappy_chat_result_destroy(&sequence->results[index]);
   }
+  for (index = 0U;
+       index < STRAPPY_ASSISTANT_MAX_FINAL_ANSWER_FOLLOWUPS;
+       index++) {
+    strappy_chat_result_destroy(&sequence->final_answer_results[index]);
+  }
   strappy_chat_result_destroy(&sequence->learning_summary_result);
 
   sequence->round_count = 0U;
+  sequence->final_answer_result_count = 0U;
   sequence->final_result = NULL;
+  sequence->failed_result = NULL;
   sequence->learning_summary_final_result = NULL;
 }
 
@@ -449,38 +478,6 @@ static int strappy_assistant_emit_tool_event(
   event.message_json = message_json;
   if (!callback(&event, callback_data)) {
     strappy_set_error(error_out, "Stream callback rejected tool event.");
-    return 0;
-  }
-
-  return 1;
-}
-
-static int strappy_assistant_emit_content_retracted_event(
-  const strappy_assistant_turn_spec *turn,
-  strappy_chat_stream_callback callback,
-  void *callback_data,
-  char **error_out)
-{
-  strappy_chat_stream_event event;
-
-  if ((turn == NULL) || (callback == NULL)) {
-    return 1;
-  }
-
-  memset(&event, 0, sizeof(event));
-  event.type = STRAPPY_CHAT_STREAM_EVENT_CONTENT_RETRACTED;
-  event.text = "";
-  event.turn_key = turn->turn_key;
-  event.prompt_group_key = turn->prompt_group_key;
-  event.actor = turn->actor;
-  event.kind = "assistant";
-  event.message_key = turn->assistant_message_key;
-  event.render_role = "assistant";
-  event.api_role = "assistant";
-
-  if (!callback(&event, callback_data)) {
-    strappy_set_error(error_out,
-                      "Stream callback rejected content correction event.");
     return 0;
   }
 
@@ -1502,6 +1499,69 @@ static int strappy_assistant_build_learning_summary_request(
   return 1;
 }
 
+static int strappy_assistant_build_final_answer_request(
+  const strappy_assistant_request_messages *base_request,
+  const strappy_chat_result *reasoning_result,
+  const char *final_answer_prompt,
+  strappy_assistant_request_messages *final_answer_request,
+  char **error_out)
+{
+  strappy_chat_message *messages;
+  size_t request_count;
+
+  if (final_answer_request == NULL) {
+    strappy_set_error(error_out, "Final answer request output is missing.");
+    return 0;
+  }
+  strappy_assistant_request_messages_destroy(final_answer_request);
+
+  if ((base_request == NULL) ||
+      (base_request->messages == NULL) ||
+      (base_request->count == 0U) ||
+      (reasoning_result == NULL) ||
+      (reasoning_result->message_json == NULL) ||
+      (reasoning_result->message_json[0] == '\0') ||
+      (final_answer_prompt == NULL) ||
+      (final_answer_prompt[0] == '\0')) {
+    strappy_set_error(error_out, "Final answer request is incomplete.");
+    return 0;
+  }
+
+  if (base_request->count > (((size_t)-1) - 2U)) {
+    strappy_set_error(error_out, "Final answer request is too large.");
+    return 0;
+  }
+  request_count = base_request->count + 2U;
+  if (request_count > (((size_t)-1) / sizeof(strappy_chat_message))) {
+    strappy_set_error(error_out, "Final answer request is too large.");
+    return 0;
+  }
+
+  messages = (strappy_chat_message *)malloc(
+    request_count * sizeof(strappy_chat_message));
+  if (messages == NULL) {
+    strappy_set_error(error_out, "Could not allocate final answer request.");
+    return 0;
+  }
+
+  memcpy(messages,
+         base_request->messages,
+         base_request->count * sizeof(strappy_chat_message));
+  messages[base_request->count].role = "assistant";
+  messages[base_request->count].content =
+    (reasoning_result->response_text != NULL) ?
+      reasoning_result->response_text : "";
+  messages[base_request->count].message_json = reasoning_result->message_json;
+  messages[base_request->count + 1U].role = "user";
+  messages[base_request->count + 1U].content = final_answer_prompt;
+  messages[base_request->count + 1U].message_json = NULL;
+
+  final_answer_request->messages = messages;
+  final_answer_request->count = request_count;
+  final_answer_request->system_prompt = NULL;
+  return 1;
+}
+
 static int strappy_assistant_prepare_request_messages(
   const char *prompt,
   const char *system_prompt_template_path,
@@ -2512,6 +2572,137 @@ static void strappy_assistant_try_store_turn_error(
                                             callback_data);
 }
 
+static const strappy_chat_result *strappy_assistant_tool_sequence_error_result(
+  const strappy_assistant_tool_sequence *sequence,
+  const strappy_chat_result *fallback)
+{
+  if ((sequence != NULL) && (sequence->failed_result != NULL)) {
+    return sequence->failed_result;
+  }
+
+  return fallback;
+}
+
+static const strappy_chat_result *strappy_assistant_tool_sequence_final_result(
+  const strappy_assistant_tool_sequence *sequence,
+  const strappy_chat_result *fallback)
+{
+  if ((sequence != NULL) && (sequence->final_result != NULL)) {
+    return sequence->final_result;
+  }
+
+  return fallback;
+}
+
+static int strappy_assistant_text_is_empty(const char *text)
+{
+  return ((text == NULL) || (text[0] == '\0')) ? 1 : 0;
+}
+
+static int strappy_assistant_finish_is_error(const char *finish_reason)
+{
+  return ((finish_reason != NULL) &&
+          (strcmp(finish_reason, "error") == 0)) ? 1 : 0;
+}
+
+static int strappy_assistant_result_needs_final_answer(
+  const strappy_chat_result *result)
+{
+  if ((result == NULL) || result->cancelled ||
+      !strappy_assistant_text_is_empty(result->response_text) ||
+      strappy_assistant_text_is_empty(result->reasoning_text) ||
+      strappy_assistant_text_is_empty(result->message_json) ||
+      strappy_assistant_finish_is_error(result->finish_reason) ||
+      strappy_assistant_finish_is_error(result->native_finish_reason)) {
+    return 0;
+  }
+
+  return 1;
+}
+
+static strappy_chat_result *strappy_assistant_next_final_answer_result(
+  strappy_assistant_tool_sequence *sequence,
+  char **error_out)
+{
+  strappy_chat_result *result;
+
+  if (sequence == NULL) {
+    strappy_set_error(error_out, "Final answer result sequence is missing.");
+    return NULL;
+  }
+
+  if (sequence->final_answer_result_count >=
+      STRAPPY_ASSISTANT_MAX_FINAL_ANSWER_FOLLOWUPS) {
+    strappy_set_error(error_out, "Final answer follow-up limit reached.");
+    return NULL;
+  }
+
+  result =
+    &sequence->final_answer_results[sequence->final_answer_result_count];
+  sequence->final_answer_result_count++;
+  strappy_chat_result_destroy(result);
+  return result;
+}
+
+static int strappy_assistant_merge_prior_reasoning(
+  strappy_chat_result *result,
+  const strappy_chat_result *prior_result,
+  char **error_out)
+{
+  const char *prior;
+  const char *current;
+  char *merged;
+  size_t prior_length;
+  size_t current_length;
+  size_t total_length;
+
+  if ((result == NULL) || (prior_result == NULL) ||
+      strappy_assistant_text_is_empty(prior_result->reasoning_text)) {
+    return 1;
+  }
+
+  prior = prior_result->reasoning_text;
+  current = result->reasoning_text;
+  if (strappy_assistant_text_is_empty(current)) {
+    merged = strappy_string_duplicate(prior);
+    if (merged == NULL) {
+      strappy_set_error(error_out, "Could not preserve assistant reasoning.");
+      return 0;
+    }
+    free(result->reasoning_text);
+    result->reasoning_text = merged;
+    return 1;
+  }
+
+  if (strcmp(prior, current) == 0) {
+    return 1;
+  }
+
+  prior_length = strlen(prior);
+  current_length = strlen(current);
+  if ((prior_length > (((size_t)-1) - 2U)) ||
+      ((prior_length + 2U) > (((size_t)-1) - current_length))) {
+    strappy_set_error(error_out, "Assistant reasoning is too large.");
+    return 0;
+  }
+  total_length = prior_length + 2U + current_length;
+
+  merged = (char *)malloc(total_length + 1U);
+  if (merged == NULL) {
+    strappy_set_error(error_out, "Could not preserve assistant reasoning.");
+    return 0;
+  }
+
+  memcpy(merged, prior, prior_length);
+  memcpy(merged + prior_length, "\n\n", 2U);
+  memcpy(merged + prior_length + 2U, current, current_length);
+  merged[total_length] = '\0';
+
+  free(result->reasoning_text);
+  result->reasoning_text = merged;
+  return 1;
+}
+
 static int strappy_assistant_validate_final_result(
   const strappy_chat_result *result,
   char **error_out)
@@ -2868,15 +3059,18 @@ static int strappy_assistant_run_tool_sequence(
 {
   const strappy_assistant_request_messages *current_request;
   strappy_assistant_request_messages followup_request;
+  strappy_assistant_request_messages final_answer_request;
   const strappy_chat_result *current_result;
   int stored_prompt_message;
+  int did_request_final_answer;
 
   if (did_run_out != NULL) {
     *did_run_out = 0;
   }
 
   if ((guidance == NULL) ||
-      (guidance->tool_round_limit_message == NULL)) {
+      (guidance->tool_round_limit_message == NULL) ||
+      (guidance->final_answer_prompt == NULL)) {
     strappy_set_error(error_out, "Assistant tool guidance is missing.");
     return 0;
   }
@@ -2889,7 +3083,9 @@ static int strappy_assistant_run_tool_sequence(
   current_request = request_messages;
   current_result = tool_request_result;
   stored_prompt_message = 0;
+  did_request_final_answer = 0;
   strappy_assistant_request_messages_init(&followup_request);
+  strappy_assistant_request_messages_init(&final_answer_request);
 
   for (;;) {
     strappy_assistant_tool_round *round;
@@ -2898,26 +3094,115 @@ static int strappy_assistant_run_tool_sequence(
 
     if ((current_result != NULL) && current_result->cancelled) {
       sequence->final_result = (strappy_chat_result *)current_result;
+      strappy_assistant_request_messages_destroy(&final_answer_request);
       return 1;
     }
 
     if (!strappy_assistant_result_has_tool_calls(current_result,
                                                 &has_tool_calls,
                                                 error_out)) {
+      sequence->failed_result = (strappy_chat_result *)current_result;
+      strappy_assistant_request_messages_destroy(&final_answer_request);
       return 0;
     }
 
     if (!has_tool_calls) {
-      sequence->final_result = (strappy_chat_result *)current_result;
-      return 1;
-    }
+      if (!did_request_final_answer &&
+          strappy_assistant_result_needs_final_answer(current_result)) {
+        next_result =
+          strappy_assistant_next_final_answer_result(sequence, error_out);
+        if (next_result == NULL) {
+          sequence->failed_result = (strappy_chat_result *)current_result;
+          strappy_assistant_request_messages_destroy(&final_answer_request);
+          return 0;
+        }
 
-    if (stream_model_responses &&
-        !strappy_assistant_emit_content_retracted_event(turn,
-                                                        callback,
-                                                        callback_data,
-                                                        error_out)) {
-      return 0;
+        if (!strappy_assistant_build_final_answer_request(
+              current_request,
+              current_result,
+              guidance->final_answer_prompt,
+              &final_answer_request,
+              error_out)) {
+          sequence->failed_result = (strappy_chat_result *)current_result;
+          strappy_assistant_request_messages_destroy(&final_answer_request);
+          return 0;
+        }
+
+        if (stream_model_responses) {
+          strappy_assistant_stream_turn_context turn_context;
+          strappy_chat_stream_callback stream_callback;
+          void *stream_callback_data;
+
+          stream_callback = callback;
+          stream_callback_data = callback_data;
+          if ((turn != NULL) && (callback != NULL)) {
+            turn_context.callback = callback;
+            turn_context.callback_data = callback_data;
+            turn_context.turn = turn;
+            stream_callback = strappy_assistant_stream_turn_callback;
+            stream_callback_data = &turn_context;
+          }
+
+          if (!strappy_client_stream_messages(config,
+                                              final_answer_request.messages,
+                                              final_answer_request.count,
+                                              next_result,
+                                              stream_callback,
+                                              stream_callback_data,
+                                              error_out)) {
+            sequence->failed_result = next_result;
+            strappy_assistant_request_messages_destroy(&final_answer_request);
+            return 0;
+          }
+          if (next_result->cancelled) {
+            sequence->final_result = next_result;
+            strappy_assistant_request_messages_destroy(&final_answer_request);
+            return 1;
+          }
+        } else if (!strappy_client_send_messages(config,
+                                                 final_answer_request.messages,
+                                                 final_answer_request.count,
+                                                 next_result,
+                                                 error_out)) {
+          sequence->failed_result = next_result;
+          strappy_assistant_request_messages_destroy(&final_answer_request);
+          return 0;
+        } else if (emit_complete_model_events) {
+          int next_has_tool_calls;
+
+          next_has_tool_calls = 0;
+          if (!strappy_assistant_result_has_tool_calls(next_result,
+                                                       &next_has_tool_calls,
+                                                       error_out) ||
+              !strappy_assistant_emit_complete_result_events(turn,
+                                                             next_result,
+                                                             next_has_tool_calls,
+                                                             callback,
+                                                             callback_data,
+                                                             error_out)) {
+            sequence->failed_result = next_result;
+            strappy_assistant_request_messages_destroy(&final_answer_request);
+            return 0;
+          }
+        }
+
+        if (!strappy_assistant_merge_prior_reasoning(next_result,
+                                                     current_result,
+                                                     error_out)) {
+          sequence->failed_result = next_result;
+          strappy_assistant_request_messages_destroy(&final_answer_request);
+          return 0;
+        }
+
+        did_request_final_answer = 1;
+        current_request = &final_answer_request;
+        current_result = next_result;
+        continue;
+      }
+
+      sequence->final_result = (strappy_chat_result *)current_result;
+      strappy_assistant_request_messages_destroy(&final_answer_request);
+      return 1;
     }
 
     if (sequence->round_count >= STRAPPY_ASSISTANT_MAX_TOOL_ROUNDS) {
@@ -2926,6 +3211,7 @@ static int strappy_assistant_run_tool_sequence(
                                                    current_result,
                                                    guidance,
                                                    error_out)) {
+        strappy_assistant_request_messages_destroy(&final_answer_request);
         return 0;
       }
       if ((stream_model_responses || emit_complete_model_events) &&
@@ -2935,9 +3221,11 @@ static int strappy_assistant_run_tool_sequence(
                                                          callback,
                                                          callback_data,
                                                          error_out)) {
+        strappy_assistant_request_messages_destroy(&final_answer_request);
         return 0;
       }
       sequence->final_result = next_result;
+      strappy_assistant_request_messages_destroy(&final_answer_request);
       return 1;
     }
 
@@ -2958,11 +3246,14 @@ static int strappy_assistant_run_tool_sequence(
                                             1,
                                             round,
                                             error_out)) {
+      sequence->failed_result = (strappy_chat_result *)current_result;
+      strappy_assistant_request_messages_destroy(&final_answer_request);
       return 0;
     }
 
     if ((round->followup_messages == NULL) || (round->followup_count == 0U)) {
       sequence->final_result = (strappy_chat_result *)current_result;
+      strappy_assistant_request_messages_destroy(&final_answer_request);
       return 1;
     }
 
@@ -2997,10 +3288,13 @@ static int strappy_assistant_run_tool_sequence(
                                           stream_callback,
                                           stream_callback_data,
                                           error_out)) {
+        sequence->failed_result = next_result;
+        strappy_assistant_request_messages_destroy(&final_answer_request);
         return 0;
       }
       if (next_result->cancelled) {
         sequence->final_result = next_result;
+        strappy_assistant_request_messages_destroy(&final_answer_request);
         return 1;
       }
     } else if (!strappy_client_send_messages(config,
@@ -3008,6 +3302,8 @@ static int strappy_assistant_run_tool_sequence(
                                              round->followup_count,
                                              next_result,
                                              error_out)) {
+      sequence->failed_result = next_result;
+      strappy_assistant_request_messages_destroy(&final_answer_request);
       return 0;
     } else if (emit_complete_model_events) {
       int next_has_tool_calls;
@@ -3022,6 +3318,8 @@ static int strappy_assistant_run_tool_sequence(
                                                          callback,
                                                          callback_data,
                                                          error_out)) {
+        sequence->failed_result = next_result;
+        strappy_assistant_request_messages_destroy(&final_answer_request);
         return 0;
       }
     }
@@ -3057,6 +3355,7 @@ static int strappy_assistant_run_learning_summary(
   const char *helper_tool_allowlist[3];
   strappy_config helper_config;
   strappy_assistant_stream_turn_context turn_context;
+  const strappy_chat_result *helper_final_result;
 
   if ((config == NULL) || (helper_turn == NULL) ||
       (guidance == NULL) ||
@@ -3215,8 +3514,12 @@ static int strappy_assistant_run_learning_summary(
     return 0;
   }
 
-  sequence->learning_summary_final_result = did_run_helper_tool_round ?
-    sequence->final_result : &sequence->learning_summary_result;
+  helper_final_result =
+    strappy_assistant_tool_sequence_final_result(
+      sequence,
+      &sequence->learning_summary_result);
+  sequence->learning_summary_final_result =
+    (strappy_chat_result *)helper_final_result;
   sequence->final_result = (strappy_chat_result *)final_result;
   if (did_run_helper_tool_round && (did_run_tool_round_in_out != NULL)) {
     *did_run_tool_round_in_out = 1;
@@ -3525,7 +3828,9 @@ static char *strappy_assistant_send_prompt_for_session_internal(
       strappy_assistant_try_store_turn_error(session_db_path,
                                              session_id,
                                              &main_turn,
-                                             &result,
+                                             strappy_assistant_tool_sequence_error_result(
+                                               &tool_sequence,
+                                               &result),
                                              callback,
                                              callback_data,
                                              error_out);
@@ -3561,7 +3866,8 @@ static char *strappy_assistant_send_prompt_for_session_internal(
     return NULL;
   }
 
-  final_result = did_run_tool_round ? tool_sequence.final_result : &result;
+  final_result =
+    strappy_assistant_tool_sequence_final_result(&tool_sequence, &result);
   if (!strappy_assistant_validate_final_result(final_result, error_out)) {
     if (event_callback != NULL) {
       strappy_assistant_try_store_turn_error(session_db_path,
@@ -3681,7 +3987,8 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   strappy_assistant_request_messages_destroy(&request_messages);
   strappy_session_message_record_list_destroy(&message_list);
 
-  final_result = did_run_tool_round ? tool_sequence.final_result : &result;
+  final_result =
+    strappy_assistant_tool_sequence_final_result(&tool_sequence, &result);
   if (!strappy_assistant_store_tool_sequence(session_db_path,
                                             session_id,
                                             prompt,
@@ -3700,9 +4007,9 @@ static char *strappy_assistant_send_prompt_for_session_internal(
     return NULL;
   }
 
-  if (did_run_tool_round) {
-    response = tool_sequence.final_result->response_text;
-    tool_sequence.final_result->response_text = NULL;
+  if (final_result != &result) {
+    response = ((strappy_chat_result *)final_result)->response_text;
+    ((strappy_chat_result *)final_result)->response_text = NULL;
   } else {
     response = result.response_text;
     result.response_text = NULL;
@@ -3951,7 +4258,9 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
     strappy_assistant_try_store_turn_error(session_db_path,
                                            session_id,
                                            &main_turn,
-                                           &result,
+                                           strappy_assistant_tool_sequence_error_result(
+                                             &tool_sequence,
+                                             &result),
                                            callback,
                                            callback_data,
                                            error_out);
@@ -3984,7 +4293,8 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
     return NULL;
   }
 
-  final_result = did_run_tool_round ? tool_sequence.final_result : &result;
+  final_result =
+    strappy_assistant_tool_sequence_final_result(&tool_sequence, &result);
   if (!strappy_assistant_validate_final_result(final_result, error_out)) {
     strappy_assistant_try_store_turn_error(session_db_path,
                                            session_id,
@@ -4083,7 +4393,8 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   strappy_assistant_request_messages_destroy(&request_messages);
   strappy_session_message_record_list_destroy(&message_list);
 
-  final_result = did_run_tool_round ? tool_sequence.final_result : &result;
+  final_result =
+    strappy_assistant_tool_sequence_final_result(&tool_sequence, &result);
   if (!strappy_assistant_store_tool_sequence(session_db_path,
                                             session_id,
                                             prompt,
@@ -4102,9 +4413,9 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
     return NULL;
   }
 
-  if (did_run_tool_round) {
-    response = tool_sequence.final_result->response_text;
-    tool_sequence.final_result->response_text = NULL;
+  if (final_result != &result) {
+    response = ((strappy_chat_result *)final_result)->response_text;
+    ((strappy_chat_result *)final_result)->response_text = NULL;
   } else {
     response = result.response_text;
     result.response_text = NULL;

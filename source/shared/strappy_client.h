@@ -26,7 +26,13 @@ typedef struct strappy_chat_result {
   char *native_finish_reason;
   char *service_tier;
   char *system_fingerprint;
+  char *provider_name;
+  char *error_code;
+  char *error_type;
+  char *provider_code;
   char *usage_json;
+  char *openrouter_metadata_json;
+  char *error_metadata_json;
   char *generation_metadata_json;
   char *metadata_json;
   char *metadata_text;
