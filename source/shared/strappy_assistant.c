@@ -2413,6 +2413,34 @@ static int strappy_assistant_store_turn_error(
   return ok;
 }
 
+static void strappy_assistant_emit_stored_turn_update(
+  const strappy_assistant_turn_spec *turn,
+  const char *message,
+  strappy_chat_stream_callback callback,
+  void *callback_data)
+{
+  strappy_chat_stream_event event;
+
+  if ((turn == NULL) || (callback == NULL) ||
+      (turn->assistant_message_key == NULL) ||
+      (turn->assistant_message_key[0] == '\0')) {
+    return;
+  }
+
+  memset(&event, 0, sizeof(event));
+  event.type = STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED;
+  event.text = (message != NULL) ? message : "";
+  event.turn_key = turn->turn_key;
+  event.prompt_group_key = turn->prompt_group_key;
+  event.actor = turn->actor;
+  event.kind = "assistant";
+  event.message_key = turn->assistant_message_key;
+  event.render_role = "assistant";
+  event.api_role = "assistant";
+
+  (void)callback(&event, callback_data);
+}
+
 static int strappy_assistant_store_turn_result(
   const char *session_db_path,
   long long session_id,
@@ -2455,6 +2483,8 @@ static void strappy_assistant_try_store_turn_error(
   long long session_id,
   const strappy_assistant_turn_spec *turn,
   const strappy_chat_result *result,
+  strappy_chat_stream_callback callback,
+  void *callback_data,
   char **error_out)
 {
   const char *message;
@@ -2472,7 +2502,14 @@ static void strappy_assistant_try_store_turn_error(
                                           message,
                                           &store_error)) {
     free(store_error);
+    return;
   }
+  free(store_error);
+
+  strappy_assistant_emit_stored_turn_update(turn,
+                                            message,
+                                            callback,
+                                            callback_data);
 }
 
 static int strappy_assistant_validate_final_result(
@@ -3403,6 +3440,8 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                              session_id,
                                              &main_turn,
                                              &result,
+                                             callback,
+                                             callback_data,
                                              error_out);
     }
     strappy_assistant_turn_keys_destroy(&helper_keys);
@@ -3431,6 +3470,8 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                              session_id,
                                              &main_turn,
                                              &result,
+                                             callback,
+                                             callback_data,
                                              error_out);
     }
     strappy_assistant_turn_keys_destroy(&helper_keys);
@@ -3449,6 +3490,8 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                              session_id,
                                              &main_turn,
                                              &result,
+                                             callback,
+                                             callback_data,
                                              error_out);
     }
     strappy_assistant_turn_keys_destroy(&helper_keys);
@@ -3483,6 +3526,8 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                              session_id,
                                              &main_turn,
                                              &result,
+                                             callback,
+                                             callback_data,
                                              error_out);
     }
     strappy_assistant_turn_keys_destroy(&helper_keys);
@@ -3501,6 +3546,8 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                              session_id,
                                              &main_turn,
                                              &result,
+                                             callback,
+                                             callback_data,
                                              error_out);
     }
     strappy_assistant_turn_keys_destroy(&helper_keys);
@@ -3521,6 +3568,8 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                              session_id,
                                              &main_turn,
                                              final_result,
+                                             callback,
+                                             callback_data,
                                              error_out);
     }
     strappy_assistant_turn_keys_destroy(&helper_keys);
@@ -3544,6 +3593,8 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                            session_id,
                                            &main_turn,
                                            final_result,
+                                           callback,
+                                           callback_data,
                                            error_out);
     strappy_assistant_turn_keys_destroy(&helper_keys);
     strappy_assistant_turn_keys_destroy(&main_keys);
@@ -3561,6 +3612,8 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                              session_id,
                                              &main_turn,
                                              final_result,
+                                             callback,
+                                             callback_data,
                                              error_out);
     }
     strappy_assistant_turn_keys_destroy(&helper_keys);
@@ -3845,6 +3898,8 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
                                            session_id,
                                            &main_turn,
                                            &result,
+                                           callback,
+                                           callback_data,
                                            error_out);
     strappy_assistant_turn_keys_destroy(&helper_keys);
     strappy_assistant_turn_keys_destroy(&main_keys);
@@ -3861,6 +3916,8 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
                                            session_id,
                                            &main_turn,
                                            &result,
+                                           callback,
+                                           callback_data,
                                            error_out);
     strappy_assistant_turn_keys_destroy(&helper_keys);
     strappy_assistant_turn_keys_destroy(&main_keys);
@@ -3895,6 +3952,8 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
                                            session_id,
                                            &main_turn,
                                            &result,
+                                           callback,
+                                           callback_data,
                                            error_out);
     strappy_assistant_turn_keys_destroy(&helper_keys);
     strappy_assistant_turn_keys_destroy(&main_keys);
@@ -3911,6 +3970,8 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
                                            session_id,
                                            &main_turn,
                                            &result,
+                                           callback,
+                                           callback_data,
                                            error_out);
     strappy_assistant_turn_keys_destroy(&helper_keys);
     strappy_assistant_turn_keys_destroy(&main_keys);
@@ -3929,6 +3990,8 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
                                            session_id,
                                            &main_turn,
                                            final_result,
+                                           callback,
+                                           callback_data,
                                            error_out);
     strappy_assistant_turn_keys_destroy(&helper_keys);
     strappy_assistant_turn_keys_destroy(&main_keys);
@@ -3951,6 +4014,8 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
                                              session_id,
                                              &main_turn,
                                              final_result,
+                                             callback,
+                                             callback_data,
                                              error_out);
       strappy_assistant_turn_keys_destroy(&helper_keys);
       strappy_assistant_turn_keys_destroy(&main_keys);
