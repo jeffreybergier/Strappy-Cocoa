@@ -4,9 +4,6 @@
 static const CGFloat kPromptSendHeightCollapsed = 32.0;
 static const CGFloat kPromptSendHeightExpanded = 108.0;
 static const CGFloat kPromptSendPad = 4.0;
-static const CGFloat kPromptOptionsSegmentWidth = 180.0;
-static const CGFloat kPromptSendSegmentWidth = 96.0;
-static const CGFloat kPromptActionSegmentCapSlack = 2.0;
 static const CGFloat kPromptActionButtonHeight = 24.0;
 
 enum {
@@ -80,6 +77,8 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
 @end
 
 @interface PromptSendViewController ()
+- (void)layoutPromptViews;
+- (void)sizeActionSegmentedControlToFit;
 - (void)updateExpansion;
 - (void)updateActionControls;
 - (void)updateSendButtonAppearance;
@@ -175,11 +174,7 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   [actionSegmented_ setSegmentCount:2];
   [[actionSegmented_ cell] setTrackingMode:NSSegmentSwitchTrackingMomentary];
   [actionSegmented_ XP_setToolbarSegmentStyle];
-  [actionSegmented_ setWidth:kPromptOptionsSegmentWidth
-                  forSegment:kPromptActionSegmentOptions];
-  [actionSegmented_ setWidth:kPromptSendSegmentWidth
-                  forSegment:kPromptActionSegmentSend];
-  [actionSegmented_ sizeToFit];
+  [self sizeActionSegmentedControlToFit];
   [actionSegmented_ setMenu:optionsMenu_
                  forSegment:kPromptActionSegmentOptions];
   [actionSegmented_ setTarget:self];
@@ -204,6 +199,12 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
 
 - (void)viewDidLayout
 {
+  [super viewDidLayout];
+  [self layoutPromptViews];
+}
+
+- (void)layoutPromptViews
+{
   NSRect bounds;
   NSSize actionSize;
   CGFloat actionWidth;
@@ -211,20 +212,10 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   CGFloat inputWidth;
   CGFloat actionX;
 
-  [super viewDidLayout];
   bounds = [barView_ bounds];
-  [actionSegmented_ sizeToFit];
   actionSize = [actionSegmented_ frame].size;
   actionWidth = actionSize.width;
   actionHeight = actionSize.height;
-  if (actionWidth <= 0.0) {
-    actionWidth = kPromptOptionsSegmentWidth + kPromptSendSegmentWidth;
-  }
-  if (actionWidth < (kPromptOptionsSegmentWidth + kPromptSendSegmentWidth +
-                     kPromptActionSegmentCapSlack)) {
-    actionWidth = kPromptOptionsSegmentWidth + kPromptSendSegmentWidth +
-      kPromptActionSegmentCapSlack;
-  }
   if (actionHeight <= 0.0) {
     actionHeight = kPromptActionButtonHeight;
   }
@@ -243,6 +234,18 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
                                   inputWidth,
                                   bounds.size.height - (kPromptSendPad * 2.0))];
   [scrollView_ setFrame:[bezelView_ bounds]];
+}
+
+- (void)sizeActionSegmentedControlToFit
+{
+  if (actionSegmented_ == nil) {
+    return;
+  }
+
+  [actionSegmented_ setWidth:0.0 forSegment:kPromptActionSegmentOptions];
+  [actionSegmented_ setWidth:0.0 forSegment:kPromptActionSegmentSend];
+  [actionSegmented_ sizeToFit];
+  [self layoutPromptViews];
 }
 
 - (CGFloat)preferredHeight
@@ -273,6 +276,7 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
     [actionSegmented_ XP_setToolTip:NSLocalizedString(@"Send Prompt", nil)
                          forSegment:kPromptActionSegmentSend];
   }
+  [self sizeActionSegmentedControlToFit];
 }
 
 - (void)updateOptionsSegmentTitle:(NSString *)title
@@ -284,6 +288,7 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   [actionSegmented_ setLabel:(([title length] > 0U) ?
                               title : NSLocalizedString(@"Model", nil))
                   forSegment:kPromptActionSegmentOptions];
+  [self sizeActionSegmentedControlToFit];
 }
 
 - (void)reloadOptionsMenu
