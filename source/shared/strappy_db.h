@@ -229,6 +229,9 @@ int strappy_db_load_session(const char *db_path,
                             long long session_id,
                             strappy_session_record *record,
                             char **error_out);
+int strappy_db_delete_session(const char *db_path,
+                              long long session_id,
+                              char **error_out);
 int strappy_db_append_exchange_to_session(const char *db_path,
                                           long long session_id,
                                           const char *prompt,

@@ -20,12 +20,15 @@ static const CGFloat kStrappyPromptIconSize = 10.0;
 static const CGFloat kStrappyPromptIconGap = 4.0;
 static const AIFontAwesomeIcon kStrappySessionToolbarPlusIcon =
   (AIFontAwesomeIcon)0xF067;
+static const AIFontAwesomeIcon kStrappySessionToolbarMinusIcon =
+  AIFAMinus;
 static const AIFontAwesomeIcon kStrappySessionPromptActiveIcon =
   AIFAArrowsRotate;
 
 enum {
   kStrappySessionToolbarClose = 0,
-  kStrappySessionToolbarNew = 1
+  kStrappySessionToolbarDelete = 1,
+  kStrappySessionToolbarNew = 2
 };
 
 static NSString * const kStrappySessionRowTypeKey = @"row_type";
@@ -385,11 +388,16 @@ static void StrappyDrawTintedImage(NSImage *image,
 @interface SessionListViewController ()
 - (void)rebuildToolbarSegmentIcons;
 - (void)updateToolbarSegments;
+- (NSDictionary *)selectedSessionRow;
 - (void)sessionPromptActivityDidChange:(NSNotification *)notification;
 - (void)toolbarDidMoveToWindow:(id)sender;
 - (void)toolbarSegmentClicked:(id)sender;
-- (void)closeActiveSession:(id)sender;
 - (void)layoutSidebarViews;
+- (void)deleteChatAlertDidEnd:(NSAlert *)alert
+                    returnCode:(NSInteger)returnCode
+                   contextInfo:(void *)contextInfo;
+- (void)deleteSessionIdentifier:(NSNumber *)sessionIdentifier;
+- (void)showDeleteError:(NSError *)error;
 @end
 
 @implementation SessionListViewController
@@ -452,7 +460,7 @@ static void StrappyDrawTintedImage(NSImage *image,
   [[self view] addSubview:toolbarView_];
 
   toolbarSegmented_ = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
-  [toolbarSegmented_ setSegmentCount:2];
+  [toolbarSegmented_ setSegmentCount:3];
   [[toolbarSegmented_ cell] setTrackingMode:NSSegmentSwitchTrackingMomentary];
   [toolbarSegmented_ XP_setToolbarSegmentStyle];
   [toolbarSegmented_ setTarget:self];
@@ -542,6 +550,7 @@ static void StrappyDrawTintedImage(NSImage *image,
 {
   CGFloat scale;
   NSImage *closeImage;
+  NSImage *deleteImage;
   NSImage *newImage;
 
   if (toolbarSegmented_ == nil) {
@@ -566,6 +575,11 @@ static void StrappyDrawTintedImage(NSImage *image,
                                 iconSize:14.0
                               canvasSize:20.0
                                    scale:scale];
+  deleteImage = [AIFontAwesome imageForIcon:kStrappySessionToolbarMinusIcon
+                                      style:AIFontAwesomeStyleSolid
+                                   iconSize:14.0
+                                 canvasSize:20.0
+                                      scale:scale];
 
   if (closeImage != nil) {
     [toolbarSegmented_ setImage:closeImage
@@ -587,8 +601,20 @@ static void StrappyDrawTintedImage(NSImage *image,
                      forSegment:kStrappySessionToolbarNew];
   }
 
+  if (deleteImage != nil) {
+    [toolbarSegmented_ setImage:deleteImage
+                     forSegment:kStrappySessionToolbarDelete];
+    [toolbarSegmented_ setLabel:@""
+                     forSegment:kStrappySessionToolbarDelete];
+  } else {
+    [toolbarSegmented_ setLabel:NSLocalizedString(@"Delete", nil)
+                     forSegment:kStrappySessionToolbarDelete];
+  }
+
   [toolbarSegmented_ XP_setToolTip:NSLocalizedString(@"Close Chat", nil)
                          forSegment:kStrappySessionToolbarClose];
+  [toolbarSegmented_ XP_setToolTip:NSLocalizedString(@"Delete Chat", nil)
+                         forSegment:kStrappySessionToolbarDelete];
   [toolbarSegmented_ XP_setToolTip:NSLocalizedString(@"New Chat", nil)
                          forSegment:kStrappySessionToolbarNew];
   [toolbarSegmented_ sizeToFit];
@@ -602,9 +628,11 @@ static void StrappyDrawTintedImage(NSImage *image,
     return;
   }
 
-  hasOpenSession = ([tableView_ selectedRow] >= 0) ? YES : NO;
+  hasOpenSession = [self canCloseActiveSession];
   [toolbarSegmented_ setEnabled:hasOpenSession
                      forSegment:kStrappySessionToolbarClose];
+  [toolbarSegmented_ setEnabled:[self canDeleteActiveSession]
+                     forSegment:kStrappySessionToolbarDelete];
   [toolbarSegmented_ setEnabled:(creatingSession_ ? NO : YES)
                      forSegment:kStrappySessionToolbarNew];
 }
@@ -837,15 +865,38 @@ static void StrappyDrawTintedImage(NSImage *image,
   selectedSegment = [(NSSegmentedControl *)sender selectedSegment];
   if (selectedSegment == kStrappySessionToolbarClose) {
     [self closeActiveSession:sender];
+  } else if (selectedSegment == kStrappySessionToolbarDelete) {
+    [self deleteActiveSession:sender];
   } else if (selectedSegment == kStrappySessionToolbarNew) {
     [self addSession:sender];
   }
 }
 
+- (NSDictionary *)selectedSessionRow
+{
+  NSInteger row;
+  NSDictionary *rowData;
+  NSString *type;
+
+  row = [tableView_ selectedRow];
+  if ((row < 0) || (row >= (NSInteger)[rows_ count])) {
+    return nil;
+  }
+
+  rowData = [rows_ objectAtIndex:(NSUInteger)row];
+  type = [rowData objectForKey:kStrappySessionRowTypeKey];
+  return [type isEqualToString:kStrappySessionRowTypeSession] ? rowData : nil;
+}
+
+- (BOOL)canCloseActiveSession
+{
+  return ([self selectedSessionRow] != nil) ? YES : NO;
+}
+
 - (void)closeActiveSession:(id)sender
 {
   (void)sender;
-  if ([tableView_ selectedRow] < 0) {
+  if (![self canCloseActiveSession]) {
     return;
   }
 
@@ -856,6 +907,139 @@ static void StrappyDrawTintedImage(NSImage *image,
   suppressSelectionNotification_ = NO;
   [self notifySelectedSession];
   [self updateToolbarSegments];
+}
+
+- (BOOL)canDeleteActiveSession
+{
+  NSDictionary *rowData;
+  NSNumber *sessionIdentifier;
+
+  rowData = [self selectedSessionRow];
+  if (rowData == nil) {
+    return NO;
+  }
+
+  sessionIdentifier = [rowData objectForKey:@"id"];
+  if (![sessionIdentifier isKindOfClass:[NSNumber class]]) {
+    return NO;
+  }
+
+  if (StrappyRowIsPromptInFlight(rowData) ||
+      [StrappySession isPromptInFlightForSessionIdentifier:sessionIdentifier]) {
+    return NO;
+  }
+
+  return YES;
+}
+
+- (void)deleteActiveSession:(id)sender
+{
+  NSDictionary *rowData;
+  NSNumber *sessionIdentifier;
+  NSString *title;
+  NSString *message;
+  NSWindow *window;
+  NSAlert *alert;
+
+  (void)sender;
+  if (![self canDeleteActiveSession]) {
+    NSBeep();
+    return;
+  }
+
+  rowData = [self selectedSessionRow];
+  sessionIdentifier = [rowData objectForKey:@"id"];
+  title = StrappySessionPromptPreview(rowData);
+  message = [NSString stringWithFormat:
+    NSLocalizedString(@"This will permanently delete \"%@\" and all of its messages. This cannot be undone.", nil),
+    title];
+
+  window = [[self view] window];
+  if (window == nil) {
+    NSBeep();
+    return;
+  }
+
+  alert = [[[NSAlert alloc] init] autorelease];
+  [alert setMessageText:NSLocalizedString(@"Delete Chat?", nil)];
+  [alert setInformativeText:message];
+  [alert addButtonWithTitle:NSLocalizedString(@"Delete", nil)];
+  [alert addButtonWithTitle:NSLocalizedString(@"Cancel", nil)];
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101000
+  [alert setAlertStyle:NSAlertStyleWarning];
+#else
+  [alert setAlertStyle:NSWarningAlertStyle];
+#endif
+  [alert XP_beginSheetModalForWindow:window
+                       modalDelegate:self
+                      didEndSelector:@selector(deleteChatAlertDidEnd:returnCode:contextInfo:)
+                         contextInfo:[sessionIdentifier retain]];
+}
+
+- (void)deleteChatAlertDidEnd:(NSAlert *)alert
+                    returnCode:(NSInteger)returnCode
+                   contextInfo:(void *)contextInfo
+{
+  NSNumber *sessionIdentifier;
+
+  (void)alert;
+  sessionIdentifier = (NSNumber *)contextInfo;
+  if (returnCode == NSAlertFirstButtonReturn) {
+    [self deleteSessionIdentifier:sessionIdentifier];
+  }
+  [sessionIdentifier release];
+}
+
+- (void)deleteSessionIdentifier:(NSNumber *)sessionIdentifier
+{
+  NSError *error;
+
+  if (![sessionIdentifier isKindOfClass:[NSNumber class]]) {
+    NSBeep();
+    return;
+  }
+  if ([StrappySession isPromptInFlightForSessionIdentifier:sessionIdentifier]) {
+    NSBeep();
+    return;
+  }
+
+  error = nil;
+  if (![StrappySession deleteSessionWithIdentifier:sessionIdentifier
+                                             error:&error]) {
+    [self showDeleteError:error];
+    return;
+  }
+
+  if ([selectedSessionId_ isEqualToNumber:sessionIdentifier]) {
+    [selectedSessionId_ release];
+    selectedSessionId_ = nil;
+  }
+  [self reloadData];
+}
+
+- (void)showDeleteError:(NSError *)error
+{
+  NSString *message;
+  NSAlert *alert;
+  NSWindow *window;
+
+  message = [error localizedDescription];
+  if ([message length] == 0U) {
+    message = NSLocalizedString(@"The chat could not be deleted.", nil);
+  }
+
+  alert = [[[NSAlert alloc] init] autorelease];
+  [alert setMessageText:NSLocalizedString(@"Could Not Delete Chat", nil)];
+  [alert setInformativeText:message];
+  window = [[self view] window];
+  if (window != nil) {
+    [alert XP_beginSheetModalForWindow:window
+                         modalDelegate:nil
+                        didEndSelector:NULL
+                           contextInfo:NULL];
+  } else {
+    [alert runModal];
+  }
 }
 
 - (void)addSession:(id)sender

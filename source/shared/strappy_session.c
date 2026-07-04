@@ -124,6 +124,13 @@ int strappy_session_load_record(const char *db_path,
   return strappy_db_load_session(db_path, session_id, record, error_out);
 }
 
+int strappy_session_delete(const char *db_path,
+                           long long session_id,
+                           char **error_out)
+{
+  return strappy_db_delete_session(db_path, session_id, error_out);
+}
+
 int strappy_session_list_message_records(
   const char *db_path,
   long long session_id,

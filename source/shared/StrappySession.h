@@ -21,6 +21,8 @@ extern NSString * const StrappySessionModelCatalogDidChangeNotification;
 + (NSString *)sessionsDatabasePath;
 + (BOOL)initializeSessionStoreWithError:(NSError **)error;
 + (StrappySession *)createSessionWithError:(NSError **)error;
++ (BOOL)deleteSessionWithIdentifier:(NSNumber *)sessionIdentifier
+                               error:(NSError **)error;
 + (StrappySession *)sessionWithIdentifier:(NSNumber *)sessionIdentifier;
 + (StrappySession *)sessionWithSummary:(NSDictionary *)summary;
 + (NSUInteger)inFlightSessionCount;

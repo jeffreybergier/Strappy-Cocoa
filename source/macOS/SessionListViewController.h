@@ -30,5 +30,9 @@
 - (void)reloadSessionIdentifier:(NSNumber *)sessionIdentifier select:(BOOL)select;
 - (void)selectSessionIdentifier:(NSNumber *)sessionIdentifier;
 - (void)addSession:(id)sender;
+- (BOOL)canCloseActiveSession;
+- (void)closeActiveSession:(id)sender;
+- (BOOL)canDeleteActiveSession;
+- (void)deleteActiveSession:(id)sender;
 
 @end

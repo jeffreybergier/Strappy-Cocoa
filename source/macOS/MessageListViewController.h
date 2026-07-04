@@ -37,5 +37,11 @@
 - (BOOL)canToggleStreaming;
 - (BOOL)streamingEnabled;
 - (void)toggleStreaming:(id)sender;
+- (BOOL)canPrintCurrentChat;
+- (void)printCurrentChat:(id)sender;
+- (NSArray *)availableModels;
+- (NSString *)selectedModelIdentifier;
+- (BOOL)canSelectModel;
+- (BOOL)setSelectedModelIdentifier:(NSString *)modelIdentifier;
 
 @end

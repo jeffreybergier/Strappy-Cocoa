@@ -1668,6 +1668,59 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
                                                     summary:summary] autorelease];
 }
 
++ (BOOL)deleteSessionWithIdentifier:(NSNumber *)sessionIdentifier
+                               error:(NSError **)error
+{
+  NSString *databasePath;
+  char *strappyError;
+  long long sessionId;
+
+  sessionId = [sessionIdentifier isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier longLongValue] : 0LL;
+  if (sessionId <= 0) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  if ([StrappySession isPromptInFlightForSessionIdentifier:sessionIdentifier]) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Prompt request is already running.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:8
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+
+  strappyError = NULL;
+  if (!strappy_session_delete([databasePath UTF8String],
+                              sessionId,
+                              &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return NO;
+  }
+
+  return YES;
+}
+
 + (NSArray *)sessionSummariesWithError:(NSError **)error
 {
   NSString *databasePath;

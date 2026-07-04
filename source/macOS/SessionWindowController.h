@@ -12,6 +12,10 @@
 
 - (id)init;
 - (void)newSession:(id)sender;
+- (BOOL)canCloseCurrentChat;
+- (void)closeCurrentChat:(id)sender;
+- (BOOL)canDeleteCurrentChat;
+- (void)deleteCurrentChat:(id)sender;
 - (BOOL)canSendCurrentPrompt;
 - (void)sendCurrentPrompt:(id)sender;
 - (BOOL)canCancelCurrentPrompt;
@@ -19,5 +23,9 @@
 - (BOOL)canToggleStreaming;
 - (BOOL)streamingEnabled;
 - (void)toggleStreaming:(id)sender;
+- (void)populateModelMenu:(NSMenu *)menu;
+- (void)selectCurrentModel:(id)sender;
+- (BOOL)canPrintCurrentChat;
+- (void)printCurrentChat:(id)sender;
 
 @end

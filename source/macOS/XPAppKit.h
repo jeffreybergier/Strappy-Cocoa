@@ -9,12 +9,14 @@
   #define XPTableViewDelegate   NSTableViewDelegate
   #define XPTextViewDelegate    NSTextViewDelegate
   #define XPToolbarDelegate     NSToolbarDelegate
+  #define XPMenuDelegate        NSMenuDelegate
 #else
   @protocol XPApplicationDelegate @end
   @protocol XPTableViewDataSource @end
   @protocol XPTableViewDelegate   @end
   @protocol XPTextViewDelegate    @end
   @protocol XPToolbarDelegate     @end
+  @protocol XPMenuDelegate        @end
 #endif
 
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101200
@@ -24,6 +26,8 @@
   #define XPWindowStyleMaskResizable      NSWindowStyleMaskResizable
   #define XPEventModifierFlagCommand      NSEventModifierFlagCommand
   #define XPEventModifierFlagOption       NSEventModifierFlagOption
+  #define XPEventModifierFlagShift        NSEventModifierFlagShift
+  #define XPEventModifierFlagControl      NSEventModifierFlagControl
 #else
   #define XPWindowStyleMaskTitled         NSTitledWindowMask
   #define XPWindowStyleMaskClosable       NSClosableWindowMask
@@ -31,6 +35,8 @@
   #define XPWindowStyleMaskResizable      NSResizableWindowMask
   #define XPEventModifierFlagCommand      NSCommandKeyMask
   #define XPEventModifierFlagOption       NSAlternateKeyMask
+  #define XPEventModifierFlagShift        NSShiftKeyMask
+  #define XPEventModifierFlagControl      NSControlKeyMask
 #endif
 
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101200
@@ -138,6 +144,8 @@
 
 @interface NSView (XPAppKit)
 - (void)XP_pinToWindowAppearance;
+- (BOOL)XP_canPrintWebContent;
+- (BOOL)XP_printWebContent:(id)sender;
 @end
 
 @interface NSSegmentedControl (XPAppKit)

@@ -1,5 +1,6 @@
 #import "MessageListViewController.h"
 #import "StrappySession.h"
+#import "XPAppKit.h"
 
 static const NSUInteger kStrappyInitialMessageLimit = 80U;
 static const NSUInteger kStrappyMessagePageSize = 40U;
@@ -324,6 +325,29 @@ static BOOL StrappyEnsureDirectory(NSString *path)
                    setStreamingEnabled:![self streamingEnabled]];
 }
 
+- (BOOL)canPrintCurrentChat
+{
+  NSView *webView;
+
+  webView = (NSView *)[self webView];
+  return ((session_ != nil) &&
+          (webView != nil) &&
+          [webView XP_canPrintWebContent]) ? YES : NO;
+}
+
+- (void)printCurrentChat:(id)sender
+{
+  NSView *webView;
+
+  webView = (NSView *)[self webView];
+  if ((session_ == nil) ||
+      (webView == nil) ||
+      ![webView XP_printWebContent:sender]) {
+    NSBeep();
+    return;
+  }
+}
+
 - (BOOL)validateMenuItem:(NSMenuItem *)item
 {
   SEL action;
@@ -341,28 +365,58 @@ static BOOL StrappyEnsureDirectory(NSString *path)
   return YES;
 }
 
-- (NSArray *)allowedModelsForPromptSendViewController:
-    (PromptSendViewController *)controller
+- (NSArray *)availableModels
 {
   NSArray *models;
 
-  (void)controller;
   models = [StrappySession allowedOpenRouterModelCatalogWithError:nil];
   return (models != nil) ? models : [NSArray array];
 }
 
-- (NSString *)selectedModelIdentifierForPromptSendViewController:
+- (NSArray *)allowedModelsForPromptSendViewController:
     (PromptSendViewController *)controller
+{
+  (void)controller;
+  return [self availableModels];
+}
+
+- (NSString *)selectedModelIdentifier
 {
   NSString *modelIdentifier;
 
-  (void)controller;
   if (session_ == nil) {
     return @"";
   }
 
   modelIdentifier = [session_ selectedOpenRouterModelIdentifierWithError:nil];
   return (modelIdentifier != nil) ? modelIdentifier : @"";
+}
+
+- (NSString *)selectedModelIdentifierForPromptSendViewController:
+    (PromptSendViewController *)controller
+{
+  (void)controller;
+  return [self selectedModelIdentifier];
+}
+
+- (BOOL)canSelectModel
+{
+  if ((session_ == nil) || sending_ || [self sessionPromptIsInFlight]) {
+    return NO;
+  }
+  return YES;
+}
+
+- (BOOL)setSelectedModelIdentifier:(NSString *)modelIdentifier
+{
+  BOOL changed;
+
+  changed = [self promptSendViewController:sendController_
+                setSelectedModelIdentifier:modelIdentifier];
+  if (changed) {
+    [sendController_ reloadOptionsMenu];
+  }
+  return changed;
 }
 
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller

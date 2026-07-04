@@ -4042,6 +4042,136 @@ int strappy_db_create_session(const char *db_path,
   return 1;
 }
 
+static int strappy_db_delete_session_rows(sqlite3 *db,
+                                          const char *sql,
+                                          long long session_id,
+                                          const char *prepare_error,
+                                          const char *bind_error,
+                                          const char *step_error,
+                                          char **error_out)
+{
+  sqlite3_stmt *stmt;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "%s: %s",
+                                prepare_error,
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "%s: %s",
+                                bind_error,
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "%s: %s",
+                                step_error,
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+int strappy_db_delete_session(const char *db_path,
+                              long long session_id,
+                              char **error_out)
+{
+  sqlite3 *db;
+
+  if (session_id <= 0) {
+    strappy_set_error(error_out, "Session id is not valid.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_session_exists(db, session_id, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin session delete",
+                       error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_delete_session_rows(
+        db,
+        "DELETE FROM session_messages WHERE session_id = ?;",
+        session_id,
+        "Could not prepare session message delete",
+        "Could not bind session message delete",
+        "Could not delete session messages",
+        error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session delete", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_delete_session_rows(
+        db,
+        "DELETE FROM session_turns WHERE session_id = ?;",
+        session_id,
+        "Could not prepare session turn delete",
+        "Could not bind session turn delete",
+        "Could not delete session turns",
+        error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session delete", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_delete_session_rows(
+        db,
+        "DELETE FROM sessions WHERE id = ?;",
+        session_id,
+        "Could not prepare session delete",
+        "Could not bind session delete",
+        "Could not delete session",
+        error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session delete", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       "COMMIT;",
+                       "Could not commit session delete",
+                       error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session delete", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  sqlite3_close(db);
+  return 1;
+}
+
 int strappy_db_update_session_name_if_empty(const char *db_path,
                                             long long session_id,
                                             const char *name,

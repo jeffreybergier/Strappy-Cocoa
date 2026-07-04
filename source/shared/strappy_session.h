@@ -54,6 +54,9 @@ int strappy_session_load_record(const char *db_path,
                                 long long session_id,
                                 strappy_session_record *record,
                                 char **error_out);
+int strappy_session_delete(const char *db_path,
+                           long long session_id,
+                           char **error_out);
 int strappy_session_list_message_records(
   const char *db_path,
   long long session_id,

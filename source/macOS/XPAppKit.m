@@ -109,6 +109,75 @@ static CGColorRef XPAppKitInvokeCGColorGetter(id target, SEL selector)
   return result;
 }
 
+static id XPAppKitInvokeObjectGetter(id target, SEL selector)
+{
+  NSInvocation *invocation;
+  id result;
+
+  invocation = XPAppKitInvocation(target, selector);
+  if (invocation == nil) {
+    return nil;
+  }
+
+  result = nil;
+  [invocation invoke];
+  [invocation getReturnValue:&result];
+
+  return result;
+}
+
+static id XPAppKitInvokeObjectObject(id target, SEL selector, id objectValue)
+{
+  NSInvocation *invocation;
+  id result;
+
+  invocation = XPAppKitInvocation(target, selector);
+  if (invocation == nil) {
+    return nil;
+  }
+
+  result = nil;
+  [invocation setArgument:&objectValue atIndex:2];
+  [invocation invoke];
+  [invocation getReturnValue:&result];
+
+  return result;
+}
+
+static NSPrintOperation *XPAppKitPrintOperationForTarget(id target)
+{
+  NSPrintInfo *printInfo;
+  NSPrintOperation *operation;
+
+  if ((target == nil) ||
+      ![target respondsToSelector:@selector(printOperationWithPrintInfo:)]) {
+    return nil;
+  }
+
+  printInfo = [[[NSPrintInfo sharedPrintInfo] copy] autorelease];
+  operation = XPAppKitInvokeObjectObject(target,
+                                         @selector(printOperationWithPrintInfo:),
+                                         printInfo);
+  return operation;
+}
+
+static id XPAppKitLegacyWebFrameViewForView(NSView *view)
+{
+  id mainFrame;
+
+  if ((view == nil) || ![view respondsToSelector:@selector(mainFrame)]) {
+    return nil;
+  }
+
+  mainFrame = XPAppKitInvokeObjectGetter(view, @selector(mainFrame));
+  if ((mainFrame == nil) ||
+      ![mainFrame respondsToSelector:@selector(frameView)]) {
+    return nil;
+  }
+
+  return XPAppKitInvokeObjectGetter(mainFrame, @selector(frameView));
+}
+
 @implementation NSWindow (XPAppKit)
 
 - (void)XP_setTitle:(NSString *)title
@@ -343,6 +412,49 @@ static CGColorRef XPAppKitInvokeCGColorGetter(id target, SEL selector)
     return;
   }
   [self performSelector:@selector(setAppearance:) withObject:appearance];
+}
+
+- (BOOL)XP_canPrintWebContent
+{
+  id frameView;
+
+  if ([self respondsToSelector:@selector(printOperationWithPrintInfo:)]) {
+    return YES;
+  }
+
+  frameView = XPAppKitLegacyWebFrameViewForView(self);
+  if ((frameView != nil) &&
+      [frameView respondsToSelector:@selector(printOperationWithPrintInfo:)]) {
+    return YES;
+  }
+
+  return [self respondsToSelector:@selector(print:)] ? YES : NO;
+}
+
+- (BOOL)XP_printWebContent:(id)sender
+{
+  NSPrintOperation *operation;
+  id frameView;
+
+  operation = XPAppKitPrintOperationForTarget(self);
+  if (operation != nil) {
+    [operation runOperation];
+    return YES;
+  }
+
+  frameView = XPAppKitLegacyWebFrameViewForView(self);
+  operation = XPAppKitPrintOperationForTarget(frameView);
+  if (operation != nil) {
+    [operation runOperation];
+    return YES;
+  }
+
+  if ([self respondsToSelector:@selector(print:)]) {
+    [self print:sender];
+    return YES;
+  }
+
+  return NO;
 }
 
 @end

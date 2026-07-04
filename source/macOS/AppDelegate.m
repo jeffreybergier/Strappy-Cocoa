@@ -7,6 +7,7 @@
 @interface AppDelegate (Private)
 - (void)setupMenu;
 - (void)showMainWindow;
+- (void)populateModelMenu:(NSMenu *)menu;
 - (void)strappySessionPromptDidStart:(NSNotification *)notification;
 - (void)strappySessionPromptDidFinish:(NSNotification *)notification;
 - (void)releaseFinishedPromptSession:(StrappySession *)session;
@@ -45,9 +46,20 @@
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender
 {
   (void)sender;
-  if ([StrappySession hasInFlightSessions] || ([_inFlightSessions count] > 0U)) {
-    _terminateWhenInFlightSessionsFinish = YES;
-    return NO;
+  _terminateWhenInFlightSessionsFinish = NO;
+  return NO;
+}
+
+- (BOOL)applicationShouldHandleReopen:(NSApplication *)sender
+                    hasVisibleWindows:(BOOL)flag
+{
+  NSWindow *mainWindow;
+
+  (void)sender;
+  (void)flag;
+  mainWindow = (_windowController != nil) ? [_windowController window] : nil;
+  if ((mainWindow == nil) || ![mainWindow isVisible]) {
+    [self showMainWindow];
   }
   return YES;
 }
@@ -86,12 +98,27 @@
   [appMenu addItemWithTitle:NSLocalizedString(@"About Strappy", nil)
                      action:@selector(showAboutWindow:)
               keyEquivalent:@""];
+  [appMenu addItem:[NSMenuItem separatorItem]];
   {
     NSMenuItem *preferences =
       [appMenu addItemWithTitle:NSLocalizedString(@"Preferences...", nil)
                          action:@selector(showPreferencesWindow:)
                   keyEquivalent:@","];
     [preferences setTarget:self];
+  }
+  [appMenu addItem:[NSMenuItem separatorItem]];
+  {
+    NSMenuItem *servicesItem =
+      [appMenu addItemWithTitle:NSLocalizedString(@"Services", nil)
+                         action:NULL
+                  keyEquivalent:@""];
+    NSMenu *servicesMenu = [[[NSMenu alloc]
+        initWithTitle:NSLocalizedString(@"Services", nil)] autorelease];
+    [appMenu setSubmenu:servicesMenu forItem:servicesItem];
+    if ([NSApp respondsToSelector:@selector(setServicesMenu:)]) {
+      [NSApp performSelector:@selector(setServicesMenu:)
+                   withObject:servicesMenu];
+    }
   }
   [appMenu addItem:[NSMenuItem separatorItem]];
   [appMenu addItemWithTitle:NSLocalizedString(@"Hide Strappy", nil)
@@ -122,11 +149,30 @@
   [mainMenu setSubmenu:chatMenu forItem:chatMenuItem];
   {
     NSMenuItem *newSession =
-      [chatMenu addItemWithTitle:NSLocalizedString(@"New Session", nil)
+      [chatMenu addItemWithTitle:NSLocalizedString(@"New Chat", nil)
                            action:@selector(newSession:)
                     keyEquivalent:@"n"];
     [newSession setTarget:nil];
   }
+  {
+    NSMenuItem *closeChat =
+      [chatMenu addItemWithTitle:NSLocalizedString(@"Close Chat", nil)
+                          action:@selector(closeCurrentChat:)
+                   keyEquivalent:@"w"];
+    [closeChat setKeyEquivalentModifierMask:(XPEventModifierFlagCommand |
+                                             XPEventModifierFlagOption)];
+    [closeChat setTarget:nil];
+  }
+  {
+    NSMenuItem *deleteChat =
+      [chatMenu addItemWithTitle:NSLocalizedString(@"Delete Chat...", nil)
+                          action:@selector(deleteCurrentChat:)
+                   keyEquivalent:[NSString stringWithFormat:@"%C",
+                    (unichar)NSDeleteCharacter]];
+    [deleteChat setKeyEquivalentModifierMask:XPEventModifierFlagCommand];
+    [deleteChat setTarget:nil];
+  }
+  [chatMenu addItem:[NSMenuItem separatorItem]];
   {
     NSMenuItem *sendPrompt =
       [chatMenu addItemWithTitle:NSLocalizedString(@"Send Prompt", nil)
@@ -145,11 +191,41 @@
   }
   [chatMenu addItem:[NSMenuItem separatorItem]];
   {
+    NSMenuItem *modelItem =
+      [chatMenu addItemWithTitle:NSLocalizedString(@"Model", nil)
+                          action:NULL
+                   keyEquivalent:@""];
+    NSMenu *modelMenu = [[[NSMenu alloc]
+        initWithTitle:NSLocalizedString(@"Model", nil)] autorelease];
+    [chatMenu setSubmenu:modelMenu forItem:modelItem];
+    [modelMenu setDelegate:self];
+    [_modelMenu release];
+    _modelMenu = [modelMenu retain];
+    [self populateModelMenu:modelMenu];
+  }
+  {
     NSMenuItem *streaming =
       [chatMenu addItemWithTitle:NSLocalizedString(@"Streaming", nil)
                           action:@selector(toggleStreaming:)
                    keyEquivalent:@""];
     [streaming setTarget:nil];
+  }
+  [chatMenu addItem:[NSMenuItem separatorItem]];
+  {
+    NSMenuItem *pageSetup =
+      [chatMenu addItemWithTitle:NSLocalizedString(@"Page Setup...", nil)
+                          action:@selector(runPageLayout:)
+                   keyEquivalent:@"p"];
+    [pageSetup setKeyEquivalentModifierMask:(XPEventModifierFlagCommand |
+                                             XPEventModifierFlagShift)];
+    [pageSetup setTarget:nil];
+  }
+  {
+    NSMenuItem *print =
+      [chatMenu addItemWithTitle:NSLocalizedString(@"Print...", nil)
+                          action:@selector(printCurrentChat:)
+                   keyEquivalent:@"p"];
+    [print setTarget:nil];
   }
 
   NSMenuItem *editMenuItem = [mainMenu addItemWithTitle:NSLocalizedString(@"Edit", nil)
@@ -174,9 +250,152 @@
   [editMenu addItemWithTitle:NSLocalizedString(@"Paste", nil)
                       action:@selector(paste:)
                keyEquivalent:@"v"];
+  {
+    NSMenuItem *pasteAndMatchStyle =
+      [editMenu addItemWithTitle:NSLocalizedString(@"Paste and Match Style", nil)
+                          action:@selector(pasteAsPlainText:)
+                   keyEquivalent:@"v"];
+    [pasteAndMatchStyle
+      setKeyEquivalentModifierMask:(XPEventModifierFlagCommand |
+                                    XPEventModifierFlagOption |
+                                    XPEventModifierFlagShift)];
+  }
+  [editMenu addItemWithTitle:NSLocalizedString(@"Delete", nil)
+                      action:@selector(delete:)
+               keyEquivalent:@""];
   [editMenu addItemWithTitle:NSLocalizedString(@"Select All", nil)
                       action:@selector(selectAll:)
                keyEquivalent:@"a"];
+  [editMenu addItem:[NSMenuItem separatorItem]];
+  {
+    NSMenuItem *findMenuItem =
+      [editMenu addItemWithTitle:NSLocalizedString(@"Find", nil)
+                          action:NULL
+                   keyEquivalent:@""];
+    NSMenu *findMenu = [[[NSMenu alloc]
+        initWithTitle:NSLocalizedString(@"Find", nil)] autorelease];
+    NSMenuItem *item;
+
+    item = [findMenu addItemWithTitle:NSLocalizedString(@"Find...", nil)
+                               action:@selector(performFindPanelAction:)
+                        keyEquivalent:@"f"];
+    [item setTag:1];
+    item = [findMenu addItemWithTitle:NSLocalizedString(@"Find Next", nil)
+                               action:@selector(performFindPanelAction:)
+                        keyEquivalent:@"g"];
+    [item setTag:2];
+    item = [findMenu addItemWithTitle:NSLocalizedString(@"Find Previous", nil)
+                               action:@selector(performFindPanelAction:)
+                        keyEquivalent:@"G"];
+    [item setTag:3];
+    item = [findMenu addItemWithTitle:NSLocalizedString(@"Use Selection for Find", nil)
+                               action:@selector(useSelectionForFind:)
+                        keyEquivalent:@"e"];
+    [item setTag:4];
+    [findMenu addItemWithTitle:NSLocalizedString(@"Jump to Selection", nil)
+                        action:@selector(jumpToSelection:)
+                 keyEquivalent:@"j"];
+    [editMenu setSubmenu:findMenu forItem:findMenuItem];
+  }
+  {
+    NSMenuItem *spellingMenuItem =
+      [editMenu addItemWithTitle:NSLocalizedString(@"Spelling and Grammar", nil)
+                          action:NULL
+                   keyEquivalent:@""];
+    NSMenu *spellingMenu = [[[NSMenu alloc]
+        initWithTitle:NSLocalizedString(@"Spelling and Grammar", nil)] autorelease];
+    [spellingMenu addItemWithTitle:NSLocalizedString(@"Show Spelling and Grammar", nil)
+                            action:@selector(showGuessPanel:)
+                     keyEquivalent:@":"];
+    [spellingMenu addItemWithTitle:NSLocalizedString(@"Check Document Now", nil)
+                            action:@selector(checkSpelling:)
+                     keyEquivalent:@";"];
+    [spellingMenu addItem:[NSMenuItem separatorItem]];
+    [spellingMenu addItemWithTitle:NSLocalizedString(@"Check Spelling While Typing", nil)
+                            action:@selector(toggleContinuousSpellChecking:)
+                     keyEquivalent:@""];
+    [spellingMenu addItemWithTitle:NSLocalizedString(@"Check Grammar With Spelling", nil)
+                            action:@selector(toggleGrammarChecking:)
+                     keyEquivalent:@""];
+    [spellingMenu addItemWithTitle:NSLocalizedString(@"Correct Spelling Automatically", nil)
+                            action:@selector(toggleAutomaticSpellingCorrection:)
+                     keyEquivalent:@""];
+    [editMenu setSubmenu:spellingMenu forItem:spellingMenuItem];
+  }
+  {
+    NSMenuItem *substitutionsMenuItem =
+      [editMenu addItemWithTitle:NSLocalizedString(@"Substitutions", nil)
+                          action:NULL
+                   keyEquivalent:@""];
+    NSMenu *substitutionsMenu = [[[NSMenu alloc]
+        initWithTitle:NSLocalizedString(@"Substitutions", nil)] autorelease];
+    [substitutionsMenu addItemWithTitle:NSLocalizedString(@"Show Substitutions", nil)
+                                 action:@selector(orderFrontSubstitutionsPanel:)
+                          keyEquivalent:@""];
+    [substitutionsMenu addItem:[NSMenuItem separatorItem]];
+    [substitutionsMenu addItemWithTitle:NSLocalizedString(@"Smart Copy/Paste", nil)
+                                 action:@selector(toggleSmartInsertDelete:)
+                          keyEquivalent:@""];
+    [substitutionsMenu addItemWithTitle:NSLocalizedString(@"Smart Quotes", nil)
+                                 action:@selector(toggleAutomaticQuoteSubstitution:)
+                          keyEquivalent:@""];
+    [substitutionsMenu addItemWithTitle:NSLocalizedString(@"Smart Dashes", nil)
+                                 action:@selector(toggleAutomaticDashSubstitution:)
+                          keyEquivalent:@""];
+    [substitutionsMenu addItemWithTitle:NSLocalizedString(@"Smart Links", nil)
+                                 action:@selector(toggleAutomaticLinkDetection:)
+                          keyEquivalent:@""];
+    [substitutionsMenu addItemWithTitle:NSLocalizedString(@"Data Detectors", nil)
+                                 action:@selector(toggleAutomaticDataDetection:)
+                          keyEquivalent:@""];
+    [substitutionsMenu addItemWithTitle:NSLocalizedString(@"Text Replacement", nil)
+                                 action:@selector(toggleAutomaticTextReplacement:)
+                          keyEquivalent:@""];
+    [editMenu setSubmenu:substitutionsMenu forItem:substitutionsMenuItem];
+  }
+  {
+    NSMenuItem *transformationsMenuItem =
+      [editMenu addItemWithTitle:NSLocalizedString(@"Transformations", nil)
+                          action:NULL
+                   keyEquivalent:@""];
+    NSMenu *transformationsMenu = [[[NSMenu alloc]
+        initWithTitle:NSLocalizedString(@"Transformations", nil)] autorelease];
+    [transformationsMenu addItemWithTitle:NSLocalizedString(@"Make Upper Case", nil)
+                                   action:@selector(uppercaseWord:)
+                            keyEquivalent:@""];
+    [transformationsMenu addItemWithTitle:NSLocalizedString(@"Make Lower Case", nil)
+                                   action:@selector(lowercaseWord:)
+                            keyEquivalent:@""];
+    [transformationsMenu addItemWithTitle:NSLocalizedString(@"Capitalize", nil)
+                                   action:@selector(capitalizeWord:)
+                            keyEquivalent:@""];
+    [editMenu setSubmenu:transformationsMenu forItem:transformationsMenuItem];
+  }
+  {
+    NSMenuItem *speechMenuItem =
+      [editMenu addItemWithTitle:NSLocalizedString(@"Speech", nil)
+                          action:NULL
+                   keyEquivalent:@""];
+    NSMenu *speechMenu = [[[NSMenu alloc]
+        initWithTitle:NSLocalizedString(@"Speech", nil)] autorelease];
+    [speechMenu addItemWithTitle:NSLocalizedString(@"Start Speaking", nil)
+                          action:@selector(startSpeaking:)
+                   keyEquivalent:@""];
+    [speechMenu addItemWithTitle:NSLocalizedString(@"Stop Speaking", nil)
+                          action:@selector(stopSpeaking:)
+                   keyEquivalent:@""];
+    [editMenu setSubmenu:speechMenu forItem:speechMenuItem];
+  }
+  [editMenu addItem:[NSMenuItem separatorItem]];
+  {
+    NSMenuItem *emoji =
+      [editMenu addItemWithTitle:NSLocalizedString(@"Emoji & Symbols", nil)
+                          action:@selector(orderFrontCharacterPalette:)
+                   keyEquivalent:@" "];
+    [emoji setKeyEquivalentModifierMask:(XPEventModifierFlagCommand |
+                                         XPEventModifierFlagControl)];
+    [emoji setTarget:NSApp];
+  }
 
   NSMenuItem *viewMenuItem = [mainMenu addItemWithTitle:NSLocalizedString(@"View", nil)
                                                  action:NULL
@@ -186,12 +405,22 @@
   [mainMenu setSubmenu:viewMenu forItem:viewMenuItem];
   {
     NSMenuItem *toggleSidebar =
-      [viewMenu addItemWithTitle:NSLocalizedString(@"Toggle Sidebar", nil)
+      [viewMenu addItemWithTitle:NSLocalizedString(@"Hide Sidebar", nil)
                           action:@selector(toggleSidebar:)
                    keyEquivalent:@"s"];
     [toggleSidebar setKeyEquivalentModifierMask:(XPEventModifierFlagCommand |
                                                  XPEventModifierFlagOption)];
     [toggleSidebar setTarget:nil];
+  }
+  [viewMenu addItem:[NSMenuItem separatorItem]];
+  {
+    NSMenuItem *fullScreen =
+      [viewMenu addItemWithTitle:NSLocalizedString(@"Enter Full Screen", nil)
+                          action:@selector(toggleFullScreen:)
+                   keyEquivalent:@"f"];
+    [fullScreen setKeyEquivalentModifierMask:(XPEventModifierFlagCommand |
+                                              XPEventModifierFlagControl)];
+    [fullScreen setTarget:nil];
   }
 
   NSMenuItem *windowMenuItem = [mainMenu addItemWithTitle:NSLocalizedString(@"Window", nil)
@@ -201,6 +430,17 @@
       initWithTitle:NSLocalizedString(@"Window", nil)] autorelease];
   [mainMenu setSubmenu:windowMenu forItem:windowMenuItem];
   [NSApp setWindowsMenu:windowMenu];
+  [windowMenu addItemWithTitle:NSLocalizedString(@"Close Window", nil)
+                        action:@selector(performClose:)
+                 keyEquivalent:@"w"];
+  {
+    NSMenuItem *showMainWindow =
+      [windowMenu addItemWithTitle:NSLocalizedString(@"Show Chat Window", nil)
+                            action:@selector(showMainWindow:)
+                     keyEquivalent:@""];
+    [showMainWindow setTarget:self];
+  }
+  [windowMenu addItem:[NSMenuItem separatorItem]];
   [windowMenu addItemWithTitle:NSLocalizedString(@"Minimize", nil)
                         action:@selector(performMiniaturize:)
                  keyEquivalent:@"m"];
@@ -212,7 +452,52 @@
                         action:@selector(arrangeInFront:)
                  keyEquivalent:@""];
 
+  NSMenuItem *helpMenuItem = [mainMenu addItemWithTitle:NSLocalizedString(@"Help", nil)
+                                                 action:NULL
+                                          keyEquivalent:@""];
+  NSMenu *helpMenu = [[[NSMenu alloc]
+      initWithTitle:NSLocalizedString(@"Help", nil)] autorelease];
+  [mainMenu setSubmenu:helpMenu forItem:helpMenuItem];
+  [helpMenu addItemWithTitle:NSLocalizedString(@"Strappy Help", nil)
+                      action:@selector(showHelp:)
+               keyEquivalent:@"?"];
+  if ([NSApp respondsToSelector:@selector(setHelpMenu:)]) {
+    [NSApp performSelector:@selector(setHelpMenu:)
+                withObject:helpMenu];
+  }
+
   [NSApp setMainMenu:mainMenu];
+}
+
+- (void)populateModelMenu:(NSMenu *)menu
+{
+  if (menu == nil) {
+    return;
+  }
+
+  if (_windowController != nil) {
+    [_windowController populateModelMenu:menu];
+    return;
+  }
+
+  while ([menu numberOfItems] > 0) {
+    [menu removeItemAtIndex:0];
+  }
+  {
+    NSMenuItem *item;
+
+    item = [menu addItemWithTitle:NSLocalizedString(@"Model", nil)
+                           action:nil
+                    keyEquivalent:@""];
+    [item setEnabled:NO];
+  }
+}
+
+- (void)menuNeedsUpdate:(NSMenu *)menu
+{
+  if (menu == _modelMenu) {
+    [self populateModelMenu:menu];
+  }
 }
 
 - (void)showMainWindow
@@ -220,11 +505,19 @@
   _terminateWhenInFlightSessionsFinish = NO;
   if (_windowController != nil) {
     [_windowController showWindow:self];
+    [[_windowController window] makeKeyAndOrderFront:self];
     return;
   }
 
   _windowController = [[SessionWindowController alloc] init];
   [_windowController showWindow:self];
+  [[_windowController window] makeKeyAndOrderFront:self];
+}
+
+- (void)showMainWindow:(id)sender
+{
+  (void)sender;
+  [self showMainWindow];
 }
 
 - (void)strappySessionPromptDidFinish:(NSNotification *)notification
@@ -294,6 +587,8 @@
 - (void)dealloc
 {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [_modelMenu setDelegate:nil];
+  [_modelMenu release];
   [_windowController release];
   [_preferencesWindowController release];
   [_inFlightSessions release];
