@@ -1,8 +1,7 @@
 #import "StrappyPreferencesAuthenticationView.h"
 
+#import "StrappyKeychain.h"
 #import "XPAppKit.h"
-#import "strappy_config.h"
-#import "strappy_keychain.h"
 
 static const CGFloat kStrappyPreferencesInset = 12.0;
 
@@ -73,7 +72,7 @@ static NSTextField *StrappyPreferencesLabelWithFrame(NSRect frame,
 
   apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
   if ([apiEndpoint length] == 0U) {
-    apiEndpoint = [NSString stringWithUTF8String:STRAPPY_CONFIG_DEFAULT_API_ENDPOINT];
+    apiEndpoint = [StrappyKeychain defaultAPIEndpoint];
   }
   apiEndpointField_ =
     [[NSTextField alloc] initWithFrame:NSMakeRect(fieldX,

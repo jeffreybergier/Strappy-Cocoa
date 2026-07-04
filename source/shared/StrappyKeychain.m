@@ -1,8 +1,7 @@
-#import "strappy_keychain.h"
+#import "StrappyKeychain.h"
 
-#import "XPFoundation.h"
+#import "XPKeychain.h"
 #include "strappy_config.h"
-#include "strappy_core.h"
 
 #include <stdlib.h>
 
@@ -34,6 +33,11 @@ static NSString *StrappyEnvironmentValueOrNil(NSString *name)
     instance = [[StrappyKeychain alloc] init];
   }
   return instance;
+}
+
++ (NSString *)defaultAPIEndpoint
+{
+  return [NSString stringWithUTF8String:STRAPPY_CONFIG_DEFAULT_API_ENDPOINT];
 }
 
 - (void)loadIfNeeded
@@ -124,57 +128,3 @@ static NSString *StrappyEnvironmentValueOrNil(NSString *name)
 }
 
 @end
-
-char *strappy_keychain_copy_api_endpoint(void)
-{
-  NSAutoreleasePool *pool;
-  NSString *apiEndpoint;
-  char *copy;
-
-  pool = [[NSAutoreleasePool alloc] init];
-  apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
-  copy = NULL;
-  if ([apiEndpoint length] > 0U) {
-    copy = strappy_string_duplicate([apiEndpoint UTF8String]);
-  }
-  [pool release];
-  return copy;
-}
-
-char *strappy_keychain_copy_api_token(void)
-{
-  NSAutoreleasePool *pool;
-  NSString *apiToken;
-  char *copy;
-
-  pool = [[NSAutoreleasePool alloc] init];
-  apiToken = [[StrappyKeychain sharedKeychain] apiToken];
-  copy = NULL;
-  if ([apiToken length] > 0U) {
-    copy = strappy_string_duplicate([apiToken UTF8String]);
-  }
-  [pool release];
-  return copy;
-}
-
-int strappy_keychain_save_api_credentials(const char *api_endpoint,
-                                          const char *api_token)
-{
-  NSAutoreleasePool *pool;
-  NSString *apiEndpoint;
-  NSString *apiToken;
-  int ok;
-
-  if ((api_endpoint == NULL) || (api_endpoint[0] == '\0') ||
-      (api_token == NULL) || (api_token[0] == '\0')) {
-    return 0;
-  }
-
-  pool = [[NSAutoreleasePool alloc] init];
-  apiEndpoint = [NSString stringWithUTF8String:api_endpoint];
-  apiToken = [NSString stringWithUTF8String:api_token];
-  ok = [[StrappyKeychain sharedKeychain] saveAPIEndpoint:apiEndpoint
-                                                   token:apiToken] ? 1 : 0;
-  [pool release];
-  return ok;
-}

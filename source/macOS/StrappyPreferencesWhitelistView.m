@@ -116,60 +116,93 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
   return nil;
 }
 
-typedef struct {
-  StrappyPreferencesWhitelistView *view;
-  NSArray *sortDescriptors;
-  NSString *stableSortKey;
-} StrappyWhitelistSortContext;
+@interface StrappyWhitelistSortableRow : NSObject {
+ @private
+  id                              row_;
+  StrappyPreferencesWhitelistView *view_;
+  NSArray                         *sortDescriptors_;
+  NSString                        *stableSortKey_;
+}
+- (id)initWithRow:(id)row
+             view:(StrappyPreferencesWhitelistView *)view
+  sortDescriptors:(NSArray *)sortDescriptors
+    stableSortKey:(NSString *)stableSortKey;
+- (id)row;
+- (NSComparisonResult)compare:(StrappyWhitelistSortableRow *)other;
+@end
 
-static NSComparisonResult StrappyWhitelistCompareRows(id leftObject,
-                                                      id rightObject,
-                                                      void *context)
+@implementation StrappyWhitelistSortableRow
+
+- (id)initWithRow:(id)row
+             view:(StrappyPreferencesWhitelistView *)view
+  sortDescriptors:(NSArray *)sortDescriptors
+    stableSortKey:(NSString *)stableSortKey
 {
-  StrappyWhitelistSortContext *sortContext;
-  StrappyPreferencesWhitelistView *view;
-  NSArray *sortDescriptors;
-  NSString *stableSortKey;
+  if ((self = [super init])) {
+    row_ = [row retain];
+    view_ = view;
+    sortDescriptors_ = [sortDescriptors copy];
+    stableSortKey_ = [stableSortKey copy];
+  }
+  return self;
+}
+
+- (void)dealloc
+{
+  [row_ release];
+  [sortDescriptors_ release];
+  [stableSortKey_ release];
+  [super dealloc];
+}
+
+- (id)row
+{
+  return row_;
+}
+
+- (NSComparisonResult)compare:(StrappyWhitelistSortableRow *)other
+{
+  id otherRow;
   NSUInteger index;
 
-  sortContext = (StrappyWhitelistSortContext *)context;
-  if ((sortContext == NULL) || (sortContext->view == nil)) {
+  if (![other isKindOfClass:[StrappyWhitelistSortableRow class]] ||
+      (view_ == nil)) {
     return NSOrderedSame;
   }
 
-  view = sortContext->view;
-  if (![leftObject isKindOfClass:[NSDictionary class]] ||
-      ![rightObject isKindOfClass:[NSDictionary class]]) {
+  otherRow = [other row];
+  if (![row_ isKindOfClass:[NSDictionary class]] ||
+      ![otherRow isKindOfClass:[NSDictionary class]]) {
     return NSOrderedSame;
   }
 
-  sortDescriptors = sortContext->sortDescriptors;
-  for (index = 0U; index < [sortDescriptors count]; index++) {
+  for (index = 0U; index < [sortDescriptors_ count]; index++) {
     NSSortDescriptor *sortDescriptor;
     NSComparisonResult result;
 
-    sortDescriptor = [sortDescriptors objectAtIndex:index];
+    sortDescriptor = [sortDescriptors_ objectAtIndex:index];
     if (![sortDescriptor isKindOfClass:[NSSortDescriptor class]]) {
       continue;
     }
 
-    result = [view compareRow:leftObject
-                          row:rightObject
-                   forSortKey:[sortDescriptor key]];
+    result = [view_ compareRow:row_
+                           row:otherRow
+                    forSortKey:[sortDescriptor key]];
     if (result != NSOrderedSame) {
       return [sortDescriptor ascending] ? result : -result;
     }
   }
 
-  stableSortKey = sortContext->stableSortKey;
-  if ([stableSortKey length] > 0U) {
-    return [view compareRow:leftObject
-                        row:rightObject
-                 forSortKey:stableSortKey];
+  if ([stableSortKey_ length] > 0U) {
+    return [view_ compareRow:row_
+                         row:otherRow
+                  forSortKey:stableSortKey_];
   }
 
   return NSOrderedSame;
 }
+
+@end
 
 @interface StrappyPreferencesWhitelistView ()
 - (void)buildViewWithTarget:(id)target
@@ -473,20 +506,45 @@ static NSComparisonResult StrappyWhitelistCompareRows(id leftObject,
 
 - (NSArray *)sortedRows:(NSArray *)rows
 {
-  StrappyWhitelistSortContext sortContext;
+  NSMutableArray *sortableRows;
+  NSArray *sortedSortableRows;
+  NSMutableArray *sortedRows;
+  NSArray *sortDescriptors;
+  NSString *stableSortKey;
+  NSUInteger index;
 
   if (![rows isKindOfClass:[NSArray class]]) {
     return [NSArray array];
   }
 
-  sortContext.view = self;
-  sortContext.sortDescriptors =
+  sortDescriptors =
     [self effectiveSortDescriptorsForSortDescriptors:
       [[self tableView] sortDescriptors]];
-  sortContext.stableSortKey = [self stableSortKey];
+  stableSortKey = [self stableSortKey];
+  sortableRows = [NSMutableArray arrayWithCapacity:[rows count]];
+  for (index = 0U; index < [rows count]; index++) {
+    StrappyWhitelistSortableRow *sortableRow;
 
-  return [rows sortedArrayUsingFunction:StrappyWhitelistCompareRows
-                                context:&sortContext];
+    sortableRow =
+      [[[StrappyWhitelistSortableRow alloc]
+        initWithRow:[rows objectAtIndex:index]
+               view:self
+    sortDescriptors:sortDescriptors
+      stableSortKey:stableSortKey] autorelease];
+    [sortableRows addObject:sortableRow];
+  }
+
+  sortedSortableRows =
+    [sortableRows sortedArrayUsingSelector:@selector(compare:)];
+  sortedRows = [NSMutableArray arrayWithCapacity:[sortedSortableRows count]];
+  for (index = 0U; index < [sortedSortableRows count]; index++) {
+    StrappyWhitelistSortableRow *sortableRow;
+
+    sortableRow = [sortedSortableRows objectAtIndex:index];
+    [sortedRows addObject:[sortableRow row]];
+  }
+
+  return sortedRows;
 }
 
 - (NSImage *)refreshButtonImage

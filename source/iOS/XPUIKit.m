@@ -1,5 +1,25 @@
 #import "XPUIKit.h"
-#import <objc/message.h>
+
+static void XPUIKitInvokeIntegerSetter(id target, SEL selector, NSInteger value)
+{
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+
+  if ((target == nil) || ![target respondsToSelector:selector]) {
+    return;
+  }
+
+  signature = [target methodSignatureForSelector:selector];
+  if (signature == nil) {
+    return;
+  }
+
+  invocation = [NSInvocation invocationWithMethodSignature:signature];
+  [invocation setTarget:target];
+  [invocation setSelector:selector];
+  [invocation setArgument:&value atIndex:2];
+  [invocation invoke];
+}
 
 @implementation UIColor (XPUIKit)
 
@@ -17,8 +37,9 @@
 
 - (void)XP_setTextAlignmentCenter
 {
-  ((void (*)(id, SEL, NSInteger))objc_msgSend)
-    (self, @selector(setTextAlignment:), (NSInteger)UITextAlignmentCenter);
+  XPUIKitInvokeIntegerSetter(self,
+                             @selector(setTextAlignment:),
+                             (NSInteger)UITextAlignmentCenter);
 }
 
 @end

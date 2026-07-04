@@ -9,6 +9,8 @@
 
 int strappy_model_catalog_refresh_openrouter_user_models(
   const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
   const char *db_path,
   char **error_out)
 {
@@ -23,7 +25,11 @@ int strappy_model_catalog_refresh_openrouter_user_models(
   }
 
   strappy_config_init(&config);
-  if (!strappy_config_load(&config, env_path, error_out)) {
+  if (!strappy_config_load_with_fallback_credentials(&config,
+                                                     env_path,
+                                                     fallback_api_endpoint,
+                                                     fallback_api_token,
+                                                     error_out)) {
     strappy_config_destroy(&config);
     return 0;
   }

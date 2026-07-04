@@ -18,21 +18,16 @@ APIs directly.
   `strappy_model_catalog.h`, `strappy_prompt.h`, and `strappy_webview.h`.
 - `source/shared/FileScanner.m:4` imports `strappy_core.h`, `strappy_db.h`,
   and `strappy_file_scanner.h`; also includes `<stdlib.h>` and `<string.h>`.
-- `source/shared/StrappyKeychain.m:1` imports `strappy_keychain.h`; also
-  includes `strappy_config.h`, `strappy_core.h`, and `<stdlib.h>`.
-- `source/macOS/PreferencesWindowController.m:10` imports
-  `strappy_keychain.h`.
-- `source/macOS/StrappyPreferencesAuthenticationView.m:4` imports
-  `strappy_config.h` and `strappy_keychain.h`.
-- `source/shared/XPFoundation.m:3` imports `<Security/Security.h>` and
-  `<TargetConditionals.h>`; also includes `<string.h>`.
-- `source/macOS/XPAppKit.m:2` and `source/iOS/XPUIKit.m:2` import
-  `<objc/message.h>`.
+- `source/shared/StrappyKeychain.m:4` imports `strappy_config.h`; also includes
+  `<stdlib.h>`.
 
 Notes:
 
 - Normal Cocoa framework imports such as `Foundation`, `UIKit`, and `AppKit`
   were not counted as C-header violations.
+- `source/shared/XPKeychain.{h,m}` is the designated keychain platform bridge.
+  It intentionally owns the Security/CoreFoundation calls that were previously
+  embedded in `XPFoundation`.
 - `AltivecCore/AltivecCore.h` was not counted as a C-header violation because
   the visible use is Objective-C message syntax (`[AltivecCore certPath]`).
 - The shared `strappy_*.h` headers themselves are C API headers: they use
@@ -67,18 +62,7 @@ Notes:
     `strappy_db_save_discovered_databases`.
   - `source/shared/FileScanner.m:345` uses
     `strappy_file_scanner_options` and `strappy_file_scanner_record_list`.
-- `source/shared/StrappyKeychain.m` exports C functions from Objective-C:
-  `char *strappy_keychain_copy_api_endpoint`,
-  `char *strappy_keychain_copy_api_token`, and
-  `int strappy_keychain_save_api_credentials(const char *, const char *)`.
-  It also uses `getenv` for environment variables.
-- `source/shared/XPFoundation.m` uses CoreFoundation and Security C APIs
-  directly: `CFTypeRef`, `CFRelease`, `OSStatus`, `SecItem*`, `SecKeychain*`,
-  pointer casts, `UInt32`, `UInt16`, and `strlen`.
-- `source/macOS/XPAppKit.m` and `source/iOS/XPUIKit.m` cast and call
-  `objc_msgSend` directly.
-- `source/macOS/StrappyPreferencesWhitelistView.m:119` defines a local
-  `typedef struct` plus a comparator callback with `void *context`.
+- `source/shared/StrappyKeychain.m` uses `getenv` for environment variables.
 - `source/iOS/main.m:4` and `source/macOS/main.m:4` contain normal C app
   entry points: `int main(int argc, char *argv[])`.
 
@@ -89,8 +73,8 @@ Notes:
 - Remove `strappy_*` imports from UI/controller files first, especially
   `PreferencesWindowController` and `StrappyPreferencesAuthenticationView`.
 - Decide whether platform/runtime compatibility shims (`XPFoundation`,
-  `XPAppKit`, `XPUIKit`, and `main.m`) are explicit exceptions to the rule or
-  must also be rewritten/isolated.
+  `XPAppKit`, `XPUIKit`, `XPKeychain`, and `main.m`) are explicit exceptions
+  to the rule or must also be rewritten/isolated.
 
 ### Resolved
 
@@ -100,3 +84,23 @@ Notes:
   `strappy_webview.h`, includes `<string.h>`, builds `strappy_webview_*`
   structs, or owns C webview batch lifetimes. It now calls Objective-C
   rendering/batching methods on `StrappySession`.
+- `source/macOS/XPAppKit.m` and `source/iOS/XPUIKit.m` no longer import
+  `<objc/message.h>` or cast/call `objc_msgSend` directly. Runtime bridge
+  helpers now use `performSelector:` for object-only calls and `NSInvocation`
+  for primitive or Core Graphics pointer signatures.
+- `source/macOS/StrappyPreferencesWhitelistView.m` no longer defines a local
+  sort context struct or `void *context` comparator. It wraps rows in a private
+  Objective-C sortable object and sorts with `sortedArrayUsingSelector:`.
+- `source/shared/XPFoundation.{h,m}` no longer exposes or implements
+  `XPKeychain`, and no longer imports Security/CoreFoundation headers. The
+  keychain platform bridge now lives in designated
+  `source/shared/XPKeychain.{h,m}` files.
+- `source/shared/strappy_keychain.h` was removed. C configuration code no
+  longer reads Keychain directly; `StrappySession` passes Objective-C-resolved
+  fallback credentials into assistant and model-catalog C entry points.
+- `source/macOS/PreferencesWindowController.m` and
+  `source/macOS/StrappyPreferencesAuthenticationView.m` no longer import
+  `strappy_keychain.h`; they import the Objective-C `StrappyKeychain.h`.
+- `source/macOS/StrappyPreferencesAuthenticationView.m` no longer imports
+  `strappy_config.h`; the default endpoint is exposed through
+  `StrappyKeychain`.

@@ -4116,6 +4116,8 @@ static int strappy_assistant_apply_selected_model(strappy_config *config,
 static char *strappy_assistant_send_prompt_for_session_internal(
   const char *prompt,
   const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
   const char *system_prompt_template_path,
   const char *session_db_path,
   long long session_id,
@@ -4177,7 +4179,11 @@ static char *strappy_assistant_send_prompt_for_session_internal(
     event_callback_data = &store_context;
   }
 
-  if (!strappy_config_load(&config, env_path, error_out)) {
+  if (!strappy_config_load_with_fallback_credentials(&config,
+                                                     env_path,
+                                                     fallback_api_endpoint,
+                                                     fallback_api_token,
+                                                     error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_session_message_record_list_destroy(&message_list);
@@ -4611,6 +4617,8 @@ static char *strappy_assistant_send_prompt_for_session_internal(
 static char *strappy_assistant_stream_prompt_for_session_internal(
   const char *prompt,
   const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
   const char *system_prompt_template_path,
   const char *session_db_path,
   long long session_id,
@@ -4656,7 +4664,11 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   memset(&helper_turn, 0, sizeof(helper_turn));
   memset(&store_context, 0, sizeof(store_context));
 
-  if (!strappy_config_load(&config, env_path, error_out)) {
+  if (!strappy_config_load_with_fallback_credentials(&config,
+                                                     env_path,
+                                                     fallback_api_endpoint,
+                                                     fallback_api_token,
+                                                     error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_session_message_record_list_destroy(&message_list);
@@ -5036,6 +5048,8 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
 
 char *strappy_assistant_send_prompt_for_session_and_store(const char *prompt,
                                                          const char *env_path,
+                                                         const char *fallback_api_endpoint,
+                                                         const char *fallback_api_token,
                                                          const char *system_prompt_template_path,
                                                          const char *session_db_path,
                                                          long long session_id,
@@ -5043,6 +5057,8 @@ char *strappy_assistant_send_prompt_for_session_and_store(const char *prompt,
 {
   return strappy_assistant_send_prompt_for_session_internal(prompt,
                                                            env_path,
+                                                           fallback_api_endpoint,
+                                                           fallback_api_token,
                                                            system_prompt_template_path,
                                                            session_db_path,
                                                            session_id,
@@ -5054,6 +5070,8 @@ char *strappy_assistant_send_prompt_for_session_and_store(const char *prompt,
 char *strappy_assistant_send_prompt_for_session_and_store_with_events(
   const char *prompt,
   const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
   const char *system_prompt_template_path,
   const char *session_db_path,
   long long session_id,
@@ -5063,6 +5081,8 @@ char *strappy_assistant_send_prompt_for_session_and_store_with_events(
 {
   return strappy_assistant_send_prompt_for_session_internal(prompt,
                                                            env_path,
+                                                           fallback_api_endpoint,
+                                                           fallback_api_token,
                                                            system_prompt_template_path,
                                                            session_db_path,
                                                            session_id,
@@ -5074,6 +5094,8 @@ char *strappy_assistant_send_prompt_for_session_and_store_with_events(
 char *strappy_assistant_stream_prompt_for_session_and_store(
   const char *prompt,
   const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
   const char *system_prompt_template_path,
   const char *session_db_path,
   long long session_id,
@@ -5083,6 +5105,8 @@ char *strappy_assistant_stream_prompt_for_session_and_store(
 {
   return strappy_assistant_stream_prompt_for_session_internal(prompt,
                                                              env_path,
+                                                             fallback_api_endpoint,
+                                                             fallback_api_token,
                                                              system_prompt_template_path,
                                                              session_db_path,
                                                              session_id,

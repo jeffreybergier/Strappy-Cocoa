@@ -1,27 +1,112 @@
 #import "XPAppKit.h"
-#import <objc/message.h>
 
-static void XPAppKitInvokeXPIntegerSetter(id target,
-                                          SEL selector,
-                                          XPInteger value)
+static NSInvocation *XPAppKitInvocation(id target, SEL selector)
 {
   NSMethodSignature *signature;
   NSInvocation *invocation;
 
   if ((target == nil) || ![target respondsToSelector:selector]) {
-    return;
+    return nil;
   }
 
   signature = [target methodSignatureForSelector:selector];
   if (signature == nil) {
-    return;
+    return nil;
   }
 
   invocation = [NSInvocation invocationWithMethodSignature:signature];
   [invocation setTarget:target];
   [invocation setSelector:selector];
+
+  return invocation;
+}
+
+static void XPAppKitInvokeBOOLSetter(id target, SEL selector, BOOL value)
+{
+  NSInvocation *invocation;
+
+  invocation = XPAppKitInvocation(target, selector);
+  if (invocation == nil) {
+    return;
+  }
+
   [invocation setArgument:&value atIndex:2];
   [invocation invoke];
+}
+
+static void XPAppKitInvokeCGFloatSetter(id target, SEL selector, CGFloat value)
+{
+  NSInvocation *invocation;
+
+  invocation = XPAppKitInvocation(target, selector);
+  if (invocation == nil) {
+    return;
+  }
+
+  [invocation setArgument:&value atIndex:2];
+  [invocation invoke];
+}
+
+static void XPAppKitInvokeIntegerSetter(id target, SEL selector, NSInteger value)
+{
+  NSInvocation *invocation;
+
+  invocation = XPAppKitInvocation(target, selector);
+  if (invocation == nil) {
+    return;
+  }
+
+  [invocation setArgument:&value atIndex:2];
+  [invocation invoke];
+}
+
+static void XPAppKitInvokeCGColorSetter(id target,
+                                        SEL selector,
+                                        CGColorRef value)
+{
+  NSInvocation *invocation;
+
+  invocation = XPAppKitInvocation(target, selector);
+  if (invocation == nil) {
+    return;
+  }
+
+  [invocation setArgument:&value atIndex:2];
+  [invocation invoke];
+}
+
+static void XPAppKitInvokeObjectIntegerSetter(id target,
+                                              SEL selector,
+                                              id objectValue,
+                                              NSInteger integerValue)
+{
+  NSInvocation *invocation;
+
+  invocation = XPAppKitInvocation(target, selector);
+  if (invocation == nil) {
+    return;
+  }
+
+  [invocation setArgument:&objectValue atIndex:2];
+  [invocation setArgument:&integerValue atIndex:3];
+  [invocation invoke];
+}
+
+static CGColorRef XPAppKitInvokeCGColorGetter(id target, SEL selector)
+{
+  NSInvocation *invocation;
+  CGColorRef result;
+
+  invocation = XPAppKitInvocation(target, selector);
+  if (invocation == nil) {
+    return NULL;
+  }
+
+  result = NULL;
+  [invocation invoke];
+  [invocation getReturnValue:&result];
+
+  return result;
 }
 
 @implementation NSWindow (XPAppKit)
@@ -112,8 +197,9 @@ static void XPAppKitInvokeXPIntegerSetter(id target,
   if (AICCCurrentTier() < AICCTierMiddle) {
     return;
   }
-  ((void (*)(id, SEL, BOOL))objc_msgSend)
-    (self, @selector(setAutomaticallyAdjustsContentInsets:), flag);
+  XPAppKitInvokeBOOLSetter(self,
+                           @selector(setAutomaticallyAdjustsContentInsets:),
+                           flag);
 }
 
 - (void)XP_setContentInsetsTop:(CGFloat)top
@@ -156,8 +242,7 @@ static void XPAppKitInvokeXPIntegerSetter(id target,
   if (AICCCurrentTier() < AICCTierMiddle) {
     return;
   }
-  ((void (*)(id, SEL, BOOL))objc_msgSend)
-    (self, @selector(setWantsLayer:), flag);
+  XPAppKitInvokeBOOLSetter(self, @selector(setWantsLayer:), flag);
 }
 
 - (void)XP_setLayerCornerRadius:(CGFloat)radius
@@ -167,12 +252,14 @@ static void XPAppKitInvokeXPIntegerSetter(id target,
   if (AICCCurrentTier() < AICCTierMiddle) {
     return;
   }
-  layer = ((id (*)(id, SEL))objc_msgSend)(self, @selector(layer));
+  if (![self respondsToSelector:@selector(layer)]) {
+    return;
+  }
+  layer = [self performSelector:@selector(layer)];
   if (!layer) {
     return;
   }
-  ((void (*)(id, SEL, CGFloat))objc_msgSend)
-    (layer, @selector(setCornerRadius:), radius);
+  XPAppKitInvokeCGFloatSetter(layer, @selector(setCornerRadius:), radius);
 }
 
 - (void)XP_setLayerMasksToBounds:(BOOL)flag
@@ -182,12 +269,14 @@ static void XPAppKitInvokeXPIntegerSetter(id target,
   if (AICCCurrentTier() < AICCTierMiddle) {
     return;
   }
-  layer = ((id (*)(id, SEL))objc_msgSend)(self, @selector(layer));
+  if (![self respondsToSelector:@selector(layer)]) {
+    return;
+  }
+  layer = [self performSelector:@selector(layer)];
   if (!layer) {
     return;
   }
-  ((void (*)(id, SEL, BOOL))objc_msgSend)
-    (layer, @selector(setMasksToBounds:), flag);
+  XPAppKitInvokeBOOLSetter(layer, @selector(setMasksToBounds:), flag);
 }
 
 - (void)XP_setLayerBorderWidth:(CGFloat)width
@@ -197,12 +286,14 @@ static void XPAppKitInvokeXPIntegerSetter(id target,
   if (AICCCurrentTier() < AICCTierMiddle) {
     return;
   }
-  layer = ((id (*)(id, SEL))objc_msgSend)(self, @selector(layer));
+  if (![self respondsToSelector:@selector(layer)]) {
+    return;
+  }
+  layer = [self performSelector:@selector(layer)];
   if (!layer) {
     return;
   }
-  ((void (*)(id, SEL, CGFloat))objc_msgSend)
-    (layer, @selector(setBorderWidth:), width);
+  XPAppKitInvokeCGFloatSetter(layer, @selector(setBorderWidth:), width);
 }
 
 - (void)XP_setLayerBorderColor:(NSColor *)color
@@ -213,16 +304,18 @@ static void XPAppKitInvokeXPIntegerSetter(id target,
   if (AICCCurrentTier() < AICCTierMiddle || color == nil) {
     return;
   }
-  layer = ((id (*)(id, SEL))objc_msgSend)(self, @selector(layer));
+  if (![self respondsToSelector:@selector(layer)]) {
+    return;
+  }
+  layer = [self performSelector:@selector(layer)];
   if (!layer) {
     return;
   }
-  cgColor = ((CGColorRef (*)(id, SEL))objc_msgSend)(color, @selector(CGColor));
+  cgColor = XPAppKitInvokeCGColorGetter(color, @selector(CGColor));
   if (!cgColor) {
     return;
   }
-  ((void (*)(id, SEL, CGColorRef))objc_msgSend)
-    (layer, @selector(setBorderColor:), cgColor);
+  XPAppKitInvokeCGColorSetter(layer, @selector(setBorderColor:), cgColor);
 }
 
 @end
@@ -239,17 +332,17 @@ static void XPAppKitInvokeXPIntegerSetter(id target,
   }
 
   window = [self window];
-  if (window == nil || ![self respondsToSelector:@selector(setAppearance:)]) {
+  if (window == nil ||
+      ![window respondsToSelector:@selector(effectiveAppearance)] ||
+      ![self respondsToSelector:@selector(setAppearance:)]) {
     return;
   }
 
-  appearance = ((id (*)(id, SEL))objc_msgSend)
-    (window, @selector(effectiveAppearance));
+  appearance = [window performSelector:@selector(effectiveAppearance)];
   if (appearance == nil) {
     return;
   }
-  ((void (*)(id, SEL, id))objc_msgSend)
-    (self, @selector(setAppearance:), appearance);
+  [self performSelector:@selector(setAppearance:) withObject:appearance];
 }
 
 @end
@@ -261,9 +354,9 @@ static void XPAppKitInvokeXPIntegerSetter(id target,
   id cell;
 
   cell = [self cell];
-  XPAppKitInvokeXPIntegerSetter(cell,
-                                @selector(setSegmentStyle:),
-                                XPSegmentStyleTexturedRounded);
+  XPAppKitInvokeIntegerSetter(cell,
+                              @selector(setSegmentStyle:),
+                              XPSegmentStyleTexturedRounded);
 }
 
 - (void)XP_setToolTip:(NSString *)tip forSegment:(XPInteger)segment
@@ -271,8 +364,10 @@ static void XPAppKitInvokeXPIntegerSetter(id target,
   if (AICCCurrentTier() < AICCTierModern) {
     return;
   }
-  ((void (*)(id, SEL, NSString *, XPInteger))objc_msgSend)
-    (self, @selector(setToolTip:forSegment:), tip, segment);
+  XPAppKitInvokeObjectIntegerSetter(self,
+                                    @selector(setToolTip:forSegment:),
+                                    tip,
+                                    segment);
 }
 
 @end
@@ -306,8 +401,7 @@ static void XPAppKitInvokeXPIntegerSetter(id target,
   if (AICCCurrentTier() < AICCTierMiddle) {
     return;
   }
-  ((void (*)(id, SEL, BOOL))objc_msgSend)
-    (self, @selector(setFloatsGroupRows:), floats);
+  XPAppKitInvokeBOOLSetter(self, @selector(setFloatsGroupRows:), floats);
 }
 
 - (void)XP_setSourceListStyle
@@ -319,14 +413,14 @@ static void XPAppKitInvokeXPIntegerSetter(id target,
     NSInteger value;
 
     value = XPTableViewStyleSourceList;
-    ((void (*)(id, SEL, NSInteger))objc_msgSend)
-      (self, @selector(setStyle:), value);
+    XPAppKitInvokeIntegerSetter(self, @selector(setStyle:), value);
   } else if (tier == AICCTierMiddle) {
     NSInteger value;
 
     value = NSTableViewSelectionHighlightStyleSourceList;
-    ((void (*)(id, SEL, NSInteger))objc_msgSend)
-      (self, @selector(setSelectionHighlightStyle:), value);
+    XPAppKitInvokeIntegerSetter(self,
+                                @selector(setSelectionHighlightStyle:),
+                                value);
   }
 }
 

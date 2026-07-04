@@ -1,9 +1,6 @@
 #include "strappy_config.h"
 
 #include "strappy_core.h"
-#ifdef __APPLE__
-#include "strappy_keychain.h"
-#endif
 
 #include <ctype.h>
 #include <stdio.h>
@@ -184,43 +181,42 @@ static int strappy_config_apply_environment(strappy_config *config,
   return 1;
 }
 
-static int strappy_config_apply_keychain(strappy_config *config,
-                                         int needs_api_endpoint,
-                                         int needs_api_token,
-                                         char **error_out)
+static int strappy_config_apply_fallback_credentials(
+  strappy_config *config,
+  int needs_api_endpoint,
+  int needs_api_token,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
+  char **error_out)
 {
-#ifdef __APPLE__
-  char *api_endpoint;
-  char *api_token;
   int ok;
 
   if ((config == NULL) || (!needs_api_endpoint && !needs_api_token)) {
     return 1;
   }
 
-  api_endpoint = needs_api_endpoint ? strappy_keychain_copy_api_endpoint() : NULL;
-  api_token = needs_api_token ? strappy_keychain_copy_api_token() : NULL;
-
   ok = 1;
-  if ((api_endpoint != NULL) &&
-      !strappy_config_apply_pair(config, "APIENDPOINT", api_endpoint, error_out)) {
+  if (needs_api_endpoint &&
+      (fallback_api_endpoint != NULL) &&
+      (fallback_api_endpoint[0] != '\0') &&
+      !strappy_config_apply_pair(config,
+                                 "APIENDPOINT",
+                                 fallback_api_endpoint,
+                                 error_out)) {
     ok = 0;
   }
-  if (ok && (api_token != NULL) &&
-      !strappy_config_apply_pair(config, "APITOKEN", api_token, error_out)) {
+  if (ok &&
+      needs_api_token &&
+      (fallback_api_token != NULL) &&
+      (fallback_api_token[0] != '\0') &&
+      !strappy_config_apply_pair(config,
+                                 "APITOKEN",
+                                 fallback_api_token,
+                                 error_out)) {
     ok = 0;
   }
 
-  free(api_endpoint);
-  free(api_token);
   return ok;
-#else
-  (void)config;
-  (void)needs_api_endpoint;
-  (void)needs_api_token;
-  (void)error_out;
-  return 1;
-#endif
 }
 
 void strappy_config_init(strappy_config *config)
@@ -281,6 +277,20 @@ int strappy_config_load(strappy_config *config,
                       const char *env_path,
                       char **error_out)
 {
+  return strappy_config_load_with_fallback_credentials(config,
+                                                       env_path,
+                                                       NULL,
+                                                       NULL,
+                                                       error_out);
+}
+
+int strappy_config_load_with_fallback_credentials(
+  strappy_config *config,
+  const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
+  char **error_out)
+{
   const char *path;
   int path_is_required;
   int api_endpoint_configured;
@@ -334,10 +344,12 @@ int strappy_config_load(strappy_config *config,
     return 0;
   }
 
-  if (!strappy_config_apply_keychain(config,
-                                     !api_endpoint_configured,
-                                     !api_token_configured,
-                                     error_out)) {
+  if (!strappy_config_apply_fallback_credentials(config,
+                                                 !api_endpoint_configured,
+                                                 !api_token_configured,
+                                                 fallback_api_endpoint,
+                                                 fallback_api_token,
+                                                 error_out)) {
     strappy_config_destroy(config);
     return 0;
   }

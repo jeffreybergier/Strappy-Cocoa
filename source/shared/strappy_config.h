@@ -32,6 +32,12 @@ int strappy_config_set_guidance_resource_dir(strappy_config *config,
 int strappy_config_load(strappy_config *config,
                         const char *env_path,
                         char **error_out);
+int strappy_config_load_with_fallback_credentials(
+  strappy_config *config,
+  const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
+  char **error_out);
 
 #ifdef __cplusplus
 }

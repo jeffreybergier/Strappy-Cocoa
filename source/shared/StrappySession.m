@@ -1,5 +1,6 @@
 #import "StrappySession.h"
 
+#import "StrappyKeychain.h"
 #import "strappy_assistant.h"
 #import "strappy_client.h"
 #import "strappy_core.h"
@@ -36,6 +37,14 @@ static const char *StrappySessionCString(NSString *string)
 {
   if (![string isKindOfClass:[NSString class]]) {
     return "";
+  }
+  return [string UTF8String];
+}
+
+static const char *StrappySessionOptionalCString(NSString *string)
+{
+  if (![string isKindOfClass:[NSString class]] || ([string length] == 0U)) {
+    return NULL;
   }
   return [string UTF8String];
 }
@@ -1591,6 +1600,8 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 {
   NSAutoreleasePool *pool;
   NSString *databasePath;
+  NSString *apiEndpoint;
+  NSString *apiToken;
   NSMutableDictionary *result;
   char *strappyError;
   int ok;
@@ -1598,11 +1609,15 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   (void)ignored;
   pool = [[NSAutoreleasePool alloc] init];
   databasePath = [StrappySession sessionsDatabasePath];
+  apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
+  apiToken = [[StrappyKeychain sharedKeychain] apiToken];
   result = [[NSMutableDictionary alloc] init];
 
   strappyError = NULL;
   ok = strappy_model_catalog_refresh_openrouter_user_models(
     NULL,
+    StrappySessionOptionalCString(apiEndpoint),
+    StrappySessionOptionalCString(apiToken),
     [databasePath UTF8String],
     &strappyError);
   if (!ok) {
@@ -2215,6 +2230,8 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 {
   NSString *databasePath;
   NSString *systemPromptTemplatePath;
+  NSString *apiEndpoint;
+  NSString *apiToken;
   char *response;
   char *strappyError;
   long long sessionId;
@@ -2258,10 +2275,15 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
     return nil;
   }
 
+  apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
+  apiToken = [[StrappyKeychain sharedKeychain] apiToken];
+
   strappyError = NULL;
   response =
     strappy_assistant_send_prompt_for_session_and_store([prompt UTF8String],
                                                         NULL,
+                                                        StrappySessionOptionalCString(apiEndpoint),
+                                                        StrappySessionOptionalCString(apiToken),
                                                         [systemPromptTemplatePath fileSystemRepresentation],
                                                         [databasePath UTF8String],
                                                         sessionId,
@@ -2301,6 +2323,8 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 {
   NSString *databasePath;
   NSString *systemPromptTemplatePath;
+  NSString *apiEndpoint;
+  NSString *apiToken;
   char *response;
   char *strappyError;
   long long sessionId;
@@ -2351,12 +2375,16 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 
   streamContext.session = self;
   streamContext.context = [context retain];
+  apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
+  apiToken = [[StrappyKeychain sharedKeychain] apiToken];
 
   strappyError = NULL;
   if (streaming) {
     response = strappy_assistant_stream_prompt_for_session_and_store(
       [prompt UTF8String],
       NULL,
+      StrappySessionOptionalCString(apiEndpoint),
+      StrappySessionOptionalCString(apiToken),
       [systemPromptTemplatePath fileSystemRepresentation],
       [databasePath UTF8String],
       sessionId,
@@ -2367,6 +2395,8 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
     response = strappy_assistant_send_prompt_for_session_and_store_with_events(
       [prompt UTF8String],
       NULL,
+      StrappySessionOptionalCString(apiEndpoint),
+      StrappySessionOptionalCString(apiToken),
       [systemPromptTemplatePath fileSystemRepresentation],
       [databasePath UTF8String],
       sessionId,

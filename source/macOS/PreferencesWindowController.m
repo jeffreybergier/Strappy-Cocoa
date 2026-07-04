@@ -7,7 +7,7 @@
 #import "StrappyPreferencesDatabaseWhitelistView.h"
 #import "StrappyPreferencesModelWhitelistView.h"
 #import "StrappyPreferencesSystemPromptsView.h"
-#import "strappy_keychain.h"
+#import "StrappyKeychain.h"
 
 static const CGFloat kStrappyPreferencesWidth = 720.0;
 static const CGFloat kStrappyPreferencesHeight = 480.0;

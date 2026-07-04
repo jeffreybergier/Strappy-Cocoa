@@ -9,6 +9,8 @@ extern "C" {
 
 char *strappy_assistant_send_prompt_for_session_and_store(const char *prompt,
                                                          const char *env_path,
+                                                         const char *fallback_api_endpoint,
+                                                         const char *fallback_api_token,
                                                          const char *system_prompt_template_path,
                                                          const char *session_db_path,
                                                          long long session_id,
@@ -16,6 +18,8 @@ char *strappy_assistant_send_prompt_for_session_and_store(const char *prompt,
 char *strappy_assistant_send_prompt_for_session_and_store_with_events(
   const char *prompt,
   const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
   const char *system_prompt_template_path,
   const char *session_db_path,
   long long session_id,
@@ -25,6 +29,8 @@ char *strappy_assistant_send_prompt_for_session_and_store_with_events(
 char *strappy_assistant_stream_prompt_for_session_and_store(
   const char *prompt,
   const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
   const char *system_prompt_template_path,
   const char *session_db_path,
   long long session_id,
