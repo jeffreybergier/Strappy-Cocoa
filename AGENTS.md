@@ -123,12 +123,14 @@ House style for Strappy source:
     injection method; do not assemble conversation DOM state in platform UI
     code. Keep temporary UI-only control state, such as disabled buttons or
     spinners, out of persisted conversation rows.
-20. When changing shared C behavior, especially database, tool, prompt, client,
+20. iOS Objective-C code must use bracketed accessor/message syntax instead of
+    dot syntax, even when dot syntax would be accepted by the compiler.
+21. When changing shared C behavior, especially database, tool, prompt, client,
     or JSON parsing code, run `make -C source/linux clean test` where the host
     Linux environment has the required dependencies. Keep the harnesses updated
     as new shared behavior is added or existing behavior changes, so regressions
     can be caught without waiting for full Apple-target builds.
-21. SQLite `PRAGMA user_version` is intentionally pinned at `1`. Do not
+22. SQLite `PRAGMA user_version` is intentionally pinned at `1`. Do not
     increase it or add migration steps without explicit user permission; this
     database has not shipped yet.
 

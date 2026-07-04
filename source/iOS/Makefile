@@ -1,7 +1,12 @@
 # Altivec Intelligence - Strappy (iPhone)
 APP_NAME = Strappy
 SOURCES = main.m AppDelegate.m StrappyRootCoordinator.m \
-          SessionListViewController.m XPUIKit.m
+          SessionListViewController.m PreferencesTableViewController.m \
+          StrappyPreferencesWhitelistTableViewController.m \
+          StrappyPreferencesModelWhitelistTableViewController.m \
+          StrappyPreferencesDatabaseWhitelistTableViewController.m \
+          StrappyPreferencesSystemPromptsTableViewController.m \
+          XPUIKit.m
 INFO_PLIST = Info.plist
 
 SHARED_DIR = ../shared
@@ -29,6 +34,7 @@ PHONE_SOURCE_FLAGS = -fobjc-arc
 PHONE_EXTRA_SOURCE_FLAGS = -Wno-conversion -Wno-sign-conversion -Wno-float-conversion -Wno-strict-prototypes -Wno-newline-eof
 LIBS_IPHONE = -framework Security
 PHONE_LDID_SIGN ?= 1
+PHONE_LDID_ENTITLEMENTS ?= Entitlements.plist
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
 EXTRA_BUNDLE_STEPS = @set -e; $(MAKE) -f Makefile $(FONTAWESOME_GENERATED); echo "  > copying prompt guidance resources"; for resource in $(GUIDANCE_RESOURCES); do cp "$$resource" "$@/"; done
 

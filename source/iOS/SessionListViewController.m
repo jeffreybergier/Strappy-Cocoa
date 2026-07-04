@@ -1,5 +1,7 @@
 #import "SessionListViewController.h"
 
+#import "AIFontAwesome.h"
+#import "PreferencesTableViewController.h"
 #import "StrappySession.h"
 #import "XPFoundation.h"
 #import "XPUIKit.h"
@@ -97,7 +99,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 @property (nonatomic, copy) NSNumber *selectedSessionId;
 @property (nonatomic, copy) NSString *loadErrorText;
 @property (nonatomic, strong) UIBarButtonItem *addButton;
-@property (nonatomic, strong) UIBarButtonItem *refreshButton;
+@property (nonatomic, strong) UIBarButtonItem *settingsButton;
 @property (nonatomic, assign) BOOL creatingSession;
 - (void)strappySessionDidUpdate:(NSNotification *)notification;
 - (void)sessionPromptActivityDidChange:(NSNotification *)notification;
@@ -134,12 +136,15 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
     [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd
                                                   target:self
                                                   action:@selector(addSession:)];
-  self.refreshButton =
-    [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh
-                                                  target:self
-                                                  action:@selector(reloadDataAction:)];
-  self.navigationItem.rightBarButtonItem = self.addButton;
-  self.navigationItem.leftBarButtonItem = self.refreshButton;
+  [self setSettingsButton:
+    [[UIBarButtonItem alloc] initWithImage:[self whiteBarIconForIcon:AIFAGear]
+                                     style:UIBarButtonItemStyleBordered
+                                    target:self
+                                    action:@selector(settingsAction:)]];
+  [[self settingsButton]
+    setAccessibilityLabel:NSLocalizedString(@"Preferences", nil)];
+  [[self navigationItem] setRightBarButtonItem:[self addButton]];
+  [[self navigationItem] setLeftBarButtonItem:[self settingsButton]];
 
   [[NSNotificationCenter defaultCenter]
     addObserver:self
@@ -166,10 +171,32 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   [self reloadData];
 }
 
+- (UIImage *)whiteBarIconForIcon:(AIFontAwesomeIcon)icon
+{
+  return [AIFontAwesome imageForIcon:icon
+                               style:AIFontAwesomeStyleSolid
+                            iconSize:18.0f
+                          canvasSize:28.0f
+                               color:[UIColor whiteColor]
+                               scale:0.0f];
+}
+
+- (void)settingsAction:(id)sender
+{
+  PreferencesTableViewController *preferences;
+  UINavigationController *navigationController;
+
+  (void)sender;
+  preferences = [[PreferencesTableViewController alloc] init];
+  navigationController =
+    [[UINavigationController alloc] initWithRootViewController:preferences];
+  [self presentModalViewController:navigationController animated:YES];
+}
+
 - (void)setControlsEnabled:(BOOL)enabled
 {
-  self.addButton.enabled = enabled;
-  self.refreshButton.enabled = enabled;
+  [[self addButton] setEnabled:enabled];
+  [[self settingsButton] setEnabled:enabled];
 }
 
 - (void)reloadData
