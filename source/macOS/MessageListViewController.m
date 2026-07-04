@@ -6,6 +6,7 @@
 
 static const NSUInteger kStrappyInitialMessageLimit = 80U;
 static const NSUInteger kStrappyMessagePageSize = 40U;
+static const NSTimeInterval kStrappyStreamEventFlushInterval = 0.3;
 
 static NSString *StrappyHTMLDirectory(void)
 {
@@ -255,7 +256,12 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 - (void)sessionPromptDidFinish:(NSNotification *)notification;
 - (void)modelCatalogDidChange:(NSNotification *)notification;
 - (void)sendPromptDidFinish:(NSDictionary *)result;
-- (BOOL)pushDatabaseMessageForStreamEvent:(NSDictionary *)event;
+- (NSString *)javaScriptForStreamEvent:(NSDictionary *)event;
+- (void)queueJavaScriptForStreamEvent:(NSDictionary *)event;
+- (void)schedulePendingStreamEventFlush;
+- (void)streamEventFlushTimerDidFire:(NSTimer *)timer;
+- (void)flushPendingStreamEvents;
+- (void)cancelPendingStreamEventFlush;
 - (BOOL)sessionPromptIsInFlight;
 - (void)updateSendingStateFromSession;
 - (void)beginSendingPrompt:(NSString *)prompt;
@@ -350,6 +356,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
 - (void)clearRequestState
 {
+  [self cancelPendingStreamEventFlush];
 }
 
 - (BOOL)sessionPromptIsInFlight
@@ -814,9 +821,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   }
 
   [self updateSendingStateFromSession];
-  if (![self pushDatabaseMessageForStreamEvent:event]) {
-    return;
-  }
+  [self queueJavaScriptForStreamEvent:event];
 }
 
 - (void)sessionPromptDidFinish:(NSNotification *)notification
@@ -824,6 +829,7 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   if ([notification object] != session_) {
     return;
   }
+  [self flushPendingStreamEvents];
   [self sendPromptDidFinish:[notification userInfo]];
 }
 
@@ -854,23 +860,116 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   [self updateSendingStateFromSession];
 }
 
-- (BOOL)pushDatabaseMessageForStreamEvent:(NSDictionary *)event
+- (NSString *)javaScriptForStreamEvent:(NSDictionary *)event
 {
   NSString *js;
   NSError *error;
 
   if ((session_ == nil) || ![event isKindOfClass:[NSDictionary class]]) {
-    return NO;
+    return @"";
   }
 
   error = nil;
   js = [session_ webViewJavaScriptForStreamEvent:event error:&error];
   if ([js length] == 0U) {
-    return NO;
+    return @"";
   }
 
-  [self pushJavaScript:js];
-  return YES;
+  return js;
+}
+
+- (void)queueJavaScriptForStreamEvent:(NSDictionary *)event
+{
+  NSString *js;
+
+  if (![event isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
+
+  js = [self javaScriptForStreamEvent:event];
+  if ([js length] == 0U) {
+    return;
+  }
+
+  if (pendingStreamBatch_ == NULL) {
+    pendingStreamBatch_ = strappy_webview_script_batch_create();
+    if (pendingStreamBatch_ == NULL) {
+      return;
+    }
+  }
+
+  if (!strappy_webview_script_batch_append_js(pendingStreamBatch_,
+                                              [js UTF8String])) {
+    strappy_webview_script_batch_destroy(pendingStreamBatch_);
+    pendingStreamBatch_ = NULL;
+    return;
+  }
+
+  [self schedulePendingStreamEventFlush];
+}
+
+- (void)schedulePendingStreamEventFlush
+{
+  if (streamEventFlushTimer_ != nil) {
+    return;
+  }
+
+  streamEventFlushTimer_ =
+    [[NSTimer scheduledTimerWithTimeInterval:kStrappyStreamEventFlushInterval
+                                      target:self
+                                    selector:@selector(streamEventFlushTimerDidFire:)
+                                    userInfo:nil
+                                     repeats:NO] retain];
+}
+
+- (void)streamEventFlushTimerDidFire:(NSTimer *)timer
+{
+  if (streamEventFlushTimer_ == timer) {
+    [streamEventFlushTimer_ invalidate];
+    [streamEventFlushTimer_ release];
+    streamEventFlushTimer_ = nil;
+  }
+  [self flushPendingStreamEvents];
+}
+
+- (void)flushPendingStreamEvents
+{
+  strappy_webview_script_batch *batch;
+  NSString *batchJS;
+  char *batchCString;
+
+  if (pendingStreamBatch_ == NULL) {
+    return;
+  }
+
+  if (streamEventFlushTimer_ != nil) {
+    [streamEventFlushTimer_ invalidate];
+    [streamEventFlushTimer_ release];
+    streamEventFlushTimer_ = nil;
+  }
+
+  batch = pendingStreamBatch_;
+  pendingStreamBatch_ = NULL;
+  batchCString = strappy_webview_script_batch_finish_js(batch);
+  batchJS = StrappyStringFromWebViewCString(batchCString);
+  strappy_webview_script_batch_destroy(batch);
+
+  if ([batchJS length] > 0U) {
+    [self pushJavaScript:batchJS];
+  }
+}
+
+- (void)cancelPendingStreamEventFlush
+{
+  if (streamEventFlushTimer_ != nil) {
+    [streamEventFlushTimer_ invalidate];
+    [streamEventFlushTimer_ release];
+    streamEventFlushTimer_ = nil;
+  }
+  if (pendingStreamBatch_ != NULL) {
+    strappy_webview_script_batch_destroy(pendingStreamBatch_);
+    pendingStreamBatch_ = NULL;
+  }
 }
 
 - (void)loadEarlierMessages
@@ -910,12 +1009,14 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
   oldestRenderedMessageIndex_ = start;
 
   js = StrappyPrependMessagesJavaScript(html, (start > 0U) ? YES : NO);
+  [self flushPendingStreamEvents];
   [self pushJavaScript:js];
 }
 
 - (void)dealloc
 {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [self cancelPendingStreamEventFlush];
   [htmlDirectoryPath_ release];
   [session_ release];
   [sendController_ release];

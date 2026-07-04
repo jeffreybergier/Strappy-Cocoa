@@ -751,7 +751,7 @@ static int harness_test_answer_content_streams_live(void)
     return harness_fail("Live answer content JSON was invalid.");
   }
 
-  ok = (record.content_count == 2) &&
+  ok = (record.content_count == 1) &&
        (record.reasoning_count == 0) &&
        (record.retracted_count == 0) &&
        (strcmp(record.content, "Visible answer.") == 0) &&
@@ -816,11 +816,11 @@ static int harness_test_tool_call_stream_content_retracted_live(void)
     return harness_fail("Tool-call content retraction JSON was invalid.");
   }
 
-  ok = (record.content_count == 1) &&
-       (record.retracted_count == 1) &&
-       (record.reasoning_count == 1) &&
-       (strcmp(record.content, "Let me check ") == 0) &&
-       (strcmp(record.reasoning, "the database.") == 0) &&
+  ok = (record.content_count == 0) &&
+       (record.retracted_count == 0) &&
+       (record.reasoning_count == 2) &&
+       (strcmp(record.content, "") == 0) &&
+       (strcmp(record.reasoning, "Let me check the database.") == 0) &&
        harness_expect_string(root, "content", "Let me check the database.");
 
   cJSON_Delete(root);

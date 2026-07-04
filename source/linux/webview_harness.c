@@ -72,9 +72,22 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function toolUsesDatabaseId") &&
        harness_expect_contains(page_html, "database_context_read") &&
        harness_expect_contains(page_html, "function beginMessageBatch") &&
+       harness_expect_contains(page_html, "function scheduleWebViewUpdate") &&
+       harness_expect_contains(page_html, "function flushWebViewUpdates") &&
+       harness_expect_contains(page_html, "function scheduleStatusTick") &&
+       harness_expect_contains(page_html,
+                               "var strappyUpdateInterval=300;"
+                               "var strappyStatusInterval=1000;") &&
        harness_expect_contains(page_html, "function scrollBottomNow") &&
-       harness_expect_contains(page_html, "function shouldAutoScroll") &&
        harness_expect_contains(page_html, ".page{padding:18px 10px;}") &&
+       harness_expect_contains(page_html, ".processing-autoscroll{position:absolute") &&
+       harness_expect_contains(page_html, ".processing-autoscroll-on") &&
+       harness_expect_contains(page_html,
+                               ".processing-status-text{display:block;"
+                               "line-height:32px;") &&
+       harness_expect_contains(page_html,
+                               "#tool-sources,.tool-source-bin,.row.tool_call,"
+                               ".row.tool{display:none;}") &&
        harness_expect_contains(page_html, ".processing-status{position:fixed") &&
        harness_expect_contains(page_html,
                                ".bubble,.reasoning,.tool-column,.request-metadata{") &&
@@ -82,8 +95,15 @@ static int harness_check_page_scripts(void)
                                "box-shadow:0 2px 9px rgba(0,0,0,.12);") &&
        harness_expect_contains(page_html, "function setProcessingStatus") &&
        harness_expect_contains(page_html, "function clearProcessingStatus") &&
+       harness_expect_contains(page_html, "function clearProcessingStatusNode") &&
        harness_expect_contains(page_html, "function initProcessingStatusFromRenderState") &&
        harness_expect_contains(page_html, "processing_status") &&
+       harness_expect_contains(page_html, "var strappyAutoScrollEnabled=1") &&
+       harness_expect_contains(page_html, "function toggleAutoScroll") &&
+       harness_expect_contains(page_html, "function updateAutoScrollButton") &&
+       harness_expect_contains(page_html, "aria-pressed") &&
+       harness_expect_contains(page_html, "Disable autoscroll") &&
+       harness_expect_contains(page_html, "Enable autoscroll") &&
        harness_expect_contains(page_html, "function shouldRenderMarkdownBubble") &&
        harness_expect_contains(page_html, "function shouldRenderMarkdownReasoning") &&
        harness_expect_contains(page_html, "ancestorHasClass(n,'assistant')") &&
@@ -92,12 +112,42 @@ static int harness_check_page_scripts(void)
                                "shouldRenderMarkdownBubble(n[i])||"
                                "shouldRenderMarkdownReasoning(n[i])") &&
        harness_expect_contains(page_html, "_strappyMarkdownRendered") &&
-       harness_expect_contains(page_html, "function renderStreamingTextNode") &&
+       harness_expect_contains(page_html, "function scheduleStreamingMarkdown") &&
        harness_expect_contains(page_html,
-                               "q.kind=='reasoning'){if(typeof n._strappyMarkdown") &&
+                               "strappyStreamingMarkdownNeedsFlush=1;"
+                               "if(strappyBatchDepth===0)"
+                               "scheduleWebViewUpdate(strappyUpdateInterval);") &&
+       harness_expect_contains(page_html, "function appendStreamingMarkdownNode") &&
+       harness_expect_contains(page_html,
+                               "q.kind=='reasoning'){if(hasClass(r,'streaming-active')") &&
        harness_expect_contains(page_html, "queueTextAppend(id,t,'content')") &&
+       harness_expect_contains(page_html,
+                               "if(strappyBatchDepth===0){"
+                               "if(strappyTextQueuesHaveEntries())flushTextQueues();") &&
+       harness_expect_contains(page_html,
+                               "if(strappyTextQueuesHaveEntries())flushTextQueues();"
+                               "if(strappyStreamingMarkdownNeedsFlush)"
+                               "flushStreamingMarkdown();") &&
+       harness_expect_contains(page_html,
+                               "strappyBatchShouldScroll=strappyAutoScrollEnabled?1:0") &&
+       harness_expect_contains(page_html,
+                               "if(strappyAutoScrollEnabled)"
+                               "strappyUpdateShouldScroll=1") &&
+       harness_expect_contains(page_html,
+                               "function scrollBottom(){if(!strappyAutoScrollEnabled)return") &&
+       harness_expect_contains(page_html, "function preserveLiveMessageText") &&
+       harness_expect_contains(page_html,
+                               "if(isAssistantRow(old)&&isAssistantRow(next))"
+                               "preserveLiveMessageText(old,next)") &&
+       harness_expect_contains(page_html, "oldRaw.indexOf(newRaw)>=0") &&
+       harness_expect_contains(page_html, "moveMessageTextToReasoningByMessageKey") &&
        harness_expect_contains(page_html, "appendMessageTextByMessageKey") &&
        harness_expect_contains(page_html, "appendReasoningTextByMessageKey") &&
+       harness_expect_not_contains(page_html, "setInterval(") &&
+       harness_expect_not_contains(page_html, "strappyTextTimer") &&
+       harness_expect_not_contains(page_html, "strappyUpdateLastFlush") &&
+       harness_expect_not_contains(page_html, "shouldAutoScroll") &&
+       harness_expect_not_contains(page_html, "requestAnimationFrame") &&
        harness_expect_contains(page_html, "function setToolBoxCount") &&
        harness_expect_contains(page_html, "setToolBoxCount(box,cards.length,last") &&
        harness_expect_contains(page_html, "toolCardSummary(last,cards.length-1)") &&
@@ -108,6 +158,7 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "tool-column-toggle") &&
        harness_expect_contains(page_html, "tool-column-collapsed .tool-count") &&
        harness_expect_contains(page_html, "streaming-active .tool-column-toggle") &&
+       harness_expect_contains(page_html, "if(!isToolRow(r))r.style.display='block'") &&
        harness_expect_contains(page_html, "tool-column-error") &&
        harness_expect_contains(page_html, "function decoratePromptGroups") &&
        harness_expect_contains(page_html, "function togglePromptGroup") &&
@@ -174,6 +225,72 @@ static int harness_check_fontawesome_rendering(void)
 
   strappy_webview_free(page_html);
   strappy_webview_set_font_dir(NULL);
+  return ok;
+}
+
+static int harness_check_script_batch(void)
+{
+  strappy_webview_script_batch *batch;
+  char *java_script;
+  const char *expected;
+  int ok;
+
+  batch = strappy_webview_script_batch_create();
+  if (batch == NULL) {
+    fprintf(stderr, "Could not create empty script batch.\n");
+    return 0;
+  }
+
+  java_script = strappy_webview_script_batch_finish_js(batch);
+  ok = (java_script == NULL) &&
+       !strappy_webview_script_batch_has_js(batch);
+  if (java_script != NULL) {
+    strappy_webview_free(java_script);
+  }
+  strappy_webview_script_batch_destroy(batch);
+  if (!ok) {
+    fprintf(stderr, "Empty script batch should not produce JavaScript.\n");
+    return 0;
+  }
+
+  batch = strappy_webview_script_batch_create();
+  if (batch == NULL) {
+    fprintf(stderr, "Could not create script batch.\n");
+    return 0;
+  }
+
+  ok = strappy_webview_script_batch_append_js(batch, NULL) &&
+       strappy_webview_script_batch_append_js(batch, "") &&
+       !strappy_webview_script_batch_has_js(batch) &&
+       strappy_webview_script_batch_append_js(
+         batch,
+         "appendMessageTextByMessageKey('m','hi');") &&
+       strappy_webview_script_batch_append_js(
+         batch,
+         "setProcessingStatus('{}');") &&
+       strappy_webview_script_batch_has_js(batch);
+
+  java_script = strappy_webview_script_batch_finish_js(batch);
+  expected =
+    "beginMessageBatch();try{"
+    "appendMessageTextByMessageKey('m','hi');"
+    "setProcessingStatus('{}');"
+    "}finally{endMessageBatch();}";
+  ok = ok &&
+       (java_script != NULL) &&
+       (strcmp(java_script, expected) == 0) &&
+       !strappy_webview_script_batch_has_js(batch) &&
+       !strappy_webview_script_batch_append_js(batch,
+                                               "appendMessageText('x','y');");
+
+  if (!ok) {
+    fprintf(stderr, "Script batch did not produce expected JavaScript.\n");
+  }
+
+  if (java_script != NULL) {
+    strappy_webview_free(java_script);
+  }
+  strappy_webview_script_batch_destroy(batch);
   return ok;
 }
 
@@ -638,6 +755,9 @@ int main(void)
     return 1;
   }
   if (!harness_check_fontawesome_rendering()) {
+    return 1;
+  }
+  if (!harness_check_script_batch()) {
     return 1;
   }
   if (!harness_check_tool_column_state()) {

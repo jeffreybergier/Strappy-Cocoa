@@ -21,6 +21,8 @@
 #define STRAPPY_CLIENT_STREAM_LOW_SPEED_TIME_SECONDS 60L
 #define STRAPPY_CLIENT_CHAT_RETRY_ATTEMPTS 3U
 #define STRAPPY_CLIENT_CHAT_RETRY_INITIAL_DELAY_MS 500U
+#define STRAPPY_CLIENT_STREAM_SPECULATIVE_CONTENT_BYTES 96U
+#define STRAPPY_CLIENT_STREAM_SPECULATIVE_CONTENT_CHUNKS 2U
 
 typedef struct strappy_http_buffer {
   char *data;
@@ -2199,6 +2201,7 @@ typedef struct strappy_stream_context {
   int saw_tool_calls;
   int retracted_content_for_tool_calls;
   int emitted_content_delta;
+  size_t pending_content_delta_count;
   strappy_chat_result *result;
   strappy_chat_stream_callback callback;
   void *callback_data;
@@ -2229,6 +2232,7 @@ static void strappy_stream_context_init(strappy_stream_context *context)
   context->saw_tool_calls = 0;
   context->retracted_content_for_tool_calls = 0;
   context->emitted_content_delta = 0;
+  context->pending_content_delta_count = 0U;
   context->result = NULL;
   context->callback = NULL;
   context->callback_data = NULL;
@@ -3379,7 +3383,35 @@ static int strappy_client_stream_flush_pending_content(
   if (type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) {
     context->emitted_content_delta = 1;
   }
+  context->pending_content_delta_count = 0U;
   strappy_http_buffer_clear(&context->pending_content);
+  return 1;
+}
+
+static int strappy_client_stream_append_speculative_content(
+  strappy_stream_context *context,
+  const char *text)
+{
+  if ((context == NULL) || (text == NULL) || (text[0] == '\0')) {
+    return 1;
+  }
+
+  if (!strappy_http_buffer_append_cstring(&context->pending_content, text)) {
+    return strappy_client_stream_set_error(
+      context,
+      "Could not allocate pending assistant text.");
+  }
+
+  context->pending_content_delta_count++;
+  if ((context->pending_content.length >=
+       STRAPPY_CLIENT_STREAM_SPECULATIVE_CONTENT_BYTES) ||
+      (context->pending_content_delta_count >=
+       STRAPPY_CLIENT_STREAM_SPECULATIVE_CONTENT_CHUNKS)) {
+    return strappy_client_stream_flush_pending_content(
+      context,
+      STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA);
+  }
+
   return 1;
 }
 
@@ -3637,6 +3669,11 @@ static int strappy_client_stream_parse_json_event(strappy_stream_context *contex
                                                        context->result);
   }
   if (api_error != NULL) {
+    (void)strappy_client_stream_flush_pending_content(
+      context,
+      context->saw_tool_calls ?
+        STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA :
+        STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA);
     if (context->result != NULL) {
       strappy_client_replace_result_string(&context->result->finish_reason,
                                            "error");
@@ -3694,14 +3731,8 @@ static int strappy_client_stream_parse_json_event(strappy_stream_context *contex
           ok = 0;
         }
       } else {
-        if (!strappy_client_stream_emit_delta(
-              context,
-              STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA,
-              content_text)) {
-          ok = 0;
-        } else {
-          context->emitted_content_delta = 1;
-        }
+        ok = strappy_client_stream_append_speculative_content(context,
+                                                              content_text);
       }
     }
     free(content_text);

@@ -1782,6 +1782,11 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
         [messageKey UTF8String],
         [delta UTF8String]));
   }
+  if ([streamEvent isEqualToString:@"content_retracted"]) {
+    return StrappySessionStringFromWebViewCString(
+      strappy_webview_move_message_text_to_reasoning_by_key_js(
+        [messageKey UTF8String]));
+  }
   if ([streamEvent isEqualToString:@"processing_status"]) {
     statusJSON = [event objectForKey:@"status_json"];
     if (![statusJSON isKindOfClass:[NSString class]]) {

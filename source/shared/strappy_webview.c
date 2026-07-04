@@ -10,6 +10,13 @@ typedef struct strappy_webview_buffer {
   size_t capacity;
 } strappy_webview_buffer;
 
+struct strappy_webview_script_batch {
+  strappy_webview_buffer buffer;
+  int has_js;
+  int failed;
+  int finished;
+};
+
 static char *g_strappy_webview_font_dir = NULL;
 
 static void strappy_webview_buffer_init(strappy_webview_buffer *buffer)
@@ -727,9 +734,17 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "body.processing-status-active .page{padding-bottom:58px;}",
     ".processing-status{position:fixed;left:10px;right:10px;bottom:10px;",
     "z-index:20;box-sizing:border-box;border:1px solid #b8c7d4;",
-    "background:#f8fbfd;color:#26323d;padding:8px 10px;",
+    "background:#f8fbfd;color:#26323d;padding:0 42px 0 10px;",
     "box-shadow:0 2px 9px rgba(0,0,0,.12);font-size:12px;",
-    "line-height:16px;}",
+    "line-height:32px;height:34px;}",
+    ".processing-status-text{display:block;line-height:32px;white-space:nowrap;",
+    "overflow:hidden;text-overflow:ellipsis;}",
+    ".processing-autoscroll{position:absolute;right:7px;top:7px;",
+    "width:24px;height:20px;box-sizing:border-box;",
+    "border:1px solid #aab8c4;background:#fff;color:#536677;",
+    "padding:0;text-align:center;line-height:18px;cursor:pointer;}",
+    ".processing-autoscroll-on{background:#dbeaf5;border-color:#7fa7c5;",
+    "box-shadow:inset 0 1px 3px rgba(0,0,0,.25);color:#174f7a;}",
     ".processing-status-retry_wait{border-color:#caa85f;background:#fff9e8;",
     "color:#4d3d15;}",
     ".processing-status-retrying{border-color:#9eb8d0;background:#f1f7fc;",
@@ -742,7 +757,7 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".tool-column-error{border-color:#d99;background:#fff0f6;color:#7a253f;}",
     ".tool-column-empty{display:none;}",
     "#messages{max-width:none;margin:0;}",
-    "#tool-sources,.tool-source-bin{display:none;}",
+    "#tool-sources,.tool-source-bin,.row.tool_call,.row.tool{display:none;}",
     ".tool-cards{margin:0;}",
     ".tool-column-collapsed .tool-cards{display:none;}",
     ".tool-rail-title{font-size:11px;font-weight:bold;text-transform:uppercase;",
@@ -928,11 +943,12 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(/^[0-9a-f]{3,6}$/i.test(k))return k.toUpperCase();",
     "s=String(s||'solid').toLowerCase();if(s!='solid'&&s!='regular'&&s!='brands')s='solid';",
     "m=faIconMap[s]||faIconMap.solid||{};return m[k]||'';}",
-    "function faIconHTML(style,name,raw){var s=String(style||'solid').toLowerCase();var c;",
+    "function faIconHTML(style,name,raw){var s=String(style||'solid').toLowerCase();var c,k,cls;",
     "if(s!='solid'&&s!='regular'&&s!='brands')s='solid';",
-    "c=faIconCode(s,name);",
+    "k=String(name||'').toLowerCase();if(k.indexOf('fa-')==0)k=k.substring(3);",
+    "cls=/^[a-z0-9-]+$/.test(k)?' fa-'+k:'';c=faIconCode(s,name);",
     "if(c==='')return escHTML(raw);",
-    "return '<span class=\"fa fa-'+s+'\" aria-hidden=\"true\">&#x'+c+';</span>';}",
+    "return '<i class=\"fa fa-'+s+cls+'\" aria-hidden=\"true\">&#x'+c+';</i>';}",
     "function mdSafeHref(h){var v=(h||'').replace(/^\\s+|\\s+$/g,'').toLowerCase();",
     "return v.indexOf('http://')==0||v.indexOf('https://')==0||",
     "v.indexOf('mailto:')==0;}",
@@ -1008,8 +1024,16 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function renderMarkdownNode(n){if(!n)return;if(typeof n._strappyMarkdown=='undefined')",
     "n._strappyMarkdown=n.innerHTML;if(n._strappyMarkdownRendered==n._strappyMarkdown)return;",
     "n.innerHTML=mdToHTML(n._strappyMarkdown);n._strappyMarkdownRendered=n._strappyMarkdown;}",
-    "function renderStreamingTextNode(n){if(!n)return;if(typeof n._strappyMarkdown=='undefined')",
-    "n._strappyMarkdown=n.innerHTML;n.innerHTML=n._strappyMarkdown;n._strappyMarkdownRendered=null;}",
+    "var strappyStreamingMarkdownDirty=[];var strappyStreamingMarkdownNeedsFlush=0;",
+    "function scheduleStreamingMarkdown(n){if(!n||n._strappyStreamingMarkdownDirty)return;",
+    "n._strappyStreamingMarkdownDirty=1;strappyStreamingMarkdownDirty[strappyStreamingMarkdownDirty.length]=n;",
+    "strappyStreamingMarkdownNeedsFlush=1;if(strappyBatchDepth===0)scheduleWebViewUpdate(strappyUpdateInterval);}",
+    "function flushStreamingMarkdown(){var list=strappyStreamingMarkdownDirty;var i,n;",
+    "strappyStreamingMarkdownDirty=[];strappyStreamingMarkdownNeedsFlush=0;",
+    "for(i=0;i<list.length;i++){n=list[i];if(!n)continue;n._strappyStreamingMarkdownDirty=0;",
+    "if(n.parentNode)renderMarkdownNode(n);}}",
+    "function appendStreamingMarkdownNode(n,t){if(!n)return;if(typeof n._strappyMarkdown=='undefined')",
+    "n._strappyMarkdown=n.innerHTML;n._strappyMarkdown+=t;n.innerHTML+=t;scheduleStreamingMarkdown(n);}",
     "function shouldRenderMarkdownBubble(n){return hasClass(n,'bubble')&&",
     "!hasClass(n,'bubble-status')&&ancestorHasClass(n,'assistant')&&",
     "!ancestorHasClass(n,'tool-column');}",
@@ -1026,7 +1050,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(typeof v=='string')return v;if(typeof v=='number'||typeof v=='boolean')",
     "return String(v);if(typeof JSON!='undefined'&&JSON.stringify)return JSON.stringify(v);",
     "return String(v);}",
-    "var strappyProcessingStatus=null;var strappyProcessingTimer=null;",
+    "var strappyProcessingStatus=null;var strappyProcessingStatusDirty=0;",
+    "var strappyProcessingNextTick=0;",
     "function processingStatusObject(raw){var s=raw;if(!s)return null;",
     "if(typeof s=='string'){try{s=JSON.parse(s);}catch(e){return null;}}",
     "if(s&&s.processing_status)s=s.processing_status;return isObj(s)?s:null;}",
@@ -1048,23 +1073,43 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(kind=='retrying')return 'Retrying'+(attempt?' - '+attempt:'')+' - '+processingDuration(elapsed)+' elapsed';",
     "if(kind=='tools')return 'Using tools - '+processingDuration(elapsed);",
     "return 'Thinking - '+processingDuration(elapsed);}",
+    "var strappyAutoScrollEnabled=1;",
+    "function updateAutoScrollButton(n){var b;if(!n)return;b=firstByClass(n,'processing-autoscroll');",
+    "if(!b)return;b.className='processing-autoscroll'+(strappyAutoScrollEnabled?' processing-autoscroll-on':'');",
+    "b.setAttribute('aria-pressed',strappyAutoScrollEnabled?'true':'false');",
+    "b.title=strappyAutoScrollEnabled?'Disable autoscroll':'Enable autoscroll';",
+    "b.setAttribute('aria-label',b.title);}",
+    "function setAutoScrollEnabled(v){var n;strappyAutoScrollEnabled=v?1:0;",
+    "n=byId('processing-status');if(n)updateAutoScrollButton(n);",
+    "if(strappyAutoScrollEnabled)scrollBottomNow();}",
+    "function toggleAutoScroll(){setAutoScrollEnabled(!strappyAutoScrollEnabled);return false;}",
+    "function processingStatusTextNode(n){var t;if(!n)return null;t=firstByClass(n,'processing-status-text');",
+    "if(!t){t=document.createElement('span');t.className='processing-status-text';",
+    "if(n.firstChild)n.insertBefore(t,n.firstChild);else n.appendChild(t);}return t;}",
+    "function processingAutoScrollButton(n){var b;if(!n)return null;b=firstByClass(n,'processing-autoscroll');",
+    "if(!b){b=document.createElement('button');b.type='button';b.className='processing-autoscroll';",
+    "b.onclick=function(){return toggleAutoScroll();};",
+    "b.innerHTML=faIconHTML('solid','arrows-up-down','v');n.appendChild(b);}updateAutoScrollButton(n);return b;}",
     "function processingStatusNode(){var n=byId('processing-status');if(n)return n;",
     "n=document.createElement('div');n.id='processing-status';n.className='processing-status';",
     "n.setAttribute('role','status');n.setAttribute('aria-live','polite');",
+    "processingStatusTextNode(n);processingAutoScrollButton(n);",
     "(document.body||document.documentElement).appendChild(n);return n;}",
-    "function updateProcessingStatus(){var s=strappyProcessingStatus;var n,b=document.body;",
-    "if(!s||!s.active){clearProcessingStatus();return;}n=processingStatusNode();",
+    "function updateProcessingStatus(){var s=strappyProcessingStatus;var n,t,b=document.body;",
+    "if(!s||!s.active){clearProcessingStatusNode();return;}n=processingStatusNode();",
     "n.className='processing-status processing-status-'+(s.status_kind||'thinking');",
-    "setNodeText(n,processingStatusText(s));if(b&&!hasClass(b,'processing-status-active'))",
+    "t=processingStatusTextNode(n);setNodeText(t,processingStatusText(s));processingAutoScrollButton(n);",
+    "if(b&&!hasClass(b,'processing-status-active'))",
     "b.className+=' processing-status-active';}",
-    "function scheduleProcessingStatusTimer(){if(strappyProcessingTimer)return;",
-    "strappyProcessingTimer=setInterval(updateProcessingStatus,5000);}",
     "function setProcessingStatus(raw){var s=processingStatusObject(raw);",
     "if(!s||!s.active){clearProcessingStatus();return;}strappyProcessingStatus=s;",
-    "updateProcessingStatus();scheduleProcessingStatusTimer();}",
-    "function clearProcessingStatus(){var n=byId('processing-status');var b=document.body;",
-    "strappyProcessingStatus=null;if(strappyProcessingTimer){clearInterval(strappyProcessingTimer);",
-    "strappyProcessingTimer=null;}if(n&&n.parentNode)n.parentNode.removeChild(n);",
+    "strappyProcessingStatusDirty=1;strappyProcessingNextTick=0;",
+    "if(strappyAutoScrollEnabled)strappyUpdateShouldScroll=1;scheduleWebViewUpdate(0);}",
+    "function clearProcessingStatus(){strappyProcessingStatus=null;strappyProcessingStatusDirty=1;",
+    "if(strappyAutoScrollEnabled)strappyUpdateShouldScroll=1;",
+    "strappyProcessingNextTick=0;scheduleWebViewUpdate(0);}",
+    "function clearProcessingStatusNode(){var n=byId('processing-status');var b=document.body;",
+    "if(n&&n.parentNode)n.parentNode.removeChild(n);",
     "if(b)b.className=b.className.replace(/\\sprocessing-status-active/g,'');}",
     "function initProcessingStatusFromRenderState(){var n=document.getElementsByTagName('*');var i,raw,s;",
     "for(i=n.length-1;i>=0;i--){raw=n[i].getAttribute?n[i].getAttribute('data-render-state'):'';",
@@ -1429,70 +1474,97 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function renderTools(root){moveToolRows(root);rebuildToolCards();}",
     "function renderMessageDecorations(root){renderMarkdown(root);renderMetadata(root);renderTools(root);decoratePromptGroups(root);}",
     "var strappyBatchDepth=0;var strappyNeedsRender=0;var strappyBatchShouldScroll=0;",
+    "var strappyUpdateInterval=300;var strappyStatusInterval=1000;",
+    "var strappyUpdateTimer=null;var strappyUpdateDue=0;var strappyUpdateFlushing=0;",
+    "var strappyUpdateShouldScroll=0;",
     "function scrollHeight(){var b=document.body||{};var e=document.documentElement||{};",
     "return Math.max(b.scrollHeight||0,e.scrollHeight||0,b.offsetHeight||0,e.offsetHeight||0);}",
-    "function scrollTop(){var b=document.body||{};var e=document.documentElement||{};",
-    "return Math.max(window.pageYOffset||0,e.scrollTop||0,b.scrollTop||0);}",
-    "function viewportHeight(){var b=document.body||{};var e=document.documentElement||{};",
-    "return window.innerHeight||e.clientHeight||b.clientHeight||0;}",
-    "function shouldAutoScroll(){var h=scrollHeight(),v=viewportHeight(),t=scrollTop();",
-    "var threshold=30;if(v>0&&v/10>threshold)threshold=v/10;return h-(t+v)<=threshold;}",
-    "function beginMessageBatch(){if(strappyBatchDepth===0)strappyBatchShouldScroll=shouldAutoScroll()?1:0;strappyBatchDepth++;}",
+    "function scrollBottomNow(){var b=document.body||{};var e=document.documentElement||{};",
+    "var h=scrollHeight();",
+    "if(e)e.scrollTop=h;if(b)b.scrollTop=h;window.scrollTo(0,h);}",
+    "function strappyTextQueuesHaveEntries(){var k;for(k in strappyTextQueues)return 1;return 0;}",
+    "function scheduleStatusTick(){var now,delay;if(!strappyProcessingStatus||!strappyProcessingStatus.active)return;",
+    "now=(new Date()).getTime();if(strappyProcessingNextTick<=now)strappyProcessingNextTick=now+strappyStatusInterval;",
+    "delay=strappyProcessingNextTick-now;if(delay<0)delay=0;scheduleWebViewUpdate(delay);}",
+    "function scheduleWebViewUpdate(delay){var now,due;if(strappyUpdateFlushing)return;",
+    "if(typeof delay!='number')delay=strappyUpdateInterval;if(delay<0)delay=0;now=(new Date()).getTime();due=now+delay;",
+    "if(strappyUpdateTimer&&due>=strappyUpdateDue)return;if(strappyUpdateTimer)clearTimeout(strappyUpdateTimer);",
+    "strappyUpdateDue=due;strappyUpdateTimer=setTimeout(flushWebViewUpdates,delay);}",
+    "function flushWebViewUpdates(){var now,stick;if(strappyUpdateTimer){clearTimeout(strappyUpdateTimer);",
+    "strappyUpdateTimer=null;}strappyUpdateDue=0;strappyUpdateFlushing=1;now=(new Date()).getTime();",
+    "stick=strappyAutoScrollEnabled?1:0;strappyUpdateShouldScroll=0;",
+    "if(strappyTextQueuesHaveEntries())flushTextQueues();",
+    "if(strappyStreamingMarkdownNeedsFlush)flushStreamingMarkdown();",
+    "if(strappyProcessingStatusDirty||(strappyProcessingStatus&&strappyProcessingStatus.active&&now>=strappyProcessingNextTick)){",
+    "strappyProcessingStatusDirty=0;updateProcessingStatus();strappyProcessingNextTick=now+strappyStatusInterval;}",
+    "else if(strappyProcessingStatus&&strappyProcessingStatus.active)strappyProcessingNextTick=now+strappyStatusInterval;",
+    "if(stick)scrollBottomNow();strappyUpdateFlushing=0;",
+    "if(strappyTextQueuesHaveEntries()||strappyStreamingMarkdownNeedsFlush||strappyProcessingStatusDirty)",
+    "scheduleWebViewUpdate(strappyUpdateInterval);else scheduleStatusTick();}",
+    "function beginMessageBatch(){if(strappyBatchDepth===0)strappyBatchShouldScroll=strappyAutoScrollEnabled?1:0;strappyBatchDepth++;}",
     "function endMessageBatch(){if(strappyBatchDepth>0)strappyBatchDepth--;",
-    "if(strappyBatchDepth===0){if(strappyNeedsRender){strappyNeedsRender=0;",
-    "renderMessageDecorations(document);scrollBottom(strappyBatchShouldScroll);}",
-    "strappyBatchShouldScroll=0;}}",
+    "if(strappyBatchDepth===0){if(strappyTextQueuesHaveEntries())flushTextQueues();",
+    "if(strappyStreamingMarkdownNeedsFlush)flushStreamingMarkdown();",
+    "if(strappyNeedsRender){strappyNeedsRender=0;renderMessageDecorations(document);}",
+    "if(strappyBatchShouldScroll)scrollBottomNow();strappyBatchShouldScroll=0;}}",
     "function renderAfterMutation(root){if(strappyBatchDepth>0){strappyNeedsRender=1;return;}",
     "renderMessageDecorations(root);}",
     "function clearEmpty(){var e=byId('empty');if(e)e.style.display='none';}",
     "function nodesFromHTML(html){var d=document.createElement('div');d.innerHTML=html;return d;}",
-    "function scrollBottomNow(){var b=document.body||{};var e=document.documentElement||{};",
-    "var h=scrollHeight();",
-    "if(e)e.scrollTop=h;if(b)b.scrollTop=h;window.scrollTo(0,h);}",
-    "function scrollBottom(stick){if(!stick)return;if(strappyBatchDepth>0){strappyBatchShouldScroll=1;return;}",
-    "scrollBottomNow();setTimeout(scrollBottomNow,0);",
-    "setTimeout(scrollBottomNow,80);if(window.requestAnimationFrame)",
-    "window.requestAnimationFrame(scrollBottomNow);}",
+    "function scrollBottom(){if(!strappyAutoScrollEnabled)return;if(strappyBatchDepth>0){strappyBatchShouldScroll=1;return;}",
+    "strappyUpdateShouldScroll=1;scheduleWebViewUpdate(0);}",
     "function scrollToolRailBottom(){}",
     "function updateToolTargets(oldId,newId){var rows,i;if(!oldId||!newId||oldId==newId)return;",
     "rows=toolSourceRows().concat(messageRows());for(i=0;i<rows.length;i++){if(toolTarget(rows[i])==oldId)setToolTarget(rows[i],newId);}}",
-    "var strappyTextQueues={};var strappyTextTimer=null;",
+    "var strappyTextQueues={};",
     "function queueTextAppend(id,t,kind){var k=kind+'|'+id;if(!strappyTextQueues[k])",
     "strappyTextQueues[k]={id:id,kind:kind,text:''};strappyTextQueues[k].text+=escHTML(t);",
-    "if(!strappyTextTimer)strappyTextTimer=setTimeout(flushTextQueues,60);}",
-    "function flushTextQueues(){var k,q,r,n,stick=shouldAutoScroll();strappyTextTimer=null;",
+    "if(strappyAutoScrollEnabled)strappyUpdateShouldScroll=1;",
+    "if(strappyBatchDepth===0)scheduleWebViewUpdate(strappyUpdateInterval);}",
+    "function flushTextQueues(){var k,q,r,n;",
     "for(k in strappyTextQueues){q=strappyTextQueues[k];r=byId(q.id);if(!r)continue;",
     "n=(q.kind=='reasoning')?firstByClass(r,'reasoning-body'):firstByClass(r,'bubble');",
-    "if(!n)continue;if(q.kind=='reasoning'){if(typeof n._strappyMarkdown=='undefined')n._strappyMarkdown=n.innerHTML;",
-    "n._strappyMarkdown+=q.text;if(hasClass(r,'streaming-active')){renderStreamingTextNode(n);continue;}",
+    "if(!n)continue;if(q.kind=='reasoning'){if(hasClass(r,'streaming-active')){",
+    "appendStreamingMarkdownNode(n,q.text);continue;}if(typeof n._strappyMarkdown=='undefined')n._strappyMarkdown=n.innerHTML;",
+    "n._strappyMarkdown+=q.text;",
     "if(shouldRenderMarkdownReasoning(n))renderMarkdownNode(n);",
     "else n.innerHTML=n._strappyMarkdown;continue;}",
+    "if(hasClass(r,'streaming-active')){appendStreamingMarkdownNode(n,q.text);continue;}",
     "if(typeof n._strappyMarkdown=='undefined')n._strappyMarkdown=n.innerHTML;",
-    "n._strappyMarkdown+=q.text;if(hasClass(r,'streaming-active'))renderStreamingTextNode(n);",
-    "else if(shouldRenderMarkdownBubble(n))renderMarkdownNode(n);",
-    "else n.innerHTML=n._strappyMarkdown;}strappyTextQueues={};scrollBottom(stick);}",
-    "function appendMessage(html){clearEmpty();var stick=shouldAutoScroll();var m=byId('messages');if(!m)return;",
+    "n._strappyMarkdown+=q.text;",
+    "if(shouldRenderMarkdownBubble(n))renderMarkdownNode(n);",
+    "else n.innerHTML=n._strappyMarkdown;}strappyTextQueues={};}",
+    "function appendMessage(html){clearEmpty();var m=byId('messages');if(!m)return;",
     "if(m.insertAdjacentHTML){m.insertAdjacentHTML('beforeend',html);}",
     "else{var d=nodesFromHTML(html);while(d.firstChild)m.appendChild(d.firstChild);}",
-    "renderAfterMutation(m);scrollBottom(stick);}",
+    "renderAfterMutation(m);scrollBottom();}",
+    "function rawMarkdown(n){if(!n)return '';return (typeof n._strappyMarkdown!='undefined')?n._strappyMarkdown:(n.innerHTML||'');}",
+    "function setRawMarkdown(n,raw){if(!n)return;n._strappyMarkdown=raw||'';n._strappyMarkdownRendered=null;n.innerHTML=n._strappyMarkdown;}",
+    "function preserveLongerMarkdown(oldNode,newNode){var oldRaw,newRaw;if(!oldNode||!newNode)return;",
+    "oldRaw=rawMarkdown(oldNode);newRaw=rawMarkdown(newNode);",
+    "if(oldRaw.length>newRaw.length&&(newRaw===''||oldRaw.indexOf(newRaw)>=0))setRawMarkdown(newNode,oldRaw);}",
+    "function preserveLiveMessageText(oldRow,newRow){if(!oldRow||!newRow)return;",
+    "preserveLongerMarkdown(firstByClass(oldRow,'bubble'),firstByClass(newRow,'bubble'));",
+    "preserveLongerMarkdown(firstByClass(oldRow,'reasoning-body'),firstByClass(newRow,'reasoning-body'));}",
     "function replaceMessage(id,html){clearEmpty();var old=byId(id);var oldId,target,wasAssistant,next,newId;",
-    "var stick=shouldAutoScroll();flushTextQueues();",
+    "flushTextQueues();",
     "if(!old){appendMessage(html);return;}var d=nodesFromHTML(html);",
     "oldId=rowId(old);target=toolTarget(old);wasAssistant=isAssistantRow(old);",
     "if(d.firstChild){next=d.firstChild;if(target!==''&&isToolRow(next))setToolTarget(next,target);",
+    "if(isAssistantRow(old)&&isAssistantRow(next))preserveLiveMessageText(old,next);",
     "old.parentNode.replaceChild(next,old);newId=rowId(next);if(wasAssistant)updateToolTargets(oldId,newId);}",
-    "renderAfterMutation(document);scrollBottom(stick);}",
-    "function insertMessageBefore(id,html){clearEmpty();var stick=shouldAutoScroll();var before=byId(id);var m=byId('messages');",
+    "renderAfterMutation(document);scrollBottom();}",
+    "function insertMessageBefore(id,html){clearEmpty();var before=byId(id);var m=byId('messages');",
     "if(!m){return;}if(!before){appendMessage(html);return;}var d=nodesFromHTML(html);",
-    "while(d.firstChild)m.insertBefore(d.firstChild,before);renderAfterMutation(m);scrollBottom(stick);}",
+    "while(d.firstChild)m.insertBefore(d.firstChild,before);renderAfterMutation(m);scrollBottom();}",
     "function prependMessages(html,hasMore){var m=byId('messages');if(!m)return;",
     "var d=nodesFromHTML(html);while(d.lastChild)m.insertBefore(d.lastChild,m.firstChild);",
     "var l=byId('load-more');if(l&&!hasMore)l.parentNode.removeChild(l);",
     "renderAfterMutation(m);}",
-    "function setMessageState(id,status,state){var r=byId(id);var s,stick=shouldAutoScroll();if(!r)return;",
+    "function setMessageState(id,status,state){var r=byId(id);var s;if(!r)return;",
     "r.className=r.className.replace(/\\sstate-[^\\s]+/g,'');if(state)r.className+=' state-'+state;",
     "s=firstByClass(r,'status');if(status){if(!s){s=document.createElement('div');",
-    "s.className='meta status';r.appendChild(s);}s.innerHTML=status;}else if(s&&s.parentNode)s.parentNode.removeChild(s);scrollBottom(stick);}",
+    "s.className='meta status';r.appendChild(s);}s.innerHTML=status;}else if(s&&s.parentNode)s.parentNode.removeChild(s);scrollBottom();}",
     "function setMessageThinking(id,status){var r=byId(id);var b;if(!r)return;",
     "b=firstByClass(r,'bubble');if(b&&hasClass(b,'bubble-status'))b.innerHTML=status||'';}",
     "function appendMessageText(id,t){var r=byId(id);var b;if(!r)return;",
@@ -1503,20 +1575,22 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "queueTextAppend(id,t,'content');}",
     "function appendMessageTextByMessageKey(key,t){var id=rowIdByMessageKey(key);",
     "if(id==='')return false;appendMessageText(id,t);return true;}",
-    "function moveMessageTextToReasoning(id){var r=byId(id);var b,box,body,raw,stick=shouldAutoScroll();",
+    "function moveMessageTextToReasoning(id){var r=byId(id);var b,box,body,raw;",
     "flushTextQueues();if(!r)return;b=firstByClass(r,'bubble');box=firstByClass(r,'reasoning');",
     "body=firstByClass(r,'reasoning-body');if(!b||!box||!body)return;",
     "raw=(typeof b._strappyMarkdown!='undefined')?b._strappyMarkdown:escHTML(nodeText(b));",
     "if(raw==='')return;if(typeof body._strappyMarkdown=='undefined')body._strappyMarkdown=body.innerHTML;",
-    "if(body._strappyMarkdown!==''&&raw.charAt(0)!='\\n')body._strappyMarkdown+='\\n';",
-    "body._strappyMarkdown+=raw;if(hasClass(r,'streaming-active'))renderStreamingTextNode(body);",
-    "else if(shouldRenderMarkdownReasoning(body))renderMarkdownNode(body);",
-    "else body.innerHTML=body._strappyMarkdown;",
+    "if(body._strappyMarkdown!==''&&raw.charAt(0)!='\\n')raw='\\n'+raw;",
+    "if(hasClass(r,'streaming-active'))appendStreamingMarkdownNode(body,raw);",
+    "else{body._strappyMarkdown+=raw;if(shouldRenderMarkdownReasoning(body))renderMarkdownNode(body);",
+    "else body.innerHTML=body._strappyMarkdown;}",
     "b._strappyMarkdown='';b.className=b.className.replace(/\\sbubble-status/g,'');",
     "b.innerHTML='';b.style.display='none';",
     "box.style.display='block';",
     "if(!hasClass(r,'streaming-active'))r.className+=' streaming-active';",
-    "setReasoningCollapsed(box,0);setMessageToolColumnCollapsed(id,1);scrollBottom(stick);}",
+    "setReasoningCollapsed(box,0);setMessageToolColumnCollapsed(id,1);scrollBottom();}",
+    "function moveMessageTextToReasoningByMessageKey(key){var id=rowIdByMessageKey(key);",
+    "if(id==='')return false;moveMessageTextToReasoning(id);return true;}",
     "function appendReasoningText(id,t){var r=byId(id);if(!r)return;",
     "var box=firstByClass(r,'reasoning');var body=firstByClass(r,'reasoning-body');",
     "if(box)box.style.display='block';if(!body)return;",
@@ -1524,10 +1598,10 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "queueTextAppend(id,t,'reasoning');}",
     "function appendReasoningTextByMessageKey(key,t){var id=rowIdByMessageKey(key);",
     "if(id==='')return false;appendReasoningText(id,t);return true;}",
-    "function appendToolEventText(id,t){var r=byId(id);var b,stick=shouldAutoScroll();if(!r)return;",
-    "r.style.display='block';b=firstByClass(r,'bubble');if(!b)return;",
+    "function appendToolEventText(id,t){var r=byId(id);var b;if(!r)return;",
+    "if(!isToolRow(r))r.style.display='block';b=firstByClass(r,'bubble');if(!b)return;",
     "if(typeof b._strappyRawText=='undefined')b._strappyRawText=nodeText(b);",
-    "b._strappyRawText+=t;renderAfterMutation(document);scrollBottom(stick);}",
+    "b._strappyRawText+=t;renderAfterMutation(document);scrollBottom();}",
     "function removeMessage(id){flushTextQueues();var r=byId(id);",
     "if(r&&r.parentNode)r.parentNode.removeChild(r);renderAfterMutation(document);}",
     "setTimeout(initProcessingStatusFromRenderState,0);",
@@ -1541,6 +1615,85 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
 void strappy_webview_free(char *value)
 {
   free(value);
+}
+
+strappy_webview_script_batch *strappy_webview_script_batch_create(void)
+{
+  strappy_webview_script_batch *batch;
+
+  batch = (strappy_webview_script_batch *)malloc(sizeof(*batch));
+  if (batch == NULL) {
+    return NULL;
+  }
+
+  strappy_webview_buffer_init(&batch->buffer);
+  batch->has_js = 0;
+  batch->failed = 0;
+  batch->finished = 0;
+
+  if (!strappy_webview_buffer_append_cstring(&batch->buffer,
+                                             "beginMessageBatch();try{")) {
+    strappy_webview_script_batch_destroy(batch);
+    return NULL;
+  }
+
+  return batch;
+}
+
+void strappy_webview_script_batch_destroy(strappy_webview_script_batch *batch)
+{
+  if (batch == NULL) {
+    return;
+  }
+
+  strappy_webview_buffer_destroy(&batch->buffer);
+  free(batch);
+}
+
+int strappy_webview_script_batch_append_js(
+  strappy_webview_script_batch *batch,
+  const char *java_script)
+{
+  if ((batch == NULL) || batch->failed || batch->finished) {
+    return 0;
+  }
+  if ((java_script == NULL) || (java_script[0] == '\0')) {
+    return 1;
+  }
+
+  if (!strappy_webview_buffer_append_cstring(&batch->buffer, java_script)) {
+    batch->failed = 1;
+    return 0;
+  }
+
+  batch->has_js = 1;
+  return 1;
+}
+
+int strappy_webview_script_batch_has_js(
+  const strappy_webview_script_batch *batch)
+{
+  return ((batch != NULL) &&
+          batch->has_js &&
+          !batch->failed &&
+          !batch->finished) ? 1 : 0;
+}
+
+char *strappy_webview_script_batch_finish_js(
+  strappy_webview_script_batch *batch)
+{
+  if (!strappy_webview_script_batch_has_js(batch)) {
+    return NULL;
+  }
+
+  if (!strappy_webview_buffer_append_cstring(&batch->buffer,
+                                             "}finally{endMessageBatch();}")) {
+    batch->failed = 1;
+    return NULL;
+  }
+
+  batch->finished = 1;
+  return strappy_webview_buffer_finish(&batch->buffer);
 }
 
 void strappy_webview_set_font_dir(const char *abs_dir)
@@ -2209,6 +2362,23 @@ char *strappy_webview_move_message_text_to_reasoning_js(const char *element_id)
         &buffer,
         "moveMessageTextToReasoning(") ||
       !strappy_webview_append_js_string(&buffer, element_id) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_move_message_text_to_reasoning_by_key_js(
+  const char *message_key)
+{
+  strappy_webview_buffer buffer;
+
+  strappy_webview_buffer_init(&buffer);
+  if (!strappy_webview_buffer_append_cstring(
+        &buffer,
+        "moveMessageTextToReasoningByMessageKey(") ||
+      !strappy_webview_append_js_string(&buffer, message_key) ||
       !strappy_webview_buffer_append_cstring(&buffer, ");")) {
     strappy_webview_buffer_destroy(&buffer);
     return NULL;
