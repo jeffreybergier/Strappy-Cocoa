@@ -38,7 +38,10 @@ House style for Strappy source:
    `session_store`; it will hold app-wide database responsibilities over time.
 5. C files must not import macOS-only framework headers such as
    `CoreFoundation`. Shared C code must stay portable across Apple and potential
-   future targets.
+   future targets. The exception is `source/shared/strappy_cocoa.c`, which is
+   the designated Cocoa/CoreFoundation import boundary for shared C; keep any
+   framework-specific imports and code isolated there with portable fallbacks
+   for non-Apple targets.
 6. `StrappySession.m` owns the Objective-C/C boundary for AI agent sessions.
    Keep filesystem scanning and database discovery out of `StrappySession`.
 7. `FileScanner.m` owns the Objective-C/C boundary for filesystem scanning and

@@ -1,13 +1,7 @@
 #import "StrappySession.h"
 
 #import "StrappyKeychain.h"
-#import "strappy_assistant.h"
-#import "strappy_client.h"
-#import "strappy_core.h"
-#import "strappy_db.h"
-#import "strappy_model_catalog.h"
-#import "strappy_prompt.h"
-#import "strappy_webview.h"
+#import "strappy_session.h"
 #import "XPFoundation.h"
 
 NSString * const StrappySessionDidUpdateNotification =
@@ -49,7 +43,7 @@ static const char *StrappySessionOptionalCString(NSString *string)
   return [string UTF8String];
 }
 
-static NSString *StrappySessionStringFromWebViewCString(char *value)
+static NSString *StrappySessionStringFromCString(char *value)
 {
   NSString *string;
 
@@ -58,7 +52,7 @@ static NSString *StrappySessionStringFromWebViewCString(char *value)
   }
 
   string = [NSString stringWithUTF8String:value];
-  strappy_webview_free(value);
+  strappy_session_free_string(value);
   return (string != nil) ? string : @"";
 }
 
@@ -77,35 +71,6 @@ static strappy_webview_labels StrappySessionWebViewLabels(void)
     StrappySessionCString(NSLocalizedString(@"Tool Result", nil));
   labels.retry = StrappySessionCString(NSLocalizedString(@"Retry", nil));
   return labels;
-}
-
-static void StrappySessionWebViewMessageFromRecord(
-  const strappy_session_message_record *record,
-  strappy_webview_message *message)
-{
-  if (message == NULL) {
-    return;
-  }
-
-  memset(message, 0, sizeof(*message));
-  if (record == NULL) {
-    return;
-  }
-
-  message->message_id = record->message_id;
-  message->http_status = record->http_status;
-  message->role = record->role;
-  message->kind = record->kind;
-  message->actor = record->actor;
-  message->prompt_group_key = record->prompt_group_key;
-  message->message_key = record->message_key;
-  message->target_message_key = record->target_message_key;
-  message->text = record->content;
-  message->reasoning = record->reasoning;
-  message->metadata_json = record->metadata_json;
-  message->render_state_json = record->render_state_json;
-  message->created_at = record->created_at;
-  message->is_error = record->is_error ? 1 : 0;
 }
 
 static long long StrappySessionMessageNumericIdentifier(NSDictionary *message)
@@ -140,7 +105,7 @@ static void StrappySessionWebViewMessageFromDictionary(
   if (message == NULL) {
     return;
   }
-  memset(message, 0, sizeof(*message));
+  strappy_session_webview_message_init(message);
 
   if (![dictionary isKindOfClass:[NSDictionary class]]) {
     return;
@@ -256,11 +221,11 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   labels = StrappySessionWebViewLabels();
   StrappySessionWebViewMessageFromDictionary(message, &webMessage);
   webMessage.element_id = StrappySessionCString(elementIdentifier);
-  return StrappySessionStringFromWebViewCString(
-    strappy_webview_message_html(&webMessage,
-                                 &labels,
-                                 StrappySessionCString(state),
-                                 StrappySessionCString(statusHTML)));
+  return StrappySessionStringFromCString(
+    strappy_session_webview_message_html(&webMessage,
+                                         &labels,
+                                         StrappySessionCString(state),
+                                         StrappySessionCString(statusHTML)));
 }
 
 + (NSString *)webViewMessagesHTMLForMessages:(NSArray *)messages
@@ -293,33 +258,21 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 + (NSString *)webViewPrependMessagesJavaScriptForHTML:(NSString *)messagesHTML
                                              hasMore:(BOOL)hasMore
 {
-  return StrappySessionStringFromWebViewCString(
-    strappy_webview_prepend_messages_js(StrappySessionCString(messagesHTML),
-                                        hasMore ? 1 : 0));
+  return StrappySessionStringFromCString(
+    strappy_session_webview_prepend_messages_js(
+      StrappySessionCString(messagesHTML),
+      hasMore ? 1 : 0));
 }
 
 + (NSString *)webViewBatchedJavaScriptForJavaScript:(NSString *)javaScript
 {
-  strappy_webview_script_batch *batch;
-  char *batchCString;
-
   if (![javaScript isKindOfClass:[NSString class]] ||
       ([javaScript length] == 0U)) {
     return @"";
   }
 
-  batch = strappy_webview_script_batch_create();
-  if (batch == NULL) {
-    return @"";
-  }
-  if (!strappy_webview_script_batch_append_js(batch, [javaScript UTF8String])) {
-    strappy_webview_script_batch_destroy(batch);
-    return @"";
-  }
-
-  batchCString = strappy_webview_script_batch_finish_js(batch);
-  strappy_webview_script_batch_destroy(batch);
-  return StrappySessionStringFromWebViewCString(batchCString);
+  return StrappySessionStringFromCString(
+    strappy_session_webview_batched_js([javaScript UTF8String]));
 }
 
 + (NSString *)webViewMessagesPageHTMLForMessagesHTML:(NSString *)messagesHTML
@@ -327,8 +280,8 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
                                          hasMessages:(BOOL)hasMessages
                                              hasMore:(BOOL)hasMore
 {
-  return StrappySessionStringFromWebViewCString(
-    strappy_webview_messages_page_html(
+  return StrappySessionStringFromCString(
+    strappy_session_webview_messages_page_html(
       StrappySessionCString(messagesHTML),
       StrappySessionCString(emptyText),
       hasMessages ? 1 : 0,
@@ -760,27 +713,29 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 {
   char *strappyError;
   NSString *fontsPath;
+  int ok;
 
   if (![caCertPath isKindOfClass:[NSString class]] || ([caCertPath length] == 0U)) {
     [NSException raise:NSInvalidArgumentException
                 format:@"[StrappySession bootstrapProcessWithCACertPath:] caCertPath is required"];
   }
 
+  fontsPath = [[[NSBundle mainBundle] resourcePath]
+    stringByAppendingPathComponent:@"Fonts"];
+
   strappyError = NULL;
-  if (!strappy_client_set_cainfo([caCertPath fileSystemRepresentation],
-                                 &strappyError)) {
+  ok = strappy_session_configure_process([caCertPath fileSystemRepresentation],
+                                         [fontsPath fileSystemRepresentation],
+                                         &strappyError);
+  if (!ok) {
     NSString *message = nil;
     if (strappyError != NULL) {
       message = [NSString stringWithUTF8String:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     [NSException raise:NSInvalidArgumentException
-                format:@"%@", (message ? message : @"Could not configure CA certificate path.")];
+                format:@"%@", (message ? message : @"Could not bootstrap Strappy.")];
   }
-
-  fontsPath = [[[NSBundle mainBundle] resourcePath]
-    stringByAppendingPathComponent:@"Fonts"];
-  strappy_webview_set_font_dir([fontsPath fileSystemRepresentation]);
 }
 
 + (NSString *)systemPromptTemplatePathWithError:(NSError **)error
@@ -790,9 +745,11 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   NSString *path;
 
   resourceName =
-    [NSString stringWithUTF8String:STRAPPY_PROMPT_TEMPLATE_RESOURCE_NAME];
+    [NSString stringWithUTF8String:
+      strappy_session_prompt_template_resource_name()];
   resourceType =
-    [NSString stringWithUTF8String:STRAPPY_PROMPT_TEMPLATE_RESOURCE_TYPE];
+    [NSString stringWithUTF8String:
+      strappy_session_prompt_template_resource_type()];
   path = [[NSBundle mainBundle] pathForResource:resourceName
                                          ofType:resourceType];
   if ([path isKindOfClass:[NSString class]] && ([path length] > 0U)) {
@@ -1310,12 +1267,13 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   }
 
   strappyError = NULL;
-  ok = strappy_db_initialize([databasePath UTF8String], &strappyError);
+  ok = strappy_session_initialize_store([databasePath UTF8String],
+                                        &strappyError);
   if (!ok) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     return NO;
   }
 
@@ -1362,14 +1320,14 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   strappyError = NULL;
   searchCString = ((searchText != nil) && ([searchText length] > 0U)) ?
     [searchText UTF8String] : NULL;
-  if (!strappy_db_list_openrouter_models_matching([databasePath UTF8String],
+  if (!strappy_session_list_openrouter_models_matching([databasePath UTF8String],
                                                   searchCString,
                                                   &list,
                                                   &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     strappy_openrouter_model_record_list_destroy(&list);
     return nil;
   }
@@ -1400,13 +1358,13 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 
   strappy_openrouter_model_record_list_init(&list);
   strappyError = NULL;
-  if (!strappy_db_list_allowed_openrouter_models([databasePath UTF8String],
+  if (!strappy_session_list_allowed_openrouter_models([databasePath UTF8String],
                                                  &list,
                                                  &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     strappy_openrouter_model_record_list_destroy(&list);
     return nil;
   }
@@ -1431,13 +1389,13 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 
   modelId = NULL;
   strappyError = NULL;
-  if (!strappy_db_get_default_openrouter_model([databasePath UTF8String],
+  if (!strappy_session_get_default_openrouter_model([databasePath UTF8String],
                                                &modelId,
                                                &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     return nil;
   }
 
@@ -1445,7 +1403,7 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   if (modelId != NULL) {
     result = [NSString stringWithUTF8String:modelId];
   }
-  strappy_free_string(modelId);
+  strappy_session_free_string(modelId);
   return result;
 }
 
@@ -1476,14 +1434,14 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   }
 
   strappyError = NULL;
-  ok = strappy_db_set_default_openrouter_model([databasePath UTF8String],
+  ok = strappy_session_set_default_openrouter_model([databasePath UTF8String],
                                                [modelIdentifier UTF8String],
                                                &strappyError);
   if (!ok) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     return NO;
   }
 
@@ -1537,7 +1495,7 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   }
 
   strappyError = NULL;
-  ok = strappy_db_set_openrouter_model_allowed([databasePath UTF8String],
+  ok = strappy_session_set_openrouter_model_allowed([databasePath UTF8String],
                                                [modelIdentifier UTF8String],
                                                allowed ? 1 : 0,
                                                &strappyError);
@@ -1545,7 +1503,7 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     return NO;
   }
 
@@ -1614,8 +1572,7 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   result = [[NSMutableDictionary alloc] init];
 
   strappyError = NULL;
-  ok = strappy_model_catalog_refresh_openrouter_user_models(
-    NULL,
+  ok = strappy_session_refresh_openrouter_user_models(
     StrappySessionOptionalCString(apiEndpoint),
     StrappySessionOptionalCString(apiToken),
     [databasePath UTF8String],
@@ -1639,7 +1596,7 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
                  forKey:@"model_count"];
     }
   }
-  strappy_free_string(strappyError);
+  strappy_session_free_string(strappyError);
 
   [self performSelectorOnMainThread:@selector(openRouterModelCatalogRefreshDidFinish:)
                          withObject:result
@@ -1691,13 +1648,13 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 
   sessionId = 0;
   strappyError = NULL;
-  if (!strappy_db_create_session([databasePath UTF8String],
+  if (!strappy_session_create([databasePath UTF8String],
                                  &sessionId,
                                  &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     return nil;
   }
 
@@ -1727,11 +1684,11 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 
   strappy_session_record_list_init(&list);
   strappyError = NULL;
-  if (!strappy_db_list_sessions([databasePath UTF8String], &list, &strappyError)) {
+  if (!strappy_session_list_records([databasePath UTF8String], &list, &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     strappy_session_record_list_destroy(&list);
     return nil;
   }
@@ -1811,14 +1768,14 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 
   strappy_session_record_init(&record);
   strappyError = NULL;
-  if (!strappy_db_load_session([databasePath UTF8String],
+  if (!strappy_session_load_record([databasePath UTF8String],
                                sessionId,
                                &record,
                                &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     strappy_session_record_destroy(&record);
     return nil;
   }
@@ -1872,14 +1829,14 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   strappyError = NULL;
   sessionId = [sessionIdentifier isKindOfClass:[NSNumber class]] ?
     [sessionIdentifier longLongValue] : 0LL;
-  if (!strappy_db_list_session_messages([databasePath UTF8String],
+  if (!strappy_session_list_message_records([databasePath UTF8String],
                                         sessionId,
                                         &list,
                                         &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     strappy_session_message_record_list_destroy(&list);
     return nil;
   }
@@ -1926,8 +1883,6 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   char *strappyError;
   char *js;
   long long sessionId;
-  strappy_session_message_record record;
-  strappy_webview_message message;
   strappy_webview_labels labels;
 
   if (![event isKindOfClass:[NSDictionary class]]) {
@@ -1947,20 +1902,20 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   }
 
   if ([streamEvent isEqualToString:@"content_delta"]) {
-    return StrappySessionStringFromWebViewCString(
-      strappy_webview_append_message_text_by_key_js(
+    return StrappySessionStringFromCString(
+      strappy_session_webview_append_message_text_by_key_js(
         [messageKey UTF8String],
         [delta UTF8String]));
   }
   if ([streamEvent isEqualToString:@"reasoning_delta"]) {
-    return StrappySessionStringFromWebViewCString(
-      strappy_webview_append_reasoning_text_by_key_js(
+    return StrappySessionStringFromCString(
+      strappy_session_webview_append_reasoning_text_by_key_js(
         [messageKey UTF8String],
         [delta UTF8String]));
   }
   if ([streamEvent isEqualToString:@"content_retracted"]) {
-    return StrappySessionStringFromWebViewCString(
-      strappy_webview_move_message_text_to_reasoning_by_key_js(
+    return StrappySessionStringFromCString(
+      strappy_session_webview_move_message_text_to_reasoning_by_key_js(
         [messageKey UTF8String]));
   }
   if ([streamEvent isEqualToString:@"processing_status"]) {
@@ -1968,8 +1923,9 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
     if (![statusJSON isKindOfClass:[NSString class]]) {
       statusJSON = @"";
     }
-    return StrappySessionStringFromWebViewCString(
-      strappy_webview_set_processing_status_js([statusJSON UTF8String]));
+    return StrappySessionStringFromCString(
+      strappy_session_webview_set_processing_status_js(
+        [statusJSON UTF8String]));
   }
 
   sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
@@ -1984,35 +1940,32 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
     return @"";
   }
 
-  strappy_session_message_record_init(&record);
   strappyError = NULL;
-  if (!strappy_db_load_session_message_by_key([databasePath UTF8String],
-                                              sessionId,
-                                              [messageKey UTF8String],
-                                              &record,
-                                              &strappyError)) {
+  labels = StrappySessionWebViewLabels();
+  js = strappy_session_webview_message_update_js_for_key(
+    [databasePath UTF8String],
+    sessionId,
+    [messageKey UTF8String],
+    &labels,
+    &strappyError);
+  if (js == NULL) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
-    strappy_session_message_record_destroy(&record);
+    strappy_session_free_string(strappyError);
     return @"";
   }
 
-  labels = StrappySessionWebViewLabels();
-  StrappySessionWebViewMessageFromRecord(&record, &message);
-  js = strappy_webview_message_update_js(&message, &labels);
-  strappy_session_message_record_destroy(&record);
   if ([streamEvent isEqualToString:@"turn_finished"]) {
     NSString *clearJS;
     NSString *updateJS;
 
-    clearJS = StrappySessionStringFromWebViewCString(
-      strappy_webview_clear_processing_status_js());
-    updateJS = StrappySessionStringFromWebViewCString(js);
+    clearJS = StrappySessionStringFromCString(
+      strappy_session_webview_clear_processing_status_js());
+    updateJS = StrappySessionStringFromCString(js);
     return [clearJS stringByAppendingString:updateJS];
   }
-  return StrappySessionStringFromWebViewCString(js);
+  return StrappySessionStringFromCString(js);
 }
 
 - (BOOL)streamingEnabled
@@ -2054,14 +2007,14 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   }
 
   strappyError = NULL;
-  if (!strappy_db_update_session_streaming_enabled([databasePath UTF8String],
+  if (!strappy_session_update_streaming_enabled([databasePath UTF8String],
                                                    sessionId,
                                                    enabled ? 1 : 0,
                                                    &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     return NO;
   }
 
@@ -2125,14 +2078,14 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 
   modelId = NULL;
   strappyError = NULL;
-  if (!strappy_db_get_session_model([databasePath UTF8String],
+  if (!strappy_session_get_model([databasePath UTF8String],
                                     sessionId,
                                     &modelId,
                                     &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     return nil;
   }
 
@@ -2140,7 +2093,7 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   if (modelId != NULL) {
     result = [NSString stringWithUTF8String:modelId];
   }
-  strappy_free_string(modelId);
+  strappy_session_free_string(modelId);
   return result;
 }
 
@@ -2186,14 +2139,14 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   }
 
   strappyError = NULL;
-  if (!strappy_db_update_session_model([databasePath UTF8String],
+  if (!strappy_session_update_model([databasePath UTF8String],
                                        sessionId,
                                        [modelIdentifier UTF8String],
                                        &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     return NO;
   }
 
@@ -2232,7 +2185,6 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   NSString *systemPromptTemplatePath;
   NSString *apiEndpoint;
   NSString *apiToken;
-  char *response;
   char *strappyError;
   long long sessionId;
   strappy_session_record record;
@@ -2278,35 +2230,21 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
   apiToken = [[StrappyKeychain sharedKeychain] apiToken];
 
-  strappyError = NULL;
-  response =
-    strappy_assistant_send_prompt_for_session_and_store([prompt UTF8String],
-                                                        NULL,
-                                                        StrappySessionOptionalCString(apiEndpoint),
-                                                        StrappySessionOptionalCString(apiToken),
-                                                        [systemPromptTemplatePath fileSystemRepresentation],
-                                                        [databasePath UTF8String],
-                                                        sessionId,
-                                                        &strappyError);
-  if (response == NULL) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_free_string(strappyError);
-    return nil;
-  }
-  strappy_free_string(response);
-
   strappy_session_record_init(&record);
   strappyError = NULL;
-  if (!strappy_db_load_session([databasePath UTF8String],
-                               sessionId,
-                               &record,
-                               &strappyError)) {
+  if (!strappy_session_send_prompt_and_load(
+        [prompt UTF8String],
+        StrappySessionOptionalCString(apiEndpoint),
+        StrappySessionOptionalCString(apiToken),
+        [systemPromptTemplatePath fileSystemRepresentation],
+        [databasePath UTF8String],
+        sessionId,
+        &record,
+        &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     strappy_session_record_destroy(&record);
     return nil;
   }
@@ -2325,7 +2263,6 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   NSString *systemPromptTemplatePath;
   NSString *apiEndpoint;
   NSString *apiToken;
-  char *response;
   char *strappyError;
   long long sessionId;
   strappy_session_record record;
@@ -2378,56 +2315,29 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
   apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
   apiToken = [[StrappyKeychain sharedKeychain] apiToken];
 
-  strappyError = NULL;
-  if (streaming) {
-    response = strappy_assistant_stream_prompt_for_session_and_store(
-      [prompt UTF8String],
-      NULL,
-      StrappySessionOptionalCString(apiEndpoint),
-      StrappySessionOptionalCString(apiToken),
-      [systemPromptTemplatePath fileSystemRepresentation],
-      [databasePath UTF8String],
-      sessionId,
-      StrappySessionHandleStreamEvent,
-      &streamContext,
-      &strappyError);
-  } else {
-    response = strappy_assistant_send_prompt_for_session_and_store_with_events(
-      [prompt UTF8String],
-      NULL,
-      StrappySessionOptionalCString(apiEndpoint),
-      StrappySessionOptionalCString(apiToken),
-      [systemPromptTemplatePath fileSystemRepresentation],
-      [databasePath UTF8String],
-      sessionId,
-      StrappySessionHandleStreamEvent,
-      &streamContext,
-      &strappyError);
-  }
-
-  [streamContext.context release];
-  if (response == NULL) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_free_string(strappyError);
-    return nil;
-  }
-  strappy_free_string(response);
-
   strappy_session_record_init(&record);
   strappyError = NULL;
-  if (!strappy_db_load_session([databasePath UTF8String],
-                               sessionId,
-                               &record,
-                               &strappyError)) {
+  if (!strappy_session_submit_prompt_with_events_and_load(
+        [prompt UTF8String],
+        StrappySessionOptionalCString(apiEndpoint),
+        StrappySessionOptionalCString(apiToken),
+        [systemPromptTemplatePath fileSystemRepresentation],
+        [databasePath UTF8String],
+        sessionId,
+        streaming ? 1 : 0,
+        StrappySessionHandleStreamEvent,
+        &streamContext,
+        &record,
+        &strappyError)) {
+    [streamContext.context release];
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
-    strappy_free_string(strappyError);
+    strappy_session_free_string(strappyError);
     strappy_session_record_destroy(&record);
     return nil;
   }
+  [streamContext.context release];
 
   session = [StrappySession dictionaryFromSessionRecord:&record];
   strappy_session_record_destroy(&record);
