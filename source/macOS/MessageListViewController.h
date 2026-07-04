@@ -18,7 +18,7 @@
   PromptSendViewController *sendController_;
   id<MessageListViewControllerDelegate> delegate_;
   NSString                 *statusText_;
-  struct strappy_webview_script_batch *pendingStreamBatch_;
+  NSMutableString          *pendingStreamJavaScript_;
   NSTimer                  *streamEventFlushTimer_;
   NSUInteger                oldestRenderedMessageIndex_;
   BOOL                      sending_;

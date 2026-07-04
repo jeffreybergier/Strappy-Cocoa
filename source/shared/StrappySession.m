@@ -99,6 +99,76 @@ static void StrappySessionWebViewMessageFromRecord(
   message->is_error = record->is_error ? 1 : 0;
 }
 
+static long long StrappySessionMessageNumericIdentifier(NSDictionary *message)
+{
+  NSNumber *identifier;
+
+  identifier = [message objectForKey:@"id"];
+  if (![identifier isKindOfClass:[NSNumber class]]) {
+    return 0LL;
+  }
+  return [identifier longLongValue];
+}
+
+static void StrappySessionWebViewMessageFromDictionary(
+  NSDictionary *dictionary,
+  strappy_webview_message *message)
+{
+  NSString *role;
+  NSString *kind;
+  NSString *actor;
+  NSString *promptGroupKey;
+  NSString *messageKey;
+  NSString *targetMessageKey;
+  NSString *text;
+  NSString *reasoning;
+  NSString *metadataJSON;
+  NSString *renderStateJSON;
+  NSString *createdAt;
+  NSNumber *httpStatus;
+  NSNumber *isError;
+
+  if (message == NULL) {
+    return;
+  }
+  memset(message, 0, sizeof(*message));
+
+  if (![dictionary isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
+
+  role = [dictionary objectForKey:@"role"];
+  kind = [dictionary objectForKey:@"kind"];
+  actor = [dictionary objectForKey:@"actor"];
+  promptGroupKey = [dictionary objectForKey:@"prompt_group_key"];
+  messageKey = [dictionary objectForKey:@"message_key"];
+  targetMessageKey = [dictionary objectForKey:@"target_message_key"];
+  text = [dictionary objectForKey:@"text"];
+  reasoning = [dictionary objectForKey:@"reasoning"];
+  metadataJSON = [dictionary objectForKey:@"metadata_json"];
+  renderStateJSON = [dictionary objectForKey:@"render_state_json"];
+  createdAt = [dictionary objectForKey:@"created_at"];
+  httpStatus = [dictionary objectForKey:@"http_status"];
+  isError = [dictionary objectForKey:@"is_error"];
+
+  message->message_id = StrappySessionMessageNumericIdentifier(dictionary);
+  message->http_status =
+    [httpStatus isKindOfClass:[NSNumber class]] ? [httpStatus longValue] : 0L;
+  message->role = StrappySessionCString(role);
+  message->kind = StrappySessionCString(kind);
+  message->actor = StrappySessionCString(actor);
+  message->prompt_group_key = StrappySessionCString(promptGroupKey);
+  message->message_key = StrappySessionCString(messageKey);
+  message->target_message_key = StrappySessionCString(targetMessageKey);
+  message->text = StrappySessionCString(text);
+  message->reasoning = StrappySessionCString(reasoning);
+  message->metadata_json = StrappySessionCString(metadataJSON);
+  message->render_state_json = StrappySessionCString(renderStateJSON);
+  message->created_at = StrappySessionCString(createdAt);
+  message->is_error =
+    [isError isKindOfClass:[NSNumber class]] ? ([isError boolValue] ? 1 : 0) : 0;
+}
+
 @interface StrappySession ()
 + (NSMutableDictionary *)inFlightSessions;
 + (void)registerInFlightSession:(StrappySession *)session;
@@ -165,6 +235,97 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 }
 
 @implementation StrappySession
+
++ (NSString *)webViewMessageHTMLForMessage:(NSDictionary *)message
+                         elementIdentifier:(NSString *)elementIdentifier
+                                      state:(NSString *)state
+                                 statusHTML:(NSString *)statusHTML
+{
+  strappy_webview_labels labels;
+  strappy_webview_message webMessage;
+
+  labels = StrappySessionWebViewLabels();
+  StrappySessionWebViewMessageFromDictionary(message, &webMessage);
+  webMessage.element_id = StrappySessionCString(elementIdentifier);
+  return StrappySessionStringFromWebViewCString(
+    strappy_webview_message_html(&webMessage,
+                                 &labels,
+                                 StrappySessionCString(state),
+                                 StrappySessionCString(statusHTML)));
+}
+
++ (NSString *)webViewMessagesHTMLForMessages:(NSArray *)messages
+                                  startIndex:(NSUInteger)start
+                                    endIndex:(NSUInteger)end
+{
+  NSMutableString *html;
+  NSUInteger index;
+
+  html = [NSMutableString string];
+  if (end > [messages count]) {
+    end = [messages count];
+  }
+  for (index = start; index < end; index++) {
+    NSDictionary *message;
+
+    message = [messages objectAtIndex:index];
+    if (![message isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    [html appendString:
+      [self webViewMessageHTMLForMessage:message
+                       elementIdentifier:nil
+                                    state:nil
+                               statusHTML:nil]];
+  }
+  return html;
+}
+
++ (NSString *)webViewPrependMessagesJavaScriptForHTML:(NSString *)messagesHTML
+                                             hasMore:(BOOL)hasMore
+{
+  return StrappySessionStringFromWebViewCString(
+    strappy_webview_prepend_messages_js(StrappySessionCString(messagesHTML),
+                                        hasMore ? 1 : 0));
+}
+
++ (NSString *)webViewBatchedJavaScriptForJavaScript:(NSString *)javaScript
+{
+  strappy_webview_script_batch *batch;
+  char *batchCString;
+
+  if (![javaScript isKindOfClass:[NSString class]] ||
+      ([javaScript length] == 0U)) {
+    return @"";
+  }
+
+  batch = strappy_webview_script_batch_create();
+  if (batch == NULL) {
+    return @"";
+  }
+  if (!strappy_webview_script_batch_append_js(batch, [javaScript UTF8String])) {
+    strappy_webview_script_batch_destroy(batch);
+    return @"";
+  }
+
+  batchCString = strappy_webview_script_batch_finish_js(batch);
+  strappy_webview_script_batch_destroy(batch);
+  return StrappySessionStringFromWebViewCString(batchCString);
+}
+
++ (NSString *)webViewMessagesPageHTMLForMessagesHTML:(NSString *)messagesHTML
+                                           emptyText:(NSString *)emptyText
+                                         hasMessages:(BOOL)hasMessages
+                                             hasMore:(BOOL)hasMore
+{
+  return StrappySessionStringFromWebViewCString(
+    strappy_webview_messages_page_html(
+      StrappySessionCString(messagesHTML),
+      StrappySessionCString(emptyText),
+      hasMessages ? 1 : 0,
+      hasMore ? 1 : 0,
+      StrappySessionCString(NSLocalizedString(@"Show Earlier Messages", nil))));
+}
 
 - (int)handleStreamEvent:(const strappy_chat_stream_event *)event
                  context:(NSDictionary *)contextDictionary

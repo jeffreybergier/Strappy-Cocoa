@@ -1,8 +1,5 @@
 #import "MessageListViewController.h"
 #import "StrappySession.h"
-#import "strappy_webview.h"
-
-#include <string.h>
 
 static const NSUInteger kStrappyInitialMessageLimit = 80U;
 static const NSUInteger kStrappyMessagePageSize = 40U;
@@ -79,175 +76,6 @@ static BOOL StrappyEnsureDirectory(NSString *path)
   }
 
   return NO;
-}
-
-static long long StrappyMessageNumericIdentifier(NSDictionary *message)
-{
-  NSNumber *identifier;
-
-  identifier = [message objectForKey:@"id"];
-  if (![identifier isKindOfClass:[NSNumber class]]) {
-    return 0LL;
-  }
-  return [identifier longLongValue];
-}
-
-static const char *StrappyCString(NSString *string)
-{
-  if (![string isKindOfClass:[NSString class]]) {
-    return "";
-  }
-  return [string UTF8String];
-}
-
-static NSString *StrappyStringFromWebViewCString(char *value)
-{
-  NSString *string;
-
-  if (value == NULL) {
-    return @"";
-  }
-  string = [NSString stringWithUTF8String:value];
-  strappy_webview_free(value);
-  return (string != nil) ? string : @"";
-}
-
-static strappy_webview_labels StrappyWebViewLabels(void)
-{
-  strappy_webview_labels labels;
-
-  labels.agent = StrappyCString(NSLocalizedString(@"Agent", nil));
-  labels.you = StrappyCString(NSLocalizedString(@"You", nil));
-  labels.harness = StrappyCString(NSLocalizedString(@"Harness", nil));
-  labels.thinking = StrappyCString(NSLocalizedString(@"Thinking", nil));
-  labels.request_metadata =
-    StrappyCString(NSLocalizedString(@"Request Metadata", nil));
-  labels.tool_call = StrappyCString(NSLocalizedString(@"Tool Call", nil));
-  labels.tool_result = StrappyCString(NSLocalizedString(@"Tool Result", nil));
-  labels.retry = StrappyCString(NSLocalizedString(@"Retry", nil));
-  return labels;
-}
-
-static void StrappyWebViewMessageFromDictionary(
-  NSDictionary *dictionary,
-  strappy_webview_message *message)
-{
-  NSString *role;
-  NSString *kind;
-  NSString *actor;
-  NSString *promptGroupKey;
-  NSString *messageKey;
-  NSString *targetMessageKey;
-  NSString *text;
-  NSString *reasoning;
-  NSString *metadataJSON;
-  NSString *renderStateJSON;
-  NSString *createdAt;
-  NSNumber *httpStatus;
-  NSNumber *isError;
-
-  if (message == NULL) {
-    return;
-  }
-  memset(message, 0, sizeof(*message));
-
-  if (![dictionary isKindOfClass:[NSDictionary class]]) {
-    return;
-  }
-
-  role = [dictionary objectForKey:@"role"];
-  kind = [dictionary objectForKey:@"kind"];
-  actor = [dictionary objectForKey:@"actor"];
-  promptGroupKey = [dictionary objectForKey:@"prompt_group_key"];
-  messageKey = [dictionary objectForKey:@"message_key"];
-  targetMessageKey = [dictionary objectForKey:@"target_message_key"];
-  text = [dictionary objectForKey:@"text"];
-  reasoning = [dictionary objectForKey:@"reasoning"];
-  metadataJSON = [dictionary objectForKey:@"metadata_json"];
-  renderStateJSON = [dictionary objectForKey:@"render_state_json"];
-  createdAt = [dictionary objectForKey:@"created_at"];
-  httpStatus = [dictionary objectForKey:@"http_status"];
-  isError = [dictionary objectForKey:@"is_error"];
-
-  message->message_id = StrappyMessageNumericIdentifier(dictionary);
-  message->http_status =
-    [httpStatus isKindOfClass:[NSNumber class]] ? [httpStatus longValue] : 0L;
-  message->role = StrappyCString(role);
-  message->kind = StrappyCString(kind);
-  message->actor = StrappyCString(actor);
-  message->prompt_group_key = StrappyCString(promptGroupKey);
-  message->message_key = StrappyCString(messageKey);
-  message->target_message_key = StrappyCString(targetMessageKey);
-  message->text = StrappyCString(text);
-  message->reasoning = StrappyCString(reasoning);
-  message->metadata_json = StrappyCString(metadataJSON);
-  message->render_state_json = StrappyCString(renderStateJSON);
-  message->created_at = StrappyCString(createdAt);
-  message->is_error =
-    [isError isKindOfClass:[NSNumber class]] ? ([isError boolValue] ? 1 : 0) : 0;
-}
-
-static NSString *StrappyMessageHTML(NSDictionary *message,
-                                    NSString *elementIdentifier,
-                                    NSString *state,
-                                    NSString *statusHTML)
-{
-  strappy_webview_labels labels;
-  strappy_webview_message webMessage;
-
-  labels = StrappyWebViewLabels();
-  StrappyWebViewMessageFromDictionary(message, &webMessage);
-  webMessage.element_id = StrappyCString(elementIdentifier);
-  return StrappyStringFromWebViewCString(
-    strappy_webview_message_html(&webMessage,
-                                 &labels,
-                                 StrappyCString(state),
-                                 StrappyCString(statusHTML)));
-}
-
-static NSString *StrappyMessagesHTMLForRange(NSArray *messages,
-                                             NSUInteger start,
-                                             NSUInteger end)
-{
-  NSMutableString *html;
-  NSUInteger index;
-
-  html = [NSMutableString string];
-  if (end > [messages count]) {
-    end = [messages count];
-  }
-  for (index = start; index < end; index++) {
-    NSDictionary *message;
-
-    message = [messages objectAtIndex:index];
-    if (![message isKindOfClass:[NSDictionary class]]) {
-      continue;
-    }
-    [html appendString:StrappyMessageHTML(message, nil, nil, nil)];
-  }
-  return html;
-}
-
-static NSString *StrappyPrependMessagesJavaScript(NSString *messagesHTML,
-                                                  BOOL hasMore)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_prepend_messages_js(StrappyCString(messagesHTML),
-                                        hasMore ? 1 : 0));
-}
-
-static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
-                                         NSString *emptyText,
-                                         BOOL hasMessages,
-                                         BOOL hasMore)
-{
-  return StrappyStringFromWebViewCString(
-    strappy_webview_messages_page_html(
-      StrappyCString(messagesHTML),
-      StrappyCString(emptyText),
-      hasMessages ? 1 : 0,
-      hasMore ? 1 : 0,
-      StrappyCString(NSLocalizedString(@"Show Earlier Messages", nil))));
 }
 
 @interface MessageListViewController ()
@@ -678,13 +506,16 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
   messagesHTML = [NSMutableString string];
   if (count > 0U) {
-    [messagesHTML appendString:StrappyMessagesHTMLForRange(messages, start, count)];
+    [messagesHTML appendString:
+      [StrappySession webViewMessagesHTMLForMessages:messages
+                                          startIndex:start
+                                            endIndex:count]];
   }
 
-  return StrappyMessagesPageHTML(messagesHTML,
-                                 emptyText,
-                                 hasMessages,
-                                 (start > 0U) ? YES : NO);
+  return [StrappySession webViewMessagesPageHTMLForMessagesHTML:messagesHTML
+                                                      emptyText:emptyText
+                                                    hasMessages:hasMessages
+                                                        hasMore:(start > 0U) ? YES : NO];
 }
 
 - (void)promptSendViewController:(PromptSendViewController *)controller
@@ -891,19 +722,10 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     return;
   }
 
-  if (pendingStreamBatch_ == NULL) {
-    pendingStreamBatch_ = strappy_webview_script_batch_create();
-    if (pendingStreamBatch_ == NULL) {
-      return;
-    }
+  if (pendingStreamJavaScript_ == nil) {
+    pendingStreamJavaScript_ = [[NSMutableString alloc] init];
   }
-
-  if (!strappy_webview_script_batch_append_js(pendingStreamBatch_,
-                                              [js UTF8String])) {
-    strappy_webview_script_batch_destroy(pendingStreamBatch_);
-    pendingStreamBatch_ = NULL;
-    return;
-  }
+  [pendingStreamJavaScript_ appendString:js];
 
   [self schedulePendingStreamEventFlush];
 }
@@ -934,11 +756,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
 
 - (void)flushPendingStreamEvents
 {
-  strappy_webview_script_batch *batch;
   NSString *batchJS;
-  char *batchCString;
 
-  if (pendingStreamBatch_ == NULL) {
+  if ([pendingStreamJavaScript_ length] == 0U) {
     return;
   }
 
@@ -948,11 +768,10 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     streamEventFlushTimer_ = nil;
   }
 
-  batch = pendingStreamBatch_;
-  pendingStreamBatch_ = NULL;
-  batchCString = strappy_webview_script_batch_finish_js(batch);
-  batchJS = StrappyStringFromWebViewCString(batchCString);
-  strappy_webview_script_batch_destroy(batch);
+  batchJS =
+    [StrappySession webViewBatchedJavaScriptForJavaScript:pendingStreamJavaScript_];
+  [pendingStreamJavaScript_ release];
+  pendingStreamJavaScript_ = nil;
 
   if ([batchJS length] > 0U) {
     [self pushJavaScript:batchJS];
@@ -966,9 +785,9 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     [streamEventFlushTimer_ release];
     streamEventFlushTimer_ = nil;
   }
-  if (pendingStreamBatch_ != NULL) {
-    strappy_webview_script_batch_destroy(pendingStreamBatch_);
-    pendingStreamBatch_ = NULL;
+  if (pendingStreamJavaScript_ != nil) {
+    [pendingStreamJavaScript_ release];
+    pendingStreamJavaScript_ = nil;
   }
 }
 
@@ -1005,10 +824,13 @@ static NSString *StrappyMessagesPageHTML(NSString *messagesHTML,
     start = 0U;
   }
 
-  html = StrappyMessagesHTMLForRange(messages, start, end);
+  html = [StrappySession webViewMessagesHTMLForMessages:messages
+                                             startIndex:start
+                                               endIndex:end];
   oldestRenderedMessageIndex_ = start;
 
-  js = StrappyPrependMessagesJavaScript(html, (start > 0U) ? YES : NO);
+  js = [StrappySession webViewPrependMessagesJavaScriptForHTML:html
+                                                       hasMore:(start > 0U) ? YES : NO];
   [self flushPendingStreamEvents];
   [self pushJavaScript:js];
 }

@@ -44,6 +44,20 @@ extern NSString * const StrappySessionModelCatalogDidChangeNotification;
                 forModelIdentifier:(NSString *)modelIdentifier
                              error:(NSError **)error;
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error;
++ (NSString *)webViewMessageHTMLForMessage:(NSDictionary *)message
+                         elementIdentifier:(NSString *)elementIdentifier
+                                      state:(NSString *)state
+                                 statusHTML:(NSString *)statusHTML;
++ (NSString *)webViewMessagesHTMLForMessages:(NSArray *)messages
+                                  startIndex:(NSUInteger)start
+                                    endIndex:(NSUInteger)end;
++ (NSString *)webViewPrependMessagesJavaScriptForHTML:(NSString *)messagesHTML
+                                             hasMore:(BOOL)hasMore;
++ (NSString *)webViewBatchedJavaScriptForJavaScript:(NSString *)javaScript;
++ (NSString *)webViewMessagesPageHTMLForMessagesHTML:(NSString *)messagesHTML
+                                           emptyText:(NSString *)emptyText
+                                         hasMessages:(BOOL)hasMessages
+                                             hasMore:(BOOL)hasMore;
 
 - (id)initWithSessionIdentifier:(NSNumber *)sessionIdentifier
                         summary:(NSDictionary *)summary;
