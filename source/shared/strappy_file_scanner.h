@@ -54,6 +54,16 @@ void strappy_file_scanner_record_list_destroy(strappy_file_scanner_record_list *
 int strappy_file_scanner_scan(const strappy_file_scanner_options *options,
                               strappy_file_scanner_record_list *list,
                               char **error_out);
+int strappy_file_scanner_save_discovered_databases(
+  const char *db_path,
+  const strappy_file_scanner_record_list *list,
+  const char *scan_root,
+  char **error_out);
+int strappy_file_scanner_scan_and_save_discovered_databases(
+  const char *db_path,
+  const strappy_file_scanner_options *options,
+  strappy_file_scanner_record_list *list,
+  char **error_out);
 
 #ifdef __cplusplus
 }

@@ -1,6 +1,7 @@
 #include "strappy_file_scanner.h"
 
 #include "strappy_core.h"
+#include "strappy_db.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -386,6 +387,99 @@ int strappy_file_scanner_scan(const strappy_file_scanner_options *options,
     strappy_set_formatted_error(error_out,
                                 "Filesystem scan failed: %s",
                                 strerror(fts_errno));
+    return 0;
+  }
+
+  return 1;
+}
+
+static void strappy_file_scanner_discovered_database_input_from_record(
+  strappy_discovered_database_input *input,
+  const strappy_file_scanner_record *record,
+  const char *scan_root)
+{
+  input->path = record->path;
+  input->size = record->size;
+  input->modified_at = record->modified_at;
+  input->device = record->device;
+  input->inode = record->inode;
+  input->is_valid_sqlite = record->is_valid_sqlite;
+  input->validation_error = record->validation_error;
+  input->scan_root = scan_root;
+}
+
+int strappy_file_scanner_save_discovered_databases(
+  const char *db_path,
+  const strappy_file_scanner_record_list *list,
+  const char *scan_root,
+  char **error_out)
+{
+  strappy_discovered_database_input *inputs;
+  size_t index;
+  int ok;
+
+  if (list == NULL) {
+    strappy_set_error(error_out, "Scanner records are missing.");
+    return 0;
+  }
+  if ((list->records == NULL) && (list->count > 0U)) {
+    strappy_set_error(error_out, "Scanner record storage is missing.");
+    return 0;
+  }
+
+  inputs = NULL;
+  if (list->count > 0U) {
+    inputs = (strappy_discovered_database_input *)calloc(
+      list->count,
+      sizeof(strappy_discovered_database_input));
+    if (inputs == NULL) {
+      strappy_set_error(error_out,
+                        "Could not allocate discovered database records.");
+      return 0;
+    }
+  }
+
+  for (index = 0U; index < list->count; index++) {
+    strappy_file_scanner_discovered_database_input_from_record(
+      &inputs[index],
+      &list->records[index],
+      scan_root);
+  }
+
+  ok = strappy_db_save_discovered_databases(db_path,
+                                            inputs,
+                                            list->count,
+                                            error_out);
+  free(inputs);
+  return ok;
+}
+
+int strappy_file_scanner_scan_and_save_discovered_databases(
+  const char *db_path,
+  const strappy_file_scanner_options *options,
+  strappy_file_scanner_record_list *list,
+  char **error_out)
+{
+  const char *scan_root;
+
+  if ((options == NULL) || (list == NULL)) {
+    strappy_set_error(error_out, "Scanner catalog request is incomplete.");
+    return 0;
+  }
+
+  if (!strappy_file_scanner_scan(options, list, error_out)) {
+    return 0;
+  }
+
+  scan_root = options->root_path;
+  if ((scan_root != NULL) && (scan_root[0] == '\0')) {
+    scan_root = NULL;
+  }
+
+  if (!strappy_file_scanner_save_discovered_databases(db_path,
+                                                      list,
+                                                      scan_root,
+                                                      error_out)) {
     return 0;
   }
 

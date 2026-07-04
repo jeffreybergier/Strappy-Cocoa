@@ -5,7 +5,6 @@
 #import "strappy_db.h"
 #import "strappy_file_scanner.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 @implementation FileScanner
@@ -196,140 +195,6 @@
   return dictionary;
 }
 
-+ (BOOL)saveDatabaseRowsToCatalog:(NSArray *)rows
-                         scanRoot:(NSString *)rootPath
-                            error:(NSError **)error
-{
-  NSString *databasePath;
-  const char *scanRootCString;
-  strappy_discovered_database_input *inputs;
-  NSUInteger rowCount;
-  NSUInteger rowIndex;
-  NSUInteger inputCount;
-  char *strappyError;
-  int ok;
-
-  if (![rows isKindOfClass:[NSArray class]]) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Database scan rows are missing.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"FileScannerErrorDomain"
-                                   code:5
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  if (![StrappySession initializeSessionStoreWithError:error]) {
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  scanRootCString = NULL;
-  if ([rootPath isKindOfClass:[NSString class]] && ([rootPath length] > 0U)) {
-    scanRootCString = [rootPath UTF8String];
-  }
-
-  inputs = NULL;
-  inputCount = 0U;
-  rowCount = [rows count];
-  if (rowCount > 0U) {
-    inputs = (strappy_discovered_database_input *)calloc(
-      rowCount,
-      sizeof(strappy_discovered_database_input));
-    if (inputs == NULL) {
-      if (error != nil) {
-        NSDictionary *userInfo =
-          [NSDictionary dictionaryWithObject:NSLocalizedString(@"Could not allocate database catalog rows.", nil)
-                                      forKey:NSLocalizedDescriptionKey];
-        *error = [NSError errorWithDomain:@"FileScannerErrorDomain"
-                                     code:3
-                                 userInfo:userInfo];
-      }
-      return NO;
-    }
-  }
-
-  for (rowIndex = 0U; rowIndex < rowCount; rowIndex++) {
-    NSDictionary *row;
-    NSString *path;
-    NSString *validationError;
-    NSNumber *size;
-    NSNumber *modifiedAt;
-    NSNumber *device;
-    NSNumber *inode;
-    NSNumber *isValidSQLite;
-    const char *pathCString;
-
-    row = [rows objectAtIndex:rowIndex];
-    if (![row isKindOfClass:[NSDictionary class]]) {
-      continue;
-    }
-
-    path = [row objectForKey:@"path"];
-    if (![path isKindOfClass:[NSString class]] || ([path length] == 0U)) {
-      continue;
-    }
-
-    pathCString = [path UTF8String];
-    if (pathCString == NULL) {
-      free(inputs);
-      if (error != nil) {
-        NSDictionary *userInfo =
-          [NSDictionary dictionaryWithObject:NSLocalizedString(@"Could not encode discovered database path.", nil)
-                                      forKey:NSLocalizedDescriptionKey];
-        *error = [NSError errorWithDomain:@"FileScannerErrorDomain"
-                                     code:4
-                                 userInfo:userInfo];
-      }
-      return NO;
-    }
-
-    size = [row objectForKey:@"size"];
-    modifiedAt = [row objectForKey:@"modified_at"];
-    device = [row objectForKey:@"device"];
-    inode = [row objectForKey:@"inode"];
-    isValidSQLite = [row objectForKey:@"is_valid_sqlite"];
-    validationError = [row objectForKey:@"validation_error"];
-
-    inputs[inputCount].path = pathCString;
-    inputs[inputCount].size =
-      ([size isKindOfClass:[NSNumber class]] ? [size longLongValue] : 0LL);
-    inputs[inputCount].modified_at =
-      ([modifiedAt isKindOfClass:[NSNumber class]] ? [modifiedAt longLongValue] : 0LL);
-    inputs[inputCount].device =
-      ([device isKindOfClass:[NSNumber class]] ? [device unsignedLongLongValue] : 0ULL);
-    inputs[inputCount].inode =
-      ([inode isKindOfClass:[NSNumber class]] ? [inode unsignedLongLongValue] : 0ULL);
-    inputs[inputCount].is_valid_sqlite =
-      ([isValidSQLite isKindOfClass:[NSNumber class]] &&
-       [isValidSQLite boolValue]) ? 1 : 0;
-    if ([validationError isKindOfClass:[NSString class]] &&
-        ([validationError length] > 0U)) {
-      inputs[inputCount].validation_error = [validationError UTF8String];
-    }
-    inputs[inputCount].scan_root = scanRootCString;
-    inputCount++;
-  }
-
-  strappyError = NULL;
-  ok = strappy_db_save_discovered_databases([databasePath UTF8String],
-                                            inputs,
-                                            inputCount,
-                                            &strappyError);
-  free(inputs);
-  if (!ok) {
-    if (error != nil) {
-      *error = [FileScanner errorFromCString:strappyError];
-    }
-    strappy_free_string(strappyError);
-    return NO;
-  }
-
-  return YES;
-}
-
 - (NSArray *)scanHomeDirectoryForSQLiteDatabasesWithError:(NSError **)error
 {
   NSString *homeDirectory;
@@ -391,20 +256,48 @@
 - (NSArray *)scanDirectoryForSQLiteDatabasesAtPath:(NSString *)path
                    savingResultsToCatalogWithError:(NSError **)error
 {
-  NSArray *rows;
+  NSString *databasePath;
+  strappy_file_scanner_options options;
+  strappy_file_scanner_record_list list;
+  char *strappyError;
 
-  rows = [self scanDirectoryForSQLiteDatabasesAtPath:path
-                                               error:error];
-  if (rows == nil) {
+  if (![path isKindOfClass:[NSString class]] || ([path length] == 0U)) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Scan path is empty.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"FileScannerErrorDomain"
+                                   code:2
+                               userInfo:userInfo];
+    }
     return nil;
   }
 
-  if (![FileScanner saveDatabaseRowsToCatalog:rows
-                                     scanRoot:path
-                                        error:error]) {
+  if (![StrappySession initializeSessionStoreWithError:error]) {
     return nil;
   }
 
+  databasePath = [StrappySession sessionsDatabasePath];
+  strappy_file_scanner_options_init(&options);
+  options.root_path = [path fileSystemRepresentation];
+  options.validate_candidates = 1;
+
+  strappy_file_scanner_record_list_init(&list);
+  strappyError = NULL;
+  if (!strappy_file_scanner_scan_and_save_discovered_databases(
+        [databasePath UTF8String],
+        &options,
+        &list,
+        &strappyError)) {
+    if (error != nil) {
+      *error = [FileScanner errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    strappy_file_scanner_record_list_destroy(&list);
+    return nil;
+  }
+
+  strappy_file_scanner_record_list_destroy(&list);
   return [self catalogedSQLiteDatabasesWithError:error];
 }
 
