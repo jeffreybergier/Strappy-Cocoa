@@ -1,6 +1,7 @@
 # Altivec Intelligence - Strappy (iPhone)
 APP_NAME = Strappy
-SOURCES = main.m AppDelegate.m XPUIKit.m
+SOURCES = main.m AppDelegate.m StrappyRootCoordinator.m \
+          SessionListViewController.m XPUIKit.m
 INFO_PLIST = Info.plist
 
 SHARED_DIR = ../shared
@@ -27,8 +28,19 @@ EXTRA_SOURCES = XPFoundation.m XPKeychain.m StrappyKeychain.m StrappySession.m F
 PHONE_SOURCE_FLAGS = -fobjc-arc
 PHONE_EXTRA_SOURCE_FLAGS = -Wno-conversion -Wno-sign-conversion -Wno-float-conversion -Wno-strict-prototypes -Wno-newline-eof
 LIBS_IPHONE = -framework Security
+PHONE_LDID_SIGN ?= 1
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
 EXTRA_BUNDLE_STEPS = @set -e; $(MAKE) -f Makefile $(FONTAWESOME_GENERATED); echo "  > copying prompt guidance resources"; for resource in $(GUIDANCE_RESOURCES); do cp "$$resource" "$@/"; done
+
+DEB_PACKAGE_ID ?= com.altivecintelligence.strappy
+DEB_VERSION ?= 0.1.0
+DEB_ARCH ?= iphoneos-arm
+DEB_SECTION ?= Applications
+DEB_PRIORITY ?= optional
+DEB_MAINTAINER ?= Altivec Intelligence <support@altivecintelligence.com>
+DEB_DESCRIPTION ?= OpenRouter assistant for jailbroken iOS devices.
+DEB_STAGE = $(INT_DIR)/deb
+PHONE_DEB = $(BUILD_DIR)/$(APP_NAME).deb
 
 $(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
 	python3 $(FONTAWESOME_GENERATOR) --font-dir "$(FONTAWESOME_FONT_DIR)" --webview-map "$(FONTAWESOME_WEBVIEW_MAP)"
@@ -37,3 +49,37 @@ VALIDATE_PATHS = . $(SHARED_DIR)
 
 # Import common Phone build engine.
 include /altivec/altivec_common_phone.mk
+
+.DEFAULT_GOAL := deb
+
+deb: validate
+	@echo "--- Building Phone Debian Package ($(OPT_FLAGS)) ---"
+	@$(MAKE) --no-print-directory build-release/$(APP_NAME).deb BUILD_DIR=build-release OPT_FLAGS=-O3
+
+debug-deb: validate
+	@echo "--- Building Phone Debug Debian Package (-O0) ---"
+	@$(MAKE) --no-print-directory build-debug/$(APP_NAME).deb BUILD_DIR=build-debug OPT_FLAGS=-O0
+
+$(PHONE_DEB): $(APP_BUNDLE)
+	@echo " [5/5] Packaging Debian archive..."
+	@rm -rf "$(DEB_STAGE)"
+	@mkdir -p "$(DEB_STAGE)/DEBIAN" "$(DEB_STAGE)/Applications"
+	@cp -R "$(APP_BUNDLE)" "$(DEB_STAGE)/Applications/"
+	@installed_size=$$(du -sk "$(DEB_STAGE)/Applications/$(APP_NAME).app" | awk '{print $$1}'); \
+	{ \
+	  echo "Package: $(DEB_PACKAGE_ID)"; \
+	  echo "Name: $(APP_NAME)"; \
+	  echo "Version: $(DEB_VERSION)"; \
+	  echo "Architecture: $(DEB_ARCH)"; \
+	  echo "Section: $(DEB_SECTION)"; \
+	  echo "Priority: $(DEB_PRIORITY)"; \
+	  echo "Maintainer: $(DEB_MAINTAINER)"; \
+	  echo "Installed-Size: $$installed_size"; \
+	  echo "Description: $(DEB_DESCRIPTION)"; \
+	} > "$(DEB_STAGE)/DEBIAN/control"
+	@find "$(DEB_STAGE)" -type d -exec chmod 0755 {} \;
+	@find "$(DEB_STAGE)" -type f -exec chmod 0644 {} \;
+	@chmod 0755 "$(DEB_STAGE)/Applications/$(APP_NAME).app/$(APP_NAME)"
+	@fakeroot sh -c 'chown -R 0:0 "$$1" && dpkg-deb --build "$$1" "$$2"' sh "$(DEB_STAGE)" "$@"
+
+.PHONY: deb debug-deb
