@@ -59,9 +59,9 @@ static int harness_check_page_scripts(void)
 
   ok = harness_expect_contains(page_html, "@font-face") &&
        harness_expect_contains(page_html,
-                               "font:13px -apple-system,Helvetica,Arial,sans-serif;") &&
+                               "font:13px/1.3 -apple-system,Helvetica,Arial,sans-serif;") &&
        harness_expect_contains(page_html,
-                               ".tool-panel{font:12px -apple-system,Helvetica,Arial,sans-serif;") &&
+                               ".tool-panel{line-height:1.3;") &&
        harness_expect_contains(page_html, "function faIconHTML") &&
        harness_expect_contains(page_html, "\"heart\":'F004'") &&
        harness_expect_contains(page_html, "[fa(?::(solid|regular|brands))?") &&
@@ -79,12 +79,12 @@ static int harness_check_page_scripts(void)
                                "var strappyUpdateInterval=300;"
                                "var strappyStatusInterval=1000;") &&
        harness_expect_contains(page_html, "function scrollBottomNow") &&
-       harness_expect_contains(page_html, ".page{padding:18px 10px;}") &&
+       harness_expect_contains(page_html, ".page{padding:16px 10px;}") &&
        harness_expect_contains(page_html, ".processing-autoscroll{position:absolute") &&
        harness_expect_contains(page_html, ".processing-autoscroll-on") &&
        harness_expect_contains(page_html,
                                ".processing-status-text{display:block;"
-                               "line-height:32px;") &&
+                               "white-space:nowrap;") &&
        harness_expect_contains(page_html,
                                "#tool-sources,.tool-source-bin,.row.tool_call,"
                                ".row.tool{display:none;}") &&
