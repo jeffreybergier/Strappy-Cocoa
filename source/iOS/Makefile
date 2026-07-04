@@ -39,6 +39,8 @@ DEB_SECTION ?= Applications
 DEB_PRIORITY ?= optional
 DEB_MAINTAINER ?= Altivec Intelligence <support@altivecintelligence.com>
 DEB_DESCRIPTION ?= OpenRouter assistant for jailbroken iOS devices.
+DEB_COMPRESSION ?= gzip
+DEB_APP_PROCESS ?= $(APP_NAME)
 DEB_STAGE = $(INT_DIR)/deb
 PHONE_DEB = $(BUILD_DIR)/$(APP_NAME).deb
 
@@ -77,9 +79,56 @@ $(PHONE_DEB): $(APP_BUNDLE)
 	  echo "Installed-Size: $$installed_size"; \
 	  echo "Description: $(DEB_DESCRIPTION)"; \
 	} > "$(DEB_STAGE)/DEBIAN/control"
+	@{ \
+	  echo '#!/bin/sh'; \
+	  echo 'set -e'; \
+	  echo ''; \
+	  echo 'case "$$1" in'; \
+	  echo '  install|upgrade)'; \
+	  echo '    if command -v killall >/dev/null 2>&1; then'; \
+	  echo '      killall $(DEB_APP_PROCESS) >/dev/null 2>&1 || true'; \
+	  echo '      sleep 1'; \
+	  echo '      killall -9 $(DEB_APP_PROCESS) >/dev/null 2>&1 || true'; \
+	  echo '    fi'; \
+	  echo '    ;;'; \
+	  echo 'esac'; \
+	  echo ''; \
+	  echo 'exit 0'; \
+	} > "$(DEB_STAGE)/DEBIAN/preinst"
+	@{ \
+	  echo '#!/bin/sh'; \
+	  echo 'set -e'; \
+	  echo ''; \
+	  echo 'case "$$1" in'; \
+	  echo '  remove|upgrade|deconfigure)'; \
+	  echo '    if command -v killall >/dev/null 2>&1; then'; \
+	  echo '      killall $(DEB_APP_PROCESS) >/dev/null 2>&1 || true'; \
+	  echo '      sleep 1'; \
+	  echo '      killall -9 $(DEB_APP_PROCESS) >/dev/null 2>&1 || true'; \
+	  echo '    fi'; \
+	  echo '    ;;'; \
+	  echo 'esac'; \
+	  echo ''; \
+	  echo 'exit 0'; \
+	} > "$(DEB_STAGE)/DEBIAN/prerm"
+	@{ \
+	  echo '#!/bin/sh'; \
+	  echo 'set -e'; \
+	  echo ''; \
+	  echo 'case "$$1" in'; \
+	  echo '  configure)'; \
+	  echo '    if command -v uicache >/dev/null 2>&1; then'; \
+	  echo '      su mobile -c uicache >/dev/null 2>&1 || uicache >/dev/null 2>&1 || true'; \
+	  echo '    fi'; \
+	  echo '    ;;'; \
+	  echo 'esac'; \
+	  echo ''; \
+	  echo 'exit 0'; \
+	} > "$(DEB_STAGE)/DEBIAN/postinst"
 	@find "$(DEB_STAGE)" -type d -exec chmod 0755 {} \;
 	@find "$(DEB_STAGE)" -type f -exec chmod 0644 {} \;
+	@chmod 0755 "$(DEB_STAGE)/DEBIAN/preinst" "$(DEB_STAGE)/DEBIAN/prerm" "$(DEB_STAGE)/DEBIAN/postinst"
 	@chmod 0755 "$(DEB_STAGE)/Applications/$(APP_NAME).app/$(APP_NAME)"
-	@fakeroot sh -c 'chown -R 0:0 "$$1" && dpkg-deb --build "$$1" "$$2"' sh "$(DEB_STAGE)" "$@"
+	@fakeroot sh -c 'chown -R 0:0 "$$1" && dpkg-deb -Z"$$3" --build "$$1" "$$2"' sh "$(DEB_STAGE)" "$@" "$(DEB_COMPRESSION)"
 
 .PHONY: deb debug-deb
