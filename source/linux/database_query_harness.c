@@ -47,6 +47,26 @@ static int harness_join_path(char *output,
   return ((written > 0) && ((size_t)written < output_size)) ? 1 : 0;
 }
 
+static void harness_unlink_sqlite_files(const char *database_path)
+{
+  char sidecar_path[1400];
+  int written;
+
+  if ((database_path == NULL) || (database_path[0] == '\0')) {
+    return;
+  }
+
+  unlink(database_path);
+  written = snprintf(sidecar_path, sizeof(sidecar_path), "%s-wal", database_path);
+  if ((written > 0) && ((size_t)written < sizeof(sidecar_path))) {
+    unlink(sidecar_path);
+  }
+  written = snprintf(sidecar_path, sizeof(sidecar_path), "%s-shm", database_path);
+  if ((written > 0) && ((size_t)written < sizeof(sidecar_path))) {
+    unlink(sidecar_path);
+  }
+}
+
 static void harness_context_init(harness_context *context)
 {
   if (context == NULL) {
@@ -83,19 +103,19 @@ static void harness_context_destroy(harness_context *context)
   context->mail_protected_id = NULL;
 
   if (context->catalog_path[0] != '\0') {
-    unlink(context->catalog_path);
+    harness_unlink_sqlite_files(context->catalog_path);
   }
   if (context->database_path[0] != '\0') {
-    unlink(context->database_path);
+    harness_unlink_sqlite_files(context->database_path);
   }
   if (context->sms_path[0] != '\0') {
-    unlink(context->sms_path);
+    harness_unlink_sqlite_files(context->sms_path);
   }
   if (context->mail_envelope_path[0] != '\0') {
-    unlink(context->mail_envelope_path);
+    harness_unlink_sqlite_files(context->mail_envelope_path);
   }
   if (context->mail_protected_path[0] != '\0') {
-    unlink(context->mail_protected_path);
+    harness_unlink_sqlite_files(context->mail_protected_path);
   }
   if (context->mail_dir[0] != '\0') {
     rmdir(context->mail_dir);
@@ -283,6 +303,60 @@ static int harness_expect_catalog_user_version(const char *database_path,
   return 1;
 }
 
+static int harness_expect_catalog_journal_mode(const char *database_path,
+                                               const char *expected_mode)
+{
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  const unsigned char *mode;
+  int rc;
+  int ok;
+
+  if ((expected_mode == NULL) || (expected_mode[0] == '\0')) {
+    fprintf(stderr, "Expected journal mode is missing.\n");
+    return 0;
+  }
+
+  db = NULL;
+  rc = sqlite3_open_v2(database_path, &db, SQLITE_OPEN_READWRITE, NULL);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr,
+            "Could not open catalog for journal mode check: %s\n",
+            (db != NULL) ? sqlite3_errmsg(db) : "unknown");
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, "PRAGMA journal_mode;", -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr, "Could not prepare journal mode check: %s\n", sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  ok = 0;
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    mode = sqlite3_column_text(stmt, 0);
+    ok = (mode != NULL) && (strcmp((const char *)mode, expected_mode) == 0);
+    if (!ok) {
+      fprintf(stderr,
+              "Expected journal_mode %s, got %s.\n",
+              expected_mode,
+              (mode != NULL) ? (const char *)mode : "unknown");
+    }
+  } else {
+    fprintf(stderr, "Could not read journal mode check.\n");
+  }
+
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  return ok;
+}
+
 static int harness_expect_catalog_integer(const char *database_path,
                                           const char *sql,
                                           long long expected,
@@ -370,7 +444,7 @@ static int harness_run_legacy_default_model_migration_test(
     fprintf(stderr, "Could not build legacy model migration fixture path.\n");
     return 0;
   }
-  unlink(database_path);
+  harness_unlink_sqlite_files(database_path);
 
   error = NULL;
   if (!strappy_db_initialize(database_path, &error)) {
@@ -378,7 +452,7 @@ static int harness_run_legacy_default_model_migration_test(
             "Could not initialize catalog for legacy model migration: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
-    unlink(database_path);
+    harness_unlink_sqlite_files(database_path);
     return 0;
   }
 
@@ -391,13 +465,13 @@ static int harness_run_legacy_default_model_migration_test(
     if (db != NULL) {
       sqlite3_close(db);
     }
-    unlink(database_path);
+    harness_unlink_sqlite_files(database_path);
     return 0;
   }
   ok = harness_exec_sql(db, legacy_sql);
   sqlite3_close(db);
   if (!ok) {
-    unlink(database_path);
+    harness_unlink_sqlite_files(database_path);
     return 0;
   }
 
@@ -410,7 +484,7 @@ static int harness_run_legacy_default_model_migration_test(
             "Could not migrate legacy default OpenRouter model: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
-    unlink(database_path);
+    harness_unlink_sqlite_files(database_path);
     return 0;
   }
 
@@ -419,7 +493,7 @@ static int harness_run_legacy_default_model_migration_test(
   strappy_free_string(default_model);
   if (!ok) {
     fprintf(stderr, "Legacy default OpenRouter model was not canonicalized.\n");
-    unlink(database_path);
+    harness_unlink_sqlite_files(database_path);
     return 0;
   }
 
@@ -442,7 +516,7 @@ static int harness_run_legacy_default_model_migration_test(
       "WHERE model = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "';",
       1LL,
       "canonicalized legacy session model");
-  unlink(database_path);
+  harness_unlink_sqlite_files(database_path);
   return ok;
 }
 
@@ -465,6 +539,7 @@ static int harness_run_fresh_catalog_schema_tests(
   }
 
   return harness_expect_catalog_user_version(context->catalog_path, 1) &&
+         harness_expect_catalog_journal_mode(context->catalog_path, "wal") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
            "SELECT id, name, prompt, response, model, http_status, "
@@ -712,6 +787,65 @@ static int harness_create_user_database(const char *database_path)
 
   sqlite3_close(db);
   return ok;
+}
+
+static int harness_create_open_wal_database(const char *database_path,
+                                            sqlite3 **db_out)
+{
+  sqlite3 *db;
+  char wal_path[1400];
+  int written;
+  int rc;
+
+  if ((database_path == NULL) || (database_path[0] == '\0') ||
+      (db_out == NULL)) {
+    fprintf(stderr, "WAL database fixture request is incomplete.\n");
+    return 0;
+  }
+  *db_out = NULL;
+
+  db = NULL;
+  rc = sqlite3_open_v2(database_path,
+                       &db,
+                       SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                       NULL);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr,
+            "Could not create WAL user database: %s\n",
+            (db != NULL) ? sqlite3_errmsg(db) : "unknown");
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    return 0;
+  }
+
+  if (!harness_exec_sql(
+        db,
+        "PRAGMA journal_mode = WAL;"
+        "PRAGMA wal_autocheckpoint = 0;"
+        "CREATE TABLE wal_messages ("
+        "id INTEGER PRIMARY KEY,"
+        "note TEXT NOT NULL"
+        ");"
+        "INSERT INTO wal_messages(note) VALUES ('from wal');")) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  written = snprintf(wal_path, sizeof(wal_path), "%s-wal", database_path);
+  if ((written <= 0) || ((size_t)written >= sizeof(wal_path))) {
+    fprintf(stderr, "Could not build WAL sidecar path.\n");
+    sqlite3_close(db);
+    return 0;
+  }
+  if (access(wal_path, F_OK) != 0) {
+    fprintf(stderr, "Expected WAL sidecar was not created: %s\n", wal_path);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  *db_out = db;
+  return 1;
 }
 
 static int harness_create_sms_database(const char *database_path)
@@ -1735,6 +1869,55 @@ static int harness_run_database_query_tests(const harness_context *context)
   }
 
   return 1;
+}
+
+static int harness_run_readonly_wal_database_query_test(
+  harness_context *context)
+{
+  sqlite3 *db;
+  char database_path[1200];
+  char arguments[2048];
+  char *database_id;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  if (!harness_join_path(database_path,
+                         sizeof(database_path),
+                         context->temp_dir,
+                         "wal-user.sqlite")) {
+    fprintf(stderr, "Could not build WAL user database path.\n");
+    return 0;
+  }
+  harness_unlink_sqlite_files(database_path);
+
+  db = NULL;
+  database_id = NULL;
+  ok = harness_create_open_wal_database(database_path, &db) &&
+       harness_register_database_path(context,
+                                      database_path,
+                                      6ULL,
+                                      6ULL,
+                                      &database_id) &&
+       harness_build_query_arguments(
+         arguments,
+         sizeof(arguments),
+         database_id,
+         "SELECT note FROM wal_messages ORDER BY id") &&
+       harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_DATABASE_QUERY,
+                                      arguments,
+                                      "from wal",
+                                      "\"rows\"");
+
+  free(database_id);
+  if (db != NULL) {
+    sqlite3_close(db);
+  }
+  harness_unlink_sqlite_files(database_path);
+  return ok;
 }
 
 static int harness_run_helper_info_tests(const harness_context *context)
@@ -2875,7 +3058,7 @@ static int harness_run_openrouter_model_catalog_tests(
       found_openai = 1;
     }
   }
-  ok = (list.count == 2U) && found_builtin_default && found_gemma && found_openai;
+  ok = (list.count == 3U) && found_builtin_default && found_gemma && found_openai;
   strappy_openrouter_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "OpenRouter model rows did not match expected values.\n");
@@ -3100,7 +3283,7 @@ static int harness_run_openrouter_model_catalog_tests(
     return 0;
   }
 
-  ok = (list.count == 2U) &&
+  ok = (list.count == 3U) &&
        (list.records[0].model_id != NULL) &&
        (strcmp(list.records[0].model_id, "openai/gpt-4.1-mini") == 0) &&
        list.records[0].selected &&
@@ -3356,6 +3539,7 @@ int main(void)
        harness_register_database(&context) &&
        harness_run_database_list_info_tests(&context) &&
        harness_run_database_query_tests(&context) &&
+       harness_run_readonly_wal_database_query_test(&context) &&
        harness_run_helper_info_tests(&context) &&
        harness_run_empty_session_storage_tests(&context) &&
        harness_run_session_turn_storage_tests(&context) &&

@@ -33,6 +33,59 @@ static int strappy_db_copy_default_openrouter_model(sqlite3 *db,
                                                     char **model_id_out,
                                                     char **error_out);
 
+static int strappy_db_enable_write_ahead_log(sqlite3 *db, char **error_out)
+{
+  sqlite3_stmt *stmt;
+  const unsigned char *journal_mode;
+  int rc;
+  int finalize_rc;
+  int ok;
+
+  if (db == NULL) {
+    strappy_set_error(error_out, "Database is not open.");
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, "PRAGMA journal_mode = WAL;", -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not enable database write-ahead log: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  ok = 1;
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    journal_mode = sqlite3_column_text(stmt, 0);
+    if ((journal_mode == NULL) ||
+        (strcmp((const char *)journal_mode, "wal") != 0)) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not enable database write-ahead log: "
+                                  "journal mode is %s",
+                                  (journal_mode != NULL) ?
+                                    (const char *)journal_mode : "unknown");
+      ok = 0;
+    }
+  } else {
+    strappy_set_formatted_error(error_out,
+                                "Could not enable database write-ahead log: %s",
+                                sqlite3_errmsg(db));
+    ok = 0;
+  }
+
+  finalize_rc = sqlite3_finalize(stmt);
+  if (ok && (finalize_rc != SQLITE_OK)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not enable database write-ahead log: %s",
+                                sqlite3_errmsg(db));
+    ok = 0;
+  }
+
+  return ok;
+}
+
 void strappy_session_record_init(strappy_session_record *record)
 {
   if (record == NULL) {
@@ -386,6 +439,11 @@ static int strappy_db_open(const char *db_path,
   }
 
   sqlite3_busy_timeout(db, 5000);
+  if (!strappy_db_enable_write_ahead_log(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
   *db_out = db;
   return 1;
 }
