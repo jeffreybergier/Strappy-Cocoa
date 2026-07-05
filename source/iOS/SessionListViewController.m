@@ -6,8 +6,6 @@
 #import "XPFoundation.h"
 #import "XPUIKit.h"
 
-static const CGFloat kStrappySessionRowHeight = 72.0f;
-
 static NSString * const kStrappySessionCellIdentifier = @"StrappySessionCell";
 
 static NSString *StrappySessionPromptPreview(NSDictionary *session)
@@ -69,7 +67,6 @@ static BOOL StrappySessionPromptIsInFlight(NSDictionary *session)
 static NSString *StrappySessionSubtitle(NSDictionary *session)
 {
   NSString *timestamp;
-  NSString *lastText;
 
   if (StrappySessionPromptIsInFlight(session)) {
     return NSLocalizedString(@"Prompt in progress", nil);
@@ -77,19 +74,8 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 
   timestamp =
     StrappySessionDisplayTimestamp([session objectForKey:@"last_message_at"]);
-  lastText = [session objectForKey:@"last_message_text"];
-  if (![lastText isKindOfClass:[NSString class]]) {
-    lastText = @"";
-  }
-
-  if (([timestamp length] > 0U) && ([lastText length] > 0U)) {
-    return [NSString stringWithFormat:@"%@  %@", timestamp, lastText];
-  }
   if ([timestamp length] > 0U) {
     return timestamp;
-  }
-  if ([lastText length] > 0U) {
-    return lastText;
   }
   return NSLocalizedString(@"No messages yet", nil);
 }
@@ -128,7 +114,6 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 {
   [super viewDidLoad];
 
-  self.tableView.rowHeight = kStrappySessionRowHeight;
   self.tableView.backgroundColor = [UIColor messagesBackgroundColor];
   self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
 
@@ -421,8 +406,8 @@ titleForHeaderInSection:(NSInteger)section
   if (cell == nil) {
     cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
                                   reuseIdentifier:kStrappySessionCellIdentifier];
-    cell.textLabel.numberOfLines = 2;
-    cell.detailTextLabel.numberOfLines = 2;
+    [[cell textLabel] setNumberOfLines:1];
+    [[cell detailTextLabel] setNumberOfLines:1];
   }
 
   session = [self sessionAtIndexPath:indexPath];
@@ -456,23 +441,12 @@ titleForHeaderInSection:(NSInteger)section
 - (void)configureSessionCell:(UITableViewCell *)cell
                      session:(NSDictionary *)session
 {
-  UIActivityIndicatorView *spinner;
-
-  cell.textLabel.text = StrappySessionPromptPreview(session);
-  cell.detailTextLabel.text = StrappySessionSubtitle(session);
-  cell.imageView.image = nil;
-  cell.selectionStyle = UITableViewCellSelectionStyleBlue;
-
-  if (StrappySessionPromptIsInFlight(session)) {
-    spinner = [[UIActivityIndicatorView alloc]
-      initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleGray];
-    [spinner startAnimating];
-    cell.accessoryType = UITableViewCellAccessoryNone;
-    cell.accessoryView = spinner;
-  } else {
-    cell.accessoryView = nil;
-    cell.accessoryType = UITableViewCellAccessoryNone;
-  }
+  [[cell textLabel] setText:StrappySessionPromptPreview(session)];
+  [[cell detailTextLabel] setText:StrappySessionSubtitle(session)];
+  [[cell imageView] setImage:nil];
+  [cell setAccessoryView:nil];
+  [cell setAccessoryType:UITableViewCellAccessoryNone];
+  [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
 }
 
 #pragma mark - UITableViewDelegate
