@@ -392,6 +392,76 @@ static int harness_test_post_store_turn_update_sees_metadata(void)
   return 1;
 }
 
+static int harness_test_sensitive_finish_stores_error_row(void)
+{
+  char db_path[] = "/tmp/strappy-assistant-sensitive-finish-XXXXXX";
+  strappy_assistant_turn_spec turn;
+  strappy_chat_result result;
+  strappy_session_message_record record;
+  char *error;
+  long long session_id;
+  int fd;
+  int ok;
+
+  fd = mkstemp(db_path);
+  if (fd < 0) {
+    return harness_fail("Could not create temporary sensitive finish DB path.");
+  }
+  close(fd);
+
+  memset(&turn, 0, sizeof(turn));
+  strappy_chat_result_init(&result);
+  strappy_session_message_record_init(&record);
+  error = NULL;
+  session_id = 0LL;
+
+  turn.turn_key = "turn-sensitive-finish";
+  turn.prompt_group_key = "prompt-group-sensitive-finish";
+  turn.actor = "user";
+  turn.context_policy = "full";
+  turn.assistant_message_key = "assistant-sensitive-finish";
+  turn.session_id = 1LL;
+
+  ok = strappy_db_create_session(db_path, &session_id, &error) &&
+       harness_set_result_string(&result.response_text, "Partial answer") &&
+       harness_set_result_string(&result.finish_reason, "stop") &&
+       harness_set_result_string(&result.native_finish_reason, "sensitive") &&
+       harness_set_result_string(&result.metadata_json,
+                                 "{\"finish_reason\":\"stop\","
+                                 "\"native_finish_reason\":\"sensitive\","
+                                 "\"finish_status\":\"error\"}") &&
+       strappy_assistant_store_turn_result(db_path,
+                                           session_id,
+                                           &turn,
+                                           &result,
+                                           &error) &&
+       strappy_db_load_session_message_by_key(db_path,
+                                              session_id,
+                                              turn.assistant_message_key,
+                                              &record,
+                                              &error);
+  if (ok) {
+    ok = (record.is_error == 1) &&
+         (record.include_in_context == 0) &&
+         (record.content != NULL) &&
+         (strcmp(record.content, "Partial answer") == 0);
+  }
+
+  if (error != NULL) {
+    fprintf(stderr, "%s\n", error);
+    strappy_free_string(error);
+  }
+  strappy_session_message_record_destroy(&record);
+  strappy_chat_result_destroy(&result);
+  unlink(db_path);
+
+  if (!ok) {
+    return harness_fail("Sensitive native finish was not stored as an error row.");
+  }
+
+  return 1;
+}
+
 static int harness_test_post_answer_helper_call_preserves_answer(void)
 {
   char db_path[] = "/tmp/strappy-assistant-helper-answer-XXXXXX";
@@ -630,6 +700,10 @@ int main(void)
     return 1;
   }
   if (!harness_test_post_store_turn_update_sees_metadata()) {
+    fprintf(stderr, "assistant_reasoning_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_sensitive_finish_stores_error_row()) {
     fprintf(stderr, "assistant_reasoning_harness failed.\n");
     return 1;
   }

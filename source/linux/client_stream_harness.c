@@ -601,6 +601,53 @@ static int harness_test_stream_midstream_error_metadata(void)
   return 1;
 }
 
+static int harness_test_native_sensitive_finish_status_metadata(void)
+{
+  const char *response_json =
+    "{\"id\":\"gen-sensitive\",\"model\":\"z-ai/glm-5.2-20260616\","
+    "\"provider\":\"Novita\",\"choices\":[{"
+    "\"finish_reason\":\"stop\",\"native_finish_reason\":\"sensitive\","
+    "\"message\":{\"role\":\"assistant\",\"content\":\"Partial answer\"}}]}";
+  strappy_chat_result result;
+  cJSON *metadata;
+  char *error;
+  int ok;
+
+  strappy_chat_result_init(&result);
+  metadata = NULL;
+  error = NULL;
+
+  ok = strappy_client_parse_response(response_json, 200L, &result, &error) &&
+       (result.response_text != NULL) &&
+       (strcmp(result.response_text, "Partial answer") == 0) &&
+       (result.finish_reason != NULL) &&
+       (strcmp(result.finish_reason, "stop") == 0) &&
+       (result.native_finish_reason != NULL) &&
+       (strcmp(result.native_finish_reason, "sensitive") == 0) &&
+       strappy_client_finish_status_is_error(result.finish_reason,
+                                             result.native_finish_reason) &&
+       strappy_client_build_metadata_json(&result);
+  if (ok) {
+    metadata = cJSON_Parse(result.metadata_json);
+    ok = cJSON_IsObject(metadata) &&
+         harness_expect_string(metadata, "finish_status", "error") &&
+         harness_expect_string(metadata, "finish_reason", "stop") &&
+         harness_expect_string(metadata, "native_finish_reason", "sensitive");
+  }
+
+  if (error != NULL) {
+    strappy_free_string(error);
+  }
+  cJSON_Delete(metadata);
+  strappy_chat_result_destroy(&result);
+
+  if (!ok) {
+    return harness_fail("Native sensitive finish status metadata was not captured.");
+  }
+
+  return 1;
+}
+
 static int harness_test_non_stream_reasoning_detail_chunks_are_joined(void)
 {
   const char *response_json =
@@ -1077,6 +1124,10 @@ int main(void)
     return 1;
   }
   if (!harness_test_stream_midstream_error_metadata()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_native_sensitive_finish_status_metadata()) {
     fprintf(stderr, "client_stream_harness failed.\n");
     return 1;
   }

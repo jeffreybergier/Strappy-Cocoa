@@ -93,6 +93,11 @@ static int harness_check_page_scripts(void)
                                ".bubble,.reasoning,.tool-column,.request-metadata{") &&
        harness_expect_contains(page_html,
                                "box-shadow:0 2px 9px rgba(0,0,0,.12);") &&
+       harness_expect_contains(page_html, ".request-metadata-error") &&
+       harness_expect_contains(page_html, "function metadataFinishStatus") &&
+       harness_expect_contains(page_html, "native_finish_reason") &&
+       harness_expect_contains(page_html, "request-metadata-error") &&
+       harness_expect_contains(page_html, "ERROR '+detail+' | '") &&
        harness_expect_contains(page_html, "function setProcessingStatus") &&
        harness_expect_contains(page_html, "function clearProcessingStatus") &&
        harness_expect_contains(page_html, "function clearProcessingStatusNode") &&

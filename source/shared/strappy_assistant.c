@@ -2905,6 +2905,7 @@ static char *strappy_assistant_create_error_metadata_json(
   http_status = (result != NULL) ? result->http_status : 0L;
   ok = (cJSON_AddStringToObject(root, "finish_reason", "error") != NULL) &&
        (cJSON_AddStringToObject(root, "native_finish_reason", "error") != NULL) &&
+       (cJSON_AddStringToObject(root, "finish_status", "error") != NULL) &&
        (cJSON_AddNumberToObject(root, "http_status", (double)http_status) != NULL) &&
        (cJSON_AddStringToObject(root,
                                 "error",
@@ -3086,6 +3087,13 @@ static int strappy_assistant_store_turn_result(
   input.metadata_json = result->metadata_json;
   input.message_json = result->message_json;
   input.reasoning = result->reasoning_text;
+  input.is_error = strappy_client_finish_status_is_error(
+    result->finish_reason,
+    result->native_finish_reason);
+  if (input.is_error) {
+    input.context_policy = "omit";
+    input.include_in_context = 0;
+  }
 
   return strappy_db_upsert_session_message(session_db_path,
                                            session_id,
@@ -3547,6 +3555,13 @@ static int strappy_assistant_store_tool_sequence(
   messages[message_index].metadata_json = final_result->metadata_json;
   messages[message_index].message_json = final_result->message_json;
   messages[message_index].reasoning = final_result->reasoning_text;
+  messages[message_index].is_error = strappy_client_finish_status_is_error(
+    final_result->finish_reason,
+    final_result->native_finish_reason);
+  if (messages[message_index].is_error) {
+    messages[message_index].context_policy = "omit";
+    messages[message_index].include_in_context = 0;
+  }
   message_index++;
 
   for (round_index = 0U; round_index < sequence->round_count; round_index++) {
@@ -3601,6 +3616,13 @@ static int strappy_assistant_store_tool_sequence(
         learning_summary_final_result->metadata_json;
       messages[message_index].reasoning =
         learning_summary_final_result->reasoning_text;
+      messages[message_index].is_error = strappy_client_finish_status_is_error(
+        learning_summary_final_result->finish_reason,
+        learning_summary_final_result->native_finish_reason);
+      if (messages[message_index].is_error) {
+        messages[message_index].context_policy = "omit";
+        messages[message_index].include_in_context = 0;
+      }
     }
     messages[message_index].message_json = learning_summary_completion_json;
     message_index++;

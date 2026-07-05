@@ -42,6 +42,12 @@ typedef struct strappy_chat_result {
   int cancelled;
 } strappy_chat_result;
 
+typedef enum strappy_client_finish_status {
+  STRAPPY_CLIENT_FINISH_STATUS_OK = 0,
+  STRAPPY_CLIENT_FINISH_STATUS_WARNING = 1,
+  STRAPPY_CLIENT_FINISH_STATUS_ERROR = 2
+} strappy_client_finish_status;
+
 typedef enum strappy_chat_stream_event_type {
   STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA = 1,
   STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA = 2,
@@ -87,6 +93,13 @@ typedef int (*strappy_chat_stream_callback)(
 
 void strappy_chat_result_init(strappy_chat_result *result);
 void strappy_chat_result_destroy(strappy_chat_result *result);
+strappy_client_finish_status strappy_client_classify_finish_reason(
+  const char *finish_reason,
+  const char *native_finish_reason);
+const char *strappy_client_finish_status_name(
+  strappy_client_finish_status status);
+int strappy_client_finish_status_is_error(const char *finish_reason,
+                                          const char *native_finish_reason);
 int strappy_client_set_cainfo(const char *path, char **error_out);
 int strappy_client_send_messages(const strappy_config *config,
                                  const strappy_chat_message *messages,

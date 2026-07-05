@@ -1130,10 +1130,192 @@ static int strappy_client_capture_api_error_metadata(cJSON *error,
   return ok;
 }
 
+static int strappy_client_ascii_tolower(int value)
+{
+  return ((value >= 'A') && (value <= 'Z')) ? (value + ('a' - 'A')) : value;
+}
+
+static int strappy_client_string_equals_ignore_case(const char *left,
+                                                    const char *right)
+{
+  unsigned char left_ch;
+  unsigned char right_ch;
+
+  if ((left == NULL) || (right == NULL)) {
+    return 0;
+  }
+
+  while ((*left != '\0') && (*right != '\0')) {
+    left_ch = (unsigned char)*left;
+    right_ch = (unsigned char)*right;
+    if (strappy_client_ascii_tolower(left_ch) !=
+        strappy_client_ascii_tolower(right_ch)) {
+      return 0;
+    }
+    left++;
+    right++;
+  }
+
+  return ((*left == '\0') && (*right == '\0')) ? 1 : 0;
+}
+
+static int strappy_client_string_contains_ignore_case(const char *haystack,
+                                                      const char *needle)
+{
+  const char *cursor;
+  const char *haystack_cursor;
+  const char *needle_cursor;
+
+  if ((haystack == NULL) || (needle == NULL) || (needle[0] == '\0')) {
+    return 0;
+  }
+
+  for (cursor = haystack; *cursor != '\0'; cursor++) {
+    haystack_cursor = cursor;
+    needle_cursor = needle;
+    while ((*haystack_cursor != '\0') && (*needle_cursor != '\0') &&
+           (strappy_client_ascii_tolower((unsigned char)*haystack_cursor) ==
+            strappy_client_ascii_tolower((unsigned char)*needle_cursor))) {
+      haystack_cursor++;
+      needle_cursor++;
+    }
+    if (*needle_cursor == '\0') {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int strappy_client_finish_value_is_error(const char *value)
+{
+  static const char * const exact_values[] = {
+    "error",
+    "content_filter",
+    "content-filter",
+    "content filter",
+    "sensitive",
+    "safety",
+    "safety_filter",
+    "safety-filter",
+    "safety filter",
+    "moderation",
+    "moderated",
+    "blocked",
+    "filtered",
+    "refusal",
+    "refused",
+    NULL
+  };
+  static const char * const fragments[] = {
+    "content_filter",
+    "content-filter",
+    "content filter",
+    "sensitive",
+    "safety",
+    "moderation",
+    "policy",
+    "blocked",
+    "filtered",
+    "prohibited",
+    "forbidden",
+    "refusal",
+    "refused",
+    NULL
+  };
+  size_t index;
+
+  if ((value == NULL) || (value[0] == '\0')) {
+    return 0;
+  }
+
+  for (index = 0U; exact_values[index] != NULL; index++) {
+    if (strappy_client_string_equals_ignore_case(value, exact_values[index])) {
+      return 1;
+    }
+  }
+
+  for (index = 0U; fragments[index] != NULL; index++) {
+    if (strappy_client_string_contains_ignore_case(value, fragments[index])) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int strappy_client_finish_value_is_warning(const char *value)
+{
+  static const char * const fragments[] = {
+    "length",
+    "max_tokens",
+    "max-tokens",
+    "max tokens",
+    "token_limit",
+    "token-limit",
+    "token limit",
+    "context_length",
+    "context-length",
+    "context length",
+    NULL
+  };
+  size_t index;
+
+  if ((value == NULL) || (value[0] == '\0')) {
+    return 0;
+  }
+
+  for (index = 0U; fragments[index] != NULL; index++) {
+    if (strappy_client_string_contains_ignore_case(value, fragments[index])) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+strappy_client_finish_status strappy_client_classify_finish_reason(
+  const char *finish_reason,
+  const char *native_finish_reason)
+{
+  if (strappy_client_finish_value_is_error(finish_reason) ||
+      strappy_client_finish_value_is_error(native_finish_reason)) {
+    return STRAPPY_CLIENT_FINISH_STATUS_ERROR;
+  }
+
+  if (strappy_client_finish_value_is_warning(finish_reason) ||
+      strappy_client_finish_value_is_warning(native_finish_reason)) {
+    return STRAPPY_CLIENT_FINISH_STATUS_WARNING;
+  }
+
+  return STRAPPY_CLIENT_FINISH_STATUS_OK;
+}
+
+const char *strappy_client_finish_status_name(
+  strappy_client_finish_status status)
+{
+  if (status == STRAPPY_CLIENT_FINISH_STATUS_ERROR) {
+    return "error";
+  }
+  if (status == STRAPPY_CLIENT_FINISH_STATUS_WARNING) {
+    return "warning";
+  }
+  return "ok";
+}
+
+int strappy_client_finish_status_is_error(const char *finish_reason,
+                                          const char *native_finish_reason)
+{
+  return (strappy_client_classify_finish_reason(
+            finish_reason,
+            native_finish_reason) == STRAPPY_CLIENT_FINISH_STATUS_ERROR) ? 1 : 0;
+}
+
 static int strappy_client_build_metadata_json(strappy_chat_result *result)
 {
   cJSON *root;
   char *json;
+  strappy_client_finish_status finish_status;
   int ok;
 
   if (result == NULL) {
@@ -1144,6 +1326,10 @@ static int strappy_client_build_metadata_json(strappy_chat_result *result)
   if (root == NULL) {
     return 0;
   }
+
+  finish_status = strappy_client_classify_finish_reason(
+    result->finish_reason,
+    result->native_finish_reason);
 
   ok = strappy_client_json_add_string_if_present(root,
                                                  "response_id",
@@ -1161,6 +1347,10 @@ static int strappy_client_build_metadata_json(strappy_chat_result *result)
        strappy_client_json_add_string_if_present(root,
                                                  "native_finish_reason",
                                                  result->native_finish_reason) &&
+       (cJSON_AddStringToObject(root,
+                                "finish_status",
+                                strappy_client_finish_status_name(
+                                  finish_status)) != NULL) &&
        strappy_client_json_add_string_if_present(root,
                                                  "service_tier",
                                                  result->service_tier) &&
@@ -1232,6 +1422,12 @@ static int strappy_client_build_metadata_text(strappy_chat_result *result)
        strappy_client_metadata_append_line(&buffer,
                                            "Native finish reason",
                                            result->native_finish_reason) &&
+       strappy_client_metadata_append_line(
+         &buffer,
+         "Finish status",
+         strappy_client_finish_status_name(strappy_client_classify_finish_reason(
+           result->finish_reason,
+           result->native_finish_reason))) &&
        strappy_client_metadata_append_line(&buffer,
                                            "Provider",
                                            result->provider_name) &&
