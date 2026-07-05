@@ -2,6 +2,7 @@
 APP_NAME = Strappy
 SOURCES = main.m AppDelegate.m StrappyRootCoordinator.m \
           SessionListViewController.m PreferencesTableViewController.m \
+          MessageListViewController.m PromptSendViewController.m \
           StrappyPreferencesWhitelistTableViewController.m \
           StrappyPreferencesModelWhitelistTableViewController.m \
           StrappyPreferencesDatabaseWhitelistTableViewController.m \
@@ -32,7 +33,7 @@ EXTRA_FLAGS = -I$(SHARED_DIR)
 EXTRA_SOURCES = XPFoundation.m XPKeychain.m StrappyKeychain.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_config.c strappy_client.c strappy_db.c strappy_model_catalog.c strappy_file_scanner.c strappy_session.c strappy_prompt.c strappy_tools.c strappy_assistant.c strappy_webview.c
 PHONE_SOURCE_FLAGS = -fobjc-arc
 PHONE_EXTRA_SOURCE_FLAGS = -Wno-conversion -Wno-sign-conversion -Wno-float-conversion -Wno-strict-prototypes -Wno-newline-eof
-LIBS_IPHONE = -framework Security
+LIBS_IPHONE = -framework Security -framework QuartzCore
 PHONE_LDID_SIGN ?= 1
 PHONE_LDID_ENTITLEMENTS ?= Entitlements.plist
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources

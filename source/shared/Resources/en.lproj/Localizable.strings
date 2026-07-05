@@ -17,6 +17,8 @@
 "Send" = "Send";
 "Send Prompt" = "Send Prompt";
 "Stream Responses" = "Stream Responses";
+"Stream Responses: On" = "Stream Responses: On";
+"Stream Responses: Off" = "Stream Responses: Off";
 "Sending prompt..." = "Sending prompt...";
 "Prompt failed." = "Prompt failed.";
 
@@ -42,6 +44,7 @@
 "Default model is always allowed." = "Default model is always allowed.";
 "No matching models." = "No matching models.";
 "No models have been fetched yet." = "No models have been fetched yet.";
+"OK" = "OK";
 "Model list could not be loaded." = "Model list could not be loaded.";
 "Fetching models..." = "Fetching models...";
 "Model refresh could not start." = "Model refresh could not start.";
@@ -144,6 +147,7 @@
 "Preferences..." = "Preferences...";
 "Print..." = "Print...";
 "Prompt is empty." = "Prompt is empty.";
+"Ask Strappy" = "Ask Strappy";
 "Prompt request is already running." = "Prompt request is already running.";
 "Prompts" = "Prompts";
 "Refresh" = "Refresh";
@@ -178,6 +182,10 @@
 "Text Replacement" = "Text Replacement";
 "The chat could not be deleted." = "The chat could not be deleted.";
 "Thinking" = "Thinking";
+"%@ (Selected)" = "%@ (Selected)";
+"An unknown error occurred." = "An unknown error occurred.";
+"Model Not Changed" = "Model Not Changed";
+"Streaming Not Changed" = "Streaming Not Changed";
 "This will permanently delete \"%@\" and all of its messages. This cannot be undone." = "This will permanently delete \"%@\" and all of its messages. This cannot be undone.";
 "Transformations" = "Transformations";
 "Use Selection for Find" = "Use Selection for Find";

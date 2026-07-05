@@ -4,6 +4,15 @@
 + (UIColor *)messagesBackgroundColor;
 @end
 
+@interface UIView (XPUIKit)
+- (void)XP_setBackgroundTransparent;
+- (void)XP_removeShadow;
+@end
+
+@interface UIWebView (XPUIKit)
+- (UIScrollView *)XP_scrollView;
+@end
+
 @interface UILabel (XPUIKit)
 - (void)XP_setTextAlignmentCenter;
 @end

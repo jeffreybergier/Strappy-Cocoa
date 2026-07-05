@@ -17,6 +17,8 @@
 "Send" = "送信";
 "Send Prompt" = "プロンプトを送信";
 "Stream Responses" = "応答をストリーミング";
+"Stream Responses: On" = "応答をストリーミング: オン";
+"Stream Responses: Off" = "応答をストリーミング: オフ";
 "Sending prompt..." = "プロンプトを送信中...";
 "Prompt failed." = "プロンプトに失敗しました。";
 
@@ -42,6 +44,7 @@
 "Default model is always allowed." = "既定モデルは常に許可されます。";
 "No matching models." = "一致するモデルはありません。";
 "No models have been fetched yet." = "モデルはまだ取得されていません。";
+"OK" = "OK";
 "Model list could not be loaded." = "モデル一覧を読み込めませんでした。";
 "Fetching models..." = "モデルを取得中...";
 "Model refresh could not start." = "モデル更新を開始できませんでした。";
@@ -144,6 +147,7 @@
 "Preferences..." = "環境設定...";
 "Print..." = "プリント...";
 "Prompt is empty." = "プロンプトが空です。";
+"Ask Strappy" = "Strappy に質問";
 "Prompt request is already running." = "プロンプトリクエストはすでに実行中です。";
 "Prompts" = "プロンプト";
 "Refresh" = "更新";
@@ -178,6 +182,10 @@
 "Text Replacement" = "テキスト置換";
 "The chat could not be deleted." = "チャットを削除できませんでした。";
 "Thinking" = "思考中";
+"%@ (Selected)" = "%@（選択中）";
+"An unknown error occurred." = "不明なエラーが発生しました。";
+"Model Not Changed" = "モデルは変更されませんでした";
+"Streaming Not Changed" = "ストリーミングは変更されませんでした";
 "This will permanently delete \"%@\" and all of its messages. This cannot be undone." = "「%@」とそのすべてのメッセージを完全に削除します。この操作は取り消せません。";
 "Transformations" = "変換";
 "Use Selection for Find" = "選択部分を検索に使用";

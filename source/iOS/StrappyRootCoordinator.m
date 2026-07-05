@@ -1,9 +1,11 @@
 #import "StrappyRootCoordinator.h"
 
+#import "MessageListViewController.h"
 #import "SessionListViewController.h"
 #import "StrappySession.h"
 
-@interface StrappyRootCoordinator () <SessionListViewControllerDelegate>
+@interface StrappyRootCoordinator () <SessionListViewControllerDelegate,
+                                      MessageListViewControllerDelegate>
 @property (nonatomic, strong) UINavigationController *nav;
 @property (nonatomic, strong) SessionListViewController *sessionList;
 @end
@@ -19,8 +21,8 @@
   }
 
   if ((self = [super init])) {
-    self.nav = [[UINavigationController alloc] init];
-    window.rootViewController = self.nav;
+    [self setNav:[[UINavigationController alloc] init]];
+    [window setRootViewController:[self nav]];
   }
   return self;
 }
@@ -35,17 +37,40 @@
           [error localizedDescription]);
   }
 
-  self.sessionList = [[SessionListViewController alloc] init];
-  self.sessionList.delegate = self;
-  [self.nav setViewControllers:[NSArray arrayWithObject:self.sessionList]
-                       animated:NO];
+  [self setSessionList:[[SessionListViewController alloc] init]];
+  [[self sessionList] setDelegate:self];
+  [[self nav] setViewControllers:[NSArray arrayWithObject:[self sessionList]]
+                         animated:NO];
 }
 
 - (void)sessionListViewController:(SessionListViewController *)controller
                  didSelectSession:(StrappySession *)session
 {
+  MessageListViewController *messages;
+
   (void)controller;
-  (void)session;
+  if (![session isKindOfClass:[StrappySession class]]) {
+    return;
+  }
+
+  messages = [[MessageListViewController alloc] initWithSession:session];
+  [messages setDelegate:self];
+  [[self nav] pushViewController:messages animated:YES];
+}
+
+- (void)messageListViewController:(MessageListViewController *)controller
+                 didUpdateSession:(NSDictionary *)session
+{
+  NSNumber *identifier;
+
+  (void)controller;
+  if (![session isKindOfClass:[NSDictionary class]]) {
+    [[self sessionList] reloadData];
+    return;
+  }
+
+  identifier = [session objectForKey:@"id"];
+  [[self sessionList] reloadSessionIdentifier:identifier select:NO];
 }
 
 @end
