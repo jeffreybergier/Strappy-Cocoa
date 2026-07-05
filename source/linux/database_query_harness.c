@@ -413,113 +413,6 @@ static int harness_expect_catalog_integer(const char *database_path,
   return 1;
 }
 
-static int harness_run_legacy_default_model_migration_test(
-  const harness_context *context)
-{
-  static const char *legacy_sql =
-    "INSERT INTO app_settings (key, value) VALUES "
-    "('default_openrouter_model_id', 'gemma-4-31b-it');"
-    "INSERT INTO app_settings (key, value) VALUES "
-    "('selected_openrouter_model_id', 'gemma-4-31b-it');"
-    "INSERT INTO sessions (prompt, response, model, http_status) "
-    "VALUES ('', '', 'gemma-4-31b-it', 0);"
-    "INSERT INTO openrouter_models (id, name, description) VALUES "
-    "('gemma-4-31b-it', 'gemma-4-31b-it', 'Built-in default model.');"
-    "INSERT INTO openrouter_model_settings (model_id, allowed) VALUES "
-    "('gemma-4-31b-it', 1);";
-  sqlite3 *db;
-  char *default_model;
-  char *error;
-  char database_path[1200];
-  int rc;
-  int ok;
-
-  if (context == NULL) {
-    return 0;
-  }
-  if (!harness_join_path(database_path,
-                         sizeof(database_path),
-                         context->temp_dir,
-                         "legacy-default-model.sqlite")) {
-    fprintf(stderr, "Could not build legacy model migration fixture path.\n");
-    return 0;
-  }
-  harness_unlink_sqlite_files(database_path);
-
-  error = NULL;
-  if (!strappy_db_initialize(database_path, &error)) {
-    fprintf(stderr,
-            "Could not initialize catalog for legacy model migration: %s\n",
-            (error != NULL) ? error : "unknown");
-    strappy_free_string(error);
-    harness_unlink_sqlite_files(database_path);
-    return 0;
-  }
-
-  db = NULL;
-  rc = sqlite3_open_v2(database_path, &db, SQLITE_OPEN_READWRITE, NULL);
-  if (rc != SQLITE_OK) {
-    fprintf(stderr,
-            "Could not open catalog for legacy model migration: %s\n",
-            (db != NULL) ? sqlite3_errmsg(db) : "unknown");
-    if (db != NULL) {
-      sqlite3_close(db);
-    }
-    harness_unlink_sqlite_files(database_path);
-    return 0;
-  }
-  ok = harness_exec_sql(db, legacy_sql);
-  sqlite3_close(db);
-  if (!ok) {
-    harness_unlink_sqlite_files(database_path);
-    return 0;
-  }
-
-  default_model = NULL;
-  error = NULL;
-  if (!strappy_db_get_default_openrouter_model(database_path,
-                                               &default_model,
-                                               &error)) {
-    fprintf(stderr,
-            "Could not migrate legacy default OpenRouter model: %s\n",
-            (error != NULL) ? error : "unknown");
-    strappy_free_string(error);
-    harness_unlink_sqlite_files(database_path);
-    return 0;
-  }
-
-  ok = (default_model != NULL) &&
-       (strcmp(default_model, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0);
-  strappy_free_string(default_model);
-  if (!ok) {
-    fprintf(stderr, "Legacy default OpenRouter model was not canonicalized.\n");
-    harness_unlink_sqlite_files(database_path);
-    return 0;
-  }
-
-  ok =
-    harness_expect_catalog_integer(
-      database_path,
-      "SELECT COUNT(*) FROM openrouter_models "
-      "WHERE id = 'gemma-4-31b-it';",
-      0LL,
-      "legacy default OpenRouter model row") &&
-    harness_expect_catalog_integer(
-      database_path,
-      "SELECT COUNT(*) FROM openrouter_model_settings "
-      "WHERE model_id = 'gemma-4-31b-it';",
-      0LL,
-      "legacy default OpenRouter model setting") &&
-    harness_expect_catalog_integer(
-      database_path,
-      "SELECT COUNT(*) FROM sessions "
-      "WHERE model = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "';",
-      1LL,
-      "canonicalized legacy session model");
-  harness_unlink_sqlite_files(database_path);
-  return ok;
-}
-
 static int harness_run_fresh_catalog_schema_tests(
   const harness_context *context)
 {
@@ -567,6 +460,11 @@ static int harness_run_fresh_catalog_schema_tests(
            "user_decision, scan_root, first_seen_at, last_seen_at, "
            "last_scanned_at FROM discovered_databases LIMIT 0;",
            "discovered_databases columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT path, user_decision, assistant_database_id, created_at, "
+           "updated_at FROM database_access_settings LIMIT 0;",
+           "database_access_settings columns") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
            "SELECT key, value, updated_at FROM app_settings LIMIT 0;",
@@ -1722,6 +1620,209 @@ static int harness_run_empty_database_list_info_tests(
   return ok;
 }
 
+static int harness_run_discovered_database_replacement_tests(
+  const harness_context *context)
+{
+  char catalog_path[1200];
+  char first_path[1200];
+  char second_path[1200];
+  strappy_discovered_database_input inputs[2];
+  strappy_discovered_database_record_list list;
+  char *error;
+  char *first_database_id;
+  long long first_catalog_id;
+  size_t index;
+  int found_first;
+  int found_second;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  if (!harness_join_path(catalog_path,
+                         sizeof(catalog_path),
+                         context->temp_dir,
+                         "replacement-catalog.sqlite") ||
+      !harness_join_path(first_path,
+                         sizeof(first_path),
+                         context->temp_dir,
+                         "first.sqlite") ||
+      !harness_join_path(second_path,
+                         sizeof(second_path),
+                         context->temp_dir,
+                         "second.sqlite")) {
+    fprintf(stderr, "Could not build replacement test paths.\n");
+    return 0;
+  }
+  harness_unlink_sqlite_files(catalog_path);
+
+  memset(inputs, 0, sizeof(inputs));
+  inputs[0].path = first_path;
+  inputs[0].size = 100;
+  inputs[0].modified_at = 1;
+  inputs[0].device = 1ULL;
+  inputs[0].inode = 10ULL;
+  inputs[0].is_valid_sqlite = 1;
+  inputs[0].scan_root = context->temp_dir;
+  inputs[1].path = second_path;
+  inputs[1].size = 200;
+  inputs[1].modified_at = 2;
+  inputs[1].device = 1ULL;
+  inputs[1].inode = 20ULL;
+  inputs[1].is_valid_sqlite = 1;
+  inputs[1].scan_root = context->temp_dir;
+
+  error = NULL;
+  if (!strappy_db_replace_discovered_databases_for_scan_root(catalog_path,
+                                                             inputs,
+                                                             2U,
+                                                             context->temp_dir,
+                                                             &error)) {
+    fprintf(stderr,
+            "Could not save initial replacement scan: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  strappy_discovered_database_record_list_init(&list);
+  if (!strappy_db_list_discovered_databases(catalog_path, &list, &error)) {
+    fprintf(stderr,
+            "Could not list replacement scan: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  first_catalog_id = 0;
+  first_database_id = NULL;
+  for (index = 0U; index < list.count; index++) {
+    if ((list.records[index].path != NULL) &&
+        (strcmp(list.records[index].path, first_path) == 0)) {
+      first_catalog_id = list.records[index].catalog_id;
+      first_database_id =
+        strappy_string_duplicate(list.records[index].assistant_database_id);
+      break;
+    }
+  }
+  strappy_discovered_database_record_list_destroy(&list);
+  if ((first_catalog_id <= 0) || (first_database_id == NULL)) {
+    fprintf(stderr, "Initial replacement scan did not preserve first row.\n");
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  if (!strappy_db_update_discovered_database_decision(catalog_path,
+                                                      first_catalog_id,
+                                                      "allowed",
+                                                      &error)) {
+    fprintf(stderr,
+            "Could not approve replacement database: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  if (!strappy_db_replace_discovered_databases_for_scan_root(catalog_path,
+                                                             &inputs[1],
+                                                             1U,
+                                                             context->temp_dir,
+                                                             &error)) {
+    fprintf(stderr,
+            "Could not replace scan with second row: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  strappy_discovered_database_record_list_init(&list);
+  if (!strappy_db_list_discovered_databases(catalog_path, &list, &error)) {
+    fprintf(stderr,
+            "Could not list after replacement delete: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  found_first = 0;
+  found_second = 0;
+  for (index = 0U; index < list.count; index++) {
+    if ((list.records[index].path != NULL) &&
+        (strcmp(list.records[index].path, first_path) == 0)) {
+      found_first = 1;
+    }
+    if ((list.records[index].path != NULL) &&
+        (strcmp(list.records[index].path, second_path) == 0)) {
+      found_second = 1;
+    }
+  }
+  strappy_discovered_database_record_list_destroy(&list);
+  if (found_first || !found_second) {
+    fprintf(stderr, "Replacement scan did not delete stale database rows.\n");
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  if (!strappy_db_replace_discovered_databases_for_scan_root(catalog_path,
+                                                             inputs,
+                                                             1U,
+                                                             context->temp_dir,
+                                                             &error)) {
+    fprintf(stderr,
+            "Could not re-save first replacement scan: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  strappy_discovered_database_record_list_init(&list);
+  if (!strappy_db_list_discovered_databases(catalog_path, &list, &error)) {
+    fprintf(stderr,
+            "Could not list replacement state restore: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  ok = 0;
+  for (index = 0U; index < list.count; index++) {
+    if ((list.records[index].path != NULL) &&
+        (strcmp(list.records[index].path, first_path) == 0) &&
+        (list.records[index].user_decision != NULL) &&
+        (strcmp(list.records[index].user_decision, "allowed") == 0) &&
+        (list.records[index].assistant_database_id != NULL) &&
+        (strcmp(list.records[index].assistant_database_id,
+                first_database_id) == 0)) {
+      ok = 1;
+      break;
+    }
+  }
+  strappy_discovered_database_record_list_destroy(&list);
+  free(first_database_id);
+  harness_unlink_sqlite_files(catalog_path);
+
+  if (!ok) {
+    fprintf(stderr,
+            "Replacement scan did not restore database access state.\n");
+  }
+  return ok;
+}
+
 static int harness_build_query_arguments(char *output,
                                          size_t output_size,
                                          const char *database_id,
@@ -1869,6 +1970,116 @@ static int harness_run_database_query_tests(const harness_context *context)
   }
 
   return 1;
+}
+
+static int harness_run_missing_database_query_guidance_test(
+  const harness_context *context)
+{
+  char catalog_path[1200];
+  char missing_path[1200];
+  char arguments[2048];
+  strappy_discovered_database_input input;
+  strappy_discovered_database_record_list list;
+  char *database_id;
+  char *error;
+  long long catalog_id;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  if (!harness_join_path(catalog_path,
+                         sizeof(catalog_path),
+                         context->temp_dir,
+                         "missing-catalog.sqlite") ||
+      !harness_join_path(missing_path,
+                         sizeof(missing_path),
+                         context->temp_dir,
+                         "missing.sqlite")) {
+    fprintf(stderr, "Could not build missing database query paths.\n");
+    return 0;
+  }
+  harness_unlink_sqlite_files(catalog_path);
+  harness_unlink_sqlite_files(missing_path);
+
+  memset(&input, 0, sizeof(input));
+  input.path = missing_path;
+  input.size = 4096;
+  input.modified_at = 1;
+  input.device = 7ULL;
+  input.inode = 7ULL;
+  input.is_valid_sqlite = 1;
+  input.scan_root = context->temp_dir;
+
+  error = NULL;
+  if (!strappy_db_save_discovered_databases(catalog_path,
+                                            &input,
+                                            1U,
+                                            &error)) {
+    fprintf(stderr,
+            "Could not save missing database catalog row: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  strappy_discovered_database_record_list_init(&list);
+  if (!strappy_db_list_discovered_databases(catalog_path, &list, &error)) {
+    fprintf(stderr,
+            "Could not list missing database catalog row: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  if ((list.count < 1U) || (list.records[0].assistant_database_id == NULL)) {
+    fprintf(stderr, "Missing database catalog row was not listed.\n");
+    strappy_discovered_database_record_list_destroy(&list);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+  catalog_id = list.records[0].catalog_id;
+  database_id = strappy_string_duplicate(list.records[0].assistant_database_id);
+  strappy_discovered_database_record_list_destroy(&list);
+  if (database_id == NULL) {
+    fprintf(stderr, "Could not copy missing database id.\n");
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  if (!strappy_db_update_discovered_database_decision(catalog_path,
+                                                      catalog_id,
+                                                      "allowed",
+                                                      &error)) {
+    fprintf(stderr,
+            "Could not approve missing database catalog row: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    free(database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  if (!harness_build_query_arguments(arguments,
+                                     sizeof(arguments),
+                                     database_id,
+                                     "SELECT 1")) {
+    fprintf(stderr, "Could not build missing database query arguments.\n");
+    free(database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  ok = harness_expect_error_contains(catalog_path,
+                                     STRAPPY_TOOL_DATABASE_QUERY,
+                                     arguments,
+                                     "NEVER retry the same database_id");
+  free(database_id);
+  harness_unlink_sqlite_files(catalog_path);
+  return ok;
 }
 
 static int harness_run_readonly_wal_database_query_test(
@@ -3534,16 +3745,17 @@ int main(void)
        harness_run_helper_fontawesome_tests() &&
        harness_make_temp_dir(&context) &&
        harness_run_fresh_catalog_schema_tests(&context) &&
+       harness_run_discovered_database_replacement_tests(&context) &&
        harness_run_empty_database_list_info_tests(&context) &&
        harness_create_user_database(context.database_path) &&
        harness_register_database(&context) &&
        harness_run_database_list_info_tests(&context) &&
        harness_run_database_query_tests(&context) &&
+       harness_run_missing_database_query_guidance_test(&context) &&
        harness_run_readonly_wal_database_query_test(&context) &&
        harness_run_helper_info_tests(&context) &&
        harness_run_empty_session_storage_tests(&context) &&
        harness_run_session_turn_storage_tests(&context) &&
-       harness_run_legacy_default_model_migration_test(&context) &&
        harness_run_openrouter_model_catalog_tests(&context) &&
        harness_run_sms_guidance_tests(&context) &&
        harness_run_mail_guidance_tests(&context);

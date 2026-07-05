@@ -38,8 +38,8 @@ typedef struct harness_stream_record {
   int content_count;
   int reasoning_count;
   int retracted_count;
-  char content[512];
-  char reasoning[512];
+  char content[4096];
+  char reasoning[4096];
 } harness_stream_record;
 
 static int harness_append_recorded_text(char *buffer,
@@ -890,6 +890,94 @@ static int harness_test_same_chunk_tool_call_content_is_reasoning(void)
   return 1;
 }
 
+static int harness_test_long_helper_tool_call_content_remains_answer(void)
+{
+  const char *chunk_one =
+    "Database overview: Communications include messages, mail, and recents. "
+    "Photos and media include asset metadata, albums, voice memos, downloads, "
+    "and local media library records. Organization includes calendar events, "
+    "notes, contacts, Safari bookmarks, and reminder metadata. Security "
+    "includes privacy grants, account records, and password vault structure. ";
+  const char *chunk_two =
+    "The most interesting follow ups are photos for albums and comments, "
+    "messages for conversation history, mail for sender and thread context, "
+    "calendar for upcoming plans, notes for written context, reading databases "
+    "for feeds and articles, wallet passes for tickets, and recordings for "
+    "voice memo labels and durations. Pick one area and I can dig deeper.";
+  strappy_stream_context context;
+  strappy_chat_result result;
+  harness_stream_record record;
+  cJSON *root;
+  cJSON *tool_calls;
+  char first_event[1024];
+  char second_event[1024];
+  char expected[2048];
+  int ok;
+
+  memset(&record, 0, sizeof(record));
+  strappy_chat_result_init(&result);
+  strappy_stream_context_init(&context);
+  context.result = &result;
+  context.callback = harness_record_stream_event;
+  context.callback_data = &record;
+
+  snprintf(first_event,
+           sizeof(first_event),
+           "{\"choices\":[{\"delta\":{\"role\":\"assistant\","
+           "\"content\":\"%s\"},\"finish_reason\":null}]}",
+           chunk_one);
+  snprintf(second_event,
+           sizeof(second_event),
+           "{\"choices\":[{\"delta\":{\"content\":\"%s\"},"
+           "\"finish_reason\":null}]}",
+           chunk_two);
+  snprintf(expected, sizeof(expected), "%s%s", chunk_one, chunk_two);
+
+  ok =
+    harness_feed_stream_event(&context, first_event) &&
+    harness_feed_stream_event(&context, second_event) &&
+    harness_feed_stream_event(
+      &context,
+      "{\"choices\":[{\"delta\":{\"tool_calls\":[{"
+      "\"index\":0,\"id\":\"call_title\",\"type\":\"function\","
+      "\"function\":{\"name\":\"helper_session_name_write\","
+      "\"arguments\":\"{\\\"name\\\":\\\"Database overview\\\"}\"}}]},"
+      "\"finish_reason\":\"tool_calls\"}]}") &&
+    strappy_client_stream_finalize_message(&context);
+
+  if (!ok) {
+    strappy_stream_context_destroy(&context);
+    strappy_chat_result_destroy(&result);
+    return harness_fail("Long helper-call answer stream failed.");
+  }
+
+  root = cJSON_Parse(result.message_json);
+  if (root == NULL) {
+    strappy_stream_context_destroy(&context);
+    strappy_chat_result_destroy(&result);
+    return harness_fail("Long helper-call answer JSON was invalid.");
+  }
+
+  tool_calls = cJSON_GetObjectItem(root, "tool_calls");
+  ok = (record.reasoning_count == 0) &&
+       (record.retracted_count == 0) &&
+       (context.helper_tool_calls_preserve_content == 1) &&
+       (strcmp(record.content, expected) == 0) &&
+       harness_expect_string(root, "content", expected) &&
+       cJSON_IsArray(tool_calls) &&
+       (cJSON_GetArraySize(tool_calls) == 1);
+
+  cJSON_Delete(root);
+  strappy_stream_context_destroy(&context);
+  strappy_chat_result_destroy(&result);
+
+  if (!ok) {
+    return harness_fail("Long helper-call answer was not preserved as content.");
+  }
+
+  return 1;
+}
+
 static int harness_test_stream_reasoning_detail_chunks_coalesced(void)
 {
   strappy_stream_context context;
@@ -1009,6 +1097,10 @@ int main(void)
     return 1;
   }
   if (!harness_test_same_chunk_tool_call_content_is_reasoning()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_long_helper_tool_call_content_remains_answer()) {
     fprintf(stderr, "client_stream_harness failed.\n");
     return 1;
   }

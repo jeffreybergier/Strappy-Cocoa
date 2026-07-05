@@ -23,6 +23,7 @@
 #define STRAPPY_CLIENT_CHAT_RETRY_INITIAL_DELAY_MS 500U
 #define STRAPPY_CLIENT_STREAM_SPECULATIVE_CONTENT_BYTES 96U
 #define STRAPPY_CLIENT_STREAM_SPECULATIVE_CONTENT_CHUNKS 2U
+#define STRAPPY_CLIENT_STREAM_HELPER_ANSWER_BYTES 512U
 
 typedef struct strappy_http_buffer {
   char *data;
@@ -1606,6 +1607,32 @@ static const char *strappy_client_tool_call_name(cJSON *tool_call)
   return name->valuestring;
 }
 
+static int strappy_client_tool_calls_are_all_helpers(cJSON *tool_calls)
+{
+  int count;
+  int index;
+
+  if (!cJSON_IsArray(tool_calls)) {
+    return 0;
+  }
+
+  count = cJSON_GetArraySize(tool_calls);
+  if (count <= 0) {
+    return 0;
+  }
+
+  for (index = 0; index < count; index++) {
+    const char *name;
+
+    name = strappy_client_tool_call_name(cJSON_GetArrayItem(tool_calls, index));
+    if ((name == NULL) || !strappy_tools_is_helper(name)) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
 static char *strappy_client_tool_calls_display_text(cJSON *tool_calls)
 {
   strappy_http_buffer buffer;
@@ -2199,6 +2226,7 @@ typedef struct strappy_stream_context {
   int *tool_call_stream_indices;
   size_t tool_call_stream_index_count;
   int saw_tool_calls;
+  int helper_tool_calls_preserve_content;
   int retracted_content_for_tool_calls;
   int emitted_content_delta;
   size_t pending_content_delta_count;
@@ -2230,6 +2258,7 @@ static void strappy_stream_context_init(strappy_stream_context *context)
   context->tool_call_stream_indices = NULL;
   context->tool_call_stream_index_count = 0U;
   context->saw_tool_calls = 0;
+  context->helper_tool_calls_preserve_content = 0;
   context->retracted_content_for_tool_calls = 0;
   context->emitted_content_delta = 0;
   context->pending_content_delta_count = 0U;
@@ -3443,6 +3472,48 @@ static int strappy_client_stream_emit_content_retracted(
   return 1;
 }
 
+static size_t strappy_client_stream_content_length(
+  const strappy_stream_context *context)
+{
+  size_t length;
+
+  if (context == NULL) {
+    return 0U;
+  }
+
+  length = context->content.length;
+  if (length > (((size_t)-1) - context->pending_content.length)) {
+    return (size_t)-1;
+  }
+
+  return length + context->pending_content.length;
+}
+
+static int strappy_client_stream_should_preserve_helper_content(
+  const strappy_stream_context *context,
+  cJSON *tool_calls)
+{
+  if ((context == NULL) || !strappy_client_tool_calls_are_all_helpers(tool_calls)) {
+    return 0;
+  }
+
+  return (strappy_client_stream_content_length(context) >=
+          STRAPPY_CLIENT_STREAM_HELPER_ANSWER_BYTES) ? 1 : 0;
+}
+
+static int strappy_client_stream_enable_helper_content_preservation(
+  strappy_stream_context *context)
+{
+  if (context == NULL) {
+    return 1;
+  }
+
+  context->helper_tool_calls_preserve_content = 1;
+  return strappy_client_stream_flush_pending_content(
+    context,
+    STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA);
+}
+
 static int strappy_client_stream_note_tool_calls(strappy_stream_context *context,
                                                  cJSON *tool_calls)
 {
@@ -3456,6 +3527,13 @@ static int strappy_client_stream_note_tool_calls(strappy_stream_context *context
   }
 
   context->saw_tool_calls = 1;
+  if (strappy_client_stream_should_preserve_helper_content(context,
+                                                           tool_calls)) {
+    return strappy_client_stream_enable_helper_content_preservation(context);
+  }
+  if (strappy_client_tool_calls_are_all_helpers(tool_calls)) {
+    return 1;
+  }
   if (!strappy_client_stream_flush_pending_content(
         context,
         STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA)) {
@@ -3671,7 +3749,8 @@ static int strappy_client_stream_parse_json_event(strappy_stream_context *contex
   if (api_error != NULL) {
     (void)strappy_client_stream_flush_pending_content(
       context,
-      context->saw_tool_calls ?
+      (context->saw_tool_calls &&
+       !context->helper_tool_calls_preserve_content) ?
         STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA :
         STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA);
     if (context->result != NULL) {
@@ -3724,13 +3803,23 @@ static int strappy_client_stream_parse_json_event(strappy_stream_context *contex
       if (!strappy_http_buffer_append_cstring(&context->content, content_text)) {
         ok = strappy_client_stream_set_error(context, "Could not allocate streamed assistant text.");
       } else if (context->saw_tool_calls) {
+        if (!context->helper_tool_calls_preserve_content &&
+            strappy_client_stream_should_preserve_helper_content(
+              context,
+              context->tool_calls)) {
+          ok = strappy_client_stream_enable_helper_content_preservation(context);
+        }
+      }
+      if (ok && context->saw_tool_calls) {
         if (!strappy_client_stream_emit_delta(
               context,
-              STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA,
+              context->helper_tool_calls_preserve_content ?
+                STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA :
+                STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA,
               content_text)) {
           ok = 0;
         }
-      } else {
+      } else if (ok) {
         ok = strappy_client_stream_append_speculative_content(context,
                                                               content_text);
       }
@@ -3747,7 +3836,9 @@ static int strappy_client_stream_parse_json_event(strappy_stream_context *contex
       }
       if (!strappy_client_stream_flush_pending_content(
             context,
-            STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA)) {
+            context->helper_tool_calls_preserve_content ?
+              STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA :
+              STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA)) {
         ok = 0;
       }
     } else if (!context->saw_tool_calls &&
@@ -4781,7 +4872,8 @@ static int strappy_client_stream_request_json(const strappy_config *config,
       (stream_context.pending_content.length > 0U) &&
       !strappy_client_stream_flush_pending_content(
         &stream_context,
-        stream_context.saw_tool_calls ?
+        (stream_context.saw_tool_calls &&
+         !stream_context.helper_tool_calls_preserve_content) ?
           STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA :
           STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA)) {
     if (stream_context.stream_error != NULL) {
@@ -4801,24 +4893,28 @@ static int strappy_client_stream_request_json(const strappy_config *config,
 
     streamed_content =
       (stream_context.content.data != NULL) ? stream_context.content.data : "";
-    tool_display_text =
-      strappy_client_tool_calls_display_text(stream_context.tool_calls);
-    if (tool_display_text == NULL) {
-      strappy_set_error(error_out, "Could not allocate streamed tool call text.");
-      strappy_stream_context_destroy(&stream_context);
-      strappy_client_finalize_metadata(config, result);
-      return 0;
-    }
-
-    if (streamed_content[0] == '\0') {
-      result->response_text = tool_display_text;
-      tool_display_text = NULL;
+    if (stream_context.helper_tool_calls_preserve_content) {
+      result->response_text = strappy_string_duplicate(streamed_content);
     } else {
-      result->response_text =
-        strappy_client_text_with_tool_calls_display(streamed_content,
-                                                    stream_context.tool_calls);
-      free(tool_display_text);
-      tool_display_text = NULL;
+      tool_display_text =
+        strappy_client_tool_calls_display_text(stream_context.tool_calls);
+      if (tool_display_text == NULL) {
+        strappy_set_error(error_out, "Could not allocate streamed tool call text.");
+        strappy_stream_context_destroy(&stream_context);
+        strappy_client_finalize_metadata(config, result);
+        return 0;
+      }
+
+      if (streamed_content[0] == '\0') {
+        result->response_text = tool_display_text;
+        tool_display_text = NULL;
+      } else {
+        result->response_text =
+          strappy_client_text_with_tool_calls_display(streamed_content,
+                                                      stream_context.tool_calls);
+        free(tool_display_text);
+        tool_display_text = NULL;
+      }
     }
   } else {
     result->response_text = strappy_string_duplicate(

@@ -5,10 +5,12 @@
 #include "strappy_db.h"
 
 #include <cJSON.h>
+#include <errno.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 
 #define STRAPPY_TOOLS_AVAILABILITY_ERROR "error"
@@ -897,6 +899,42 @@ char *strappy_tools_tool_guidance_string(const char *resource_dir,
     strappy_set_error(error_out, "Could not allocate tool guidance string.");
   }
   return value;
+}
+
+static char *strappy_tools_tool_guidance_optional_string(
+  const char *resource_dir,
+  const char *section_name,
+  const char *key)
+{
+  char *error;
+  char *value;
+
+  error = NULL;
+  value = strappy_tools_tool_guidance_string(resource_dir,
+                                             section_name,
+                                             key,
+                                             &error);
+  free(error);
+  return value;
+}
+
+static void strappy_tools_set_error_with_tool_guidance(char **error_out,
+                                                       const char *message,
+                                                       const char *resource_dir,
+                                                       const char *guidance_key)
+{
+  char *guidance;
+
+  guidance = strappy_tools_tool_guidance_optional_string(resource_dir,
+                                                         "tool_errors",
+                                                         guidance_key);
+  if ((guidance != NULL) && (guidance[0] != '\0')) {
+    strappy_set_formatted_error(error_out, "%s %s", message, guidance);
+  } else {
+    strappy_set_error(error_out, message);
+  }
+
+  free(guidance);
 }
 
 static int strappy_tools_validate_empty_arguments(const char *arguments_json,
@@ -2982,6 +3020,21 @@ static int strappy_tools_open_readonly_database(const char *path,
   sqlite3_busy_timeout(db, 1000);
   *db_out = db;
   return 1;
+}
+
+static int strappy_tools_database_file_is_missing(const char *path)
+{
+  struct stat info;
+
+  if ((path == NULL) || (path[0] == '\0')) {
+    return 0;
+  }
+
+  if (stat(path, &info) == 0) {
+    return 0;
+  }
+
+  return ((errno == ENOENT) || (errno == ENOTDIR)) ? 1 : 0;
 }
 
 static int strappy_tools_catalog_exec(sqlite3 *db,
@@ -5224,6 +5277,17 @@ static char *strappy_tools_execute_database_query(const char *session_db_path,
         resource_dir,
         "database_query_missing_database_id");
     }
+    strappy_discovered_database_record_list_destroy(&list);
+    strappy_database_query_arguments_destroy(&arguments);
+    return NULL;
+  }
+
+  if (strappy_tools_database_file_is_missing(record->path)) {
+    strappy_tools_set_error_with_tool_guidance(
+      error_out,
+      "database_query approved database file is missing.",
+      resource_dir,
+      "database_query_missing_file");
     strappy_discovered_database_record_list_destroy(&list);
     strappy_database_query_arguments_destroy(&arguments);
     return NULL;

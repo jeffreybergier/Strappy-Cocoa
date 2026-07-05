@@ -446,10 +446,11 @@ int strappy_file_scanner_save_discovered_databases(
       scan_root);
   }
 
-  ok = strappy_db_save_discovered_databases(db_path,
-                                            inputs,
-                                            list->count,
-                                            error_out);
+  ok = strappy_db_replace_discovered_databases_for_scan_root(db_path,
+                                                             inputs,
+                                                             list->count,
+                                                             scan_root,
+                                                             error_out);
   free(inputs);
   return ok;
 }

@@ -9,7 +9,8 @@
   },
   "tool_errors": {
     "default": "Tool failed.",
-    "not_allowed_for_turn": "Tool is not allowed for this turn."
+    "not_allowed_for_turn": "Tool is not allowed for this turn.",
+    "database_query_missing_file": "The approved database file is no longer present on disk. NEVER retry the same database_id. Tell the user to rescan or manage databases, then call database_list_info again before querying."
   },
   "tools": [
     {

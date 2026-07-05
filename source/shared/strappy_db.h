@@ -182,6 +182,12 @@ int strappy_db_save_discovered_databases(
   const strappy_discovered_database_input *records,
   size_t count,
   char **error_out);
+int strappy_db_replace_discovered_databases_for_scan_root(
+  const char *db_path,
+  const strappy_discovered_database_input *records,
+  size_t count,
+  const char *scan_root,
+  char **error_out);
 int strappy_db_list_discovered_databases(
   const char *db_path,
   strappy_discovered_database_record_list *list,

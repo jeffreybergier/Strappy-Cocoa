@@ -13,7 +13,6 @@
   "default_openrouter_model_id"
 #define STRAPPY_DB_SELECTED_OPENROUTER_MODEL_KEY \
   "selected_openrouter_model_id"
-#define STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "gemma-4-31b-it"
 #define STRAPPY_DB_BUILTIN_DEFAULT_MODEL_DESCRIPTION "Built-in default model."
 #define STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL \
   "COALESCE((SELECT s.value FROM app_settings s " \
@@ -477,89 +476,6 @@ static int strappy_db_exec(sqlite3 *db,
   return 1;
 }
 
-static int strappy_db_migrate_legacy_default_openrouter_model(
-  sqlite3 *db,
-  char **error_out)
-{
-  static const char *settings_sql =
-    "UPDATE app_settings "
-    "SET value = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "', "
-    "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') "
-    "WHERE value = '" STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "' "
-    "AND key IN ('" STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_KEY "', "
-    "'" STRAPPY_DB_SELECTED_OPENROUTER_MODEL_KEY "');";
-  static const char *sessions_sql =
-    "UPDATE sessions "
-    "SET model = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "' "
-    "WHERE model = '" STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "';";
-  static const char *preserve_allowed_sql =
-    "UPDATE openrouter_model_settings "
-    "SET allowed = 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') "
-    "WHERE model_id = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "' "
-    "AND EXISTS (SELECT 1 FROM openrouter_model_settings "
-    "WHERE model_id = '" STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "' "
-    "AND allowed = 1);";
-  static const char *move_allowed_sql =
-    "UPDATE openrouter_model_settings "
-    "SET model_id = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "', "
-    "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') "
-    "WHERE model_id = '" STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "' "
-    "AND NOT EXISTS (SELECT 1 FROM openrouter_model_settings "
-    "WHERE model_id = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "');";
-  static const char *delete_legacy_settings_sql =
-    "DELETE FROM openrouter_model_settings "
-    "WHERE model_id = '" STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "';";
-  static const char *delete_legacy_model_sql =
-    "DELETE FROM openrouter_models "
-    "WHERE id = '" STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "' "
-    "AND name = '" STRAPPY_DB_LEGACY_DEFAULT_API_MODEL "' "
-    "AND description = '" STRAPPY_DB_BUILTIN_DEFAULT_MODEL_DESCRIPTION "';";
-
-  if (strcmp(STRAPPY_CONFIG_DEFAULT_API_MODEL,
-             STRAPPY_DB_LEGACY_DEFAULT_API_MODEL) == 0) {
-    return 1;
-  }
-
-  if (!strappy_db_exec(db,
-                       settings_sql,
-                       "Could not migrate default OpenRouter model settings",
-                       error_out)) {
-    return 0;
-  }
-  if (!strappy_db_exec(db,
-                       sessions_sql,
-                       "Could not migrate session OpenRouter models",
-                       error_out)) {
-    return 0;
-  }
-  if (!strappy_db_exec(db,
-                       preserve_allowed_sql,
-                       "Could not migrate OpenRouter model allowlist",
-                       error_out)) {
-    return 0;
-  }
-  if (!strappy_db_exec(db,
-                       move_allowed_sql,
-                       "Could not migrate OpenRouter model allowlist",
-                       error_out)) {
-    return 0;
-  }
-  if (!strappy_db_exec(db,
-                       delete_legacy_settings_sql,
-                       "Could not remove legacy OpenRouter model setting",
-                       error_out)) {
-    return 0;
-  }
-  if (!strappy_db_exec(db,
-                       delete_legacy_model_sql,
-                       "Could not remove legacy OpenRouter default model",
-                       error_out)) {
-    return 0;
-  }
-
-  return 1;
-}
-
 static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
 {
   static const char *sessions_sql =
@@ -659,6 +575,19 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
   static const char *discovered_databases_decision_index_sql =
     "CREATE INDEX IF NOT EXISTS discovered_databases_user_decision_idx "
     "ON discovered_databases(user_decision);";
+  static const char *database_access_settings_sql =
+    "CREATE TABLE IF NOT EXISTS database_access_settings ("
+    "path TEXT PRIMARY KEY,"
+    "user_decision TEXT NOT NULL DEFAULT 'unknown',"
+    "assistant_database_id TEXT UNIQUE,"
+    "created_at TEXT NOT NULL DEFAULT "
+    "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
+    "updated_at TEXT NOT NULL DEFAULT "
+    "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+    ");";
+  static const char *database_access_settings_decision_index_sql =
+    "CREATE INDEX IF NOT EXISTS database_access_settings_decision_idx "
+    "ON database_access_settings(user_decision);";
   static const char *app_settings_sql =
     "CREATE TABLE IF NOT EXISTS app_settings ("
     "key TEXT PRIMARY KEY,"
@@ -805,6 +734,20 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
   }
 
   if (!strappy_db_exec(db,
+                       database_access_settings_sql,
+                       "Could not create database access settings schema",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       database_access_settings_decision_index_sql,
+                       "Could not create database access settings decision index",
+                       error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
                        app_settings_sql,
                        "Could not create app settings schema",
                        error_out)) {
@@ -836,9 +779,6 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
                        STRAPPY_DB_INSERT_BUILTIN_DEFAULT_MODEL_SQL,
                        "Could not create built-in OpenRouter default model",
                        error_out)) {
-    return 0;
-  }
-  if (!strappy_db_migrate_legacy_default_openrouter_model(db, error_out)) {
     return 0;
   }
 
@@ -1163,22 +1103,18 @@ static int strappy_db_bind_optional_text(sqlite3 *db,
   return 1;
 }
 
-static int strappy_db_set_assistant_database_id(sqlite3 *db,
-                                                long long catalog_id,
-                                                char **error_out)
+static int strappy_db_ensure_database_access_setting(sqlite3 *db,
+                                                     const char *path,
+                                                     char **error_out)
 {
   static const char *sql =
-    "UPDATE discovered_databases "
-    "SET assistant_database_id = ? "
-    "WHERE id = ? "
-    "AND (assistant_database_id IS NULL OR assistant_database_id = '');";
+    "INSERT OR IGNORE INTO database_access_settings "
+    "(path, user_decision) VALUES (?, 'unknown');";
   sqlite3_stmt *stmt;
-  char *assistant_database_id;
   int rc;
 
-  assistant_database_id = strappy_db_create_assistant_database_id(catalog_id);
-  if (assistant_database_id == NULL) {
-    strappy_set_error(error_out, "Could not allocate discovered database id.");
+  if ((path == NULL) || (path[0] == '\0')) {
+    strappy_set_error(error_out, "Database access path is empty.");
     return 0;
   }
 
@@ -1186,9 +1122,164 @@ static int strappy_db_set_assistant_database_id(sqlite3 *db,
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
+                                "Could not prepare database access setting: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind database access setting: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save database access setting: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+static int strappy_db_copy_database_access_assistant_id(
+  sqlite3 *db,
+  const char *path,
+  char **assistant_database_id_out,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT assistant_database_id FROM database_access_settings "
+    "WHERE path = ?;";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (assistant_database_id_out == NULL) {
+    strappy_set_error(error_out, "Database access id lookup has no output.");
+    return 0;
+  }
+  *assistant_database_id_out = NULL;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare database access id lookup: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind database access id lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    *assistant_database_id_out = strappy_db_column_string(stmt, 0);
+    sqlite3_finalize(stmt);
+    if ((*assistant_database_id_out != NULL) &&
+        ((*assistant_database_id_out)[0] == '\0')) {
+      free(*assistant_database_id_out);
+      *assistant_database_id_out = NULL;
+    }
+    return 1;
+  }
+
+  sqlite3_finalize(stmt);
+  if (rc == SQLITE_DONE) {
+    return 1;
+  }
+
+  strappy_set_formatted_error(error_out,
+                              "Could not read database access id lookup: %s",
+                              sqlite3_errmsg(db));
+  return 0;
+}
+
+static int strappy_db_store_database_access_assistant_id(
+  sqlite3 *db,
+  const char *path,
+  const char *assistant_database_id,
+  char **error_out)
+{
+  static const char *sql =
+    "UPDATE database_access_settings "
+    "SET assistant_database_id = ? "
+    "WHERE path = ?;";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare database access id update: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(stmt, 1, assistant_database_id, -1, SQLITE_TRANSIENT);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 2, path, -1, SQLITE_TRANSIENT);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind database access id update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save database access id: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  if (sqlite3_changes(db) < 1) {
+    strappy_set_error(error_out, "Database access setting was not found.");
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+static int strappy_db_store_discovered_database_assistant_id(
+  sqlite3 *db,
+  long long catalog_id,
+  const char *assistant_database_id,
+  char **error_out)
+{
+  static const char *sql =
+    "UPDATE discovered_databases "
+    "SET assistant_database_id = ? "
+    "WHERE id = ?;";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
                                 "Could not prepare discovered database id update: %s",
                                 sqlite3_errmsg(db));
-    free(assistant_database_id);
     return 0;
   }
 
@@ -1201,7 +1292,6 @@ static int strappy_db_set_assistant_database_id(sqlite3 *db,
                                 "Could not bind discovered database id update: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    free(assistant_database_id);
     return 0;
   }
 
@@ -1211,11 +1301,60 @@ static int strappy_db_set_assistant_database_id(sqlite3 *db,
                                 "Could not save discovered database id: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    free(assistant_database_id);
     return 0;
   }
 
   sqlite3_finalize(stmt);
+  return 1;
+}
+
+static int strappy_db_set_assistant_database_id(sqlite3 *db,
+                                                long long catalog_id,
+                                                const char *path,
+                                                char **error_out)
+{
+  char *assistant_database_id;
+
+  if ((path == NULL) || (path[0] == '\0')) {
+    strappy_set_error(error_out, "Discovered database path is empty.");
+    return 0;
+  }
+
+  if (!strappy_db_ensure_database_access_setting(db, path, error_out)) {
+    return 0;
+  }
+
+  assistant_database_id = NULL;
+  if (!strappy_db_copy_database_access_assistant_id(db,
+                                                    path,
+                                                    &assistant_database_id,
+                                                    error_out)) {
+    return 0;
+  }
+
+  if (assistant_database_id == NULL) {
+    assistant_database_id = strappy_db_create_assistant_database_id(catalog_id);
+    if (assistant_database_id == NULL) {
+      strappy_set_error(error_out, "Could not allocate discovered database id.");
+      return 0;
+    }
+    if (!strappy_db_store_database_access_assistant_id(db,
+                                                       path,
+                                                       assistant_database_id,
+                                                       error_out)) {
+      free(assistant_database_id);
+      return 0;
+    }
+  }
+
+  if (!strappy_db_store_discovered_database_assistant_id(db,
+                                                         catalog_id,
+                                                         assistant_database_id,
+                                                         error_out)) {
+    free(assistant_database_id);
+    return 0;
+  }
+
   free(assistant_database_id);
   return 1;
 }
@@ -1498,7 +1637,10 @@ static int strappy_db_save_discovered_database(
     }
   }
 
-  return strappy_db_set_assistant_database_id(db, catalog_id, error_out);
+  return strappy_db_set_assistant_database_id(db,
+                                              catalog_id,
+                                              record->path,
+                                              error_out);
 }
 
 static int strappy_db_assign_discovered_database_from_statement(
@@ -3520,17 +3662,227 @@ int strappy_db_save_discovered_databases(
   return 1;
 }
 
+static int strappy_db_prepare_scan_path_table(sqlite3 *db, char **error_out)
+{
+  if (!strappy_db_exec(db,
+                       "CREATE TEMP TABLE IF NOT EXISTS strappy_scan_paths "
+                       "(path TEXT PRIMARY KEY);",
+                       "Could not create scan path table",
+                       error_out)) {
+    return 0;
+  }
+
+  return strappy_db_exec(db,
+                         "DELETE FROM strappy_scan_paths;",
+                         "Could not clear scan path table",
+                         error_out);
+}
+
+static int strappy_db_add_scan_path(sqlite3 *db,
+                                    const char *path,
+                                    char **error_out)
+{
+  static const char *sql =
+    "INSERT OR IGNORE INTO strappy_scan_paths (path) VALUES (?);";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if ((path == NULL) || (path[0] == '\0')) {
+    strappy_set_error(error_out, "Scan path is empty.");
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare scan path insert: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind scan path insert: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save scan path: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+static int strappy_db_delete_missing_scan_root_databases(sqlite3 *db,
+                                                         const char *scan_root,
+                                                         char **error_out)
+{
+  static const char *sql =
+    "DELETE FROM discovered_databases "
+    "WHERE ((? IS NULL AND scan_root IS NULL) OR scan_root = ?) "
+    "AND NOT EXISTS ("
+    "SELECT 1 FROM strappy_scan_paths p "
+    "WHERE p.path = discovered_databases.path);";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare stale database delete: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  if ((scan_root != NULL) && (scan_root[0] != '\0')) {
+    rc = sqlite3_bind_text(stmt, 1, scan_root, -1, SQLITE_TRANSIENT);
+    if (rc == SQLITE_OK) {
+      rc = sqlite3_bind_text(stmt, 2, scan_root, -1, SQLITE_TRANSIENT);
+    }
+  } else {
+    rc = sqlite3_bind_null(stmt, 1);
+    if (rc == SQLITE_OK) {
+      rc = sqlite3_bind_null(stmt, 2);
+    }
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind stale database delete: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not delete stale databases: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+int strappy_db_replace_discovered_databases_for_scan_root(
+  const char *db_path,
+  const strappy_discovered_database_input *records,
+  size_t count,
+  const char *scan_root,
+  char **error_out)
+{
+  sqlite3 *db;
+  size_t index;
+
+  if ((records == NULL) && (count > 0U)) {
+    strappy_set_error(error_out, "Discovered database records are missing.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin discovered database replacement",
+                       error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_prepare_scan_path_table(db, error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database replacement",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  for (index = 0U; index < count; index++) {
+    if (!strappy_db_add_scan_path(db, records[index].path, error_out)) {
+      strappy_db_exec(db,
+                      "ROLLBACK;",
+                      "Could not roll back discovered database replacement",
+                      NULL);
+      sqlite3_close(db);
+      return 0;
+    }
+  }
+
+  if (!strappy_db_delete_missing_scan_root_databases(db,
+                                                     scan_root,
+                                                     error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database replacement",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  for (index = 0U; index < count; index++) {
+    if (!strappy_db_save_discovered_database(db,
+                                             &records[index],
+                                             error_out)) {
+      strappy_db_exec(db,
+                      "ROLLBACK;",
+                      "Could not roll back discovered database replacement",
+                      NULL);
+      sqlite3_close(db);
+      return 0;
+    }
+  }
+
+  if (!strappy_db_exec(db,
+                       "COMMIT;",
+                       "Could not commit discovered database replacement",
+                       error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database replacement",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  sqlite3_close(db);
+  return 1;
+}
+
 int strappy_db_list_discovered_databases(
   const char *db_path,
   strappy_discovered_database_record_list *list,
   char **error_out)
 {
   static const char *sql =
-    "SELECT id, assistant_database_id, path, size, modified_at, "
-    "device, inode, is_valid_sqlite, validation_error, scan_status, "
-    "user_decision, scan_root, first_seen_at, last_seen_at, last_scanned_at "
-    "FROM discovered_databases "
-    "ORDER BY last_seen_at DESC, id DESC;";
+    "SELECT d.id, COALESCE(a.assistant_database_id, d.assistant_database_id), "
+    "d.path, d.size, d.modified_at, d.device, d.inode, d.is_valid_sqlite, "
+    "d.validation_error, d.scan_status, "
+    "COALESCE(a.user_decision, d.user_decision, 'unknown'), "
+    "d.scan_root, d.first_seen_at, d.last_seen_at, d.last_scanned_at "
+    "FROM discovered_databases d "
+    "LEFT JOIN database_access_settings a ON a.path = d.path "
+    "ORDER BY d.last_seen_at DESC, d.id DESC;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;
@@ -3618,13 +3970,22 @@ int strappy_db_update_discovered_database_decision(
   const char *user_decision,
   char **error_out)
 {
-  static const char *sql =
-    "UPDATE discovered_databases "
-    "SET user_decision = ? "
+  static const char *lookup_sql =
+    "SELECT path FROM discovered_databases "
     "WHERE id = ? "
     "AND (? != 'allowed' OR is_valid_sqlite = 1);";
+  static const char *access_sql =
+    "UPDATE database_access_settings "
+    "SET user_decision = ?, "
+    "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+    "WHERE path = ?;";
+  static const char *legacy_sql =
+    "UPDATE discovered_databases "
+    "SET user_decision = ? "
+    "WHERE id = ?;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
+  char *path;
   int rc;
 
   if (catalog_id <= 0) {
@@ -3637,6 +3998,7 @@ int strappy_db_update_discovered_database_decision(
     return 0;
   }
 
+  db = NULL;
   if (!strappy_db_open(db_path, &db, error_out)) {
     return 0;
   }
@@ -3646,12 +4008,164 @@ int strappy_db_update_discovered_database_decision(
     return 0;
   }
 
+  if (!strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin discovered database decision update",
+                       error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  path = NULL;
   stmt = NULL;
-  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  rc = sqlite3_prepare_v2(db, lookup_sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare discovered database decision lookup: %s",
+                                sqlite3_errmsg(db));
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database decision update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)catalog_id);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 2, user_decision, -1, SQLITE_TRANSIENT);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind discovered database decision lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database decision update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    path = strappy_db_column_string(stmt, 0);
+  } else if (rc == SQLITE_DONE) {
+    strappy_set_error(error_out,
+                      "Discovered database was not found or is not valid SQLite.");
+    sqlite3_finalize(stmt);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database decision update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  } else {
+    strappy_set_formatted_error(error_out,
+                                "Could not read discovered database decision lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database decision update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+
+  if (path == NULL) {
+    strappy_set_error(error_out, "Could not allocate discovered database path.");
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database decision update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_set_assistant_database_id(db, catalog_id, path, error_out)) {
+    free(path);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database decision update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, access_sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare database access decision update: %s",
+                                sqlite3_errmsg(db));
+    free(path);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database decision update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(stmt, 1, user_decision, -1, SQLITE_TRANSIENT);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 2, path, -1, SQLITE_TRANSIENT);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind database access decision update: %s",
+                                sqlite3_errmsg(db));
+    free(path);
+    sqlite3_finalize(stmt);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database decision update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not update database access decision: %s",
+                                sqlite3_errmsg(db));
+    free(path);
+    sqlite3_finalize(stmt);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database decision update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+  if (sqlite3_changes(db) < 1) {
+    strappy_set_error(error_out, "Database access setting was not found.");
+    free(path);
+    sqlite3_finalize(stmt);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database decision update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, legacy_sql, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
                                 "Could not prepare discovered database decision update: %s",
                                 sqlite3_errmsg(db));
+    free(path);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database decision update",
+                    NULL);
     sqlite3_close(db);
     return 0;
   }
@@ -3660,14 +4174,16 @@ int strappy_db_update_discovered_database_decision(
   if (rc == SQLITE_OK) {
     rc = sqlite3_bind_int64(stmt, 2, (sqlite3_int64)catalog_id);
   }
-  if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_text(stmt, 3, user_decision, -1, SQLITE_TRANSIENT);
-  }
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
                                 "Could not bind discovered database decision update: %s",
                                 sqlite3_errmsg(db));
+    free(path);
     sqlite3_finalize(stmt);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database decision update",
+                    NULL);
     sqlite3_close(db);
     return 0;
   }
@@ -3677,20 +4193,31 @@ int strappy_db_update_discovered_database_decision(
     strappy_set_formatted_error(error_out,
                                 "Could not update discovered database decision: %s",
                                 sqlite3_errmsg(db));
+    free(path);
     sqlite3_finalize(stmt);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database decision update",
+                    NULL);
     sqlite3_close(db);
     return 0;
   }
-
-  if (sqlite3_changes(db) < 1) {
-    strappy_set_error(error_out,
-                      "Discovered database was not found or is not valid SQLite.");
-    sqlite3_finalize(stmt);
-    sqlite3_close(db);
-    return 0;
-  }
-
   sqlite3_finalize(stmt);
+
+  if (!strappy_db_exec(db,
+                       "COMMIT;",
+                       "Could not commit discovered database decision update",
+                       error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database decision update",
+                    NULL);
+    free(path);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  free(path);
   sqlite3_close(db);
   return 1;
 }
