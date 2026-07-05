@@ -98,6 +98,68 @@ static NSComparisonResult StrappyCompareBooleans(BOOL left, BOOL right)
   return left ? NSOrderedAscending : NSOrderedDescending;
 }
 
+static NSComparisonResult StrappyCompareLongLong(long long left,
+                                                  long long right)
+{
+  if (left < right) {
+    return NSOrderedAscending;
+  }
+  if (left > right) {
+    return NSOrderedDescending;
+  }
+  return NSOrderedSame;
+}
+
+static BOOL StrappyDatabasePathContains(NSString *path, NSString *needle)
+{
+  if (([path length] == 0U) || ([needle length] == 0U)) {
+    return NO;
+  }
+  return ([path rangeOfString:needle
+                      options:NSCaseInsensitiveSearch].location != NSNotFound) ?
+    YES : NO;
+}
+
+static long long StrappyDatabaseRowPriority(NSDictionary *row)
+{
+  NSString *path;
+  NSString *name;
+  NSNumber *sizeNumber;
+  long long size;
+
+  path = StrappyDatabasePathForRow(row);
+  name = [path lastPathComponent];
+  sizeNumber = [row objectForKey:@"size"];
+  size = [sizeNumber isKindOfClass:[NSNumber class]] ?
+    [sizeNumber longLongValue] : 0LL;
+
+  if (StrappyDatabasePathContains(path, @".localstorage")) {
+    return 30LL;
+  }
+  if ([name caseInsensitiveCompare:@"ApplicationCache.db"] == NSOrderedSame) {
+    return 35LL;
+  }
+  if ([name caseInsensitiveCompare:@"MapTiles.sqlitedb"] == NSOrderedSame) {
+    return 35LL;
+  }
+  if ([name caseInsensitiveCompare:@"SafeBrowsing.db"] == NSOrderedSame) {
+    return 35LL;
+  }
+  if ([name isEqualToString:@"Cache.db"] ||
+      ([name caseInsensitiveCompare:@"nsurlcache"] == NSOrderedSame)) {
+    return (size <= 4096LL) ? 5LL : 20LL;
+  }
+  if (([name isEqualToString:@"cache.db"]) &&
+      StrappyDatabasePathContains(path, @"/Caches/")) {
+    return 25LL;
+  }
+  if (StrappyDatabasePathContains(path, @"/Library/Caches/")) {
+    return 40LL;
+  }
+
+  return 100LL;
+}
+
 static BOOL StrappyDatabaseRowIsAllowed(NSDictionary *row)
 {
   NSString *decision;
@@ -121,6 +183,11 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
                                   StrappyDatabaseRowIsAllowed(rightRow));
   if (result != NSOrderedSame) {
     return result;
+  }
+  result = StrappyCompareLongLong(StrappyDatabaseRowPriority(leftRow),
+                                  StrappyDatabaseRowPriority(rightRow));
+  if (result != NSOrderedSame) {
+    return -result;
   }
   result = StrappyCompareStrings(StrappyDatabaseLocationForRow(leftRow),
                                  StrappyDatabaseLocationForRow(rightRow));

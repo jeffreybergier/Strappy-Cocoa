@@ -86,6 +86,57 @@ static NSComparisonResult StrappyDatabaseWhitelistCompareLongLong(long long left
   return NSOrderedSame;
 }
 
+static BOOL StrappyDatabaseWhitelistPathContains(NSString *path,
+                                                 NSString *needle)
+{
+  if (([path length] == 0U) || ([needle length] == 0U)) {
+    return NO;
+  }
+  return ([path rangeOfString:needle
+                      options:NSCaseInsensitiveSearch].location != NSNotFound) ?
+    YES : NO;
+}
+
+static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
+{
+  NSString *path;
+  NSString *name;
+  NSNumber *sizeNumber;
+  long long size;
+
+  path = StrappyDatabaseWhitelistPathForRow(row);
+  name = [path lastPathComponent];
+  sizeNumber = [row objectForKey:@"size"];
+  size = [sizeNumber isKindOfClass:[NSNumber class]] ?
+    [sizeNumber longLongValue] : 0LL;
+
+  if (StrappyDatabaseWhitelistPathContains(path, @".localstorage")) {
+    return 30LL;
+  }
+  if ([name caseInsensitiveCompare:@"ApplicationCache.db"] == NSOrderedSame) {
+    return 35LL;
+  }
+  if ([name caseInsensitiveCompare:@"MapTiles.sqlitedb"] == NSOrderedSame) {
+    return 35LL;
+  }
+  if ([name caseInsensitiveCompare:@"SafeBrowsing.db"] == NSOrderedSame) {
+    return 35LL;
+  }
+  if ([name isEqualToString:@"Cache.db"] ||
+      ([name caseInsensitiveCompare:@"nsurlcache"] == NSOrderedSame)) {
+    return (size <= 4096LL) ? 5LL : 20LL;
+  }
+  if (([name isEqualToString:@"cache.db"]) &&
+      StrappyDatabaseWhitelistPathContains(path, @"/Caches/")) {
+    return 25LL;
+  }
+  if (StrappyDatabaseWhitelistPathContains(path, @"/Library/Caches/")) {
+    return 40LL;
+  }
+
+  return 100LL;
+}
+
 @implementation StrappyPreferencesDatabaseWhitelistView
 
 - (id)initWithFrame:(NSRect)frame
@@ -181,8 +232,8 @@ static NSComparisonResult StrappyDatabaseWhitelistCompareLongLong(long long left
   [tableView addTableColumn:sizeColumn];
 
   [tableView setSortDescriptors:[NSArray arrayWithObjects:
-    [[[NSSortDescriptor alloc] initWithKey:@"location"
-                                 ascending:YES] autorelease],
+    [[[NSSortDescriptor alloc] initWithKey:@"database_priority"
+                                 ascending:NO] autorelease],
     nil]];
 }
 
@@ -194,13 +245,15 @@ static NSComparisonResult StrappyDatabaseWhitelistCompareLongLong(long long left
 
 - (NSSortDescriptor *)defaultPrimarySortDescriptor
 {
-  return [[[NSSortDescriptor alloc] initWithKey:@"location"
-                                      ascending:YES] autorelease];
+  return [[[NSSortDescriptor alloc] initWithKey:@"database_priority"
+                                      ascending:NO] autorelease];
 }
 
 - (NSArray *)fallbackSortDescriptors
 {
   return [NSArray arrayWithObjects:
+    [[[NSSortDescriptor alloc] initWithKey:@"location"
+                                 ascending:YES] autorelease],
     [[[NSSortDescriptor alloc] initWithKey:@"size"
                                  ascending:NO] autorelease],
     nil];
@@ -214,6 +267,7 @@ static NSComparisonResult StrappyDatabaseWhitelistCompareLongLong(long long left
 - (BOOL)sortKeyIsKnown:(NSString *)key
 {
   return ([key isEqualToString:@"allowed"] ||
+          [key isEqualToString:@"database_priority"] ||
           [key isEqualToString:@"name"] ||
           [key isEqualToString:@"location"] ||
           [key isEqualToString:@"size"] ||
@@ -228,6 +282,11 @@ static NSComparisonResult StrappyDatabaseWhitelistCompareLongLong(long long left
     return StrappyDatabaseWhitelistCompareLongLong(
       StrappyDatabaseWhitelistRowIsAllowed(left) ? 1LL : 0LL,
       StrappyDatabaseWhitelistRowIsAllowed(right) ? 1LL : 0LL);
+  }
+  if ([key isEqualToString:@"database_priority"]) {
+    return StrappyDatabaseWhitelistCompareLongLong(
+      StrappyDatabaseWhitelistPriorityForRow(left),
+      StrappyDatabaseWhitelistPriorityForRow(right));
   }
   if ([key isEqualToString:@"name"]) {
     return StrappyDatabaseWhitelistCompareStrings(

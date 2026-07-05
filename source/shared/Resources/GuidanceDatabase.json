@@ -116,6 +116,263 @@
       ]
     },
     {
+      "id": "apple_notes",
+      "match": {
+        "path_suffix": "/Library/Notes/notes.sqlite"
+      },
+      "description_short": "Apple Notes titles, summaries, body text, stores, accounts, creation dates, and modification dates.",
+      "description": "Apple Notes database. Use for note titles, summaries, body text, stores, accounts, creation dates, modification dates, and deleted state. Join ZNOTE.ZBODY to ZNOTEBODY.Z_PK for note content. Join ZNOTE.ZSTORE to ZSTORE.Z_PK and ZSTORE.ZACCOUNT to ZACCOUNT.Z_PK for account/store context. CoreData timestamp columns must be sampled before conversion; do not assume Unix seconds.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "apple_safari_bookmarks",
+      "match": {
+        "path_suffix": "/Library/Safari/Bookmarks.db"
+      },
+      "description_short": "Safari bookmarks, folders, URLs, hierarchy, read state, and bookmark timestamps.",
+      "description": "Safari bookmarks database. Use bookmarks for saved bookmark and folder questions. The bookmarks.parent column forms the hierarchy; inspect type values before distinguishing folders from bookmark items. last_modified and added must be sampled before timestamp conversion. This database is not Safari browsing history or HTTP cache.",
+      "related_databases": [
+        "Cache.db",
+        ".localstorage"
+      ]
+    },
+    {
+      "id": "apple_wallet_passes",
+      "match": {
+        "path_suffix": "/Library/Passes/passes23.sqlite"
+      },
+      "description_short": "Apple Wallet pass, card, issuer, expiration, color, web service, and location metadata.",
+      "description": "Apple Wallet/Passes metadata. Use for boarding passes, loyalty cards, tickets, pass names, organizations, serial numbers, activation/expiration metadata, pass colors, web-service metadata, and pass geofences. Dates are integer columns but must be sampled before conversion. BLOB hash and token columns are implementation metadata; do not expose secrets or authentication tokens.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "apple_tcc_permissions",
+      "match": {
+        "path_suffix": "/Library/TCC/TCC.db"
+      },
+      "description_short": "Apple privacy permission grants, denials, prompt counts, and last-used metadata by service and app.",
+      "description": "Apple TCC privacy permissions database. Use for app access to protected services such as camera, microphone, location, contacts, photos, and similar privacy categories. access.service names the permission, access.client identifies the app or bundle, allowed indicates grant/deny state, and access_times.last_used_time records usage time. ALWAYS sample last_used_time before conversion. This database records permissions, not the protected content itself.",
+      "related_databases": [
+        "Social.sqlite"
+      ]
+    },
+    {
+      "id": "apple_social_permissions",
+      "match": {
+        "path_suffix": "/Library/Social/Social.sqlite"
+      },
+      "description_short": "Apple Social framework permission state by bundle identifier and service.",
+      "description": "Apple Social framework permissions database. Use for social-service permission state by bundle identifier. ZPERMISSION stores ZBUNDLEID, ZSERVICE, and integer permission state. This is permission metadata only; it does not contain social messages or posts.",
+      "related_databases": [
+        "TCC.db"
+      ]
+    },
+    {
+      "id": "apple_voicemail",
+      "match": {
+        "path_suffix": "/Library/Voicemail/voicemail.db"
+      },
+      "description_short": "Phone voicemail sender, callback number, date, duration, expiration, trashed state, and flags.",
+      "description": "Apple Phone voicemail metadata. Use voicemail for caller/sender, callback number, date, duration, expiration, trashed state, and flags. date is an integer timestamp; ALWAYS sample values before conversion. This database does not contain enough context to resolve contact names by itself; pair with Contacts when identity resolution is needed.",
+      "related_databases": [
+        "AddressBook.sqlitedb",
+        "Recents"
+      ]
+    },
+    {
+      "id": "apple_voice_memos",
+      "match": {
+        "path_suffix": "/Media/Recordings/Recordings.db"
+      },
+      "description_short": "Voice Memos recording labels, dates, durations, file paths, sync state, and restore state.",
+      "description": "Apple Voice Memos metadata. Use ZRECORDING for recording labels, dates, durations, audio file paths, sync state, and pending restore state. ZDURATION is seconds. ZDATE is a CoreData timestamp; sample before conversion. This database stores metadata and paths, not the audio bytes.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "apple_game_center",
+      "match": {
+        "path_contains": "/Library/GameKit/Data/"
+      },
+      "description_short": "Game Center games, achievements, leaderboards, scores, players, friends, challenges, and matches.",
+      "description": "Apple Game Center database. Use for installed Game Center games, achievements, achievement descriptions, leaderboard scores, player profiles, friend entries, challenges, and multiplayer/turn-based match metadata. CoreData timestamp columns must be sampled before conversion. This database can contain social gaming metadata; avoid exposing sensitive identifiers unless needed for the user's question.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "apple_accounts",
+      "match": {
+        "path_suffix": "/Library/Accounts/Accounts3.sqlite"
+      },
+      "description_short": "Apple Accounts framework account descriptions, usernames, account types, active state, and app authorizations.",
+      "description": "Apple Accounts framework database. Use for configured account metadata, account types, active/authenticated state, owning bundle IDs, enabled data classes, and app authorization rows. Most account properties are stored as BLOBs; do not invent decoded values. This database identifies accounts and permissions, not Mail messages or Contacts records.",
+      "related_databases": [
+        "Mail",
+        "AddressBook.sqlitedb",
+        "Calendar.sqlitedb"
+      ]
+    },
+    {
+      "id": "apple_keyboard_user_dictionary",
+      "match": {
+        "path_suffix": "/Library/Keyboard/UserDictionary.sqlite"
+      },
+      "description_short": "Apple keyboard text replacements, shortcuts, custom phrases, parts of speech, and timestamps.",
+      "description": "Apple User Dictionary database. Use ZUSERDICTIONARYENTRY for user-defined text replacements and custom words. ZPHRASE is the expanded phrase, ZSHORTCUT is the typed shortcut, and ZTIMESTAMP must be sampled before conversion. This is user-authored keyboard data; answer narrowly and avoid surfacing unrelated entries.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "apple_keyboard_bigram_learning",
+      "match": {
+        "path_suffix": "/Library/Keyboard/BigramLearning_ja_JP.db/sqlite.db"
+      },
+      "description_short": "Japanese/Korean keyboard bigram prediction learning data.",
+      "description": "Apple keyboard bigram learning database. Use only for keyboard prediction and IME diagnostics. Words stores learned reading/surface BLOB pairs and Assist tracks update metadata. This is not normal message, note, or document content.",
+      "related_databases": [
+        "UserDictionary.sqlite"
+      ]
+    },
+    {
+      "id": "apple_keyboard_phrase_learning",
+      "match": {
+        "path_suffix": "/Library/Keyboard/PhraseLearning_ja_JP.db/sqlite.db"
+      },
+      "description_short": "Japanese/Korean keyboard phrase prediction learning data.",
+      "description": "Apple keyboard phrase learning database. Use only for keyboard prediction and IME diagnostics. Words stores learned Reading and Surface BLOB values and Assist tracks update metadata. This is not normal message, note, or document content.",
+      "related_databases": [
+        "UserDictionary.sqlite"
+      ]
+    },
+    {
+      "id": "apple_messages_spotlight",
+      "match": {
+        "path_suffix": "/Library/Spotlight/com.apple.MobileSMS/SMSSearchindex.sqlite"
+      },
+      "description_short": "Spotlight search snippets and top-hit metadata for Apple Messages.",
+      "description": "Apple Messages Spotlight index. Use only for search index and top-hit questions. ZSPRECORD can contain searchable message snippets and display fields, but this is not the primary message source. ALWAYS use sms.db for full conversations, joins, authoritative timestamps, and attachments.",
+      "related_databases": [
+        "sms.db"
+      ]
+    },
+    {
+      "id": "apple_spotlight_top_hits",
+      "match": {
+        "path_suffix": "/Library/Spotlight/com.apple.SpotlightTopHits/index.sqlite"
+      },
+      "description_short": "General Spotlight search records, display fields, content snippets, and top-hit ranking metadata.",
+      "description": "Apple Spotlight top-hits index. Use for Spotlight search result metadata, display identifiers, searchable snippets, and top-hit ranking/selection metadata. This is an index, not the primary source for the underlying app data. Use the referenced app database whenever possible for authoritative facts.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "apple_downloads",
+      "match": {
+        "path_suffix": "/Media/Downloads/downloads.28.sqlitedb"
+      },
+      "description_short": "Apple download manager purchases, rentals, apps, podcasts, assets, state, URLs, and errors.",
+      "description": "Apple iTunes/download manager database. Use download for titles, artists, bundle IDs, purchase/redownload/rental flags, store item/account metadata, release/purchase dates, descriptions, and durations. Join download to asset by download_id for asset URLs, local paths, byte counts, and DRM metadata. Join download_state for phase, restrictions, and errors. Timestamp columns must be sampled before conversion.",
+      "related_databases": [
+        "itunesstored2.sqlitedb",
+        "MediaLibrary.sqlitedb"
+      ]
+    },
+    {
+      "id": "apple_itunesstored_purchases",
+      "match": {
+        "path_suffix": "/Library/com.apple.itunesstored/itunesstored2.sqlitedb"
+      },
+      "description_short": "iTunes Store in-app purchase, transaction, receipt, client, and download metadata.",
+      "description": "iTunes Store in-app purchase database. Use for product identifiers, purchase states, transaction identifiers, original transaction identifiers, client bundle metadata, and related download state. Receipt, request, error, and SINF columns are BLOB implementation data; do not expose secrets. CoreData timestamp columns must be sampled before conversion.",
+      "related_databases": [
+        "downloads.28.sqlitedb",
+        "kvs.sqlitedb"
+      ]
+    },
+    {
+      "id": "apple_itunesstored_private",
+      "match": {
+        "path_suffix": "/Library/com.apple.itunesstored/itunesstored_private.sqlitedb"
+      },
+      "description_short": "iTunes Store private push notification, cancelled download, and ringtone assignment metadata.",
+      "description": "iTunes Store private metadata database. Use for cancelled downloads, push notification clients/environments, and ringtone purchase assignment metadata. Token and userInfo BLOB fields may contain sensitive implementation data; summarize structure and avoid exposing raw tokens.",
+      "related_databases": [
+        "itunesstored2.sqlitedb",
+        "downloads.28.sqlitedb"
+      ]
+    },
+    {
+      "id": "apple_itunesstored_kvs",
+      "match": {
+        "path_suffix": "/Library/com.apple.itunesstored/kvs.sqlitedb"
+      },
+      "description_short": "iTunes Store key-value domains, keys, and serialized BLOB values.",
+      "description": "iTunes Store key-value store. Use kvs_value for domain/key lookup and high-level diagnostics. value is BLOB serialized data; do not invent decoded content. Query by domain and key when possible and avoid broad BLOB dumps.",
+      "related_databases": [
+        "itunesstored2.sqlitedb"
+      ]
+    },
+    {
+      "id": "apple_media_library",
+      "match": {
+        "path_suffix": "/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb"
+      },
+      "description_short": "Apple media library metadata for music and video; schema may require manual table queries.",
+      "description": "Apple media library database. Use for music/video library metadata when schema access succeeds. Some environments cannot enumerate the full schema because Apple virtual table modules are unavailable; if database_context_read reports a schema error, query sqlite_master and individual known tables carefully. Do not treat schema errors as proof the library is empty.",
+      "related_databases": [
+        "downloads.28.sqlitedb",
+        "UbiquitousMetadata.sqlitedb"
+      ]
+    },
+    {
+      "id": "apple_music_account_cache",
+      "match": {
+        "path_suffix": "/Library/MusicLibrary/AccountCache.sqlitedb"
+      },
+      "description_short": "Apple Music/iTunes DSID-to-Apple-ID account mapping.",
+      "description": "Apple Music/iTunes account cache. Use only to resolve Apple DSID values to Apple ID email/account identifiers. It is a small support database with no message, media, purchase, or contact content.",
+      "related_databases": [
+        "MediaLibrary.sqlitedb",
+        "itunesstored2.sqlitedb"
+      ]
+    },
+    {
+      "id": "apple_cloud_docs_item_info",
+      "match": {
+        "filename": "item-info.db",
+        "path_contains": "/Library/Application Support/Ubiquity/"
+      },
+      "description_short": "iCloud Drive item metadata, filenames, sizes, parent/root relationships, peers, shares, and sync state.",
+      "description": "iCloud Drive/CloudDocs item metadata database. Use item_table for filenames, local filenames, sizes, file IDs, parent/root relationships, state, type, mode, membership metadata, and modification timestamps. shadow_table mirrors pending changes. collection tables describe sharing. mtime must be sampled before conversion. This tracks file metadata and sync state, not file contents.",
+      "related_databases": [
+        "ChunkStoreDatabase"
+      ]
+    },
+    {
+      "id": "apple_cloud_docs_chunk_store",
+      "match": {
+        "filename": "ChunkStoreDatabase",
+        "path_contains": "/Library/Application Support/Ubiquity/"
+      },
+      "description_short": "iCloud content-addressed chunk storage metadata.",
+      "description": "iCloud content-addressed chunk storage database. Use only for low-level CloudDocs storage diagnostics. Tables track chunk IDs, file/chunk mappings, offsets, lengths, reference counts, storage files, and pending chunks. Prefer item-info.db for user-facing file metadata. Do not reconstruct or expose file contents from chunks.",
+      "related_databases": [
+        "item-info.db"
+      ]
+    },
+    {
+      "id": "apple_books_outstanding_assets",
+      "match": {
+        "path_suffix": "/Media/Books/Sync/Database/OutstandingAssets_4.sqlite"
+      },
+      "description_short": "Apple Books pending and installed iCloud asset download metadata.",
+      "description": "Apple Books outstanding asset database. Use for pending/restored/installed asset metadata, persistent IDs, download complete paths, computed sizes, and serialized asset dictionaries. BLOB asset dictionaries must not be treated as decoded text unless sampled and decoded safely.",
+      "related_databases": [
+      ]
+    },
+    {
       "id": "apple_photos_library",
       "match": {
         "filename": "Photos.sqlite"
@@ -230,6 +487,131 @@
       "related_databases": [
         "rkit.db",
         "rkit-data.db"
+      ]
+    },
+    {
+      "id": "strappy_app_database",
+      "match": {
+        "path_suffix": "/Library/Application Support/Strappy/strappy.sqlite"
+      },
+      "description_short": "Strappy app sessions, turns, messages, discovered databases, memories, model catalog, and settings.",
+      "description": "Strappy's own application database. Use ONLY for Strappy diagnostics, sessions, messages, helper memory, discovered database catalog state, OpenRouter model catalog/settings, and app settings. Session messages may contain conversation history, tool metadata, and reasoning; do not expose hidden reasoning or unrelated private history unless the user explicitly asks for Strappy app diagnostics. discovered_databases is the source of truth for the database selection screen.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "onepassword_vault",
+      "match": {
+        "filename": "OnePassword.sqlite"
+      },
+      "description_short": "1Password vault metadata, categories, folders, tags, usage counters, sync state, and encrypted item BLOBs.",
+      "description": "1Password local vault database. Most item content is encrypted in BLOB columns such as key_data, overview_data, and item_details.data. Use only for high-level metadata such as categories, folders, tags, trashed state, usage counters, sync state, and schema diagnostics. NEVER attempt to reveal, infer, or fabricate passwords, secrets, decrypted item fields, or vault contents from encrypted BLOBs.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "speedtest_results",
+      "match": {
+        "filename": "speedtest.sqlite"
+      },
+      "description_short": "Speedtest result dates, download/upload speeds, latency, carrier, server, connection type, and location metadata.",
+      "description": "Speedtest result database. Use ZSPEEDTESTRESULT for test date, download, upload, latency, carrier, device model, server name/sponsor, connection type, WAN type, Wi-Fi SSID, and optional coordinate metadata. Verify speed units and timestamp format by sampling values before reporting. Be careful with external/internal IP and location columns; include them only when needed for the question.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "google_analytics_sdk",
+      "match": {
+        "filename": "googleanalytics.sql"
+      },
+      "description_short": "Google Analytics SDK queued events, hits, sessions, custom variables, and referrer metadata.",
+      "description": "Google Analytics SDK local tracking database. Use only for analytics/debug questions. events, hits, session, custom_var_cache, and referrer track queued or cached analytics data before upload. Timestamp columns are likely Unix seconds but must be sampled before conversion. NEVER treat analytics rows as the primary source for app content or user-authored records.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "generic_nsurl_cache",
+      "match": {
+        "filename": "Cache.db",
+        "path_contains": "/Library/Caches/"
+      },
+      "description_short": "Generic NSURLCache HTTP cache. Secondary evidence only; prefer the app's primary database.",
+      "description": "Generic NSURLCache HTTP cache. Common tables are cfurl_cache_response, cfurl_cache_blob_data, cfurl_cache_receiver_data, and cfurl_cache_schema_version. request_key contains cached URLs, time_stamp may be TEXT or another format and must be sampled, and receiver/blob tables may contain cached response/request BLOBs. Use ONLY for cache, web-request, offline payload, debugging, or forensic questions. NEVER use Cache.db as the primary source for messages, contacts, notes, mail, photos, feeds, purchases, or other app content when a primary app database is available.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "generic_nsurlcache_legacy",
+      "match": {
+        "filename": "nsurlcache",
+        "path_contains": "/Library/Caches/"
+      },
+      "description_short": "Legacy generic NSURLCache HTTP cache. Secondary evidence only.",
+      "description": "Legacy generic NSURLCache database. Common tables are cfurl_cache_response, cfurl_cache_blob_data, cfurl_cache_receiver_data, and cfurl_cache_schema_version. Use ONLY for cache/debug/forensic questions about cached URLs, timestamps, request/response objects, and cached payload bytes. Prefer primary app databases for user data and app state.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "generic_lowercase_cache_db",
+      "match": {
+        "filename": "cache.db",
+        "path_contains": "/Library/Caches/"
+      },
+      "description_short": "App-specific cache database. Inspect schema and use only for cache/debug questions.",
+      "description": "App-specific lowercase cache.db. This may be a custom cache index rather than standard NSURLCache. ALWAYS inspect schema before querying. Use only for cache/debug questions such as cache keys, UUIDs, access times, file sizes, or cached-object lookup. NEVER treat it as the primary source for app content unless schema and evidence prove it stores authoritative records.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "generic_webkit_local_storage",
+      "match": {
+        "path_suffix": ".localstorage"
+      },
+      "description_short": "WebKit localStorage key-value database for a web origin. Secondary web state only.",
+      "description": "WebKit localStorage database for the origin encoded in the filename. Expected table is ItemTable(key, value), but some files may be locked or unreadable. Use only for browser/webview storage, web app state, ad/tracking state, or debugging questions. Values are often serialized BLOBs; do not invent decoded content and avoid broad dumps of private web state.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "webkit_application_cache",
+      "match": {
+        "filename": "ApplicationCache.db"
+      },
+      "description_short": "WebKit HTML5 Application Cache manifests, resources, origins, cached headers, and cached payloads.",
+      "description": "WebKit HTML5 Application Cache database. Use for app-cache manifests, origins, resource URLs, response URLs, status codes, MIME types, headers, and cached payload BLOBs. Join CacheResources.data to CacheResourceData.id for cached content. Use ONLY for web cache/offline-resource questions; prefer primary app databases for app content.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "apple_maps_tile_cache",
+      "match": {
+        "path_suffix": "/Library/Caches/MapTiles/MapTiles.sqlitedb"
+      },
+      "description_short": "Apple Maps tile cache metadata and cached tile image BLOBs.",
+      "description": "Apple Maps tile cache. image stores tile coordinate fields, tileset, retrieved timestamp, size, and tile image BLOB data; edition and version track tileset metadata. Use only for map rendering cache/debug questions. This is not location history and should not be used to claim where the user went.",
+      "related_databases": [
+      ]
+    },
+    {
+      "id": "apple_safari_safe_browsing",
+      "match": {
+        "path_suffix": "/Library/Caches/com.apple.mobilesafari/SafeBrowsing/SafeBrowsing.db"
+      },
+      "description_short": "Safari Safe Browsing hashed host lists and update metadata.",
+      "description": "Safari Safe Browsing database. Hosts stores hashed malicious/phishing host entries by list and chunk; Lists stores list names and update timestamps. Use only for Safe Browsing diagnostics. Hash BLOBs are not browsing history and cannot directly identify visited sites without external list context.",
+      "related_databases": [
+        "Bookmarks.db",
+        "Cache.db"
+      ]
+    },
+    {
+      "id": "apple_voice_services_manifest",
+      "match": {
+        "path_suffix": "/Library/Caches/VoiceServices/Express.vscache/Manifest.sqlitedb"
+      },
+      "description_short": "Apple VoiceServices model manifests and value-translation metadata.",
+      "description": "Apple VoiceServices model/translation manifest. Model tracks model identifiers, validity, and last update metadata. ValueTranslation maps internal values to translated/display values. Use only for model/voice-services diagnostics, not user-authored content.",
+      "related_databases": [
       ]
     }
   ]
