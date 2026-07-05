@@ -82,6 +82,7 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 @property (nonatomic, assign) BOOL cancelPromptRequested;
 @property (nonatomic, assign) CGFloat composeBarBottomY;
 @property (nonatomic, assign) BOOL composing;
+@property (nonatomic, assign) BOOL tearingDown;
 - (void)observeKeyboard;
 - (void)keyboardWillShow:(NSNotification *)notification;
 - (void)keyboardWillHide:(NSNotification *)notification;
@@ -114,6 +115,8 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 - (NSString *)writeCurrentHTML;
 - (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error;
 - (void)clearRequestState;
+- (BOOL)isLeavingNavigationStack;
+- (void)prepareForRemoval;
 - (void)updateTitleFromSession;
 - (void)showError:(NSError *)error title:(NSString *)title;
 - (void)showMessage:(NSString *)message title:(NSString *)title;
@@ -208,7 +211,48 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 - (void)viewWillDisappear:(BOOL)animated
 {
   [super viewWillDisappear:animated];
+  if ([self isLeavingNavigationStack]) {
+    [self prepareForRemoval];
+  }
   [[self view] endEditing:YES];
+}
+
+- (BOOL)isLeavingNavigationStack
+{
+  UINavigationController *navigationController;
+
+  if ([self XP_isMovingFromParentViewController]) {
+    return YES;
+  }
+
+  navigationController = [self navigationController];
+  if (navigationController == nil) {
+    return YES;
+  }
+  return ![[navigationController viewControllers] containsObject:self];
+}
+
+- (void)prepareForRemoval
+{
+  UIWebView *webView;
+  UIScrollView *scrollView;
+
+  if ([self tearingDown]) {
+    return;
+  }
+
+  [self setTearingDown:YES];
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [self cancelPendingStreamEventFlush];
+  [[self sendBar] setDelegate:nil];
+
+  webView = [self webView];
+  scrollView = [webView XP_scrollView];
+  [scrollView setDelegate:nil];
+  [webView setDelegate:nil];
+  [webView stopLoading];
+  [webView removeFromSuperview];
+  [self setWebView:nil];
 }
 
 - (void)observeKeyboard
@@ -324,6 +368,9 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 
 - (void)scrollWebViewToBottom
 {
+  if ([self tearingDown] || ([self webView] == nil)) {
+    return;
+  }
   [[self webView] stringByEvaluatingJavaScriptFromString:
     @"window.scrollTo(0, document.body.scrollHeight);"];
 }
@@ -348,6 +395,10 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 {
   StrappySession *oldSession;
   BOOL sessionChanged;
+
+  if ([self tearingDown]) {
+    return;
+  }
 
   if (![session isKindOfClass:[StrappySession class]]) {
     session = nil;
@@ -602,6 +653,10 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 {
   NSString *path;
 
+  if ([self tearingDown]) {
+    return;
+  }
+
   path = [self writeCurrentHTML];
   if ([path length] == 0U) {
     return;
@@ -749,6 +804,9 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
   NSError *startError;
   BOOL didStartPrompt;
 
+  if ([self tearingDown]) {
+    return;
+  }
   if ([self sending]) {
     return;
   }
@@ -790,6 +848,9 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 
 - (void)sessionPromptDidStart:(NSNotification *)notification
 {
+  if ([self tearingDown]) {
+    return;
+  }
   if ([notification object] != [self session]) {
     return;
   }
@@ -799,12 +860,19 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 - (void)modelCatalogDidChange:(NSNotification *)notification
 {
   (void)notification;
+  if ([self tearingDown]) {
+    return;
+  }
   [[self sendBar] reloadOptionsMenu];
 }
 
 - (void)sessionStreamEvent:(NSNotification *)notification
 {
   NSDictionary *event;
+
+  if ([self tearingDown]) {
+    return;
+  }
 
   if ([notification object] != [self session]) {
     return;
@@ -821,6 +889,9 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 
 - (void)sessionPromptDidFinish:(NSNotification *)notification
 {
+  if ([self tearingDown]) {
+    return;
+  }
   if ([notification object] != [self session]) {
     return;
   }
@@ -914,6 +985,9 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 
 - (void)streamEventFlushTimerDidFire:(NSTimer *)timer
 {
+  if ([self tearingDown]) {
+    return;
+  }
   if ([self streamEventFlushTimer] == timer) {
     [[self streamEventFlushTimer] invalidate];
     [self setStreamEventFlushTimer:nil];
@@ -924,6 +998,11 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 - (void)flushPendingStreamEvents
 {
   NSString *batchJavaScript;
+
+  if ([self tearingDown]) {
+    [self setPendingStreamJavaScript:nil];
+    return;
+  }
 
   if ([[self pendingStreamJavaScript] length] == 0U) {
     return;
@@ -1069,6 +1148,9 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
 
   (void)webView;
   (void)navigationType;
+  if ([self tearingDown]) {
+    return NO;
+  }
   url = [request URL];
   scheme = [url scheme];
   if ([scheme isEqualToString:@"strappy-action"]) {
@@ -1083,6 +1165,9 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
 - (void)webViewDidFinishLoad:(UIWebView *)webView
 {
   (void)webView;
+  if ([self tearingDown]) {
+    return;
+  }
   [[self webView] XP_setBackgroundTransparent];
   [[[self webView] XP_scrollView] XP_removeShadow];
   [self scrollWebViewToBottom];
@@ -1113,10 +1198,7 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
 
 - (void)dealloc
 {
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [self cancelPendingStreamEventFlush];
-  [[self webView] setDelegate:nil];
-  [[self sendBar] setDelegate:nil];
+  [self prepareForRemoval];
 }
 
 @end

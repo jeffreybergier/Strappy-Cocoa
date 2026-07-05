@@ -13,6 +13,10 @@
 - (UIScrollView *)XP_scrollView;
 @end
 
+@interface UIViewController (XPUIKit)
+- (BOOL)XP_isMovingFromParentViewController;
+@end
+
 @interface UILabel (XPUIKit)
 - (void)XP_setTextAlignmentCenter;
 @end

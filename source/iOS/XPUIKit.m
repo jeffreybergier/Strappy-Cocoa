@@ -21,6 +21,30 @@ static void XPUIKitInvokeIntegerSetter(id target, SEL selector, NSInteger value)
   [invocation invoke];
 }
 
+static BOOL XPUIKitInvokeBoolGetter(id target, SEL selector)
+{
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+  BOOL value;
+
+  if ((target == nil) || ![target respondsToSelector:selector]) {
+    return NO;
+  }
+
+  signature = [target methodSignatureForSelector:selector];
+  if (signature == nil) {
+    return NO;
+  }
+
+  invocation = [NSInvocation invocationWithMethodSignature:signature];
+  [invocation setTarget:target];
+  [invocation setSelector:selector];
+  [invocation invoke];
+  value = NO;
+  [invocation getReturnValue:&value];
+  return value ? YES : NO;
+}
+
 @implementation UIColor (XPUIKit)
 
 + (UIColor *)messagesBackgroundColor
@@ -67,7 +91,7 @@ static void XPUIKitInvokeIntegerSetter(id target, SEL selector, NSInteger value)
   SEL selector;
   NSMethodSignature *signature;
   NSInvocation *invocation;
-  UIScrollView *scrollView;
+  __unsafe_unretained UIScrollView *scrollView;
 
   selector = @selector(scrollView);
   if (![self respondsToSelector:selector]) {
@@ -85,6 +109,16 @@ static void XPUIKitInvokeIntegerSetter(id target, SEL selector, NSInteger value)
   scrollView = nil;
   [invocation getReturnValue:&scrollView];
   return scrollView;
+}
+
+@end
+
+@implementation UIViewController (XPUIKit)
+
+- (BOOL)XP_isMovingFromParentViewController
+{
+  return XPUIKitInvokeBoolGetter(self,
+                                 @selector(isMovingFromParentViewController));
 }
 
 @end
