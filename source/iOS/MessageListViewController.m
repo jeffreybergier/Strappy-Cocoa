@@ -76,6 +76,8 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 @property (nonatomic, strong) NSMutableString *pendingStreamJavaScript;
 @property (nonatomic, strong) NSTimer *streamEventFlushTimer;
 @property (nonatomic, assign) NSUInteger oldestRenderedMessageIndex;
+@property (nonatomic, assign) NSUInteger newestRenderedMessageCount;
+@property (nonatomic, assign) BOOL webViewContentLoaded;
 @property (nonatomic, assign) BOOL sending;
 @property (nonatomic, assign) BOOL cancelPromptRequested;
 @property (nonatomic, assign) CGFloat composeBarBottomY;
@@ -106,6 +108,8 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 - (void)setPromptCancellationRequested:(BOOL)requested;
 - (BOOL)promptCancellationRequested;
 - (void)loadEarlierMessages;
+- (BOOL)appendNewMessagesToWebView;
+- (BOOL)refreshRenderedMessageCountFromSession;
 - (void)reloadContent;
 - (NSString *)writeCurrentHTML;
 - (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error;
@@ -390,7 +394,8 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
   [[self sendBar] setStreamingEnabled:(session != nil) ?
     [session streamingEnabled] : NO];
   [[self sendBar] reloadOptionsMenu];
-  if (sessionChanged || ([self webView] != nil)) {
+  if (([self webView] != nil) &&
+      (sessionChanged || ![self webViewContentLoaded])) {
     [self reloadContent];
   }
 }
@@ -602,6 +607,7 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
     return;
   }
 
+  [self setWebViewContentLoaded:YES];
   [[self webView] loadRequest:
     [NSURLRequest requestWithURL:[NSURL fileURLWithPath:path]]];
 }
@@ -660,6 +666,7 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
     start = count - kStrappyInitialMessageLimit;
   }
   [self setOldestRenderedMessageIndex:start];
+  [self setNewestRenderedMessageCount:count];
 
   hasMessages = (count > 0U) ? YES : NO;
   if ([[self statusText] length] > 0U) {
@@ -825,7 +832,9 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 {
   NSDictionary *sessionSummary;
   NSString *errorMessage;
+  BOOL streamingPrompt;
 
+  streamingPrompt = [[self session] streamingEnabled] ? YES : NO;
   [self setPromptCancellationRequested:NO];
   [self updateSendingStateFromSession];
 
@@ -849,7 +858,12 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 
   [self clearRequestState];
   [self updateSendingStateFromSession];
-  [self reloadContent];
+  if (streamingPrompt && [sessionSummary isKindOfClass:[NSDictionary class]]) {
+    [self refreshRenderedMessageCountFromSession];
+  } else if ([sessionSummary isKindOfClass:[NSDictionary class]] &&
+             [self appendNewMessagesToWebView]) {
+    /* The persisted messages were appended without a full web view reload. */
+  }
 }
 
 - (NSString *)javaScriptForStreamEvent:(NSDictionary *)event
@@ -937,6 +951,72 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
     [self setStreamEventFlushTimer:nil];
   }
   [self setPendingStreamJavaScript:nil];
+}
+
+- (BOOL)appendNewMessagesToWebView
+{
+  NSArray *messages;
+  NSError *error;
+  NSUInteger count;
+  NSUInteger start;
+  NSString *html;
+  NSString *javaScript;
+
+  if ([self session] == nil) {
+    return NO;
+  }
+
+  error = nil;
+  messages = [[self session] messagesWithError:&error];
+  if (![messages isKindOfClass:[NSArray class]]) {
+    return NO;
+  }
+
+  count = [messages count];
+  start = [self newestRenderedMessageCount];
+  if (start > count) {
+    return NO;
+  }
+  if (start == count) {
+    return YES;
+  }
+
+  html = [StrappySession webViewMessagesHTMLForMessages:messages
+                                             startIndex:start
+                                               endIndex:count];
+  if ([html length] == 0U) {
+    return NO;
+  }
+
+  javaScript = [StrappySession webViewAppendMessagesJavaScriptForHTML:html];
+  if ([javaScript length] == 0U) {
+    return NO;
+  }
+
+  [self flushPendingStreamEvents];
+  [[self webView] stringByEvaluatingJavaScriptFromString:javaScript];
+  [self setNewestRenderedMessageCount:count];
+  return YES;
+}
+
+- (BOOL)refreshRenderedMessageCountFromSession
+{
+  NSArray *messages;
+  NSError *error;
+
+  if ([self session] == nil) {
+    [self setNewestRenderedMessageCount:0U];
+    return NO;
+  }
+
+  error = nil;
+  messages = [[self session] messagesWithError:&error];
+  if (![messages isKindOfClass:[NSArray class]]) {
+    return NO;
+  }
+
+  [self setNewestRenderedMessageCount:[messages count]];
+  return YES;
 }
 
 - (void)loadEarlierMessages

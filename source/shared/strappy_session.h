@@ -109,6 +109,7 @@ char *strappy_session_webview_message_html(
   const char *state,
   const char *status_html);
 void strappy_session_webview_message_init(strappy_webview_message *message);
+char *strappy_session_webview_append_messages_js(const char *messages_html);
 char *strappy_session_webview_prepend_messages_js(const char *messages_html,
                                                   int has_more);
 char *strappy_session_webview_batched_js(const char *java_script);

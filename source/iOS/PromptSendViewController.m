@@ -8,7 +8,9 @@ static const CGFloat kStrappySendCollapsedHeight = 44.0f;
 static const CGFloat kStrappySendExpandedHeight = 104.0f;
 static const CGFloat kStrappySendPad = 4.0f;
 static const CGFloat kStrappySendButtonSize = 36.0f;
+static const CGFloat kStrappySendDismissWidth = 22.0f;
 static const CGFloat kStrappySendOptionsWidth = 36.0f;
+static const CGFloat kStrappySendDismissGlyphSize = 14.0f;
 static const CGFloat kStrappySendFontSize = 16.0f;
 
 static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
@@ -40,16 +42,22 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
     : NSLocalizedString(@"Model", nil);
 }
 
-@interface PromptSendViewController () <UITextViewDelegate,
-                                          UIActionSheetDelegate>
+@class StrappyPromptOptionsTableViewController;
+
+enum {
+  kStrappyPromptOptionsSectionModels = 0,
+  kStrappyPromptOptionsSectionStreaming,
+  kStrappyPromptOptionsSectionCount
+};
+
+@interface PromptSendViewController () <UITextViewDelegate>
+@property (nonatomic, strong) UIButton *dismissButton;
 @property (nonatomic, strong) UIButton *optionsButton;
 @property (nonatomic, strong) UITextView *textView;
 @property (nonatomic, strong) UILabel *placeholderLabel;
 @property (nonatomic, strong) UIButton *sendButton;
-@property (nonatomic, strong) UIActionSheet *optionsSheet;
-@property (nonatomic, copy) NSArray *optionsModels;
-@property (nonatomic, assign) NSInteger streamingButtonIndex;
-@property (nonatomic, assign) NSInteger firstModelButtonIndex;
+@property (nonatomic, strong) UINavigationController *optionsNavigationController;
+@property (nonatomic, strong) StrappyPromptOptionsTableViewController *optionsController;
 @property (nonatomic, assign) BOOL controlsEnabled;
 @property (nonatomic, assign) BOOL composing;
 @property (nonatomic, assign) BOOL expanded;
@@ -65,8 +73,232 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
 - (void)updateControls;
 - (void)updateExpansion;
 - (void)updatePlaceholderVisibility;
+- (NSArray *)currentAllowedModels;
+- (NSString *)currentSelectedModelIdentifier;
+- (BOOL)setSelectedModelIdentifierFromOptions:(NSString *)modelIdentifier;
+- (BOOL)setStreamingEnabledFromOptions:(BOOL)enabled;
+- (UIViewController *)containingViewController;
+- (void)dismissOptionsControllerAnimated:(BOOL)animated;
+- (void)dismissTapped:(id)sender;
 - (void)optionsTapped:(id)sender;
 - (void)sendTapped:(id)sender;
+@end
+
+@interface StrappyPromptOptionsTableViewController : UITableViewController
+@property (nonatomic, assign) PromptSendViewController *promptSendViewController;
+@property (nonatomic, copy) NSArray *models;
+@property (nonatomic, copy) NSString *selectedModelIdentifier;
+@property (nonatomic, strong) UISwitch *streamingSwitch;
+@property (nonatomic, assign) BOOL streamingEnabled;
+- (instancetype)initWithPromptSendViewController:
+    (PromptSendViewController *)promptSendViewController;
+- (void)reloadOptionsFromPrompt;
+@end
+
+@implementation StrappyPromptOptionsTableViewController
+
+- (instancetype)initWithPromptSendViewController:
+    (PromptSendViewController *)promptSendViewController
+{
+  if ((self = [super initWithStyle:UITableViewStyleGrouped])) {
+    [self setPromptSendViewController:promptSendViewController];
+    [[self navigationItem] setTitle:NSLocalizedString(@"Prompt Options", nil)];
+    [self reloadOptionsSnapshot];
+  }
+  return self;
+}
+
+- (void)viewDidLoad
+{
+  UISwitch *streamingSwitch;
+
+  [super viewDidLoad];
+
+  streamingSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
+  [streamingSwitch addTarget:self
+                      action:@selector(streamingSwitchChanged:)
+            forControlEvents:UIControlEventValueChanged];
+  [self setStreamingSwitch:streamingSwitch];
+  [self reloadOptionsFromPrompt];
+
+  [[self navigationItem] setRightBarButtonItem:
+    [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                                                  target:self
+                                                  action:@selector(doneAction:)]];
+}
+
+- (void)reloadOptionsSnapshot
+{
+  PromptSendViewController *promptSendViewController;
+
+  promptSendViewController = [self promptSendViewController];
+  [self setModels:
+    (promptSendViewController != nil)
+      ? [promptSendViewController currentAllowedModels]
+      : [NSArray array]];
+  [self setSelectedModelIdentifier:
+    (promptSendViewController != nil)
+      ? [promptSendViewController currentSelectedModelIdentifier]
+      : @""];
+  [self setStreamingEnabled:
+    (promptSendViewController != nil)
+      ? [promptSendViewController streamingEnabled]
+      : NO];
+}
+
+- (void)reloadOptionsFromPrompt
+{
+  [self reloadOptionsSnapshot];
+  [[self streamingSwitch] setOn:[self streamingEnabled] animated:NO];
+  [[self tableView] reloadData];
+}
+
+- (void)doneAction:(id)sender
+{
+  (void)sender;
+  [[self promptSendViewController] dismissOptionsControllerAnimated:YES];
+}
+
+- (void)streamingSwitchChanged:(UISwitch *)sender
+{
+  PromptSendViewController *promptSendViewController;
+
+  promptSendViewController = [self promptSendViewController];
+  if (promptSendViewController != nil) {
+    (void)[promptSendViewController setStreamingEnabledFromOptions:
+      [sender isOn]];
+    [self setStreamingEnabled:[promptSendViewController streamingEnabled]];
+  }
+  [sender setOn:[self streamingEnabled] animated:YES];
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
+{
+  (void)tableView;
+  return kStrappyPromptOptionsSectionCount;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView
+ numberOfRowsInSection:(NSInteger)section
+{
+  (void)tableView;
+  if (section == kStrappyPromptOptionsSectionModels) {
+    return ([[self models] count] > 0U) ? (NSInteger)[[self models] count] : 1;
+  }
+  if (section == kStrappyPromptOptionsSectionStreaming) {
+    return 1;
+  }
+  return 0;
+}
+
+- (NSString *)tableView:(UITableView *)tableView
+titleForHeaderInSection:(NSInteger)section
+{
+  (void)tableView;
+  if (section == kStrappyPromptOptionsSectionModels) {
+    return NSLocalizedString(@"Models", nil);
+  }
+  if (section == kStrappyPromptOptionsSectionStreaming) {
+    return NSLocalizedString(@"Streaming", nil);
+  }
+  return nil;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView
+         cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  UITableViewCell *cell;
+
+  if ([indexPath section] == kStrappyPromptOptionsSectionStreaming) {
+    cell = [tableView dequeueReusableCellWithIdentifier:@"StreamingCell"];
+    if (cell == nil) {
+      cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
+                                    reuseIdentifier:@"StreamingCell"];
+      [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+    }
+    [[cell textLabel] setText:NSLocalizedString(@"Stream Responses", nil)];
+    [[self streamingSwitch] setOn:[self streamingEnabled] animated:NO];
+    [cell setAccessoryView:[self streamingSwitch]];
+    return cell;
+  }
+
+  cell = [tableView dequeueReusableCellWithIdentifier:@"ModelCell"];
+  if (cell == nil) {
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
+                                  reuseIdentifier:@"ModelCell"];
+    [[cell textLabel] setNumberOfLines:1];
+    [[cell detailTextLabel] setNumberOfLines:1];
+  }
+
+  if ([[self models] count] == 0U) {
+    [[cell textLabel] setText:
+      NSLocalizedString(@"No models have been fetched yet.", nil)];
+    [[cell detailTextLabel] setText:nil];
+    [[cell textLabel] setTextColor:[UIColor grayColor]];
+    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+    [cell setAccessoryType:UITableViewCellAccessoryNone];
+    [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+    return cell;
+  }
+
+  {
+    NSDictionary *model;
+    NSString *identifier;
+
+    model = [[self models] objectAtIndex:(NSUInteger)[indexPath row]];
+    identifier = StrappyMessageModelStringForRow(model, @"id");
+    [[cell textLabel] setText:StrappyMessageModelDisplayNameForRow(model)];
+    [[cell detailTextLabel] setText:identifier];
+    [[cell textLabel] setTextColor:[UIColor blackColor]];
+    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+    [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
+    [cell setAccessoryType:
+      [identifier isEqualToString:[self selectedModelIdentifier]]
+        ? UITableViewCellAccessoryCheckmark
+        : UITableViewCellAccessoryNone];
+  }
+  return cell;
+}
+
+- (NSIndexPath *)tableView:(UITableView *)tableView
+  willSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  (void)tableView;
+  if ([indexPath section] != kStrappyPromptOptionsSectionModels) {
+    return nil;
+  }
+  return ([[self models] count] > 0U) ? indexPath : nil;
+}
+
+- (void)tableView:(UITableView *)tableView
+didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  NSDictionary *model;
+  NSString *modelIdentifier;
+
+  [tableView deselectRowAtIndexPath:indexPath animated:YES];
+  if (([indexPath section] != kStrappyPromptOptionsSectionModels) ||
+      ([[self models] count] == 0U)) {
+    return;
+  }
+
+  model = [[self models] objectAtIndex:(NSUInteger)[indexPath row]];
+  modelIdentifier = StrappyMessageModelStringForRow(model, @"id");
+  if ([modelIdentifier length] == 0U) {
+    return;
+  }
+
+  if ([[self promptSendViewController]
+        setSelectedModelIdentifierFromOptions:modelIdentifier]) {
+    [self setSelectedModelIdentifier:modelIdentifier];
+    [[self tableView] reloadSections:
+      [NSIndexSet indexSetWithIndex:kStrappyPromptOptionsSectionModels]
+                  withRowAnimation:UITableViewRowAnimationNone];
+  } else {
+    [self reloadOptionsFromPrompt];
+  }
+}
+
 @end
 
 @implementation PromptSendViewController
@@ -78,8 +310,6 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
     [self setAutoresizingMask:
       UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin];
     [self setControlsEnabled:YES];
-    [self setStreamingButtonIndex:-1];
-    [self setFirstModelButtonIndex:-1];
     [self buildSubviews];
   }
   return self;
@@ -107,6 +337,7 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
 
 - (void)buildSubviews
 {
+  UIButton *dismiss;
   UIButton *options;
   UITextView *textView;
   UILabel *placeholder;
@@ -118,13 +349,27 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
     hairline = 1.0f;
   }
 
+  dismiss = [UIButton buttonWithType:UIButtonTypeCustom];
+  [dismiss setAlpha:0.0f];
+  [dismiss setImage:[self iconImageForIcon:AIFAChevronDown
+                                      style:AIFontAwesomeStyleSolid
+                                  pointSize:kStrappySendDismissGlyphSize
+                                      color:[UIColor darkGrayColor]]
+             forState:UIControlStateNormal];
+  [dismiss setAccessibilityLabel:NSLocalizedString(@"Dismiss Keyboard", nil)];
+  [dismiss addTarget:self
+              action:@selector(dismissTapped:)
+    forControlEvents:UIControlEventTouchUpInside];
+  [self addSubview:dismiss];
+  [self setDismissButton:dismiss];
+
   options = [UIButton buttonWithType:UIButtonTypeCustom];
-  [options setImage:[self iconImageForIcon:AIFASliders
+  [options setImage:[self iconImageForIcon:AIFAMicrochip
                                      style:AIFontAwesomeStyleSolid
                                  pointSize:18.0f
                                      color:[UIColor darkGrayColor]]
             forState:UIControlStateNormal];
-  [options setAccessibilityLabel:NSLocalizedString(@"Prompt Options", nil)];
+  [options setAccessibilityLabel:NSLocalizedString(@"Models", nil)];
   [options addTarget:self
               action:@selector(optionsTapped:)
     forControlEvents:UIControlEventTouchUpInside];
@@ -185,14 +430,15 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
   CGFloat textRight;
   CGFloat textHeight;
   CGFloat placeholderHeight;
+  CGFloat placeholderWidth;
 
   [super layoutSubviews];
 
   bounds = [self bounds];
-  optionsX = kStrappySendPad;
   sendX = bounds.size.width - kStrappySendPad - kStrappySendButtonSize;
-  textX = optionsX + kStrappySendOptionsWidth + kStrappySendPad;
-  textRight = sendX - kStrappySendPad;
+  optionsX = sendX - kStrappySendPad - kStrappySendOptionsWidth;
+  textX = [self composing] ? kStrappySendDismissWidth : kStrappySendPad;
+  textRight = optionsX - kStrappySendPad;
   if (textRight < textX) {
     textRight = textX;
   }
@@ -201,6 +447,11 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
     textHeight = kStrappySendButtonSize;
   }
 
+  [[self dismissButton] setAlpha:[self composing] ? 1.0f : 0.0f];
+  [[self dismissButton] setFrame:CGRectMake(0.0f,
+                                            kStrappySendPad,
+                                            kStrappySendDismissWidth,
+                                            kStrappySendButtonSize)];
   [[self optionsButton] setFrame:CGRectMake(optionsX,
                                             kStrappySendPad,
                                             kStrappySendOptionsWidth,
@@ -215,9 +466,13 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
                                        textHeight)];
 
   placeholderHeight = (CGFloat)ceilf((float)[[[self textView] font] lineHeight]);
+  placeholderWidth = (textRight - textX) - 16.0f;
+  if (placeholderWidth < 0.0f) {
+    placeholderWidth = 0.0f;
+  }
   [[self placeholderLabel] setFrame:CGRectMake(textX + 8.0f,
                                                kStrappySendPad + 8.0f,
-                                               (textRight - textX) - 16.0f,
+                                               placeholderWidth,
                                                placeholderHeight)];
 }
 
@@ -232,6 +487,7 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
 {
   _composing = composing ? YES : NO;
   [self setNeedsLayout];
+  [self updateControls];
 }
 
 - (void)setEnabled:(BOOL)enabled
@@ -259,11 +515,13 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
 - (void)setStreamingEnabled:(BOOL)enabled
 {
   _streamingEnabled = enabled ? YES : NO;
+  [[self optionsController] reloadOptionsFromPrompt];
 }
 
 - (void)reloadOptionsMenu
 {
   [self updateControls];
+  [[self optionsController] reloadOptionsFromPrompt];
 }
 
 - (NSString *)trimmedPromptText
@@ -300,6 +558,8 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
 
   [[self optionsButton] setEnabled:
     ([self controlsEnabled] && ![self sending]) ? YES : NO];
+  [[self dismissButton] setEnabled:
+    ([self controlsEnabled] && [self composing]) ? YES : NO];
   [[self textView] setEditable:
     ([self controlsEnabled] && ![self sending]) ? YES : NO];
   [[self sendButton] setEnabled:sendEnabled];
@@ -411,18 +671,11 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
   [self performSend:sender];
 }
 
-- (void)optionsTapped:(id)sender
+- (NSArray *)currentAllowedModels
 {
-  UIActionSheet *sheet;
   NSArray *models;
-  NSMutableArray *sheetModels;
-  NSString *selectedModelIdentifier;
+  NSMutableArray *filteredModels;
   NSUInteger index;
-
-  (void)sender;
-  if ([self sending]) {
-    return;
-  }
 
   models = nil;
   if ([[self delegate] respondsToSelector:
@@ -430,8 +683,28 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
     models = [[self delegate] allowedModelsForPromptSendViewController:self];
   }
   if (![models isKindOfClass:[NSArray class]]) {
-    models = [NSArray array];
+    return [NSArray array];
   }
+
+  filteredModels = [NSMutableArray arrayWithCapacity:[models count]];
+  for (index = 0U; index < [models count]; index++) {
+    NSDictionary *model;
+
+    model = [models objectAtIndex:index];
+    if (![model isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    if ([StrappyMessageModelStringForRow(model, @"id") length] == 0U) {
+      continue;
+    }
+    [filteredModels addObject:model];
+  }
+  return filteredModels;
+}
+
+- (NSString *)currentSelectedModelIdentifier
+{
+  NSString *selectedModelIdentifier;
 
   selectedModelIdentifier = @"";
   if ([[self delegate] respondsToSelector:
@@ -439,98 +712,95 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
     selectedModelIdentifier =
       [[self delegate] selectedModelIdentifierForPromptSendViewController:self];
   }
-  if (![selectedModelIdentifier isKindOfClass:[NSString class]]) {
-    selectedModelIdentifier = @"";
-  }
-
-  sheet = [[UIActionSheet alloc] initWithTitle:NSLocalizedString(@"Prompt Options", nil)
-                                      delegate:self
-                             cancelButtonTitle:nil
-                        destructiveButtonTitle:nil
-                             otherButtonTitles:nil];
-  [self setStreamingButtonIndex:
-    [sheet addButtonWithTitle:([self streamingEnabled]
-      ? NSLocalizedString(@"Stream Responses: On", nil)
-      : NSLocalizedString(@"Stream Responses: Off", nil))]];
-  [self setFirstModelButtonIndex:[sheet numberOfButtons]];
-  sheetModels = [NSMutableArray arrayWithCapacity:[models count]];
-  for (index = 0U; index < [models count]; index++) {
-    NSDictionary *model;
-    NSString *identifier;
-    NSString *title;
-
-    model = [models objectAtIndex:index];
-    if (![model isKindOfClass:[NSDictionary class]]) {
-      continue;
-    }
-    identifier = StrappyMessageModelStringForRow(model, @"id");
-    if ([identifier length] == 0U) {
-      continue;
-    }
-    title = StrappyMessageModelDisplayNameForRow(model);
-    if ([identifier isEqualToString:selectedModelIdentifier]) {
-      title = [NSString stringWithFormat:NSLocalizedString(@"%@ (Selected)", nil),
-        title];
-    }
-    [sheet addButtonWithTitle:title];
-    [sheetModels addObject:model];
-  }
-  [sheet setCancelButtonIndex:
-    [sheet addButtonWithTitle:NSLocalizedString(@"Cancel", nil)]];
-  [self setOptionsModels:sheetModels];
-  [self setOptionsSheet:sheet];
-  [sheet showInView:self];
+  return [selectedModelIdentifier isKindOfClass:[NSString class]]
+    ? selectedModelIdentifier
+    : @"";
 }
 
-- (void)actionSheet:(UIActionSheet *)actionSheet
-clickedButtonAtIndex:(NSInteger)buttonIndex
+- (BOOL)setSelectedModelIdentifierFromOptions:(NSString *)modelIdentifier
 {
-  NSInteger modelIndex;
+  if (([modelIdentifier length] == 0U) ||
+      ![[self delegate] respondsToSelector:
+        @selector(promptSendViewController:setSelectedModelIdentifier:)]) {
+    return NO;
+  }
+  return [[self delegate] promptSendViewController:self
+                       setSelectedModelIdentifier:modelIdentifier];
+}
 
-  if (actionSheet != [self optionsSheet]) {
+- (BOOL)setStreamingEnabledFromOptions:(BOOL)enabled
+{
+  BOOL changed;
+
+  changed = NO;
+  if ([[self delegate] respondsToSelector:
+        @selector(promptSendViewController:setStreamingEnabled:)]) {
+    changed = [[self delegate] promptSendViewController:self
+                                    setStreamingEnabled:(enabled ? YES : NO)];
+  }
+  if (changed) {
+    [self setStreamingEnabled:enabled];
+  }
+  return changed;
+}
+
+- (UIViewController *)containingViewController
+{
+  UIResponder *responder;
+
+  responder = self;
+  while ((responder = [responder nextResponder]) != nil) {
+    if ([responder isKindOfClass:[UIViewController class]]) {
+      return (UIViewController *)responder;
+    }
+  }
+  return nil;
+}
+
+- (void)dismissOptionsControllerAnimated:(BOOL)animated
+{
+  UINavigationController *navigationController;
+
+  navigationController = [self optionsNavigationController];
+  [self setOptionsController:nil];
+  [self setOptionsNavigationController:nil];
+  if (navigationController != nil) {
+    [navigationController dismissModalViewControllerAnimated:animated];
+  }
+}
+
+- (void)dismissTapped:(id)sender
+{
+  (void)sender;
+  [[self textView] resignFirstResponder];
+}
+
+- (void)optionsTapped:(id)sender
+{
+  UIViewController *presentingController;
+  StrappyPromptOptionsTableViewController *optionsController;
+  UINavigationController *navigationController;
+
+  (void)sender;
+  if ([self sending] || ([self optionsNavigationController] != nil)) {
     return;
   }
-  if (buttonIndex == [actionSheet cancelButtonIndex]) {
-    [self setOptionsSheet:nil];
-    [self setOptionsModels:nil];
+
+  presentingController = [self containingViewController];
+  if (presentingController == nil) {
     return;
   }
 
-  if (buttonIndex == [self streamingButtonIndex]) {
-    BOOL enabled;
-    BOOL changed;
-
-    enabled = [self streamingEnabled] ? NO : YES;
-    changed = NO;
-    if ([[self delegate] respondsToSelector:
-          @selector(promptSendViewController:setStreamingEnabled:)]) {
-      changed = [[self delegate] promptSendViewController:self
-                                       setStreamingEnabled:enabled];
-    }
-    if (changed) {
-      [self setStreamingEnabled:enabled];
-    }
-  } else if (buttonIndex >= [self firstModelButtonIndex]) {
-    modelIndex = buttonIndex - [self firstModelButtonIndex];
-    if ((modelIndex >= 0) &&
-        (modelIndex < (NSInteger)[[self optionsModels] count])) {
-      NSDictionary *model;
-      NSString *modelIdentifier;
-
-      model = [[self optionsModels] objectAtIndex:(NSUInteger)modelIndex];
-      modelIdentifier = StrappyMessageModelStringForRow(model, @"id");
-      if ([modelIdentifier length] > 0U &&
-          [[self delegate] respondsToSelector:
-            @selector(promptSendViewController:setSelectedModelIdentifier:)]) {
-        (void)[[self delegate] promptSendViewController:self
-                              setSelectedModelIdentifier:modelIdentifier];
-      }
-    }
-  }
-
-  [self setOptionsSheet:nil];
-  [self setOptionsModels:nil];
-  [self updateControls];
+  [[self textView] resignFirstResponder];
+  optionsController =
+    [[StrappyPromptOptionsTableViewController alloc]
+      initWithPromptSendViewController:self];
+  navigationController =
+    [[UINavigationController alloc] initWithRootViewController:optionsController];
+  [self setOptionsController:optionsController];
+  [self setOptionsNavigationController:navigationController];
+  [presentingController presentModalViewController:navigationController
+                                          animated:YES];
 }
 
 - (void)textViewDidChange:(UITextView *)textView
@@ -544,7 +814,6 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
 - (void)dealloc
 {
   [[self textView] setDelegate:nil];
-  [[self optionsSheet] setDelegate:nil];
 }
 
 @end

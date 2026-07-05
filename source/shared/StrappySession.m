@@ -264,6 +264,13 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
       hasMore ? 1 : 0));
 }
 
++ (NSString *)webViewAppendMessagesJavaScriptForHTML:(NSString *)messagesHTML
+{
+  return StrappySessionStringFromCString(
+    strappy_session_webview_append_messages_js(
+      StrappySessionCString(messagesHTML)));
+}
+
 + (NSString *)webViewBatchedJavaScriptForJavaScript:(NSString *)javaScript
 {
   if (![javaScript isKindOfClass:[NSString class]] ||

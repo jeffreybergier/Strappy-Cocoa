@@ -148,6 +148,7 @@
 "Print..." = "プリント...";
 "Prompt is empty." = "プロンプトが空です。";
 "Ask Strappy" = "Strappy に質問";
+"Dismiss Keyboard" = "キーボードを閉じる";
 "Prompt request is already running." = "プロンプトリクエストはすでに実行中です。";
 "Prompts" = "プロンプト";
 "Refresh" = "更新";

@@ -301,6 +301,11 @@ char *strappy_session_webview_prepend_messages_js(const char *messages_html,
   return strappy_webview_prepend_messages_js(messages_html, has_more);
 }
 
+char *strappy_session_webview_append_messages_js(const char *messages_html)
+{
+  return strappy_webview_append_message_js(messages_html);
+}
+
 char *strappy_session_webview_batched_js(const char *java_script)
 {
   strappy_webview_script_batch *batch;
