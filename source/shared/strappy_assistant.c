@@ -4093,6 +4093,7 @@ static int strappy_assistant_run_learning_summary(
   strappy_assistant_tool_sequence *sequence,
   const strappy_chat_result *final_result,
   int original_did_run_tool_round,
+  int is_first_prompt,
   int should_stream,
   strappy_chat_stream_callback callback,
   void *callback_data,
@@ -4127,6 +4128,10 @@ static int strappy_assistant_run_learning_summary(
   /* This flag belongs to the current user turn; older session tool rows do
      not participate in deciding whether this harness turn is worth running. */
   if (!original_did_run_tool_round) {
+    return 1;
+  }
+
+  if (!is_first_prompt) {
     return 1;
   }
 
@@ -4362,6 +4367,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
   char *response;
   int initial_has_tool_calls;
   int did_run_tool_round;
+  int is_first_prompt;
 
   if ((prompt == NULL) || (prompt[0] == '\0')) {
     strappy_set_error(error_out, "Prompt is empty.");
@@ -4437,6 +4443,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
     strappy_config_destroy(&config);
     return NULL;
   }
+  is_first_prompt = (message_list.count == 0U) ? 1 : 0;
 
   if (!strappy_assistant_prepare_request_messages(prompt,
                                                   system_prompt_template_path,
@@ -4772,6 +4779,7 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                           &tool_sequence,
                                           final_result,
                                           did_run_tool_round,
+                                          is_first_prompt,
                                           0,
                                           event_callback,
                                           event_callback_data,
@@ -4866,6 +4874,7 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
   const strappy_chat_result *final_result;
   char *response;
   int did_run_tool_round;
+  int is_first_prompt;
 
   if ((prompt == NULL) || (prompt[0] == '\0')) {
     strappy_set_error(error_out, "Prompt is empty.");
@@ -4928,6 +4937,7 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
     strappy_config_destroy(&config);
     return NULL;
   }
+  is_first_prompt = (message_list.count == 0U) ? 1 : 0;
 
   if (!strappy_assistant_prepare_request_messages(prompt,
                                                   system_prompt_template_path,
@@ -5209,6 +5219,7 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
                                             &tool_sequence,
                                             final_result,
                                             did_run_tool_round,
+                                            is_first_prompt,
                                             1,
                                             strappy_assistant_stream_store_callback,
                                             &store_context,

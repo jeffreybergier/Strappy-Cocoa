@@ -561,6 +561,64 @@ static int harness_test_post_answer_helper_call_preserves_answer(void)
   return 1;
 }
 
+static int harness_test_learning_summary_skips_after_first_prompt(void)
+{
+  strappy_config config;
+  strappy_assistant_guidance guidance;
+  strappy_assistant_turn_spec helper_turn;
+  strappy_assistant_request_messages request;
+  strappy_assistant_tool_sequence sequence;
+  strappy_chat_result final_result;
+  char *error;
+  int did_run;
+  int ok;
+
+  strappy_config_init(&config);
+  memset(&guidance, 0, sizeof(guidance));
+  memset(&helper_turn, 0, sizeof(helper_turn));
+  strappy_assistant_request_messages_init(&request);
+  strappy_assistant_tool_sequence_init(&sequence);
+  strappy_chat_result_init(&final_result);
+  error = NULL;
+  did_run = 1;
+
+  guidance.learning_summary_prompt = "Learning Summary";
+  guidance.learning_summary_completion_text = "Learning Summary Complete";
+
+  ok = strappy_assistant_run_learning_summary(
+         &config,
+         "/tmp/strappy-existing-session.sqlite",
+         &guidance,
+         &helper_turn,
+         &request,
+         &sequence,
+         &final_result,
+         1,
+         0,
+         0,
+         NULL,
+         NULL,
+         &did_run,
+         &error) &&
+       (did_run == 1) &&
+       (sequence.learning_summary_final_result == NULL);
+
+  if (error != NULL) {
+    fprintf(stderr, "%s\n", error);
+    strappy_free_string(error);
+  }
+  strappy_chat_result_destroy(&final_result);
+  strappy_assistant_tool_sequence_destroy(&sequence);
+  strappy_assistant_request_messages_destroy(&request);
+  strappy_config_destroy(&config);
+
+  if (!ok) {
+    return harness_fail("Learning summary did not skip after first prompt.");
+  }
+
+  return 1;
+}
+
 int main(void)
 {
   if (!harness_test_final_result_gets_accumulated_reasoning()) {
@@ -576,6 +634,10 @@ int main(void)
     return 1;
   }
   if (!harness_test_post_answer_helper_call_preserves_answer()) {
+    fprintf(stderr, "assistant_reasoning_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_learning_summary_skips_after_first_prompt()) {
     fprintf(stderr, "assistant_reasoning_harness failed.\n");
     return 1;
   }
