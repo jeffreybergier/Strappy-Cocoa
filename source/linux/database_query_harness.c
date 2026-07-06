@@ -7,6 +7,7 @@
 #include "cJSON.h"
 
 #include <sqlite3.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -208,6 +209,32 @@ static int harness_exec_sql(sqlite3 *db, const char *sql)
     return 0;
   }
 
+  return 1;
+}
+
+static int harness_append_format(char *output,
+                                 size_t output_size,
+                                 size_t *used,
+                                 const char *format,
+                                 ...)
+{
+  va_list args;
+  int written;
+
+  if ((output == NULL) || (output_size == 0U) || (used == NULL) ||
+      (*used >= output_size) || (format == NULL)) {
+    return 0;
+  }
+
+  va_start(args, format);
+  written = vsnprintf(output + *used, output_size - *used, format, args);
+  va_end(args);
+
+  if ((written < 0) || ((size_t)written >= (output_size - *used))) {
+    return 0;
+  }
+
+  *used += (size_t)written;
   return 1;
 }
 
@@ -683,6 +710,60 @@ static int harness_create_user_database(const char *database_path)
     "(-5023472826755880000),"
     "(42);");
 
+  sqlite3_close(db);
+  return ok;
+}
+
+static int harness_create_wide_column_database(const char *database_path)
+{
+  sqlite3 *db;
+  char sql[4096];
+  size_t used;
+  int column;
+  int rc;
+  int ok;
+
+  db = NULL;
+  rc = sqlite3_open_v2(database_path,
+                       &db,
+                       SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                       NULL);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr,
+            "Could not create wide-column database: %s\n",
+            (db != NULL) ? sqlite3_errmsg(db) : "unknown");
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    return 0;
+  }
+
+  used = 0U;
+  ok = harness_append_format(sql,
+                             sizeof(sql),
+                             &used,
+                             "CREATE TABLE wide_table ("
+                             "id INTEGER PRIMARY KEY");
+  for (column = 1; ok && (column <= 70); column++) {
+    ok = harness_append_format(sql,
+                               sizeof(sql),
+                               &used,
+                               ", c%02d TEXT",
+                               column);
+  }
+  ok = ok && harness_append_format(sql,
+                                   sizeof(sql),
+                                   &used,
+                                   ");"
+                                   "INSERT INTO wide_table(id, c01) "
+                                   "VALUES (1, 'wide');");
+  if (!ok) {
+    fprintf(stderr, "Could not build wide-column fixture SQL.\n");
+    sqlite3_close(db);
+    return 0;
+  }
+
+  ok = harness_exec_sql(db, sql);
   sqlite3_close(db);
   return ok;
 }
@@ -2127,6 +2208,61 @@ static int harness_run_readonly_wal_database_query_test(
   if (db != NULL) {
     sqlite3_close(db);
   }
+  harness_unlink_sqlite_files(database_path);
+  return ok;
+}
+
+static int harness_run_wide_schema_database_query_test(
+  harness_context *context)
+{
+  char database_path[1200];
+  char arguments[2048];
+  char *database_id;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  if (!harness_join_path(database_path,
+                         sizeof(database_path),
+                         context->temp_dir,
+                         "wide-user.sqlite")) {
+    fprintf(stderr, "Could not build wide-column user database path.\n");
+    return 0;
+  }
+  harness_unlink_sqlite_files(database_path);
+
+  database_id = NULL;
+  ok = harness_create_wide_column_database(database_path) &&
+       harness_register_database_path(context,
+                                      database_path,
+                                      8ULL,
+                                      8ULL,
+                                      &database_id) &&
+       harness_build_query_arguments(
+         arguments,
+         sizeof(arguments),
+         database_id,
+         "SELECT count(*) FROM sqlite_master WHERE name = 'wide_table'") &&
+       harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_DATABASE_QUERY,
+                                      arguments,
+                                      "\"rows\":[[1]]",
+                                      "\"ok\":true");
+
+  if (ok) {
+    ok = harness_build_query_arguments(arguments,
+                                       sizeof(arguments),
+                                       database_id,
+                                       "SELECT * FROM wide_table LIMIT 1") &&
+         harness_expect_error_contains(context->catalog_path,
+                                       STRAPPY_TOOL_DATABASE_QUERY,
+                                       arguments,
+                                       "selected too many columns");
+  }
+
+  free(database_id);
   harness_unlink_sqlite_files(database_path);
   return ok;
 }
@@ -3753,6 +3889,7 @@ int main(void)
        harness_run_database_query_tests(&context) &&
        harness_run_missing_database_query_guidance_test(&context) &&
        harness_run_readonly_wal_database_query_test(&context) &&
+       harness_run_wide_schema_database_query_test(&context) &&
        harness_run_helper_info_tests(&context) &&
        harness_run_empty_session_storage_tests(&context) &&
        harness_run_session_turn_storage_tests(&context) &&

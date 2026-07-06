@@ -5034,7 +5034,6 @@ static void strappy_tools_configure_database_query_connection(sqlite3 *db)
   sqlite3_limit(db,
                 SQLITE_LIMIT_SQL_LENGTH,
                 (int)STRAPPY_DATABASE_QUERY_MAX_SQL_BYTES);
-  sqlite3_limit(db, SQLITE_LIMIT_COLUMN, STRAPPY_DATABASE_QUERY_MAX_COLUMNS);
   sqlite3_limit(db, SQLITE_LIMIT_ATTACHED, 0);
   sqlite3_limit(db, SQLITE_LIMIT_COMPOUND_SELECT, 8);
   sqlite3_limit(db, SQLITE_LIMIT_FUNCTION_ARG, 32);

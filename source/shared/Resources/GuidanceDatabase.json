@@ -320,7 +320,7 @@
         "path_suffix": "/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb"
       },
       "description_short": "Apple media library metadata for music and video; schema may require manual table queries.",
-      "description": "Apple media library database. Use for music/video library metadata when schema access succeeds. Some environments cannot enumerate the full schema because Apple virtual table modules are unavailable; if database_context_read reports a schema error, query sqlite_master and individual known tables carefully. Do not treat schema errors as proof the library is empty.",
+      "description": "Apple media library database. Use for music/video library metadata. Some environments cannot enumerate the full schema because item_to_container uses Apple's private ML3ContainerItemToContainer virtual table module. If database_context_read reports no such module or another schema error, do not treat the library as empty; query sqlite_master and known ordinary tables carefully with narrow column lists. item_extra stores titles and durations, item_stats stores play counts and last-played/skipped metadata, and item joins stable media identifiers. Avoid SELECT * from wide tables.",
       "related_databases": [
         "downloads.28.sqlitedb",
         "UbiquitousMetadata.sqlitedb"
