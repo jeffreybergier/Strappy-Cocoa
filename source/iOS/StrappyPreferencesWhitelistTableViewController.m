@@ -11,6 +11,37 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
     [NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
+static NSUInteger StrappyPreferencesIdleTimerDisableCount = 0U;
+static BOOL StrappyPreferencesPreviousIdleTimerDisabled = NO;
+
+static void StrappyPreferencesSetIdleTimerAssertionEnabled(BOOL enabled)
+{
+  UIApplication *application;
+
+  application = [UIApplication sharedApplication];
+  @synchronized(application) {
+    if (enabled) {
+      if (StrappyPreferencesIdleTimerDisableCount == 0U) {
+        StrappyPreferencesPreviousIdleTimerDisabled =
+          [application isIdleTimerDisabled];
+        [application setIdleTimerDisabled:YES];
+      }
+      StrappyPreferencesIdleTimerDisableCount++;
+      return;
+    }
+
+    if (StrappyPreferencesIdleTimerDisableCount == 0U) {
+      return;
+    }
+
+    StrappyPreferencesIdleTimerDisableCount--;
+    if (StrappyPreferencesIdleTimerDisableCount == 0U) {
+      [application
+        setIdleTimerDisabled:StrappyPreferencesPreviousIdleTimerDisabled];
+    }
+  }
+}
+
 @implementation StrappyPreferencesWhitelistTableViewController
 
 - (instancetype)initWithTitle:(NSString *)title
@@ -56,6 +87,16 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
 {
   [super viewWillDisappear:animated];
   [[self navigationController] setToolbarHidden:YES animated:animated];
+}
+
+- (void)setWorking:(BOOL)working
+{
+  if (_working == working) {
+    return;
+  }
+
+  _working = working;
+  StrappyPreferencesSetIdleTimerAssertionEnabled(working);
 }
 
 - (void)buildStatusToolbar
@@ -358,6 +399,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
 - (void)dealloc
 {
+  [self setWorking:NO];
   [[self searchBar] setDelegate:nil];
 }
 
