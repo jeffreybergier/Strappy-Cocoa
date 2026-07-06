@@ -79,6 +79,179 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
   return directory;
 }
 
+static BOOL StrappyDatabaseStringHasValue(NSString *string)
+{
+  return ([string isKindOfClass:[NSString class]] && ([string length] > 0U)) ?
+    YES : NO;
+}
+
+static NSString *StrappyDatabaseAppNameForRow(NSDictionary *row)
+{
+  NSString *appName;
+  NSString *groupKey;
+
+  appName = [row objectForKey:@"app_name"];
+  if (StrappyDatabaseStringHasValue(appName)) {
+    return appName;
+  }
+
+  groupKey = [row objectForKey:@"app_group_key"];
+  if (StrappyDatabaseStringHasValue(groupKey)) {
+    return groupKey;
+  }
+
+  return NSLocalizedString(@"Other", nil);
+}
+
+static NSString *StrappyDatabaseAppGroupKeyForRow(NSDictionary *row)
+{
+  NSString *groupKey;
+  NSString *location;
+
+  groupKey = [row objectForKey:@"app_group_key"];
+  if (StrappyDatabaseStringHasValue(groupKey)) {
+    return groupKey;
+  }
+
+  location = StrappyDatabaseLocationForRow(row);
+  return [@"path:" stringByAppendingString:[location lowercaseString]];
+}
+
+static NSString *StrappyDatabaseBundleIdentifierForRow(NSDictionary *row)
+{
+  NSString *bundleIdentifier;
+
+  bundleIdentifier = [row objectForKey:@"app_bundle_id"];
+  return StrappyDatabaseStringHasValue(bundleIdentifier) ? bundleIdentifier : @"";
+}
+
+static BOOL StrappyDatabaseRowAllowedValue(NSDictionary *row)
+{
+  NSString *decision;
+
+  decision = [row objectForKey:@"user_decision"];
+  return [decision isEqualToString:@"allowed"];
+}
+
+static NSString *StrappyDatabaseSectionTitle(NSString *appName,
+                                             NSString *bundleIdentifier,
+                                             NSUInteger count,
+                                             NSUInteger allowedCount,
+                                             BOOL disambiguate)
+{
+  NSString *title;
+
+  title = StrappyDatabaseStringHasValue(appName) ? appName :
+    NSLocalizedString(@"Other", nil);
+  if (disambiguate && ([bundleIdentifier length] > 0U)) {
+    title = [NSString stringWithFormat:@"%@ (%@)", title, bundleIdentifier];
+  }
+
+  if (allowedCount > 0U) {
+    return [NSString stringWithFormat:@"%@ - %lu/%lu",
+      title,
+      (unsigned long)allowedCount,
+      (unsigned long)count];
+  }
+
+  return [NSString stringWithFormat:@"%@ - %lu",
+    title,
+    (unsigned long)count];
+}
+
+static NSArray *StrappyDatabaseSectionsForRows(NSArray *rows)
+{
+  NSMutableDictionary *nameCounts;
+  NSMutableArray *sections;
+  NSString *currentGroupKey;
+  NSString *currentAppName;
+  NSString *currentBundleIdentifier;
+  NSMutableArray *currentRows;
+  NSUInteger index;
+
+  if (![rows isKindOfClass:[NSArray class]] || ([rows count] == 0U)) {
+    return [NSArray array];
+  }
+
+  nameCounts = [NSMutableDictionary dictionary];
+  for (index = 0U; index < [rows count]; index++) {
+    NSDictionary *row;
+    NSString *appName;
+    NSNumber *count;
+
+    row = [rows objectAtIndex:index];
+    if (![row isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    appName = StrappyDatabaseAppNameForRow(row);
+    count = [nameCounts objectForKey:appName];
+    [nameCounts setObject:[NSNumber numberWithUnsignedInteger:
+      ([count isKindOfClass:[NSNumber class]] ?
+        [count unsignedIntegerValue] + 1U : 1U)]
+                    forKey:appName];
+  }
+
+  sections = [NSMutableArray array];
+  currentGroupKey = nil;
+  currentAppName = nil;
+  currentBundleIdentifier = nil;
+  currentRows = [NSMutableArray array];
+  for (index = 0U; index <= [rows count]; index++) {
+    NSDictionary *row;
+    NSString *groupKey;
+
+    row = (index < [rows count]) ? [rows objectAtIndex:index] : nil;
+    groupKey = [row isKindOfClass:[NSDictionary class]] ?
+      StrappyDatabaseAppGroupKeyForRow(row) : nil;
+    if ((currentGroupKey != nil) &&
+        ((row == nil) || ![groupKey isEqualToString:currentGroupKey])) {
+      NSUInteger rowIndex;
+      NSUInteger allowedCount;
+      NSNumber *appNameCount;
+      BOOL disambiguate;
+      NSString *title;
+      NSDictionary *section;
+
+      allowedCount = 0U;
+      for (rowIndex = 0U; rowIndex < [currentRows count]; rowIndex++) {
+        if (StrappyDatabaseRowAllowedValue([currentRows objectAtIndex:rowIndex])) {
+          allowedCount++;
+        }
+      }
+      appNameCount = [nameCounts objectForKey:currentAppName];
+      disambiguate = ([appNameCount isKindOfClass:[NSNumber class]] &&
+                      ([appNameCount unsignedIntegerValue] >
+                       [currentRows count])) ? YES : NO;
+      title = StrappyDatabaseSectionTitle(currentAppName,
+                                          currentBundleIdentifier,
+                                          [currentRows count],
+                                          allowedCount,
+                                          disambiguate);
+      section = [NSDictionary dictionaryWithObjectsAndKeys:
+        title, @"title",
+        [NSArray arrayWithArray:currentRows], @"rows",
+        currentGroupKey, @"app_group_key",
+        nil];
+      [sections addObject:section];
+      [currentRows removeAllObjects];
+      currentGroupKey = nil;
+      currentAppName = nil;
+      currentBundleIdentifier = nil;
+    }
+
+    if ([row isKindOfClass:[NSDictionary class]]) {
+      if (currentGroupKey == nil) {
+        currentGroupKey = groupKey;
+        currentAppName = StrappyDatabaseAppNameForRow(row);
+        currentBundleIdentifier = StrappyDatabaseBundleIdentifierForRow(row);
+      }
+      [currentRows addObject:row];
+    }
+  }
+
+  return sections;
+}
+
 static NSComparisonResult StrappyCompareStrings(NSString *left, NSString *right)
 {
   if (![left isKindOfClass:[NSString class]]) {
@@ -179,6 +352,16 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
   (void)context;
   leftRow = [left isKindOfClass:[NSDictionary class]] ? left : nil;
   rightRow = [right isKindOfClass:[NSDictionary class]] ? right : nil;
+  result = StrappyCompareStrings(StrappyDatabaseAppNameForRow(leftRow),
+                                 StrappyDatabaseAppNameForRow(rightRow));
+  if (result != NSOrderedSame) {
+    return result;
+  }
+  result = StrappyCompareStrings(StrappyDatabaseAppGroupKeyForRow(leftRow),
+                                 StrappyDatabaseAppGroupKeyForRow(rightRow));
+  if (result != NSOrderedSame) {
+    return result;
+  }
   result = StrappyCompareBooleans(StrappyDatabaseRowIsAllowed(leftRow),
                                   StrappyDatabaseRowIsAllowed(rightRow));
   if (result != NSOrderedSame) {
@@ -200,6 +383,7 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 
 @interface StrappyPreferencesDatabaseWhitelistTableViewController ()
 @property (nonatomic, assign) BOOL scanning;
+@property (nonatomic, copy) NSArray *databaseSections;
 - (void)scanDatabasesInBackground:(NSString *)rootPath;
 - (void)scanDatabasesDidFinish:(NSDictionary *)result;
 @end
@@ -223,18 +407,57 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 
 - (BOOL)row:(NSDictionary *)row matchesSearchText:(NSString *)searchText
 {
+  NSString *appName;
+  NSString *appBundleId;
+
   if ([searchText length] == 0U) {
     return YES;
   }
+  appName = StrappyDatabaseAppNameForRow(row);
+  appBundleId = StrappyDatabaseBundleIdentifierForRow(row);
   return ([StrappyDatabaseNameForRow(row)
             rangeOfString:searchText
                   options:NSCaseInsensitiveSearch].location != NSNotFound) ||
+         ([appName rangeOfString:searchText
+                          options:NSCaseInsensitiveSearch].location !=
+          NSNotFound) ||
+         ([appBundleId rangeOfString:searchText
+                              options:NSCaseInsensitiveSearch].location !=
+          NSNotFound) ||
          ([StrappyDatabaseLocationForRow(row)
             rangeOfString:searchText
                   options:NSCaseInsensitiveSearch].location != NSNotFound) ||
          ([StrappyDatabasePathForRow(row)
             rangeOfString:searchText
                   options:NSCaseInsensitiveSearch].location != NSNotFound);
+}
+
+- (void)applyRows
+{
+  NSMutableArray *matchingRows;
+  NSArray *sortedRows;
+  NSString *searchText;
+  NSUInteger index;
+
+  searchText = [self currentSearchText];
+  matchingRows = [NSMutableArray arrayWithCapacity:[[self allRows] count]];
+  for (index = 0U; index < [[self allRows] count]; index++) {
+    NSDictionary *row;
+
+    row = [[self allRows] objectAtIndex:index];
+    if (![row isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    if ([self row:row matchesSearchText:searchText]) {
+      [matchingRows addObject:row];
+    }
+  }
+
+  sortedRows = [self sortedRows:matchingRows];
+  [self setRows:sortedRows];
+  [self setDatabaseSections:StrappyDatabaseSectionsForRows(sortedRows)];
+  [[self tableView] reloadData];
+  [self refreshStatusToolbar];
 }
 
 - (BOOL)databaseRowCanBeAllowed:(NSDictionary *)row
@@ -320,6 +543,128 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
   if (![self databaseRowCanBeAllowed:row]) {
     [[cell textLabel] setTextColor:[UIColor grayColor]];
     [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+  }
+}
+
+- (NSDictionary *)databaseRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  NSDictionary *section;
+  NSArray *sectionRows;
+
+  if (([indexPath section] < 0) ||
+      ((NSUInteger)[indexPath section] >= [[self databaseSections] count])) {
+    return nil;
+  }
+
+  section = [[self databaseSections] objectAtIndex:(NSUInteger)[indexPath section]];
+  sectionRows = [section objectForKey:@"rows"];
+  if (![sectionRows isKindOfClass:[NSArray class]] ||
+      ([indexPath row] < 0) ||
+      ((NSUInteger)[indexPath row] >= [sectionRows count])) {
+    return nil;
+  }
+
+  return [sectionRows objectAtIndex:(NSUInteger)[indexPath row]];
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
+{
+  (void)tableView;
+  return ([[self rows] count] > 0U) ?
+    (NSInteger)[[self databaseSections] count] : 1;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView
+ numberOfRowsInSection:(NSInteger)section
+{
+  NSDictionary *sectionInfo;
+  NSArray *sectionRows;
+
+  (void)tableView;
+  if ([[self rows] count] == 0U) {
+    return (section == 0) ? 1 : 0;
+  }
+  if ((section < 0) ||
+      ((NSUInteger)section >= [[self databaseSections] count])) {
+    return 0;
+  }
+
+  sectionInfo = [[self databaseSections] objectAtIndex:(NSUInteger)section];
+  sectionRows = [sectionInfo objectForKey:@"rows"];
+  return [sectionRows isKindOfClass:[NSArray class]] ?
+    (NSInteger)[sectionRows count] : 0;
+}
+
+- (NSString *)tableView:(UITableView *)tableView
+titleForHeaderInSection:(NSInteger)section
+{
+  NSDictionary *sectionInfo;
+  NSString *title;
+
+  (void)tableView;
+  if ([[self rows] count] == 0U ||
+      (section < 0) ||
+      ((NSUInteger)section >= [[self databaseSections] count])) {
+    return nil;
+  }
+
+  sectionInfo = [[self databaseSections] objectAtIndex:(NSUInteger)section];
+  title = [sectionInfo objectForKey:@"title"];
+  return StrappyDatabaseStringHasValue(title) ? title : nil;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView
+         cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  UITableViewCell *cell;
+  NSDictionary *row;
+
+  cell = [tableView dequeueReusableCellWithIdentifier:@"CatalogCell"];
+  if (cell == nil) {
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
+                                  reuseIdentifier:@"CatalogCell"];
+    [[cell textLabel] setNumberOfLines:1];
+    [[cell detailTextLabel] setNumberOfLines:1];
+  }
+
+  if ([[self rows] count] == 0U) {
+    [[cell textLabel] setText:[self emptyText]];
+    [[cell detailTextLabel] setText:nil];
+    [cell setAccessoryType:UITableViewCellAccessoryNone];
+    [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+    [[cell textLabel] setTextColor:[UIColor grayColor]];
+    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+    return cell;
+  }
+
+  row = [self databaseRowAtIndexPath:indexPath];
+  [[cell textLabel] setTextColor:[UIColor blackColor]];
+  [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+  [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
+  [self configureCell:cell withRow:row];
+  return cell;
+}
+
+- (NSIndexPath *)tableView:(UITableView *)tableView
+  willSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  (void)tableView;
+  return ([[self rows] count] > 0U) ? indexPath : nil;
+}
+
+- (void)tableView:(UITableView *)tableView
+didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  NSDictionary *row;
+
+  [tableView deselectRowAtIndexPath:indexPath animated:YES];
+  if ([[self rows] count] == 0U) {
+    return;
+  }
+
+  row = [self databaseRowAtIndexPath:indexPath];
+  if (row != nil) {
+    [self useRow:row atIndexPath:indexPath];
   }
 }
 

@@ -484,8 +484,10 @@ static int harness_run_fresh_catalog_schema_tests(
            context->catalog_path,
            "SELECT id, assistant_database_id, path, size, modified_at, "
            "device, inode, is_valid_sqlite, validation_error, scan_status, "
-           "user_decision, scan_root, first_seen_at, last_seen_at, "
-           "last_scanned_at FROM discovered_databases LIMIT 0;",
+           "user_decision, scan_root, app_group_key, app_name, "
+           "app_bundle_id, app_container_path, app_bundle_path, app_source, "
+           "first_seen_at, last_seen_at, last_scanned_at "
+           "FROM discovered_databases LIMIT 0;",
            "discovered_databases columns") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,

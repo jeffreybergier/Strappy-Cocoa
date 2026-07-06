@@ -28,6 +28,10 @@ static NSString * const kStrappyPreferencesToolbarPrompts =
   @"StrappyPreferencesToolbar.Prompts";
 static NSString * const kStrappyModelSearchTextKey =
   @"_strappy_model_search_text";
+static NSString * const kStrappyDatabaseGroupHeaderKey =
+  @"_strappy_database_group_header";
+static NSString * const kStrappyDatabaseGroupTitleKey =
+  @"_strappy_database_group_title";
 
 static NSString *StrappyByteCountString(NSNumber *sizeNumber)
 {
@@ -110,6 +114,231 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
   }
 
   return directory;
+}
+
+static BOOL StrappyDatabaseRowIsGroupHeader(NSDictionary *row)
+{
+  NSNumber *header;
+
+  header = [row objectForKey:kStrappyDatabaseGroupHeaderKey];
+  return ([header isKindOfClass:[NSNumber class]] && [header boolValue]) ?
+    YES : NO;
+}
+
+static NSString *StrappyDatabaseAppNameForRow(NSDictionary *row)
+{
+  NSString *appName;
+  NSString *groupKey;
+
+  appName = [row objectForKey:@"app_name"];
+  if ([appName isKindOfClass:[NSString class]] && ([appName length] > 0U)) {
+    return appName;
+  }
+
+  groupKey = [row objectForKey:@"app_group_key"];
+  if ([groupKey isKindOfClass:[NSString class]] && ([groupKey length] > 0U)) {
+    return groupKey;
+  }
+
+  return NSLocalizedString(@"Other", nil);
+}
+
+static NSString *StrappyDatabaseAppGroupKeyForRow(NSDictionary *row)
+{
+  NSString *groupKey;
+
+  groupKey = [row objectForKey:@"app_group_key"];
+  if ([groupKey isKindOfClass:[NSString class]] && ([groupKey length] > 0U)) {
+    return groupKey;
+  }
+
+  return [@"path:" stringByAppendingString:
+    [StrappyDatabaseLocationForRow(row) lowercaseString]];
+}
+
+static NSString *StrappyDatabaseBundleIdentifierForRow(NSDictionary *row)
+{
+  NSString *bundleIdentifier;
+
+  bundleIdentifier = [row objectForKey:@"app_bundle_id"];
+  return ([bundleIdentifier isKindOfClass:[NSString class]] &&
+          ([bundleIdentifier length] > 0U)) ? bundleIdentifier : @"";
+}
+
+static BOOL StrappyDatabaseStringHasValue(NSString *string)
+{
+  return ([string isKindOfClass:[NSString class]] && ([string length] > 0U)) ?
+    YES : NO;
+}
+
+static NSString *StrappyDatabaseGroupTitle(NSString *appName,
+                                           NSString *bundleIdentifier,
+                                           NSUInteger count,
+                                           NSUInteger allowedCount,
+                                           BOOL disambiguate)
+{
+  NSString *title;
+  NSString *countText;
+
+  title = StrappyDatabaseStringHasValue(appName) ? appName :
+    NSLocalizedString(@"Other", nil);
+  if (disambiguate && ([bundleIdentifier length] > 0U)) {
+    title = [NSString stringWithFormat:@"%@ (%@)", title, bundleIdentifier];
+  }
+
+  if (count == 1U) {
+    countText = NSLocalizedString(@"1 database", nil);
+  } else {
+    countText = [NSString stringWithFormat:
+      NSLocalizedString(@"%lu databases", nil), (unsigned long)count];
+  }
+
+  if (allowedCount > 0U) {
+    return [NSString stringWithFormat:@"%@ - %@, %lu allowed",
+      title,
+      countText,
+      (unsigned long)allowedCount];
+  }
+
+  return [NSString stringWithFormat:@"%@ - %@", title, countText];
+}
+
+static NSString *StrappyDatabaseHeaderTitleForRow(NSDictionary *row)
+{
+  NSString *title;
+
+  title = [row objectForKey:kStrappyDatabaseGroupTitleKey];
+  return ([title isKindOfClass:[NSString class]] && ([title length] > 0U)) ?
+    title : @"";
+}
+
+static BOOL StrappyDatabaseRowAllowedValue(NSDictionary *row)
+{
+  NSString *decision;
+
+  decision = [row objectForKey:@"user_decision"];
+  return [decision isEqualToString:@"allowed"];
+}
+
+static NSArray *StrappyDatabaseRowsWithGroupHeaders(NSArray *rows)
+{
+  NSMutableDictionary *nameCounts;
+  NSMutableArray *groupedRows;
+  NSString *currentGroupKey;
+  NSString *currentAppName;
+  NSString *currentBundleIdentifier;
+  NSMutableArray *currentRows;
+  NSUInteger index;
+
+  if (![rows isKindOfClass:[NSArray class]] || ([rows count] == 0U)) {
+    return [NSArray array];
+  }
+
+  nameCounts = [NSMutableDictionary dictionary];
+  for (index = 0U; index < [rows count]; index++) {
+    NSDictionary *row;
+    NSString *appName;
+    NSNumber *count;
+
+    row = [rows objectAtIndex:index];
+    if (![row isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    appName = StrappyDatabaseAppNameForRow(row);
+    count = [nameCounts objectForKey:appName];
+    [nameCounts setObject:[NSNumber numberWithUnsignedInteger:
+      ([count isKindOfClass:[NSNumber class]] ?
+        [count XP_unsignedIntegerValue] + 1U : 1U)]
+                    forKey:appName];
+  }
+
+  groupedRows = [NSMutableArray arrayWithCapacity:[rows count] + 16U];
+  currentGroupKey = nil;
+  currentAppName = nil;
+  currentBundleIdentifier = nil;
+  currentRows = [NSMutableArray array];
+  for (index = 0U; index <= [rows count]; index++) {
+    NSDictionary *row;
+    NSString *groupKey;
+
+    row = (index < [rows count]) ? [rows objectAtIndex:index] : nil;
+    groupKey = [row isKindOfClass:[NSDictionary class]] ?
+      StrappyDatabaseAppGroupKeyForRow(row) : nil;
+    if ((currentGroupKey != nil) &&
+        ((row == nil) || ![groupKey isEqualToString:currentGroupKey])) {
+      NSUInteger rowIndex;
+      NSUInteger allowedCount;
+      BOOL disambiguate;
+      NSMutableDictionary *header;
+      NSString *title;
+      NSNumber *appNameCount;
+
+      allowedCount = 0U;
+      for (rowIndex = 0U; rowIndex < [currentRows count]; rowIndex++) {
+        if (StrappyDatabaseRowAllowedValue([currentRows objectAtIndex:rowIndex])) {
+          allowedCount++;
+        }
+      }
+      appNameCount = [nameCounts objectForKey:currentAppName];
+      disambiguate = ([appNameCount isKindOfClass:[NSNumber class]] &&
+                      ([appNameCount XP_unsignedIntegerValue] >
+                       [currentRows count])) ? YES : NO;
+      title = StrappyDatabaseGroupTitle(currentAppName,
+                                        currentBundleIdentifier,
+                                        [currentRows count],
+                                        allowedCount,
+                                        disambiguate);
+      header = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+        [NSNumber numberWithBool:YES], kStrappyDatabaseGroupHeaderKey,
+        title, kStrappyDatabaseGroupTitleKey,
+        currentGroupKey, @"app_group_key",
+        currentAppName, @"app_name",
+        nil];
+      if ([currentBundleIdentifier length] > 0U) {
+        [header setObject:currentBundleIdentifier forKey:@"app_bundle_id"];
+      }
+      [groupedRows addObject:header];
+      [groupedRows addObjectsFromArray:currentRows];
+      [currentRows removeAllObjects];
+      currentGroupKey = nil;
+      currentAppName = nil;
+      currentBundleIdentifier = nil;
+    }
+
+    if ([row isKindOfClass:[NSDictionary class]]) {
+      if (currentGroupKey == nil) {
+        currentGroupKey = groupKey;
+        currentAppName = StrappyDatabaseAppNameForRow(row);
+        currentBundleIdentifier = StrappyDatabaseBundleIdentifierForRow(row);
+      }
+      [currentRows addObject:row];
+    }
+  }
+
+  return groupedRows;
+}
+
+static NSUInteger StrappyDatabaseContentRowCount(NSArray *rows)
+{
+  NSUInteger index;
+  NSUInteger count;
+
+  if (![rows isKindOfClass:[NSArray class]]) {
+    return 0U;
+  }
+
+  count = 0U;
+  for (index = 0U; index < [rows count]; index++) {
+    NSDictionary *row;
+
+    row = [rows objectAtIndex:index];
+    if ([row isKindOfClass:[NSDictionary class]] &&
+        !StrappyDatabaseRowIsGroupHeader(row)) {
+      count++;
+    }
+  }
+
+  return count;
 }
 
 static NSString *StrappyStringForModelRow(NSDictionary *row, NSString *key)
@@ -1133,6 +1362,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   for (index = 0U; index < [rows count]; index++) {
     NSDictionary *row;
     NSString *name;
+    NSString *appName;
+    NSString *appBundleId;
     NSString *location;
     NSString *path;
 
@@ -1142,10 +1373,17 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     }
 
     name = StrappyDatabaseNameForRow(row);
+    appName = StrappyDatabaseAppNameForRow(row);
+    appBundleId = StrappyDatabaseBundleIdentifierForRow(row);
     location = StrappyDatabaseLocationForRow(row);
     path = StrappyDatabasePathForRow(row);
     if (([name rangeOfString:searchText
                      options:NSCaseInsensitiveSearch].location != NSNotFound) ||
+        ([appName rangeOfString:searchText
+                        options:NSCaseInsensitiveSearch].location != NSNotFound) ||
+        ([appBundleId rangeOfString:searchText
+                            options:NSCaseInsensitiveSearch].location !=
+         NSNotFound) ||
         ([location rangeOfString:searchText
                          options:NSCaseInsensitiveSearch].location != NSNotFound) ||
         ([path rangeOfString:searchText
@@ -1164,6 +1402,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   rows = [self databaseRows:allDatabaseRows_
         matchingSearchText:[self currentDatabaseSearchText]];
   rows = [databaseWhitelistView_ sortedRows:rows];
+  rows = StrappyDatabaseRowsWithGroupHeaders(rows);
   [databaseRows_ release];
   databaseRows_ = [rows copy];
   [databaseTableView_ reloadData];
@@ -1212,7 +1451,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
-  count = [databaseRows_ count];
+  count = StrappyDatabaseContentRowCount(databaseRows_);
   searchText = [self currentDatabaseSearchText];
   if ([searchText length] > 0U) {
     if (count == 1U) {
@@ -1543,8 +1782,17 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
   database = [databaseRows_ objectAtIndex:(NSUInteger)row];
   identifier = [tableColumn identifier];
+  if (StrappyDatabaseRowIsGroupHeader(database)) {
+    if ([identifier isEqualToString:@"application"]) {
+      return StrappyDatabaseHeaderTitleForRow(database);
+    }
+    return @"";
+  }
   if ([identifier isEqualToString:@"allowed"]) {
     return [self allowedValueForDatabaseRow:database];
+  }
+  if ([identifier isEqualToString:@"application"]) {
+    return StrappyDatabaseAppNameForRow(database);
   }
   if ([identifier isEqualToString:@"name"]) {
     return StrappyDatabaseNameForRow(database);
@@ -1557,6 +1805,36 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   return nil;
+}
+
+- (CGFloat)tableView:(NSTableView *)tableView heightOfRow:(NSInteger)row
+{
+  NSDictionary *database;
+
+  if (tableView != databaseTableView_) {
+    return [tableView rowHeight];
+  }
+  if ((row < 0) || (row >= (NSInteger)[databaseRows_ count])) {
+    return [tableView rowHeight];
+  }
+
+  database = [databaseRows_ objectAtIndex:(NSUInteger)row];
+  return StrappyDatabaseRowIsGroupHeader(database) ? 20.0 : [tableView rowHeight];
+}
+
+- (BOOL)tableView:(NSTableView *)tableView shouldSelectRow:(NSInteger)row
+{
+  NSDictionary *database;
+
+  if (tableView != databaseTableView_) {
+    return YES;
+  }
+  if ((row < 0) || (row >= (NSInteger)[databaseRows_ count])) {
+    return NO;
+  }
+
+  database = [databaseRows_ objectAtIndex:(NSUInteger)row];
+  return StrappyDatabaseRowIsGroupHeader(database) ? NO : YES;
 }
 
 - (NSString *)tableView:(NSTableView *)tableView
@@ -1607,6 +1885,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   database = [databaseRows_ objectAtIndex:(NSUInteger)row];
+  if (StrappyDatabaseRowIsGroupHeader(database)) {
+    return StrappyDatabaseHeaderTitleForRow(database);
+  }
   identifier = [tableColumn identifier];
   if ([identifier isEqualToString:@"allowed"] &&
       ![self databaseRowCanBeAllowed:database]) {
@@ -1687,6 +1968,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   database = [databaseRows_ objectAtIndex:(NSUInteger)row];
+  if (StrappyDatabaseRowIsGroupHeader(database)) {
+    return;
+  }
   if (allowed && ![self databaseRowCanBeAllowed:database]) {
     NSBeep();
     [databaseTableView_ reloadData];
@@ -1731,6 +2015,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   database = [databaseRows_ objectAtIndex:(NSUInteger)row];
+  if (StrappyDatabaseRowIsGroupHeader(database)) {
+    return NO;
+  }
   return [self databaseRowCanBeAllowed:database];
 }
 
@@ -1768,6 +2055,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   database = [databaseRows_ objectAtIndex:(NSUInteger)row];
+  if (StrappyDatabaseRowIsGroupHeader(database)) {
+    [cell setEnabled:NO];
+    return;
+  }
   [cell setEnabled:[self databaseRowCanBeAllowed:database]];
 }
 

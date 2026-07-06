@@ -52,6 +52,12 @@ void strappy_file_scanner_record_init(strappy_file_scanner_record *record)
   record->inode = 0ULL;
   record->is_valid_sqlite = 0;
   record->validation_error = NULL;
+  record->app_group_key = NULL;
+  record->app_name = NULL;
+  record->app_bundle_id = NULL;
+  record->app_container_path = NULL;
+  record->app_bundle_path = NULL;
+  record->app_source = NULL;
 }
 
 void strappy_file_scanner_record_destroy(strappy_file_scanner_record *record)
@@ -62,7 +68,88 @@ void strappy_file_scanner_record_destroy(strappy_file_scanner_record *record)
 
   free(record->path);
   free(record->validation_error);
+  free(record->app_group_key);
+  free(record->app_name);
+  free(record->app_bundle_id);
+  free(record->app_container_path);
+  free(record->app_bundle_path);
+  free(record->app_source);
   strappy_file_scanner_record_init(record);
+}
+
+static char *strappy_file_scanner_duplicate_optional_string(const char *value)
+{
+  if ((value == NULL) || (value[0] == '\0')) {
+    return NULL;
+  }
+
+  return strappy_string_duplicate(value);
+}
+
+int strappy_file_scanner_record_set_app_metadata(
+  strappy_file_scanner_record *record,
+  const char *app_group_key,
+  const char *app_name,
+  const char *app_bundle_id,
+  const char *app_container_path,
+  const char *app_bundle_path,
+  const char *app_source,
+  char **error_out)
+{
+  char *new_group_key;
+  char *new_name;
+  char *new_bundle_id;
+  char *new_container_path;
+  char *new_bundle_path;
+  char *new_source;
+
+  if (record == NULL) {
+    strappy_set_error(error_out, "Scanner record is missing.");
+    return 0;
+  }
+
+  new_group_key = strappy_file_scanner_duplicate_optional_string(app_group_key);
+  new_name = strappy_file_scanner_duplicate_optional_string(app_name);
+  new_bundle_id = strappy_file_scanner_duplicate_optional_string(app_bundle_id);
+  new_container_path =
+    strappy_file_scanner_duplicate_optional_string(app_container_path);
+  new_bundle_path = strappy_file_scanner_duplicate_optional_string(app_bundle_path);
+  new_source = strappy_file_scanner_duplicate_optional_string(app_source);
+
+  if (((app_group_key != NULL) && (app_group_key[0] != '\0') &&
+       (new_group_key == NULL)) ||
+      ((app_name != NULL) && (app_name[0] != '\0') && (new_name == NULL)) ||
+      ((app_bundle_id != NULL) && (app_bundle_id[0] != '\0') &&
+       (new_bundle_id == NULL)) ||
+      ((app_container_path != NULL) && (app_container_path[0] != '\0') &&
+       (new_container_path == NULL)) ||
+      ((app_bundle_path != NULL) && (app_bundle_path[0] != '\0') &&
+       (new_bundle_path == NULL)) ||
+      ((app_source != NULL) && (app_source[0] != '\0') &&
+       (new_source == NULL))) {
+    free(new_group_key);
+    free(new_name);
+    free(new_bundle_id);
+    free(new_container_path);
+    free(new_bundle_path);
+    free(new_source);
+    strappy_set_error(error_out, "Could not allocate scanner app metadata.");
+    return 0;
+  }
+
+  free(record->app_group_key);
+  free(record->app_name);
+  free(record->app_bundle_id);
+  free(record->app_container_path);
+  free(record->app_bundle_path);
+  free(record->app_source);
+  record->app_group_key = new_group_key;
+  record->app_name = new_name;
+  record->app_bundle_id = new_bundle_id;
+  record->app_container_path = new_container_path;
+  record->app_bundle_path = new_bundle_path;
+  record->app_source = new_source;
+  return 1;
 }
 
 void strappy_file_scanner_record_list_init(strappy_file_scanner_record_list *list)
@@ -406,6 +493,12 @@ static void strappy_file_scanner_discovered_database_input_from_record(
   input->is_valid_sqlite = record->is_valid_sqlite;
   input->validation_error = record->validation_error;
   input->scan_root = scan_root;
+  input->app_group_key = record->app_group_key;
+  input->app_name = record->app_name;
+  input->app_bundle_id = record->app_bundle_id;
+  input->app_container_path = record->app_container_path;
+  input->app_bundle_path = record->app_bundle_path;
+  input->app_source = record->app_source;
 }
 
 int strappy_file_scanner_save_discovered_databases(

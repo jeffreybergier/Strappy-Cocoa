@@ -15,6 +15,12 @@ typedef struct strappy_file_scanner_record {
   unsigned long long inode;
   int is_valid_sqlite;
   char *validation_error;
+  char *app_group_key;
+  char *app_name;
+  char *app_bundle_id;
+  char *app_container_path;
+  char *app_bundle_path;
+  char *app_source;
 } strappy_file_scanner_record;
 
 typedef struct strappy_file_scanner_record_list {
@@ -48,6 +54,15 @@ typedef struct strappy_file_scanner_options {
 void strappy_file_scanner_options_init(strappy_file_scanner_options *options);
 void strappy_file_scanner_record_init(strappy_file_scanner_record *record);
 void strappy_file_scanner_record_destroy(strappy_file_scanner_record *record);
+int strappy_file_scanner_record_set_app_metadata(
+  strappy_file_scanner_record *record,
+  const char *app_group_key,
+  const char *app_name,
+  const char *app_bundle_id,
+  const char *app_container_path,
+  const char *app_bundle_path,
+  const char *app_source,
+  char **error_out);
 void strappy_file_scanner_record_list_init(strappy_file_scanner_record_list *list);
 void strappy_file_scanner_record_list_destroy(strappy_file_scanner_record_list *list);
 

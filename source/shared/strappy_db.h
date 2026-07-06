@@ -92,6 +92,12 @@ typedef struct strappy_discovered_database_input {
   int is_valid_sqlite;
   const char *validation_error;
   const char *scan_root;
+  const char *app_group_key;
+  const char *app_name;
+  const char *app_bundle_id;
+  const char *app_container_path;
+  const char *app_bundle_path;
+  const char *app_source;
 } strappy_discovered_database_input;
 
 typedef struct strappy_discovered_database_record {
@@ -107,6 +113,12 @@ typedef struct strappy_discovered_database_record {
   char *scan_status;
   char *user_decision;
   char *scan_root;
+  char *app_group_key;
+  char *app_name;
+  char *app_bundle_id;
+  char *app_container_path;
+  char *app_bundle_path;
+  char *app_source;
   char *first_seen_at;
   char *last_seen_at;
   char *last_scanned_at;

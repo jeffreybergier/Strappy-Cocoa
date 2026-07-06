@@ -54,6 +54,24 @@ static NSString *StrappyDatabaseWhitelistLocationForRow(NSDictionary *row)
   return directory;
 }
 
+static NSString *StrappyDatabaseWhitelistAppNameForRow(NSDictionary *row)
+{
+  NSString *appName;
+  NSString *groupKey;
+
+  appName = [row objectForKey:@"app_name"];
+  if ([appName isKindOfClass:[NSString class]] && ([appName length] > 0U)) {
+    return appName;
+  }
+
+  groupKey = [row objectForKey:@"app_group_key"];
+  if ([groupKey isKindOfClass:[NSString class]] && ([groupKey length] > 0U)) {
+    return groupKey;
+  }
+
+  return NSLocalizedString(@"Other", nil);
+}
+
 static BOOL StrappyDatabaseWhitelistRowIsAllowed(NSDictionary *row)
 {
   NSString *decision;
@@ -165,10 +183,12 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
 - (void)addTableColumnsToTableView:(NSTableView *)tableView
 {
   NSTableColumn *allowedColumn;
+  NSTableColumn *appColumn;
   NSTableColumn *nameColumn;
   NSTableColumn *locationColumn;
   NSTableColumn *sizeColumn;
   NSButtonCell *allowedCell;
+  NSTextFieldCell *appCell;
   NSTextFieldCell *nameCell;
   NSTextFieldCell *locationCell;
   NSTextFieldCell *sizeCell;
@@ -189,6 +209,19 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
   [allowedCell setAlignment:XPTextAlignmentCenter];
   [allowedColumn setDataCell:allowedCell];
   [tableView addTableColumn:allowedColumn];
+
+  appColumn = [[[NSTableColumn alloc] initWithIdentifier:@"application"] autorelease];
+  [[appColumn headerCell] setStringValue:NSLocalizedString(@"Application", nil)];
+  [appColumn setWidth:140.0];
+  [appColumn setMinWidth:100.0];
+  [appColumn setEditable:NO];
+  [appColumn setSortDescriptorPrototype:
+    [[[NSSortDescriptor alloc] initWithKey:@"application"
+                                 ascending:YES] autorelease]];
+  appCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
+  [appCell setLineBreakMode:NSLineBreakByTruncatingTail];
+  [appColumn setDataCell:appCell];
+  [tableView addTableColumn:appColumn];
 
   nameColumn = [[[NSTableColumn alloc] initWithIdentifier:@"name"] autorelease];
   [[nameColumn headerCell] setStringValue:NSLocalizedString(@"Database", nil)];
@@ -232,8 +265,8 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
   [tableView addTableColumn:sizeColumn];
 
   [tableView setSortDescriptors:[NSArray arrayWithObjects:
-    [[[NSSortDescriptor alloc] initWithKey:@"database_priority"
-                                 ascending:NO] autorelease],
+    [[[NSSortDescriptor alloc] initWithKey:@"application"
+                                 ascending:YES] autorelease],
     nil]];
 }
 
@@ -252,6 +285,8 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
 - (NSArray *)fallbackSortDescriptors
 {
   return [NSArray arrayWithObjects:
+    [[[NSSortDescriptor alloc] initWithKey:@"database_priority"
+                                 ascending:NO] autorelease],
     [[[NSSortDescriptor alloc] initWithKey:@"location"
                                  ascending:YES] autorelease],
     [[[NSSortDescriptor alloc] initWithKey:@"size"
@@ -268,6 +303,7 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
 {
   return ([key isEqualToString:@"allowed"] ||
           [key isEqualToString:@"database_priority"] ||
+          [key isEqualToString:@"application"] ||
           [key isEqualToString:@"name"] ||
           [key isEqualToString:@"location"] ||
           [key isEqualToString:@"size"] ||
@@ -287,6 +323,11 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
     return StrappyDatabaseWhitelistCompareLongLong(
       StrappyDatabaseWhitelistPriorityForRow(left),
       StrappyDatabaseWhitelistPriorityForRow(right));
+  }
+  if ([key isEqualToString:@"application"]) {
+    return StrappyDatabaseWhitelistCompareStrings(
+      StrappyDatabaseWhitelistAppNameForRow(left),
+      StrappyDatabaseWhitelistAppNameForRow(right));
   }
   if ([key isEqualToString:@"name"]) {
     return StrappyDatabaseWhitelistCompareStrings(
