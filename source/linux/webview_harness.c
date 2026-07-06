@@ -59,7 +59,12 @@ static int harness_check_page_scripts(void)
 
   ok = harness_expect_contains(page_html, "@font-face") &&
        harness_expect_contains(page_html,
-                               "font:13px/1.3 -apple-system,Helvetica,Arial,sans-serif;") &&
+                               "<meta name=\"viewport\" "
+                               "content=\"width=device-width,initial-scale=1.0\">") &&
+       harness_expect_contains(page_html,
+                               "font:14px/1.38 -apple-system,Helvetica,Arial,sans-serif;") &&
+       harness_expect_contains(page_html,
+                               "-webkit-text-size-adjust:none;") &&
        harness_expect_contains(page_html,
                                ".tool-panel{line-height:1.3;") &&
        harness_expect_contains(page_html, "function faIconHTML") &&
@@ -79,7 +84,7 @@ static int harness_check_page_scripts(void)
                                "var strappyUpdateInterval=300;"
                                "var strappyStatusInterval=1000;") &&
        harness_expect_contains(page_html, "function scrollBottomNow") &&
-       harness_expect_contains(page_html, ".page{padding:16px 10px;}") &&
+       harness_expect_contains(page_html, ".page{padding:0 0 12px;}") &&
        harness_expect_contains(page_html, ".processing-autoscroll{position:absolute") &&
        harness_expect_contains(page_html, ".processing-autoscroll-on") &&
        harness_expect_contains(page_html,
@@ -90,9 +95,8 @@ static int harness_check_page_scripts(void)
                                ".row.tool{display:none;}") &&
        harness_expect_contains(page_html, ".processing-status{position:fixed") &&
        harness_expect_contains(page_html,
-                               ".bubble,.reasoning,.tool-column,.request-metadata{") &&
-       harness_expect_contains(page_html,
-                               "box-shadow:0 2px 9px rgba(0,0,0,.12);") &&
+                               ".bubble,.reasoning,.tool-column,.request-metadata{"
+                               "box-shadow:none;}") &&
        harness_expect_contains(page_html, ".request-metadata-error") &&
        harness_expect_contains(page_html, "function metadataFinishStatus") &&
        harness_expect_contains(page_html, "native_finish_reason") &&

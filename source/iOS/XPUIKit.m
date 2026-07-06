@@ -45,6 +45,27 @@ static BOOL XPUIKitInvokeBoolGetter(id target, SEL selector)
   return value ? YES : NO;
 }
 
+static UIScrollView *XPUIKitFindScrollView(UIView *view)
+{
+  NSArray *subviews;
+  NSUInteger index;
+
+  if ([view isKindOfClass:[UIScrollView class]]) {
+    return (UIScrollView *)view;
+  }
+
+  subviews = [view subviews];
+  for (index = 0U; index < [subviews count]; index++) {
+    UIScrollView *scrollView;
+
+    scrollView = XPUIKitFindScrollView([subviews objectAtIndex:index]);
+    if (scrollView != nil) {
+      return scrollView;
+    }
+  }
+  return nil;
+}
+
 @implementation UIColor (XPUIKit)
 
 + (UIColor *)messagesBackgroundColor
@@ -95,11 +116,11 @@ static BOOL XPUIKitInvokeBoolGetter(id target, SEL selector)
 
   selector = @selector(scrollView);
   if (![self respondsToSelector:selector]) {
-    return nil;
+    return XPUIKitFindScrollView(self);
   }
   signature = [self methodSignatureForSelector:selector];
   if (signature == nil) {
-    return nil;
+    return XPUIKitFindScrollView(self);
   }
 
   invocation = [NSInvocation invocationWithMethodSignature:signature];
@@ -108,7 +129,7 @@ static BOOL XPUIKitInvokeBoolGetter(id target, SEL selector)
   [invocation invoke];
   scrollView = nil;
   [invocation getReturnValue:&scrollView];
-  return scrollView;
+  return (scrollView != nil) ? scrollView : XPUIKitFindScrollView(self);
 }
 
 @end

@@ -66,6 +66,26 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
   return NSLocalizedString(@"New Session", nil);
 }
 
+static void StrappySetScrollsToTopOwnerInView(UIView *view,
+                                              UIScrollView *owner)
+{
+  NSArray *subviews;
+  NSUInteger index;
+
+  if (view == nil) {
+    return;
+  }
+
+  if ([view isKindOfClass:[UIScrollView class]]) {
+    [(UIScrollView *)view setScrollsToTop:(view == owner) ? YES : NO];
+  }
+
+  subviews = [view subviews];
+  for (index = 0U; index < [subviews count]; index++) {
+    StrappySetScrollsToTopOwnerInView([subviews objectAtIndex:index], owner);
+  }
+}
+
 @interface MessageListViewController () <UIWebViewDelegate,
                                           PromptSendViewControllerDelegate>
 @property (nonatomic, strong) StrappySession *session;
@@ -80,6 +100,7 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 @property (nonatomic, assign) BOOL webViewContentLoaded;
 @property (nonatomic, assign) BOOL sending;
 @property (nonatomic, assign) BOOL cancelPromptRequested;
+@property (nonatomic, assign) BOOL renderedRequestMessages;
 @property (nonatomic, assign) CGFloat composeBarBottomY;
 @property (nonatomic, assign) BOOL composing;
 @property (nonatomic, assign) BOOL tearingDown;
@@ -92,13 +113,15 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
                               curve:(UIViewAnimationCurve)curve
                            duration:(NSTimeInterval)duration;
 - (void)scrollWebViewToBottom;
+- (void)setWebViewScrollsToTop:(BOOL)scrollsToTop;
 - (void)sessionStreamEvent:(NSNotification *)notification;
 - (void)sessionPromptDidStart:(NSNotification *)notification;
 - (void)sessionPromptDidFinish:(NSNotification *)notification;
 - (void)modelCatalogDidChange:(NSNotification *)notification;
 - (void)sendPromptDidFinish:(NSDictionary *)result;
 - (NSString *)javaScriptForStreamEvent:(NSDictionary *)event;
-- (void)queueJavaScriptForStreamEvent:(NSDictionary *)event;
+- (BOOL)queueJavaScriptForStreamEvent:(NSDictionary *)event;
+- (BOOL)streamEventRendersMessage:(NSDictionary *)event;
 - (void)schedulePendingStreamEventFlush;
 - (void)streamEventFlushTimerDidFire:(NSTimer *)timer;
 - (void)flushPendingStreamEvents;
@@ -169,6 +192,7 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
   [[webView XP_scrollView] setDecelerationRate:UIScrollViewDecelerationRateNormal];
   [[self view] addSubview:webView];
   [self setWebView:webView];
+  [self setWebViewScrollsToTop:YES];
 
   sendBar = [[PromptSendViewController alloc]
     initWithFrame:CGRectMake(0.0f,
@@ -206,11 +230,13 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
   [self relayoutComposeBarAnimated:NO
                               curve:UIViewAnimationCurveEaseInOut
                            duration:0.0];
+  [self setWebViewScrollsToTop:YES];
 }
 
 - (void)viewWillDisappear:(BOOL)animated
 {
   [super viewWillDisappear:animated];
+  [self setWebViewScrollsToTop:NO];
   if ([self isLeavingNavigationStack]) {
     [self prepareForRemoval];
   }
@@ -248,6 +274,7 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 
   webView = [self webView];
   scrollView = [webView XP_scrollView];
+  [scrollView setScrollsToTop:NO];
   [scrollView setDelegate:nil];
   [webView setDelegate:nil];
   [webView stopLoading];
@@ -375,6 +402,18 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
     @"window.scrollTo(0, document.body.scrollHeight);"];
 }
 
+- (void)setWebViewScrollsToTop:(BOOL)scrollsToTop
+{
+  UIScrollView *scrollView;
+
+  scrollView = [[self webView] XP_scrollView];
+  if (scrollsToTop && (scrollView != nil)) {
+    StrappySetScrollsToTopOwnerInView([self view], scrollView);
+  } else {
+    StrappySetScrollsToTopOwnerInView([self view], nil);
+  }
+}
+
 - (void)updateTitleFromSession
 {
   NSDictionary *summary;
@@ -389,6 +428,7 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 - (void)clearRequestState
 {
   [self cancelPendingStreamEventFlush];
+  [self setRenderedRequestMessages:NO];
 }
 
 - (void)reloadWithSession:(StrappySession *)session
@@ -884,7 +924,10 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
   }
 
   [self updateSendingStateFromSession];
-  [self queueJavaScriptForStreamEvent:event];
+  if ([self queueJavaScriptForStreamEvent:event] &&
+      [self streamEventRendersMessage:event]) {
+    [self setRenderedRequestMessages:YES];
+  }
 }
 
 - (void)sessionPromptDidFinish:(NSNotification *)notification
@@ -904,8 +947,10 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
   NSDictionary *sessionSummary;
   NSString *errorMessage;
   BOOL streamingPrompt;
+  BOOL renderedRequestMessages;
 
   streamingPrompt = [[self session] streamingEnabled] ? YES : NO;
+  renderedRequestMessages = [self renderedRequestMessages];
   [self setPromptCancellationRequested:NO];
   [self updateSendingStateFromSession];
 
@@ -929,7 +974,8 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
 
   [self clearRequestState];
   [self updateSendingStateFromSession];
-  if (streamingPrompt && [sessionSummary isKindOfClass:[NSDictionary class]]) {
+  if ((streamingPrompt || renderedRequestMessages) &&
+      [sessionSummary isKindOfClass:[NSDictionary class]]) {
     [self refreshRenderedMessageCountFromSession];
   } else if ([sessionSummary isKindOfClass:[NSDictionary class]] &&
              [self appendNewMessagesToWebView]) {
@@ -949,17 +995,17 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
   return [javaScript isKindOfClass:[NSString class]] ? javaScript : @"";
 }
 
-- (void)queueJavaScriptForStreamEvent:(NSDictionary *)event
+- (BOOL)queueJavaScriptForStreamEvent:(NSDictionary *)event
 {
   NSString *javaScript;
 
   if (![event isKindOfClass:[NSDictionary class]]) {
-    return;
+    return NO;
   }
 
   javaScript = [self javaScriptForStreamEvent:event];
   if ([javaScript length] == 0U) {
-    return;
+    return NO;
   }
 
   if ([self pendingStreamJavaScript] == nil) {
@@ -967,6 +1013,19 @@ static NSString *StrappyTitleForSessionSummary(NSDictionary *summary)
   }
   [[self pendingStreamJavaScript] appendString:javaScript];
   [self schedulePendingStreamEventFlush];
+  return YES;
+}
+
+- (BOOL)streamEventRendersMessage:(NSDictionary *)event
+{
+  NSString *streamEvent;
+
+  streamEvent = [event objectForKey:@"stream_event"];
+  if (![streamEvent isKindOfClass:[NSString class]]) {
+    return NO;
+  }
+
+  return ![streamEvent isEqualToString:@"processing_status"];
 }
 
 - (void)schedulePendingStreamEventFlush
@@ -1170,6 +1229,7 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
   }
   [[self webView] XP_setBackgroundTransparent];
   [[[self webView] XP_scrollView] XP_removeShadow];
+  [self setWebViewScrollsToTop:YES];
   [self scrollWebViewToBottom];
 }
 

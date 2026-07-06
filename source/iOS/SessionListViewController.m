@@ -114,9 +114,6 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 {
   [super viewDidLoad];
 
-  self.tableView.backgroundColor = [UIColor messagesBackgroundColor];
-  self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
-
   self.addButton =
     [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd
                                                   target:self
@@ -393,7 +390,8 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 titleForHeaderInSection:(NSInteger)section
 {
   (void)tableView;
-  return (section == 0) ? NSLocalizedString(@"Conversations", nil) : nil;
+  (void)section;
+  return nil;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView

@@ -382,6 +382,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [textView setBackgroundColor:[UIColor whiteColor]];
   [textView setReturnKeyType:UIReturnKeyDefault];
   [textView setAutocorrectionType:UITextAutocorrectionTypeDefault];
+  [textView setScrollsToTop:NO];
   [textView setAutoresizingMask:UIViewAutoresizingFlexibleWidth |
                                 UIViewAutoresizingFlexibleHeight];
   [[textView layer] setCornerRadius:7.0f];
