@@ -32,9 +32,24 @@ static void StrappyLogApplicationLifecycle(NSString *event,
 
 @interface AppDelegate ()
 @property (nonatomic, strong) StrappyRootCoordinator *coordinator;
+@property (nonatomic, assign) UIBackgroundTaskIdentifier promptBackgroundTaskIdentifier;
+- (void)observePromptLifecycle;
+- (void)promptLifecycleDidChange:(NSNotification *)notification;
+- (void)updatePromptBackgroundTaskAssertion;
+- (void)beginPromptBackgroundTaskIfNeeded;
+- (void)endPromptBackgroundTaskIfNeeded;
+- (void)promptBackgroundTaskDidExpire;
 @end
 
 @implementation AppDelegate
+
+- (instancetype)init
+{
+  if ((self = [super init])) {
+    _promptBackgroundTaskIdentifier = UIBackgroundTaskInvalid;
+  }
+  return self;
+}
 
 - (BOOL)application:(UIApplication *)application
     didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
@@ -53,11 +68,13 @@ static void StrappyLogApplicationLifecycle(NSString *event,
   }
 
   [AIFontAwesome registerBundledFonts];
+  [self observePromptLifecycle];
 
   self.coordinator = [[StrappyRootCoordinator alloc] initWithWindow:self.window];
   [self.coordinator start];
   [self.window makeKeyAndVisible];
 
+  [self updatePromptBackgroundTaskAssertion];
   StrappyLogApplicationLifecycle(@"didFinishLaunching end", application);
   return YES;
 }
@@ -70,26 +87,138 @@ static void StrappyLogApplicationLifecycle(NSString *event,
 - (void)applicationDidEnterBackground:(UIApplication *)application
 {
   StrappyLogApplicationLifecycle(@"applicationDidEnterBackground", application);
+  [self updatePromptBackgroundTaskAssertion];
 }
 
 - (void)applicationWillEnterForeground:(UIApplication *)application
 {
   StrappyLogApplicationLifecycle(@"applicationWillEnterForeground", application);
+  [self updatePromptBackgroundTaskAssertion];
 }
 
 - (void)applicationDidBecomeActive:(UIApplication *)application
 {
   StrappyLogApplicationLifecycle(@"applicationDidBecomeActive", application);
+  [self updatePromptBackgroundTaskAssertion];
 }
 
 - (void)applicationWillTerminate:(UIApplication *)application
 {
   StrappyLogApplicationLifecycle(@"applicationWillTerminate", application);
+  [self endPromptBackgroundTaskIfNeeded];
 }
 
 - (void)applicationDidReceiveMemoryWarning:(UIApplication *)application
 {
   StrappyLogApplicationLifecycle(@"applicationDidReceiveMemoryWarning", application);
+}
+
+- (void)observePromptLifecycle
+{
+  NSNotificationCenter *notificationCenter;
+
+  notificationCenter = [NSNotificationCenter defaultCenter];
+  [notificationCenter addObserver:self
+                         selector:@selector(promptLifecycleDidChange:)
+                             name:StrappySessionPromptDidStartNotification
+                           object:nil];
+  [notificationCenter addObserver:self
+                         selector:@selector(promptLifecycleDidChange:)
+                             name:StrappySessionPromptDidFinishNotification
+                           object:nil];
+}
+
+- (void)promptLifecycleDidChange:(NSNotification *)notification
+{
+  NSString *name;
+
+  name = [notification name];
+  NSLog(@"StrappyLifecycle AppDelegate promptLifecycleDidChange name=%@ inFlightSessions=%lu",
+        name,
+        (unsigned long)[StrappySession inFlightSessionCount]);
+  [self updatePromptBackgroundTaskAssertion];
+}
+
+- (void)updatePromptBackgroundTaskAssertion
+{
+  if ([StrappySession hasInFlightSessions]) {
+    [self beginPromptBackgroundTaskIfNeeded];
+  } else {
+    [self endPromptBackgroundTaskIfNeeded];
+  }
+}
+
+- (void)beginPromptBackgroundTaskIfNeeded
+{
+  UIApplication *application;
+  UIBackgroundTaskIdentifier taskIdentifier;
+
+  @synchronized(self) {
+    if ([self promptBackgroundTaskIdentifier] != UIBackgroundTaskInvalid) {
+      return;
+    }
+  }
+
+  application = [UIApplication sharedApplication];
+  taskIdentifier =
+    [application beginBackgroundTaskWithExpirationHandler:^{
+      [self promptBackgroundTaskDidExpire];
+    }];
+  if (taskIdentifier == UIBackgroundTaskInvalid) {
+    NSLog(@"StrappyLifecycle AppDelegate promptBackgroundTaskBeginFailed inFlightSessions=%lu backgroundTimeRemaining=%.3f",
+          (unsigned long)[StrappySession inFlightSessionCount],
+          [application backgroundTimeRemaining]);
+    return;
+  }
+
+  @synchronized(self) {
+    if ([self promptBackgroundTaskIdentifier] == UIBackgroundTaskInvalid) {
+      [self setPromptBackgroundTaskIdentifier:taskIdentifier];
+    } else if (taskIdentifier != UIBackgroundTaskInvalid) {
+      [application endBackgroundTask:taskIdentifier];
+      return;
+    }
+  }
+
+  NSLog(@"StrappyLifecycle AppDelegate promptBackgroundTaskBegan task=%lu inFlightSessions=%lu backgroundTimeRemaining=%.3f",
+        (unsigned long)taskIdentifier,
+        (unsigned long)[StrappySession inFlightSessionCount],
+        [application backgroundTimeRemaining]);
+}
+
+- (void)endPromptBackgroundTaskIfNeeded
+{
+  UIApplication *application;
+  UIBackgroundTaskIdentifier taskIdentifier;
+
+  @synchronized(self) {
+    taskIdentifier = [self promptBackgroundTaskIdentifier];
+    if (taskIdentifier == UIBackgroundTaskInvalid) {
+      return;
+    }
+    [self setPromptBackgroundTaskIdentifier:UIBackgroundTaskInvalid];
+  }
+
+  application = [UIApplication sharedApplication];
+  [application endBackgroundTask:taskIdentifier];
+  NSLog(@"StrappyLifecycle AppDelegate promptBackgroundTaskEnded task=%lu inFlightSessions=%lu backgroundTimeRemaining=%.3f",
+        (unsigned long)taskIdentifier,
+        (unsigned long)[StrappySession inFlightSessionCount],
+        [application backgroundTimeRemaining]);
+}
+
+- (void)promptBackgroundTaskDidExpire
+{
+  NSLog(@"StrappyLifecycle AppDelegate promptBackgroundTaskExpired inFlightSessions=%lu backgroundTimeRemaining=%.3f",
+        (unsigned long)[StrappySession inFlightSessionCount],
+        [[UIApplication sharedApplication] backgroundTimeRemaining]);
+  [self endPromptBackgroundTaskIfNeeded];
+}
+
+- (void)dealloc
+{
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [self endPromptBackgroundTaskIfNeeded];
 }
 
 @end

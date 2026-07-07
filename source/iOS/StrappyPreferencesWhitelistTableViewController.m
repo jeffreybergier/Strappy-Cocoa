@@ -1,5 +1,6 @@
 #import "StrappyPreferencesWhitelistTableViewController.h"
 
+#import "StrappyIdleTimerAssertion.h"
 #import "XPUIKit.h"
 
 static NSString *StrappyPreferencesTrimmedString(NSString *string)
@@ -9,37 +10,6 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
   }
   return [string stringByTrimmingCharactersInSet:
     [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-}
-
-static NSUInteger StrappyPreferencesIdleTimerDisableCount = 0U;
-static BOOL StrappyPreferencesPreviousIdleTimerDisabled = NO;
-
-static void StrappyPreferencesSetIdleTimerAssertionEnabled(BOOL enabled)
-{
-  UIApplication *application;
-
-  application = [UIApplication sharedApplication];
-  @synchronized(application) {
-    if (enabled) {
-      if (StrappyPreferencesIdleTimerDisableCount == 0U) {
-        StrappyPreferencesPreviousIdleTimerDisabled =
-          [application isIdleTimerDisabled];
-        [application setIdleTimerDisabled:YES];
-      }
-      StrappyPreferencesIdleTimerDisableCount++;
-      return;
-    }
-
-    if (StrappyPreferencesIdleTimerDisableCount == 0U) {
-      return;
-    }
-
-    StrappyPreferencesIdleTimerDisableCount--;
-    if (StrappyPreferencesIdleTimerDisableCount == 0U) {
-      [application
-        setIdleTimerDisabled:StrappyPreferencesPreviousIdleTimerDisabled];
-    }
-  }
 }
 
 @implementation StrappyPreferencesWhitelistTableViewController
@@ -96,7 +66,7 @@ static void StrappyPreferencesSetIdleTimerAssertionEnabled(BOOL enabled)
   }
 
   _working = working;
-  StrappyPreferencesSetIdleTimerAssertionEnabled(working);
+  StrappyIdleTimerAssertionSetEnabled(working);
 }
 
 - (void)buildStatusToolbar

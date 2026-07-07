@@ -1,6 +1,7 @@
 #import "MessageListViewController.h"
 
 #import "PromptSendViewController.h"
+#import "StrappyIdleTimerAssertion.h"
 #import "StrappySession.h"
 #import "XPUIKit.h"
 
@@ -149,10 +150,14 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 @property (nonatomic, assign) CGFloat composeBarBottomY;
 @property (nonatomic, assign) BOOL composing;
 @property (nonatomic, assign) BOOL tearingDown;
+@property (nonatomic, assign, getter=isPromptIdleTimerAssertionEnabled)
+  BOOL promptIdleTimerAssertionEnabled;
 - (void)logLifecycleEvent:(NSString *)event;
 - (void)observeKeyboard;
 - (void)observeApplicationLifecycle;
 - (void)applicationLifecycleNotification:(NSNotification *)notification;
+- (void)updatePromptIdleTimerAssertion;
+- (void)setPromptIdleTimerAssertionEnabled:(BOOL)enabled;
 - (void)keyboardWillShow:(NSNotification *)notification;
 - (void)keyboardWillHide:(NSNotification *)notification;
 - (NSTimeInterval)keyboardDuration:(NSDictionary *)userInfo;
@@ -233,7 +238,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
   inFlight = [self sessionPromptIsInFlight];
 
-  NSLog(@"StrappyLifecycle MessageList %@ self=%p appState=%@ backgroundTimeRemaining=%.3f session=%@ webView=%p viewLoaded=%@ viewInWindow=%@ contentLoaded=%@ sending=%@ inFlight=%@ cancelRequested=%@ pendingJS=%lu timer=%@ tearingDown=%@ renderedRequestMessages=%@",
+  NSLog(@"StrappyLifecycle MessageList %@ self=%p appState=%@ backgroundTimeRemaining=%.3f session=%@ webView=%p viewLoaded=%@ viewInWindow=%@ contentLoaded=%@ sending=%@ inFlight=%@ cancelRequested=%@ pendingJS=%lu timer=%@ promptIdleAssertion=%@ tearingDown=%@ renderedRequestMessages=%@",
         [event isKindOfClass:[NSString class]] ? event : @"event",
         (__bridge void *)self,
         StrappyMessageListApplicationStateName(),
@@ -248,6 +253,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
         StrappyMessageListBoolString([self promptCancellationRequested]),
         (unsigned long)pendingJavaScriptLength,
         StrappyMessageListBoolString(([self streamEventFlushTimer] != nil) ? YES : NO),
+        StrappyMessageListBoolString([self isPromptIdleTimerAssertionEnabled]),
         StrappyMessageListBoolString([self tearingDown]),
         StrappyMessageListBoolString([self renderedRequestMessages]));
 }
@@ -331,6 +337,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)viewDidAppear:(BOOL)animated
 {
   [super viewDidAppear:animated];
+  [self updatePromptIdleTimerAssertion];
   [self logLifecycleEvent:@"viewDidAppear"];
 }
 
@@ -338,6 +345,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 {
   [super viewWillDisappear:animated];
   [self logLifecycleEvent:@"viewWillDisappear begin"];
+  [self setPromptIdleTimerAssertionEnabled:NO];
   [self setWebViewScrollsToTop:NO];
   if ([self isLeavingNavigationStack]) {
     [self prepareForRemoval];
@@ -349,6 +357,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)viewDidDisappear:(BOOL)animated
 {
   [super viewDidDisappear:animated];
+  [self updatePromptIdleTimerAssertion];
   [self logLifecycleEvent:@"viewDidDisappear"];
 }
 
@@ -384,6 +393,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
 
   [self logLifecycleEvent:@"prepareForRemoval begin"];
+  [self setPromptIdleTimerAssertionEnabled:NO];
   [self setTearingDown:YES];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [self cancelPendingStreamEventFlush];
@@ -450,6 +460,37 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 {
   [self logLifecycleEvent:
     StrappyMessageListLifecycleEventName([notification name])];
+  [self updatePromptIdleTimerAssertion];
+}
+
+- (void)setPromptIdleTimerAssertionEnabled:(BOOL)enabled
+{
+  if ([self isPromptIdleTimerAssertionEnabled] == enabled) {
+    return;
+  }
+
+  _promptIdleTimerAssertionEnabled = enabled ? YES : NO;
+  StrappyIdleTimerAssertionSetEnabled(enabled);
+  NSLog(@"StrappyLifecycle MessageList promptIdleTimerAssertion %@ self=%p session=%@",
+        StrappyMessageListBoolString(enabled),
+        (__bridge void *)self,
+        (([self session] != nil) ? [[self session] sessionIdentifier] : nil));
+}
+
+- (void)updatePromptIdleTimerAssertion
+{
+  BOOL viewVisible;
+  BOOL shouldAssert;
+
+  viewVisible = NO;
+  if ([self isViewLoaded]) {
+    viewVisible = ([[self view] window] != nil) ? YES : NO;
+  }
+
+  shouldAssert = (![self tearingDown] &&
+                  viewVisible &&
+                  [self sessionPromptIsInFlight]) ? YES : NO;
+  [self setPromptIdleTimerAssertionEnabled:shouldAssert];
 }
 
 - (NSTimeInterval)keyboardDuration:(NSDictionary *)userInfo
@@ -637,6 +678,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self updateTitleFromSession];
   [[self sendBar] setEnabled:(session != nil)];
   [self updateSendingStateFromSession];
+  [self updatePromptIdleTimerAssertion];
   [[self sendBar] setStreamingEnabled:(session != nil) ?
     [session streamingEnabled] : NO];
   [[self sendBar] reloadOptionsMenu];
@@ -670,6 +712,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [[self sendBar] setSending:[self sending]];
   [[self sendBar] setCancellationRequested:
     ([self sending] && [self promptCancellationRequested]) ? YES : NO];
+  [self updatePromptIdleTimerAssertion];
 }
 
 - (BOOL)canSendCurrentPrompt
@@ -1052,6 +1095,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
   [self logLifecycleEvent:@"sessionPromptDidStart"];
   [self updateSendingStateFromSession];
+  [self updatePromptIdleTimerAssertion];
 }
 
 - (void)modelCatalogDidChange:(NSNotification *)notification
@@ -1098,6 +1142,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self logLifecycleEvent:@"sessionPromptDidFinish begin"];
   [self flushPendingStreamEvents];
   [self sendPromptDidFinish:[notification userInfo]];
+  [self updatePromptIdleTimerAssertion];
   [self logLifecycleEvent:@"sessionPromptDidFinish end"];
 }
 
@@ -1423,6 +1468,7 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
 - (void)dealloc
 {
   [self logLifecycleEvent:@"dealloc"];
+  [self setPromptIdleTimerAssertionEnabled:NO];
   [self prepareForRemoval];
 }
 
