@@ -1093,6 +1093,79 @@ static int harness_test_stream_reasoning_detail_chunks_coalesced(void)
   return 1;
 }
 
+static int harness_test_stream_write_drops_success_raw_body(void)
+{
+  strappy_stream_context context;
+  strappy_chat_result result;
+  char first_chunk[] =
+    "data: {\"id\":\"gen-raw\",\"object\":\"chat.completion.chunk\","
+    "\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"hello\"}}]}\n\n";
+  char second_chunk[] = "data: [DONE]\n\n";
+  size_t first_length;
+  size_t second_length;
+  int ok;
+
+  strappy_chat_result_init(&result);
+  strappy_stream_context_init(&context);
+  context.result = &result;
+
+  first_length = strlen(first_chunk);
+  second_length = strlen(second_chunk);
+  ok = (strappy_client_stream_write_callback(first_chunk,
+                                             1U,
+                                             first_length,
+                                             &context) == first_length) &&
+       context.saw_event &&
+       (context.raw_body.data == NULL) &&
+       (context.raw_body.length == 0U) &&
+       (strappy_client_stream_write_callback(second_chunk,
+                                             1U,
+                                             second_length,
+                                             &context) == second_length) &&
+       (context.raw_body.data == NULL) &&
+       (context.raw_body.length == 0U);
+
+  strappy_stream_context_destroy(&context);
+  strappy_chat_result_destroy(&result);
+
+  if (!ok) {
+    return harness_fail("Successful stream retained raw SSE body.");
+  }
+
+  return 1;
+}
+
+static int harness_test_stream_write_preserves_non_sse_raw_body(void)
+{
+  strappy_stream_context context;
+  strappy_chat_result result;
+  char body[] = "{\"error\":{\"message\":\"bad request\"}}\n";
+  size_t body_length;
+  int ok;
+
+  strappy_chat_result_init(&result);
+  strappy_stream_context_init(&context);
+  context.result = &result;
+
+  body_length = strlen(body);
+  ok = (strappy_client_stream_write_callback(body,
+                                             1U,
+                                             body_length,
+                                             &context) == body_length) &&
+       !context.saw_event &&
+       (context.raw_body.data != NULL) &&
+       (strcmp(context.raw_body.data, body) == 0);
+
+  strappy_stream_context_destroy(&context);
+  strappy_chat_result_destroy(&result);
+
+  if (!ok) {
+    return harness_fail("Non-SSE response raw body was not preserved.");
+  }
+
+  return 1;
+}
+
 int main(void)
 {
   if (!harness_test_retry_after_and_server_error_type()) {
@@ -1156,6 +1229,14 @@ int main(void)
     return 1;
   }
   if (!harness_test_stream_reasoning_detail_chunks_coalesced()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_stream_write_drops_success_raw_body()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_stream_write_preserves_non_sse_raw_body()) {
     fprintf(stderr, "client_stream_harness failed.\n");
     return 1;
   }

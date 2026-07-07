@@ -181,6 +181,8 @@ static int StrappySessionHandleStreamEvent(
 {
   StrappySessionStreamContext *context;
   StrappySession *session;
+  NSAutoreleasePool *pool;
+  int result;
 
   if ((event == NULL) || (userData == NULL)) {
     return 1;
@@ -192,7 +194,10 @@ static int StrappySessionHandleStreamEvent(
     return 1;
   }
 
-  return [session handleStreamEvent:event context:context->context];
+  pool = [[NSAutoreleasePool alloc] init];
+  result = [session handleStreamEvent:event context:context->context];
+  [pool release];
+  return result;
 }
 
 static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)

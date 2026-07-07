@@ -4234,6 +4234,7 @@ static size_t strappy_client_stream_write_callback(void *contents,
 {
   strappy_stream_context *context;
   size_t real_size;
+  int should_capture_raw_body;
 
   if ((contents == NULL) || (userp == NULL)) {
     return 0U;
@@ -4245,8 +4246,10 @@ static size_t strappy_client_stream_write_callback(void *contents,
 
   real_size = size * nmemb;
   context = (strappy_stream_context *)userp;
+  should_capture_raw_body = context->saw_event ? 0 : 1;
 
-  if (!strappy_http_buffer_append(&context->raw_body,
+  if (should_capture_raw_body &&
+      !strappy_http_buffer_append(&context->raw_body,
                                   (const char *)contents,
                                   real_size)) {
     strappy_client_stream_set_error(context, "Could not allocate OpenRouter raw stream.");
@@ -4254,7 +4257,14 @@ static size_t strappy_client_stream_write_callback(void *contents,
   }
 
   if (!strappy_client_stream_feed(context, (const char *)contents, real_size)) {
+    if (context->saw_event) {
+      strappy_http_buffer_destroy(&context->raw_body);
+    }
     return 0U;
+  }
+
+  if (context->saw_event) {
+    strappy_http_buffer_destroy(&context->raw_body);
   }
 
   return real_size;
