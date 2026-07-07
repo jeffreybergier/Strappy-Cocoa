@@ -86,6 +86,51 @@ static void StrappySetScrollsToTopOwnerInView(UIView *view,
   }
 }
 
+static NSString *StrappyMessageListApplicationStateName(void)
+{
+  UIApplication *application;
+
+  application = [UIApplication sharedApplication];
+  switch ([application applicationState]) {
+    case UIApplicationStateActive:
+      return @"active";
+    case UIApplicationStateInactive:
+      return @"inactive";
+    case UIApplicationStateBackground:
+      return @"background";
+  }
+  return @"unknown";
+}
+
+static NSString *StrappyMessageListBoolString(BOOL value)
+{
+  return value ? @"YES" : @"NO";
+}
+
+static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName)
+{
+  if ([notificationName isEqualToString:UIApplicationWillResignActiveNotification]) {
+    return @"UIApplicationWillResignActiveNotification";
+  }
+  if ([notificationName isEqualToString:UIApplicationDidEnterBackgroundNotification]) {
+    return @"UIApplicationDidEnterBackgroundNotification";
+  }
+  if ([notificationName isEqualToString:UIApplicationWillEnterForegroundNotification]) {
+    return @"UIApplicationWillEnterForegroundNotification";
+  }
+  if ([notificationName isEqualToString:UIApplicationDidBecomeActiveNotification]) {
+    return @"UIApplicationDidBecomeActiveNotification";
+  }
+  if ([notificationName isEqualToString:UIApplicationWillTerminateNotification]) {
+    return @"UIApplicationWillTerminateNotification";
+  }
+  if ([notificationName isEqualToString:UIApplicationDidReceiveMemoryWarningNotification]) {
+    return @"UIApplicationDidReceiveMemoryWarningNotification";
+  }
+  return [notificationName isKindOfClass:[NSString class]] ?
+    notificationName : @"UIApplicationNotification";
+}
+
 @interface MessageListViewController () <UIWebViewDelegate,
                                           PromptSendViewControllerDelegate>
 @property (nonatomic, strong) StrappySession *session;
@@ -104,7 +149,10 @@ static void StrappySetScrollsToTopOwnerInView(UIView *view,
 @property (nonatomic, assign) CGFloat composeBarBottomY;
 @property (nonatomic, assign) BOOL composing;
 @property (nonatomic, assign) BOOL tearingDown;
+- (void)logLifecycleEvent:(NSString *)event;
 - (void)observeKeyboard;
+- (void)observeApplicationLifecycle;
+- (void)applicationLifecycleNotification:(NSNotification *)notification;
 - (void)keyboardWillShow:(NSNotification *)notification;
 - (void)keyboardWillHide:(NSNotification *)notification;
 - (NSTimeInterval)keyboardDuration:(NSDictionary *)userInfo;
@@ -158,8 +206,50 @@ static void StrappySetScrollsToTopOwnerInView(UIView *view,
     [self setHtmlDirectoryPath:directoryPath];
     [self setSession:session];
     [self setTitle:NSLocalizedString(@"Strappy", nil)];
+    [self logLifecycleEvent:@"initWithSession"];
   }
   return self;
+}
+
+- (void)logLifecycleEvent:(NSString *)event
+{
+  UIApplication *application;
+  NSNumber *sessionIdentifier;
+  NSUInteger pendingJavaScriptLength;
+  BOOL viewLoaded;
+  BOOL viewInWindow;
+  BOOL inFlight;
+
+  application = [UIApplication sharedApplication];
+  sessionIdentifier = nil;
+  if ([self session] != nil) {
+    sessionIdentifier = [[self session] sessionIdentifier];
+  }
+  pendingJavaScriptLength = [[self pendingStreamJavaScript] length];
+  viewLoaded = [self isViewLoaded] ? YES : NO;
+  viewInWindow = NO;
+  if (viewLoaded) {
+    viewInWindow = ([[self view] window] != nil) ? YES : NO;
+  }
+  inFlight = [self sessionPromptIsInFlight];
+
+  NSLog(@"StrappyLifecycle MessageList %@ self=%p appState=%@ backgroundTimeRemaining=%.3f session=%@ webView=%p viewLoaded=%@ viewInWindow=%@ contentLoaded=%@ sending=%@ inFlight=%@ cancelRequested=%@ pendingJS=%lu timer=%@ tearingDown=%@ renderedRequestMessages=%@",
+        [event isKindOfClass:[NSString class]] ? event : @"event",
+        (__bridge void *)self,
+        StrappyMessageListApplicationStateName(),
+        [application backgroundTimeRemaining],
+        sessionIdentifier,
+        (__bridge void *)[self webView],
+        StrappyMessageListBoolString(viewLoaded),
+        StrappyMessageListBoolString(viewInWindow),
+        StrappyMessageListBoolString([self webViewContentLoaded]),
+        StrappyMessageListBoolString([self sending]),
+        StrappyMessageListBoolString(inFlight),
+        StrappyMessageListBoolString([self promptCancellationRequested]),
+        (unsigned long)pendingJavaScriptLength,
+        StrappyMessageListBoolString(([self streamEventFlushTimer] != nil) ? YES : NO),
+        StrappyMessageListBoolString([self tearingDown]),
+        StrappyMessageListBoolString([self renderedRequestMessages]));
 }
 
 - (void)viewDidLoad
@@ -170,6 +260,7 @@ static void StrappySetScrollsToTopOwnerInView(UIView *view,
   PromptSendViewController *sendBar;
 
   [super viewDidLoad];
+  [self logLifecycleEvent:@"viewDidLoad begin"];
 
   [[self view] setBackgroundColor:[UIColor messagesBackgroundColor]];
   [self updateTitleFromSession];
@@ -205,6 +296,7 @@ static void StrappySetScrollsToTopOwnerInView(UIView *view,
 
   [self setComposeBarBottomY:bounds.size.height];
   [self observeKeyboard];
+  [self observeApplicationLifecycle];
 
   [[NSNotificationCenter defaultCenter]
     addObserver:self
@@ -219,11 +311,13 @@ static void StrappySetScrollsToTopOwnerInView(UIView *view,
     [self setSession:nil];
     [self reloadWithSession:initialSession];
   }
+  [self logLifecycleEvent:@"viewDidLoad end"];
 }
 
 - (void)viewWillAppear:(BOOL)animated
 {
   [super viewWillAppear:animated];
+  [self logLifecycleEvent:@"viewWillAppear begin"];
   if (![self composing]) {
     [self setComposeBarBottomY:[[self view] bounds].size.height];
   }
@@ -231,16 +325,37 @@ static void StrappySetScrollsToTopOwnerInView(UIView *view,
                               curve:UIViewAnimationCurveEaseInOut
                            duration:0.0];
   [self setWebViewScrollsToTop:YES];
+  [self logLifecycleEvent:@"viewWillAppear end"];
+}
+
+- (void)viewDidAppear:(BOOL)animated
+{
+  [super viewDidAppear:animated];
+  [self logLifecycleEvent:@"viewDidAppear"];
 }
 
 - (void)viewWillDisappear:(BOOL)animated
 {
   [super viewWillDisappear:animated];
+  [self logLifecycleEvent:@"viewWillDisappear begin"];
   [self setWebViewScrollsToTop:NO];
   if ([self isLeavingNavigationStack]) {
     [self prepareForRemoval];
   }
   [[self view] endEditing:YES];
+  [self logLifecycleEvent:@"viewWillDisappear end"];
+}
+
+- (void)viewDidDisappear:(BOOL)animated
+{
+  [super viewDidDisappear:animated];
+  [self logLifecycleEvent:@"viewDidDisappear"];
+}
+
+- (void)didReceiveMemoryWarning
+{
+  [super didReceiveMemoryWarning];
+  [self logLifecycleEvent:@"didReceiveMemoryWarning"];
 }
 
 - (BOOL)isLeavingNavigationStack
@@ -264,9 +379,11 @@ static void StrappySetScrollsToTopOwnerInView(UIView *view,
   UIScrollView *scrollView;
 
   if ([self tearingDown]) {
+    [self logLifecycleEvent:@"prepareForRemoval already tearingDown"];
     return;
   }
 
+  [self logLifecycleEvent:@"prepareForRemoval begin"];
   [self setTearingDown:YES];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [self cancelPendingStreamEventFlush];
@@ -280,6 +397,7 @@ static void StrappySetScrollsToTopOwnerInView(UIView *view,
   [webView stopLoading];
   [webView removeFromSuperview];
   [self setWebView:nil];
+  [self logLifecycleEvent:@"prepareForRemoval end"];
 }
 
 - (void)observeKeyboard
@@ -295,6 +413,43 @@ static void StrappySetScrollsToTopOwnerInView(UIView *view,
                          selector:@selector(keyboardWillHide:)
                              name:UIKeyboardWillHideNotification
                            object:nil];
+}
+
+- (void)observeApplicationLifecycle
+{
+  NSNotificationCenter *notificationCenter;
+
+  notificationCenter = [NSNotificationCenter defaultCenter];
+  [notificationCenter addObserver:self
+                         selector:@selector(applicationLifecycleNotification:)
+                             name:UIApplicationWillResignActiveNotification
+                           object:nil];
+  [notificationCenter addObserver:self
+                         selector:@selector(applicationLifecycleNotification:)
+                             name:UIApplicationDidEnterBackgroundNotification
+                           object:nil];
+  [notificationCenter addObserver:self
+                         selector:@selector(applicationLifecycleNotification:)
+                             name:UIApplicationWillEnterForegroundNotification
+                           object:nil];
+  [notificationCenter addObserver:self
+                         selector:@selector(applicationLifecycleNotification:)
+                             name:UIApplicationDidBecomeActiveNotification
+                           object:nil];
+  [notificationCenter addObserver:self
+                         selector:@selector(applicationLifecycleNotification:)
+                             name:UIApplicationWillTerminateNotification
+                           object:nil];
+  [notificationCenter addObserver:self
+                         selector:@selector(applicationLifecycleNotification:)
+                             name:UIApplicationDidReceiveMemoryWarningNotification
+                           object:nil];
+}
+
+- (void)applicationLifecycleNotification:(NSNotification *)notification
+{
+  [self logLifecycleEvent:
+    StrappyMessageListLifecycleEventName([notification name])];
 }
 
 - (NSTimeInterval)keyboardDuration:(NSDictionary *)userInfo
@@ -857,6 +1012,7 @@ static void StrappySetScrollsToTopOwnerInView(UIView *view,
     return;
   }
 
+  [self logLifecycleEvent:@"beginSendingPrompt"];
   [self setSending:YES];
   [self setPromptCancellationRequested:NO];
   [self setStatusText:nil];
@@ -894,6 +1050,7 @@ static void StrappySetScrollsToTopOwnerInView(UIView *view,
   if ([notification object] != [self session]) {
     return;
   }
+  [self logLifecycleEvent:@"sessionPromptDidStart"];
   [self updateSendingStateFromSession];
 }
 
@@ -938,8 +1095,10 @@ static void StrappySetScrollsToTopOwnerInView(UIView *view,
   if ([notification object] != [self session]) {
     return;
   }
+  [self logLifecycleEvent:@"sessionPromptDidFinish begin"];
   [self flushPendingStreamEvents];
   [self sendPromptDidFinish:[notification userInfo]];
+  [self logLifecycleEvent:@"sessionPromptDidFinish end"];
 }
 
 - (void)sendPromptDidFinish:(NSDictionary *)result
@@ -1078,6 +1237,10 @@ static void StrappySetScrollsToTopOwnerInView(UIView *view,
   [self setPendingStreamJavaScript:nil];
 
   if ([batchJavaScript length] > 0U) {
+    if ([[UIApplication sharedApplication] applicationState] !=
+        UIApplicationStateActive) {
+      [self logLifecycleEvent:@"flushPendingStreamEvents non-active"];
+    }
     [[self webView] stringByEvaluatingJavaScriptFromString:batchJavaScript];
   }
 }
@@ -1227,6 +1390,7 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
   if ([self tearingDown]) {
     return;
   }
+  [self logLifecycleEvent:@"webViewDidFinishLoad"];
   [[self webView] XP_setBackgroundTransparent];
   [[[self webView] XP_scrollView] XP_removeShadow];
   [self setWebViewScrollsToTop:YES];
@@ -1258,6 +1422,7 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
 
 - (void)dealloc
 {
+  [self logLifecycleEvent:@"dealloc"];
   [self prepareForRemoval];
 }
 
