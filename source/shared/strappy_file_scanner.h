@@ -21,6 +21,7 @@ typedef struct strappy_file_scanner_record {
   char *app_container_path;
   char *app_bundle_path;
   char *app_source;
+  int hidden;
 } strappy_file_scanner_record;
 
 typedef struct strappy_file_scanner_record_list {

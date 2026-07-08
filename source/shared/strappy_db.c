@@ -252,6 +252,7 @@ void strappy_discovered_database_record_init(strappy_discovered_database_record 
   record->app_container_path = NULL;
   record->app_bundle_path = NULL;
   record->app_source = NULL;
+  record->hidden = 0;
   record->first_seen_at = NULL;
   record->last_seen_at = NULL;
   record->last_scanned_at = NULL;
@@ -601,6 +602,7 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
     "path TEXT PRIMARY KEY,"
     "user_decision TEXT NOT NULL DEFAULT 'unknown',"
     "assistant_database_id TEXT UNIQUE,"
+    "hidden INTEGER NOT NULL DEFAULT 0,"
     "created_at TEXT NOT NULL DEFAULT "
     "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
     "updated_at TEXT NOT NULL DEFAULT "
@@ -1133,11 +1135,12 @@ static int strappy_db_bind_optional_text(sqlite3 *db,
 
 static int strappy_db_ensure_database_access_setting(sqlite3 *db,
                                                      const char *path,
+                                                     int initial_hidden,
                                                      char **error_out)
 {
   static const char *sql =
     "INSERT OR IGNORE INTO database_access_settings "
-    "(path, user_decision) VALUES (?, 'unknown');";
+    "(path, user_decision, hidden) VALUES (?, 'unknown', ?);";
   sqlite3_stmt *stmt;
   int rc;
 
@@ -1156,6 +1159,9 @@ static int strappy_db_ensure_database_access_setting(sqlite3 *db,
   }
 
   rc = sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int(stmt, 2, initial_hidden ? 1 : 0);
+  }
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
                                 "Could not bind database access setting: %s",
@@ -1168,6 +1174,61 @@ static int strappy_db_ensure_database_access_setting(sqlite3 *db,
   if (rc != SQLITE_DONE) {
     strappy_set_formatted_error(error_out,
                                 "Could not save database access setting: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+static int strappy_db_store_database_access_hidden(sqlite3 *db,
+                                                   const char *path,
+                                                   int hidden,
+                                                   char **error_out)
+{
+  static const char *sql =
+    "UPDATE database_access_settings "
+    "SET hidden = ?, "
+    "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+    "WHERE path = ? AND hidden != ?;";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if ((path == NULL) || (path[0] == '\0')) {
+    strappy_set_error(error_out, "Database access hidden path is empty.");
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare database access hidden update: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  rc = sqlite3_bind_int(stmt, 1, hidden ? 1 : 0);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 2, path, -1, SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int(stmt, 3, hidden ? 1 : 0);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind database access hidden update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save database access hidden state: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     return 0;
@@ -1348,7 +1409,7 @@ static int strappy_db_set_assistant_database_id(sqlite3 *db,
     return 0;
   }
 
-  if (!strappy_db_ensure_database_access_setting(db, path, error_out)) {
+  if (!strappy_db_ensure_database_access_setting(db, path, 0, error_out)) {
     return 0;
   }
 
@@ -1764,6 +1825,13 @@ static int strappy_db_save_discovered_database(
     }
   }
 
+  if (!strappy_db_ensure_database_access_setting(db,
+                                                 record->path,
+                                                 record->hidden,
+                                                 error_out)) {
+    return 0;
+  }
+
   return strappy_db_set_assistant_database_id(db,
                                               catalog_id,
                                               record->path,
@@ -1791,6 +1859,7 @@ static int strappy_db_assign_discovered_database_from_statement(
   char *last_seen_at;
   char *last_scanned_at;
   long long catalog_id;
+  int hidden;
 
   if ((record == NULL) || (stmt == NULL)) {
     strappy_set_error(error_out, "Discovered database row request is incomplete.");
@@ -1814,16 +1883,17 @@ static int strappy_db_assign_discovered_database_from_statement(
   validation_error = strappy_db_column_string(stmt, 8);
   scan_status = strappy_db_column_string(stmt, 9);
   user_decision = strappy_db_column_string(stmt, 10);
-  scan_root = strappy_db_column_string(stmt, 11);
-  app_group_key = strappy_db_column_string(stmt, 12);
-  app_name = strappy_db_column_string(stmt, 13);
-  app_bundle_id = strappy_db_column_string(stmt, 14);
-  app_container_path = strappy_db_column_string(stmt, 15);
-  app_bundle_path = strappy_db_column_string(stmt, 16);
-  app_source = strappy_db_column_string(stmt, 17);
-  first_seen_at = strappy_db_column_string(stmt, 18);
-  last_seen_at = strappy_db_column_string(stmt, 19);
-  last_scanned_at = strappy_db_column_string(stmt, 20);
+  hidden = sqlite3_column_int(stmt, 11) ? 1 : 0;
+  scan_root = strappy_db_column_string(stmt, 12);
+  app_group_key = strappy_db_column_string(stmt, 13);
+  app_name = strappy_db_column_string(stmt, 14);
+  app_bundle_id = strappy_db_column_string(stmt, 15);
+  app_container_path = strappy_db_column_string(stmt, 16);
+  app_bundle_path = strappy_db_column_string(stmt, 17);
+  app_source = strappy_db_column_string(stmt, 18);
+  first_seen_at = strappy_db_column_string(stmt, 19);
+  last_seen_at = strappy_db_column_string(stmt, 20);
+  last_scanned_at = strappy_db_column_string(stmt, 21);
 
   if ((assistant_database_id == NULL) || (path == NULL) ||
       (scan_status == NULL) || (user_decision == NULL) ||
@@ -1860,6 +1930,7 @@ static int strappy_db_assign_discovered_database_from_statement(
   record->app_container_path = app_container_path;
   record->app_bundle_path = app_bundle_path;
   record->app_source = app_source;
+  record->hidden = hidden;
   record->first_seen_at = first_seen_at;
   record->last_seen_at = last_seen_at;
   record->last_scanned_at = last_scanned_at;
@@ -4030,6 +4101,7 @@ int strappy_db_list_discovered_databases(
     "d.path, d.size, d.modified_at, d.device, d.inode, d.is_valid_sqlite, "
     "d.validation_error, d.scan_status, "
     "COALESCE(a.user_decision, d.user_decision, 'unknown'), "
+    "COALESCE(a.hidden, 0), "
     "d.scan_root, d.app_group_key, d.app_name, d.app_bundle_id, "
     "d.app_container_path, d.app_bundle_path, d.app_source, "
     "d.first_seen_at, d.last_seen_at, d.last_scanned_at "
@@ -4364,6 +4436,151 @@ int strappy_db_update_discovered_database_decision(
     strappy_db_exec(db,
                     "ROLLBACK;",
                     "Could not roll back discovered database decision update",
+                    NULL);
+    free(path);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  free(path);
+  sqlite3_close(db);
+  return 1;
+}
+
+int strappy_db_update_discovered_database_hidden(const char *db_path,
+                                                 long long catalog_id,
+                                                 int hidden,
+                                                 char **error_out)
+{
+  static const char *lookup_sql =
+    "SELECT path FROM discovered_databases "
+    "WHERE id = ?;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  char *path;
+  int rc;
+
+  if (catalog_id <= 0) {
+    strappy_set_error(error_out, "Discovered database id is not valid.");
+    return 0;
+  }
+
+  db = NULL;
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin discovered database hidden update",
+                       error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  path = NULL;
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, lookup_sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare discovered database hidden lookup: %s",
+                                sqlite3_errmsg(db));
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database hidden update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)catalog_id);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind discovered database hidden lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database hidden update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    path = strappy_db_column_string(stmt, 0);
+  } else if (rc == SQLITE_DONE) {
+    strappy_set_error(error_out, "Discovered database was not found.");
+    sqlite3_finalize(stmt);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database hidden update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  } else {
+    strappy_set_formatted_error(error_out,
+                                "Could not read discovered database hidden lookup: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database hidden update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+
+  if (path == NULL) {
+    strappy_set_error(error_out, "Could not allocate discovered database path.");
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database hidden update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_ensure_database_access_setting(db,
+                                                 path,
+                                                 hidden,
+                                                 error_out)) {
+    free(path);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database hidden update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_store_database_access_hidden(db,
+                                               path,
+                                               hidden,
+                                               error_out)) {
+    free(path);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database hidden update",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_exec(db,
+                       "COMMIT;",
+                       "Could not commit discovered database hidden update",
+                       error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back discovered database hidden update",
                     NULL);
     free(path);
     sqlite3_close(db);

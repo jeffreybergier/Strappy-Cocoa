@@ -133,6 +133,15 @@ static BOOL StrappyDatabaseRowAllowedValue(NSDictionary *row)
   return [decision isEqualToString:@"allowed"];
 }
 
+static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
+{
+  NSNumber *hidden;
+
+  hidden = [row objectForKey:@"hidden"];
+  return ([hidden isKindOfClass:[NSNumber class]] && [hidden boolValue]) ?
+    YES : NO;
+}
+
 static NSString *StrappyDatabaseSectionTitle(NSString *appName,
                                              NSString *bundleIdentifier,
                                              NSUInteger count,
@@ -159,7 +168,7 @@ static NSString *StrappyDatabaseSectionTitle(NSString *appName,
     (unsigned long)count];
 }
 
-static NSArray *StrappyDatabaseSectionsForRows(NSArray *rows)
+static NSArray *StrappyDatabaseSectionsForRows(NSArray *rows, BOOL hiddenMode)
 {
   NSMutableDictionary *nameCounts;
   NSMutableArray *sections;
@@ -214,7 +223,12 @@ static NSArray *StrappyDatabaseSectionsForRows(NSArray *rows)
 
       allowedCount = 0U;
       for (rowIndex = 0U; rowIndex < [currentRows count]; rowIndex++) {
-        if (StrappyDatabaseRowAllowedValue([currentRows objectAtIndex:rowIndex])) {
+        NSDictionary *sectionRow;
+
+        sectionRow = [currentRows objectAtIndex:rowIndex];
+        if (hiddenMode ?
+              StrappyDatabaseRowHiddenValue(sectionRow) :
+              StrappyDatabaseRowAllowedValue(sectionRow)) {
           allowedCount++;
         }
       }
@@ -283,62 +297,14 @@ static NSComparisonResult StrappyCompareLongLong(long long left,
   return NSOrderedSame;
 }
 
-static BOOL StrappyDatabasePathContains(NSString *path, NSString *needle)
-{
-  if (([path length] == 0U) || ([needle length] == 0U)) {
-    return NO;
-  }
-  return ([path rangeOfString:needle
-                      options:NSCaseInsensitiveSearch].location != NSNotFound) ?
-    YES : NO;
-}
-
 static long long StrappyDatabaseRowPriority(NSDictionary *row)
 {
-  NSString *path;
-  NSString *name;
-  NSNumber *sizeNumber;
-  long long size;
-
-  path = StrappyDatabasePathForRow(row);
-  name = [path lastPathComponent];
-  sizeNumber = [row objectForKey:@"size"];
-  size = [sizeNumber isKindOfClass:[NSNumber class]] ?
-    [sizeNumber longLongValue] : 0LL;
-
-  if (StrappyDatabasePathContains(path, @".localstorage")) {
-    return 30LL;
-  }
-  if ([name caseInsensitiveCompare:@"ApplicationCache.db"] == NSOrderedSame) {
-    return 35LL;
-  }
-  if ([name caseInsensitiveCompare:@"MapTiles.sqlitedb"] == NSOrderedSame) {
-    return 35LL;
-  }
-  if ([name caseInsensitiveCompare:@"SafeBrowsing.db"] == NSOrderedSame) {
-    return 35LL;
-  }
-  if ([name isEqualToString:@"Cache.db"] ||
-      ([name caseInsensitiveCompare:@"nsurlcache"] == NSOrderedSame)) {
-    return (size <= 4096LL) ? 5LL : 20LL;
-  }
-  if (([name isEqualToString:@"cache.db"]) &&
-      StrappyDatabasePathContains(path, @"/Caches/")) {
-    return 25LL;
-  }
-  if (StrappyDatabasePathContains(path, @"/Library/Caches/")) {
-    return 40LL;
-  }
-
-  return 100LL;
+  return StrappyDatabaseRowHiddenValue(row) ? 0LL : 100LL;
 }
 
 static BOOL StrappyDatabaseRowIsAllowed(NSDictionary *row)
 {
-  NSString *decision;
-
-  decision = [row objectForKey:@"user_decision"];
-  return [decision isEqualToString:@"allowed"];
+  return StrappyDatabaseRowAllowedValue(row);
 }
 
 static NSComparisonResult StrappyCompareDatabaseRows(id left,
@@ -383,7 +349,11 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 
 @interface StrappyPreferencesDatabaseWhitelistTableViewController ()
 @property (nonatomic, assign) BOOL scanning;
+@property (nonatomic, assign) BOOL hiddenMode;
 @property (nonatomic, copy) NSArray *databaseSections;
+@property (nonatomic, strong) UIBarButtonItem *hiddenModeButton;
+- (void)hiddenModeButtonPressed:(id)sender;
+- (void)updateHiddenModeButton;
 - (void)scanDatabasesInBackground:(NSString *)rootPath;
 - (void)scanDatabasesDidFinish:(NSDictionary *)result;
 @end
@@ -393,6 +363,46 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 - (instancetype)init
 {
   return [super initWithTitle:NSLocalizedString(@"Databases", nil)];
+}
+
+- (void)viewDidLoad
+{
+  [super viewDidLoad];
+
+  [self setHiddenModeButton:
+    [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Hidden", nil)
+                                     style:UIBarButtonItemStyleBordered
+                                    target:self
+                                    action:@selector(hiddenModeButtonPressed:)]];
+  [[self navigationItem] setRightBarButtonItem:[self hiddenModeButton]];
+  [self updateHiddenModeButton];
+}
+
+- (void)setHiddenMode:(BOOL)hiddenMode
+{
+  if (_hiddenMode == hiddenMode) {
+    return;
+  }
+
+  _hiddenMode = hiddenMode;
+  [self updateHiddenModeButton];
+  [self applyRows];
+}
+
+- (void)hiddenModeButtonPressed:(id)sender
+{
+  (void)sender;
+  [self setHiddenMode:![self hiddenMode]];
+}
+
+- (void)updateHiddenModeButton
+{
+  [[self hiddenModeButton] setTitle:NSLocalizedString(@"Hidden", nil)];
+  [[self hiddenModeButton] setStyle:[self hiddenMode] ?
+    UIBarButtonItemStyleDone : UIBarButtonItemStyleBordered];
+  [[self hiddenModeButton] setAccessibilityLabel:[self hiddenMode] ?
+    NSLocalizedString(@"Editing hidden databases", nil) :
+    NSLocalizedString(@"Edit hidden databases", nil)];
 }
 
 - (NSArray *)loadAllRowsWithError:(NSError **)error
@@ -448,6 +458,11 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
     if (![row isKindOfClass:[NSDictionary class]]) {
       continue;
     }
+    if (![self hiddenMode] &&
+        StrappyDatabaseRowHiddenValue(row) &&
+        !StrappyDatabaseRowAllowedValue(row)) {
+      continue;
+    }
     if ([self row:row matchesSearchText:searchText]) {
       [matchingRows addObject:row];
     }
@@ -455,7 +470,8 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 
   sortedRows = [self sortedRows:matchingRows];
   [self setRows:sortedRows];
-  [self setDatabaseSections:StrappyDatabaseSectionsForRows(sortedRows)];
+  [self setDatabaseSections:StrappyDatabaseSectionsForRows(sortedRows,
+                                                           [self hiddenMode])];
   [[self tableView] reloadData];
   [self refreshStatusToolbar];
 }
@@ -475,7 +491,9 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 
 - (BOOL)rowIsSelected:(NSDictionary *)row
 {
-  return [self allowedValueForDatabaseRow:row];
+  return [self hiddenMode] ?
+    StrappyDatabaseRowHiddenValue(row) :
+    [self allowedValueForDatabaseRow:row];
 }
 
 - (NSString *)workingStatusText
@@ -514,11 +532,13 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 
   [[cell textLabel] setText:StrappyDatabaseNameForRow(row)];
   [[cell detailTextLabel] setText:[details componentsJoinedByString:@" | "]];
-  [cell setAccessoryType:[self allowedValueForDatabaseRow:row]
+  [cell setAccessoryType:[self rowIsSelected:row]
     ? UITableViewCellAccessoryCheckmark
     : UITableViewCellAccessoryNone];
 
-  if (![self databaseRowCanBeAllowed:row]) {
+  if (![self hiddenMode] &&
+      (![self databaseRowCanBeAllowed:row] ||
+       StrappyDatabaseRowHiddenValue(row))) {
     [[cell textLabel] setTextColor:[UIColor grayColor]];
     [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
   }
@@ -722,10 +742,27 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
   NSNumber *catalogId;
   BOOL shouldAllow;
+  BOOL shouldHide;
   NSError *error;
   NSString *validationError;
 
   (void)indexPath;
+  catalogId = [row objectForKey:@"catalog_id"];
+
+  if ([self hiddenMode]) {
+    shouldHide = StrappyDatabaseRowHiddenValue(row) ? NO : YES;
+    error = nil;
+    if (![[FileScanner sharedScanner] setCatalogedDatabaseHidden:shouldHide
+                                            forCatalogIdentifier:catalogId
+                                                           error:&error]) {
+      [self showError:error
+                title:NSLocalizedString(@"Could not update database", nil)];
+      return;
+    }
+    [self reloadRows];
+    return;
+  }
+
   if (![self databaseRowCanBeAllowed:row]) {
     validationError = [row objectForKey:@"validation_error"];
     if (![validationError isKindOfClass:[NSString class]] ||
@@ -738,7 +775,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     return;
   }
 
-  catalogId = [row objectForKey:@"catalog_id"];
   shouldAllow = [self allowedValueForDatabaseRow:row] ? NO : YES;
   error = nil;
   if (![[FileScanner sharedScanner] setCatalogedDatabaseAllowed:shouldAllow

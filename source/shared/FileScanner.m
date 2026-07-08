@@ -819,6 +819,7 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
   NSNumber *device;
   NSNumber *inode;
   NSNumber *isValidSQLite;
+  NSNumber *hidden;
   NSMutableDictionary *dictionary;
 
   if (record == NULL) {
@@ -843,6 +844,7 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
   device = [NSNumber numberWithUnsignedLongLong:record->device];
   inode = [NSNumber numberWithUnsignedLongLong:record->inode];
   isValidSQLite = [NSNumber numberWithBool:(record->is_valid_sqlite ? YES : NO)];
+  hidden = [NSNumber numberWithBool:(record->hidden ? YES : NO)];
 
   dictionary = [NSMutableDictionary dictionaryWithObjectsAndKeys:
     path, @"path",
@@ -851,6 +853,7 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
     device, @"device",
     inode, @"inode",
     isValidSQLite, @"is_valid_sqlite",
+    hidden, @"hidden",
     nil];
   if ([validationError length] > 0U) {
     [dictionary setObject:validationError forKey:@"validation_error"];
@@ -882,6 +885,7 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
   NSNumber *device;
   NSNumber *inode;
   NSNumber *isValidSQLite;
+  NSNumber *hidden;
   NSString *assistantDatabaseId;
   NSString *path;
   NSString *validationError;
@@ -909,6 +913,7 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
   device = [NSNumber numberWithUnsignedLongLong:record->device];
   inode = [NSNumber numberWithUnsignedLongLong:record->inode];
   isValidSQLite = [NSNumber numberWithBool:(record->is_valid_sqlite ? YES : NO)];
+  hidden = [NSNumber numberWithBool:(record->hidden ? YES : NO)];
   assistantDatabaseId =
     [FileScanner stringFromCStringOrEmpty:record->assistant_database_id];
   path = [FileScanner stringFromCStringOrEmpty:record->path];
@@ -943,6 +948,7 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
     device, @"device",
     inode, @"inode",
     isValidSQLite, @"is_valid_sqlite",
+    hidden, @"hidden",
     scanStatus, @"scan_status",
     userDecision, @"user_decision",
     firstSeenAt, @"first_seen_at",
@@ -1258,6 +1264,49 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
     [databasePath UTF8String],
     [catalogIdentifier longLongValue],
     decision,
+    &strappyError);
+  if (!ok) {
+    if (error != nil) {
+      *error = [FileScanner errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return NO;
+  }
+
+  return YES;
+}
+
+- (BOOL)setCatalogedDatabaseHidden:(BOOL)hidden
+               forCatalogIdentifier:(NSNumber *)catalogIdentifier
+                              error:(NSError **)error
+{
+  NSString *databasePath;
+  char *strappyError;
+  int ok;
+
+  if (![catalogIdentifier isKindOfClass:[NSNumber class]] ||
+      ([catalogIdentifier longLongValue] <= 0LL)) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Database catalog id is missing.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"FileScannerErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  if (![StrappySession initializeSessionStoreWithError:error]) {
+    return NO;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  strappyError = NULL;
+  ok = strappy_db_update_discovered_database_hidden(
+    [databasePath UTF8String],
+    [catalogIdentifier longLongValue],
+    hidden ? 1 : 0,
     &strappyError);
   if (!ok) {
     if (error != nil) {

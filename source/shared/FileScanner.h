@@ -12,5 +12,8 @@
 - (BOOL)setCatalogedDatabaseAllowed:(BOOL)allowed
                 forCatalogIdentifier:(NSNumber *)catalogIdentifier
                                error:(NSError **)error;
+- (BOOL)setCatalogedDatabaseHidden:(BOOL)hidden
+               forCatalogIdentifier:(NSNumber *)catalogIdentifier
+                              error:(NSError **)error;
 
 @end

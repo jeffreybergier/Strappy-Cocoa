@@ -115,8 +115,10 @@
 "Could Not Delete Chat" = "Could Not Delete Chat";
 "Could not create session directory." = "Could not create session directory.";
 "Could not update streaming setting." = "Could not update streaming setting.";
+"Could not update database" = "Could not update database";
 "Data Detectors" = "Data Detectors";
 "Database" = "Database";
+"Database cannot be used" = "Database cannot be used";
 "Database catalog id is missing." = "Database catalog id is missing.";
 "Databases" = "Databases";
 "Delete" = "Delete";
@@ -132,6 +134,9 @@
 "Find..." = "Find...";
 "Harness" = "Harness";
 "Help" = "Help";
+"Hidden" = "Hidden";
+"Edit hidden databases" = "Edit hidden databases";
+"Editing hidden databases" = "Editing hidden databases";
 "Hide Sidebar" = "Hide Sidebar";
 "Jump to Selection" = "Jump to Selection";
 "Location" = "Location";
@@ -147,6 +152,7 @@
 "Preferences..." = "Preferences...";
 "Print..." = "Print...";
 "Prompt is empty." = "Prompt is empty.";
+"This file is not a valid SQLite database." = "This file is not a valid SQLite database.";
 "Ask Strappy" = "Ask Strappy";
 "Dismiss Keyboard" = "Dismiss Keyboard";
 "Prompt request is already running." = "Prompt request is already running.";

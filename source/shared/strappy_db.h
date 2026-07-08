@@ -98,6 +98,7 @@ typedef struct strappy_discovered_database_input {
   const char *app_container_path;
   const char *app_bundle_path;
   const char *app_source;
+  int hidden;
 } strappy_discovered_database_input;
 
 typedef struct strappy_discovered_database_record {
@@ -119,6 +120,7 @@ typedef struct strappy_discovered_database_record {
   char *app_container_path;
   char *app_bundle_path;
   char *app_source;
+  int hidden;
   char *first_seen_at;
   char *last_seen_at;
   char *last_scanned_at;
@@ -209,6 +211,10 @@ int strappy_db_update_discovered_database_decision(
   long long catalog_id,
   const char *user_decision,
   char **error_out);
+int strappy_db_update_discovered_database_hidden(const char *db_path,
+                                                 long long catalog_id,
+                                                 int hidden,
+                                                 char **error_out);
 int strappy_db_save_exchange(const char *db_path,
                              const char *prompt,
                              const char *response,

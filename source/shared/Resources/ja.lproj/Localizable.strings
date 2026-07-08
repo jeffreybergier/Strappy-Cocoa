@@ -115,8 +115,10 @@
 "Could Not Delete Chat" = "チャットを削除できませんでした";
 "Could not create session directory." = "セッションディレクトリを作成できませんでした。";
 "Could not update streaming setting." = "ストリーミング設定を更新できませんでした。";
+"Could not update database" = "データベースを更新できませんでした";
 "Data Detectors" = "データ検出";
 "Database" = "データベース";
+"Database cannot be used" = "データベースを使用できません";
 "Database catalog id is missing." = "データベースカタログ ID がありません。";
 "Databases" = "データベース";
 "Delete" = "削除";
@@ -132,6 +134,9 @@
 "Find..." = "検索...";
 "Harness" = "ハーネス";
 "Help" = "ヘルプ";
+"Hidden" = "隠す";
+"Edit hidden databases" = "隠すデータベースを編集";
+"Editing hidden databases" = "隠すデータベースを編集中";
 "Hide Sidebar" = "サイドバーを隠す";
 "Jump to Selection" = "選択部分へ移動";
 "Location" = "場所";
@@ -147,6 +152,7 @@
 "Preferences..." = "環境設定...";
 "Print..." = "プリント...";
 "Prompt is empty." = "プロンプトが空です。";
+"This file is not a valid SQLite database." = "このファイルは有効な SQLite データベースではありません。";
 "Ask Strappy" = "Strappy に質問";
 "Dismiss Keyboard" = "キーボードを閉じる";
 "Prompt request is already running." = "プロンプトリクエストはすでに実行中です。";

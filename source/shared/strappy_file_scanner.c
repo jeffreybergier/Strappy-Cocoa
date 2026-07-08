@@ -13,6 +13,107 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+static int strappy_file_scanner_ascii_tolower(int character)
+{
+  if ((character >= 'A') && (character <= 'Z')) {
+    return character + ('a' - 'A');
+  }
+  return character;
+}
+
+static int strappy_file_scanner_case_insensitive_equal(const char *left,
+                                                       const char *right)
+{
+  size_t index;
+
+  if ((left == NULL) || (right == NULL)) {
+    return 0;
+  }
+
+  for (index = 0U; (left[index] != '\0') && (right[index] != '\0'); index++) {
+    if (strappy_file_scanner_ascii_tolower((unsigned char)left[index]) !=
+        strappy_file_scanner_ascii_tolower((unsigned char)right[index])) {
+      return 0;
+    }
+  }
+
+  return (left[index] == right[index]) ? 1 : 0;
+}
+
+static int strappy_file_scanner_case_insensitive_contains(const char *haystack,
+                                                          const char *needle)
+{
+  size_t haystack_index;
+  size_t needle_index;
+
+  if ((haystack == NULL) || (needle == NULL) || (needle[0] == '\0')) {
+    return 0;
+  }
+
+  for (haystack_index = 0U; haystack[haystack_index] != '\0'; haystack_index++) {
+    for (needle_index = 0U; needle[needle_index] != '\0'; needle_index++) {
+      if (haystack[haystack_index + needle_index] == '\0') {
+        return 0;
+      }
+      if (strappy_file_scanner_ascii_tolower(
+            (unsigned char)haystack[haystack_index + needle_index]) !=
+          strappy_file_scanner_ascii_tolower(
+            (unsigned char)needle[needle_index])) {
+        break;
+      }
+    }
+    if (needle[needle_index] == '\0') {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static const char *strappy_file_scanner_basename(const char *path)
+{
+  const char *slash;
+
+  if (path == NULL) {
+    return NULL;
+  }
+
+  slash = strrchr(path, '/');
+  return (slash != NULL) ? slash + 1 : path;
+}
+
+static int strappy_file_scanner_database_should_be_hidden(const char *path)
+{
+  const char *name;
+
+  if ((path == NULL) || (path[0] == '\0')) {
+    return 0;
+  }
+
+  name = strappy_file_scanner_basename(path);
+  if (strappy_file_scanner_case_insensitive_contains(path, ".localstorage")) {
+    return 1;
+  }
+  if (strappy_file_scanner_case_insensitive_equal(name, "ApplicationCache.db") ||
+      strappy_file_scanner_case_insensitive_equal(name, "MapTiles.sqlitedb") ||
+      strappy_file_scanner_case_insensitive_equal(name, "SafeBrowsing.db")) {
+    return 1;
+  }
+  if ((strcmp(name, "Cache.db") == 0) ||
+      strappy_file_scanner_case_insensitive_equal(name, "nsurlcache")) {
+    return 1;
+  }
+  if ((strcmp(name, "cache.db") == 0) &&
+      strappy_file_scanner_case_insensitive_contains(path, "/Caches/")) {
+    return 1;
+  }
+  if (strappy_file_scanner_case_insensitive_contains(path, "/Library/Caches/")) {
+    return 1;
+  }
+
+  return 0;
+}
+
 static int strappy_file_scanner_report_progress(
   const strappy_file_scanner_options *options,
   const strappy_file_scanner_progress *progress)
@@ -58,6 +159,7 @@ void strappy_file_scanner_record_init(strappy_file_scanner_record *record)
   record->app_container_path = NULL;
   record->app_bundle_path = NULL;
   record->app_source = NULL;
+  record->hidden = 0;
 }
 
 void strappy_file_scanner_record_destroy(strappy_file_scanner_record *record)
@@ -226,6 +328,7 @@ static int strappy_file_scanner_add_record(
   record->inode = (unsigned long long)stat_info->st_ino;
   record->is_valid_sqlite = is_valid_sqlite;
   record->validation_error = validation_error;
+  record->hidden = strappy_file_scanner_database_should_be_hidden(path);
   list->count++;
   return 1;
 }
@@ -499,6 +602,7 @@ static void strappy_file_scanner_discovered_database_input_from_record(
   input->app_container_path = record->app_container_path;
   input->app_bundle_path = record->app_bundle_path;
   input->app_source = record->app_source;
+  input->hidden = record->hidden;
 }
 
 int strappy_file_scanner_save_discovered_databases(

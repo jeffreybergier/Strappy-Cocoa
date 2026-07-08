@@ -104,55 +104,13 @@ static NSComparisonResult StrappyDatabaseWhitelistCompareLongLong(long long left
   return NSOrderedSame;
 }
 
-static BOOL StrappyDatabaseWhitelistPathContains(NSString *path,
-                                                 NSString *needle)
-{
-  if (([path length] == 0U) || ([needle length] == 0U)) {
-    return NO;
-  }
-  return ([path rangeOfString:needle
-                      options:NSCaseInsensitiveSearch].location != NSNotFound) ?
-    YES : NO;
-}
-
 static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
 {
-  NSString *path;
-  NSString *name;
-  NSNumber *sizeNumber;
-  long long size;
+  NSNumber *hidden;
 
-  path = StrappyDatabaseWhitelistPathForRow(row);
-  name = [path lastPathComponent];
-  sizeNumber = [row objectForKey:@"size"];
-  size = [sizeNumber isKindOfClass:[NSNumber class]] ?
-    [sizeNumber longLongValue] : 0LL;
-
-  if (StrappyDatabaseWhitelistPathContains(path, @".localstorage")) {
-    return 30LL;
-  }
-  if ([name caseInsensitiveCompare:@"ApplicationCache.db"] == NSOrderedSame) {
-    return 35LL;
-  }
-  if ([name caseInsensitiveCompare:@"MapTiles.sqlitedb"] == NSOrderedSame) {
-    return 35LL;
-  }
-  if ([name caseInsensitiveCompare:@"SafeBrowsing.db"] == NSOrderedSame) {
-    return 35LL;
-  }
-  if ([name isEqualToString:@"Cache.db"] ||
-      ([name caseInsensitiveCompare:@"nsurlcache"] == NSOrderedSame)) {
-    return (size <= 4096LL) ? 5LL : 20LL;
-  }
-  if (([name isEqualToString:@"cache.db"]) &&
-      StrappyDatabaseWhitelistPathContains(path, @"/Caches/")) {
-    return 25LL;
-  }
-  if (StrappyDatabaseWhitelistPathContains(path, @"/Library/Caches/")) {
-    return 40LL;
-  }
-
-  return 100LL;
+  hidden = [row objectForKey:@"hidden"];
+  return ([hidden isKindOfClass:[NSNumber class]] && [hidden boolValue]) ?
+    0LL : 100LL;
 }
 
 @implementation StrappyPreferencesDatabaseWhitelistView

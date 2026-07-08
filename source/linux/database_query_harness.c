@@ -3,6 +3,7 @@
 #include "strappy_core.h"
 #include "strappy_config.h"
 #include "strappy_db.h"
+#include "strappy_file_scanner.h"
 #include "strappy_tools.h"
 #include "cJSON.h"
 
@@ -66,6 +67,21 @@ static void harness_unlink_sqlite_files(const char *database_path)
   if ((written > 0) && ((size_t)written < sizeof(sidecar_path))) {
     unlink(sidecar_path);
   }
+}
+
+static int harness_ensure_directory(const char *path, const char *description)
+{
+  if ((path == NULL) || (path[0] == '\0') || (description == NULL)) {
+    fprintf(stderr, "Directory request is incomplete.\n");
+    return 0;
+  }
+
+  if ((mkdir(path, 0700) != 0) && (access(path, F_OK) != 0)) {
+    perror(description);
+    return 0;
+  }
+
+  return 1;
 }
 
 static void harness_context_init(harness_context *context)
@@ -491,8 +507,8 @@ static int harness_run_fresh_catalog_schema_tests(
            "discovered_databases columns") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
-           "SELECT path, user_decision, assistant_database_id, created_at, "
-           "updated_at FROM database_access_settings LIMIT 0;",
+           "SELECT path, user_decision, assistant_database_id, hidden, "
+           "created_at, updated_at FROM database_access_settings LIMIT 0;",
            "database_access_settings columns") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
@@ -1714,6 +1730,7 @@ static int harness_run_discovered_database_replacement_tests(
   char *error;
   char *first_database_id;
   long long first_catalog_id;
+  long long restored_catalog_id;
   size_t index;
   int found_first;
   int found_second;
@@ -1748,6 +1765,7 @@ static int harness_run_discovered_database_replacement_tests(
   inputs[0].inode = 10ULL;
   inputs[0].is_valid_sqlite = 1;
   inputs[0].scan_root = context->temp_dir;
+  inputs[0].hidden = 1;
   inputs[1].path = second_path;
   inputs[1].size = 200;
   inputs[1].modified_at = 2;
@@ -1755,6 +1773,7 @@ static int harness_run_discovered_database_replacement_tests(
   inputs[1].inode = 20ULL;
   inputs[1].is_valid_sqlite = 1;
   inputs[1].scan_root = context->temp_dir;
+  inputs[1].hidden = 0;
 
   error = NULL;
   if (!strappy_db_replace_discovered_databases_for_scan_root(catalog_path,
@@ -1785,6 +1804,12 @@ static int harness_run_discovered_database_replacement_tests(
   for (index = 0U; index < list.count; index++) {
     if ((list.records[index].path != NULL) &&
         (strcmp(list.records[index].path, first_path) == 0)) {
+      if (list.records[index].hidden != 1) {
+        fprintf(stderr, "Initial replacement scan did not persist hidden state.\n");
+        strappy_discovered_database_record_list_destroy(&list);
+        harness_unlink_sqlite_files(catalog_path);
+        return 0;
+      }
       first_catalog_id = list.records[index].catalog_id;
       first_database_id =
         strappy_string_duplicate(list.records[index].assistant_database_id);
@@ -1857,6 +1882,7 @@ static int harness_run_discovered_database_replacement_tests(
     return 0;
   }
 
+  inputs[0].hidden = 0;
   if (!strappy_db_replace_discovered_databases_for_scan_root(catalog_path,
                                                              inputs,
                                                              1U,
@@ -1883,6 +1909,7 @@ static int harness_run_discovered_database_replacement_tests(
   }
 
   ok = 0;
+  restored_catalog_id = 0;
   for (index = 0U; index < list.count; index++) {
     if ((list.records[index].path != NULL) &&
         (strcmp(list.records[index].path, first_path) == 0) &&
@@ -1890,7 +1917,56 @@ static int harness_run_discovered_database_replacement_tests(
         (strcmp(list.records[index].user_decision, "allowed") == 0) &&
         (list.records[index].assistant_database_id != NULL) &&
         (strcmp(list.records[index].assistant_database_id,
-                first_database_id) == 0)) {
+                first_database_id) == 0) &&
+        (list.records[index].hidden == 1)) {
+      restored_catalog_id = list.records[index].catalog_id;
+      ok = 1;
+      break;
+    }
+  }
+  strappy_discovered_database_record_list_destroy(&list);
+  if (!ok) {
+    fprintf(stderr,
+            "Replacement scan did not restore database access state.\n");
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  if (!strappy_db_update_discovered_database_hidden(catalog_path,
+                                                    restored_catalog_id,
+                                                    0,
+                                                    &error)) {
+    fprintf(stderr,
+            "Could not update replacement hidden state: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  strappy_discovered_database_record_list_init(&list);
+  if (!strappy_db_list_discovered_databases(catalog_path, &list, &error)) {
+    fprintf(stderr,
+            "Could not list replacement hidden update: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  ok = 0;
+  for (index = 0U; index < list.count; index++) {
+    if ((list.records[index].path != NULL) &&
+        (strcmp(list.records[index].path, first_path) == 0) &&
+        (list.records[index].user_decision != NULL) &&
+        (strcmp(list.records[index].user_decision, "allowed") == 0) &&
+        (list.records[index].assistant_database_id != NULL) &&
+        (strcmp(list.records[index].assistant_database_id,
+                first_database_id) == 0) &&
+        (list.records[index].hidden == 0)) {
       ok = 1;
       break;
     }
@@ -1901,7 +1977,188 @@ static int harness_run_discovered_database_replacement_tests(
 
   if (!ok) {
     fprintf(stderr,
-            "Replacement scan did not restore database access state.\n");
+            "Hidden update did not preserve database access state.\n");
+  }
+  return ok;
+}
+
+static int harness_run_file_scanner_hidden_tests(const harness_context *context)
+{
+  char catalog_path[1200];
+  char scan_root[1200];
+  char normal_dir[1200];
+  char library_dir[1200];
+  char caches_dir[1200];
+  char cache_owner_dir[1200];
+  char normal_path[1200];
+  char cache_path[1200];
+  strappy_file_scanner_options options;
+  strappy_file_scanner_record_list scan_list;
+  strappy_discovered_database_record_list catalog_list;
+  char *error;
+  size_t index;
+  int found_normal;
+  int found_cache;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  catalog_path[0] = '\0';
+  scan_root[0] = '\0';
+  normal_dir[0] = '\0';
+  library_dir[0] = '\0';
+  caches_dir[0] = '\0';
+  cache_owner_dir[0] = '\0';
+  normal_path[0] = '\0';
+  cache_path[0] = '\0';
+  strappy_file_scanner_record_list_init(&scan_list);
+  strappy_discovered_database_record_list_init(&catalog_list);
+  error = NULL;
+  found_normal = 0;
+  found_cache = 0;
+  ok = 0;
+
+  if (!harness_join_path(catalog_path,
+                         sizeof(catalog_path),
+                         context->temp_dir,
+                         "scanner-hidden-catalog.sqlite") ||
+      !harness_join_path(scan_root,
+                         sizeof(scan_root),
+                         context->temp_dir,
+                         "scanner-hidden-root") ||
+      !harness_join_path(normal_dir,
+                         sizeof(normal_dir),
+                         scan_root,
+                         "Documents") ||
+      !harness_join_path(library_dir,
+                         sizeof(library_dir),
+                         scan_root,
+                         "Library") ||
+      !harness_join_path(caches_dir,
+                         sizeof(caches_dir),
+                         library_dir,
+                         "Caches") ||
+      !harness_join_path(cache_owner_dir,
+                         sizeof(cache_owner_dir),
+                         caches_dir,
+                         "com.example.CacheOwner") ||
+      !harness_join_path(normal_path,
+                         sizeof(normal_path),
+                         normal_dir,
+                         "primary.sqlite") ||
+      !harness_join_path(cache_path,
+                         sizeof(cache_path),
+                         cache_owner_dir,
+                         "Cache.db")) {
+    fprintf(stderr, "Could not build scanner hidden test paths.\n");
+    goto cleanup;
+  }
+
+  if (!harness_ensure_directory(scan_root, "mkdir scanner-hidden-root") ||
+      !harness_ensure_directory(normal_dir, "mkdir scanner Documents") ||
+      !harness_ensure_directory(library_dir, "mkdir scanner Library") ||
+      !harness_ensure_directory(caches_dir, "mkdir scanner Caches") ||
+      !harness_ensure_directory(cache_owner_dir, "mkdir scanner cache owner")) {
+    goto cleanup;
+  }
+
+  if (!harness_create_user_database(normal_path) ||
+      !harness_create_user_database(cache_path)) {
+    goto cleanup;
+  }
+
+  strappy_file_scanner_options_init(&options);
+  options.root_path = scan_root;
+  options.validate_candidates = 1;
+  if (!strappy_file_scanner_scan(&options, &scan_list, &error)) {
+    fprintf(stderr,
+            "Could not run scanner hidden test: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    error = NULL;
+    goto cleanup;
+  }
+
+  for (index = 0U; index < scan_list.count; index++) {
+    if ((scan_list.records[index].path != NULL) &&
+        (strcmp(scan_list.records[index].path, normal_path) == 0)) {
+      found_normal = (scan_list.records[index].hidden == 0) ? 1 : 0;
+    }
+    if ((scan_list.records[index].path != NULL) &&
+        (strcmp(scan_list.records[index].path, cache_path) == 0)) {
+      found_cache = (scan_list.records[index].hidden == 1) ? 1 : 0;
+    }
+  }
+  if (!found_normal || !found_cache) {
+    fprintf(stderr, "Scanner hidden classification did not match expected paths.\n");
+    goto cleanup;
+  }
+
+  if (!strappy_file_scanner_save_discovered_databases(catalog_path,
+                                                      &scan_list,
+                                                      scan_root,
+                                                      &error)) {
+    fprintf(stderr,
+            "Could not save scanner hidden catalog: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    error = NULL;
+    goto cleanup;
+  }
+
+  if (!strappy_db_list_discovered_databases(catalog_path,
+                                            &catalog_list,
+                                            &error)) {
+    fprintf(stderr,
+            "Could not list scanner hidden catalog: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    error = NULL;
+    goto cleanup;
+  }
+
+  found_normal = 0;
+  found_cache = 0;
+  for (index = 0U; index < catalog_list.count; index++) {
+    if ((catalog_list.records[index].path != NULL) &&
+        (strcmp(catalog_list.records[index].path, normal_path) == 0)) {
+      found_normal = (catalog_list.records[index].hidden == 0) ? 1 : 0;
+    }
+    if ((catalog_list.records[index].path != NULL) &&
+        (strcmp(catalog_list.records[index].path, cache_path) == 0)) {
+      found_cache = (catalog_list.records[index].hidden == 1) ? 1 : 0;
+    }
+  }
+  if (!found_normal || !found_cache) {
+    fprintf(stderr, "Scanner hidden state was not persisted to the catalog.\n");
+    goto cleanup;
+  }
+
+  ok = 1;
+
+cleanup:
+  free(error);
+  strappy_file_scanner_record_list_destroy(&scan_list);
+  strappy_discovered_database_record_list_destroy(&catalog_list);
+  harness_unlink_sqlite_files(normal_path);
+  harness_unlink_sqlite_files(cache_path);
+  harness_unlink_sqlite_files(catalog_path);
+  if (cache_owner_dir[0] != '\0') {
+    rmdir(cache_owner_dir);
+  }
+  if (caches_dir[0] != '\0') {
+    rmdir(caches_dir);
+  }
+  if (library_dir[0] != '\0') {
+    rmdir(library_dir);
+  }
+  if (normal_dir[0] != '\0') {
+    rmdir(normal_dir);
+  }
+  if (scan_root[0] != '\0') {
+    rmdir(scan_root);
   }
   return ok;
 }
@@ -3884,6 +4141,7 @@ int main(void)
        harness_make_temp_dir(&context) &&
        harness_run_fresh_catalog_schema_tests(&context) &&
        harness_run_discovered_database_replacement_tests(&context) &&
+       harness_run_file_scanner_hidden_tests(&context) &&
        harness_run_empty_database_list_info_tests(&context) &&
        harness_create_user_database(context.database_path) &&
        harness_register_database(&context) &&

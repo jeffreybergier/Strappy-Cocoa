@@ -31,6 +31,7 @@ DATABASE_QUERY_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_cocoa.c \
 	$(SHARED_DIR)/strappy_tools.c \
 	$(SHARED_DIR)/strappy_db.c \
+	$(SHARED_DIR)/strappy_file_scanner.c \
 	$(SHARED_DIR)/strappy_core.c \
 	$(CJSON_DIR)/cJSON.c
 
