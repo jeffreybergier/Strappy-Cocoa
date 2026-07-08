@@ -473,39 +473,17 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
   return StrappyDatabaseRowIsAllowed(row);
 }
 
-- (NSString *)statusText
+- (BOOL)rowIsSelected:(NSDictionary *)row
 {
-  NSUInteger count;
-  NSString *searchText;
+  return [self allowedValueForDatabaseRow:row];
+}
 
+- (NSString *)workingStatusText
+{
   if ([self scanning]) {
-    return NSLocalizedString(@"Scanning databases...", nil);
+    return NSLocalizedString(@"Scanning...", nil);
   }
-  if ([[self statusMessage] length] > 0U) {
-    return [self statusMessage];
-  }
-
-  count = [[self rows] count];
-  searchText = [self currentSearchText];
-  if ([searchText length] > 0U) {
-    if (count == 0U) {
-      return NSLocalizedString(@"No matching databases.", nil);
-    }
-    if (count == 1U) {
-      return NSLocalizedString(@"1 database shown.", nil);
-    }
-    return [NSString stringWithFormat:
-      NSLocalizedString(@"%lu databases shown.", nil), (unsigned long)count];
-  }
-
-  if (count == 0U) {
-    return NSLocalizedString(@"No databases available.", nil);
-  }
-  if (count == 1U) {
-    return NSLocalizedString(@"1 database available.", nil);
-  }
-  return [NSString stringWithFormat:
-    NSLocalizedString(@"%lu databases available.", nil), (unsigned long)count];
+  return nil;
 }
 
 - (NSString *)emptyText
@@ -680,7 +658,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   rootPath = NSHomeDirectory();
   [self setScanning:YES];
   [self setWorking:YES];
-  [[[self navigationItem] rightBarButtonItem] setEnabled:NO];
   [self setStatusMessage:nil];
   [[self tableView] reloadData];
   [self refreshStatusToolbar];
@@ -737,7 +714,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
   [self setScanning:NO];
   [self setWorking:NO];
-  [[[self navigationItem] rightBarButtonItem] setEnabled:YES];
   [[self tableView] reloadData];
   [self refreshStatusToolbar];
 }

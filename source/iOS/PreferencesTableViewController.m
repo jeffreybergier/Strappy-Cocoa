@@ -4,9 +4,6 @@
 #import "StrappyPreferencesDatabaseWhitelistTableViewController.h"
 #import "StrappyPreferencesModelWhitelistTableViewController.h"
 #import "StrappyPreferencesSystemPromptsTableViewController.h"
-#import "XPUIKit.h"
-
-#include <stdlib.h>
 
 static NSString *StrappyPreferencesTrimmedString(NSString *string)
 {
@@ -15,17 +12,6 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
   }
   return [string stringByTrimmingCharactersInSet:
     [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-}
-
-static BOOL StrappyEnvironmentOverrideActive(void)
-{
-  const char *endpoint;
-  const char *token;
-
-  endpoint = getenv("APIENDPOINT");
-  token = getenv("APITOKEN");
-  return ((endpoint != NULL) && (endpoint[0] != '\0')) ||
-         ((token != NULL) && (token[0] != '\0'));
 }
 
 enum {
@@ -37,7 +23,6 @@ enum {
 enum {
   kStrappyAuthRowEndpoint = 0,
   kStrappyAuthRowToken,
-  kStrappyAuthRowSave,
   kStrappyAuthRowCount
 };
 
@@ -51,16 +36,12 @@ enum {
 @interface PreferencesTableViewController () <UITextFieldDelegate>
 @property (nonatomic, strong) UITextField *apiEndpointField;
 @property (nonatomic, strong) UITextField *apiTokenField;
-@property (nonatomic, copy) NSString *statusMessage;
-@property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, assign) BOOL authenticationDirty;
 - (UITextField *)makeFieldSecure:(BOOL)secure placeholder:(NSString *)placeholder;
 - (void)loadAuthenticationFields;
-- (void)buildStatusToolbar;
-- (void)refreshStatusToolbar;
-- (NSString *)authenticationStatusText;
 - (BOOL)saveAuthenticationIfNeeded;
 - (BOOL)saveAuthentication;
+- (void)showMessage:(NSString *)message title:(NSString *)title;
 - (void)fieldChanged:(id)sender;
 - (void)doneAction:(id)sender;
 @end
@@ -92,75 +73,24 @@ enum {
     [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                   target:self
                                                   action:@selector(doneAction:)]];
-  [self buildStatusToolbar];
 }
 
 - (void)viewWillAppear:(BOOL)animated
 {
   [super viewWillAppear:animated];
-  [self refreshStatusToolbar];
-  [[self navigationController] setToolbarHidden:NO animated:animated];
-}
-
-- (void)viewWillDisappear:(BOOL)animated
-{
-  [super viewWillDisappear:animated];
   [[self navigationController] setToolbarHidden:YES animated:animated];
 }
 
-- (void)buildStatusToolbar
+- (void)showMessage:(NSString *)message title:(NSString *)title
 {
-  UIBarButtonItem *flexLeft;
-  UIBarButtonItem *flexRight;
-  UIBarButtonItem *statusItem;
-  UILabel *label;
-  CGFloat width;
+  UIAlertView *alert;
 
-  width = CGRectGetWidth([[self view] bounds]) - 80.0f;
-  if (width < 160.0f) {
-    width = 160.0f;
-  }
-
-  label = [[UILabel alloc] initWithFrame:CGRectMake(0.0f, 0.0f, width, 30.0f)];
-  [label setBackgroundColor:[UIColor clearColor]];
-  [label setTextColor:[UIColor whiteColor]];
-  [label setShadowColor:[UIColor darkGrayColor]];
-  [label setShadowOffset:CGSizeMake(0.0f, -1.0f)];
-  [label setFont:[UIFont systemFontOfSize:12.0f]];
-  [label setNumberOfLines:1];
-  [label XP_setTextAlignmentCenter];
-  [label setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
-  [self setStatusLabel:label];
-
-  statusItem = [[UIBarButtonItem alloc] initWithCustomView:label];
-  flexLeft = [[UIBarButtonItem alloc]
-    initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
-                         target:nil
-                         action:NULL];
-  flexRight = [[UIBarButtonItem alloc]
-    initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
-                         target:nil
-                         action:NULL];
-  [self setToolbarItems:
-    [NSArray arrayWithObjects:flexLeft, statusItem, flexRight, nil]];
-  [self refreshStatusToolbar];
-}
-
-- (void)refreshStatusToolbar
-{
-  [[self statusLabel] setText:[self authenticationStatusText]];
-}
-
-- (NSString *)authenticationStatusText
-{
-  if ([[self statusMessage] length] > 0U) {
-    return [self statusMessage];
-  }
-  if (StrappyEnvironmentOverrideActive()) {
-    return NSLocalizedString(
-      @"APIENDPOINT or APITOKEN overrides keychain values while set.", nil);
-  }
-  return @"";
+  alert = [[UIAlertView alloc] initWithTitle:title
+                                     message:message
+                                    delegate:nil
+                           cancelButtonTitle:NSLocalizedString(@"OK", nil)
+                           otherButtonTitles:nil];
+  [alert show];
 }
 
 - (UITextField *)makeFieldSecure:(BOOL)secure placeholder:(NSString *)placeholder
@@ -174,6 +104,7 @@ enum {
   [field setAutocorrectionType:UITextAutocorrectionTypeNo];
   [field setAutocapitalizationType:UITextAutocapitalizationTypeNone];
   [field setClearButtonMode:UITextFieldViewModeWhileEditing];
+  [field setContentVerticalAlignment:UIControlContentVerticalAlignmentCenter];
   [field setReturnKeyType:secure ? UIReturnKeyDone : UIReturnKeyNext];
   [field setKeyboardType:secure ? UIKeyboardTypeDefault : UIKeyboardTypeURL];
   [field addTarget:self
@@ -196,14 +127,6 @@ enum {
   [[self apiEndpointField] setText:(endpoint != nil) ? endpoint : @""];
   [[self apiTokenField] setText:(token != nil) ? token : @""];
   [self setAuthenticationDirty:NO];
-
-  if ([[StrappyKeychain sharedKeychain] hasAPICredentials]) {
-    [self setStatusMessage:
-      NSLocalizedString(@"API credentials are available.", nil)];
-  } else {
-    [self setStatusMessage:
-      NSLocalizedString(@"No API credentials are saved in the keychain.", nil)];
-  }
 }
 
 - (void)fieldChanged:(id)sender
@@ -238,34 +161,22 @@ enum {
   endpoint = StrappyPreferencesTrimmedString([[self apiEndpointField] text]);
   token = StrappyPreferencesTrimmedString([[self apiTokenField] text]);
   if (([endpoint length] == 0U) || ([token length] == 0U)) {
-    [self setStatusMessage:
-      NSLocalizedString(@"API endpoint and token are required.", nil)];
-    [[self tableView] reloadSections:
-      [NSIndexSet indexSetWithIndex:kStrappyPreferencesSectionAuthentication]
-                  withRowAnimation:UITableViewRowAnimationNone];
-    [self refreshStatusToolbar];
+    [self showMessage:NSLocalizedString(
+      @"API endpoint and token are required.", nil)
+                title:NSLocalizedString(@"Credentials Required", nil)];
     return NO;
   }
 
   if (![[StrappyKeychain sharedKeychain] saveAPIEndpoint:endpoint token:token]) {
-    [self setStatusMessage:
-      NSLocalizedString(@"The keychain refused the write.", nil)];
-    [[self tableView] reloadSections:
-      [NSIndexSet indexSetWithIndex:kStrappyPreferencesSectionAuthentication]
-                  withRowAnimation:UITableViewRowAnimationNone];
-    [self refreshStatusToolbar];
+    [self showMessage:NSLocalizedString(
+      @"The keychain refused the write.", nil)
+                title:NSLocalizedString(@"Could Not Save Credentials", nil)];
     return NO;
   }
 
   [[self apiEndpointField] setText:endpoint];
   [[self apiTokenField] setText:token];
   [self setAuthenticationDirty:NO];
-  [self setStatusMessage:
-    NSLocalizedString(@"API credentials saved to keychain.", nil)];
-  [[self tableView] reloadSections:
-    [NSIndexSet indexSetWithIndex:kStrappyPreferencesSectionAuthentication]
-                withRowAnimation:UITableViewRowAnimationNone];
-  [self refreshStatusToolbar];
   return YES;
 }
 
@@ -332,22 +243,13 @@ titleForFooterInSection:(NSInteger)section
   UITextField *field;
 
   if ([indexPath section] == kStrappyPreferencesSectionAuthentication) {
-    if ([indexPath row] == kStrappyAuthRowSave) {
-      cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
-                                    reuseIdentifier:nil];
-      [[cell textLabel] setText:NSLocalizedString(@"Save API Credentials", nil)];
-      [[cell textLabel] setTextColor:[UIColor blueColor]];
-      [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-      return cell;
-    }
-
     cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
                                   reuseIdentifier:nil];
     [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
     field = ([indexPath row] == kStrappyAuthRowEndpoint)
       ? [self apiEndpointField]
       : [self apiTokenField];
-    [field setFrame:CGRectInset([[cell contentView] bounds], 15.0f, 7.0f)];
+    [field setFrame:CGRectInset([[cell contentView] bounds], 15.0f, 0.0f)];
     [field setAutoresizingMask:
       UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight];
     [[cell contentView] addSubview:field];
@@ -381,10 +283,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
   if ([indexPath section] == kStrappyPreferencesSectionAuthentication) {
-    if ([indexPath row] == kStrappyAuthRowSave) {
-      [[self view] endEditing:YES];
-      [self saveAuthentication];
-    }
     return;
   }
 

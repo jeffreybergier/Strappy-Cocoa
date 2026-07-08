@@ -1,5 +1,6 @@
 #import "StrappyPreferencesWhitelistTableViewController.h"
 
+#import "AIFontAwesome.h"
 #import "StrappyIdleTimerAssertion.h"
 #import "XPUIKit.h"
 
@@ -11,6 +12,20 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
   return [string stringByTrimmingCharactersInSet:
     [NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
+
+static const CGFloat kStrappyPreferencesToolbarSideItemWidth = 44.0f;
+static const CGFloat kStrappyPreferencesToolbarLabelHeight = 30.0f;
+static const CGFloat kStrappyPreferencesToolbarFallbackHeight = 44.0f;
+
+@interface StrappyPreferencesWhitelistTableViewController ()
+@property (nonatomic, strong) UIView *toolbarContentView;
+@property (nonatomic, strong) UIBarButtonItem *toolbarContentItem;
+@property (nonatomic, strong) UIButton *actionToolbarButton;
+@property (nonatomic, strong) UIActivityIndicatorView *activityIndicatorView;
+@property (nonatomic, strong) UIImage *actionToolbarImage;
+- (void)layoutToolbarContentView;
+- (void)refreshToolbarItems;
+@end
 
 @implementation StrappyPreferencesWhitelistTableViewController
 
@@ -35,13 +50,6 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
   [[self searchBar] setPlaceholder:NSLocalizedString(@"Search", nil)];
   [[self tableView] setTableHeaderView:[self searchBar]];
 
-  [[self navigationItem] setRightBarButtonItem:
-    [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh
-                                                  target:self
-                                                  action:@selector(actionButtonPressed:)]];
-  [[[self navigationItem] rightBarButtonItem]
-    setAccessibilityLabel:[self actionButtonAccessibilityLabel]];
-
   [self buildStatusToolbar];
   [self reloadRows];
 }
@@ -49,8 +57,34 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
 - (void)viewWillAppear:(BOOL)animated
 {
   [super viewWillAppear:animated];
-  [self refreshStatusToolbar];
   [[self navigationController] setToolbarHidden:NO animated:animated];
+  [self refreshStatusToolbar];
+}
+
+- (void)viewDidAppear:(BOOL)animated
+{
+  [super viewDidAppear:animated];
+  [self refreshStatusToolbar];
+}
+
+- (void)viewDidLayoutSubviews
+{
+  [super viewDidLayoutSubviews];
+  [self layoutToolbarContentView];
+}
+
+- (void)willAnimateRotationToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation
+                                        duration:(NSTimeInterval)duration
+{
+  [super willAnimateRotationToInterfaceOrientation:toInterfaceOrientation
+                                          duration:duration];
+  [self layoutToolbarContentView];
+}
+
+- (void)didRotateFromInterfaceOrientation:(UIInterfaceOrientation)fromInterfaceOrientation
+{
+  [super didRotateFromInterfaceOrientation:fromInterfaceOrientation];
+  [self layoutToolbarContentView];
 }
 
 - (void)viewWillDisappear:(BOOL)animated
@@ -67,49 +101,177 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
 
   _working = working;
   StrappyIdleTimerAssertionSetEnabled(working);
+  [self refreshStatusToolbar];
 }
 
 - (void)buildStatusToolbar
 {
-  UIBarButtonItem *flexLeft;
-  UIBarButtonItem *flexRight;
-  UIBarButtonItem *statusItem;
+  UIView *contentView;
+  UIBarButtonItem *contentItem;
+  UIButton *actionButton;
+  UIActivityIndicatorView *activityView;
   UILabel *label;
+  UIImage *actionImage;
   CGFloat width;
+  CGFloat height;
 
-  width = CGRectGetWidth([[self view] bounds]) - 80.0f;
-  if (width < 160.0f) {
-    width = 160.0f;
+  width = CGRectGetWidth([[self view] bounds]);
+  if (width <= 0.0f) {
+    width = 320.0f;
   }
+  height = kStrappyPreferencesToolbarFallbackHeight;
 
-  label = [[UILabel alloc] initWithFrame:CGRectMake(0.0f, 0.0f, width, 30.0f)];
+  contentView = [[UIView alloc] initWithFrame:
+    CGRectMake(0.0f, 0.0f, width, height)];
+  [contentView setBackgroundColor:[UIColor clearColor]];
+  [contentView setOpaque:NO];
+  [contentView setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
+
+  label = [[UILabel alloc] initWithFrame:CGRectZero];
   [label setBackgroundColor:[UIColor clearColor]];
   [label setTextColor:[UIColor whiteColor]];
-  [label setShadowColor:[UIColor darkGrayColor]];
+  [label setShadowColor:[UIColor colorWithWhite:0.0f alpha:0.5f]];
   [label setShadowOffset:CGSizeMake(0.0f, -1.0f)];
-  [label setFont:[UIFont systemFontOfSize:12.0f]];
+  [label setFont:[UIFont boldSystemFontOfSize:15.0f]];
   [label setNumberOfLines:1];
   [label XP_setTextAlignmentCenter];
   [label setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
+  [contentView addSubview:label];
   [self setStatusLabel:label];
 
-  statusItem = [[UIBarButtonItem alloc] initWithCustomView:label];
-  flexLeft = [[UIBarButtonItem alloc]
-    initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
-                         target:nil
-                         action:NULL];
-  flexRight = [[UIBarButtonItem alloc]
-    initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
-                         target:nil
-                         action:NULL];
-  [self setToolbarItems:
-    [NSArray arrayWithObjects:flexLeft, statusItem, flexRight, nil]];
+  actionImage = [AIFontAwesome imageForIcon:AIFAArrowsRotate
+                                      style:AIFontAwesomeStyleSolid
+                                   iconSize:18.0f
+                                 canvasSize:kStrappyPreferencesToolbarSideItemWidth
+                                      color:[UIColor whiteColor]
+                                      scale:0.0f];
+  actionButton = [UIButton buttonWithType:UIButtonTypeCustom];
+  [actionButton setImage:actionImage forState:UIControlStateNormal];
+  [actionButton setShowsTouchWhenHighlighted:YES];
+  [actionButton setAccessibilityLabel:[self actionButtonAccessibilityLabel]];
+  [actionButton addTarget:self
+                   action:@selector(actionButtonPressed:)
+         forControlEvents:UIControlEventTouchUpInside];
+  [contentView addSubview:actionButton];
+
+  activityView = [[UIActivityIndicatorView alloc]
+    initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhite];
+  [activityView setHidesWhenStopped:YES];
+  [contentView addSubview:activityView];
+
+  contentItem = [[UIBarButtonItem alloc] initWithCustomView:contentView];
+  [contentItem setWidth:width];
+
+  [self setToolbarContentView:contentView];
+  [self setToolbarContentItem:contentItem];
+  [self setActionToolbarButton:actionButton];
+  [self setActionToolbarImage:actionImage];
+  [self setActivityIndicatorView:activityView];
+  [self setToolbarItems:[NSArray arrayWithObject:contentItem]];
   [self refreshStatusToolbar];
 }
 
 - (void)refreshStatusToolbar
 {
   [[self statusLabel] setText:[self statusText]];
+  [self layoutToolbarContentView];
+  [self refreshToolbarItems];
+}
+
+- (void)layoutToolbarContentView
+{
+  UIToolbar *toolbar;
+  UIView *contentView;
+  CGRect frame;
+  CGFloat width;
+  CGFloat contentWidth;
+  CGFloat contentX;
+  CGFloat height;
+  CGFloat sideWidth;
+  CGFloat labelX;
+  CGFloat labelHeight;
+  CGFloat labelWidth;
+  CGFloat buttonX;
+  CGFloat labelY;
+
+  contentView = [self toolbarContentView];
+  if (contentView == nil) {
+    return;
+  }
+
+  toolbar = [[self navigationController] toolbar];
+  width = CGRectGetWidth([toolbar bounds]);
+  if (width <= 0.0f) {
+    width = CGRectGetWidth([[self view] bounds]);
+  }
+  if (width <= 0.0f) {
+    width = CGRectGetWidth([contentView bounds]);
+  }
+  if (width <= 0.0f) {
+    width = 320.0f;
+  }
+
+  height = CGRectGetHeight([toolbar bounds]);
+  if (height <= 0.0f) {
+    height = kStrappyPreferencesToolbarFallbackHeight;
+  }
+
+  frame = [contentView frame];
+  contentX = CGRectGetMinX(frame);
+  if ((contentX < 0.0f) || (contentX >= width)) {
+    contentX = 0.0f;
+  }
+  contentWidth = width - contentX;
+  if (contentWidth <= 0.0f) {
+    contentWidth = width;
+  }
+
+  frame.size.width = contentWidth;
+  frame.size.height = height;
+  [contentView setFrame:frame];
+  [[self toolbarContentItem] setWidth:contentWidth];
+
+  sideWidth = kStrappyPreferencesToolbarSideItemWidth;
+  if ((sideWidth * 2.0f) > width) {
+    sideWidth = width * 0.5f;
+  }
+  labelX = sideWidth - contentX;
+  if (labelX < 0.0f) {
+    labelX = 0.0f;
+  }
+  buttonX = contentWidth - sideWidth;
+  if (buttonX < 0.0f) {
+    buttonX = 0.0f;
+  }
+  labelWidth = buttonX - labelX;
+  if (labelWidth < 0.0f) {
+    labelWidth = 0.0f;
+  }
+  labelHeight = kStrappyPreferencesToolbarLabelHeight;
+  labelY = (CGFloat)floor((double)((height - labelHeight) * 0.5f));
+  [[self statusLabel] setFrame:
+    CGRectMake(labelX,
+               labelY,
+               labelWidth,
+               labelHeight)];
+  [[self actionToolbarButton] setFrame:
+    CGRectMake(buttonX, 0.0f, sideWidth, height)];
+  [[self activityIndicatorView] setFrame:
+    CGRectMake(buttonX, 0.0f, sideWidth, height)];
+  [toolbar setNeedsLayout];
+}
+
+- (void)refreshToolbarItems
+{
+  if ([self working]) {
+    [[self activityIndicatorView] startAnimating];
+    [[self actionToolbarButton] setHidden:YES];
+    [[self activityIndicatorView] setHidden:NO];
+  } else {
+    [[self activityIndicatorView] stopAnimating];
+    [[self activityIndicatorView] setHidden:YES];
+    [[self actionToolbarButton] setHidden:NO];
+  }
 }
 
 - (NSArray *)loadAllRowsWithError:(NSError **)error
@@ -134,41 +296,50 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
   return ([searchText length] == 0U) ? YES : NO;
 }
 
+- (BOOL)rowIsSelected:(NSDictionary *)row
+{
+  (void)row;
+  return NO;
+}
+
 - (NSString *)currentSearchText
 {
   return StrappyPreferencesTrimmedString([[self searchBar] text]);
 }
 
+- (NSString *)workingStatusText
+{
+  return nil;
+}
+
 - (NSString *)statusText
 {
-  NSUInteger count;
-  NSString *searchText;
+  NSUInteger index;
+  NSUInteger selectedCount;
+  NSUInteger totalCount;
+  NSString *workingText;
+
+  workingText = [self workingStatusText];
+  if ([workingText length] > 0U) {
+    return workingText;
+  }
 
   if ([[self statusMessage] length] > 0U) {
     return [self statusMessage];
   }
 
-  count = [[self rows] count];
-  searchText = [self currentSearchText];
-  if ([searchText length] > 0U) {
-    if (count == 0U) {
-      return NSLocalizedString(@"No matching rows.", nil);
-    }
-    if (count == 1U) {
-      return NSLocalizedString(@"1 row shown.", nil);
-    }
-    return [NSString stringWithFormat:NSLocalizedString(@"%lu rows shown.", nil),
-      (unsigned long)count];
-  }
+  selectedCount = 0U;
+  totalCount = [[self allRows] count];
+  for (index = 0U; index < totalCount; index++) {
+    NSDictionary *row;
 
-  if (count == 0U) {
-    return [self emptyText];
+    row = [[self allRows] objectAtIndex:index];
+    if ([row isKindOfClass:[NSDictionary class]] && [self rowIsSelected:row]) {
+      selectedCount++;
+    }
   }
-  if (count == 1U) {
-    return NSLocalizedString(@"1 row available.", nil);
-  }
-  return [NSString stringWithFormat:NSLocalizedString(@"%lu rows available.", nil),
-    (unsigned long)count];
+  return [NSString stringWithFormat:NSLocalizedString(@"%lu of %lu", nil),
+    (unsigned long)selectedCount, (unsigned long)totalCount];
 }
 
 - (NSString *)emptyText

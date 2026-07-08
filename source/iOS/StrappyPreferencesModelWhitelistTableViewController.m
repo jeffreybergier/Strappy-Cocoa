@@ -1,9 +1,27 @@
 #import "StrappyPreferencesModelWhitelistTableViewController.h"
 
+#import "AIFontAwesome.h"
 #import "StrappySession.h"
 
 static NSString * const kStrappyModelSearchTextKey =
   @"_strappy_model_search_text";
+static const CGFloat kStrappyModelDefaultIconCanvasSize = 24.0f;
+static const CGFloat kStrappyModelDefaultIconSize = 20.0f;
+
+static UIImage *StrappyModelDefaultIconImage(void)
+{
+  static UIImage *image = nil;
+
+  if (image == nil) {
+    image = [AIFontAwesome imageForIcon:AIFACircleCheck
+                               style:AIFontAwesomeStyleSolid
+                            iconSize:kStrappyModelDefaultIconSize
+                          canvasSize:kStrappyModelDefaultIconCanvasSize
+                                  color:[UIColor blackColor]
+                                  scale:0.0f];
+  }
+  return image;
+}
 
 static NSString *StrappyStringForModelRow(NSDictionary *row, NSString *key)
 {
@@ -187,6 +205,17 @@ static NSComparisonResult StrappyCompareBooleans(BOOL left, BOOL right)
   return left ? NSOrderedAscending : NSOrderedDescending;
 }
 
+static NSComparisonResult StrappyCompareDouble(double left, double right)
+{
+  if (left < right) {
+    return NSOrderedAscending;
+  }
+  if (left > right) {
+    return NSOrderedDescending;
+  }
+  return NSOrderedSame;
+}
+
 static BOOL StrappyModelRowIsDefault(NSDictionary *row)
 {
   NSNumber *selected;
@@ -208,7 +237,29 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
     YES : NO;
 }
 
-static NSComparisonResult StrappyCompareModelRows(id left, id right, void *context)
+static NSComparisonResult StrappyCompareModelNameRows(id left,
+                                                      id right,
+                                                      void *context)
+{
+  NSDictionary *leftRow;
+  NSDictionary *rightRow;
+  NSComparisonResult result;
+
+  (void)context;
+  leftRow = [left isKindOfClass:[NSDictionary class]] ? left : nil;
+  rightRow = [right isKindOfClass:[NSDictionary class]] ? right : nil;
+  result = StrappyCompareStrings(StrappyModelDisplayNameForRow(leftRow),
+                                 StrappyModelDisplayNameForRow(rightRow));
+  if (result != NSOrderedSame) {
+    return result;
+  }
+  return StrappyCompareStrings(StrappyStringForModelRow(leftRow, @"id"),
+                               StrappyStringForModelRow(rightRow, @"id"));
+}
+
+static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
+                                                           id right,
+                                                           void *context)
 {
   NSDictionary *leftRow;
   NSDictionary *rightRow;
@@ -222,24 +273,53 @@ static NSComparisonResult StrappyCompareModelRows(id left, id right, void *conte
   if (result != NSOrderedSame) {
     return result;
   }
-  return StrappyCompareStrings(StrappyStringForModelRow(leftRow, @"id"),
-                               StrappyStringForModelRow(rightRow, @"id"));
+  result = StrappyCompareStrings(StrappyStringForModelRow(leftRow, @"id"),
+                                 StrappyStringForModelRow(rightRow, @"id"));
+  if (result != NSOrderedSame) {
+    return result;
+  }
+  result = StrappyCompareDouble(
+    [StrappyStringForModelRow(leftRow, @"pricing_completion") doubleValue],
+    [StrappyStringForModelRow(rightRow, @"pricing_completion") doubleValue]);
+  if (result != NSOrderedSame) {
+    return result;
+  }
+  return StrappyCompareDouble(
+    [StrappyStringForModelRow(leftRow, @"pricing_prompt") doubleValue],
+    [StrappyStringForModelRow(rightRow, @"pricing_prompt") doubleValue]);
 }
 
+@class StrappyPreferencesDefaultModelTableViewController;
+
 @interface StrappyPreferencesModelWhitelistTableViewController ()
-@property (nonatomic, copy) NSDictionary *pendingModelRow;
-@property (nonatomic, assign) NSInteger pendingDefaultButtonIndex;
-@property (nonatomic, assign) NSInteger pendingToggleButtonIndex;
+@property (nonatomic, strong) UINavigationController *defaultModelNavigationController;
+@property (nonatomic, strong) StrappyPreferencesDefaultModelTableViewController *defaultModelController;
 @property (nonatomic, assign) BOOL refreshingModels;
+- (void)defaultModelButtonPressed:(id)sender;
+- (BOOL)setDefaultModelIdentifierFromDefaultPicker:(NSString *)modelIdentifier;
+- (void)dismissDefaultModelControllerAnimated:(BOOL)animated;
 @end
 
-@implementation StrappyPreferencesModelWhitelistTableViewController
+@interface StrappyPreferencesDefaultModelTableViewController : UITableViewController
+@property (nonatomic, assign)
+  StrappyPreferencesModelWhitelistTableViewController *modelWhitelistViewController;
+@property (nonatomic, copy) NSArray *models;
+@property (nonatomic, copy) NSString *defaultModelIdentifier;
+- (instancetype)initWithModelWhitelistViewController:
+    (StrappyPreferencesModelWhitelistTableViewController *)viewController;
+- (void)reloadModels;
+@end
 
-- (instancetype)init
+@implementation StrappyPreferencesDefaultModelTableViewController
+
+- (instancetype)initWithModelWhitelistViewController:
+    (StrappyPreferencesModelWhitelistTableViewController *)viewController
 {
-  if ((self = [super initWithTitle:NSLocalizedString(@"Models", nil)])) {
-    [self setPendingDefaultButtonIndex:-1];
-    [self setPendingToggleButtonIndex:-1];
+  if ((self = [super initWithStyle:UITableViewStyleGrouped])) {
+    [self setModelWhitelistViewController:viewController];
+    [self setModels:[NSArray array]];
+    [self setDefaultModelIdentifier:@""];
+    [[self navigationItem] setTitle:NSLocalizedString(@"Default Model", nil)];
   }
   return self;
 }
@@ -247,6 +327,173 @@ static NSComparisonResult StrappyCompareModelRows(id left, id right, void *conte
 - (void)viewDidLoad
 {
   [super viewDidLoad];
+
+  [[self navigationItem] setRightBarButtonItem:
+    [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                                                  target:self
+                                                  action:@selector(doneAction:)]];
+  [self reloadModels];
+}
+
+- (void)reloadModels
+{
+  NSError *error;
+  NSArray *models;
+  NSString *defaultModelIdentifier;
+
+  error = nil;
+  models = [StrappySession allowedOpenRouterModelCatalogWithError:&error];
+  if (![models isKindOfClass:[NSArray class]]) {
+    models = [NSArray array];
+    if (error != nil) {
+      [[self modelWhitelistViewController] showError:error
+        title:NSLocalizedString(@"Could not load models", nil)];
+    }
+  }
+
+  error = nil;
+  defaultModelIdentifier =
+    [StrappySession defaultOpenRouterModelIdentifierWithError:&error];
+  if (![defaultModelIdentifier isKindOfClass:[NSString class]]) {
+    defaultModelIdentifier = @"";
+    if (error != nil) {
+      [[self modelWhitelistViewController] showError:error
+        title:NSLocalizedString(@"Could not load default model", nil)];
+    }
+  }
+
+  [self setModels:
+    [models sortedArrayUsingFunction:StrappyCompareModelNameRows context:NULL]];
+  [self setDefaultModelIdentifier:defaultModelIdentifier];
+  [[self tableView] reloadData];
+}
+
+- (void)doneAction:(id)sender
+{
+  (void)sender;
+  [[self modelWhitelistViewController] dismissDefaultModelControllerAnimated:YES];
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
+{
+  (void)tableView;
+  return 1;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView
+ numberOfRowsInSection:(NSInteger)section
+{
+  (void)tableView;
+  if (section != 0) {
+    return 0;
+  }
+  return ([[self models] count] > 0U) ? (NSInteger)[[self models] count] : 1;
+}
+
+- (NSString *)tableView:(UITableView *)tableView
+titleForHeaderInSection:(NSInteger)section
+{
+  (void)tableView;
+  return (section == 0) ? NSLocalizedString(@"Models", nil) : nil;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView
+         cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  UITableViewCell *cell;
+
+  cell = [tableView dequeueReusableCellWithIdentifier:@"DefaultModelCell"];
+  if (cell == nil) {
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
+                                  reuseIdentifier:@"DefaultModelCell"];
+    [[cell textLabel] setNumberOfLines:1];
+    [[cell detailTextLabel] setNumberOfLines:1];
+  }
+
+  if ([[self models] count] == 0U) {
+    [[cell textLabel] setText:NSLocalizedString(@"No models are in use.", nil)];
+    [[cell detailTextLabel] setText:nil];
+    [[cell textLabel] setTextColor:[UIColor grayColor]];
+    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+    [cell setAccessoryType:UITableViewCellAccessoryNone];
+    [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+    return cell;
+  }
+
+  {
+    NSDictionary *model;
+    NSString *identifier;
+
+    model = [[self models] objectAtIndex:(NSUInteger)[indexPath row]];
+    identifier = StrappyStringForModelRow(model, @"id");
+    [[cell textLabel] setText:StrappyModelDisplayNameForRow(model)];
+    [[cell detailTextLabel] setText:identifier];
+    [[cell textLabel] setTextColor:[UIColor blackColor]];
+    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+    [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
+    [cell setAccessoryType:
+      [identifier isEqualToString:[self defaultModelIdentifier]]
+        ? UITableViewCellAccessoryCheckmark
+        : UITableViewCellAccessoryNone];
+  }
+  return cell;
+}
+
+- (NSIndexPath *)tableView:(UITableView *)tableView
+  willSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  (void)tableView;
+  return ([[self models] count] > 0U) ? indexPath : nil;
+}
+
+- (void)tableView:(UITableView *)tableView
+didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  NSDictionary *model;
+  NSString *modelIdentifier;
+
+  [tableView deselectRowAtIndexPath:indexPath animated:YES];
+  if ([[self models] count] == 0U) {
+    return;
+  }
+
+  model = [[self models] objectAtIndex:(NSUInteger)[indexPath row]];
+  modelIdentifier = StrappyStringForModelRow(model, @"id");
+  if ([modelIdentifier length] == 0U) {
+    return;
+  }
+
+  if ([[self modelWhitelistViewController]
+        setDefaultModelIdentifierFromDefaultPicker:modelIdentifier]) {
+    [self setDefaultModelIdentifier:modelIdentifier];
+    [[self tableView] reloadSections:[NSIndexSet indexSetWithIndex:0]
+                     withRowAnimation:UITableViewRowAnimationNone];
+  } else {
+    [self reloadModels];
+  }
+}
+
+@end
+
+@implementation StrappyPreferencesModelWhitelistTableViewController
+
+- (instancetype)init
+{
+  if ((self = [super initWithTitle:NSLocalizedString(@"Models", nil)])) {
+  }
+  return self;
+}
+
+- (void)viewDidLoad
+{
+  [super viewDidLoad];
+
+  [[self navigationItem] setRightBarButtonItem:
+    [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Default", nil)
+                                     style:UIBarButtonItemStyleBordered
+                                    target:self
+                                    action:@selector(defaultModelButtonPressed:)]];
+
   [[NSNotificationCenter defaultCenter]
     addObserver:self
        selector:@selector(modelCatalogRefreshDidStart:)
@@ -277,7 +524,8 @@ static NSComparisonResult StrappyCompareModelRows(id left, id right, void *conte
 
 - (NSArray *)sortedRows:(NSArray *)rows
 {
-  return [rows sortedArrayUsingFunction:StrappyCompareModelRows context:NULL];
+  return [rows sortedArrayUsingFunction:StrappyCompareModelWhitelistRows
+                                context:NULL];
 }
 
 - (BOOL)row:(NSDictionary *)row matchesSearchText:(NSString *)searchText
@@ -306,39 +554,17 @@ static NSComparisonResult StrappyCompareModelRows(id left, id right, void *conte
   return StrappyModelRowIsAllowed(row);
 }
 
-- (NSString *)statusText
+- (BOOL)rowIsSelected:(NSDictionary *)row
 {
-  NSUInteger count;
-  NSString *searchText;
+  return [self allowedValueForModelRow:row];
+}
 
+- (NSString *)workingStatusText
+{
   if ([self refreshingModels]) {
-    return NSLocalizedString(@"Fetching models...", nil);
+    return NSLocalizedString(@"Fetching...", nil);
   }
-  if ([[self statusMessage] length] > 0U) {
-    return [self statusMessage];
-  }
-
-  count = [[self rows] count];
-  searchText = [self currentSearchText];
-  if ([searchText length] > 0U) {
-    if (count == 0U) {
-      return NSLocalizedString(@"No matching models.", nil);
-    }
-    if (count == 1U) {
-      return NSLocalizedString(@"1 model shown.", nil);
-    }
-    return [NSString stringWithFormat:NSLocalizedString(@"%lu models shown.", nil),
-      (unsigned long)count];
-  }
-
-  if (count == 0U) {
-    return NSLocalizedString(@"No models have been fetched yet.", nil);
-  }
-  if (count == 1U) {
-    return NSLocalizedString(@"1 model available.", nil);
-  }
-  return [NSString stringWithFormat:NSLocalizedString(@"%lu models available.", nil),
-    (unsigned long)count];
+  return nil;
 }
 
 - (NSString *)emptyText
@@ -357,30 +583,30 @@ static NSComparisonResult StrappyCompareModelRows(id left, id right, void *conte
   NSString *context;
   NSString *promptPrice;
   NSString *completionPrice;
-  NSString *identifier;
+  BOOL defaultModel;
 
   details = [NSMutableArray array];
-  identifier = StrappyStringForModelRow(row, @"id");
-  if ([self modelRowIsDefault:row]) {
-    [details addObject:NSLocalizedString(@"Default", nil)];
-  }
-  if ([identifier length] > 0U) {
-    [details addObject:identifier];
-  }
+  defaultModel = [self modelRowIsDefault:row];
   context = StrappyModelNumberString(row, @"context_length");
   if ([context length] > 0U) {
     [details addObject:[NSString stringWithFormat:
-      NSLocalizedString(@"Context %@", nil), context]];
+      NSLocalizedString(@"Context: %@", nil), context]];
   }
   promptPrice = StrappyModelPricingString(row, @"pricing_prompt");
   completionPrice = StrappyModelPricingString(row, @"pricing_completion");
-  if (([promptPrice length] > 0U) || ([completionPrice length] > 0U)) {
+  if ([promptPrice length] > 0U) {
     [details addObject:[NSString stringWithFormat:
-      NSLocalizedString(@"In %@ / Out %@", nil), promptPrice, completionPrice]];
+      NSLocalizedString(@"In: %@", nil), promptPrice]];
+  }
+  if ([completionPrice length] > 0U) {
+    [details addObject:[NSString stringWithFormat:
+      NSLocalizedString(@"Out: %@", nil), completionPrice]];
   }
 
   [[cell textLabel] setText:StrappyModelDisplayNameForRow(row)];
-  [[cell detailTextLabel] setText:[details componentsJoinedByString:@" | "]];
+  [[cell detailTextLabel] setText:[details componentsJoinedByString:@", "]];
+  [[cell imageView] setContentMode:UIViewContentModeCenter];
+  [[cell imageView] setImage:defaultModel ? StrappyModelDefaultIconImage() : nil];
   [cell setAccessoryType:[self allowedValueForModelRow:row]
     ? UITableViewCellAccessoryCheckmark
     : UITableViewCellAccessoryNone];
@@ -409,8 +635,6 @@ static NSComparisonResult StrappyCompareModelRows(id left, id right, void *conte
 {
   _refreshingModels = refreshingModels;
   [self setWorking:refreshingModels];
-  [[[self navigationItem] rightBarButtonItem]
-    setEnabled:refreshingModels ? NO : YES];
   [[self tableView] reloadData];
   [self refreshStatusToolbar];
 }
@@ -443,85 +667,80 @@ static NSComparisonResult StrappyCompareModelRows(id left, id right, void *conte
 {
   (void)notification;
   [self reloadRows];
+  [[self defaultModelController] reloadModels];
+}
+
+- (void)defaultModelButtonPressed:(id)sender
+{
+  StrappyPreferencesDefaultModelTableViewController *controller;
+  UINavigationController *navigationController;
+
+  (void)sender;
+  if ([self defaultModelNavigationController] != nil) {
+    return;
+  }
+
+  [[self searchBar] resignFirstResponder];
+  controller =
+    [[StrappyPreferencesDefaultModelTableViewController alloc]
+      initWithModelWhitelistViewController:self];
+  navigationController =
+    [[UINavigationController alloc] initWithRootViewController:controller];
+  [self setDefaultModelController:controller];
+  [self setDefaultModelNavigationController:navigationController];
+  [self presentModalViewController:navigationController animated:YES];
+}
+
+- (BOOL)setDefaultModelIdentifierFromDefaultPicker:(NSString *)modelIdentifier
+{
+  NSError *error;
+
+  error = nil;
+  if (![StrappySession setDefaultOpenRouterModelIdentifier:modelIdentifier
+                                                     error:&error]) {
+    [self showError:error
+              title:NSLocalizedString(@"Could not set default model", nil)];
+    return NO;
+  }
+
+  [self reloadRows];
+  return YES;
+}
+
+- (void)dismissDefaultModelControllerAnimated:(BOOL)animated
+{
+  UINavigationController *navigationController;
+
+  navigationController = [self defaultModelNavigationController];
+  [self setDefaultModelController:nil];
+  [self setDefaultModelNavigationController:nil];
+  if (navigationController != nil) {
+    [navigationController dismissModalViewControllerAnimated:animated];
+  }
 }
 
 - (void)useRow:(NSDictionary *)row atIndexPath:(NSIndexPath *)indexPath
 {
-  UIActionSheet *sheet;
-  BOOL allowed;
-
-  (void)indexPath;
-  [self setPendingModelRow:row];
-  [self setPendingDefaultButtonIndex:-1];
-  [self setPendingToggleButtonIndex:-1];
-
-  if ([self modelRowIsDefault:row]) {
-    [self showMessage:NSLocalizedString(
-      @"This model is the default model and is always used.", nil)
-                title:StrappyModelDisplayNameForRow(row)];
-    return;
-  }
-
-  allowed = [self allowedValueForModelRow:row];
-  sheet = [[UIActionSheet alloc] initWithTitle:StrappyModelDisplayNameForRow(row)
-                                      delegate:self
-                             cancelButtonTitle:nil
-                        destructiveButtonTitle:nil
-                             otherButtonTitles:nil];
-  [self setPendingDefaultButtonIndex:
-    [sheet addButtonWithTitle:NSLocalizedString(@"Use as Default", nil)]];
-  [self setPendingToggleButtonIndex:
-    [sheet addButtonWithTitle:allowed
-      ? NSLocalizedString(@"Stop Using Model", nil)
-      : NSLocalizedString(@"Use Model", nil)]];
-  [sheet setCancelButtonIndex:
-    [sheet addButtonWithTitle:NSLocalizedString(@"Cancel", nil)]];
-  [sheet showInView:[self view]];
-}
-
-- (void)actionSheet:(UIActionSheet *)actionSheet
-clickedButtonAtIndex:(NSInteger)buttonIndex
-{
   NSString *modelIdentifier;
   NSError *error;
+  BOOL allow;
 
-  (void)actionSheet;
-  if ((buttonIndex == [actionSheet cancelButtonIndex]) ||
-      ([self pendingModelRow] == nil)) {
-    [self setPendingModelRow:nil];
-    return;
-  }
-
-  modelIdentifier = StrappyStringForModelRow([self pendingModelRow], @"id");
+  (void)indexPath;
+  modelIdentifier = StrappyStringForModelRow(row, @"id");
   if ([modelIdentifier length] == 0U) {
-    [self setPendingModelRow:nil];
     return;
   }
 
   error = nil;
-  if (buttonIndex == [self pendingDefaultButtonIndex]) {
-    if (![StrappySession setDefaultOpenRouterModelIdentifier:modelIdentifier
-                                                       error:&error]) {
-      [self showError:error
-                title:NSLocalizedString(@"Could not set default model", nil)];
-    } else {
-      [self reloadRows];
-    }
-  } else if (buttonIndex == [self pendingToggleButtonIndex]) {
-    BOOL allow;
-
-    allow = [self allowedValueForModelRow:[self pendingModelRow]] ? NO : YES;
-    if (![StrappySession setOpenRouterModelAllowed:allow
-                                forModelIdentifier:modelIdentifier
-                                             error:&error]) {
-      [self showError:error
-                title:NSLocalizedString(@"Could not update model", nil)];
-    } else {
-      [self reloadRows];
-    }
+  allow = [self allowedValueForModelRow:row] ? NO : YES;
+  if (![StrappySession setOpenRouterModelAllowed:allow
+                              forModelIdentifier:modelIdentifier
+                                           error:&error]) {
+    [self showError:error
+              title:NSLocalizedString(@"Could not update model", nil)];
+    return;
   }
-
-  [self setPendingModelRow:nil];
+  [self reloadRows];
 }
 
 - (void)dealloc

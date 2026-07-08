@@ -19,7 +19,9 @@
 - (NSArray *)preparedRowsForRows:(NSArray *)rows;
 - (NSArray *)sortedRows:(NSArray *)rows;
 - (BOOL)row:(NSDictionary *)row matchesSearchText:(NSString *)searchText;
+- (BOOL)rowIsSelected:(NSDictionary *)row;
 - (NSString *)currentSearchText;
+- (NSString *)workingStatusText;
 - (NSString *)statusText;
 - (NSString *)emptyText;
 - (NSString *)actionButtonAccessibilityLabel;

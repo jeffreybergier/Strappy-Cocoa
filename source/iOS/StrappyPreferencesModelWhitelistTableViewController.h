@@ -1,5 +1,5 @@
 #import "StrappyPreferencesWhitelistTableViewController.h"
 
 @interface StrappyPreferencesModelWhitelistTableViewController :
-    StrappyPreferencesWhitelistTableViewController <UIActionSheetDelegate>
+    StrappyPreferencesWhitelistTableViewController
 @end
