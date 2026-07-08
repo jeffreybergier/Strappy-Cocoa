@@ -7,6 +7,10 @@
 #import "XPUIKit.h"
 
 static NSString * const kStrappySessionCellIdentifier = @"StrappySessionCell";
+static const CGFloat kStrappyPromptIconCanvasSize = 14.0f;
+static const CGFloat kStrappyPromptIconSize = 10.0f;
+static const AIFontAwesomeIcon kStrappySessionPromptActiveIcon =
+  AIFAArrowsRotate;
 
 static NSString *StrappySessionPromptPreview(NSDictionary *session)
 {
@@ -68,10 +72,6 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 {
   NSString *timestamp;
 
-  if (StrappySessionPromptIsInFlight(session)) {
-    return NSLocalizedString(@"Prompt in progress", nil);
-  }
-
   timestamp =
     StrappySessionDisplayTimestamp([session objectForKey:@"last_message_at"]);
   if ([timestamp length] > 0U) {
@@ -80,22 +80,26 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   return NSLocalizedString(@"No messages yet", nil);
 }
 
-@interface SessionListViewController ()
+@interface SessionListViewController () <UIAlertViewDelegate>
 @property (nonatomic, copy) NSArray *sessions;
 @property (nonatomic, copy) NSNumber *selectedSessionId;
-@property (nonatomic, copy) NSString *loadErrorText;
 @property (nonatomic, strong) UIBarButtonItem *addButton;
 @property (nonatomic, strong) UIBarButtonItem *settingsButton;
+@property (nonatomic, copy) NSNumber *pendingDeleteSessionIdentifier;
 @property (nonatomic, assign) BOOL creatingSession;
 - (void)strappySessionDidUpdate:(NSNotification *)notification;
 - (void)sessionPromptActivityDidChange:(NSNotification *)notification;
 - (NSIndexPath *)indexPathForSessionIdentifier:(NSNumber *)sessionIdentifier;
 - (NSDictionary *)sessionAtIndexPath:(NSIndexPath *)indexPath;
-- (void)configureEmptyCell:(UITableViewCell *)cell;
+- (BOOL)canDeleteSession:(NSDictionary *)session;
+- (void)confirmDeleteSession:(NSDictionary *)session;
+- (void)deleteSessionIdentifier:(NSNumber *)sessionIdentifier;
+- (UIView *)promptInFlightAccessoryViewForCell:(UITableViewCell *)cell;
 - (void)configureSessionCell:(UITableViewCell *)cell
                      session:(NSDictionary *)session;
 - (void)notifySelectedSession;
 - (void)setControlsEnabled:(BOOL)enabled;
+- (void)showDeleteError:(NSError *)error;
 - (void)showError:(NSError *)error title:(NSString *)title;
 @end
 
@@ -190,10 +194,8 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   sessions = [StrappySession sessionSummariesWithError:&error];
   if (sessions == nil) {
     self.sessions = [NSArray array];
-    self.loadErrorText = [error localizedDescription];
   } else {
     self.sessions = sessions;
-    self.loadErrorText = nil;
   }
 
   [self.tableView reloadData];
@@ -333,6 +335,110 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   return [self.sessions objectAtIndex:row];
 }
 
+- (BOOL)canDeleteSession:(NSDictionary *)session
+{
+  NSNumber *sessionIdentifier;
+
+  if (![session isKindOfClass:[NSDictionary class]]) {
+    return NO;
+  }
+
+  sessionIdentifier = [session objectForKey:@"id"];
+  if (![sessionIdentifier isKindOfClass:[NSNumber class]]) {
+    return NO;
+  }
+
+  if (StrappySessionPromptIsInFlight(session) ||
+      [StrappySession isPromptInFlightForSessionIdentifier:sessionIdentifier]) {
+    return NO;
+  }
+
+  return YES;
+}
+
+- (void)confirmDeleteSession:(NSDictionary *)session
+{
+  NSNumber *sessionIdentifier;
+  NSString *title;
+  NSString *message;
+  UIAlertView *alert;
+
+  if (![self canDeleteSession:session]) {
+    return;
+  }
+
+  sessionIdentifier = [session objectForKey:@"id"];
+  title = StrappySessionPromptPreview(session);
+  message = [NSString stringWithFormat:
+    NSLocalizedString(@"This will permanently delete \"%@\" and all of its messages. This cannot be undone.", nil),
+    title];
+
+  [self setPendingDeleteSessionIdentifier:sessionIdentifier];
+  alert = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Delete Chat?", nil)
+                                     message:message
+                                    delegate:self
+                           cancelButtonTitle:NSLocalizedString(@"Cancel", nil)
+                           otherButtonTitles:NSLocalizedString(@"Delete", nil), nil];
+  [alert show];
+}
+
+- (void)deleteSessionIdentifier:(NSNumber *)sessionIdentifier
+{
+  NSError *error;
+  BOOL wasSelectedSession;
+
+  if (![sessionIdentifier isKindOfClass:[NSNumber class]]) {
+    return;
+  }
+
+  error = nil;
+  if (![StrappySession deleteSessionWithIdentifier:sessionIdentifier
+                                             error:&error]) {
+    [self showDeleteError:error];
+    return;
+  }
+
+  wasSelectedSession =
+    ([[self selectedSessionId] isEqualToNumber:sessionIdentifier] ? YES : NO);
+  if (wasSelectedSession) {
+    [self setSelectedSessionId:nil];
+  }
+
+  [self reloadData];
+  if (wasSelectedSession) {
+    [self notifySelectedSession];
+  }
+}
+
+- (UIView *)promptInFlightAccessoryViewForCell:(UITableViewCell *)cell
+{
+  UIColor *color;
+  UIImage *image;
+  UIImageView *imageView;
+
+  color = [[cell detailTextLabel] textColor];
+  if (color == nil) {
+    color = [UIColor grayColor];
+  }
+
+  image = [AIFontAwesome imageForIcon:kStrappySessionPromptActiveIcon
+                                style:AIFontAwesomeStyleSolid
+                             iconSize:kStrappyPromptIconSize
+                           canvasSize:kStrappyPromptIconCanvasSize
+                                color:color
+                                scale:0.0f];
+  if (image == nil) {
+    return nil;
+  }
+
+  imageView = [[UIImageView alloc] initWithImage:image];
+  [imageView setFrame:CGRectMake(0.0f,
+                                 0.0f,
+                                 kStrappyPromptIconCanvasSize,
+                                 kStrappyPromptIconCanvasSize)];
+  return imageView;
+}
+
 - (void)notifySelectedSession
 {
   NSIndexPath *indexPath;
@@ -348,6 +454,24 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   summary = [self sessionAtIndexPath:indexPath];
   session = [StrappySession sessionWithSummary:summary];
   [self.delegate sessionListViewController:self didSelectSession:session];
+}
+
+- (void)showDeleteError:(NSError *)error
+{
+  NSString *message;
+  UIAlertView *alert;
+
+  message = [error localizedDescription];
+  if ([message length] == 0U) {
+    message = NSLocalizedString(@"The chat could not be deleted.", nil);
+  }
+
+  alert = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Could Not Delete Chat", nil)
+                                     message:message
+                                    delegate:nil
+                           cancelButtonTitle:NSLocalizedString(@"OK", nil)
+                           otherButtonTitles:nil];
+  [alert show];
 }
 
 - (void)showError:(NSError *)error title:(NSString *)title
@@ -383,7 +507,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   if (section != 0) {
     return 0;
   }
-  return ([self.sessions count] > 0U) ? (NSInteger)[self.sessions count] : 1;
+  return (NSInteger)[self.sessions count];
 }
 
 - (NSString *)tableView:(UITableView *)tableView
@@ -409,31 +533,52 @@ titleForHeaderInSection:(NSInteger)section
   }
 
   session = [self sessionAtIndexPath:indexPath];
-  if (session == nil) {
-    [self configureEmptyCell:cell];
-  } else {
-    [self configureSessionCell:cell session:session];
-  }
+  [self configureSessionCell:cell session:session];
   return cell;
 }
 
-- (void)configureEmptyCell:(UITableViewCell *)cell
+- (BOOL)tableView:(UITableView *)tableView
+canEditRowAtIndexPath:(NSIndexPath *)indexPath
 {
-  NSString *detail;
+  (void)tableView;
+  return [self canDeleteSession:[self sessionAtIndexPath:indexPath]];
+}
 
-  detail = self.loadErrorText;
-  if ([detail length] == 0U) {
-    detail = NSLocalizedString(@"Create a conversation to begin.", nil);
+- (UITableViewCellEditingStyle)tableView:(UITableView *)tableView
+ editingStyleForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  (void)tableView;
+  return [self canDeleteSession:[self sessionAtIndexPath:indexPath]]
+    ? UITableViewCellEditingStyleDelete
+    : UITableViewCellEditingStyleNone;
+}
+
+- (NSString *)tableView:(UITableView *)tableView
+titleForDeleteConfirmationButtonForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  (void)tableView;
+  (void)indexPath;
+  return NSLocalizedString(@"Delete", nil);
+}
+
+- (void)tableView:(UITableView *)tableView
+commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
+forRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  NSDictionary *session;
+
+  if (editingStyle != UITableViewCellEditingStyleDelete) {
+    return;
   }
 
-  cell.textLabel.text = ([self.loadErrorText length] > 0U)
-    ? NSLocalizedString(@"Could not load conversations", nil)
-    : NSLocalizedString(@"No conversations yet", nil);
-  cell.detailTextLabel.text = detail;
-  cell.imageView.image = nil;
-  cell.accessoryView = nil;
-  cell.accessoryType = UITableViewCellAccessoryNone;
-  cell.selectionStyle = UITableViewCellSelectionStyleNone;
+  session = [self sessionAtIndexPath:indexPath];
+  if (![self canDeleteSession:session]) {
+    [tableView setEditing:NO animated:YES];
+    return;
+  }
+
+  [tableView setEditing:NO animated:YES];
+  [self confirmDeleteSession:session];
 }
 
 - (void)configureSessionCell:(UITableViewCell *)cell
@@ -442,8 +587,14 @@ titleForHeaderInSection:(NSInteger)section
   [[cell textLabel] setText:StrappySessionPromptPreview(session)];
   [[cell detailTextLabel] setText:StrappySessionSubtitle(session)];
   [[cell imageView] setImage:nil];
-  [cell setAccessoryView:nil];
-  [cell setAccessoryType:UITableViewCellAccessoryNone];
+  if (StrappySessionPromptIsInFlight(session)) {
+    [cell setAccessoryView:[self promptInFlightAccessoryViewForCell:cell]];
+    [cell setAccessoryType:UITableViewCellAccessoryNone];
+  } else {
+    [cell setAccessoryView:nil];
+    [cell setAccessoryType:UITableViewCellAccessoryNone];
+  }
+  [cell setEditingAccessoryType:UITableViewCellAccessoryNone];
   [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
 }
 
@@ -468,6 +619,26 @@ titleForHeaderInSection:(NSInteger)section
   self.selectedSessionId =
     [identifier isKindOfClass:[NSNumber class]] ? identifier : nil;
   [self notifySelectedSession];
+}
+
+#pragma mark - UIAlertViewDelegate
+
+- (void)alertView:(UIAlertView *)alertView
+clickedButtonAtIndex:(NSInteger)buttonIndex
+{
+  NSNumber *sessionIdentifier;
+
+  sessionIdentifier = [self pendingDeleteSessionIdentifier];
+  if (sessionIdentifier == nil) {
+    return;
+  }
+
+  [self setPendingDeleteSessionIdentifier:nil];
+  if (buttonIndex == [alertView cancelButtonIndex]) {
+    return;
+  }
+
+  [self deleteSessionIdentifier:sessionIdentifier];
 }
 
 - (void)dealloc
