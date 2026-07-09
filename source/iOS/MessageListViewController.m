@@ -679,6 +679,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [[self sendBar] setEnabled:(session != nil)];
   [self updateSendingStateFromSession];
   [self updatePromptIdleTimerAssertion];
+  [[self sendBar] setWebSearchEnabled:(session != nil) ?
+    [session webSearchEnabled] : YES];
   [[self sendBar] setStreamingEnabled:(session != nil) ?
     [session streamingEnabled] : NO];
   [[self sendBar] reloadOptionsMenu];
@@ -759,6 +761,11 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (BOOL)streamingEnabled
 {
   return ([self session] != nil) ? [[self session] streamingEnabled] : NO;
+}
+
+- (BOOL)webSearchEnabled
+{
+  return ([self session] != nil) ? [[self session] webSearchEnabled] : YES;
 }
 
 - (void)toggleStreaming:(id)sender
@@ -854,6 +861,36 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
   [self setStatusText:nil];
   [[self sendBar] reloadOptionsMenu];
+  return YES;
+}
+
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
+             setWebSearchEnabled:(BOOL)enabled
+{
+  NSError *error;
+
+  (void)controller;
+  if (![self canToggleStreaming]) {
+    return NO;
+  }
+
+  error = nil;
+  if (![[self session] setWebSearchEnabled:enabled error:&error]) {
+    NSString *message;
+
+    message = [error localizedDescription];
+    if ([message length] == 0U) {
+      message = NSLocalizedString(@"Could not update web search setting.", nil);
+    }
+    [self setStatusText:message];
+    [[self sendBar] setWebSearchEnabled:[[self session] webSearchEnabled]];
+    [self showMessage:message
+                title:NSLocalizedString(@"Web Search Not Changed", nil)];
+    return NO;
+  }
+
+  [[self sendBar] setWebSearchEnabled:[[self session] webSearchEnabled]];
+  [self setStatusText:nil];
   return YES;
 }
 

@@ -12,6 +12,7 @@ extern NSString * const StrappySessionModelCatalogDidChangeNotification;
  @private
   NSNumber     *sessionIdentifier_;
   NSDictionary *cachedSummary_;
+  BOOL          webSearchEnabled_;
   BOOL          streamingEnabled_;
   BOOL          promptInFlight_;
   BOOL          promptCancellationRequested_;
@@ -70,6 +71,8 @@ extern NSString * const StrappySessionModelCatalogDidChangeNotification;
 - (NSArray *)messagesWithError:(NSError **)error;
 - (NSString *)webViewJavaScriptForStreamEvent:(NSDictionary *)event
                                         error:(NSError **)error;
+- (BOOL)webSearchEnabled;
+- (BOOL)setWebSearchEnabled:(BOOL)enabled error:(NSError **)error;
 - (BOOL)streamingEnabled;
 - (BOOL)setStreamingEnabled:(BOOL)enabled error:(NSError **)error;
 - (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error;

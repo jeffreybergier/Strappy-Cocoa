@@ -479,7 +479,8 @@ static int harness_run_fresh_catalog_schema_tests(
          harness_expect_catalog_sql_ok(
            context->catalog_path,
            "SELECT id, name, prompt, response, model, http_status, "
-           "streaming_enabled, created_at FROM sessions LIMIT 0;",
+           "web_search_enabled, streaming_enabled, created_at "
+           "FROM sessions LIMIT 0;",
            "sessions columns") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
@@ -3395,6 +3396,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (strcmp(session.prompt, "") == 0) &&
        (session.response != NULL) &&
        (strcmp(session.response, "") == 0) &&
+       (session.web_search_enabled == 1) &&
        (session.streaming_enabled == 0) &&
        (session.http_status == 0L);
   strappy_session_record_destroy(&session);
@@ -3433,6 +3435,39 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   strappy_session_record_destroy(&session);
   if (!ok) {
     fprintf(stderr, "Session streaming setting was not stored.\n");
+    return 0;
+  }
+
+  error = NULL;
+  ok = strappy_db_update_session_web_search_enabled(context->catalog_path,
+                                                    session_id,
+                                                    0,
+                                                    &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not update session web search setting: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  strappy_session_record_init(&session);
+  ok = strappy_db_load_session(context->catalog_path,
+                               session_id,
+                               &session,
+                               &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not reload web search session setting: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_record_destroy(&session);
+    return 0;
+  }
+  ok = (session.web_search_enabled == 0);
+  strappy_session_record_destroy(&session);
+  if (!ok) {
+    fprintf(stderr, "Session web search setting was not stored.\n");
     return 0;
   }
 
@@ -3606,6 +3641,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (strcmp(session.response, "First answer") == 0) &&
        (session.model != NULL) &&
        (strcmp(session.model, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0) &&
+       (session.web_search_enabled == 0) &&
        (session.streaming_enabled == 1) &&
        (session.http_status == 200L);
   strappy_session_record_destroy(&session);

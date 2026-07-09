@@ -34,6 +34,32 @@ static int harness_expect_string(cJSON *object,
     (strcmp(value->valuestring, expected) == 0);
 }
 
+static int harness_tools_contain_type(cJSON *tools, const char *expected_type)
+{
+  int count;
+  int index;
+
+  if (!cJSON_IsArray(tools) || (expected_type == NULL)) {
+    return 0;
+  }
+
+  count = cJSON_GetArraySize(tools);
+  for (index = 0; index < count; index++) {
+    cJSON *tool;
+    cJSON *type;
+
+    tool = cJSON_GetArrayItem(tools, index);
+    type = cJSON_GetObjectItem(tool, "type");
+    if (cJSON_IsString(type) &&
+        (type->valuestring != NULL) &&
+        (strcmp(type->valuestring, expected_type) == 0)) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
 typedef struct harness_stream_record {
   int content_count;
   int reasoning_count;
@@ -383,6 +409,124 @@ static int harness_test_openrouter_reasoning_request(void)
   cJSON_Delete(root);
   if (!ok) {
     return harness_fail("OpenRouter request did not use unified reasoning.");
+  }
+
+  return 1;
+}
+
+static int harness_test_openrouter_web_search_tool_request(void)
+{
+  strappy_config config;
+  strappy_chat_message message;
+  char *request_json;
+  char *error;
+  cJSON *root;
+  cJSON *tools;
+  cJSON *provider;
+  int ok;
+
+  memset(&config, 0, sizeof(config));
+  memset(&message, 0, sizeof(message));
+  config.api_endpoint = "https://openrouter.ai/api/v1/chat/completions";
+  config.api_model = "google/gemma-4-31b-it";
+  config.guidance_resource_dir = "../shared/Resources";
+  config.web_search_enabled = 1;
+  message.role = "user";
+  message.content = "What happened today?";
+  error = NULL;
+
+  request_json =
+    strappy_client_build_messages_request_json(&config,
+                                               &message,
+                                               1U,
+                                               0,
+                                               &error);
+  if (request_json == NULL) {
+    if (error != NULL) {
+      fprintf(stderr, "%s\n", error);
+      strappy_free_string(error);
+    }
+    return harness_fail("Could not build web search request JSON.");
+  }
+
+  root = cJSON_Parse(request_json);
+  free(request_json);
+  if (root == NULL) {
+    return harness_fail("Web search request JSON was invalid.");
+  }
+
+  tools = cJSON_GetObjectItem(root, "tools");
+  provider = cJSON_GetObjectItem(root, "provider");
+  ok = cJSON_IsArray(tools) &&
+       (cJSON_GetArraySize(tools) > 1) &&
+       harness_tools_contain_type(tools, "function") &&
+       harness_tools_contain_type(tools, "openrouter:web_search") &&
+       harness_tools_contain_type(tools, "openrouter:web_fetch") &&
+       (provider == NULL);
+
+  cJSON_Delete(root);
+  if (!ok) {
+    return harness_fail("OpenRouter web search tool was not appended.");
+  }
+
+  return 1;
+}
+
+static int harness_test_openrouter_web_search_without_local_tools(void)
+{
+  strappy_config config;
+  strappy_chat_message message;
+  char *request_json;
+  char *error;
+  cJSON *root;
+  cJSON *tools;
+  cJSON *tool_choice;
+  cJSON *provider;
+  int ok;
+
+  memset(&config, 0, sizeof(config));
+  memset(&message, 0, sizeof(message));
+  config.api_endpoint = "https://openrouter.ai/api/v1/chat/completions";
+  config.api_model = "google/gemma-4-31b-it";
+  config.web_search_enabled = 1;
+  message.role = "user";
+  message.content = "Search the web.";
+  error = NULL;
+
+  request_json =
+    strappy_client_build_messages_request_json(&config,
+                                               &message,
+                                               1U,
+                                               0,
+                                               &error);
+  if (request_json == NULL) {
+    if (error != NULL) {
+      fprintf(stderr, "%s\n", error);
+      strappy_free_string(error);
+    }
+    return harness_fail("Could not build standalone web search request JSON.");
+  }
+
+  root = cJSON_Parse(request_json);
+  free(request_json);
+  if (root == NULL) {
+    return harness_fail("Standalone web search request JSON was invalid.");
+  }
+
+  tools = cJSON_GetObjectItem(root, "tools");
+  tool_choice = cJSON_GetObjectItem(root, "tool_choice");
+  provider = cJSON_GetObjectItem(root, "provider");
+  ok = cJSON_IsArray(tools) &&
+       (cJSON_GetArraySize(tools) == 2) &&
+       harness_tools_contain_type(tools, "openrouter:web_search") &&
+       harness_tools_contain_type(tools, "openrouter:web_fetch") &&
+       cJSON_IsString(tool_choice) &&
+       (strcmp(tool_choice->valuestring, "auto") == 0) &&
+       (provider == NULL);
+
+  cJSON_Delete(root);
+  if (!ok) {
+    return harness_fail("Standalone OpenRouter web search tool request was wrong.");
   }
 
   return 1;
@@ -1181,6 +1325,14 @@ int main(void)
     return 1;
   }
   if (!harness_test_openrouter_reasoning_request()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_openrouter_web_search_tool_request()) {
+    fprintf(stderr, "client_stream_harness failed.\n");
+    return 1;
+  }
+  if (!harness_test_openrouter_web_search_without_local_tools()) {
     fprintf(stderr, "client_stream_harness failed.\n");
     return 1;
   }

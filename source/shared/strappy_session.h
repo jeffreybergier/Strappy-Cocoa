@@ -72,6 +72,10 @@ int strappy_session_update_streaming_enabled(const char *db_path,
                                              long long session_id,
                                              int streaming_enabled,
                                              char **error_out);
+int strappy_session_update_web_search_enabled(const char *db_path,
+                                              long long session_id,
+                                              int web_search_enabled,
+                                              char **error_out);
 int strappy_session_get_model(const char *db_path,
                               long long session_id,
                               char **model_id_out,

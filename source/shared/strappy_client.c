@@ -451,7 +451,131 @@ static int strappy_client_should_request_stream_usage(const strappy_config *conf
 
 static int strappy_client_should_require_parameters(const strappy_config *config)
 {
+  if ((config != NULL) && config->web_search_enabled) {
+    return 0;
+  }
   return strappy_client_is_openrouter_endpoint(config);
+}
+
+static int strappy_client_should_request_web_search(const strappy_config *config)
+{
+  return ((config != NULL) &&
+          config->web_search_enabled &&
+          strappy_client_is_openrouter_endpoint(config)) ? 1 : 0;
+}
+
+static int strappy_client_append_openrouter_server_tool(cJSON *tools,
+                                                        const char *tool_type,
+                                                        char **error_out)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools)) {
+    strappy_set_error(error_out, "OpenRouter tool list is invalid.");
+    return 0;
+  }
+
+  if ((tool_type == NULL) || (tool_type[0] == '\0')) {
+    strappy_set_error(error_out, "OpenRouter server tool type is missing.");
+    return 0;
+  }
+
+  tool = cJSON_CreateObject();
+  if (tool == NULL) {
+    strappy_set_error(error_out, "Could not allocate OpenRouter server tool.");
+    return 0;
+  }
+
+  if ((cJSON_AddStringToObject(tool, "type", tool_type) == NULL) ||
+      !cJSON_AddItemToArray(tools, tool)) {
+    cJSON_Delete(tool);
+    strappy_set_error(error_out, "Could not add OpenRouter server tool.");
+    return 0;
+  }
+
+  return 1;
+}
+
+static char *strappy_client_append_web_search_tool_json(const char *tools_json,
+                                                       char **error_out)
+{
+  cJSON *tools;
+  char *json;
+
+  if ((tools_json == NULL) || (tools_json[0] == '\0')) {
+    tools = cJSON_CreateArray();
+  } else {
+    tools = cJSON_Parse(tools_json);
+  }
+
+  if (!cJSON_IsArray(tools)) {
+    cJSON_Delete(tools);
+    strappy_set_error(error_out, "OpenRouter tool list is invalid.");
+    return NULL;
+  }
+
+  if (!strappy_client_append_openrouter_server_tool(
+        tools,
+        "openrouter:web_search",
+        error_out) ||
+      !strappy_client_append_openrouter_server_tool(
+        tools,
+        "openrouter:web_fetch",
+        error_out)) {
+    cJSON_Delete(tools);
+    return NULL;
+  }
+
+  json = cJSON_PrintUnformatted(tools);
+  cJSON_Delete(tools);
+  if (json == NULL) {
+    strappy_set_error(error_out, "Could not serialize web search tool list.");
+    return NULL;
+  }
+
+  return json;
+}
+
+static char *strappy_client_request_tools_json(const strappy_config *config,
+                                               char **error_out)
+{
+  char *tools_json;
+
+  if ((config != NULL) &&
+      (config->guidance_resource_dir != NULL) &&
+      (config->guidance_resource_dir[0] != '\0')) {
+    if ((config->tool_allowlist != NULL) &&
+        (config->tool_allowlist_count > 0U)) {
+      tools_json =
+        strappy_tools_request_json_filtered(config->guidance_resource_dir,
+                                            config->tool_allowlist,
+                                            config->tool_allowlist_count,
+                                            error_out);
+    } else {
+      tools_json = strappy_tools_request_json(config->guidance_resource_dir,
+                                              error_out);
+    }
+  } else {
+    tools_json = strappy_string_duplicate("");
+    if (tools_json == NULL) {
+      strappy_set_error(error_out, "Could not allocate empty tool schema list.");
+    }
+  }
+
+  if (tools_json == NULL) {
+    return NULL;
+  }
+
+  if (strappy_client_should_request_web_search(config)) {
+    char *web_tools_json;
+
+    web_tools_json =
+      strappy_client_append_web_search_tool_json(tools_json, error_out);
+    free(tools_json);
+    tools_json = web_tools_json;
+  }
+
+  return tools_json;
 }
 
 static void strappy_client_clear_error(char **error_out)
@@ -1511,7 +1635,13 @@ static int strappy_client_build_metadata_text(strappy_chat_result *result)
              "Upstream inference cost",
              usage_root,
              "cost_details",
-             "upstream_inference_cost");
+             "upstream_inference_cost") &&
+           strappy_client_metadata_append_nested_item(
+             &buffer,
+             "Web search requests",
+             usage_root,
+             "server_tool_use",
+             "web_search_requests");
       cJSON_Delete(usage_root);
     }
   }
@@ -1935,25 +2065,7 @@ static char *strappy_client_build_messages_request_json(
     return NULL;
   }
 
-  if ((config->guidance_resource_dir != NULL) &&
-      (config->guidance_resource_dir[0] != '\0')) {
-    if ((config->tool_allowlist != NULL) &&
-        (config->tool_allowlist_count > 0U)) {
-      tools_json =
-        strappy_tools_request_json_filtered(config->guidance_resource_dir,
-                                            config->tool_allowlist,
-                                            config->tool_allowlist_count,
-                                            error_out);
-    } else {
-      tools_json = strappy_tools_request_json(config->guidance_resource_dir,
-                                              error_out);
-    }
-  } else {
-    tools_json = strappy_string_duplicate("");
-    if (tools_json == NULL) {
-      strappy_set_error(error_out, "Could not allocate empty tool schema list.");
-    }
-  }
+  tools_json = strappy_client_request_tools_json(config, error_out);
   if (tools_json == NULL) {
     return NULL;
   }

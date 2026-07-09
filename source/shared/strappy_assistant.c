@@ -4195,6 +4195,7 @@ static int strappy_assistant_run_learning_summary(
   helper_config.tool_allowlist = helper_tool_allowlist;
   helper_config.tool_allowlist_count =
     sizeof(helper_tool_allowlist) / sizeof(helper_tool_allowlist[0]);
+  helper_config.web_search_enabled = 0;
   emit_events = (callback != NULL) ? 1 : 0;
   helper_started_ms =
     strappy_assistant_callback_processing_started_ms(callback, callback_data);
@@ -4359,6 +4360,28 @@ static int strappy_assistant_apply_selected_model(strappy_config *config,
   return ok;
 }
 
+static int strappy_assistant_apply_session_options(strappy_config *config,
+                                                   const char *session_db_path,
+                                                   long long session_id,
+                                                   char **error_out)
+{
+  strappy_session_record record;
+  int ok;
+
+  if (config == NULL) {
+    strappy_set_error(error_out, "Assistant configuration is missing.");
+    return 0;
+  }
+
+  strappy_session_record_init(&record);
+  ok = strappy_db_load_session(session_db_path, session_id, &record, error_out);
+  if (ok) {
+    config->web_search_enabled = record.web_search_enabled ? 1 : 0;
+  }
+  strappy_session_record_destroy(&record);
+  return ok;
+}
+
 static char *strappy_assistant_send_prompt_for_session_internal(
   const char *prompt,
   const char *env_path,
@@ -4444,6 +4467,19 @@ static char *strappy_assistant_send_prompt_for_session_internal(
                                               session_db_path,
                                               session_id,
                                               error_out)) {
+    strappy_assistant_tool_sequence_destroy(&tool_sequence);
+    strappy_assistant_request_messages_destroy(&request_messages);
+    strappy_session_message_record_list_destroy(&message_list);
+    strappy_chat_result_destroy(&result);
+    strappy_assistant_guidance_destroy(&guidance);
+    strappy_config_destroy(&config);
+    return NULL;
+  }
+
+  if (!strappy_assistant_apply_session_options(&config,
+                                               session_db_path,
+                                               session_id,
+                                               error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_session_message_record_list_destroy(&message_list);
@@ -4938,6 +4974,19 @@ static char *strappy_assistant_stream_prompt_for_session_internal(
                                               session_db_path,
                                               session_id,
                                               error_out)) {
+    strappy_assistant_tool_sequence_destroy(&tool_sequence);
+    strappy_assistant_request_messages_destroy(&request_messages);
+    strappy_session_message_record_list_destroy(&message_list);
+    strappy_chat_result_destroy(&result);
+    strappy_assistant_guidance_destroy(&guidance);
+    strappy_config_destroy(&config);
+    return NULL;
+  }
+
+  if (!strappy_assistant_apply_session_options(&config,
+                                               session_db_path,
+                                               session_id,
+                                               error_out)) {
     strappy_assistant_tool_sequence_destroy(&tool_sequence);
     strappy_assistant_request_messages_destroy(&request_messages);
     strappy_session_message_record_list_destroy(&message_list);

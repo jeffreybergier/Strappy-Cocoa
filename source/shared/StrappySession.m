@@ -213,6 +213,21 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
           [streamingEnabled boolValue]) ? YES : NO;
 }
 
+static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
+{
+  NSNumber *webSearchEnabled;
+
+  if (![summary isKindOfClass:[NSDictionary class]]) {
+    return YES;
+  }
+
+  webSearchEnabled = [summary objectForKey:@"web_search_enabled"];
+  if (![webSearchEnabled isKindOfClass:[NSNumber class]]) {
+    return YES;
+  }
+  return [webSearchEnabled boolValue] ? YES : NO;
+}
+
 @implementation StrappySession
 
 + (NSString *)webViewMessageHTMLForMessage:(NSDictionary *)message
@@ -630,8 +645,10 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 
   if ((self = [super init])) {
     sessionIdentifier_ = [sessionIdentifier retain];
+    webSearchEnabled_ = YES;
     if ([summary isKindOfClass:[NSDictionary class]]) {
       cachedSummary_ = [summary retain];
+      webSearchEnabled_ = StrappySessionWebSearchEnabledFromSummary(summary);
       streamingEnabled_ = StrappySessionStreamingEnabledFromSummary(summary);
     }
   }
@@ -667,6 +684,7 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
       [cachedSummary_ release];
       cachedSummary_ = [summary retain];
     }
+    webSearchEnabled_ = StrappySessionWebSearchEnabledFromSummary(summary);
     streamingEnabled_ = StrappySessionStreamingEnabledFromSummary(summary);
   }
 }
@@ -800,6 +818,7 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 {
   NSNumber *sessionId;
   NSNumber *httpStatus;
+  NSNumber *webSearchEnabled;
   NSNumber *streamingEnabled;
   NSString *name;
   NSString *prompt;
@@ -813,6 +832,8 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
 
   sessionId = [NSNumber numberWithLongLong:record->session_id];
   httpStatus = [NSNumber numberWithLong:record->http_status];
+  webSearchEnabled =
+    [NSNumber numberWithBool:(record->web_search_enabled ? YES : NO)];
   streamingEnabled =
     [NSNumber numberWithBool:(record->streaming_enabled ? YES : NO)];
   name = [StrappySession stringFromCStringOrEmpty:record->name];
@@ -828,6 +849,7 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
     response, @"response",
     model, @"model",
     httpStatus, @"http_status",
+    webSearchEnabled, @"web_search_enabled",
     streamingEnabled, @"streaming_enabled",
     createdAt, @"created_at",
     nil];
@@ -2041,6 +2063,86 @@ static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
     enabled = streamingEnabled_;
   }
   return enabled;
+}
+
+- (BOOL)webSearchEnabled
+{
+  BOOL enabled;
+
+  @synchronized(self) {
+    enabled = webSearchEnabled_;
+  }
+  return enabled;
+}
+
+- (BOOL)setWebSearchEnabled:(BOOL)enabled error:(NSError **)error
+{
+  NSString *databasePath;
+  NSNumber *webSearchEnabled;
+  NSDictionary *notificationSession;
+  char *strappyError;
+  long long sessionId;
+
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  if (sessionId <= 0) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+
+  strappyError = NULL;
+  if (!strappy_session_update_web_search_enabled([databasePath UTF8String],
+                                                 sessionId,
+                                                 enabled ? 1 : 0,
+                                                 &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return NO;
+  }
+
+  webSearchEnabled = [NSNumber numberWithBool:(enabled ? YES : NO)];
+  notificationSession = nil;
+  @synchronized(self) {
+    NSMutableDictionary *summary;
+
+    webSearchEnabled_ = enabled ? YES : NO;
+    if (cachedSummary_ != nil) {
+      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
+      [summary setObject:webSearchEnabled forKey:@"web_search_enabled"];
+      [cachedSummary_ release];
+      cachedSummary_ = summary;
+      notificationSession = [cachedSummary_ retain];
+    } else {
+      notificationSession =
+        [[NSDictionary alloc] initWithObjectsAndKeys:
+          sessionIdentifier_, @"id",
+          webSearchEnabled, @"web_search_enabled",
+          nil];
+    }
+  }
+
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionDidUpdateNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObject:notificationSession
+                                                     forKey:@"session"]];
+  [notificationSession release];
+  return YES;
 }
 
 - (BOOL)setStreamingEnabled:(BOOL)enabled error:(NSError **)error

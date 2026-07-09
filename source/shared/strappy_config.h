@@ -19,6 +19,7 @@ typedef struct strappy_config {
   char *guidance_resource_dir;
   const char * const *tool_allowlist;
   size_t tool_allowlist_count;
+  int web_search_enabled;
 } strappy_config;
 
 void strappy_config_init(strappy_config *config);

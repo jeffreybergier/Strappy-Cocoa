@@ -286,6 +286,7 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
 
 enum {
   kStrappyPromptOptionsSectionModels = 0,
+  kStrappyPromptOptionsSectionWebSearch,
   kStrappyPromptOptionsSectionStreaming,
   kStrappyPromptOptionsSectionCount
 };
@@ -306,6 +307,7 @@ enum {
 @property (nonatomic, assign) BOOL expanded;
 @property (nonatomic, assign) BOOL sending;
 @property (nonatomic, assign) BOOL cancellationRequested;
+@property (nonatomic, assign) BOOL webSearchEnabled;
 @property (nonatomic, assign) BOOL streamingEnabled;
 - (void)buildSubviews;
 - (UIImage *)iconImageForIcon:(AIFontAwesomeIcon)icon
@@ -322,6 +324,7 @@ enum {
 - (NSArray *)currentAllowedModels;
 - (NSString *)currentSelectedModelIdentifier;
 - (BOOL)setSelectedModelIdentifierFromOptions:(NSString *)modelIdentifier;
+- (BOOL)setWebSearchEnabledFromOptions:(BOOL)enabled;
 - (BOOL)setStreamingEnabledFromOptions:(BOOL)enabled;
 - (UIViewController *)containingViewController;
 - (void)dismissOptionsControllerAnimated:(BOOL)animated;
@@ -334,7 +337,9 @@ enum {
 @property (nonatomic, assign) PromptSendViewController *promptSendViewController;
 @property (nonatomic, copy) NSArray *models;
 @property (nonatomic, copy) NSString *selectedModelIdentifier;
+@property (nonatomic, strong) UISwitch *webSearchSwitch;
 @property (nonatomic, strong) UISwitch *streamingSwitch;
+@property (nonatomic, assign) BOOL webSearchEnabled;
 @property (nonatomic, assign) BOOL streamingEnabled;
 - (instancetype)initWithPromptSendViewController:
     (PromptSendViewController *)promptSendViewController;
@@ -356,9 +361,16 @@ enum {
 
 - (void)viewDidLoad
 {
+  UISwitch *webSearchSwitch;
   UISwitch *streamingSwitch;
 
   [super viewDidLoad];
+
+  webSearchSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
+  [webSearchSwitch addTarget:self
+                      action:@selector(webSearchSwitchChanged:)
+            forControlEvents:UIControlEventValueChanged];
+  [self setWebSearchSwitch:webSearchSwitch];
 
   streamingSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
   [streamingSwitch addTarget:self
@@ -390,11 +402,16 @@ enum {
     (promptSendViewController != nil)
       ? [promptSendViewController streamingEnabled]
       : NO];
+  [self setWebSearchEnabled:
+    (promptSendViewController != nil)
+      ? [promptSendViewController webSearchEnabled]
+      : YES];
 }
 
 - (void)reloadOptionsFromPrompt
 {
   [self reloadOptionsSnapshot];
+  [[self webSearchSwitch] setOn:[self webSearchEnabled] animated:NO];
   [[self streamingSwitch] setOn:[self streamingEnabled] animated:NO];
   [[self tableView] reloadData];
 }
@@ -403,6 +420,19 @@ enum {
 {
   (void)sender;
   [[self promptSendViewController] dismissOptionsControllerAnimated:YES];
+}
+
+- (void)webSearchSwitchChanged:(UISwitch *)sender
+{
+  PromptSendViewController *promptSendViewController;
+
+  promptSendViewController = [self promptSendViewController];
+  if (promptSendViewController != nil) {
+    (void)[promptSendViewController setWebSearchEnabledFromOptions:
+      [sender isOn]];
+    [self setWebSearchEnabled:[promptSendViewController webSearchEnabled]];
+  }
+  [sender setOn:[self webSearchEnabled] animated:YES];
 }
 
 - (void)streamingSwitchChanged:(UISwitch *)sender
@@ -431,6 +461,9 @@ enum {
   if (section == kStrappyPromptOptionsSectionModels) {
     return (NSInteger)[[self models] count];
   }
+  if (section == kStrappyPromptOptionsSectionWebSearch) {
+    return 1;
+  }
   if (section == kStrappyPromptOptionsSectionStreaming) {
     return 1;
   }
@@ -444,6 +477,9 @@ titleForHeaderInSection:(NSInteger)section
   if (section == kStrappyPromptOptionsSectionModels) {
     return ([[self models] count] > 0U) ? NSLocalizedString(@"Models", nil) : nil;
   }
+  if (section == kStrappyPromptOptionsSectionWebSearch) {
+    return NSLocalizedString(@"Web Search", nil);
+  }
   if (section == kStrappyPromptOptionsSectionStreaming) {
     return NSLocalizedString(@"Streaming", nil);
   }
@@ -454,6 +490,19 @@ titleForHeaderInSection:(NSInteger)section
          cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
   UITableViewCell *cell;
+
+  if ([indexPath section] == kStrappyPromptOptionsSectionWebSearch) {
+    cell = [tableView dequeueReusableCellWithIdentifier:@"WebSearchCell"];
+    if (cell == nil) {
+      cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
+                                    reuseIdentifier:@"WebSearchCell"];
+      [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+    }
+    [[cell textLabel] setText:NSLocalizedString(@"Search Web", nil)];
+    [[self webSearchSwitch] setOn:[self webSearchEnabled] animated:NO];
+    [cell setAccessoryView:[self webSearchSwitch]];
+    return cell;
+  }
 
   if ([indexPath section] == kStrappyPromptOptionsSectionStreaming) {
     cell = [tableView dequeueReusableCellWithIdentifier:@"StreamingCell"];
@@ -545,6 +594,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     [self setAutoresizingMask:
       UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin];
     [self setControlsEnabled:YES];
+    [self setWebSearchEnabled:YES];
     [self buildSubviews];
   }
   return self;
@@ -815,6 +865,12 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [self updateControls];
 }
 
+- (void)setWebSearchEnabled:(BOOL)enabled
+{
+  _webSearchEnabled = enabled ? YES : NO;
+  [[self optionsController] reloadOptionsFromPrompt];
+}
+
 - (void)setStreamingEnabled:(BOOL)enabled
 {
   _streamingEnabled = enabled ? YES : NO;
@@ -1020,6 +1076,22 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   }
   return [[self delegate] promptSendViewController:self
                        setSelectedModelIdentifier:modelIdentifier];
+}
+
+- (BOOL)setWebSearchEnabledFromOptions:(BOOL)enabled
+{
+  BOOL changed;
+
+  changed = NO;
+  if ([[self delegate] respondsToSelector:
+        @selector(promptSendViewController:setWebSearchEnabled:)]) {
+    changed = [[self delegate] promptSendViewController:self
+                                   setWebSearchEnabled:(enabled ? YES : NO)];
+  }
+  if (changed) {
+    [self setWebSearchEnabled:enabled];
+  }
+  return changed;
 }
 
 - (BOOL)setStreamingEnabledFromOptions:(BOOL)enabled

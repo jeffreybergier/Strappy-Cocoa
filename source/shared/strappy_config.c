@@ -231,6 +231,7 @@ void strappy_config_init(strappy_config *config)
   config->guidance_resource_dir = NULL;
   config->tool_allowlist = NULL;
   config->tool_allowlist_count = 0U;
+  config->web_search_enabled = 0;
 }
 
 void strappy_config_destroy(strappy_config *config)

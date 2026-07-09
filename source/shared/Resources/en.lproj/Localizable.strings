@@ -172,6 +172,7 @@
 "Scan your home folder for SQLite databases." = "Scan your home folder for SQLite databases.";
 "Scanning databases..." = "Scanning databases...";
 "Search" = "Search";
+"Search Web" = "Search Web";
 "Services" = "Services";
 "Session path is not a directory." = "Session path is not a directory.";
 "Show Chat Window" = "Show Chat Window";
@@ -204,3 +205,6 @@
 "This will permanently delete \"%@\" and all of its messages. This cannot be undone." = "This will permanently delete \"%@\" and all of its messages. This cannot be undone.";
 "Transformations" = "Transformations";
 "Use Selection for Find" = "Use Selection for Find";
+"Could not update web search setting." = "Could not update web search setting.";
+"Web Search" = "Web Search";
+"Web Search Not Changed" = "Web Search Not Changed";

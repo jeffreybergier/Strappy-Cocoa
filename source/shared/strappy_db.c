@@ -97,6 +97,7 @@ void strappy_session_record_init(strappy_session_record *record)
   record->response = NULL;
   record->model = NULL;
   record->created_at = NULL;
+  record->web_search_enabled = 1;
   record->streaming_enabled = 0;
   record->http_status = 0L;
 }
@@ -503,6 +504,7 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
     "response TEXT NOT NULL,"
     "model TEXT,"
     "http_status INTEGER NOT NULL DEFAULT 0,"
+    "web_search_enabled INTEGER NOT NULL DEFAULT 1,"
     "streaming_enabled INTEGER NOT NULL DEFAULT 0,"
     "created_at TEXT NOT NULL DEFAULT "
     "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
@@ -935,7 +937,8 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   strappy_session_record_destroy(record);
   record->session_id = (long long)sqlite3_column_int64(stmt, 0);
   record->http_status = (long)sqlite3_column_int64(stmt, 5);
-  record->streaming_enabled = sqlite3_column_int(stmt, 7) ? 1 : 0;
+  record->web_search_enabled = sqlite3_column_int(stmt, 7) ? 1 : 0;
+  record->streaming_enabled = sqlite3_column_int(stmt, 8) ? 1 : 0;
 
   name = strappy_db_column_string(stmt, 1);
   prompt = strappy_db_column_string(stmt, 2);
@@ -5393,13 +5396,75 @@ int strappy_db_save_message_sequence_with_id(
   return 1;
 }
 
+int strappy_db_update_session_web_search_enabled(const char *db_path,
+                                                 long long session_id,
+                                                 int web_search_enabled,
+                                                 char **error_out)
+{
+  static const char *sql =
+    "UPDATE sessions "
+    "SET web_search_enabled = ? "
+    "WHERE id = ?;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_session_exists(db, session_id, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare session web search update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if ((sqlite3_bind_int(stmt, 1, web_search_enabled ? 1 : 0) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) != SQLITE_OK)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind session web search update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not update session web search setting: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  return 1;
+}
+
 int strappy_db_list_sessions(const char *db_path,
                              strappy_session_record_list *list,
                              char **error_out)
 {
   static const char *sql =
     "SELECT id, name, prompt, response, model, http_status, created_at, "
-    "streaming_enabled "
+    "web_search_enabled, streaming_enabled "
     "FROM sessions "
     "ORDER BY id DESC;";
   sqlite3 *db;
@@ -5489,7 +5554,7 @@ int strappy_db_load_session(const char *db_path,
 {
   static const char *sql =
     "SELECT id, name, prompt, response, model, http_status, created_at, "
-    "streaming_enabled "
+    "web_search_enabled, streaming_enabled "
     "FROM sessions "
     "WHERE id = ?;";
   sqlite3 *db;

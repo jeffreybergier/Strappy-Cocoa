@@ -12,6 +12,8 @@
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
         setSelectedModelIdentifier:(NSString *)modelIdentifier;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
+             setWebSearchEnabled:(BOOL)enabled;
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
               setStreamingEnabled:(BOOL)enabled;
 - (void)promptSendViewControllerDidCancelPrompt:
     (PromptSendViewController *)controller;
@@ -28,6 +30,7 @@
 - (void)setEnabled:(BOOL)enabled;
 - (void)setSending:(BOOL)sending;
 - (void)setCancellationRequested:(BOOL)requested;
+- (void)setWebSearchEnabled:(BOOL)enabled;
 - (void)setStreamingEnabled:(BOOL)enabled;
 - (void)reloadOptionsMenu;
 - (BOOL)canSendCurrentPrompt;

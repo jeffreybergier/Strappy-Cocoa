@@ -172,6 +172,7 @@
 "Scan your home folder for SQLite databases." = "ホームフォルダ内の SQLite データベースをスキャンします。";
 "Scanning databases..." = "データベースをスキャン中...";
 "Search" = "検索";
+"Search Web" = "Web を検索";
 "Services" = "サービス";
 "Session path is not a directory." = "セッションパスがディレクトリではありません。";
 "Show Chat Window" = "チャットウインドウを表示";
@@ -204,3 +205,6 @@
 "This will permanently delete \"%@\" and all of its messages. This cannot be undone." = "「%@」とそのすべてのメッセージを完全に削除します。この操作は取り消せません。";
 "Transformations" = "変換";
 "Use Selection for Find" = "選択部分を検索に使用";
+"Could not update web search setting." = "Web 検索設定を更新できませんでした。";
+"Web Search" = "Web 検索";
+"Web Search Not Changed" = "Web 検索は変更されませんでした";
