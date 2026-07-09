@@ -502,6 +502,7 @@ static int harness_run_fresh_catalog_schema_tests(
            "device, inode, is_valid_sqlite, validation_error, scan_status, "
            "user_decision, scan_root, app_group_key, app_name, "
            "app_bundle_id, app_container_path, app_bundle_path, app_source, "
+           "origin_kind, location_tail, "
            "first_seen_at, last_seen_at, last_scanned_at "
            "FROM discovered_databases LIMIT 0;",
            "discovered_databases columns") &&
@@ -1719,6 +1720,30 @@ static int harness_run_empty_database_list_info_tests(
   return ok;
 }
 
+typedef struct harness_scanner_batch_context {
+  const char *catalog_path;
+  const char *scan_root;
+} harness_scanner_batch_context;
+
+static int harness_save_scanner_batch(strappy_file_scanner_record_list *list,
+                                      void *user_data,
+                                      char **error_out)
+{
+  harness_scanner_batch_context *context;
+
+  context = (harness_scanner_batch_context *)user_data;
+  if ((context == NULL) || (context->catalog_path == NULL)) {
+    strappy_set_error(error_out, "Harness scanner batch context is missing.");
+    return 0;
+  }
+
+  return strappy_file_scanner_save_discovered_database_batch(
+    context->catalog_path,
+    list,
+    context->scan_root,
+    error_out);
+}
+
 static int harness_run_discovered_database_replacement_tests(
   const harness_context *context)
 {
@@ -1731,6 +1756,7 @@ static int harness_run_discovered_database_replacement_tests(
   char *first_database_id;
   long long first_catalog_id;
   long long restored_catalog_id;
+  strappy_file_scanner_record_list scanner_batch;
   size_t index;
   int found_first;
   int found_second;
@@ -1790,6 +1816,7 @@ static int harness_run_discovered_database_replacement_tests(
   }
 
   strappy_discovered_database_record_list_init(&list);
+  strappy_file_scanner_record_list_init(&scanner_batch);
   if (!strappy_db_list_discovered_databases(catalog_path, &list, &error)) {
     fprintf(stderr,
             "Could not list replacement scan: %s\n",
@@ -1972,13 +1999,275 @@ static int harness_run_discovered_database_replacement_tests(
     }
   }
   strappy_discovered_database_record_list_destroy(&list);
+
+  if (!ok) {
+    fprintf(stderr,
+            "Hidden update did not preserve database access state.\n");
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  if (!strappy_db_replace_discovered_databases_for_scan_root(catalog_path,
+                                                             NULL,
+                                                             0U,
+                                                             context->temp_dir,
+                                                             &error)) {
+    fprintf(stderr,
+            "Could not clear replacement scan before batch save: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  scanner_batch.records =
+    (strappy_file_scanner_record *)calloc(1U,
+                                          sizeof(strappy_file_scanner_record));
+  if (scanner_batch.records == NULL) {
+    fprintf(stderr, "Could not allocate scanner batch records.\n");
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+  scanner_batch.count = 1U;
+  strappy_file_scanner_record_init(&scanner_batch.records[0]);
+  scanner_batch.records[0].path = strappy_string_duplicate(first_path);
+  scanner_batch.records[0].size = 300;
+  scanner_batch.records[0].modified_at = 3;
+  scanner_batch.records[0].device = 1ULL;
+  scanner_batch.records[0].inode = 30ULL;
+  scanner_batch.records[0].is_valid_sqlite = 1;
+  scanner_batch.records[0].origin_kind = strappy_string_duplicate("documents");
+  scanner_batch.records[0].location_tail =
+    strappy_string_duplicate("first.sqlite");
+  scanner_batch.records[0].hidden = 1;
+  if ((scanner_batch.records[0].path == NULL) ||
+      (scanner_batch.records[0].origin_kind == NULL) ||
+      (scanner_batch.records[0].location_tail == NULL)) {
+    fprintf(stderr, "Could not allocate scanner batch record fields.\n");
+    strappy_file_scanner_record_list_destroy(&scanner_batch);
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  if (!strappy_file_scanner_save_discovered_database_batch(catalog_path,
+                                                           &scanner_batch,
+                                                           context->temp_dir,
+                                                           &error)) {
+    fprintf(stderr,
+            "Could not save scanner batch: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    strappy_file_scanner_record_list_destroy(&scanner_batch);
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+  strappy_file_scanner_record_list_destroy(&scanner_batch);
+
+  strappy_discovered_database_record_list_init(&list);
+  if (!strappy_db_list_discovered_databases(catalog_path, &list, &error)) {
+    fprintf(stderr,
+            "Could not list scanner batch state restore: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
+
+  ok = 0;
+  for (index = 0U; index < list.count; index++) {
+    if ((list.records[index].path != NULL) &&
+        (strcmp(list.records[index].path, first_path) == 0) &&
+        (list.records[index].user_decision != NULL) &&
+        (strcmp(list.records[index].user_decision, "allowed") == 0) &&
+        (list.records[index].assistant_database_id != NULL) &&
+        (strcmp(list.records[index].assistant_database_id,
+                first_database_id) == 0) &&
+        (list.records[index].hidden == 0)) {
+      ok = 1;
+      break;
+    }
+  }
+  strappy_discovered_database_record_list_destroy(&list);
   free(first_database_id);
   harness_unlink_sqlite_files(catalog_path);
 
   if (!ok) {
     fprintf(stderr,
-            "Hidden update did not preserve database access state.\n");
+            "Scanner batch save did not restore database access state.\n");
   }
+  return ok;
+}
+
+static int harness_run_file_scanner_batch_catalog_tests(
+  const harness_context *context)
+{
+  char catalog_path[1200];
+  char scan_root[1200];
+  char documents_dir[1200];
+  char first_path[1200];
+  char stale_path[1200];
+  strappy_discovered_database_input stale_input;
+  strappy_discovered_database_record_list catalog_list;
+  strappy_file_scanner_options options;
+  strappy_file_scanner_record_list scan_list;
+  harness_scanner_batch_context batch_context;
+  char *error;
+  size_t index;
+  int found_first;
+  int found_stale;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  if (!harness_join_path(catalog_path,
+                         sizeof(catalog_path),
+                         context->temp_dir,
+                         "batch-catalog.sqlite") ||
+      !harness_join_path(scan_root,
+                         sizeof(scan_root),
+                         context->temp_dir,
+                         "batch-scan-root") ||
+      !harness_join_path(documents_dir,
+                         sizeof(documents_dir),
+                         scan_root,
+                         "Documents") ||
+      !harness_join_path(first_path,
+                         sizeof(first_path),
+                         documents_dir,
+                         "first.sqlite") ||
+      !harness_join_path(stale_path,
+                         sizeof(stale_path),
+                         documents_dir,
+                         "stale.sqlite")) {
+    fprintf(stderr, "Could not build batch scanner test paths.\n");
+    return 0;
+  }
+
+  harness_unlink_sqlite_files(catalog_path);
+  harness_unlink_sqlite_files(first_path);
+  harness_unlink_sqlite_files(stale_path);
+
+  if (!harness_ensure_directory(scan_root, "mkdir batch scan root") ||
+      !harness_ensure_directory(documents_dir, "mkdir batch Documents") ||
+      !harness_create_user_database(first_path)) {
+    harness_unlink_sqlite_files(catalog_path);
+    harness_unlink_sqlite_files(first_path);
+    return 0;
+  }
+
+  strappy_discovered_database_record_list_init(&catalog_list);
+  strappy_file_scanner_record_list_init(&scan_list);
+  error = NULL;
+
+  strappy_file_scanner_options_init(&options);
+  options.root_path = scan_root;
+  options.validate_candidates = 1;
+  if (strappy_file_scanner_scan_and_save_discovered_databases(catalog_path,
+                                                              &options,
+                                                              &scan_list,
+                                                              &error)) {
+    fprintf(stderr, "Batch catalog scan unexpectedly accepted non-batch options.\n");
+    strappy_file_scanner_record_list_destroy(&scan_list);
+    harness_unlink_sqlite_files(catalog_path);
+    harness_unlink_sqlite_files(first_path);
+    return 0;
+  }
+  free(error);
+  error = NULL;
+
+  memset(&stale_input, 0, sizeof(stale_input));
+  stale_input.path = stale_path;
+  stale_input.size = 100;
+  stale_input.modified_at = 1;
+  stale_input.device = 1ULL;
+  stale_input.inode = 10ULL;
+  stale_input.is_valid_sqlite = 1;
+  stale_input.scan_root = scan_root;
+  if (!strappy_db_replace_discovered_databases_for_scan_root(catalog_path,
+                                                             &stale_input,
+                                                             1U,
+                                                             scan_root,
+                                                             &error)) {
+    fprintf(stderr,
+            "Could not seed batch scanner stale row: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    strappy_file_scanner_record_list_destroy(&scan_list);
+    harness_unlink_sqlite_files(catalog_path);
+    harness_unlink_sqlite_files(first_path);
+    return 0;
+  }
+
+  batch_context.catalog_path = catalog_path;
+  batch_context.scan_root = scan_root;
+  options.record_batch_size = 1U;
+  options.record_batch_callback = harness_save_scanner_batch;
+  options.record_batch_user_data = &batch_context;
+  if (!strappy_file_scanner_scan_and_save_discovered_databases(catalog_path,
+                                                               &options,
+                                                               &scan_list,
+                                                               &error)) {
+    fprintf(stderr,
+            "Could not run batch catalog scanner: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    strappy_file_scanner_record_list_destroy(&scan_list);
+    harness_unlink_sqlite_files(catalog_path);
+    harness_unlink_sqlite_files(first_path);
+    return 0;
+  }
+  if ((scan_list.records != NULL) || (scan_list.count != 0U)) {
+    fprintf(stderr, "Batch catalog scanner left unflushed records.\n");
+    strappy_file_scanner_record_list_destroy(&scan_list);
+    harness_unlink_sqlite_files(catalog_path);
+    harness_unlink_sqlite_files(first_path);
+    return 0;
+  }
+
+  if (!strappy_db_list_discovered_databases(catalog_path, &catalog_list, &error)) {
+    fprintf(stderr,
+            "Could not list batch scanner catalog: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    strappy_file_scanner_record_list_destroy(&scan_list);
+    harness_unlink_sqlite_files(catalog_path);
+    harness_unlink_sqlite_files(first_path);
+    return 0;
+  }
+
+  found_first = 0;
+  found_stale = 0;
+  for (index = 0U; index < catalog_list.count; index++) {
+    if ((catalog_list.records[index].path != NULL) &&
+        (strcmp(catalog_list.records[index].path, first_path) == 0)) {
+      found_first = 1;
+    }
+    if ((catalog_list.records[index].path != NULL) &&
+        (strcmp(catalog_list.records[index].path, stale_path) == 0)) {
+      found_stale = 1;
+    }
+  }
+
+  ok = (found_first && !found_stale) ? 1 : 0;
+  if (!ok) {
+    fprintf(stderr, "Batch catalog scanner did not replace stale rows correctly.\n");
+  }
+
+  strappy_discovered_database_record_list_destroy(&catalog_list);
+  strappy_file_scanner_record_list_destroy(&scan_list);
+  harness_unlink_sqlite_files(catalog_path);
+  harness_unlink_sqlite_files(first_path);
+  harness_unlink_sqlite_files(stale_path);
+  rmdir(documents_dir);
+  rmdir(scan_root);
   return ok;
 }
 
@@ -1990,8 +2279,26 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
   char library_dir[1200];
   char caches_dir[1200];
   char cache_owner_dir[1200];
+  char app_private_dir[1200];
+  char app_var_dir[1200];
+  char app_mobile_dir[1200];
+  char app_containers_dir[1200];
+  char app_data_dir[1200];
+  char app_application_dir[1200];
+  char app_uuid_dir[1200];
+  char app_library_dir[1200];
+  char app_preferences_dir[1200];
+  char apple_bundle_dir[1200];
+  char apple_templates_dir[1200];
+  char apple_template_dir[1200];
+  char third_party_bundle_dir[1200];
+  char third_party_templates_dir[1200];
+  char third_party_template_dir[1200];
   char normal_path[1200];
   char cache_path[1200];
+  char app_library_path[1200];
+  char apple_index_path[1200];
+  char third_party_index_path[1200];
   strappy_file_scanner_options options;
   strappy_file_scanner_record_list scan_list;
   strappy_discovered_database_record_list catalog_list;
@@ -1999,6 +2306,9 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
   size_t index;
   int found_normal;
   int found_cache;
+  int found_app_library;
+  int found_apple_index;
+  int found_third_party_index;
   int ok;
 
   if (context == NULL) {
@@ -2011,13 +2321,34 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
   library_dir[0] = '\0';
   caches_dir[0] = '\0';
   cache_owner_dir[0] = '\0';
+  app_private_dir[0] = '\0';
+  app_var_dir[0] = '\0';
+  app_mobile_dir[0] = '\0';
+  app_containers_dir[0] = '\0';
+  app_data_dir[0] = '\0';
+  app_application_dir[0] = '\0';
+  app_uuid_dir[0] = '\0';
+  app_library_dir[0] = '\0';
+  app_preferences_dir[0] = '\0';
+  apple_bundle_dir[0] = '\0';
+  apple_templates_dir[0] = '\0';
+  apple_template_dir[0] = '\0';
+  third_party_bundle_dir[0] = '\0';
+  third_party_templates_dir[0] = '\0';
+  third_party_template_dir[0] = '\0';
   normal_path[0] = '\0';
   cache_path[0] = '\0';
+  app_library_path[0] = '\0';
+  apple_index_path[0] = '\0';
+  third_party_index_path[0] = '\0';
   strappy_file_scanner_record_list_init(&scan_list);
   strappy_discovered_database_record_list_init(&catalog_list);
   error = NULL;
   found_normal = 0;
   found_cache = 0;
+  found_app_library = 0;
+  found_apple_index = 0;
+  found_third_party_index = 0;
   ok = 0;
 
   if (!harness_join_path(catalog_path,
@@ -2051,7 +2382,79 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
       !harness_join_path(cache_path,
                          sizeof(cache_path),
                          cache_owner_dir,
-                         "Cache.db")) {
+                         "Cache.db") ||
+      !harness_join_path(app_private_dir,
+                         sizeof(app_private_dir),
+                         scan_root,
+                         "private") ||
+      !harness_join_path(app_var_dir,
+                         sizeof(app_var_dir),
+                         app_private_dir,
+                         "var") ||
+      !harness_join_path(app_mobile_dir,
+                         sizeof(app_mobile_dir),
+                         app_var_dir,
+                         "mobile") ||
+      !harness_join_path(app_containers_dir,
+                         sizeof(app_containers_dir),
+                         app_mobile_dir,
+                         "Containers") ||
+      !harness_join_path(app_data_dir,
+                         sizeof(app_data_dir),
+                         app_containers_dir,
+                         "Data") ||
+      !harness_join_path(app_application_dir,
+                         sizeof(app_application_dir),
+                         app_data_dir,
+                         "Application") ||
+      !harness_join_path(app_uuid_dir,
+                         sizeof(app_uuid_dir),
+                         app_application_dir,
+                         "00000000-0000-0000-0000-000000000000") ||
+      !harness_join_path(app_library_dir,
+                         sizeof(app_library_dir),
+                         app_uuid_dir,
+                         "Library") ||
+      !harness_join_path(app_preferences_dir,
+                         sizeof(app_preferences_dir),
+                         app_library_dir,
+                         "Preferences") ||
+      !harness_join_path(app_library_path,
+                         sizeof(app_library_path),
+                         app_preferences_dir,
+                         "UserData.sqlite") ||
+      !harness_join_path(apple_bundle_dir,
+                         sizeof(apple_bundle_dir),
+                         scan_root,
+                         "Apple.app") ||
+      !harness_join_path(apple_templates_dir,
+                         sizeof(apple_templates_dir),
+                         apple_bundle_dir,
+                         "Templates") ||
+      !harness_join_path(apple_template_dir,
+                         sizeof(apple_template_dir),
+                         apple_templates_dir,
+                         "Report") ||
+      !harness_join_path(apple_index_path,
+                         sizeof(apple_index_path),
+                         apple_template_dir,
+                         "index.db") ||
+      !harness_join_path(third_party_bundle_dir,
+                         sizeof(third_party_bundle_dir),
+                         scan_root,
+                         "ThirdParty.app") ||
+      !harness_join_path(third_party_templates_dir,
+                         sizeof(third_party_templates_dir),
+                         third_party_bundle_dir,
+                         "Templates") ||
+      !harness_join_path(third_party_template_dir,
+                         sizeof(third_party_template_dir),
+                         third_party_templates_dir,
+                         "Report") ||
+      !harness_join_path(third_party_index_path,
+                         sizeof(third_party_index_path),
+                         third_party_template_dir,
+                         "index-iso.db")) {
     fprintf(stderr, "Could not build scanner hidden test paths.\n");
     goto cleanup;
   }
@@ -2060,12 +2463,36 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
       !harness_ensure_directory(normal_dir, "mkdir scanner Documents") ||
       !harness_ensure_directory(library_dir, "mkdir scanner Library") ||
       !harness_ensure_directory(caches_dir, "mkdir scanner Caches") ||
-      !harness_ensure_directory(cache_owner_dir, "mkdir scanner cache owner")) {
+      !harness_ensure_directory(cache_owner_dir, "mkdir scanner cache owner") ||
+      !harness_ensure_directory(app_private_dir, "mkdir scanner private") ||
+      !harness_ensure_directory(app_var_dir, "mkdir scanner var") ||
+      !harness_ensure_directory(app_mobile_dir, "mkdir scanner mobile") ||
+      !harness_ensure_directory(app_containers_dir, "mkdir scanner Containers") ||
+      !harness_ensure_directory(app_data_dir, "mkdir scanner Data") ||
+      !harness_ensure_directory(app_application_dir, "mkdir scanner Application") ||
+      !harness_ensure_directory(app_uuid_dir, "mkdir scanner app uuid") ||
+      !harness_ensure_directory(app_library_dir, "mkdir scanner app Library") ||
+      !harness_ensure_directory(app_preferences_dir,
+                                "mkdir scanner app Preferences") ||
+      !harness_ensure_directory(apple_bundle_dir, "mkdir scanner Apple app") ||
+      !harness_ensure_directory(apple_templates_dir,
+                                "mkdir scanner Apple templates") ||
+      !harness_ensure_directory(apple_template_dir,
+                                "mkdir scanner Apple template") ||
+      !harness_ensure_directory(third_party_bundle_dir,
+                                "mkdir scanner third-party app") ||
+      !harness_ensure_directory(third_party_templates_dir,
+                                "mkdir scanner third-party templates") ||
+      !harness_ensure_directory(third_party_template_dir,
+                                "mkdir scanner third-party template")) {
     goto cleanup;
   }
 
   if (!harness_create_user_database(normal_path) ||
-      !harness_create_user_database(cache_path)) {
+      !harness_create_user_database(cache_path) ||
+      !harness_create_user_database(app_library_path) ||
+      !harness_create_user_database(apple_index_path) ||
+      !harness_create_user_database(third_party_index_path)) {
     goto cleanup;
   }
 
@@ -2084,15 +2511,90 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
   for (index = 0U; index < scan_list.count; index++) {
     if ((scan_list.records[index].path != NULL) &&
         (strcmp(scan_list.records[index].path, normal_path) == 0)) {
-      found_normal = (scan_list.records[index].hidden == 0) ? 1 : 0;
+      found_normal =
+        ((scan_list.records[index].hidden == 0) &&
+         (scan_list.records[index].origin_kind != NULL) &&
+         (strcmp(scan_list.records[index].origin_kind, "documents") == 0) &&
+         (scan_list.records[index].location_tail != NULL) &&
+         (strcmp(scan_list.records[index].location_tail, "primary.sqlite") == 0)) ?
+        1 : 0;
     }
     if ((scan_list.records[index].path != NULL) &&
         (strcmp(scan_list.records[index].path, cache_path) == 0)) {
-      found_cache = (scan_list.records[index].hidden == 1) ? 1 : 0;
+      found_cache =
+        ((scan_list.records[index].hidden == 1) &&
+         (scan_list.records[index].origin_kind != NULL) &&
+         (strcmp(scan_list.records[index].origin_kind, "cache") == 0) &&
+         (scan_list.records[index].location_tail != NULL) &&
+         (strcmp(scan_list.records[index].location_tail,
+                 "com.example.CacheOwner/Cache.db") == 0)) ? 1 : 0;
+    }
+    if ((scan_list.records[index].path != NULL) &&
+        (strcmp(scan_list.records[index].path, app_library_path) == 0)) {
+      found_app_library =
+        ((scan_list.records[index].hidden == 0) &&
+         (scan_list.records[index].origin_kind != NULL) &&
+         (strcmp(scan_list.records[index].origin_kind, "app_library") == 0) &&
+         (scan_list.records[index].location_tail != NULL) &&
+         (strcmp(scan_list.records[index].location_tail,
+                 "Preferences/UserData.sqlite") == 0)) ? 1 : 0;
+    }
+    if ((scan_list.records[index].path != NULL) &&
+        (strcmp(scan_list.records[index].path, apple_index_path) == 0)) {
+      if (!strappy_file_scanner_record_set_app_metadata(
+            &scan_list.records[index],
+            "bundle:com.apple.TestApp",
+            "Apple Test",
+            "com.apple.TestApp",
+            NULL,
+            apple_bundle_dir,
+            "test",
+            &error)) {
+        fprintf(stderr,
+                "Could not set Apple index metadata: %s\n",
+                (error != NULL) ? error : "unknown");
+        free(error);
+        error = NULL;
+        goto cleanup;
+      }
+      found_apple_index =
+        ((scan_list.records[index].hidden == 1) &&
+         (scan_list.records[index].origin_kind != NULL) &&
+         (strcmp(scan_list.records[index].origin_kind, "app_bundle") == 0) &&
+         (scan_list.records[index].location_tail != NULL) &&
+         (strcmp(scan_list.records[index].location_tail,
+                 "Apple.app/Templates/Report/index.db") == 0)) ? 1 : 0;
+    }
+    if ((scan_list.records[index].path != NULL) &&
+        (strcmp(scan_list.records[index].path, third_party_index_path) == 0)) {
+      if (!strappy_file_scanner_record_set_app_metadata(
+            &scan_list.records[index],
+            "bundle:com.example.TestApp",
+            "Example Test",
+            "com.example.TestApp",
+            NULL,
+            third_party_bundle_dir,
+            "test",
+            &error)) {
+        fprintf(stderr,
+                "Could not set third-party index metadata: %s\n",
+                (error != NULL) ? error : "unknown");
+        free(error);
+        error = NULL;
+        goto cleanup;
+      }
+      found_third_party_index =
+        ((scan_list.records[index].hidden == 0) &&
+         (scan_list.records[index].origin_kind != NULL) &&
+         (strcmp(scan_list.records[index].origin_kind, "app_bundle") == 0) &&
+         (scan_list.records[index].location_tail != NULL) &&
+         (strcmp(scan_list.records[index].location_tail,
+                 "ThirdParty.app/Templates/Report/index-iso.db") == 0)) ? 1 : 0;
     }
   }
-  if (!found_normal || !found_cache) {
-    fprintf(stderr, "Scanner hidden classification did not match expected paths.\n");
+  if (!found_normal || !found_cache || !found_app_library ||
+      !found_apple_index || !found_third_party_index) {
+    fprintf(stderr, "Scanner display classification did not match expected paths.\n");
     goto cleanup;
   }
 
@@ -2121,18 +2623,64 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
 
   found_normal = 0;
   found_cache = 0;
+  found_app_library = 0;
+  found_apple_index = 0;
+  found_third_party_index = 0;
   for (index = 0U; index < catalog_list.count; index++) {
     if ((catalog_list.records[index].path != NULL) &&
         (strcmp(catalog_list.records[index].path, normal_path) == 0)) {
-      found_normal = (catalog_list.records[index].hidden == 0) ? 1 : 0;
+      found_normal =
+        ((catalog_list.records[index].hidden == 0) &&
+         (catalog_list.records[index].origin_kind != NULL) &&
+         (strcmp(catalog_list.records[index].origin_kind, "documents") == 0) &&
+         (catalog_list.records[index].location_tail != NULL) &&
+         (strcmp(catalog_list.records[index].location_tail,
+                 "primary.sqlite") == 0)) ? 1 : 0;
     }
     if ((catalog_list.records[index].path != NULL) &&
         (strcmp(catalog_list.records[index].path, cache_path) == 0)) {
-      found_cache = (catalog_list.records[index].hidden == 1) ? 1 : 0;
+      found_cache =
+        ((catalog_list.records[index].hidden == 1) &&
+         (catalog_list.records[index].origin_kind != NULL) &&
+         (strcmp(catalog_list.records[index].origin_kind, "cache") == 0) &&
+         (catalog_list.records[index].location_tail != NULL) &&
+         (strcmp(catalog_list.records[index].location_tail,
+                 "com.example.CacheOwner/Cache.db") == 0)) ? 1 : 0;
+    }
+    if ((catalog_list.records[index].path != NULL) &&
+        (strcmp(catalog_list.records[index].path, app_library_path) == 0)) {
+      found_app_library =
+        ((catalog_list.records[index].hidden == 0) &&
+         (catalog_list.records[index].origin_kind != NULL) &&
+         (strcmp(catalog_list.records[index].origin_kind, "app_library") == 0) &&
+         (catalog_list.records[index].location_tail != NULL) &&
+         (strcmp(catalog_list.records[index].location_tail,
+                 "Preferences/UserData.sqlite") == 0)) ? 1 : 0;
+    }
+    if ((catalog_list.records[index].path != NULL) &&
+        (strcmp(catalog_list.records[index].path, apple_index_path) == 0)) {
+      found_apple_index =
+        ((catalog_list.records[index].hidden == 1) &&
+         (catalog_list.records[index].origin_kind != NULL) &&
+         (strcmp(catalog_list.records[index].origin_kind, "app_bundle") == 0) &&
+         (catalog_list.records[index].location_tail != NULL) &&
+         (strcmp(catalog_list.records[index].location_tail,
+                 "Apple.app/Templates/Report/index.db") == 0)) ? 1 : 0;
+    }
+    if ((catalog_list.records[index].path != NULL) &&
+        (strcmp(catalog_list.records[index].path, third_party_index_path) == 0)) {
+      found_third_party_index =
+        ((catalog_list.records[index].hidden == 0) &&
+         (catalog_list.records[index].origin_kind != NULL) &&
+         (strcmp(catalog_list.records[index].origin_kind, "app_bundle") == 0) &&
+         (catalog_list.records[index].location_tail != NULL) &&
+         (strcmp(catalog_list.records[index].location_tail,
+                 "ThirdParty.app/Templates/Report/index-iso.db") == 0)) ? 1 : 0;
     }
   }
-  if (!found_normal || !found_cache) {
-    fprintf(stderr, "Scanner hidden state was not persisted to the catalog.\n");
+  if (!found_normal || !found_cache || !found_app_library ||
+      !found_apple_index || !found_third_party_index) {
+    fprintf(stderr, "Scanner display metadata was not persisted to the catalog.\n");
     goto cleanup;
   }
 
@@ -2144,7 +2692,55 @@ cleanup:
   strappy_discovered_database_record_list_destroy(&catalog_list);
   harness_unlink_sqlite_files(normal_path);
   harness_unlink_sqlite_files(cache_path);
+  harness_unlink_sqlite_files(app_library_path);
+  harness_unlink_sqlite_files(apple_index_path);
+  harness_unlink_sqlite_files(third_party_index_path);
   harness_unlink_sqlite_files(catalog_path);
+  if (third_party_template_dir[0] != '\0') {
+    rmdir(third_party_template_dir);
+  }
+  if (third_party_templates_dir[0] != '\0') {
+    rmdir(third_party_templates_dir);
+  }
+  if (third_party_bundle_dir[0] != '\0') {
+    rmdir(third_party_bundle_dir);
+  }
+  if (apple_template_dir[0] != '\0') {
+    rmdir(apple_template_dir);
+  }
+  if (apple_templates_dir[0] != '\0') {
+    rmdir(apple_templates_dir);
+  }
+  if (apple_bundle_dir[0] != '\0') {
+    rmdir(apple_bundle_dir);
+  }
+  if (app_preferences_dir[0] != '\0') {
+    rmdir(app_preferences_dir);
+  }
+  if (app_library_dir[0] != '\0') {
+    rmdir(app_library_dir);
+  }
+  if (app_uuid_dir[0] != '\0') {
+    rmdir(app_uuid_dir);
+  }
+  if (app_application_dir[0] != '\0') {
+    rmdir(app_application_dir);
+  }
+  if (app_data_dir[0] != '\0') {
+    rmdir(app_data_dir);
+  }
+  if (app_containers_dir[0] != '\0') {
+    rmdir(app_containers_dir);
+  }
+  if (app_mobile_dir[0] != '\0') {
+    rmdir(app_mobile_dir);
+  }
+  if (app_var_dir[0] != '\0') {
+    rmdir(app_var_dir);
+  }
+  if (app_private_dir[0] != '\0') {
+    rmdir(app_private_dir);
+  }
   if (cache_owner_dir[0] != '\0') {
     rmdir(cache_owner_dir);
   }
@@ -4141,6 +4737,7 @@ int main(void)
        harness_make_temp_dir(&context) &&
        harness_run_fresh_catalog_schema_tests(&context) &&
        harness_run_discovered_database_replacement_tests(&context) &&
+       harness_run_file_scanner_batch_catalog_tests(&context) &&
        harness_run_file_scanner_hidden_tests(&context) &&
        harness_run_empty_database_list_info_tests(&context) &&
        harness_create_user_database(context.database_path) &&

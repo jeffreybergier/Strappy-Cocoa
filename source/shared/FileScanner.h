@@ -1,8 +1,15 @@
 #import <Foundation/Foundation.h>
 
+extern NSString * const FileScannerDatabaseCatalogScanDidStartNotification;
+extern NSString * const FileScannerDatabaseCatalogScanDidFinishNotification;
+extern NSString * const FileScannerDatabaseCatalogDidChangeNotification;
+
 @interface FileScanner : NSObject
 
 + (FileScanner *)sharedScanner;
++ (BOOL)isDatabaseCatalogScanInFlight;
++ (BOOL)beginDatabaseCatalogScanAtPath:(NSString *)path
+                                 error:(NSError **)error;
 - (NSArray *)scanHomeDirectoryForSQLiteDatabasesWithError:(NSError **)error;
 - (NSArray *)scanDirectoryForSQLiteDatabasesAtPath:(NSString *)path
                                              error:(NSError **)error;

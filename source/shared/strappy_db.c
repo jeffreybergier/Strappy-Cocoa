@@ -252,6 +252,8 @@ void strappy_discovered_database_record_init(strappy_discovered_database_record 
   record->app_container_path = NULL;
   record->app_bundle_path = NULL;
   record->app_source = NULL;
+  record->origin_kind = NULL;
+  record->location_tail = NULL;
   record->hidden = 0;
   record->first_seen_at = NULL;
   record->last_seen_at = NULL;
@@ -276,6 +278,8 @@ void strappy_discovered_database_record_destroy(strappy_discovered_database_reco
   free(record->app_container_path);
   free(record->app_bundle_path);
   free(record->app_source);
+  free(record->origin_kind);
+  free(record->location_tail);
   free(record->first_seen_at);
   free(record->last_seen_at);
   free(record->last_scanned_at);
@@ -581,6 +585,8 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
     "app_container_path TEXT,"
     "app_bundle_path TEXT,"
     "app_source TEXT,"
+    "origin_kind TEXT NOT NULL DEFAULT 'other',"
+    "location_tail TEXT,"
     "first_seen_at TEXT NOT NULL DEFAULT "
     "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
     "last_seen_at TEXT NOT NULL DEFAULT "
@@ -1096,6 +1102,18 @@ static const char *strappy_db_scan_status_for_input(
   return "candidate";
 }
 
+static const char *strappy_db_origin_kind_for_input(
+  const strappy_discovered_database_input *record)
+{
+  if ((record != NULL) &&
+      (record->origin_kind != NULL) &&
+      (record->origin_kind[0] != '\0')) {
+    return record->origin_kind;
+  }
+
+  return "other";
+}
+
 static int strappy_db_is_valid_user_decision(const char *user_decision)
 {
   if (user_decision == NULL) {
@@ -1511,8 +1529,8 @@ static int strappy_db_insert_discovered_database(
     "(path, size, modified_at, device, inode, is_valid_sqlite, "
     "validation_error, scan_status, user_decision, scan_root, "
     "app_group_key, app_name, app_bundle_id, app_container_path, "
-    "app_bundle_path, app_source) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unknown', ?, ?, ?, ?, ?, ?, ?);";
+    "app_bundle_path, app_source, origin_kind, location_tail) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unknown', ?, ?, ?, ?, ?, ?, ?, ?, ?);";
   sqlite3_stmt *stmt;
   const char *scan_status;
   int rc;
@@ -1620,6 +1638,22 @@ static int strappy_db_insert_discovered_database(
                                            error_out)) {
     ok = 0;
   }
+  if (ok &&
+      (sqlite3_bind_text(stmt,
+                         16,
+                         strappy_db_origin_kind_for_input(record),
+                         -1,
+                         SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           17,
+                                           record->location_tail,
+                                           "Could not bind discovered database insert",
+                                           error_out)) {
+    ok = 0;
+  }
 
   if (!ok) {
     strappy_set_formatted_error(error_out,
@@ -1658,6 +1692,7 @@ static int strappy_db_update_discovered_database(
     "is_valid_sqlite = ?, validation_error = ?, scan_status = ?, "
     "scan_root = ?, app_group_key = ?, app_name = ?, app_bundle_id = ?, "
     "app_container_path = ?, app_bundle_path = ?, app_source = ?, "
+    "origin_kind = ?, location_tail = ?, "
     "last_seen_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now')), "
     "last_scanned_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now')) "
     "WHERE id = ?;";
@@ -1765,7 +1800,23 @@ static int strappy_db_update_discovered_database(
     ok = 0;
   }
   if (ok &&
-      (sqlite3_bind_int64(stmt, 15, (sqlite3_int64)catalog_id) != SQLITE_OK)) {
+      (sqlite3_bind_text(stmt,
+                         15,
+                         strappy_db_origin_kind_for_input(record),
+                         -1,
+                         SQLITE_TRANSIENT) != SQLITE_OK)) {
+    ok = 0;
+  }
+  if (ok && !strappy_db_bind_optional_text(db,
+                                           stmt,
+                                           16,
+                                           record->location_tail,
+                                           "Could not bind discovered database update",
+                                           error_out)) {
+    ok = 0;
+  }
+  if (ok &&
+      (sqlite3_bind_int64(stmt, 17, (sqlite3_int64)catalog_id) != SQLITE_OK)) {
     ok = 0;
   }
 
@@ -1855,6 +1906,8 @@ static int strappy_db_assign_discovered_database_from_statement(
   char *app_container_path;
   char *app_bundle_path;
   char *app_source;
+  char *origin_kind;
+  char *location_tail;
   char *first_seen_at;
   char *last_seen_at;
   char *last_scanned_at;
@@ -1891,13 +1944,15 @@ static int strappy_db_assign_discovered_database_from_statement(
   app_container_path = strappy_db_column_string(stmt, 16);
   app_bundle_path = strappy_db_column_string(stmt, 17);
   app_source = strappy_db_column_string(stmt, 18);
-  first_seen_at = strappy_db_column_string(stmt, 19);
-  last_seen_at = strappy_db_column_string(stmt, 20);
-  last_scanned_at = strappy_db_column_string(stmt, 21);
+  origin_kind = strappy_db_column_string(stmt, 19);
+  location_tail = strappy_db_column_string(stmt, 20);
+  first_seen_at = strappy_db_column_string(stmt, 21);
+  last_seen_at = strappy_db_column_string(stmt, 22);
+  last_scanned_at = strappy_db_column_string(stmt, 23);
 
   if ((assistant_database_id == NULL) || (path == NULL) ||
       (scan_status == NULL) || (user_decision == NULL) ||
-      (first_seen_at == NULL) || (last_seen_at == NULL) ||
+      (origin_kind == NULL) || (first_seen_at == NULL) || (last_seen_at == NULL) ||
       (last_scanned_at == NULL)) {
     free(assistant_database_id);
     free(path);
@@ -1911,6 +1966,8 @@ static int strappy_db_assign_discovered_database_from_statement(
     free(app_container_path);
     free(app_bundle_path);
     free(app_source);
+    free(origin_kind);
+    free(location_tail);
     free(first_seen_at);
     free(last_seen_at);
     free(last_scanned_at);
@@ -1930,6 +1987,8 @@ static int strappy_db_assign_discovered_database_from_statement(
   record->app_container_path = app_container_path;
   record->app_bundle_path = app_bundle_path;
   record->app_source = app_source;
+  record->origin_kind = origin_kind;
+  record->location_tail = location_tail;
   record->hidden = hidden;
   record->first_seen_at = first_seen_at;
   record->last_seen_at = last_seen_at;
@@ -4104,6 +4163,7 @@ int strappy_db_list_discovered_databases(
     "COALESCE(a.hidden, 0), "
     "d.scan_root, d.app_group_key, d.app_name, d.app_bundle_id, "
     "d.app_container_path, d.app_bundle_path, d.app_source, "
+    "COALESCE(NULLIF(d.origin_kind, ''), 'other'), d.location_tail, "
     "d.first_seen_at, d.last_seen_at, d.last_scanned_at "
     "FROM discovered_databases d "
     "LEFT JOIN database_access_settings a ON a.path = d.path "

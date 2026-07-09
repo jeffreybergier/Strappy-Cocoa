@@ -1,6 +1,8 @@
 #import "AppDelegate.h"
 #import "AIFontAwesome.h"
+#import "FileScanner.h"
 #import "StrappyRootCoordinator.h"
+#import "StrappyIdleTimerAssertion.h"
 #import "StrappySession.h"
 #import <AltivecCore/AltivecCore.h>
 
@@ -32,13 +34,17 @@ static void StrappyLogApplicationLifecycle(NSString *event,
 
 @interface AppDelegate ()
 @property (nonatomic, strong) StrappyRootCoordinator *coordinator;
-@property (nonatomic, assign) UIBackgroundTaskIdentifier promptBackgroundTaskIdentifier;
-- (void)observePromptLifecycle;
-- (void)promptLifecycleDidChange:(NSNotification *)notification;
-- (void)updatePromptBackgroundTaskAssertion;
-- (void)beginPromptBackgroundTaskIfNeeded;
-- (void)endPromptBackgroundTaskIfNeeded;
-- (void)promptBackgroundTaskDidExpire;
+@property (nonatomic, assign) UIBackgroundTaskIdentifier longRunningWorkBackgroundTaskIdentifier;
+@property (nonatomic, assign, getter=isLongRunningWorkIdleTimerAssertionEnabled)
+  BOOL longRunningWorkIdleTimerAssertionEnabled;
+- (void)observeLongRunningWorkLifecycle;
+- (void)longRunningWorkLifecycleDidChange:(NSNotification *)notification;
+- (BOOL)longRunningWorkIsActive;
+- (void)updateLongRunningWorkAssertions;
+- (void)setLongRunningWorkIdleTimerAssertionEnabled:(BOOL)enabled;
+- (void)beginLongRunningWorkBackgroundTaskIfNeeded;
+- (void)endLongRunningWorkBackgroundTaskIfNeeded;
+- (void)longRunningWorkBackgroundTaskDidExpire;
 @end
 
 @implementation AppDelegate
@@ -46,7 +52,7 @@ static void StrappyLogApplicationLifecycle(NSString *event,
 - (instancetype)init
 {
   if ((self = [super init])) {
-    _promptBackgroundTaskIdentifier = UIBackgroundTaskInvalid;
+    _longRunningWorkBackgroundTaskIdentifier = UIBackgroundTaskInvalid;
   }
   return self;
 }
@@ -68,13 +74,13 @@ static void StrappyLogApplicationLifecycle(NSString *event,
   }
 
   [AIFontAwesome registerBundledFonts];
-  [self observePromptLifecycle];
+  [self observeLongRunningWorkLifecycle];
 
   self.coordinator = [[StrappyRootCoordinator alloc] initWithWindow:self.window];
   [self.coordinator start];
   [self.window makeKeyAndVisible];
 
-  [self updatePromptBackgroundTaskAssertion];
+  [self updateLongRunningWorkAssertions];
   StrappyLogApplicationLifecycle(@"didFinishLaunching end", application);
   return YES;
 }
@@ -87,25 +93,26 @@ static void StrappyLogApplicationLifecycle(NSString *event,
 - (void)applicationDidEnterBackground:(UIApplication *)application
 {
   StrappyLogApplicationLifecycle(@"applicationDidEnterBackground", application);
-  [self updatePromptBackgroundTaskAssertion];
+  [self updateLongRunningWorkAssertions];
 }
 
 - (void)applicationWillEnterForeground:(UIApplication *)application
 {
   StrappyLogApplicationLifecycle(@"applicationWillEnterForeground", application);
-  [self updatePromptBackgroundTaskAssertion];
+  [self updateLongRunningWorkAssertions];
 }
 
 - (void)applicationDidBecomeActive:(UIApplication *)application
 {
   StrappyLogApplicationLifecycle(@"applicationDidBecomeActive", application);
-  [self updatePromptBackgroundTaskAssertion];
+  [self updateLongRunningWorkAssertions];
 }
 
 - (void)applicationWillTerminate:(UIApplication *)application
 {
   StrappyLogApplicationLifecycle(@"applicationWillTerminate", application);
-  [self endPromptBackgroundTaskIfNeeded];
+  [self setLongRunningWorkIdleTimerAssertionEnabled:NO];
+  [self endLongRunningWorkBackgroundTaskIfNeeded];
 }
 
 - (void)applicationDidReceiveMemoryWarning:(UIApplication *)application
@@ -113,48 +120,90 @@ static void StrappyLogApplicationLifecycle(NSString *event,
   StrappyLogApplicationLifecycle(@"applicationDidReceiveMemoryWarning", application);
 }
 
-- (void)observePromptLifecycle
+- (void)observeLongRunningWorkLifecycle
 {
   NSNotificationCenter *notificationCenter;
 
   notificationCenter = [NSNotificationCenter defaultCenter];
   [notificationCenter addObserver:self
-                         selector:@selector(promptLifecycleDidChange:)
+                         selector:@selector(longRunningWorkLifecycleDidChange:)
                              name:StrappySessionPromptDidStartNotification
                            object:nil];
   [notificationCenter addObserver:self
-                         selector:@selector(promptLifecycleDidChange:)
+                         selector:@selector(longRunningWorkLifecycleDidChange:)
                              name:StrappySessionPromptDidFinishNotification
+                           object:nil];
+  [notificationCenter addObserver:self
+                         selector:@selector(longRunningWorkLifecycleDidChange:)
+                             name:StrappySessionModelCatalogRefreshDidStartNotification
+                           object:nil];
+  [notificationCenter addObserver:self
+                         selector:@selector(longRunningWorkLifecycleDidChange:)
+                             name:StrappySessionModelCatalogRefreshDidFinishNotification
+                           object:nil];
+  [notificationCenter addObserver:self
+                         selector:@selector(longRunningWorkLifecycleDidChange:)
+                             name:FileScannerDatabaseCatalogScanDidStartNotification
+                           object:nil];
+  [notificationCenter addObserver:self
+                         selector:@selector(longRunningWorkLifecycleDidChange:)
+                             name:FileScannerDatabaseCatalogScanDidFinishNotification
                            object:nil];
 }
 
-- (void)promptLifecycleDidChange:(NSNotification *)notification
+- (void)longRunningWorkLifecycleDidChange:(NSNotification *)notification
 {
   NSString *name;
 
   name = [notification name];
-  NSLog(@"StrappyLifecycle AppDelegate promptLifecycleDidChange name=%@ inFlightSessions=%lu",
+  NSLog(@"StrappyLifecycle AppDelegate longRunningWorkLifecycleDidChange name=%@ inFlightSessions=%lu modelRefresh=%@ databaseScan=%@",
         name,
-        (unsigned long)[StrappySession inFlightSessionCount]);
-  [self updatePromptBackgroundTaskAssertion];
+        (unsigned long)[StrappySession inFlightSessionCount],
+        [StrappySession isModelCatalogRefreshInFlight] ? @"YES" : @"NO",
+        [FileScanner isDatabaseCatalogScanInFlight] ? @"YES" : @"NO");
+  [self updateLongRunningWorkAssertions];
 }
 
-- (void)updatePromptBackgroundTaskAssertion
+- (BOOL)longRunningWorkIsActive
 {
-  if ([StrappySession hasInFlightSessions]) {
-    [self beginPromptBackgroundTaskIfNeeded];
+  return ([StrappySession hasInFlightSessions] ||
+          [StrappySession isModelCatalogRefreshInFlight] ||
+          [FileScanner isDatabaseCatalogScanInFlight]) ? YES : NO;
+}
+
+- (void)updateLongRunningWorkAssertions
+{
+  BOOL active;
+
+  active = [self longRunningWorkIsActive];
+  [self setLongRunningWorkIdleTimerAssertionEnabled:active];
+  if (active) {
+    [self beginLongRunningWorkBackgroundTaskIfNeeded];
   } else {
-    [self endPromptBackgroundTaskIfNeeded];
+    [self endLongRunningWorkBackgroundTaskIfNeeded];
   }
 }
 
-- (void)beginPromptBackgroundTaskIfNeeded
+- (void)setLongRunningWorkIdleTimerAssertionEnabled:(BOOL)enabled
+{
+  if ([self isLongRunningWorkIdleTimerAssertionEnabled] == enabled) {
+    return;
+  }
+
+  _longRunningWorkIdleTimerAssertionEnabled = enabled ? YES : NO;
+  StrappyIdleTimerAssertionSetEnabled(enabled);
+  NSLog(@"StrappyLifecycle AppDelegate longRunningWorkIdleTimerAssertion %@",
+        enabled ? @"YES" : @"NO");
+}
+
+- (void)beginLongRunningWorkBackgroundTaskIfNeeded
 {
   UIApplication *application;
   UIBackgroundTaskIdentifier taskIdentifier;
 
   @synchronized(self) {
-    if ([self promptBackgroundTaskIdentifier] != UIBackgroundTaskInvalid) {
+    if ([self longRunningWorkBackgroundTaskIdentifier] !=
+        UIBackgroundTaskInvalid) {
       return;
     }
   }
@@ -162,63 +211,73 @@ static void StrappyLogApplicationLifecycle(NSString *event,
   application = [UIApplication sharedApplication];
   taskIdentifier =
     [application beginBackgroundTaskWithExpirationHandler:^{
-      [self promptBackgroundTaskDidExpire];
+      [self longRunningWorkBackgroundTaskDidExpire];
     }];
   if (taskIdentifier == UIBackgroundTaskInvalid) {
-    NSLog(@"StrappyLifecycle AppDelegate promptBackgroundTaskBeginFailed inFlightSessions=%lu backgroundTimeRemaining=%.3f",
+    NSLog(@"StrappyLifecycle AppDelegate longRunningWorkBackgroundTaskBeginFailed inFlightSessions=%lu modelRefresh=%@ databaseScan=%@ backgroundTimeRemaining=%.3f",
           (unsigned long)[StrappySession inFlightSessionCount],
+          [StrappySession isModelCatalogRefreshInFlight] ? @"YES" : @"NO",
+          [FileScanner isDatabaseCatalogScanInFlight] ? @"YES" : @"NO",
           [application backgroundTimeRemaining]);
     return;
   }
 
   @synchronized(self) {
-    if ([self promptBackgroundTaskIdentifier] == UIBackgroundTaskInvalid) {
-      [self setPromptBackgroundTaskIdentifier:taskIdentifier];
+    if ([self longRunningWorkBackgroundTaskIdentifier] ==
+        UIBackgroundTaskInvalid) {
+      [self setLongRunningWorkBackgroundTaskIdentifier:taskIdentifier];
     } else if (taskIdentifier != UIBackgroundTaskInvalid) {
       [application endBackgroundTask:taskIdentifier];
       return;
     }
   }
 
-  NSLog(@"StrappyLifecycle AppDelegate promptBackgroundTaskBegan task=%lu inFlightSessions=%lu backgroundTimeRemaining=%.3f",
+  NSLog(@"StrappyLifecycle AppDelegate longRunningWorkBackgroundTaskBegan task=%lu inFlightSessions=%lu modelRefresh=%@ databaseScan=%@ backgroundTimeRemaining=%.3f",
         (unsigned long)taskIdentifier,
         (unsigned long)[StrappySession inFlightSessionCount],
+        [StrappySession isModelCatalogRefreshInFlight] ? @"YES" : @"NO",
+        [FileScanner isDatabaseCatalogScanInFlight] ? @"YES" : @"NO",
         [application backgroundTimeRemaining]);
 }
 
-- (void)endPromptBackgroundTaskIfNeeded
+- (void)endLongRunningWorkBackgroundTaskIfNeeded
 {
   UIApplication *application;
   UIBackgroundTaskIdentifier taskIdentifier;
 
   @synchronized(self) {
-    taskIdentifier = [self promptBackgroundTaskIdentifier];
+    taskIdentifier = [self longRunningWorkBackgroundTaskIdentifier];
     if (taskIdentifier == UIBackgroundTaskInvalid) {
       return;
     }
-    [self setPromptBackgroundTaskIdentifier:UIBackgroundTaskInvalid];
+    [self setLongRunningWorkBackgroundTaskIdentifier:UIBackgroundTaskInvalid];
   }
 
   application = [UIApplication sharedApplication];
   [application endBackgroundTask:taskIdentifier];
-  NSLog(@"StrappyLifecycle AppDelegate promptBackgroundTaskEnded task=%lu inFlightSessions=%lu backgroundTimeRemaining=%.3f",
+  NSLog(@"StrappyLifecycle AppDelegate longRunningWorkBackgroundTaskEnded task=%lu inFlightSessions=%lu modelRefresh=%@ databaseScan=%@ backgroundTimeRemaining=%.3f",
         (unsigned long)taskIdentifier,
         (unsigned long)[StrappySession inFlightSessionCount],
+        [StrappySession isModelCatalogRefreshInFlight] ? @"YES" : @"NO",
+        [FileScanner isDatabaseCatalogScanInFlight] ? @"YES" : @"NO",
         [application backgroundTimeRemaining]);
 }
 
-- (void)promptBackgroundTaskDidExpire
+- (void)longRunningWorkBackgroundTaskDidExpire
 {
-  NSLog(@"StrappyLifecycle AppDelegate promptBackgroundTaskExpired inFlightSessions=%lu backgroundTimeRemaining=%.3f",
+  NSLog(@"StrappyLifecycle AppDelegate longRunningWorkBackgroundTaskExpired inFlightSessions=%lu modelRefresh=%@ databaseScan=%@ backgroundTimeRemaining=%.3f",
         (unsigned long)[StrappySession inFlightSessionCount],
+        [StrappySession isModelCatalogRefreshInFlight] ? @"YES" : @"NO",
+        [FileScanner isDatabaseCatalogScanInFlight] ? @"YES" : @"NO",
         [[UIApplication sharedApplication] backgroundTimeRemaining]);
-  [self endPromptBackgroundTaskIfNeeded];
+  [self endLongRunningWorkBackgroundTaskIfNeeded];
 }
 
 - (void)dealloc
 {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [self endPromptBackgroundTaskIfNeeded];
+  [self setLongRunningWorkIdleTimerAssertionEnabled:NO];
+  [self endLongRunningWorkBackgroundTaskIfNeeded];
 }
 
 @end

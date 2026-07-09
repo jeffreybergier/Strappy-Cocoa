@@ -43,12 +43,12 @@
 "Cancel" = "キャンセル";
 "Default model is always allowed." = "既定モデルは常に許可されます。";
 "No matching models." = "一致するモデルはありません。";
-"No models have been fetched yet." = "モデルはまだ取得されていません。";
 "OK" = "OK";
 "Model list could not be loaded." = "モデル一覧を読み込めませんでした。";
 "Fetching models..." = "モデルを取得中...";
 "Model refresh could not start." = "モデル更新を開始できませんでした。";
 "Could not fetch models" = "モデルを取得できませんでした";
+"Could not scan databases" = "データベースをスキャンできませんでした";
 "%lu models shown." = "%lu 個のモデルを表示しています。";
 "%lu models available." = "%lu 個のモデルを利用できます。";
 "Model is not selected." = "モデルが選択されていません。";
@@ -56,6 +56,8 @@
 "Model refresh failed." = "モデル更新に失敗しました。";
 "Could not update model setting." = "モデル設定を更新できませんでした。";
 "Database Search" = "データベース検索";
+"Database scan is already running." = "データベーススキャンはすでに実行中です。";
+"Database scan failed." = "データベーススキャンに失敗しました。";
 "System Prompt" = "システムプロンプト";
 "Scan Databases" = "データベースをスキャン";
 "APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set." = ".env またはプロセス環境の APIENDPOINT / APITOKEN が設定されている間はキーチェーンより優先されます。";
@@ -101,7 +103,11 @@
 "1 model available." = "1 個のモデルを利用できます。";
 "1 model shown." = "1 個のモデルを表示しています。";
 "Authentication" = "認証";
+"App Bundle" = "アプリバンドル";
+"App Library" = "アプリライブラリ";
+"Application Support" = "Application Support";
 "Capitalize" = "語頭を大文字にする";
+"Cache" = "キャッシュ";
 "Check Document Now" = "今すぐ書類をチェック";
 "Check Grammar With Spelling" = "スペルと一緒に文法をチェック";
 "Check Spelling While Typing" = "入力中にスペルをチェック";
@@ -125,6 +131,7 @@
 "Delete Chat" = "チャットを削除";
 "Delete Chat..." = "チャットを削除...";
 "Delete Chat?" = "チャットを削除しますか？";
+"Documents" = "書類";
 "Emoji & Symbols" = "絵文字と記号";
 "Enter Full Screen" = "フルスクリーンにする";
 "Filesystem scan failed." = "ファイルシステムのスキャンに失敗しました。";
@@ -142,10 +149,10 @@
 "Location" = "場所";
 "Make Lower Case" = "小文字にする";
 "Make Upper Case" = "大文字にする";
+"Media" = "メディア";
 "Models" = "モデル";
 "New" = "新規";
 "New Chat" = "新規チャット";
-"No databases available." = "利用できるデータベースはありません。";
 "No matching databases." = "一致するデータベースはありません。";
 "Page Setup..." = "ページ設定...";
 "Paste and Match Style" = "ペーストしてスタイルを合わせる";
@@ -184,6 +191,7 @@
 "Strappy Help" = "Strappy ヘルプ";
 "Strappy request failed." = "Strappy リクエストに失敗しました。";
 "Substitutions" = "置換";
+"System Library" = "システムライブラリ";
 "System prompt template could not be read." = "システムプロンプトテンプレートを読み込めませんでした。";
 "System prompt template is missing from the app bundle." = "システムプロンプトテンプレートがアプリバンドルにありません。";
 "Text Replacement" = "テキスト置換";

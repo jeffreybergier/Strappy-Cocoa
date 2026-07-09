@@ -98,6 +98,8 @@ typedef struct strappy_discovered_database_input {
   const char *app_container_path;
   const char *app_bundle_path;
   const char *app_source;
+  const char *origin_kind;
+  const char *location_tail;
   int hidden;
 } strappy_discovered_database_input;
 
@@ -120,6 +122,8 @@ typedef struct strappy_discovered_database_record {
   char *app_container_path;
   char *app_bundle_path;
   char *app_source;
+  char *origin_kind;
+  char *location_tail;
   int hidden;
   char *first_seen_at;
   char *last_seen_at;

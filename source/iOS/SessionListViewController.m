@@ -2,15 +2,12 @@
 
 #import "AIFontAwesome.h"
 #import "PreferencesTableViewController.h"
+#import "StrappyActivityAccessoryView.h"
 #import "StrappySession.h"
 #import "XPFoundation.h"
 #import "XPUIKit.h"
 
 static NSString * const kStrappySessionCellIdentifier = @"StrappySessionCell";
-static const CGFloat kStrappyPromptIconCanvasSize = 14.0f;
-static const CGFloat kStrappyPromptIconSize = 10.0f;
-static const AIFontAwesomeIcon kStrappySessionPromptActiveIcon =
-  AIFAArrowsRotate;
 
 static NSString *StrappySessionPromptPreview(NSDictionary *session)
 {
@@ -413,30 +410,13 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 - (UIView *)promptInFlightAccessoryViewForCell:(UITableViewCell *)cell
 {
   UIColor *color;
-  UIImage *image;
-  UIImageView *imageView;
 
   color = [[cell detailTextLabel] textColor];
   if (color == nil) {
     color = [UIColor grayColor];
   }
 
-  image = [AIFontAwesome imageForIcon:kStrappySessionPromptActiveIcon
-                                style:AIFontAwesomeStyleSolid
-                             iconSize:kStrappyPromptIconSize
-                           canvasSize:kStrappyPromptIconCanvasSize
-                                color:color
-                                scale:0.0f];
-  if (image == nil) {
-    return nil;
-  }
-
-  imageView = [[UIImageView alloc] initWithImage:image];
-  [imageView setFrame:CGRectMake(0.0f,
-                                 0.0f,
-                                 kStrappyPromptIconCanvasSize,
-                                 kStrappyPromptIconCanvasSize)];
-  return imageView;
+  return StrappyActivityAccessoryView(color);
 }
 
 - (void)notifySelectedSession

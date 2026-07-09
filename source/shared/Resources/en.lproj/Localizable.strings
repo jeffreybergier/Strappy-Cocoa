@@ -43,12 +43,12 @@
 "Cancel" = "Cancel";
 "Default model is always allowed." = "Default model is always allowed.";
 "No matching models." = "No matching models.";
-"No models have been fetched yet." = "No models have been fetched yet.";
 "OK" = "OK";
 "Model list could not be loaded." = "Model list could not be loaded.";
 "Fetching models..." = "Fetching models...";
 "Model refresh could not start." = "Model refresh could not start.";
 "Could not fetch models" = "Could not fetch models";
+"Could not scan databases" = "Could not scan databases";
 "%lu models shown." = "%lu models shown.";
 "%lu models available." = "%lu models available.";
 "Model is not selected." = "Model is not selected.";
@@ -56,6 +56,8 @@
 "Model refresh failed." = "Model refresh failed.";
 "Could not update model setting." = "Could not update model setting.";
 "Database Search" = "Database Search";
+"Database scan is already running." = "Database scan is already running.";
+"Database scan failed." = "Database scan failed.";
 "System Prompt" = "System Prompt";
 "Scan Databases" = "Scan Databases";
 "APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set." = "APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set.";
@@ -101,7 +103,11 @@
 "1 model available." = "1 model available.";
 "1 model shown." = "1 model shown.";
 "Authentication" = "Authentication";
+"App Bundle" = "App Bundle";
+"App Library" = "App Library";
+"Application Support" = "Application Support";
 "Capitalize" = "Capitalize";
+"Cache" = "Cache";
 "Check Document Now" = "Check Document Now";
 "Check Grammar With Spelling" = "Check Grammar With Spelling";
 "Check Spelling While Typing" = "Check Spelling While Typing";
@@ -125,6 +131,7 @@
 "Delete Chat" = "Delete Chat";
 "Delete Chat..." = "Delete Chat...";
 "Delete Chat?" = "Delete Chat?";
+"Documents" = "Documents";
 "Emoji & Symbols" = "Emoji & Symbols";
 "Enter Full Screen" = "Enter Full Screen";
 "Filesystem scan failed." = "Filesystem scan failed.";
@@ -142,10 +149,10 @@
 "Location" = "Location";
 "Make Lower Case" = "Make Lower Case";
 "Make Upper Case" = "Make Upper Case";
+"Media" = "Media";
 "Models" = "Models";
 "New" = "New";
 "New Chat" = "New Chat";
-"No databases available." = "No databases available.";
 "No matching databases." = "No matching databases.";
 "Page Setup..." = "Page Setup...";
 "Paste and Match Style" = "Paste and Match Style";
@@ -184,6 +191,7 @@
 "Strappy Help" = "Strappy Help";
 "Strappy request failed." = "Strappy request failed.";
 "Substitutions" = "Substitutions";
+"System Library" = "System Library";
 "System prompt template could not be read." = "System prompt template could not be read.";
 "System prompt template is missing from the app bundle." = "System prompt template is missing from the app bundle.";
 "Text Replacement" = "Text Replacement";

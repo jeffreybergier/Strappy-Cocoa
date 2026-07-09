@@ -21,6 +21,8 @@ typedef struct strappy_file_scanner_record {
   char *app_container_path;
   char *app_bundle_path;
   char *app_source;
+  char *origin_kind;
+  char *location_tail;
   int hidden;
 } strappy_file_scanner_record;
 
@@ -42,6 +44,11 @@ typedef int (*strappy_file_scanner_progress_callback)(
   const strappy_file_scanner_progress *progress,
   void *user_data);
 
+typedef int (*strappy_file_scanner_record_batch_callback)(
+  strappy_file_scanner_record_list *list,
+  void *user_data,
+  char **error_out);
+
 typedef struct strappy_file_scanner_options {
   const char *root_path;
   int validate_candidates;
@@ -50,6 +57,9 @@ typedef struct strappy_file_scanner_options {
   int max_depth;
   strappy_file_scanner_progress_callback progress_callback;
   void *progress_user_data;
+  size_t record_batch_size;
+  strappy_file_scanner_record_batch_callback record_batch_callback;
+  void *record_batch_user_data;
 } strappy_file_scanner_options;
 
 void strappy_file_scanner_options_init(strappy_file_scanner_options *options);
@@ -75,6 +85,12 @@ int strappy_file_scanner_save_discovered_databases(
   const strappy_file_scanner_record_list *list,
   const char *scan_root,
   char **error_out);
+int strappy_file_scanner_save_discovered_database_batch(
+  const char *db_path,
+  const strappy_file_scanner_record_list *list,
+  const char *scan_root,
+  char **error_out);
+/* Requires record_batch_callback; clears scan_root before writing batches. */
 int strappy_file_scanner_scan_and_save_discovered_databases(
   const char *db_path,
   const strappy_file_scanner_options *options,

@@ -7,6 +7,32 @@
 
 #include <string.h>
 
+NSString * const FileScannerDatabaseCatalogScanDidStartNotification =
+  @"FileScannerDatabaseCatalogScanDidStartNotification";
+NSString * const FileScannerDatabaseCatalogScanDidFinishNotification =
+  @"FileScannerDatabaseCatalogScanDidFinishNotification";
+NSString * const FileScannerDatabaseCatalogDidChangeNotification =
+  @"FileScannerDatabaseCatalogDidChangeNotification";
+
+static BOOL FileScannerDatabaseCatalogScanInFlight = NO;
+static const size_t StrappyFileScannerCatalogBatchSize = 100U;
+
+typedef struct StrappyFileScannerCatalogBatchContext {
+  NSString *databasePath;
+  NSString *rootPath;
+  const char *scanRoot;
+  NSError *error;
+} StrappyFileScannerCatalogBatchContext;
+
+@interface FileScanner ()
+
++ (NSError *)errorFromCString:(char *)message;
++ (BOOL)annotateScannerRecordList:(strappy_file_scanner_record_list *)list
+                      forRootPath:(NSString *)rootPath
+                            error:(NSError **)error;
+
+@end
+
 static BOOL StrappyFileScannerStringHasValue(NSString *string)
 {
   return ([string isKindOfClass:[NSString class]] && ([string length] > 0U)) ?
@@ -743,6 +769,43 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
   }
 }
 
+static int StrappyFileScannerSaveCatalogBatch(
+  strappy_file_scanner_record_list *list,
+  void *userData,
+  char **error_out)
+{
+  StrappyFileScannerCatalogBatchContext *context;
+  NSError *metadataError;
+  NSString *message;
+
+  context = (StrappyFileScannerCatalogBatchContext *)userData;
+  if (context == NULL) {
+    strappy_set_error(error_out, "Database scan batch context is missing.");
+    return 0;
+  }
+
+  metadataError = nil;
+  if (![FileScanner annotateScannerRecordList:list
+                                  forRootPath:context->rootPath
+                                        error:&metadataError]) {
+    if ((context->error == nil) && (metadataError != nil)) {
+      context->error = [metadataError retain];
+    }
+    message = [metadataError localizedDescription];
+    if ([message length] == 0U) {
+      message = NSLocalizedString(@"Database scan batch failed.", nil);
+    }
+    strappy_set_error(error_out, [message UTF8String]);
+    return 0;
+  }
+
+  return strappy_file_scanner_save_discovered_database_batch(
+    [context->databasePath UTF8String],
+    list,
+    context->scanRoot,
+    error_out);
+}
+
 @implementation FileScanner
 
 + (FileScanner *)sharedScanner
@@ -756,6 +819,124 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
   }
 
   return scanner;
+}
+
++ (BOOL)isDatabaseCatalogScanInFlight
+{
+  BOOL inFlight;
+
+  @synchronized(self) {
+    inFlight = FileScannerDatabaseCatalogScanInFlight;
+  }
+  return inFlight;
+}
+
++ (BOOL)beginDatabaseCatalogScanAtPath:(NSString *)path
+                                 error:(NSError **)error
+{
+  NSString *scanPath;
+  NSDictionary *userInfo;
+
+  if (![path isKindOfClass:[NSString class]] || ([path length] == 0U)) {
+    if (error != nil) {
+      userInfo = [NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"Scan path is empty.", nil)
+                                             forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"FileScannerErrorDomain"
+                                   code:2
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  @synchronized(self) {
+    if (FileScannerDatabaseCatalogScanInFlight) {
+      if (error != nil) {
+        userInfo = [NSDictionary dictionaryWithObject:
+          NSLocalizedString(@"Database scan is already running.", nil)
+                                               forKey:NSLocalizedDescriptionKey];
+        *error = [NSError errorWithDomain:@"FileScannerErrorDomain"
+                                     code:3
+                                 userInfo:userInfo];
+      }
+      return NO;
+    }
+    FileScannerDatabaseCatalogScanInFlight = YES;
+  }
+
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:FileScannerDatabaseCatalogScanDidStartNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObject:path forKey:@"path"]];
+
+  scanPath = [path copy];
+  [NSThread detachNewThreadSelector:@selector(databaseCatalogScanInBackground:)
+                           toTarget:self
+                         withObject:scanPath];
+  [scanPath release];
+  return YES;
+}
+
++ (void)databaseCatalogScanInBackground:(NSString *)path
+{
+  NSAutoreleasePool *pool;
+  NSError *error;
+  NSArray *rows;
+  NSMutableDictionary *result;
+  NSString *message;
+
+  pool = [[NSAutoreleasePool alloc] init];
+  error = nil;
+  rows = [[FileScanner sharedScanner]
+    scanDirectoryForSQLiteDatabasesAtPath:path
+           savingResultsToCatalogWithError:&error];
+
+  result = [[NSMutableDictionary alloc] init];
+  if ([path isKindOfClass:[NSString class]]) {
+    [result setObject:path forKey:@"path"];
+  }
+  if (rows != nil) {
+    [result setObject:rows forKey:@"rows"];
+  } else {
+    message = [error localizedDescription];
+    if ([message length] == 0U) {
+      message = NSLocalizedString(@"Database scan failed.", nil);
+    }
+    [result setObject:message forKey:@"error"];
+  }
+
+  [self performSelectorOnMainThread:@selector(databaseCatalogScanDidFinish:)
+                         withObject:result
+                      waitUntilDone:NO];
+  [result release];
+  [pool release];
+}
+
++ (void)databaseCatalogScanDidFinish:(NSDictionary *)result
+{
+  NSMutableDictionary *userInfo;
+
+  userInfo = [[NSMutableDictionary alloc] init];
+  if ([result isKindOfClass:[NSDictionary class]]) {
+    [userInfo addEntriesFromDictionary:result];
+  }
+
+  @synchronized(self) {
+    FileScannerDatabaseCatalogScanInFlight = NO;
+  }
+
+  if ([userInfo objectForKey:@"error"] == nil) {
+    [[NSNotificationCenter defaultCenter]
+      postNotificationName:FileScannerDatabaseCatalogDidChangeNotification
+                    object:self
+                  userInfo:userInfo];
+  }
+
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:FileScannerDatabaseCatalogScanDidFinishNotification
+                  object:self
+                userInfo:userInfo];
+  [userInfo release];
 }
 
 + (NSError *)errorFromCString:(char *)message
@@ -872,6 +1053,10 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
                                @"app_bundle_path",
                                record->app_bundle_path);
   StrappyFileScannerAddCString(dictionary, @"app_source", record->app_source);
+  StrappyFileScannerAddCString(dictionary, @"origin_kind", record->origin_kind);
+  StrappyFileScannerAddCString(dictionary,
+                               @"location_tail",
+                               record->location_tail);
 
   return dictionary;
 }
@@ -898,6 +1083,8 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
   NSString *appContainerPath;
   NSString *appBundlePath;
   NSString *appSource;
+  NSString *originKind;
+  NSString *locationTail;
   NSString *firstSeenAt;
   NSString *lastSeenAt;
   NSString *lastScannedAt;
@@ -930,6 +1117,8 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
   appBundlePath =
     [FileScanner stringFromCStringOrEmpty:record->app_bundle_path];
   appSource = [FileScanner stringFromCStringOrEmpty:record->app_source];
+  originKind = [FileScanner stringFromCStringOrEmpty:record->origin_kind];
+  locationTail = [FileScanner stringFromCStringOrEmpty:record->location_tail];
   firstSeenAt = [FileScanner stringFromCStringOrEmpty:record->first_seen_at];
   lastSeenAt = [FileScanner stringFromCStringOrEmpty:record->last_seen_at];
   lastScannedAt =
@@ -978,6 +1167,12 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
   }
   if ([appSource length] > 0U) {
     [dictionary setObject:appSource forKey:@"app_source"];
+  }
+  if ([originKind length] > 0U) {
+    [dictionary setObject:originKind forKey:@"origin_kind"];
+  }
+  if ([locationTail length] > 0U) {
+    [dictionary setObject:locationTail forKey:@"location_tail"];
   }
 
   return dictionary;
@@ -1135,6 +1330,7 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
                    savingResultsToCatalogWithError:(NSError **)error
 {
   NSString *databasePath;
+  StrappyFileScannerCatalogBatchContext batchContext;
   strappy_file_scanner_options options;
   strappy_file_scanner_record_list list;
   char *strappyError;
@@ -1156,37 +1352,41 @@ static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
+  batchContext.databasePath = databasePath;
+  batchContext.rootPath = path;
+  batchContext.scanRoot = [path fileSystemRepresentation];
+  batchContext.error = nil;
+
   strappy_file_scanner_options_init(&options);
-  options.root_path = [path fileSystemRepresentation];
+  options.root_path = batchContext.scanRoot;
   options.validate_candidates = 1;
+  options.record_batch_size = StrappyFileScannerCatalogBatchSize;
+  options.record_batch_callback = StrappyFileScannerSaveCatalogBatch;
+  options.record_batch_user_data = &batchContext;
 
   strappy_file_scanner_record_list_init(&list);
   strappyError = NULL;
-  if (!strappy_file_scanner_scan(&options, &list, &strappyError)) {
+  if (!strappy_file_scanner_scan_and_save_discovered_databases(
+        [databasePath UTF8String],
+        &options,
+        &list,
+        &strappyError)) {
     if (error != nil) {
-      *error = [FileScanner errorFromCString:strappyError];
+      if (batchContext.error != nil) {
+        *error = batchContext.error;
+        [batchContext.error autorelease];
+        batchContext.error = nil;
+      } else {
+        *error = [FileScanner errorFromCString:strappyError];
+      }
     }
+    [batchContext.error release];
     strappy_free_string(strappyError);
     strappy_file_scanner_record_list_destroy(&list);
     return nil;
   }
-  if (![FileScanner annotateScannerRecordList:&list
-                                  forRootPath:path
-                                        error:error]) {
-    strappy_file_scanner_record_list_destroy(&list);
-    return nil;
-  }
-  if (!strappy_file_scanner_save_discovered_databases([databasePath UTF8String],
-                                                      &list,
-                                                      [path fileSystemRepresentation],
-                                                      &strappyError)) {
-    if (error != nil) {
-      *error = [FileScanner errorFromCString:strappyError];
-    }
-    strappy_free_string(strappyError);
-    strappy_file_scanner_record_list_destroy(&list);
-    return nil;
-  }
+  [batchContext.error release];
+  batchContext.error = nil;
 
   strappy_file_scanner_record_list_destroy(&list);
   return [self catalogedSQLiteDatabasesWithError:error];

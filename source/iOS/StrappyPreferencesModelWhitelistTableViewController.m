@@ -387,13 +387,16 @@ static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
   if (section != 0) {
     return 0;
   }
-  return ([[self models] count] > 0U) ? (NSInteger)[[self models] count] : 1;
+  return (NSInteger)[[self models] count];
 }
 
 - (NSString *)tableView:(UITableView *)tableView
 titleForHeaderInSection:(NSInteger)section
 {
   (void)tableView;
+  if ([[self models] count] == 0U) {
+    return nil;
+  }
   return (section == 0) ? NSLocalizedString(@"Models", nil) : nil;
 }
 
@@ -408,16 +411,6 @@ titleForHeaderInSection:(NSInteger)section
                                   reuseIdentifier:@"DefaultModelCell"];
     [[cell textLabel] setNumberOfLines:1];
     [[cell detailTextLabel] setNumberOfLines:1];
-  }
-
-  if ([[self models] count] == 0U) {
-    [[cell textLabel] setText:NSLocalizedString(@"No models are in use.", nil)];
-    [[cell detailTextLabel] setText:nil];
-    [[cell textLabel] setTextColor:[UIColor grayColor]];
-    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
-    [cell setAccessoryType:UITableViewCellAccessoryNone];
-    [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-    return cell;
   }
 
   {
@@ -565,11 +558,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     return NSLocalizedString(@"Fetching...", nil);
   }
   return nil;
-}
-
-- (NSString *)emptyText
-{
-  return NSLocalizedString(@"No models available.", nil);
 }
 
 - (NSString *)actionButtonAccessibilityLabel

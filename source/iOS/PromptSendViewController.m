@@ -183,7 +183,7 @@ enum {
 {
   (void)tableView;
   if (section == kStrappyPromptOptionsSectionModels) {
-    return ([[self models] count] > 0U) ? (NSInteger)[[self models] count] : 1;
+    return (NSInteger)[[self models] count];
   }
   if (section == kStrappyPromptOptionsSectionStreaming) {
     return 1;
@@ -196,7 +196,7 @@ titleForHeaderInSection:(NSInteger)section
 {
   (void)tableView;
   if (section == kStrappyPromptOptionsSectionModels) {
-    return NSLocalizedString(@"Models", nil);
+    return ([[self models] count] > 0U) ? NSLocalizedString(@"Models", nil) : nil;
   }
   if (section == kStrappyPromptOptionsSectionStreaming) {
     return NSLocalizedString(@"Streaming", nil);
@@ -228,17 +228,6 @@ titleForHeaderInSection:(NSInteger)section
                                   reuseIdentifier:@"ModelCell"];
     [[cell textLabel] setNumberOfLines:1];
     [[cell detailTextLabel] setNumberOfLines:1];
-  }
-
-  if ([[self models] count] == 0U) {
-    [[cell textLabel] setText:
-      NSLocalizedString(@"No models have been fetched yet.", nil)];
-    [[cell detailTextLabel] setText:nil];
-    [[cell textLabel] setTextColor:[UIColor grayColor]];
-    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
-    [cell setAccessoryType:UITableViewCellAccessoryNone];
-    [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-    return cell;
   }
 
   {

@@ -1,9 +1,12 @@
 #import "PreferencesTableViewController.h"
 
+#import "FileScanner.h"
 #import "StrappyKeychain.h"
+#import "StrappyActivityAccessoryView.h"
 #import "StrappyPreferencesDatabaseWhitelistTableViewController.h"
 #import "StrappyPreferencesModelWhitelistTableViewController.h"
 #import "StrappyPreferencesSystemPromptsTableViewController.h"
+#import "StrappySession.h"
 
 static NSString *StrappyPreferencesTrimmedString(NSString *string)
 {
@@ -43,6 +46,7 @@ enum {
 - (BOOL)saveAuthentication;
 - (void)showMessage:(NSString *)message title:(NSString *)title;
 - (void)fieldChanged:(id)sender;
+- (void)longRunningPreferenceWorkDidChange:(NSNotification *)notification;
 - (void)doneAction:(id)sender;
 @end
 
@@ -73,6 +77,27 @@ enum {
     [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                   target:self
                                                   action:@selector(doneAction:)]];
+
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(longRunningPreferenceWorkDidChange:)
+           name:StrappySessionModelCatalogRefreshDidStartNotification
+         object:nil];
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(longRunningPreferenceWorkDidChange:)
+           name:StrappySessionModelCatalogRefreshDidFinishNotification
+         object:nil];
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(longRunningPreferenceWorkDidChange:)
+           name:FileScannerDatabaseCatalogScanDidStartNotification
+         object:nil];
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(longRunningPreferenceWorkDidChange:)
+           name:FileScannerDatabaseCatalogScanDidFinishNotification
+         object:nil];
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -133,6 +158,12 @@ enum {
 {
   (void)sender;
   [self setAuthenticationDirty:YES];
+}
+
+- (void)longRunningPreferenceWorkDidChange:(NSNotification *)notification
+{
+  (void)notification;
+  [[self tableView] reloadData];
 }
 
 - (void)doneAction:(id)sender
@@ -259,13 +290,22 @@ titleForFooterInSection:(NSInteger)section
   cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1
                                 reuseIdentifier:nil];
   [cell setAccessoryType:UITableViewCellAccessoryDisclosureIndicator];
+  [cell setAccessoryView:nil];
   [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
   if ([indexPath row] == kStrappyPaneRowModels) {
     [[cell textLabel] setText:NSLocalizedString(@"Models", nil)];
     [[cell detailTextLabel] setText:NSLocalizedString(@"Fetch, search, use", nil)];
+    if ([StrappySession isModelCatalogRefreshInFlight]) {
+      [cell setAccessoryType:UITableViewCellAccessoryNone];
+      [cell setAccessoryView:StrappyActivityAccessoryView([UIColor grayColor])];
+    }
   } else if ([indexPath row] == kStrappyPaneRowDatabases) {
     [[cell textLabel] setText:NSLocalizedString(@"Databases", nil)];
     [[cell detailTextLabel] setText:NSLocalizedString(@"Scan, search, use", nil)];
+    if ([FileScanner isDatabaseCatalogScanInFlight]) {
+      [cell setAccessoryType:UITableViewCellAccessoryNone];
+      [cell setAccessoryView:StrappyActivityAccessoryView([UIColor grayColor])];
+    }
   } else {
     [[cell textLabel] setText:NSLocalizedString(@"Prompts", nil)];
     [[cell detailTextLabel] setText:NSLocalizedString(@"System prompt", nil)];
@@ -305,6 +345,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
 - (void)dealloc
 {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   [[self apiEndpointField] setDelegate:nil];
   [[self apiTokenField] setDelegate:nil];
 }

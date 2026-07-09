@@ -40,20 +40,21 @@ static int strappy_file_scanner_case_insensitive_equal(const char *left,
   return (left[index] == right[index]) ? 1 : 0;
 }
 
-static int strappy_file_scanner_case_insensitive_contains(const char *haystack,
-                                                          const char *needle)
+static const char *strappy_file_scanner_case_insensitive_find(
+  const char *haystack,
+  const char *needle)
 {
   size_t haystack_index;
   size_t needle_index;
 
   if ((haystack == NULL) || (needle == NULL) || (needle[0] == '\0')) {
-    return 0;
+    return NULL;
   }
 
   for (haystack_index = 0U; haystack[haystack_index] != '\0'; haystack_index++) {
     for (needle_index = 0U; needle[needle_index] != '\0'; needle_index++) {
       if (haystack[haystack_index + needle_index] == '\0') {
-        return 0;
+        return NULL;
       }
       if (strappy_file_scanner_ascii_tolower(
             (unsigned char)haystack[haystack_index + needle_index]) !=
@@ -63,11 +64,62 @@ static int strappy_file_scanner_case_insensitive_contains(const char *haystack,
       }
     }
     if (needle[needle_index] == '\0') {
-      return 1;
+      return haystack + haystack_index;
     }
   }
 
-  return 0;
+  return NULL;
+}
+
+static int strappy_file_scanner_case_insensitive_contains(const char *haystack,
+                                                          const char *needle)
+{
+  return (strappy_file_scanner_case_insensitive_find(haystack, needle) != NULL) ?
+    1 : 0;
+}
+
+static int strappy_file_scanner_case_insensitive_starts_with(
+  const char *value,
+  const char *prefix)
+{
+  size_t index;
+
+  if ((value == NULL) || (prefix == NULL)) {
+    return 0;
+  }
+
+  for (index = 0U; prefix[index] != '\0'; index++) {
+    if (value[index] == '\0') {
+      return 0;
+    }
+    if (strappy_file_scanner_ascii_tolower((unsigned char)value[index]) !=
+        strappy_file_scanner_ascii_tolower((unsigned char)prefix[index])) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+static int strappy_file_scanner_case_insensitive_ends_with(const char *value,
+                                                           const char *suffix)
+{
+  size_t value_length;
+  size_t suffix_length;
+
+  if ((value == NULL) || (suffix == NULL)) {
+    return 0;
+  }
+
+  value_length = strlen(value);
+  suffix_length = strlen(suffix);
+  if (suffix_length > value_length) {
+    return 0;
+  }
+
+  return strappy_file_scanner_case_insensitive_equal(
+    value + (value_length - suffix_length),
+    suffix);
 }
 
 static const char *strappy_file_scanner_basename(const char *path)
@@ -82,7 +134,32 @@ static const char *strappy_file_scanner_basename(const char *path)
   return (slash != NULL) ? slash + 1 : path;
 }
 
-static int strappy_file_scanner_database_should_be_hidden(const char *path)
+static int strappy_file_scanner_is_index_database_name(const char *name)
+{
+  size_t length;
+
+  if (strappy_file_scanner_case_insensitive_equal(name, "index.db")) {
+    return 1;
+  }
+
+  length = (name != NULL) ? strlen(name) : 0U;
+  return (length > strlen("index-.db")) &&
+         strappy_file_scanner_case_insensitive_starts_with(name, "index-") &&
+         strappy_file_scanner_case_insensitive_ends_with(name, ".db") ?
+    1 : 0;
+}
+
+static int strappy_file_scanner_is_apple_bundle_identifier(
+  const char *bundle_identifier)
+{
+  return strappy_file_scanner_case_insensitive_starts_with(bundle_identifier,
+                                                          "com.apple.") ?
+    1 : 0;
+}
+
+static int strappy_file_scanner_database_should_be_hidden(
+  const char *path,
+  const char *app_bundle_id)
 {
   const char *name;
 
@@ -110,8 +187,212 @@ static int strappy_file_scanner_database_should_be_hidden(const char *path)
   if (strappy_file_scanner_case_insensitive_contains(path, "/Library/Caches/")) {
     return 1;
   }
+  if (strappy_file_scanner_is_apple_bundle_identifier(app_bundle_id) &&
+      strappy_file_scanner_is_index_database_name(name)) {
+    return 1;
+  }
 
   return 0;
+}
+
+static char *strappy_file_scanner_duplicate_range(const char *start,
+                                                  size_t length)
+{
+  char *copy;
+
+  if (start == NULL) {
+    return NULL;
+  }
+
+  copy = (char *)malloc(length + 1U);
+  if (copy == NULL) {
+    return NULL;
+  }
+
+  if (length > 0U) {
+    memcpy(copy, start, length);
+  }
+  copy[length] = '\0';
+  return copy;
+}
+
+static const char *strappy_file_scanner_database_origin_kind(const char *path)
+{
+  int app_data_path;
+
+  if ((path == NULL) || (path[0] == '\0')) {
+    return "other";
+  }
+
+  app_data_path =
+    ((strappy_file_scanner_case_insensitive_find(
+        path,
+        "/Containers/Data/Application/") != NULL) ||
+     (strappy_file_scanner_case_insensitive_find(
+        path,
+        "/Containers/Shared/AppGroup/") != NULL) ||
+     (strappy_file_scanner_case_insensitive_find(
+        path,
+        "/mobile/Applications/") != NULL)) ? 1 : 0;
+
+  if (strappy_file_scanner_case_insensitive_find(path, ".app/") != NULL) {
+    return "app_bundle";
+  }
+  if (strappy_file_scanner_case_insensitive_find(path, "/Documents/") != NULL) {
+    return "documents";
+  }
+  if (strappy_file_scanner_case_insensitive_find(
+        path,
+        "/Library/Application Support/") != NULL) {
+    return "application_support";
+  }
+  if ((strappy_file_scanner_case_insensitive_find(path, "/Library/Caches/") !=
+       NULL) ||
+      (strappy_file_scanner_case_insensitive_find(path, "/Caches/") != NULL)) {
+    return "cache";
+  }
+  if (strappy_file_scanner_case_insensitive_find(path, "/Media/") != NULL) {
+    return "media";
+  }
+  if (strappy_file_scanner_case_insensitive_find(path, "/Library/") != NULL) {
+    return (app_data_path ||
+            (strappy_file_scanner_case_insensitive_find(path,
+                                                        "/Applications/") !=
+             NULL)) ? "app_library" : "system_library";
+  }
+
+  return "other";
+}
+
+static char *strappy_file_scanner_last_two_path_components(const char *path)
+{
+  const char *cursor;
+  const char *end;
+  const char *last_slash;
+  const char *previous_slash;
+  const char *start;
+  size_t length;
+
+  if ((path == NULL) || (path[0] == '\0')) {
+    return NULL;
+  }
+
+  length = strlen(path);
+  while ((length > 0U) && (path[length - 1U] == '/')) {
+    length--;
+  }
+  if (length == 0U) {
+    return NULL;
+  }
+
+  end = path + length;
+  last_slash = NULL;
+  for (cursor = path; cursor < end; cursor++) {
+    if (*cursor == '/') {
+      last_slash = cursor;
+    }
+  }
+
+  if (last_slash == NULL) {
+    return strappy_file_scanner_duplicate_range(path, length);
+  }
+
+  previous_slash = NULL;
+  for (cursor = path; cursor < last_slash; cursor++) {
+    if (*cursor == '/') {
+      previous_slash = cursor;
+    }
+  }
+
+  start = (previous_slash != NULL) ? previous_slash + 1 : last_slash + 1;
+  if (start >= end) {
+    return NULL;
+  }
+
+  return strappy_file_scanner_duplicate_range(start, (size_t)(end - start));
+}
+
+static char *strappy_file_scanner_tail_after_marker(const char *path,
+                                                    const char *marker)
+{
+  const char *match;
+
+  match = strappy_file_scanner_case_insensitive_find(path, marker);
+  if (match == NULL) {
+    return NULL;
+  }
+
+  match += strlen(marker);
+  if (match[0] == '\0') {
+    return NULL;
+  }
+
+  return strappy_string_duplicate(match);
+}
+
+static char *strappy_file_scanner_app_bundle_location_tail(const char *path)
+{
+  const char *app_suffix;
+  const char *cursor;
+  const char *start;
+
+  app_suffix = strappy_file_scanner_case_insensitive_find(path, ".app/");
+  if (app_suffix == NULL) {
+    return NULL;
+  }
+
+  start = path;
+  for (cursor = path; cursor < app_suffix; cursor++) {
+    if (*cursor == '/') {
+      start = cursor + 1;
+    }
+  }
+
+  if ((start == NULL) || (start[0] == '\0')) {
+    return NULL;
+  }
+
+  return strappy_string_duplicate(start);
+}
+
+static char *strappy_file_scanner_database_location_tail(const char *path,
+                                                         const char *origin_kind)
+{
+  char *tail;
+
+  if ((path == NULL) || (path[0] == '\0')) {
+    return NULL;
+  }
+
+  tail = NULL;
+  if ((origin_kind != NULL) && (strcmp(origin_kind, "app_bundle") == 0)) {
+    tail = strappy_file_scanner_app_bundle_location_tail(path);
+  } else if ((origin_kind != NULL) &&
+             (strcmp(origin_kind, "application_support") == 0)) {
+    tail = strappy_file_scanner_tail_after_marker(
+      path,
+      "/Library/Application Support/");
+  } else if ((origin_kind != NULL) &&
+             (strcmp(origin_kind, "documents") == 0)) {
+    tail = strappy_file_scanner_tail_after_marker(path, "/Documents/");
+  } else if ((origin_kind != NULL) && (strcmp(origin_kind, "cache") == 0)) {
+    tail = strappy_file_scanner_tail_after_marker(path, "/Library/Caches/");
+    if (tail == NULL) {
+      tail = strappy_file_scanner_tail_after_marker(path, "/Caches/");
+    }
+  } else if ((origin_kind != NULL) &&
+             ((strcmp(origin_kind, "app_library") == 0) ||
+              (strcmp(origin_kind, "system_library") == 0))) {
+    tail = strappy_file_scanner_tail_after_marker(path, "/Library/");
+  } else if ((origin_kind != NULL) && (strcmp(origin_kind, "media") == 0)) {
+    tail = strappy_file_scanner_tail_after_marker(path, "/Media/");
+  }
+
+  if (tail == NULL) {
+    tail = strappy_file_scanner_last_two_path_components(path);
+  }
+
+  return tail;
 }
 
 static int strappy_file_scanner_report_progress(
@@ -138,6 +419,9 @@ void strappy_file_scanner_options_init(strappy_file_scanner_options *options)
   options->max_depth = -1;
   options->progress_callback = NULL;
   options->progress_user_data = NULL;
+  options->record_batch_size = 0U;
+  options->record_batch_callback = NULL;
+  options->record_batch_user_data = NULL;
 }
 
 void strappy_file_scanner_record_init(strappy_file_scanner_record *record)
@@ -159,6 +443,8 @@ void strappy_file_scanner_record_init(strappy_file_scanner_record *record)
   record->app_container_path = NULL;
   record->app_bundle_path = NULL;
   record->app_source = NULL;
+  record->origin_kind = NULL;
+  record->location_tail = NULL;
   record->hidden = 0;
 }
 
@@ -176,6 +462,8 @@ void strappy_file_scanner_record_destroy(strappy_file_scanner_record *record)
   free(record->app_container_path);
   free(record->app_bundle_path);
   free(record->app_source);
+  free(record->origin_kind);
+  free(record->location_tail);
   strappy_file_scanner_record_init(record);
 }
 
@@ -251,6 +539,9 @@ int strappy_file_scanner_record_set_app_metadata(
   record->app_container_path = new_container_path;
   record->app_bundle_path = new_bundle_path;
   record->app_source = new_source;
+  record->hidden =
+    strappy_file_scanner_database_should_be_hidden(record->path,
+                                                   record->app_bundle_id);
   return 1;
 }
 
@@ -289,6 +580,9 @@ static int strappy_file_scanner_add_record(
 {
   strappy_file_scanner_record *records;
   strappy_file_scanner_record *record;
+  char *origin_kind;
+  char *location_tail;
+  const char *origin_kind_value;
 
   if ((list == NULL) || (path == NULL) || (stat_info == NULL)) {
     free(validation_error);
@@ -302,10 +596,24 @@ static int strappy_file_scanner_add_record(
     return 0;
   }
 
+  origin_kind_value = strappy_file_scanner_database_origin_kind(path);
+  origin_kind = strappy_string_duplicate(origin_kind_value);
+  location_tail =
+    strappy_file_scanner_database_location_tail(path, origin_kind_value);
+  if ((origin_kind == NULL) || (location_tail == NULL)) {
+    free(origin_kind);
+    free(location_tail);
+    free(validation_error);
+    strappy_set_error(error_out, "Could not allocate scanner display metadata.");
+    return 0;
+  }
+
   records = (strappy_file_scanner_record *)realloc(
     list->records,
     sizeof(strappy_file_scanner_record) * (list->count + 1U));
   if (records == NULL) {
+    free(origin_kind);
+    free(location_tail);
     free(validation_error);
     strappy_set_error(error_out, "Could not allocate scanner record.");
     return 0;
@@ -317,6 +625,8 @@ static int strappy_file_scanner_add_record(
 
   record->path = strappy_string_duplicate(path);
   if (record->path == NULL) {
+    free(origin_kind);
+    free(location_tail);
     free(validation_error);
     strappy_set_error(error_out, "Could not allocate scanner path.");
     return 0;
@@ -328,8 +638,30 @@ static int strappy_file_scanner_add_record(
   record->inode = (unsigned long long)stat_info->st_ino;
   record->is_valid_sqlite = is_valid_sqlite;
   record->validation_error = validation_error;
-  record->hidden = strappy_file_scanner_database_should_be_hidden(path);
+  record->origin_kind = origin_kind;
+  record->location_tail = location_tail;
+  record->hidden = strappy_file_scanner_database_should_be_hidden(path, NULL);
   list->count++;
+  return 1;
+}
+
+static int strappy_file_scanner_flush_record_batch(
+  const strappy_file_scanner_options *options,
+  strappy_file_scanner_record_list *list,
+  char **error_out)
+{
+  if ((options == NULL) || (options->record_batch_callback == NULL) ||
+      (list == NULL) || (list->count == 0U)) {
+    return 1;
+  }
+
+  if (!options->record_batch_callback(list,
+                                      options->record_batch_user_data,
+                                      error_out)) {
+    return 0;
+  }
+
+  strappy_file_scanner_record_list_destroy(list);
   return 1;
 }
 
@@ -451,6 +783,7 @@ int strappy_file_scanner_scan(const strappy_file_scanner_options *options,
   int stopped;
   int cancelled;
   int failed;
+  size_t records_found;
 
   if ((options == NULL) || (list == NULL)) {
     strappy_set_error(error_out, "Scanner request is incomplete.");
@@ -485,6 +818,7 @@ int strappy_file_scanner_scan(const strappy_file_scanner_options *options,
   stopped = 0;
   cancelled = 0;
   failed = 0;
+  records_found = 0U;
 
   for (;;) {
     errno = 0;
@@ -545,10 +879,21 @@ int strappy_file_scanner_scan(const strappy_file_scanner_options *options,
             failed = 1;
             break;
           }
+          records_found++;
 
           if ((options->max_results > 0L) &&
-              (list->count >= (size_t)options->max_results)) {
+              (records_found >= (size_t)options->max_results)) {
             stopped = 1;
+            break;
+          }
+
+          if ((options->record_batch_callback != NULL) &&
+              (options->record_batch_size > 0U) &&
+              (list->count >= options->record_batch_size) &&
+              !strappy_file_scanner_flush_record_batch(options,
+                                                       list,
+                                                       error_out)) {
+            failed = 1;
             break;
           }
         }
@@ -580,6 +925,10 @@ int strappy_file_scanner_scan(const strappy_file_scanner_options *options,
     return 0;
   }
 
+  if (!strappy_file_scanner_flush_record_batch(options, list, error_out)) {
+    return 0;
+  }
+
   return 1;
 }
 
@@ -602,13 +951,16 @@ static void strappy_file_scanner_discovered_database_input_from_record(
   input->app_container_path = record->app_container_path;
   input->app_bundle_path = record->app_bundle_path;
   input->app_source = record->app_source;
+  input->origin_kind = record->origin_kind;
+  input->location_tail = record->location_tail;
   input->hidden = record->hidden;
 }
 
-int strappy_file_scanner_save_discovered_databases(
+static int strappy_file_scanner_save_discovered_databases_with_mode(
   const char *db_path,
   const strappy_file_scanner_record_list *list,
   const char *scan_root,
+  int replace_scan_root,
   char **error_out)
 {
   strappy_discovered_database_input *inputs;
@@ -643,13 +995,46 @@ int strappy_file_scanner_save_discovered_databases(
       scan_root);
   }
 
-  ok = strappy_db_replace_discovered_databases_for_scan_root(db_path,
-                                                             inputs,
-                                                             list->count,
-                                                             scan_root,
-                                                             error_out);
+  if (replace_scan_root) {
+    ok = strappy_db_replace_discovered_databases_for_scan_root(db_path,
+                                                               inputs,
+                                                               list->count,
+                                                               scan_root,
+                                                               error_out);
+  } else {
+    ok = strappy_db_save_discovered_databases(db_path,
+                                              inputs,
+                                              list->count,
+                                              error_out);
+  }
   free(inputs);
   return ok;
+}
+
+int strappy_file_scanner_save_discovered_databases(
+  const char *db_path,
+  const strappy_file_scanner_record_list *list,
+  const char *scan_root,
+  char **error_out)
+{
+  return strappy_file_scanner_save_discovered_databases_with_mode(db_path,
+                                                                  list,
+                                                                  scan_root,
+                                                                  1,
+                                                                  error_out);
+}
+
+int strappy_file_scanner_save_discovered_database_batch(
+  const char *db_path,
+  const strappy_file_scanner_record_list *list,
+  const char *scan_root,
+  char **error_out)
+{
+  return strappy_file_scanner_save_discovered_databases_with_mode(db_path,
+                                                                  list,
+                                                                  scan_root,
+                                                                  0,
+                                                                  error_out);
 }
 
 int strappy_file_scanner_scan_and_save_discovered_databases(
@@ -665,7 +1050,10 @@ int strappy_file_scanner_scan_and_save_discovered_databases(
     return 0;
   }
 
-  if (!strappy_file_scanner_scan(options, list, error_out)) {
+  if ((options->record_batch_callback == NULL) ||
+      (options->record_batch_size == 0U)) {
+    strappy_set_error(error_out,
+                      "Scanner catalog save requires batched records.");
     return 0;
   }
 
@@ -674,12 +1062,13 @@ int strappy_file_scanner_scan_and_save_discovered_databases(
     scan_root = NULL;
   }
 
-  if (!strappy_file_scanner_save_discovered_databases(db_path,
-                                                      list,
-                                                      scan_root,
-                                                      error_out)) {
+  if (!strappy_db_replace_discovered_databases_for_scan_root(db_path,
+                                                             NULL,
+                                                             0U,
+                                                             scan_root,
+                                                             error_out)) {
     return 0;
   }
 
-  return 1;
+  return strappy_file_scanner_scan(options, list, error_out);
 }

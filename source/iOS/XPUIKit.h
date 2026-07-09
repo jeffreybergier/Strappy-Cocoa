@@ -9,6 +9,14 @@
 - (void)XP_removeShadow;
 @end
 
+@interface UIScrollView (XPUIKit)
+- (void)XP_setKeyboardDismissModeOnDrag;
+@end
+
+@interface UISearchBar (XPUIKit)
+- (void)XP_enableSearchReturnKeyWhenEmpty;
+@end
+
 @interface UIWebView (XPUIKit)
 - (UIScrollView *)XP_scrollView;
 @end

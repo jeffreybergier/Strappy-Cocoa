@@ -48,7 +48,9 @@ static const CGFloat kStrappyPreferencesToolbarFallbackHeight = 44.0f;
   [[self searchBar] setDelegate:self];
   [[self searchBar] setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
   [[self searchBar] setPlaceholder:NSLocalizedString(@"Search", nil)];
+  [[self searchBar] XP_enableSearchReturnKeyWhenEmpty];
   [[self tableView] setTableHeaderView:[self searchBar]];
+  [[self tableView] XP_setKeyboardDismissModeOnDrag];
 
   [self buildStatusToolbar];
   [self reloadRows];
@@ -342,11 +344,6 @@ static const CGFloat kStrappyPreferencesToolbarFallbackHeight = 44.0f;
     (unsigned long)selectedCount, (unsigned long)totalCount];
 }
 
-- (NSString *)emptyText
-{
-  return NSLocalizedString(@"No rows available.", nil);
-}
-
 - (NSString *)actionButtonAccessibilityLabel
 {
   return NSLocalizedString(@"Refresh", nil);
@@ -445,6 +442,11 @@ static const CGFloat kStrappyPreferencesToolbarFallbackHeight = 44.0f;
 
 #pragma mark - UISearchBarDelegate
 
+- (void)searchBarTextDidBeginEditing:(UISearchBar *)searchBar
+{
+  [searchBar XP_enableSearchReturnKeyWhenEmpty];
+}
+
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText
 {
   (void)searchBar;
@@ -472,7 +474,7 @@ static const CGFloat kStrappyPreferencesToolbarFallbackHeight = 44.0f;
   if (section != 0) {
     return 0;
   }
-  return ([[self rows] count] > 0U) ? (NSInteger)[[self rows] count] : 1;
+  return (NSInteger)[[self rows] count];
 }
 
 - (NSString *)tableView:(UITableView *)tableView
@@ -495,16 +497,6 @@ titleForFooterInSection:(NSInteger)section
                                   reuseIdentifier:@"CatalogCell"];
     [[cell textLabel] setNumberOfLines:1];
     [[cell detailTextLabel] setNumberOfLines:1];
-  }
-
-  if ([[self rows] count] == 0U) {
-    [[cell textLabel] setText:[self emptyText]];
-    [[cell detailTextLabel] setText:nil];
-    [cell setAccessoryType:UITableViewCellAccessoryNone];
-    [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-    [[cell textLabel] setTextColor:[UIColor grayColor]];
-    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
-    return cell;
   }
 
   row = [[self rows] objectAtIndex:(NSUInteger)[indexPath row]];

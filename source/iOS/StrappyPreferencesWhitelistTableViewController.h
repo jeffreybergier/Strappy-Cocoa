@@ -23,7 +23,6 @@
 - (NSString *)currentSearchText;
 - (NSString *)workingStatusText;
 - (NSString *)statusText;
-- (NSString *)emptyText;
 - (NSString *)actionButtonAccessibilityLabel;
 - (void)actionButtonPressed:(id)sender;
 - (void)configureCell:(UITableViewCell *)cell withRow:(NSDictionary *)row;
