@@ -12,6 +12,246 @@ static const CGFloat kStrappySendDismissWidth = 22.0f;
 static const CGFloat kStrappySendOptionsWidth = 36.0f;
 static const CGFloat kStrappySendDismissGlyphSize = 14.0f;
 static const CGFloat kStrappySendFontSize = 16.0f;
+static const CGFloat kStrappySendFieldRadius = 8.0f;
+
+@interface StrappyPromptFieldInnerShadowView : UIView
+@end
+
+@implementation StrappyPromptFieldInnerShadowView
+
+- (instancetype)initWithFrame:(CGRect)frame
+{
+  if ((self = [super initWithFrame:frame])) {
+    [self setOpaque:NO];
+    [self setBackgroundColor:[UIColor clearColor]];
+    [self setUserInteractionEnabled:NO];
+    [self setContentMode:UIViewContentModeRedraw];
+  }
+  return self;
+}
+
+- (void)drawRect:(CGRect)rect
+{
+  CGContextRef context;
+  CGRect bounds;
+  UIBezierPath *roundedPath;
+  CGMutablePathRef ringPath;
+
+  (void)rect;
+  context = UIGraphicsGetCurrentContext();
+  if (context == NULL) {
+    return;
+  }
+
+  bounds = [self bounds];
+  roundedPath = [UIBezierPath bezierPathWithRoundedRect:bounds
+                                           cornerRadius:kStrappySendFieldRadius];
+
+  CGContextSaveGState(context);
+  [roundedPath addClip];
+  CGContextSetShadowWithColor(context,
+                              CGSizeMake(0.0f, 1.0f),
+                              3.0f,
+                              [[UIColor colorWithWhite:0.0f alpha:0.22f] CGColor]);
+  ringPath = CGPathCreateMutable();
+  CGPathAddRect(ringPath,
+                NULL,
+                CGRectInset(bounds,
+                            -(kStrappySendFieldRadius * 2.0f + 8.0f),
+                            -(kStrappySendFieldRadius * 2.0f + 8.0f)));
+  CGPathAddPath(ringPath, NULL, [roundedPath CGPath]);
+  CGContextAddPath(context, ringPath);
+  CGContextSetFillColorWithColor(context, [[UIColor blackColor] CGColor]);
+  CGContextEOFillPath(context);
+  CGPathRelease(ringPath);
+  CGContextRestoreGState(context);
+}
+
+@end
+
+@interface StrappyPromptPressableIconButton : UIButton
+@end
+
+@implementation StrappyPromptPressableIconButton
+
+- (instancetype)initWithFrame:(CGRect)frame
+{
+  if ((self = [super initWithFrame:frame])) {
+    [self setOpaque:NO];
+    [self setBackgroundColor:[UIColor clearColor]];
+    [[self imageView] setContentMode:UIViewContentModeCenter];
+  }
+  return self;
+}
+
+- (void)setHighlighted:(BOOL)highlighted
+{
+  [super setHighlighted:highlighted];
+  [self setNeedsDisplay];
+}
+
+- (void)drawRect:(CGRect)rect
+{
+  UIBezierPath *backgroundPath;
+
+  (void)rect;
+  if (![self isHighlighted] || ![self isEnabled]) {
+    return;
+  }
+
+  backgroundPath =
+    [UIBezierPath bezierPathWithRoundedRect:CGRectInset([self bounds],
+                                                        2.0f,
+                                                        2.0f)
+                               cornerRadius:5.0f];
+  [[UIColor colorWithWhite:0.0f alpha:0.12f] setFill];
+  [backgroundPath fill];
+}
+
+@end
+
+@interface StrappyPromptBorderedIconButton : StrappyPromptPressableIconButton
+@end
+
+@implementation StrappyPromptBorderedIconButton
+
+- (CGFloat)hairline
+{
+  CGFloat scale;
+
+  scale = [[UIScreen mainScreen] scale];
+  if (scale <= 0.0f) {
+    scale = 1.0f;
+  }
+  return 1.0f / scale;
+}
+
+- (void)setEnabled:(BOOL)enabled
+{
+  [super setEnabled:enabled];
+  [self setNeedsDisplay];
+}
+
+- (void)drawRect:(CGRect)rect
+{
+  CGFloat hairline;
+  UIBezierPath *buttonPath;
+  UIColor *fillColor;
+  UIColor *strokeColor;
+
+  (void)rect;
+  hairline = [self hairline];
+  buttonPath =
+    [UIBezierPath bezierPathWithRoundedRect:CGRectInset([self bounds],
+                                                        hairline * 0.5f,
+                                                        hairline * 0.5f)
+                               cornerRadius:6.0f];
+  fillColor = [UIColor whiteColor];
+  strokeColor = [self isEnabled]
+    ? [UIColor colorWithWhite:0.78f alpha:1.0f]
+    : [UIColor colorWithWhite:0.84f alpha:1.0f];
+
+  [fillColor setFill];
+  [buttonPath fill];
+
+  if ([self isHighlighted] && [self isEnabled]) {
+    [[UIColor colorWithWhite:0.0f alpha:0.12f] setFill];
+    [buttonPath fill];
+  }
+
+  [buttonPath setLineWidth:hairline];
+  [strokeColor setStroke];
+  [buttonPath stroke];
+}
+
+@end
+
+@interface StrappyPromptSendButton : UIButton
+@property (nonatomic, assign, getter=isDestructive) BOOL destructive;
+@end
+
+@implementation StrappyPromptSendButton
+
+- (instancetype)initWithFrame:(CGRect)frame
+{
+  if ((self = [super initWithFrame:frame])) {
+    [self setOpaque:NO];
+    [self setBackgroundColor:[UIColor clearColor]];
+    [[self imageView] setContentMode:UIViewContentModeCenter];
+  }
+  return self;
+}
+
+- (void)setEnabled:(BOOL)enabled
+{
+  [super setEnabled:enabled];
+  [self setNeedsDisplay];
+}
+
+- (void)setHighlighted:(BOOL)highlighted
+{
+  [super setHighlighted:highlighted];
+  [self setNeedsDisplay];
+}
+
+- (void)setDestructive:(BOOL)destructive
+{
+  _destructive = destructive ? YES : NO;
+  [self setNeedsDisplay];
+}
+
+- (void)drawRect:(CGRect)rect
+{
+  CGContextRef context;
+  CGRect bounds;
+  UIBezierPath *discPath;
+  UIColor *fillColor;
+  CGMutablePathRef ringPath;
+
+  (void)rect;
+  context = UIGraphicsGetCurrentContext();
+  if (context == NULL) {
+    return;
+  }
+
+  bounds = [self bounds];
+  if (![self isEnabled]) {
+    fillColor = [UIColor colorWithWhite:0.74f alpha:1.0f];
+  } else if ([self isDestructive]) {
+    fillColor = [self isHighlighted]
+      ? [UIColor colorWithRed:0.58f green:0.12f blue:0.11f alpha:1.0f]
+      : [UIColor colorWithRed:0.72f green:0.18f blue:0.16f alpha:1.0f];
+  } else {
+    fillColor = [self isHighlighted]
+      ? [UIColor colorWithRed:0.0f green:0.40f blue:0.80f alpha:1.0f]
+      : [UIColor colorWithRed:0.0f green:0.52f blue:1.0f alpha:1.0f];
+  }
+
+  discPath = [UIBezierPath bezierPathWithOvalInRect:bounds];
+  [fillColor setFill];
+  [discPath fill];
+
+  CGContextSaveGState(context);
+  [discPath addClip];
+  CGContextSetShadowWithColor(context,
+                              CGSizeMake(0.0f, 1.0f),
+                              2.5f,
+                              [[UIColor colorWithWhite:0.0f alpha:0.35f] CGColor]);
+  ringPath = CGPathCreateMutable();
+  CGPathAddRect(ringPath,
+                NULL,
+                CGRectInset(bounds,
+                            -bounds.size.width,
+                            -bounds.size.height));
+  CGPathAddEllipseInRect(ringPath, NULL, bounds);
+  CGContextAddPath(context, ringPath);
+  CGContextSetFillColorWithColor(context, [[UIColor blackColor] CGColor]);
+  CGContextEOFillPath(context);
+  CGPathRelease(ringPath);
+  CGContextRestoreGState(context);
+}
+
+@end
 
 static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
                                                  NSString *key)
@@ -51,11 +291,14 @@ enum {
 };
 
 @interface PromptSendViewController () <UITextViewDelegate>
+@property (nonatomic, strong) UIView *topSeparator;
+@property (nonatomic, strong) UIView *topHighlight;
 @property (nonatomic, strong) UIButton *dismissButton;
 @property (nonatomic, strong) UIButton *optionsButton;
 @property (nonatomic, strong) UITextView *textView;
+@property (nonatomic, strong) StrappyPromptFieldInnerShadowView *textViewShadow;
 @property (nonatomic, strong) UILabel *placeholderLabel;
-@property (nonatomic, strong) UIButton *sendButton;
+@property (nonatomic, strong) StrappyPromptSendButton *sendButton;
 @property (nonatomic, strong) UINavigationController *optionsNavigationController;
 @property (nonatomic, strong) StrappyPromptOptionsTableViewController *optionsController;
 @property (nonatomic, assign) BOOL controlsEnabled;
@@ -69,6 +312,9 @@ enum {
                         style:(AIFontAwesomeStyle)style
                     pointSize:(CGFloat)pointSize
                         color:(UIColor *)color;
+- (CGFloat)hairline;
+- (BOOL)showsExpanded;
+- (CGFloat)collapsedTextWidth;
 - (NSString *)trimmedPromptText;
 - (void)updateControls;
 - (void)updateExpansion;
@@ -324,21 +570,67 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
                                scale:scale];
 }
 
+- (CGFloat)hairline
+{
+  CGFloat scale;
+
+  scale = [[UIScreen mainScreen] scale];
+  if (scale <= 0.0f) {
+    scale = 1.0f;
+  }
+  return 1.0f / scale;
+}
+
+- (BOOL)showsExpanded
+{
+  return ([self composing] && [self expanded]) ? YES : NO;
+}
+
+- (CGFloat)collapsedTextWidth
+{
+  CGRect bounds;
+  CGFloat textX;
+  CGFloat sendX;
+  CGFloat optionsX;
+  CGFloat textRight;
+  CGFloat width;
+
+  bounds = [self bounds];
+  textX = [self composing] ? kStrappySendDismissWidth : kStrappySendPad;
+  sendX = bounds.size.width - kStrappySendPad - kStrappySendButtonSize;
+  optionsX = sendX - kStrappySendPad - kStrappySendOptionsWidth;
+  textRight = optionsX - kStrappySendPad;
+  width = textRight - textX;
+  return (width > 1.0f) ? width : 1.0f;
+}
+
 - (void)buildSubviews
 {
+  UIView *topSeparator;
+  UIView *topHighlight;
   UIButton *dismiss;
   UIButton *options;
   UITextView *textView;
+  StrappyPromptFieldInnerShadowView *textViewShadow;
   UILabel *placeholder;
-  UIButton *send;
+  StrappyPromptSendButton *send;
   CGFloat hairline;
 
-  hairline = 1.0f / [[UIScreen mainScreen] scale];
-  if (hairline <= 0.0f) {
-    hairline = 1.0f;
-  }
+  hairline = [self hairline];
 
-  dismiss = [UIButton buttonWithType:UIButtonTypeCustom];
+  topSeparator = [[UIView alloc] initWithFrame:CGRectZero];
+  [topSeparator setBackgroundColor:[UIColor colorWithWhite:0.72f alpha:1.0f]];
+  [topSeparator setUserInteractionEnabled:NO];
+  [self addSubview:topSeparator];
+  [self setTopSeparator:topSeparator];
+
+  topHighlight = [[UIView alloc] initWithFrame:CGRectZero];
+  [topHighlight setBackgroundColor:[UIColor whiteColor]];
+  [topHighlight setUserInteractionEnabled:NO];
+  [self addSubview:topHighlight];
+  [self setTopHighlight:topHighlight];
+
+  dismiss = [[StrappyPromptPressableIconButton alloc] initWithFrame:CGRectZero];
   [dismiss setAlpha:0.0f];
   [dismiss setImage:[self iconImageForIcon:AIFAChevronDown
                                       style:AIFontAwesomeStyleSolid
@@ -352,7 +644,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [self addSubview:dismiss];
   [self setDismissButton:dismiss];
 
-  options = [UIButton buttonWithType:UIButtonTypeCustom];
+  options = [[StrappyPromptBorderedIconButton alloc] initWithFrame:CGRectZero];
   [options setImage:[self iconImageForIcon:AIFAMicrochip
                                      style:AIFontAwesomeStyleSolid
                                  pointSize:18.0f
@@ -374,11 +666,17 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [textView setScrollsToTop:NO];
   [textView setAutoresizingMask:UIViewAutoresizingFlexibleWidth |
                                 UIViewAutoresizingFlexibleHeight];
-  [[textView layer] setCornerRadius:7.0f];
+  [textView setClipsToBounds:YES];
+  [[textView layer] setCornerRadius:kStrappySendFieldRadius];
   [[textView layer] setBorderWidth:hairline];
-  [[textView layer] setBorderColor:[[UIColor colorWithWhite:0.76f alpha:1.0f] CGColor]];
+  [[textView layer] setBorderColor:[[UIColor colorWithWhite:0.80f alpha:1.0f] CGColor]];
   [self addSubview:textView];
   [self setTextView:textView];
+
+  textViewShadow =
+    [[StrappyPromptFieldInnerShadowView alloc] initWithFrame:CGRectZero];
+  [self addSubview:textViewShadow];
+  [self setTextViewShadow:textViewShadow];
 
   placeholder = [[UILabel alloc] initWithFrame:CGRectZero];
   [placeholder setText:NSLocalizedString(@"Ask Strappy", nil)];
@@ -389,17 +687,12 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [self addSubview:placeholder];
   [self setPlaceholderLabel:placeholder];
 
-  send = [UIButton buttonWithType:UIButtonTypeCustom];
+  send = [[StrappyPromptSendButton alloc] initWithFrame:CGRectZero];
   [send setImage:[self iconImageForIcon:AIFAPaperPlane
                                   style:AIFontAwesomeStyleRegular
                               pointSize:18.0f
                                   color:[UIColor whiteColor]]
          forState:UIControlStateNormal];
-  [send setBackgroundColor:[UIColor colorWithRed:0.0f
-                                           green:0.48f
-                                            blue:0.92f
-                                           alpha:1.0f]];
-  [[send layer] setCornerRadius:kStrappySendButtonSize * 0.5f];
   [send setAccessibilityLabel:NSLocalizedString(@"Send Prompt", nil)];
   [send addTarget:self
            action:@selector(sendTapped:)
@@ -415,20 +708,31 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
   CGRect bounds;
   CGFloat optionsX;
+  CGFloat optionsY;
   CGFloat textX;
   CGFloat sendX;
   CGFloat textRight;
   CGFloat textHeight;
   CGFloat placeholderHeight;
   CGFloat placeholderWidth;
+  CGFloat hairline;
 
   [super layoutSubviews];
 
   bounds = [self bounds];
+  hairline = [self hairline];
   sendX = bounds.size.width - kStrappySendPad - kStrappySendButtonSize;
-  optionsX = sendX - kStrappySendPad - kStrappySendOptionsWidth;
+  if ([self showsExpanded]) {
+    optionsX = sendX;
+    optionsY = kStrappySendPad + kStrappySendButtonSize + kStrappySendPad;
+  } else {
+    optionsX = sendX - kStrappySendPad - kStrappySendOptionsWidth;
+    optionsY = kStrappySendPad;
+  }
   textX = [self composing] ? kStrappySendDismissWidth : kStrappySendPad;
-  textRight = optionsX - kStrappySendPad;
+  textRight = [self showsExpanded]
+    ? (sendX - kStrappySendPad)
+    : (optionsX - kStrappySendPad);
   if (textRight < textX) {
     textRight = textX;
   }
@@ -437,13 +741,21 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     textHeight = kStrappySendButtonSize;
   }
 
+  [[self topSeparator] setFrame:CGRectMake(0.0f,
+                                           0.0f,
+                                           bounds.size.width,
+                                           hairline)];
+  [[self topHighlight] setFrame:CGRectMake(0.0f,
+                                           hairline,
+                                           bounds.size.width,
+                                           hairline)];
   [[self dismissButton] setAlpha:[self composing] ? 1.0f : 0.0f];
   [[self dismissButton] setFrame:CGRectMake(0.0f,
                                             kStrappySendPad,
                                             kStrappySendDismissWidth,
                                             kStrappySendButtonSize)];
   [[self optionsButton] setFrame:CGRectMake(optionsX,
-                                            kStrappySendPad,
+                                            optionsY,
                                             kStrappySendOptionsWidth,
                                             kStrappySendButtonSize)];
   [[self sendButton] setFrame:CGRectMake(sendX,
@@ -454,6 +766,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
                                        kStrappySendPad,
                                        textRight - textX,
                                        textHeight)];
+  [[self textViewShadow] setFrame:[[self textView] frame]];
 
   placeholderHeight = (CGFloat)ceilf((float)[[[self textView] font] lineHeight]);
   placeholderWidth = (textRight - textX) - 16.0f;
@@ -468,7 +781,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
 - (CGFloat)preferredHeight
 {
-  return ([self composing] && [self expanded])
+  return [self showsExpanded]
     ? kStrappySendExpandedHeight
     : kStrappySendCollapsedHeight;
 }
@@ -539,7 +852,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   BOOL canSend;
   BOOL sendEnabled;
   UIImage *sendImage;
-  UIColor *sendColor;
 
   canSend = [self canSendCurrentPrompt];
   sendEnabled = [self sending]
@@ -568,15 +880,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     [[self sendButton] setAccessibilityLabel:NSLocalizedString(@"Send Prompt", nil)];
   }
   [[self sendButton] setImage:sendImage forState:UIControlStateNormal];
-
-  if (!sendEnabled) {
-    sendColor = [UIColor colorWithWhite:0.70f alpha:1.0f];
-  } else if ([self sending]) {
-    sendColor = [UIColor colorWithRed:0.72f green:0.18f blue:0.16f alpha:1.0f];
-  } else {
-    sendColor = [UIColor colorWithRed:0.0f green:0.48f blue:0.92f alpha:1.0f];
-  }
-  [[self sendButton] setBackgroundColor:sendColor];
+  [[self sendButton] setDestructive:[self sending] ? YES : NO];
 }
 
 - (void)updatePlaceholderVisibility
@@ -601,7 +905,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     lineHeight = 20.0f;
   }
   oneLineHeight = lineHeight + 16.0f;
-  availableWidth = [[self textView] frame].size.width;
+  availableWidth = [self collapsedTextWidth];
   if (availableWidth < 1.0f) {
     availableWidth = 1.0f;
   }
