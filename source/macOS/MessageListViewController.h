@@ -21,6 +21,7 @@
   NSMutableString          *pendingStreamJavaScript_;
   NSTimer                  *streamEventFlushTimer_;
   NSUInteger                oldestRenderedMessageIndex_;
+  NSUInteger                newestRenderedMessageCount_;
   BOOL                      sending_;
   BOOL                      cancelPromptRequested_;
 }

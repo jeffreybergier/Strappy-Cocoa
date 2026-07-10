@@ -757,6 +757,87 @@ static int harness_check_error_message_state(void)
   return ok;
 }
 
+static int harness_check_responses_items(void)
+{
+  strappy_webview_message message;
+  char *call_html;
+  char *reasoning_html;
+  char *function_html;
+  char *output_html;
+  char *developer_html;
+  int ok;
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "response-call-1";
+  message.role = "api_call";
+  message.kind = "response_api_call";
+  message.text = "POST /responses\ncompleted / HTTP 200";
+  message.metadata_json =
+    "{\"id\":\"resp-test\",\"status\":\"completed\","
+    "\"usage\":{\"input_tokens\":4,\"output_tokens\":8}}";
+  call_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "response-reasoning-1";
+  message.role = "api_reasoning";
+  message.kind = "reasoning";
+  message.text = "Checked the available evidence.";
+  reasoning_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "response-function-1";
+  message.role = "api_function_call";
+  message.kind = "function_call";
+  message.text = "database_list_info\n{}";
+  function_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "response-output-1";
+  message.role = "api_function_output";
+  message.kind = "function_call_output";
+  message.text = "{\"ok\":true}";
+  output_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "response-developer-1";
+  message.role = "developer";
+  message.kind = "message";
+  message.text = "Audit the available tools.";
+  developer_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+
+  ok = (call_html != NULL) && (reasoning_html != NULL) &&
+       (function_html != NULL) && (output_html != NULL) &&
+       (developer_html != NULL) &&
+       harness_expect_contains(call_html, "class=\"row api_call\"") &&
+       harness_expect_contains(call_html, "<div class=\"role\">API Call</div>") &&
+       harness_expect_contains(call_html, "request-metadata") &&
+       harness_expect_contains(reasoning_html,
+                               "class=\"row api_reasoning\"") &&
+       harness_expect_contains(reasoning_html,
+                               "<div class=\"role\">Thinking</div>") &&
+       harness_expect_not_contains(reasoning_html, "tool-column") &&
+       harness_expect_contains(function_html,
+                               "class=\"row api_function_call\"") &&
+       harness_expect_contains(function_html,
+                               "<div class=\"role\">Tool Call</div>") &&
+       harness_expect_not_contains(function_html, "class=\"row tool_call\"") &&
+       harness_expect_contains(output_html,
+                               "class=\"row api_function_output\"") &&
+       harness_expect_contains(output_html,
+                               "<div class=\"role\">Tool Result</div>") &&
+       harness_expect_contains(developer_html,
+                               "class=\"row developer\"") &&
+       harness_expect_contains(developer_html,
+                               "<div class=\"role\">Developer</div>");
+
+  strappy_webview_free(developer_html);
+  strappy_webview_free(output_html);
+  strappy_webview_free(function_html);
+  strappy_webview_free(reasoning_html);
+  strappy_webview_free(call_html);
+  return ok;
+}
+
 int main(void)
 {
   strappy_webview_set_font_dir("/tmp/Strappy Fonts");
@@ -791,6 +872,9 @@ int main(void)
     return 1;
   }
   if (!harness_check_error_message_state()) {
+    return 1;
+  }
+  if (!harness_check_responses_items()) {
     return 1;
   }
 

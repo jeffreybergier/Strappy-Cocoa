@@ -28,6 +28,192 @@
   STRAPPY_CONFIG_DEFAULT_API_MODEL "', '" \
   STRAPPY_DB_BUILTIN_DEFAULT_MODEL_DESCRIPTION "');"
 
+typedef enum strappy_response_field_type {
+  STRAPPY_RESPONSE_FIELD_TEXT = 0,
+  STRAPPY_RESPONSE_FIELD_INTEGER = 1,
+  STRAPPY_RESPONSE_FIELD_REAL = 2
+} strappy_response_field_type;
+
+typedef struct strappy_response_field_definition {
+  const char *json_path;
+  const char *column_name;
+  strappy_response_field_type type;
+} strappy_response_field_definition;
+
+static const strappy_response_field_definition
+strappy_response_request_fields[] = {
+  { "background", "background", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "cache_control", "cache_control_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "debug", "debug_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "frequency_penalty", "frequency_penalty", STRAPPY_RESPONSE_FIELD_REAL },
+  { "image_config", "image_config_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "include", "include_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "input", "input_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "instructions", "instructions", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "max_output_tokens", "max_output_tokens", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "max_tool_calls", "max_tool_calls", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "metadata", "metadata_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "modalities", "modalities_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "model", "model", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "models", "models_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "parallel_tool_calls", "parallel_tool_calls", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "plugins", "plugins_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "presence_penalty", "presence_penalty", STRAPPY_RESPONSE_FIELD_REAL },
+  { "previous_response_id", "previous_response_id", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "prompt", "prompt_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "prompt_cache_key", "prompt_cache_key", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "provider", "provider_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "reasoning", "reasoning_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "route", "route_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "safety_identifier", "safety_identifier", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "service_tier", "service_tier", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "session_id", "session_id", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "stop_server_tools_when", "stop_server_tools_when_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "store", "store", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "stream", "stream", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "temperature", "temperature", STRAPPY_RESPONSE_FIELD_REAL },
+  { "text", "text_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "tool_choice", "tool_choice_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "tools", "tools_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "top_k", "top_k", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "top_logprobs", "top_logprobs", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "top_p", "top_p", STRAPPY_RESPONSE_FIELD_REAL },
+  { "trace", "trace_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "truncation", "truncation_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "user", "user", STRAPPY_RESPONSE_FIELD_TEXT }
+};
+
+static const strappy_response_field_definition
+strappy_response_result_fields[] = {
+  { "background", "background", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "completed_at", "completed_at", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "created_at", "created_at", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "error", "error_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "error.code", "error_code", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "error.message", "error_message", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "error_type", "error_type", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "frequency_penalty", "frequency_penalty", STRAPPY_RESPONSE_FIELD_REAL },
+  { "id", "id", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "incomplete_details", "incomplete_details_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "incomplete_details.reason", "incomplete_reason", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "instructions", "instructions_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "max_output_tokens", "max_output_tokens", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "max_tool_calls", "max_tool_calls", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "metadata", "metadata_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "model", "model", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "object", "object", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "openrouter_metadata", "openrouter_metadata_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "output", "output_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "output_text", "output_text", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "parallel_tool_calls", "parallel_tool_calls", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "presence_penalty", "presence_penalty", STRAPPY_RESPONSE_FIELD_REAL },
+  { "previous_response_id", "previous_response_id", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "prompt", "prompt_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "prompt_cache_key", "prompt_cache_key", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "reasoning", "reasoning_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "safety_identifier", "safety_identifier", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "service_tier", "service_tier", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "status", "status", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "store", "store", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "temperature", "temperature", STRAPPY_RESPONSE_FIELD_REAL },
+  { "text", "text_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "tool_choice", "tool_choice_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "tools", "tools_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "top_logprobs", "top_logprobs", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "top_p", "top_p", STRAPPY_RESPONSE_FIELD_REAL },
+  { "truncation", "truncation", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "usage", "usage_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "usage.input_tokens", "usage_input_tokens", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "usage.input_tokens_details", "usage_input_tokens_details_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "usage.input_tokens_details.cached_tokens", "usage_cached_tokens", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "usage.output_tokens", "usage_output_tokens", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "usage.output_tokens_details", "usage_output_tokens_details_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "usage.output_tokens_details.reasoning_tokens", "usage_reasoning_tokens", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "usage.total_tokens", "usage_total_tokens", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "usage.cost", "usage_cost", STRAPPY_RESPONSE_FIELD_REAL },
+  { "usage.cost_details", "usage_cost_details_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "usage.cost_details.upstream_inference_cost", "usage_upstream_inference_cost", STRAPPY_RESPONSE_FIELD_REAL },
+  { "usage.cost_details.upstream_inference_input_cost", "usage_upstream_input_cost", STRAPPY_RESPONSE_FIELD_REAL },
+  { "usage.cost_details.upstream_inference_output_cost", "usage_upstream_output_cost", STRAPPY_RESPONSE_FIELD_REAL },
+  { "usage.is_byok", "usage_is_byok", STRAPPY_RESPONSE_FIELD_INTEGER },
+  { "user", "user", STRAPPY_RESPONSE_FIELD_TEXT }
+};
+
+static const strappy_response_field_definition
+strappy_response_item_fields[] = {
+  { "action", "action_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "advice", "advice", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "analysis", "analysis_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "annotations", "annotations_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "approval_request_id", "approval_request_id", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "approve", "approve", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "arguments", "arguments", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "call_id", "call_id", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "code", "code", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "command", "command_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "container_id", "container_id", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "content", "content_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "datetime", "datetime", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "encrypted_content", "encrypted_content", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "environment", "environment_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "error", "error_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "exitCode", "exit_code", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "failed_models", "failed_models_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "failure_reason", "failure_reason", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "filePath", "file_path", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "file_id", "file_id", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "filename", "filename", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "format", "format", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "httpStatus", "http_status", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "id", "api_item_id", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "imageB64", "image_base64", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "imageUrl", "image_url", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "input", "input", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "instance_name", "instance_name", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "key", "key", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "language", "language", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "logprobs", "logprobs_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "max_output_length", "max_output_length", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "model", "model", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "name", "name", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "namespace", "namespace", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "operation", "operation_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "outcome", "outcome_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "output", "output", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "outputs", "outputs_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "pending_safety_checks", "pending_safety_checks_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "phase", "phase", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "prompt", "prompt", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "queries", "queries_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "query", "query", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "reason", "reason", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "refusal", "refusal", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "responses", "responses_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "result", "result", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "results", "results_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "revisedPrompt", "revised_prompt", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "role", "role", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "screenshotB64", "screenshot_base64", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "serverLabel", "server_label", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "server_label", "server_label_snake", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "signature", "signature", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "sources", "sources_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "status", "status", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "stderr", "stderr", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "stdout", "stdout", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "summary", "summary_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "task_description", "task_description", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "task_name", "task_name", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "text", "text", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "timezone", "timezone", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "title", "title", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "toolName", "tool_name", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "tools", "tools_json", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "type", "type", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "url", "url", STRAPPY_RESPONSE_FIELD_TEXT },
+  { "value", "value_json", STRAPPY_RESPONSE_FIELD_TEXT }
+};
+
 static int strappy_db_copy_default_openrouter_model(sqlite3 *db,
                                                     char **model_id_out,
                                                     char **error_out);
@@ -227,6 +413,31 @@ void strappy_session_message_record_list_destroy(strappy_session_message_record_
   }
   free(list->records);
   strappy_session_message_record_list_init(list);
+}
+
+void strappy_response_item_raw_record_list_init(
+  strappy_response_item_raw_record_list *list)
+{
+  if (list == NULL) {
+    return;
+  }
+  list->records = NULL;
+  list->count = 0U;
+}
+
+void strappy_response_item_raw_record_list_destroy(
+  strappy_response_item_raw_record_list *list)
+{
+  size_t index;
+
+  if (list == NULL) {
+    return;
+  }
+  for (index = 0U; index < list->count; index++) {
+    free(list->records[index].raw_json);
+  }
+  free(list->records);
+  strappy_response_item_raw_record_list_init(list);
 }
 
 void strappy_discovered_database_record_init(strappy_discovered_database_record *record)
@@ -494,6 +705,319 @@ static int strappy_db_exec(sqlite3 *db,
   return 1;
 }
 
+typedef struct strappy_db_sql_buffer {
+  char *data;
+  size_t length;
+} strappy_db_sql_buffer;
+
+static void strappy_db_sql_buffer_destroy(strappy_db_sql_buffer *buffer)
+{
+  if (buffer == NULL) {
+    return;
+  }
+  free(buffer->data);
+  buffer->data = NULL;
+  buffer->length = 0U;
+}
+
+static int strappy_db_sql_buffer_append(strappy_db_sql_buffer *buffer,
+                                        const char *text)
+{
+  size_t text_length;
+  char *next;
+
+  if ((buffer == NULL) || (text == NULL)) {
+    return 0;
+  }
+  text_length = strlen(text);
+  if (buffer->length > (((size_t)-1) - text_length - 1U)) {
+    return 0;
+  }
+  next = (char *)realloc(buffer->data,
+                         buffer->length + text_length + 1U);
+  if (next == NULL) {
+    return 0;
+  }
+  buffer->data = next;
+  memcpy(buffer->data + buffer->length, text, text_length);
+  buffer->length += text_length;
+  buffer->data[buffer->length] = '\0';
+  return 1;
+}
+
+static const char *strappy_db_response_field_sql_type(
+  strappy_response_field_type type)
+{
+  if (type == STRAPPY_RESPONSE_FIELD_INTEGER) {
+    return "INTEGER";
+  }
+  if (type == STRAPPY_RESPONSE_FIELD_REAL) {
+    return "REAL";
+  }
+  return "TEXT";
+}
+
+static int strappy_db_append_response_schema_fields(
+  strappy_db_sql_buffer *buffer,
+  const char *prefix,
+  const strappy_response_field_definition *fields,
+  size_t field_count)
+{
+  size_t index;
+
+  for (index = 0U; index < field_count; index++) {
+    if (!strappy_db_sql_buffer_append(buffer, ",") ||
+        !strappy_db_sql_buffer_append(buffer, prefix) ||
+        !strappy_db_sql_buffer_append(buffer, fields[index].column_name) ||
+        !strappy_db_sql_buffer_append(buffer, " ") ||
+        !strappy_db_sql_buffer_append(
+          buffer,
+          strappy_db_response_field_sql_type(fields[index].type))) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int strappy_db_create_response_calls_schema(sqlite3 *db,
+                                                   char **error_out)
+{
+  strappy_db_sql_buffer buffer;
+  int ok;
+
+  memset(&buffer, 0, sizeof(buffer));
+  ok =
+    strappy_db_sql_buffer_append(
+      &buffer,
+      "CREATE TABLE IF NOT EXISTS response_api_calls ("
+      "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "session_id INTEGER NOT NULL,"
+      "previous_call_id INTEGER,"
+      "prompt_group_key TEXT NOT NULL,"
+      "request_kind TEXT NOT NULL,"
+      "round_index INTEGER NOT NULL,"
+      "attempt_index INTEGER NOT NULL,"
+      "new_input_start_index INTEGER NOT NULL DEFAULT -1,"
+      "state TEXT NOT NULL DEFAULT 'pending',"
+      "is_error INTEGER NOT NULL DEFAULT 0,"
+      "request_method TEXT NOT NULL,"
+      "request_url TEXT NOT NULL,"
+      "request_headers_json TEXT NOT NULL,"
+      "request_started_at TEXT NOT NULL DEFAULT "
+      "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
+      "transport_completed_at TEXT,"
+      "request_started_at_ms INTEGER,"
+      "transport_completed_at_ms INTEGER,"
+      "http_status INTEGER NOT NULL DEFAULT 0,"
+      "curl_code INTEGER NOT NULL DEFAULT 0,"
+      "retry_after_seconds INTEGER NOT NULL DEFAULT 0,"
+      "request_bytes INTEGER NOT NULL DEFAULT 0,"
+      "response_bytes INTEGER NOT NULL DEFAULT 0,"
+      "name_lookup_seconds REAL NOT NULL DEFAULT 0,"
+      "connect_seconds REAL NOT NULL DEFAULT 0,"
+      "start_transfer_seconds REAL NOT NULL DEFAULT 0,"
+      "total_seconds REAL NOT NULL DEFAULT 0,"
+      "effective_url TEXT,"
+      "transport_error TEXT,"
+      "response_content_type TEXT,"
+      "http_request_id TEXT,"
+      "http_generation_id TEXT,"
+      "rate_limit_limit TEXT,"
+      "rate_limit_remaining TEXT,"
+      "rate_limit_reset TEXT,"
+      "rate_limit_limit_requests TEXT,"
+      "rate_limit_remaining_requests TEXT,"
+      "rate_limit_reset_requests TEXT,"
+      "rate_limit_limit_tokens TEXT,"
+      "rate_limit_remaining_tokens TEXT,"
+      "rate_limit_reset_tokens TEXT") &&
+    strappy_db_append_response_schema_fields(
+      &buffer,
+      "request_",
+      strappy_response_request_fields,
+      sizeof(strappy_response_request_fields) /
+        sizeof(strappy_response_request_fields[0])) &&
+    strappy_db_append_response_schema_fields(
+      &buffer,
+      "response_",
+      strappy_response_result_fields,
+      sizeof(strappy_response_result_fields) /
+        sizeof(strappy_response_result_fields[0])) &&
+    strappy_db_sql_buffer_append(
+      &buffer,
+      ",request_raw_json TEXT NOT NULL,"
+      "response_headers_raw TEXT,"
+      "response_raw_json TEXT,"
+      "FOREIGN KEY(session_id) REFERENCES sessions(id),"
+      "FOREIGN KEY(previous_call_id) REFERENCES response_api_calls(id)"
+      ");");
+
+  if (!ok) {
+    strappy_db_sql_buffer_destroy(&buffer);
+    strappy_set_error(error_out,
+                      "Could not allocate Responses call schema.");
+    return 0;
+  }
+  ok = strappy_db_exec(db,
+                       buffer.data,
+                       "Could not create Responses call schema",
+                       error_out);
+  strappy_db_sql_buffer_destroy(&buffer);
+  if (!ok) {
+    return 0;
+  }
+
+  return strappy_db_exec(
+           db,
+           "CREATE INDEX IF NOT EXISTS response_api_calls_session_id_id_idx "
+           "ON response_api_calls(session_id, id);",
+           "Could not create Responses call index",
+           error_out) &&
+         strappy_db_exec(
+           db,
+           "CREATE INDEX IF NOT EXISTS response_api_calls_prompt_group_idx "
+           "ON response_api_calls(session_id, prompt_group_key, id);",
+           "Could not create Responses prompt group index",
+           error_out);
+}
+
+static int strappy_db_create_response_items_schema(sqlite3 *db,
+                                                   char **error_out)
+{
+  strappy_db_sql_buffer buffer;
+  int ok;
+
+  memset(&buffer, 0, sizeof(buffer));
+  ok =
+    strappy_db_sql_buffer_append(
+      &buffer,
+      "CREATE TABLE IF NOT EXISTS response_api_items ("
+      "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "response_call_id INTEGER NOT NULL,"
+      "session_id INTEGER NOT NULL,"
+      "direction TEXT NOT NULL,"
+      "item_index INTEGER NOT NULL,"
+      "is_canonical INTEGER NOT NULL DEFAULT 0,"
+      "timeline_visible INTEGER NOT NULL DEFAULT 0,"
+      "display_role TEXT NOT NULL,"
+      "display_text TEXT NOT NULL DEFAULT '',"
+      "is_error INTEGER NOT NULL DEFAULT 0,"
+      "created_at TEXT NOT NULL DEFAULT "
+      "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))") &&
+    strappy_db_append_response_schema_fields(
+      &buffer,
+      "",
+      strappy_response_item_fields,
+      sizeof(strappy_response_item_fields) /
+        sizeof(strappy_response_item_fields[0])) &&
+    strappy_db_sql_buffer_append(
+      &buffer,
+      ",raw_json TEXT NOT NULL,"
+      "FOREIGN KEY(response_call_id) REFERENCES response_api_calls(id),"
+      "FOREIGN KEY(session_id) REFERENCES sessions(id),"
+      "UNIQUE(response_call_id, direction, item_index)"
+      ");");
+  if (!ok) {
+    strappy_db_sql_buffer_destroy(&buffer);
+    strappy_set_error(error_out,
+                      "Could not allocate Responses item schema.");
+    return 0;
+  }
+  ok = strappy_db_exec(db,
+                       buffer.data,
+                       "Could not create Responses item schema",
+                       error_out);
+  strappy_db_sql_buffer_destroy(&buffer);
+  if (!ok) {
+    return 0;
+  }
+
+  return strappy_db_exec(
+           db,
+           "CREATE INDEX IF NOT EXISTS response_api_items_call_direction_idx "
+           "ON response_api_items(response_call_id, direction, item_index);",
+           "Could not create Responses item call index",
+           error_out) &&
+         strappy_db_exec(
+           db,
+           "CREATE INDEX IF NOT EXISTS response_api_items_context_idx "
+           "ON response_api_items(session_id, is_canonical, id);",
+           "Could not create Responses item context index",
+           error_out) &&
+         strappy_db_exec(
+           db,
+           "CREATE INDEX IF NOT EXISTS response_api_items_timeline_idx "
+           "ON response_api_items(session_id, timeline_visible, "
+           "response_call_id, direction, item_index);",
+           "Could not create Responses item timeline index",
+           error_out);
+}
+
+static int strappy_db_create_responses_schema(sqlite3 *db, char **error_out)
+{
+  static const char *parts_sql =
+    "CREATE TABLE IF NOT EXISTS response_api_item_parts ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "response_item_id INTEGER NOT NULL,"
+    "collection_name TEXT NOT NULL,"
+    "part_index INTEGER NOT NULL,"
+    "type TEXT,"
+    "text TEXT,"
+    "refusal TEXT,"
+    "annotations_json TEXT,"
+    "logprobs_json TEXT,"
+    "raw_json TEXT NOT NULL,"
+    "FOREIGN KEY(response_item_id) REFERENCES response_api_items(id),"
+    "UNIQUE(response_item_id, collection_name, part_index)"
+    ");";
+  static const char *parts_index_sql =
+    "CREATE INDEX IF NOT EXISTS response_api_item_parts_item_idx "
+    "ON response_api_item_parts(response_item_id, collection_name, part_index);";
+  static const char *tools_sql =
+    "CREATE TABLE IF NOT EXISTS response_tool_executions ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "session_id INTEGER NOT NULL,"
+    "response_call_id INTEGER NOT NULL,"
+    "response_item_id INTEGER,"
+    "output_index INTEGER NOT NULL,"
+    "call_id TEXT NOT NULL,"
+    "tool_name TEXT NOT NULL,"
+    "arguments_json TEXT NOT NULL,"
+    "status TEXT NOT NULL,"
+    "output_json TEXT,"
+    "error_text TEXT,"
+    "started_at_ms INTEGER NOT NULL,"
+    "completed_at_ms INTEGER NOT NULL,"
+    "created_at TEXT NOT NULL DEFAULT "
+    "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
+    "FOREIGN KEY(session_id) REFERENCES sessions(id),"
+    "FOREIGN KEY(response_call_id) REFERENCES response_api_calls(id),"
+    "FOREIGN KEY(response_item_id) REFERENCES response_api_items(id)"
+    ");";
+  static const char *tools_index_sql =
+    "CREATE INDEX IF NOT EXISTS response_tool_executions_call_idx "
+    "ON response_tool_executions(response_call_id, output_index, id);";
+
+  return strappy_db_create_response_calls_schema(db, error_out) &&
+         strappy_db_create_response_items_schema(db, error_out) &&
+         strappy_db_exec(db,
+                         parts_sql,
+                         "Could not create Responses item part schema",
+                         error_out) &&
+         strappy_db_exec(db,
+                         parts_index_sql,
+                         "Could not create Responses item part index",
+                         error_out) &&
+         strappy_db_exec(db,
+                         tools_sql,
+                         "Could not create Responses tool execution schema",
+                         error_out) &&
+         strappy_db_exec(db,
+                         tools_index_sql,
+                         "Could not create Responses tool execution index",
+                         error_out);
+}
+
 static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
 {
   static const char *sessions_sql =
@@ -740,6 +1264,10 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
                        messages_context_index_sql,
                        "Could not create session context message index",
                        error_out)) {
+    return 0;
+  }
+
+  if (!strappy_db_create_responses_schema(db, error_out)) {
     return 0;
   }
 
@@ -5082,6 +5610,44 @@ int strappy_db_delete_session(const char *db_path,
 
   if (!strappy_db_delete_session_rows(
         db,
+        "DELETE FROM response_api_item_parts WHERE response_item_id IN "
+        "(SELECT id FROM response_api_items WHERE session_id = ?);",
+        session_id,
+        "Could not prepare Responses item part delete",
+        "Could not bind Responses item part delete",
+        "Could not delete Responses item parts",
+        error_out) ||
+      !strappy_db_delete_session_rows(
+        db,
+        "DELETE FROM response_tool_executions WHERE session_id = ?;",
+        session_id,
+        "Could not prepare Responses tool execution delete",
+        "Could not bind Responses tool execution delete",
+        "Could not delete Responses tool executions",
+        error_out) ||
+      !strappy_db_delete_session_rows(
+        db,
+        "DELETE FROM response_api_items WHERE session_id = ?;",
+        session_id,
+        "Could not prepare Responses item delete",
+        "Could not bind Responses item delete",
+        "Could not delete Responses items",
+        error_out) ||
+      !strappy_db_delete_session_rows(
+        db,
+        "DELETE FROM response_api_calls WHERE session_id = ?;",
+        session_id,
+        "Could not prepare Responses call delete",
+        "Could not bind Responses call delete",
+        "Could not delete Responses calls",
+        error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back session delete", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  if (!strappy_db_delete_session_rows(
+        db,
         "DELETE FROM session_messages WHERE session_id = ?;",
         session_id,
         "Could not prepare session message delete",
@@ -7260,6 +7826,1777 @@ int strappy_db_get_session_model(const char *db_path,
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     sqlite3_close(db);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  return 1;
+}
+
+static cJSON *strappy_db_response_json_path(cJSON *root, const char *path)
+{
+  cJSON *current;
+  const char *cursor;
+
+  if ((root == NULL) || (path == NULL) || (path[0] == '\0')) {
+    return NULL;
+  }
+
+  current = root;
+  cursor = path;
+  while ((current != NULL) && (*cursor != '\0')) {
+    const char *dot;
+    size_t length;
+    char name[96];
+
+    dot = strchr(cursor, '.');
+    length = (dot != NULL) ? (size_t)(dot - cursor) : strlen(cursor);
+    if ((length == 0U) || (length >= sizeof(name)) ||
+        !cJSON_IsObject(current)) {
+      return NULL;
+    }
+    memcpy(name, cursor, length);
+    name[length] = '\0';
+    current = cJSON_GetObjectItem(current, name);
+    if (dot == NULL) {
+      break;
+    }
+    cursor = dot + 1;
+  }
+  return current;
+}
+
+static int strappy_db_bind_nullable_text_value(sqlite3_stmt *stmt,
+                                               int index,
+                                               const char *value)
+{
+  if (value == NULL) {
+    return sqlite3_bind_null(stmt, index) == SQLITE_OK;
+  }
+  return sqlite3_bind_text(stmt,
+                           index,
+                           value,
+                           -1,
+                           SQLITE_TRANSIENT) == SQLITE_OK;
+}
+
+static int strappy_db_bind_response_field(
+  sqlite3_stmt *stmt,
+  int index,
+  cJSON *root,
+  const strappy_response_field_definition *field)
+{
+  cJSON *value;
+  char *json;
+  int rc;
+
+  if ((stmt == NULL) || (field == NULL)) {
+    return 0;
+  }
+
+  value = strappy_db_response_json_path(root, field->json_path);
+  if ((value == NULL) || cJSON_IsNull(value)) {
+    return sqlite3_bind_null(stmt, index) == SQLITE_OK;
+  }
+
+  if (field->type == STRAPPY_RESPONSE_FIELD_INTEGER) {
+    if (cJSON_IsBool(value)) {
+      return sqlite3_bind_int(stmt, index, cJSON_IsTrue(value) ? 1 : 0) ==
+        SQLITE_OK;
+    }
+    if (cJSON_IsNumber(value)) {
+      return sqlite3_bind_int64(stmt,
+                                index,
+                                (sqlite3_int64)value->valuedouble) == SQLITE_OK;
+    }
+    return sqlite3_bind_null(stmt, index) == SQLITE_OK;
+  }
+
+  if (field->type == STRAPPY_RESPONSE_FIELD_REAL) {
+    if (cJSON_IsNumber(value)) {
+      return sqlite3_bind_double(stmt, index, value->valuedouble) == SQLITE_OK;
+    }
+    return sqlite3_bind_null(stmt, index) == SQLITE_OK;
+  }
+
+  if (cJSON_IsString(value) && (value->valuestring != NULL)) {
+    return sqlite3_bind_text(stmt,
+                             index,
+                             value->valuestring,
+                             -1,
+                             SQLITE_TRANSIENT) == SQLITE_OK;
+  }
+
+  json = cJSON_PrintUnformatted(value);
+  if (json == NULL) {
+    return 0;
+  }
+  rc = sqlite3_bind_text(stmt, index, json, -1, SQLITE_TRANSIENT);
+  free(json);
+  return rc == SQLITE_OK;
+}
+
+static int strappy_db_append_response_column_names(
+  strappy_db_sql_buffer *buffer,
+  const char *prefix,
+  const strappy_response_field_definition *fields,
+  size_t field_count)
+{
+  size_t index;
+
+  for (index = 0U; index < field_count; index++) {
+    if (!strappy_db_sql_buffer_append(buffer, ",") ||
+        !strappy_db_sql_buffer_append(buffer, prefix) ||
+        !strappy_db_sql_buffer_append(buffer, fields[index].column_name)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int strappy_db_append_response_placeholders(
+  strappy_db_sql_buffer *buffer,
+  size_t count)
+{
+  size_t index;
+
+  for (index = 0U; index < count; index++) {
+    if (!strappy_db_sql_buffer_append(buffer, ",?")) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int strappy_db_response_display_append(strappy_db_sql_buffer *buffer,
+                                              const char *text)
+{
+  if ((text == NULL) || (text[0] == '\0')) {
+    return 1;
+  }
+  if ((buffer->length > 0U) &&
+      !strappy_db_sql_buffer_append(buffer, "\n")) {
+    return 0;
+  }
+  return strappy_db_sql_buffer_append(buffer, text);
+}
+
+static int strappy_db_response_display_append_json_value(
+  strappy_db_sql_buffer *buffer,
+  cJSON *value)
+{
+  cJSON *text;
+  cJSON *refusal;
+
+  if ((value == NULL) || cJSON_IsNull(value)) {
+    return 1;
+  }
+  if (cJSON_IsString(value) && (value->valuestring != NULL)) {
+    return strappy_db_response_display_append(buffer, value->valuestring);
+  }
+  if (!cJSON_IsObject(value)) {
+    return 1;
+  }
+
+  text = cJSON_GetObjectItem(value, "text");
+  refusal = cJSON_GetObjectItem(value, "refusal");
+  if (cJSON_IsString(text) && (text->valuestring != NULL)) {
+    return strappy_db_response_display_append(buffer, text->valuestring);
+  }
+  if (cJSON_IsString(refusal) && (refusal->valuestring != NULL)) {
+    return strappy_db_response_display_append(buffer, refusal->valuestring);
+  }
+  return 1;
+}
+
+static int strappy_db_response_display_append_member(
+  strappy_db_sql_buffer *buffer,
+  cJSON *item,
+  const char *name)
+{
+  cJSON *member;
+  cJSON *child;
+
+  if (!cJSON_IsObject(item)) {
+    return 1;
+  }
+  member = cJSON_GetObjectItem(item, name);
+  if (cJSON_IsArray(member)) {
+    for (child = member->child; child != NULL; child = child->next) {
+      if (!strappy_db_response_display_append_json_value(buffer, child)) {
+        return 0;
+      }
+    }
+    return 1;
+  }
+  return strappy_db_response_display_append_json_value(buffer, member);
+}
+
+static char *strappy_db_response_item_display_text(cJSON *item)
+{
+  strappy_db_sql_buffer buffer;
+  cJSON *type;
+  cJSON *name;
+  cJSON *arguments;
+  cJSON *member;
+  const char *type_text;
+  const char *fallback_names[] = {
+    "advice", "analysis", "stdout", "stderr", "result", "output",
+    "error", "outcome", "prompt", "query", "title", "url", "value"
+  };
+  size_t index;
+
+  memset(&buffer, 0, sizeof(buffer));
+  if (cJSON_IsString(item) && (item->valuestring != NULL)) {
+    return strappy_string_duplicate(item->valuestring);
+  }
+  if (!cJSON_IsObject(item)) {
+    return strappy_string_duplicate("");
+  }
+
+  type = cJSON_GetObjectItem(item, "type");
+  type_text = (cJSON_IsString(type) && (type->valuestring != NULL)) ?
+    type->valuestring : "";
+
+  if (strcmp(type_text, "message") == 0) {
+    if (!strappy_db_response_display_append_member(&buffer,
+                                                   item,
+                                                   "content")) {
+      strappy_db_sql_buffer_destroy(&buffer);
+      return NULL;
+    }
+  } else if (strcmp(type_text, "reasoning") == 0) {
+    if (!strappy_db_response_display_append_member(&buffer,
+                                                   item,
+                                                   "summary") ||
+        !strappy_db_response_display_append_member(&buffer,
+                                                   item,
+                                                   "content")) {
+      strappy_db_sql_buffer_destroy(&buffer);
+      return NULL;
+    }
+  } else if ((strcmp(type_text, "function_call") == 0) ||
+             (strcmp(type_text, "custom_tool_call") == 0)) {
+    name = cJSON_GetObjectItem(item, "name");
+    arguments = cJSON_GetObjectItem(item, "arguments");
+    if (!cJSON_IsString(arguments)) {
+      arguments = cJSON_GetObjectItem(item, "input");
+    }
+    if ((cJSON_IsString(name) &&
+         !strappy_db_response_display_append(&buffer, name->valuestring)) ||
+        (cJSON_IsString(arguments) &&
+         !strappy_db_response_display_append(&buffer,
+                                             arguments->valuestring))) {
+      strappy_db_sql_buffer_destroy(&buffer);
+      return NULL;
+    }
+  } else if ((strcmp(type_text, "function_call_output") == 0) ||
+             (strcmp(type_text, "custom_tool_call_output") == 0)) {
+    member = cJSON_GetObjectItem(item, "output");
+    if (!strappy_db_response_display_append_json_value(&buffer, member)) {
+      strappy_db_sql_buffer_destroy(&buffer);
+      return NULL;
+    }
+  } else {
+    for (index = 0U;
+         (index < (sizeof(fallback_names) / sizeof(fallback_names[0]))) &&
+         (buffer.length == 0U);
+         index++) {
+      member = cJSON_GetObjectItem(item, fallback_names[index]);
+      if (!strappy_db_response_display_append_json_value(&buffer, member)) {
+        strappy_db_sql_buffer_destroy(&buffer);
+        return NULL;
+      }
+    }
+  }
+
+  if ((buffer.length == 0U) && (type_text[0] != '\0') &&
+      !strappy_db_sql_buffer_append(&buffer, type_text)) {
+    strappy_db_sql_buffer_destroy(&buffer);
+    return NULL;
+  }
+  if (buffer.data == NULL) {
+    return strappy_string_duplicate("");
+  }
+  return buffer.data;
+}
+
+static const char *strappy_db_response_item_display_role(cJSON *item,
+                                                         const char *direction)
+{
+  cJSON *type;
+  cJSON *role;
+  const char *type_text;
+  const char *role_text;
+
+  if (!cJSON_IsObject(item)) {
+    return (direction != NULL) && (strcmp(direction, "request") == 0) ?
+      "user" : "api_item";
+  }
+  type = cJSON_GetObjectItem(item, "type");
+  role = cJSON_GetObjectItem(item, "role");
+  type_text = (cJSON_IsString(type) && (type->valuestring != NULL)) ?
+    type->valuestring : "";
+  role_text = (cJSON_IsString(role) && (role->valuestring != NULL)) ?
+    role->valuestring : "";
+
+  if (strcmp(type_text, "message") == 0) {
+    if (strcmp(role_text, "assistant") == 0) {
+      return "assistant";
+    }
+    if (strcmp(role_text, "developer") == 0) {
+      return "developer";
+    }
+    if (strcmp(role_text, "system") == 0) {
+      return "harness";
+    }
+    return "user";
+  }
+  if ((strcmp(type_text, "function_call") == 0) ||
+      (strcmp(type_text, "custom_tool_call") == 0)) {
+    return "api_function_call";
+  }
+  if ((strcmp(type_text, "function_call_output") == 0) ||
+      (strcmp(type_text, "custom_tool_call_output") == 0)) {
+    return "api_function_output";
+  }
+  if (strcmp(type_text, "reasoning") == 0) {
+    return "api_reasoning";
+  }
+  return "api_item";
+}
+
+static int strappy_db_response_item_is_error(cJSON *item)
+{
+  cJSON *error;
+  cJSON *status;
+
+  if (!cJSON_IsObject(item)) {
+    return 0;
+  }
+  error = cJSON_GetObjectItem(item, "error");
+  if ((error != NULL) && !cJSON_IsNull(error)) {
+    return 1;
+  }
+  status = cJSON_GetObjectItem(item, "status");
+  return (status != NULL) && cJSON_IsString(status) &&
+    (status->valuestring != NULL) &&
+    ((strcmp(status->valuestring, "failed") == 0) ||
+     (strcmp(status->valuestring, "cancelled") == 0));
+}
+
+static int strappy_db_insert_response_item_parts(sqlite3 *db,
+                                                 long long response_item_id,
+                                                 cJSON *item,
+                                                 char **error_out)
+{
+  static const char *sql =
+    "INSERT INTO response_api_item_parts "
+    "(response_item_id, collection_name, part_index, type, text, refusal, "
+    "annotations_json, logprobs_json, raw_json) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);";
+  size_t field_index;
+
+  if (!cJSON_IsObject(item)) {
+    return 1;
+  }
+
+  for (field_index = 0U;
+       field_index < (sizeof(strappy_response_item_fields) /
+                      sizeof(strappy_response_item_fields[0]));
+       field_index++) {
+    cJSON *array;
+    cJSON *part;
+    int part_index;
+
+    array = strappy_db_response_json_path(
+      item,
+      strappy_response_item_fields[field_index].json_path);
+    if (!cJSON_IsArray(array)) {
+      continue;
+    }
+
+    part_index = 0;
+    for (part = array->child; part != NULL; part = part->next) {
+      sqlite3_stmt *stmt;
+      cJSON *type;
+      cJSON *text;
+      cJSON *refusal;
+      cJSON *annotations;
+      cJSON *logprobs;
+      char *annotations_json;
+      char *logprobs_json;
+      char *raw_json;
+      const char *type_value;
+      const char *text_value;
+      const char *refusal_value;
+      int rc;
+      int ok;
+
+      type = cJSON_IsObject(part) ? cJSON_GetObjectItem(part, "type") : NULL;
+      text = cJSON_IsObject(part) ? cJSON_GetObjectItem(part, "text") : NULL;
+      refusal = cJSON_IsObject(part) ?
+        cJSON_GetObjectItem(part, "refusal") : NULL;
+      annotations = cJSON_IsObject(part) ?
+        cJSON_GetObjectItem(part, "annotations") : NULL;
+      logprobs = cJSON_IsObject(part) ?
+        cJSON_GetObjectItem(part, "logprobs") : NULL;
+      annotations_json = (annotations != NULL) ?
+        cJSON_PrintUnformatted(annotations) : NULL;
+      logprobs_json = (logprobs != NULL) ?
+        cJSON_PrintUnformatted(logprobs) : NULL;
+      type_value = ((type != NULL) && cJSON_IsString(type)) ?
+        type->valuestring : NULL;
+      text_value = cJSON_IsString(part) ? part->valuestring :
+        (((text != NULL) && cJSON_IsString(text)) ? text->valuestring : NULL);
+      refusal_value = ((refusal != NULL) && cJSON_IsString(refusal)) ?
+        refusal->valuestring : NULL;
+      raw_json = cJSON_PrintUnformatted(part);
+      if (raw_json == NULL) {
+        free(annotations_json);
+        free(logprobs_json);
+        strappy_set_error(error_out,
+                          "Could not serialize Responses item part.");
+        return 0;
+      }
+
+      stmt = NULL;
+      rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+      if (rc != SQLITE_OK) {
+        free(raw_json);
+        free(annotations_json);
+        free(logprobs_json);
+        strappy_set_formatted_error(
+          error_out,
+          "Could not prepare Responses item part insert: %s",
+          sqlite3_errmsg(db));
+        return 0;
+      }
+      ok = sqlite3_bind_int64(stmt,
+                              1,
+                              (sqlite3_int64)response_item_id) == SQLITE_OK &&
+           sqlite3_bind_text(stmt,
+                             2,
+                             strappy_response_item_fields[field_index].json_path,
+                             -1,
+                             SQLITE_TRANSIENT) == SQLITE_OK &&
+           sqlite3_bind_int(stmt, 3, part_index) == SQLITE_OK &&
+           strappy_db_bind_nullable_text_value(
+             stmt,
+             4,
+             type_value) &&
+           strappy_db_bind_nullable_text_value(
+             stmt,
+             5,
+             text_value) &&
+           strappy_db_bind_nullable_text_value(
+             stmt,
+             6,
+             refusal_value) &&
+           strappy_db_bind_nullable_text_value(stmt, 7, annotations_json) &&
+           strappy_db_bind_nullable_text_value(stmt, 8, logprobs_json) &&
+           sqlite3_bind_text(stmt,
+                             9,
+                             raw_json,
+                             -1,
+                             SQLITE_TRANSIENT) == SQLITE_OK;
+      free(raw_json);
+      free(annotations_json);
+      free(logprobs_json);
+      if (!ok) {
+        strappy_set_formatted_error(
+          error_out,
+          "Could not bind Responses item part insert: %s",
+          sqlite3_errmsg(db));
+        sqlite3_finalize(stmt);
+        return 0;
+      }
+      rc = sqlite3_step(stmt);
+      sqlite3_finalize(stmt);
+      if (rc != SQLITE_DONE) {
+        strappy_set_formatted_error(
+          error_out,
+          "Could not save Responses item part: %s",
+          sqlite3_errmsg(db));
+        return 0;
+      }
+      part_index++;
+    }
+  }
+  return 1;
+}
+
+static int strappy_db_insert_response_item(sqlite3 *db,
+                                           long long response_call_id,
+                                           long long session_id,
+                                           const char *direction,
+                                           long item_index,
+                                           int is_canonical,
+                                           int timeline_visible,
+                                           cJSON *item,
+                                           char **error_out)
+{
+  strappy_db_sql_buffer sql;
+  sqlite3_stmt *stmt;
+  char *display_text;
+  char *raw_json;
+  const char *display_role;
+  size_t field_count;
+  size_t field_index;
+  long long response_item_id;
+  int parameter;
+  int rc;
+  int ok;
+
+  field_count = sizeof(strappy_response_item_fields) /
+    sizeof(strappy_response_item_fields[0]);
+  memset(&sql, 0, sizeof(sql));
+  ok = strappy_db_sql_buffer_append(
+         &sql,
+         "INSERT INTO response_api_items "
+         "(response_call_id,session_id,direction,item_index,is_canonical,"
+         "timeline_visible,display_role,display_text,is_error") &&
+       strappy_db_append_response_column_names(&sql,
+                                               "",
+                                               strappy_response_item_fields,
+                                               field_count) &&
+       strappy_db_sql_buffer_append(&sql, ",raw_json) VALUES (?,?,?,?,?,?,?,?,?") &&
+       strappy_db_append_response_placeholders(&sql, field_count) &&
+       strappy_db_sql_buffer_append(&sql, ",?);");
+  if (!ok) {
+    strappy_db_sql_buffer_destroy(&sql);
+    strappy_set_error(error_out,
+                      "Could not allocate Responses item insert.");
+    return 0;
+  }
+
+  display_text = strappy_db_response_item_display_text(item);
+  raw_json = cJSON_PrintUnformatted(item);
+  display_role = strappy_db_response_item_display_role(item, direction);
+  if ((display_text == NULL) || (raw_json == NULL)) {
+    free(display_text);
+    free(raw_json);
+    strappy_db_sql_buffer_destroy(&sql);
+    strappy_set_error(error_out,
+                      "Could not serialize Responses item.");
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql.data, -1, &stmt, NULL);
+  strappy_db_sql_buffer_destroy(&sql);
+  if (rc != SQLITE_OK) {
+    free(display_text);
+    free(raw_json);
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare Responses item insert: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  parameter = 1;
+  ok = sqlite3_bind_int64(stmt,
+                          parameter++,
+                          (sqlite3_int64)response_call_id) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          parameter++,
+                          (sqlite3_int64)session_id) == SQLITE_OK &&
+       sqlite3_bind_text(stmt,
+                         parameter++,
+                         direction,
+                         -1,
+                         SQLITE_TRANSIENT) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          parameter++,
+                          (sqlite3_int64)item_index) == SQLITE_OK &&
+       sqlite3_bind_int(stmt, parameter++, is_canonical ? 1 : 0) == SQLITE_OK &&
+       sqlite3_bind_int(stmt,
+                        parameter++,
+                        timeline_visible ? 1 : 0) == SQLITE_OK &&
+       sqlite3_bind_text(stmt,
+                         parameter++,
+                         display_role,
+                         -1,
+                         SQLITE_TRANSIENT) == SQLITE_OK &&
+       sqlite3_bind_text(stmt,
+                         parameter++,
+                         display_text,
+                         -1,
+                         SQLITE_TRANSIENT) == SQLITE_OK &&
+       sqlite3_bind_int(stmt,
+                        parameter++,
+                        strappy_db_response_item_is_error(item)) == SQLITE_OK;
+  for (field_index = 0U; ok && (field_index < field_count); field_index++) {
+    ok = strappy_db_bind_response_field(stmt,
+                                        parameter++,
+                                        item,
+                                        &strappy_response_item_fields[field_index]);
+  }
+  if (ok) {
+    ok = sqlite3_bind_text(stmt,
+                           parameter++,
+                           raw_json,
+                           -1,
+                           SQLITE_TRANSIENT) == SQLITE_OK;
+  }
+  free(display_text);
+  free(raw_json);
+  if (!ok) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind Responses item insert: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save Responses item: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  response_item_id = (long long)sqlite3_last_insert_rowid(db);
+  sqlite3_finalize(stmt);
+  return strappy_db_insert_response_item_parts(db,
+                                               response_item_id,
+                                               item,
+                                               error_out);
+}
+
+int strappy_db_begin_response_call(
+  const char *db_path,
+  const strappy_response_call_begin_input *input,
+  long long *call_id_out,
+  char **error_out)
+{
+  strappy_db_sql_buffer sql;
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  cJSON *root;
+  cJSON *request_input;
+  size_t field_count;
+  size_t field_index;
+  long long call_id;
+  int parameter;
+  int rc;
+  int ok;
+
+  if (call_id_out != NULL) {
+    *call_id_out = 0LL;
+  }
+  if ((input == NULL) || (input->session_id <= 0LL) ||
+      (input->prompt_group_key == NULL) ||
+      (input->prompt_group_key[0] == '\0') ||
+      (input->request_kind == NULL) ||
+      (input->request_method == NULL) ||
+      (input->request_url == NULL) ||
+      (input->request_headers_json == NULL) ||
+      (input->request_json == NULL) ||
+      (input->request_json[0] == '\0')) {
+    strappy_set_error(error_out, "Responses call request is incomplete.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out) ||
+      !strappy_db_session_exists(db, input->session_id, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+  if (!strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin Responses call",
+                       error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  field_count = sizeof(strappy_response_request_fields) /
+    sizeof(strappy_response_request_fields[0]);
+  memset(&sql, 0, sizeof(sql));
+  ok = strappy_db_sql_buffer_append(
+         &sql,
+         "INSERT INTO response_api_calls "
+         "(session_id,previous_call_id,prompt_group_key,request_kind,"
+         "round_index,attempt_index,new_input_start_index,request_method,"
+         "request_url,request_headers_json") &&
+       strappy_db_append_response_column_names(&sql,
+                                               "request_",
+                                               strappy_response_request_fields,
+                                               field_count) &&
+       strappy_db_sql_buffer_append(
+         &sql,
+         ",request_raw_json) VALUES (?,?,?,?,?,?,?,?,?,?") &&
+       strappy_db_append_response_placeholders(&sql, field_count) &&
+       strappy_db_sql_buffer_append(&sql, ",?);");
+  if (!ok) {
+    strappy_db_sql_buffer_destroy(&sql);
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
+    sqlite3_close(db);
+    strappy_set_error(error_out,
+                      "Could not allocate Responses call insert.");
+    return 0;
+  }
+
+  root = cJSON_Parse(input->request_json);
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql.data, -1, &stmt, NULL);
+  strappy_db_sql_buffer_destroy(&sql);
+  if (rc != SQLITE_OK) {
+    cJSON_Delete(root);
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare Responses call insert: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  parameter = 1;
+  ok = sqlite3_bind_int64(stmt,
+                          parameter++,
+                          (sqlite3_int64)input->session_id) == SQLITE_OK;
+  if (ok && (input->previous_call_id > 0LL)) {
+    ok = sqlite3_bind_int64(stmt,
+                            parameter++,
+                            (sqlite3_int64)input->previous_call_id) == SQLITE_OK;
+  } else if (ok) {
+    ok = sqlite3_bind_null(stmt, parameter++) == SQLITE_OK;
+  }
+  ok = ok &&
+       sqlite3_bind_text(stmt,
+                         parameter++,
+                         input->prompt_group_key,
+                         -1,
+                         SQLITE_TRANSIENT) == SQLITE_OK &&
+       sqlite3_bind_text(stmt,
+                         parameter++,
+                         input->request_kind,
+                         -1,
+                         SQLITE_TRANSIENT) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          parameter++,
+                          (sqlite3_int64)input->round_index) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          parameter++,
+                          (sqlite3_int64)input->attempt_index) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          parameter++,
+                          (sqlite3_int64)input->new_input_start_index) ==
+         SQLITE_OK &&
+       sqlite3_bind_text(stmt,
+                         parameter++,
+                         input->request_method,
+                         -1,
+                         SQLITE_TRANSIENT) == SQLITE_OK &&
+       sqlite3_bind_text(stmt,
+                         parameter++,
+                         input->request_url,
+                         -1,
+                         SQLITE_TRANSIENT) == SQLITE_OK &&
+       sqlite3_bind_text(stmt,
+                         parameter++,
+                         input->request_headers_json,
+                         -1,
+                         SQLITE_TRANSIENT) == SQLITE_OK;
+  for (field_index = 0U; ok && (field_index < field_count); field_index++) {
+    ok = strappy_db_bind_response_field(
+      stmt,
+      parameter++,
+      root,
+      &strappy_response_request_fields[field_index]);
+  }
+  if (ok) {
+    ok = sqlite3_bind_text(stmt,
+                           parameter++,
+                           input->request_json,
+                           -1,
+                           SQLITE_TRANSIENT) == SQLITE_OK;
+  }
+  if (!ok) {
+    sqlite3_finalize(stmt);
+    cJSON_Delete(root);
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
+    strappy_set_formatted_error(error_out,
+                                "Could not bind Responses call insert: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    sqlite3_finalize(stmt);
+    cJSON_Delete(root);
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
+    strappy_set_formatted_error(error_out,
+                                "Could not save Responses call: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+  call_id = (long long)sqlite3_last_insert_rowid(db);
+  sqlite3_finalize(stmt);
+
+  request_input = cJSON_IsObject(root) ?
+    cJSON_GetObjectItem(root, "input") : NULL;
+  if (cJSON_IsArray(request_input)) {
+    cJSON *item;
+    long item_index;
+
+    item_index = 0L;
+    for (item = request_input->child; item != NULL; item = item->next) {
+      int is_new;
+
+      is_new = (input->new_input_start_index >= 0L) &&
+        (item_index >= input->new_input_start_index);
+      if (!strappy_db_insert_response_item(db,
+                                           call_id,
+                                           input->session_id,
+                                           "request",
+                                           item_index,
+                                           is_new,
+                                           is_new,
+                                           item,
+                                           error_out)) {
+        cJSON_Delete(root);
+        strappy_db_exec(db,
+                        "ROLLBACK;",
+                        "Could not roll back Responses call",
+                        NULL);
+        sqlite3_close(db);
+        return 0;
+      }
+      item_index++;
+    }
+  } else if (request_input != NULL) {
+    int is_new;
+
+    is_new = input->new_input_start_index == 0L;
+    if (!strappy_db_insert_response_item(db,
+                                         call_id,
+                                         input->session_id,
+                                         "request",
+                                         0L,
+                                         is_new,
+                                         is_new,
+                                         request_input,
+                                         error_out)) {
+      cJSON_Delete(root);
+      strappy_db_exec(db,
+                      "ROLLBACK;",
+                      "Could not roll back Responses call",
+                      NULL);
+      sqlite3_close(db);
+      return 0;
+    }
+  }
+  cJSON_Delete(root);
+
+  if (!strappy_db_exec(db,
+                       "COMMIT;",
+                       "Could not commit Responses call",
+                       error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+  sqlite3_close(db);
+  if (call_id_out != NULL) {
+    *call_id_out = call_id;
+  }
+  return 1;
+}
+
+static int strappy_db_append_response_assignments(
+  strappy_db_sql_buffer *buffer,
+  const char *prefix,
+  const strappy_response_field_definition *fields,
+  size_t field_count)
+{
+  size_t index;
+
+  for (index = 0U; index < field_count; index++) {
+    if (!strappy_db_sql_buffer_append(buffer, ",") ||
+        !strappy_db_sql_buffer_append(buffer, prefix) ||
+        !strappy_db_sql_buffer_append(buffer, fields[index].column_name) ||
+        !strappy_db_sql_buffer_append(buffer, "=?")) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int strappy_db_response_call_session_id(sqlite3 *db,
+                                               long long call_id,
+                                               long long *session_id_out,
+                                               char **error_out)
+{
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (session_id_out == NULL) {
+    strappy_set_error(error_out,
+                      "Responses call session lookup has no output.");
+    return 0;
+  }
+  *session_id_out = 0LL;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(
+    db,
+    "SELECT session_id FROM response_api_calls WHERE id = ?;",
+    -1,
+    &stmt,
+    NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare Responses call lookup: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+  rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)call_id);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc == SQLITE_ROW) {
+    *session_id_out = (long long)sqlite3_column_int64(stmt, 0);
+    sqlite3_finalize(stmt);
+    return 1;
+  }
+  if (rc == SQLITE_DONE) {
+    strappy_set_error(error_out, "Responses call was not found.");
+  } else {
+    strappy_set_formatted_error(error_out,
+                                "Could not read Responses call lookup: %s",
+                                sqlite3_errmsg(db));
+  }
+  sqlite3_finalize(stmt);
+  return 0;
+}
+
+int strappy_db_finish_response_call(
+  const char *db_path,
+  const strappy_response_call_finish_input *input,
+  char **error_out)
+{
+  strappy_db_sql_buffer sql;
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  cJSON *root;
+  cJSON *output;
+  size_t field_count;
+  size_t field_index;
+  long long session_id;
+  int parameter;
+  int rc;
+  int ok;
+
+  if ((input == NULL) || (input->call_id <= 0LL) ||
+      (input->state == NULL) || (input->state[0] == '\0') ||
+      (input->response_headers == NULL) ||
+      (input->response_json == NULL)) {
+    strappy_set_error(error_out, "Responses call result is incomplete.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out) ||
+      !strappy_db_response_call_session_id(db,
+                                           input->call_id,
+                                           &session_id,
+                                           error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+  if (!strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin Responses call result",
+                       error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  field_count = sizeof(strappy_response_result_fields) /
+    sizeof(strappy_response_result_fields[0]);
+  memset(&sql, 0, sizeof(sql));
+  ok = strappy_db_sql_buffer_append(
+         &sql,
+         "UPDATE response_api_calls SET "
+         "state=?,is_error=?,"
+         "transport_completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),"
+         "request_started_at_ms=?,transport_completed_at_ms=?,"
+         "http_status=?,curl_code=?,retry_after_seconds=?,"
+         "request_bytes=?,response_bytes=?,name_lookup_seconds=?,"
+         "connect_seconds=?,start_transfer_seconds=?,total_seconds=?,"
+         "effective_url=?,transport_error=?,response_content_type=?,"
+         "http_request_id=?,http_generation_id=?,"
+         "rate_limit_limit=?,rate_limit_remaining=?,rate_limit_reset=?,"
+         "rate_limit_limit_requests=?,rate_limit_remaining_requests=?,"
+         "rate_limit_reset_requests=?,rate_limit_limit_tokens=?,"
+         "rate_limit_remaining_tokens=?,rate_limit_reset_tokens=?") &&
+       strappy_db_append_response_assignments(&sql,
+                                              "response_",
+                                              strappy_response_result_fields,
+                                              field_count) &&
+       strappy_db_sql_buffer_append(
+         &sql,
+         ",response_headers_raw=?,response_raw_json=? WHERE id=?;");
+  if (!ok) {
+    strappy_db_sql_buffer_destroy(&sql);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back Responses call result",
+                    NULL);
+    sqlite3_close(db);
+    strappy_set_error(error_out,
+                      "Could not allocate Responses call update.");
+    return 0;
+  }
+
+  root = cJSON_Parse(input->response_json);
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql.data, -1, &stmt, NULL);
+  strappy_db_sql_buffer_destroy(&sql);
+  if (rc != SQLITE_OK) {
+    cJSON_Delete(root);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back Responses call result",
+                    NULL);
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare Responses call update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  parameter = 1;
+  ok = sqlite3_bind_text(stmt,
+                         parameter++,
+                         input->state,
+                         -1,
+                         SQLITE_TRANSIENT) == SQLITE_OK &&
+       sqlite3_bind_int(stmt, parameter++, input->is_error ? 1 : 0) ==
+         SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          parameter++,
+                          (sqlite3_int64)input->started_at_ms) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          parameter++,
+                          (sqlite3_int64)input->completed_at_ms) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          parameter++,
+                          (sqlite3_int64)input->http_status) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          parameter++,
+                          (sqlite3_int64)input->curl_code) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          parameter++,
+                          (sqlite3_int64)input->retry_after_seconds) ==
+         SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          parameter++,
+                          (sqlite3_int64)input->request_bytes) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          parameter++,
+                          (sqlite3_int64)input->response_bytes) == SQLITE_OK &&
+       sqlite3_bind_double(stmt,
+                           parameter++,
+                           input->name_lookup_seconds) == SQLITE_OK &&
+       sqlite3_bind_double(stmt,
+                           parameter++,
+                           input->connect_seconds) == SQLITE_OK &&
+       sqlite3_bind_double(stmt,
+                           parameter++,
+                           input->start_transfer_seconds) == SQLITE_OK &&
+       sqlite3_bind_double(stmt,
+                           parameter++,
+                           input->total_seconds) == SQLITE_OK &&
+       strappy_db_bind_nullable_text_value(stmt,
+                                           parameter++,
+                                           input->effective_url) &&
+       strappy_db_bind_nullable_text_value(stmt,
+                                           parameter++,
+                                           input->transport_error) &&
+       strappy_db_bind_nullable_text_value(stmt,
+                                           parameter++,
+                                           input->content_type) &&
+       strappy_db_bind_nullable_text_value(stmt,
+                                           parameter++,
+                                           input->request_id) &&
+       strappy_db_bind_nullable_text_value(stmt,
+                                           parameter++,
+                                           input->generation_id) &&
+       strappy_db_bind_nullable_text_value(stmt,
+                                           parameter++,
+                                           input->rate_limit_limit) &&
+       strappy_db_bind_nullable_text_value(stmt,
+                                           parameter++,
+                                           input->rate_limit_remaining) &&
+       strappy_db_bind_nullable_text_value(stmt,
+                                           parameter++,
+                                           input->rate_limit_reset) &&
+       strappy_db_bind_nullable_text_value(
+         stmt,
+         parameter++,
+         input->rate_limit_limit_requests) &&
+       strappy_db_bind_nullable_text_value(
+         stmt,
+         parameter++,
+         input->rate_limit_remaining_requests) &&
+       strappy_db_bind_nullable_text_value(
+         stmt,
+         parameter++,
+         input->rate_limit_reset_requests) &&
+       strappy_db_bind_nullable_text_value(stmt,
+                                           parameter++,
+                                           input->rate_limit_limit_tokens) &&
+       strappy_db_bind_nullable_text_value(
+         stmt,
+         parameter++,
+         input->rate_limit_remaining_tokens) &&
+       strappy_db_bind_nullable_text_value(stmt,
+                                           parameter++,
+                                           input->rate_limit_reset_tokens);
+  for (field_index = 0U; ok && (field_index < field_count); field_index++) {
+    ok = strappy_db_bind_response_field(
+      stmt,
+      parameter++,
+      root,
+      &strappy_response_result_fields[field_index]);
+  }
+  if (ok) {
+    ok = sqlite3_bind_text(stmt,
+                           parameter++,
+                           input->response_headers,
+                           -1,
+                           SQLITE_TRANSIENT) == SQLITE_OK &&
+         sqlite3_bind_text(stmt,
+                           parameter++,
+                           input->response_json,
+                           -1,
+                           SQLITE_TRANSIENT) == SQLITE_OK &&
+         sqlite3_bind_int64(stmt,
+                            parameter++,
+                            (sqlite3_int64)input->call_id) == SQLITE_OK;
+  }
+  if (!ok) {
+    sqlite3_finalize(stmt);
+    cJSON_Delete(root);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back Responses call result",
+                    NULL);
+    strappy_set_formatted_error(error_out,
+                                "Could not bind Responses call update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+  rc = sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    cJSON_Delete(root);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back Responses call result",
+                    NULL);
+    strappy_set_formatted_error(error_out,
+                                "Could not update Responses call: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+
+  output = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "output") : NULL;
+  if (cJSON_IsArray(output)) {
+    cJSON *item;
+    long item_index;
+
+    item_index = 0L;
+    for (item = output->child; item != NULL; item = item->next) {
+      if (!strappy_db_insert_response_item(db,
+                                           input->call_id,
+                                           session_id,
+                                           "response",
+                                           item_index,
+                                           input->output_is_canonical,
+                                           1,
+                                           item,
+                                           error_out)) {
+        cJSON_Delete(root);
+        strappy_db_exec(db,
+                        "ROLLBACK;",
+                        "Could not roll back Responses call result",
+                        NULL);
+        sqlite3_close(db);
+        return 0;
+      }
+      item_index++;
+    }
+  }
+  cJSON_Delete(root);
+
+  if (!strappy_db_exec(db,
+                       "COMMIT;",
+                       "Could not commit Responses call result",
+                       error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back Responses call result",
+                    NULL);
+    sqlite3_close(db);
+    return 0;
+  }
+  sqlite3_close(db);
+  return 1;
+}
+
+int strappy_db_list_canonical_response_items(
+  const char *db_path,
+  long long session_id,
+  strappy_response_item_raw_record_list *list,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT id, raw_json FROM response_api_items "
+    "WHERE session_id = ? AND is_canonical = 1 ORDER BY id;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (list == NULL) {
+    strappy_set_error(error_out,
+                      "Canonical Responses item list has no output.");
+    return 0;
+  }
+  strappy_response_item_raw_record_list_init(list);
+  if (session_id <= 0LL) {
+    strappy_set_error(error_out, "Session id is not valid.");
+    return 0;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not prepare canonical Responses item query: %s",
+      sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+  rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not bind canonical Responses item query: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    strappy_response_item_raw_record *records;
+    strappy_response_item_raw_record *record;
+
+    if (list->count >= (((size_t)-1) /
+                        sizeof(strappy_response_item_raw_record))) {
+      strappy_set_error(error_out,
+                        "Canonical Responses item list is too large.");
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      strappy_response_item_raw_record_list_destroy(list);
+      return 0;
+    }
+    records = (strappy_response_item_raw_record *)realloc(
+      list->records,
+      (list->count + 1U) * sizeof(*records));
+    if (records == NULL) {
+      strappy_set_error(error_out,
+                        "Could not allocate canonical Responses item list.");
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      strappy_response_item_raw_record_list_destroy(list);
+      return 0;
+    }
+    list->records = records;
+    record = &list->records[list->count];
+    record->item_id = (long long)sqlite3_column_int64(stmt, 0);
+    record->raw_json = strappy_db_column_string(stmt, 1);
+    if (record->raw_json == NULL) {
+      strappy_set_error(error_out,
+                        "Could not allocate canonical Responses item JSON.");
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      strappy_response_item_raw_record_list_destroy(list);
+      return 0;
+    }
+    list->count++;
+  }
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not list canonical Responses items: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    strappy_response_item_raw_record_list_destroy(list);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  return 1;
+}
+
+int strappy_db_save_response_tool_execution(
+  const char *db_path,
+  const strappy_response_tool_execution_input *input,
+  char **error_out)
+{
+  static const char *sql =
+    "INSERT INTO response_tool_executions "
+    "(session_id,response_call_id,response_item_id,output_index,call_id,"
+    "tool_name,arguments_json,status,output_json,error_text,started_at_ms,"
+    "completed_at_ms) "
+    "VALUES (?,?,(SELECT id FROM response_api_items "
+    "WHERE response_call_id = ? AND direction = 'response' "
+    "AND item_index = ?),?,?,?,?,?,?,?,?,?);";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+  int ok;
+
+  if ((input == NULL) || (input->session_id <= 0LL) ||
+      (input->response_call_id <= 0LL) ||
+      (input->output_index < 0L) || (input->call_id == NULL) ||
+      (input->call_id[0] == '\0') || (input->tool_name == NULL) ||
+      (input->tool_name[0] == '\0') || (input->arguments_json == NULL) ||
+      (input->status == NULL) || (input->status[0] == '\0')) {
+    strappy_set_error(error_out,
+                      "Responses tool execution is incomplete.");
+    return 0;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not prepare Responses tool execution insert: %s",
+      sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+  ok = sqlite3_bind_int64(stmt,
+                          1,
+                          (sqlite3_int64)input->session_id) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          2,
+                          (sqlite3_int64)input->response_call_id) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          3,
+                          (sqlite3_int64)input->response_call_id) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          4,
+                          (sqlite3_int64)input->output_index) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          5,
+                          (sqlite3_int64)input->output_index) == SQLITE_OK &&
+       sqlite3_bind_text(stmt,
+                         6,
+                         input->call_id,
+                         -1,
+                         SQLITE_TRANSIENT) == SQLITE_OK &&
+       sqlite3_bind_text(stmt,
+                         7,
+                         input->tool_name,
+                         -1,
+                         SQLITE_TRANSIENT) == SQLITE_OK &&
+       sqlite3_bind_text(stmt,
+                         8,
+                         input->arguments_json,
+                         -1,
+                         SQLITE_TRANSIENT) == SQLITE_OK &&
+       sqlite3_bind_text(stmt,
+                         9,
+                         input->status,
+                         -1,
+                         SQLITE_TRANSIENT) == SQLITE_OK &&
+       strappy_db_bind_nullable_text_value(stmt, 10, input->output_json) &&
+       strappy_db_bind_nullable_text_value(stmt, 11, input->error_text) &&
+       sqlite3_bind_int64(stmt,
+                          12,
+                          (sqlite3_int64)input->started_at_ms) == SQLITE_OK &&
+       sqlite3_bind_int64(stmt,
+                          13,
+                          (sqlite3_int64)input->completed_at_ms) == SQLITE_OK;
+  if (!ok) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not bind Responses tool execution insert: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+  rc = sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save Responses tool execution: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+  sqlite3_close(db);
+  return 1;
+}
+
+int strappy_db_update_response_session_summary(
+  const char *db_path,
+  long long session_id,
+  const char *prompt,
+  const char *response,
+  const char *model,
+  long http_status,
+  char **error_out)
+{
+  sqlite3 *db;
+  int ok;
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+  ok = strappy_db_update_session_summary(db,
+                                         session_id,
+                                         prompt,
+                                         response,
+                                         model,
+                                         http_status,
+                                         error_out);
+  sqlite3_close(db);
+  return ok;
+}
+
+static char *strappy_db_response_timeline_key(const char *prefix,
+                                              long long identifier)
+{
+  char buffer[96];
+  int written;
+
+  written = snprintf(buffer,
+                     sizeof(buffer),
+                     "%s-%lld",
+                     prefix,
+                     identifier);
+  if ((written < 0) || ((size_t)written >= sizeof(buffer))) {
+    return NULL;
+  }
+  return strappy_string_duplicate(buffer);
+}
+
+static char *strappy_db_response_call_display_text(sqlite3_stmt *stmt)
+{
+  strappy_db_sql_buffer buffer;
+  const unsigned char *request_url;
+  const unsigned char *state;
+  const unsigned char *model;
+  const unsigned char *transport_error;
+  const unsigned char *response_status;
+  const unsigned char *error_message;
+  const unsigned char *incomplete_reason;
+  long round_index;
+  long attempt_index;
+  long http_status;
+  char line[512];
+  int written;
+
+  memset(&buffer, 0, sizeof(buffer));
+  request_url = sqlite3_column_text(stmt, 25);
+  state = sqlite3_column_text(stmt, 10);
+  model = sqlite3_column_text(stmt, 13);
+  transport_error = sqlite3_column_text(stmt, 15);
+  response_status = sqlite3_column_text(stmt, 26);
+  error_message = sqlite3_column_text(stmt, 27);
+  incomplete_reason = sqlite3_column_text(stmt, 28);
+  round_index = (long)sqlite3_column_int64(stmt, 8);
+  attempt_index = (long)sqlite3_column_int64(stmt, 9);
+  http_status = (long)sqlite3_column_int64(stmt, 12);
+
+  written = snprintf(
+    line,
+    sizeof(line),
+    "POST %s\nRound %ld, attempt %ld",
+    (request_url != NULL) ? (const char *)request_url : "/responses",
+    round_index + 1L,
+    attempt_index + 1L);
+  if ((written < 0) || ((size_t)written >= sizeof(line)) ||
+      !strappy_db_sql_buffer_append(&buffer, line)) {
+    strappy_db_sql_buffer_destroy(&buffer);
+    return NULL;
+  }
+
+  written = snprintf(
+    line,
+    sizeof(line),
+    "\n%s%s%s%s%s",
+    (state != NULL) ? (const char *)state : "pending",
+    (response_status != NULL) ? " / " : "",
+    (response_status != NULL) ? (const char *)response_status : "",
+    (http_status > 0L) ? " / HTTP " : "",
+    "");
+  if ((written < 0) || ((size_t)written >= sizeof(line)) ||
+      !strappy_db_sql_buffer_append(&buffer, line)) {
+    strappy_db_sql_buffer_destroy(&buffer);
+    return NULL;
+  }
+  if (http_status > 0L) {
+    written = snprintf(line, sizeof(line), "%ld", http_status);
+    if ((written < 0) || ((size_t)written >= sizeof(line)) ||
+        !strappy_db_sql_buffer_append(&buffer, line)) {
+      strappy_db_sql_buffer_destroy(&buffer);
+      return NULL;
+    }
+  }
+  if ((model != NULL) &&
+      (!strappy_db_sql_buffer_append(&buffer, "\n") ||
+       !strappy_db_sql_buffer_append(&buffer, (const char *)model))) {
+    strappy_db_sql_buffer_destroy(&buffer);
+    return NULL;
+  }
+  if ((transport_error != NULL) &&
+      (!strappy_db_sql_buffer_append(&buffer, "\n") ||
+       !strappy_db_sql_buffer_append(&buffer,
+                                     (const char *)transport_error))) {
+    strappy_db_sql_buffer_destroy(&buffer);
+    return NULL;
+  }
+  if ((error_message != NULL) &&
+      (!strappy_db_sql_buffer_append(&buffer, "\n") ||
+       !strappy_db_sql_buffer_append(&buffer,
+                                     (const char *)error_message))) {
+    strappy_db_sql_buffer_destroy(&buffer);
+    return NULL;
+  }
+  if ((incomplete_reason != NULL) &&
+      (!strappy_db_sql_buffer_append(&buffer, "\nIncomplete: ") ||
+       !strappy_db_sql_buffer_append(&buffer,
+                                     (const char *)incomplete_reason))) {
+    strappy_db_sql_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return buffer.data;
+}
+
+int strappy_db_list_response_timeline(
+  const char *db_path,
+  long long session_id,
+  strappy_session_message_record_list *list,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT 0 AS entry_type,c.id AS row_id,c.id AS call_id,"
+    "0 AS sort_phase,-1 AS item_index,NULL AS direction,"
+    "c.prompt_group_key,c.request_kind,c.round_index,c.attempt_index,"
+    "c.state,c.is_error,c.http_status,"
+    "COALESCE(c.response_model,c.request_model),c.request_started_at,"
+    "c.transport_error,c.response_raw_json,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,"
+    "c.request_url,c.response_status,c.response_error_message,"
+    "c.response_incomplete_reason,0 "
+    "FROM response_api_calls c WHERE c.session_id = ? "
+    "AND c.state <> 'pending' "
+    "UNION ALL "
+    "SELECT 1,i.id,c.id,CASE WHEN i.direction = 'request' THEN 1 ELSE 2 END,"
+    "i.item_index,i.direction,c.prompt_group_key,c.request_kind,"
+    "c.round_index,c.attempt_index,c.state,i.is_error,c.http_status,"
+    "COALESCE(c.response_model,c.request_model),i.created_at,NULL,NULL,"
+    "i.type,i.display_role,i.display_text,i.raw_json,i.call_id,i.name,"
+    "i.arguments,i.output,c.request_url,c.response_status,"
+    "c.response_error_message,c.response_incomplete_reason,i.is_canonical "
+    "FROM response_api_items i JOIN response_api_calls c "
+    "ON c.id = i.response_call_id "
+    "WHERE i.session_id = ? AND i.timeline_visible = 1 "
+    "AND c.state <> 'pending' "
+    "ORDER BY call_id,sort_phase,item_index;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (list == NULL) {
+    strappy_set_error(error_out, "Responses timeline has no output.");
+    return 0;
+  }
+  strappy_session_message_record_list_init(list);
+  if (session_id <= 0LL) {
+    strappy_set_error(error_out, "Session id is not valid.");
+    return 0;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare Responses timeline: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
+  }
+  rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind Responses timeline: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    strappy_session_message_record *records;
+    strappy_session_message_record *record;
+    long long row_id;
+    long long call_id;
+    int entry_type;
+
+    if (list->count >= (((size_t)-1) /
+                        sizeof(strappy_session_message_record))) {
+      strappy_set_error(error_out, "Responses timeline is too large.");
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      strappy_session_message_record_list_destroy(list);
+      return 0;
+    }
+    records = (strappy_session_message_record *)realloc(
+      list->records,
+      (list->count + 1U) * sizeof(*records));
+    if (records == NULL) {
+      strappy_set_error(error_out,
+                        "Could not allocate Responses timeline.");
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      strappy_session_message_record_list_destroy(list);
+      return 0;
+    }
+    list->records = records;
+    record = &list->records[list->count];
+    strappy_session_message_record_init(record);
+    entry_type = sqlite3_column_int(stmt, 0);
+    row_id = (long long)sqlite3_column_int64(stmt, 1);
+    call_id = (long long)sqlite3_column_int64(stmt, 2);
+    record->message_id = (entry_type == 0) ?
+      (call_id * 2LL) : ((row_id * 2LL) + 1LL);
+    record->session_id = session_id;
+    record->turn_id = call_id;
+    record->turn_key = strappy_db_column_string(stmt, 6);
+    record->prompt_group_key = strappy_db_column_string(stmt, 6);
+    record->model = strappy_db_column_string(stmt, 13);
+    record->created_at = strappy_db_column_string(stmt, 14);
+    record->http_status = (long)sqlite3_column_int64(stmt, 12);
+    record->is_error = sqlite3_column_int(stmt, 11) ? 1 : 0;
+    record->include_in_context = sqlite3_column_int(stmt, 29) ? 1 : 0;
+
+    if (entry_type == 0) {
+      record->actor = strappy_string_duplicate("api");
+      record->kind = strappy_string_duplicate("response_api_call");
+      record->render_role = strappy_string_duplicate(
+        record->is_error ? "api_error" : "api_call");
+      record->role = strappy_string_duplicate(
+        record->is_error ? "api_error" : "api_call");
+      record->content = strappy_db_response_call_display_text(stmt);
+      record->metadata_json = strappy_db_column_string(stmt, 16);
+      record->message_json = strappy_db_column_string(stmt, 16);
+      record->message_key =
+        strappy_db_response_timeline_key("response-call", call_id);
+    } else {
+      record->kind = strappy_db_column_string(stmt, 17);
+      record->render_role = strappy_db_column_string(stmt, 18);
+      record->role = strappy_db_column_string(stmt, 18);
+      record->content = strappy_db_column_string(stmt, 19);
+      record->message_json = strappy_db_column_string(stmt, 20);
+      record->message_key =
+        strappy_db_response_timeline_key("response-item", row_id);
+      record->tool_call_id = strappy_db_column_string(stmt, 21);
+      record->tool_name = strappy_db_column_string(stmt, 22);
+      record->arguments_json = strappy_db_column_string(stmt, 23);
+      record->result_json = strappy_db_column_string(stmt, 24);
+      if ((record->role != NULL) &&
+          (strcmp(record->role, "developer") == 0)) {
+        record->actor = strappy_string_duplicate("developer");
+        record->api_role = strappy_string_duplicate("developer");
+      } else if ((record->role != NULL) &&
+                 (strcmp(record->role, "harness") == 0)) {
+        record->actor = strappy_string_duplicate("harness");
+        record->api_role = strappy_string_duplicate("developer");
+      } else if ((record->role != NULL) &&
+                 (strcmp(record->role, "user") == 0)) {
+        record->actor = strappy_string_duplicate("user");
+        record->api_role = strappy_string_duplicate("user");
+      } else {
+        record->actor = strappy_string_duplicate("assistant");
+        record->api_role = strappy_string_duplicate("assistant");
+      }
+    }
+
+    if ((record->turn_key == NULL) || (record->prompt_group_key == NULL) ||
+        (record->actor == NULL) || (record->kind == NULL) ||
+        (record->render_role == NULL) || (record->role == NULL) ||
+        (record->content == NULL) || (record->message_key == NULL) ||
+        (record->created_at == NULL)) {
+      strappy_session_message_record_destroy(record);
+      strappy_set_error(error_out,
+                        "Could not allocate Responses timeline row.");
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      strappy_session_message_record_list_destroy(list);
+      return 0;
+    }
+    list->count++;
+  }
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read Responses timeline: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    strappy_session_message_record_list_destroy(list);
     return 0;
   }
 

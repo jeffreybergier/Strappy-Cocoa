@@ -9,11 +9,15 @@ typedef struct strappy_webview_labels {
   const char *agent;
   const char *you;
   const char *harness;
+  const char *developer;
   const char *thinking;
   const char *request_metadata;
   const char *tool_call;
   const char *tool_result;
   const char *retry;
+  const char *api_call;
+  const char *api_error;
+  const char *response_item;
 } strappy_webview_labels;
 
 typedef struct strappy_webview_message {

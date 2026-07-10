@@ -17,8 +17,9 @@ analysis logs unless the user explicitly asks for them.
 Linux-only shared-core harnesses live under `source/linux`. They are fast
 developer smoke tests for portable C code and do not replace the required
 Altivec iOS/macOS clean builds. The current harness targets are
-`database_query_harness`, `webview_harness`, `client_stream_harness`, and
-`assistant_reasoning_harness`, run through `make -C source/linux clean test`.
+`database_query_harness`, `webview_harness`, `client_stream_harness`,
+`assistant_reasoning_harness`, and `responses_harness`, run through
+`make -C source/linux clean test`.
 `database_query_harness` also covers
 OpenRouter model catalog persistence, catalog search, default model selection,
 allowed-model whitelisting, per-session model selection, and stale
@@ -97,11 +98,12 @@ House style for Strappy source:
     `helper_session_name_write` names an untitled active session. Do not store
     secrets, credentials, sensitive identifiers, long copied content, or private
     row contents in memory.
-16. Assistant turns and persisted messages carry `turn_key`,
-    `prompt_group_key`, actor, context policy, tool-call metadata, and optional
-    reasoning text. Harness and post-answer memory-audit turns should use
-    `context_policy = omit` so they can render in history without being replayed
-    as normal user context.
+16. Active assistant history uses the Responses API ledger: every HTTP attempt
+    has one `response_api_calls` row, and every typed input/output item has one
+    ordered `response_api_items` row with its exact raw JSON retained. A prompt
+    group may append one `developer` tool-audit reminder only when no local or
+    server tool-call item occurred; keep that reminder in the same Responses
+    history instead of creating a synthetic harness turn.
 17. OpenRouter model catalog and selection state live in shared SQLite storage.
     `strappy_db` owns `openrouter_models`, `openrouter_model_settings`, the
     default model app setting, and `sessions.model`; `StrappySession` owns the
@@ -115,14 +117,14 @@ House style for Strappy source:
     state first and persist it later; write the database change first, then
     refresh or render the UI from the stored value.
 19. Shared C/database code owns conversation-visible state. Platform UI code
-    must not synthesize pending prompt, assistant, tool, harness, error, or
-    cancellation rows before they exist in SQLite; it should request the shared
-    core to persist the state, then render DB-backed records or store-first
-    stream events. If a WebView needs an incremental update, Objective-C should
-    only pass shared-core, DB-derived JavaScript through the controller's single
-    injection method; do not assemble conversation DOM state in platform UI
-    code. Keep temporary UI-only control state, such as disabled buttons or
-    spinners, out of persisted conversation rows.
+    must not synthesize prompt, response item, tool, API error, or cancellation
+    rows before they exist in SQLite; it should request the shared core to
+    persist the state, then render the ordered DB-backed API items directly. If
+    a WebView needs an incremental update, Objective-C should only pass
+    shared-core, DB-derived JavaScript through the controller's single injection
+    method; do not assemble conversation DOM state in platform UI code. Keep
+    temporary UI-only control state, such as disabled buttons or spinners, out
+    of persisted conversation rows.
 20. iOS Objective-C code must use bracketed accessor/message syntax instead of
     dot syntax, even when dot syntax would be accepted by the compiler.
 21. When changing shared C behavior, especially database, tool, prompt, client,
@@ -142,7 +144,7 @@ ok.
 Strappy is an OpenRouter based AI Assistant that has the following basic
 infrastructure:
 
-1. C based API client for OpenRouter/OpenAI API
+1. C based non-streaming OpenRouter Responses API client
 2. OpenRouter model catalog persistence with searchable/sortable browsing,
    default model selection, allowed-model whitelisting, and per-session model
    selection

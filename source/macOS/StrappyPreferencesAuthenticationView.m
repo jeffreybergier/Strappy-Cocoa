@@ -82,7 +82,7 @@ static NSTextField *StrappyPreferencesLabelWithFrame(NSRect frame,
   [apiEndpointField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
   [apiEndpointField_ setStringValue:(apiEndpoint != nil) ? apiEndpoint : @""];
   [[apiEndpointField_ cell] setPlaceholderString:
-    NSLocalizedString(@"https://openrouter.ai/api/v1/chat/completions", nil)];
+    NSLocalizedString(@"https://openrouter.ai/api/v1/responses", nil)];
   [self addSubview:apiEndpointField_];
 
   tokenLabel = StrappyPreferencesLabelWithFrame(

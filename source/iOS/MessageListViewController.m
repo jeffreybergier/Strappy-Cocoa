@@ -1147,6 +1147,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)sessionStreamEvent:(NSNotification *)notification
 {
   NSDictionary *event;
+  NSString *streamEvent;
 
   if ([self tearingDown]) {
     return;
@@ -1162,6 +1163,18 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
 
   [self updateSendingStateFromSession];
+  streamEvent = [event objectForKey:@"stream_event"];
+  if ([streamEvent isEqualToString:@"ledger_changed"]) {
+    [self logLifecycleEvent:@"sessionLedgerDidChange"];
+    if ([self appendNewMessagesToWebView]) {
+      [self setRenderedRequestMessages:YES];
+    } else {
+      NSLog(@"StrappyResponses could not append committed ledger rows for session %@",
+            [[[self session] sessionIdentifier] description]);
+    }
+    return;
+  }
+
   if ([self queueJavaScriptForStreamEvent:event] &&
       [self streamEventRendersMessage:event]) {
     [self setRenderedRequestMessages:YES];
@@ -1215,11 +1228,12 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
   [self clearRequestState];
   [self updateSendingStateFromSession];
-  if ((streamingPrompt || renderedRequestMessages) &&
+  if (!streamingPrompt) {
+    [self appendNewMessagesToWebView];
+  } else if (renderedRequestMessages &&
       [sessionSummary isKindOfClass:[NSDictionary class]]) {
     [self refreshRenderedMessageCountFromSession];
-  } else if ([sessionSummary isKindOfClass:[NSDictionary class]] &&
-             [self appendNewMessagesToWebView]) {
+  } else if ([self appendNewMessagesToWebView]) {
     /* The persisted messages were appended without a full web view reload. */
   }
 }

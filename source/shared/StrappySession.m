@@ -63,6 +63,8 @@ static strappy_webview_labels StrappySessionWebViewLabels(void)
   labels.agent = StrappySessionCString(NSLocalizedString(@"Agent", nil));
   labels.you = StrappySessionCString(NSLocalizedString(@"You", nil));
   labels.harness = StrappySessionCString(NSLocalizedString(@"Harness", nil));
+  labels.developer =
+    StrappySessionCString(NSLocalizedString(@"Developer", nil));
   labels.thinking = StrappySessionCString(NSLocalizedString(@"Thinking", nil));
   labels.request_metadata =
     StrappySessionCString(NSLocalizedString(@"Request Metadata", nil));
@@ -70,6 +72,10 @@ static strappy_webview_labels StrappySessionWebViewLabels(void)
   labels.tool_result =
     StrappySessionCString(NSLocalizedString(@"Tool Result", nil));
   labels.retry = StrappySessionCString(NSLocalizedString(@"Retry", nil));
+  labels.api_call = StrappySessionCString(NSLocalizedString(@"API Call", nil));
+  labels.api_error = StrappySessionCString(NSLocalizedString(@"API Error", nil));
+  labels.response_item =
+    StrappySessionCString(NSLocalizedString(@"Response Item", nil));
   return labels;
 }
 
@@ -490,6 +496,8 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     [delta setObject:@"content_retracted" forKey:@"stream_event"];
   } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_PROCESSING_STATUS) {
     [delta setObject:@"processing_status" forKey:@"stream_event"];
+  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_LEDGER_CHANGED) {
+    [delta setObject:@"ledger_changed" forKey:@"stream_event"];
   }
 
   [self performSelectorOnMainThread:@selector(postStreamEventAndRelease:)
@@ -2575,7 +2583,12 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
                      context:(NSDictionary *)context
                        error:(NSError **)error
 {
-  return [self beginPrompt:prompt context:context streaming:YES error:error];
+  (void)prompt;
+  (void)context;
+  (void)error;
+  [NSException raise:NSInternalInconsistencyException
+              format:@"Streaming Responses API support is intentionally disabled."];
+  return NO;
 }
 
 - (BOOL)beginNonStreamingPrompt:(NSString *)prompt

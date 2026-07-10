@@ -96,6 +96,7 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 - (void)beginSendingPrompt:(NSString *)prompt;
 - (void)setPromptCancellationRequested:(BOOL)requested;
 - (BOOL)promptCancellationRequested;
+- (BOOL)appendNewMessagesToWebView;
 - (void)loadEarlierMessages;
 - (NSString *)writeCurrentHTML;
 - (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error;
@@ -546,6 +547,7 @@ static BOOL StrappyEnsureDirectory(NSString *path)
     start = count - kStrappyInitialMessageLimit;
   }
   oldestRenderedMessageIndex_ = start;
+  newestRenderedMessageCount_ = count;
 
   hasMessages = (count > 0U) ? YES : NO;
   if ([statusText_ length] > 0U) {
@@ -695,6 +697,7 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 - (void)sessionStreamEvent:(NSNotification *)notification
 {
   NSDictionary *event;
+  NSString *streamEvent;
 
   if ([notification object] != session_) {
     return;
@@ -706,6 +709,11 @@ static BOOL StrappyEnsureDirectory(NSString *path)
   }
 
   [self updateSendingStateFromSession];
+  streamEvent = [event objectForKey:@"stream_event"];
+  if ([streamEvent isEqualToString:@"ledger_changed"]) {
+    [self appendNewMessagesToWebView];
+    return;
+  }
   [self queueJavaScriptForStreamEvent:event];
 }
 
@@ -743,6 +751,7 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 
   [self clearRequestState];
   [self updateSendingStateFromSession];
+  [self appendNewMessagesToWebView];
 }
 
 - (NSString *)javaScriptForStreamEvent:(NSDictionary *)event
@@ -843,6 +852,48 @@ static BOOL StrappyEnsureDirectory(NSString *path)
     [pendingStreamJavaScript_ release];
     pendingStreamJavaScript_ = nil;
   }
+}
+
+- (BOOL)appendNewMessagesToWebView
+{
+  NSArray *messages;
+  NSError *error;
+  NSUInteger count;
+  NSUInteger start;
+  NSString *html;
+  NSString *js;
+
+  if (session_ == nil) {
+    return NO;
+  }
+  error = nil;
+  messages = [session_ messagesWithError:&error];
+  if (![messages isKindOfClass:[NSArray class]]) {
+    return NO;
+  }
+  count = [messages count];
+  start = newestRenderedMessageCount_;
+  if (start > count) {
+    return NO;
+  }
+  if (start == count) {
+    return YES;
+  }
+
+  html = [StrappySession webViewMessagesHTMLForMessages:messages
+                                             startIndex:start
+                                               endIndex:count];
+  if ([html length] == 0U) {
+    return NO;
+  }
+  js = [StrappySession webViewAppendMessagesJavaScriptForHTML:html];
+  if ([js length] == 0U) {
+    return NO;
+  }
+  [self flushPendingStreamEvents];
+  [self pushJavaScript:js];
+  newestRenderedMessageCount_ = count;
+  return YES;
 }
 
 - (void)loadEarlierMessages

@@ -26,7 +26,7 @@
 "API Token" = "API Token";
 "API Endpoint:" = "API Endpoint:";
 "API Token:" = "API Token:";
-"https://openrouter.ai/api/v1/chat/completions" = "https://openrouter.ai/api/v1/chat/completions";
+"https://openrouter.ai/api/v1/responses" = "https://openrouter.ai/api/v1/responses";
 "Paste API token" = "Paste API token";
 "Model" = "Model";
 "Fetch Models" = "Fetch Models";
@@ -140,6 +140,7 @@
 "Find Previous" = "Find Previous";
 "Find..." = "Find...";
 "Harness" = "Harness";
+"Developer" = "Developer";
 "Help" = "Help";
 "Hidden" = "Hidden";
 "Edit hidden databases" = "Edit hidden databases";

@@ -5,7 +5,8 @@
     "final_answer": "You were interrupted, please continue where you left off."
   },
   "assistant_messages": {
-    "tool_round_limit": "I reached the 50-round tool limit while inspecting local data, so I could not finish a reliable answer. Please ask a narrower question or continue with a more specific follow-up."
+    "tool_round_limit": "I reached the 50-round tool limit while inspecting local data, so I could not finish a reliable answer. Please ask a narrower question or continue with a more specific follow-up.",
+    "tool_audit_reminder": "Before finalizing, audit the user's request against the available tools and the system instructions. No function calls have been made for this request. Call every tool that is actually needed now, and do not call irrelevant tools. If no tool is needed, return the final answer directly."
   },
   "tool_errors": {
     "default": "Tool failed.",

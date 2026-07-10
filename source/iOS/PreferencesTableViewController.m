@@ -67,7 +67,7 @@ enum {
   [self setApiEndpointField:
     [self makeFieldSecure:NO
               placeholder:NSLocalizedString(
-                @"https://openrouter.ai/api/v1/chat/completions", nil)]];
+                @"https://openrouter.ai/api/v1/responses", nil)]];
   [self setApiTokenField:
     [self makeFieldSecure:YES
               placeholder:NSLocalizedString(@"Paste API token", nil)]];

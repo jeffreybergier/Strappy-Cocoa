@@ -850,6 +850,207 @@ char *strappy_tools_request_json_filtered(const char *resource_dir,
   return json;
 }
 
+static int strappy_tools_responses_copy_member(cJSON *target,
+                                                cJSON *source,
+                                                const char *name,
+                                                int required,
+                                                char **error_out)
+{
+  cJSON *member;
+  cJSON *copy;
+
+  member = cJSON_GetObjectItem(source, name);
+  if (member == NULL) {
+    if (required) {
+      strappy_set_formatted_error(error_out,
+                                  "Tool guidance is missing function.%s.",
+                                  name);
+      return 0;
+    }
+    return 1;
+  }
+
+  copy = cJSON_Duplicate(member, 1);
+  if ((copy == NULL) || !cJSON_AddItemToObject(target, name, copy)) {
+    cJSON_Delete(copy);
+    strappy_set_formatted_error(error_out,
+                                "Could not copy Responses tool field: %s",
+                                name);
+    return 0;
+  }
+  return 1;
+}
+
+static int strappy_tools_responses_append_server_tool(cJSON *tools,
+                                                       const char *type,
+                                                       char **error_out)
+{
+  cJSON *tool;
+
+  tool = cJSON_CreateObject();
+  if ((tool == NULL) ||
+      (cJSON_AddStringToObject(tool, "type", type) == NULL) ||
+      !cJSON_AddItemToArray(tools, tool)) {
+    cJSON_Delete(tool);
+    strappy_set_formatted_error(error_out,
+                                "Could not add Responses server tool: %s",
+                                type);
+    return 0;
+  }
+  return 1;
+}
+
+static char *strappy_tools_responses_json_from_chat_json(
+  const char *chat_tools_json,
+  int web_search_enabled,
+  char **error_out)
+{
+  cJSON *chat_tools;
+  cJSON *responses_tools;
+  cJSON *chat_tool;
+  char *json;
+
+  chat_tools = cJSON_Parse(chat_tools_json);
+  if (!cJSON_IsArray(chat_tools)) {
+    cJSON_Delete(chat_tools);
+    strappy_set_error(error_out, "Chat tool schema list is invalid.");
+    return NULL;
+  }
+
+  responses_tools = cJSON_CreateArray();
+  if (responses_tools == NULL) {
+    cJSON_Delete(chat_tools);
+    strappy_set_error(error_out, "Could not allocate Responses tool list.");
+    return NULL;
+  }
+
+  for (chat_tool = chat_tools->child;
+       chat_tool != NULL;
+       chat_tool = chat_tool->next) {
+    cJSON *function;
+    cJSON *response_tool;
+
+    function = cJSON_GetObjectItem(chat_tool, "function");
+    if (!cJSON_IsObject(function)) {
+      cJSON_Delete(responses_tools);
+      cJSON_Delete(chat_tools);
+      strappy_set_error(error_out,
+                        "Chat tool schema is missing its function object.");
+      return NULL;
+    }
+
+    response_tool = cJSON_CreateObject();
+    if ((response_tool == NULL) ||
+        (cJSON_AddStringToObject(response_tool, "type", "function") == NULL) ||
+        !strappy_tools_responses_copy_member(response_tool,
+                                             function,
+                                             "name",
+                                             1,
+                                             error_out) ||
+        !strappy_tools_responses_copy_member(response_tool,
+                                             function,
+                                             "description",
+                                             0,
+                                             error_out) ||
+        !strappy_tools_responses_copy_member(response_tool,
+                                             function,
+                                             "parameters",
+                                             1,
+                                             error_out)) {
+      cJSON_Delete(response_tool);
+      cJSON_Delete(responses_tools);
+      cJSON_Delete(chat_tools);
+      return NULL;
+    }
+
+    if (!strappy_tools_responses_copy_member(response_tool,
+                                             function,
+                                             "strict",
+                                             0,
+                                             error_out)) {
+      cJSON_Delete(response_tool);
+      cJSON_Delete(responses_tools);
+      cJSON_Delete(chat_tools);
+      return NULL;
+    }
+    if ((cJSON_GetObjectItem(response_tool, "strict") == NULL) &&
+        (cJSON_AddNullToObject(response_tool, "strict") == NULL)) {
+      cJSON_Delete(response_tool);
+      cJSON_Delete(responses_tools);
+      cJSON_Delete(chat_tools);
+      strappy_set_error(error_out,
+                        "Could not add Responses tool strict setting.");
+      return NULL;
+    }
+
+    if (!cJSON_AddItemToArray(responses_tools, response_tool)) {
+      cJSON_Delete(response_tool);
+      cJSON_Delete(responses_tools);
+      cJSON_Delete(chat_tools);
+      strappy_set_error(error_out, "Could not append Responses tool schema.");
+      return NULL;
+    }
+  }
+
+  if (web_search_enabled &&
+      (!strappy_tools_responses_append_server_tool(responses_tools,
+                                                   "openrouter:web_search",
+                                                   error_out) ||
+       !strappy_tools_responses_append_server_tool(responses_tools,
+                                                   "openrouter:web_fetch",
+                                                   error_out))) {
+    cJSON_Delete(responses_tools);
+    cJSON_Delete(chat_tools);
+    return NULL;
+  }
+
+  json = cJSON_PrintUnformatted(responses_tools);
+  cJSON_Delete(responses_tools);
+  cJSON_Delete(chat_tools);
+  if (json == NULL) {
+    strappy_set_error(error_out, "Could not serialize Responses tool list.");
+  }
+  return json;
+}
+
+char *strappy_tools_responses_request_json_filtered(
+  const char *resource_dir,
+  const char * const *allowed_names,
+  size_t allowed_name_count,
+  int web_search_enabled,
+  char **error_out)
+{
+  char *chat_tools_json;
+  char *responses_tools_json;
+
+  chat_tools_json =
+    strappy_tools_request_json_filtered(resource_dir,
+                                        allowed_names,
+                                        allowed_name_count,
+                                        error_out);
+  if (chat_tools_json == NULL) {
+    return NULL;
+  }
+
+  responses_tools_json =
+    strappy_tools_responses_json_from_chat_json(chat_tools_json,
+                                                web_search_enabled,
+                                                error_out);
+  free(chat_tools_json);
+  return responses_tools_json;
+}
+
+char *strappy_tools_responses_request_json(const char *resource_dir,
+                                           int web_search_enabled,
+                                           char **error_out)
+{
+  return strappy_tools_responses_request_json_filtered(resource_dir,
+                                                       NULL,
+                                                       0U,
+                                                       web_search_enabled,
+                                                       error_out);
+}
+
 char *strappy_tools_tool_guidance_string(const char *resource_dir,
                                          const char *section_name,
                                          const char *key,

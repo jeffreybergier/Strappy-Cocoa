@@ -26,7 +26,7 @@
 "API Token" = "API トークン";
 "API Endpoint:" = "API エンドポイント:";
 "API Token:" = "API トークン:";
-"https://openrouter.ai/api/v1/chat/completions" = "https://openrouter.ai/api/v1/chat/completions";
+"https://openrouter.ai/api/v1/responses" = "https://openrouter.ai/api/v1/responses";
 "Paste API token" = "API トークンを貼り付け";
 "Model" = "モデル";
 "Fetch Models" = "モデルを取得";
@@ -140,6 +140,7 @@
 "Find Previous" = "前を検索";
 "Find..." = "検索...";
 "Harness" = "ハーネス";
+"Developer" = "開発者";
 "Help" = "ヘルプ";
 "Hidden" = "隠す";
 "Edit hidden databases" = "隠すデータベースを編集";

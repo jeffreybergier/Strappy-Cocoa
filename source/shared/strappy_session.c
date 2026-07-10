@@ -1,9 +1,9 @@
 #include "strappy_session.h"
 
-#include "strappy_assistant.h"
 #include "strappy_core.h"
 #include "strappy_model_catalog.h"
 #include "strappy_prompt.h"
+#include "strappy_responses.h"
 
 #include <string.h>
 
@@ -137,7 +137,10 @@ int strappy_session_list_message_records(
   strappy_session_message_record_list *list,
   char **error_out)
 {
-  return strappy_db_list_session_messages(db_path, session_id, list, error_out);
+  return strappy_db_list_response_timeline(db_path,
+                                          session_id,
+                                          list,
+                                          error_out);
 }
 
 int strappy_session_load_message_record_by_key(
@@ -225,14 +228,15 @@ int strappy_session_send_prompt_and_load(
   char *response;
 
   response =
-    strappy_assistant_send_prompt_for_session_and_store(prompt,
-                                                        NULL,
-                                                        api_endpoint,
-                                                        api_token,
-                                                        system_prompt_template_path,
-                                                        db_path,
-                                                        session_id,
-                                                        error_out);
+    strappy_responses_send_prompt_for_session_and_store(
+      prompt,
+      NULL,
+      api_endpoint,
+      api_token,
+      system_prompt_template_path,
+      db_path,
+      session_id,
+      error_out);
   return strappy_session_load_after_prompt(db_path,
                                            session_id,
                                            response,
@@ -256,19 +260,14 @@ int strappy_session_submit_prompt_with_events_and_load(
   char *response;
 
   if (streaming) {
-    response = strappy_assistant_stream_prompt_for_session_and_store(
-      prompt,
-      NULL,
-      api_endpoint,
-      api_token,
-      system_prompt_template_path,
-      db_path,
-      session_id,
-      callback,
-      callback_data,
-      error_out);
+    (void)callback;
+    (void)callback_data;
+    strappy_set_error(error_out,
+                      "Streaming Responses API support is intentionally disabled.");
+    return 0;
   } else {
-    response = strappy_assistant_send_prompt_for_session_and_store_with_events(
+    response =
+      strappy_responses_send_prompt_for_session_and_store_with_events(
       prompt,
       NULL,
       api_endpoint,

@@ -428,6 +428,17 @@ static const char *strappy_webview_harness_label(
   return "Harness";
 }
 
+static const char *strappy_webview_developer_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->developer != NULL) &&
+      (labels->developer[0] != '\0')) {
+    return labels->developer;
+  }
+  return "Developer";
+}
+
 static const char *strappy_webview_thinking_label(
   const strappy_webview_labels *labels)
 {
@@ -481,6 +492,36 @@ static const char *strappy_webview_tool_result_label(
   return "Tool Result";
 }
 
+static const char *strappy_webview_api_call_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->api_call != NULL) &&
+      (labels->api_call[0] != '\0')) {
+    return labels->api_call;
+  }
+  return "API Call";
+}
+
+static const char *strappy_webview_api_error_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->api_error != NULL) &&
+      (labels->api_error[0] != '\0')) {
+    return labels->api_error;
+  }
+  return "API Error";
+}
+
+static const char *strappy_webview_response_item_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->response_item != NULL) &&
+      (labels->response_item[0] != '\0')) {
+    return labels->response_item;
+  }
+  return "Response Item";
+}
+
 static int strappy_webview_is_assistant_role(const char *role)
 {
   return (role != NULL) && (strcmp(role, "assistant") == 0);
@@ -506,6 +547,41 @@ static int strappy_webview_is_harness_role(const char *role)
   return (role != NULL) && (strcmp(role, "harness") == 0);
 }
 
+static int strappy_webview_is_developer_role(const char *role)
+{
+  return (role != NULL) && (strcmp(role, "developer") == 0);
+}
+
+static int strappy_webview_is_api_call_role(const char *role)
+{
+  return (role != NULL) && (strcmp(role, "api_call") == 0);
+}
+
+static int strappy_webview_is_api_error_role(const char *role)
+{
+  return (role != NULL) && (strcmp(role, "api_error") == 0);
+}
+
+static int strappy_webview_is_api_reasoning_role(const char *role)
+{
+  return (role != NULL) && (strcmp(role, "api_reasoning") == 0);
+}
+
+static int strappy_webview_is_api_function_call_role(const char *role)
+{
+  return (role != NULL) && (strcmp(role, "api_function_call") == 0);
+}
+
+static int strappy_webview_is_api_function_output_role(const char *role)
+{
+  return (role != NULL) && (strcmp(role, "api_function_output") == 0);
+}
+
+static int strappy_webview_is_api_item_role(const char *role)
+{
+  return (role != NULL) && (strcmp(role, "api_item") == 0);
+}
+
 static const char *strappy_webview_role_label(
   const char *role,
   const strappy_webview_labels *labels)
@@ -521,6 +597,27 @@ static const char *strappy_webview_role_label(
   }
   if (strappy_webview_is_harness_role(role)) {
     return strappy_webview_harness_label(labels);
+  }
+  if (strappy_webview_is_developer_role(role)) {
+    return strappy_webview_developer_label(labels);
+  }
+  if (strappy_webview_is_api_call_role(role)) {
+    return strappy_webview_api_call_label(labels);
+  }
+  if (strappy_webview_is_api_error_role(role)) {
+    return strappy_webview_api_error_label(labels);
+  }
+  if (strappy_webview_is_api_reasoning_role(role)) {
+    return strappy_webview_thinking_label(labels);
+  }
+  if (strappy_webview_is_api_function_call_role(role)) {
+    return strappy_webview_tool_call_label(labels);
+  }
+  if (strappy_webview_is_api_function_output_role(role)) {
+    return strappy_webview_tool_result_label(labels);
+  }
+  if (strappy_webview_is_api_item_role(role)) {
+    return strappy_webview_response_item_label(labels);
   }
   return strappy_webview_you_label(labels);
 }
@@ -623,7 +720,9 @@ static int strappy_webview_append_metadata_html(
   const char *metadata_json,
   const strappy_webview_labels *labels)
 {
-  if (!strappy_webview_is_assistant_role(role) ||
+  if ((!strappy_webview_is_assistant_role(role) &&
+       !strappy_webview_is_api_call_role(role) &&
+       !strappy_webview_is_api_error_role(role)) ||
       (metadata_json == NULL) ||
       (metadata_json[0] == '\0')) {
     return 1;
@@ -807,6 +906,28 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "white-space:pre-wrap;}",
     ".tool_call .bubble{background:#fffdf2;border-color:#ded6a8;}",
     ".tool .bubble{background:#f7fbff;border-color:#cbd7e2;}",
+    ".api_call,.api_error{background:#f7f7f7;}",
+    ".api_call .role{color:#4f5962;}",
+    ".api_error .role{color:#8a2525;}",
+    ".api_call .bubble,.api_error .bubble{font-size:12px;line-height:1.35;",
+    "white-space:pre-wrap;color:#4b535a;background:#f7f7f7;",
+    "border-top-color:#d9dde0;border-bottom-color:#e4e7e9;}",
+    ".api_error .bubble{background:#fff4f4;color:#742525;",
+    "border-top-color:#d9a7a7;border-bottom-color:#e7c6c6;}",
+    ".api_reasoning .role{color:#66552a;}",
+    ".api_reasoning .bubble{background:#fffbed;color:#4d452f;",
+    "border-top-color:#e1d7ae;border-bottom-color:#eee7ca;}",
+    ".api_function_call .role{color:#6a4e0f;}",
+    ".api_function_call .bubble{background:#fff9e8;color:#493b17;",
+    "border-top-color:#d8c27d;border-bottom-color:#ebdfb8;",
+    "white-space:pre-wrap;font-family:Monaco,Consolas,monospace;font-size:12px;}",
+    ".api_function_output .role{color:#356047;}",
+    ".api_function_output .bubble{background:#f2faf5;color:#284936;",
+    "border-top-color:#a9cbb6;border-bottom-color:#cde1d4;",
+    "white-space:pre-wrap;font-family:Monaco,Consolas,monospace;font-size:12px;}",
+    ".api_item .role{color:#59616a;}",
+    ".api_item .bubble{background:#f7f8f9;color:#3f464d;",
+    "border-top-color:#d6dbe0;border-bottom-color:#e3e6e9;white-space:pre-wrap;}",
     ".tool-panel{line-height:1.3;",
     "white-space:normal;color:#24313d;}",
     ".tool-heading{font-weight:bold;margin:0 0 8px;color:#2f4150;}",
@@ -918,10 +1039,12 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "padding:8px 12px 0;border-top:1px solid #d5e4f6;}",
     ".user .bubble{background:#eef5ff;border-top:0;",
     "border-bottom:0;padding-top:4px;}",
-    ".harness .role,.harness .meta{text-align:left;color:#6a597c;}",
-    ".harness .role{background:#f6f1ff;color:#6a597c;margin:0 -12px;",
+    ".harness .role,.harness .meta,.developer .role,.developer .meta{",
+    "text-align:left;color:#6a597c;}",
+    ".harness .role,.developer .role{background:#f6f1ff;color:#6a597c;",
+    "margin:0 -12px;",
     "padding:8px 12px 0;border-top:1px solid #d7caeb;}",
-    ".harness .bubble{background:#f6f1ff;border-top:0;",
+    ".harness .bubble,.developer .bubble{background:#f6f1ff;border-top:0;",
     "border-bottom:0;padding-top:4px;}",
     ".meta{font-size:12px;color:#777;margin-top:4px;}",
     ".state-pending .bubble{opacity:.72;}",
@@ -1152,7 +1275,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "return metadataHasAny(t,['length','max_tokens','max-tokens','max tokens',",
     "'token_limit','token-limit','token limit','context_length','context-length',",
     "'context length']);}",
-    "function metadataFinishStatus(root){var gen=metadataGen(root);var s=metadataLower(isObj(root)?root.finish_status:'');",
+    "function metadataFinishStatus(root){var gen=metadataGen(root);var rs=metadataLower(isObj(root)?root.status:'');var s=metadataLower(isObj(root)?root.finish_status:'');",
+    "if(isObj(root)&&root.error)return 'error';if(rs=='failed'||rs=='cancelled')return 'error';if(rs=='incomplete')return 'warning';",
     "if(s=='error'||s=='warning'||s=='ok')return s;",
     "if(isObj(root)&&(metadataValueIsError(root.finish_reason)||metadataValueIsError(root.native_finish_reason)))return 'error';",
     "if(isObj(gen)&&(metadataValueIsError(gen.finish_reason)||metadataValueIsError(gen.native_finish_reason)))return 'error';",
@@ -1160,6 +1284,9 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(isObj(gen)&&(metadataValueIsWarning(gen.finish_reason)||metadataValueIsWarning(gen.native_finish_reason)))return 'warning';",
     "return 'ok';}",
     "function metadataFinishDetail(root){var gen=metadataGen(root);",
+    "if(isObj(root)&&isObj(root.error)&&jsonText(root.error.message)!=='')return root.error.message;",
+    "if(isObj(root)&&isObj(root.incomplete_details)&&jsonText(root.incomplete_details.reason)!=='')return root.incomplete_details.reason;",
+    "if(isObj(root)&&jsonText(root.status)!==''&&metadataLower(root.status)!='completed')return root.status;",
     "if(isObj(root)&&jsonText(root.native_finish_reason)!=='')return root.native_finish_reason;",
     "if(isObj(root)&&jsonText(root.finish_reason)!=='')return root.finish_reason;",
     "if(isObj(gen)&&jsonText(gen.native_finish_reason)!=='')return gen.native_finish_reason;",
@@ -1167,9 +1294,12 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "return '';}",
     "function formatMetadata(root){var lines=[];var usage;var gen;",
     "if(!isObj(root))return jsonText(root);",
-    "addMetaLine(lines,'Response ID',root.response_id);",
+    "addMetaLine(lines,'Response ID',firstMetadataValue(root.id,root.response_id));",
     "addMetaLine(lines,'Model',root.model);",
-    "addMetaLine(lines,'Created',root.created);",
+    "addMetaLine(lines,'Created',firstMetadataValue(root.created_at,root.created));",
+    "addMetaLine(lines,'Response status',root.status);",
+    "if(isObj(root.incomplete_details))addMetaLine(lines,'Incomplete reason',root.incomplete_details.reason);",
+    "if(isObj(root.error)){addMetaLine(lines,'Error code',root.error.code);addMetaLine(lines,'Error',root.error.message);}",
     "addMetaLine(lines,'Finish reason',root.finish_reason);",
     "addMetaLine(lines,'Native finish reason',root.native_finish_reason);",
     "addMetaLine(lines,'Finish status',metadataFinishStatus(root));",
@@ -1178,13 +1308,17 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "addMetaLine(lines,'HTTP status',root.http_status);",
     "usage=root.usage;if(isObj(usage)){",
     "addMetaLine(lines,'Cost',usage.cost);",
+    "addMetaLine(lines,'Input tokens',usage.input_tokens);",
+    "addMetaLine(lines,'Output tokens',usage.output_tokens);",
     "addMetaLine(lines,'Prompt tokens',usage.prompt_tokens);",
     "addMetaLine(lines,'Completion tokens',usage.completion_tokens);",
     "addMetaLine(lines,'Total tokens',usage.total_tokens);",
     "addNestedMetaLine(lines,'Cached prompt tokens',usage,'prompt_tokens_details','cached_tokens');",
+    "addNestedMetaLine(lines,'Cached input tokens',usage,'input_tokens_details','cached_tokens');",
     "addNestedMetaLine(lines,'Cache write tokens',usage,'prompt_tokens_details','cache_write_tokens');",
     "addNestedMetaLine(lines,'Prompt audio tokens',usage,'prompt_tokens_details','audio_tokens');",
     "addNestedMetaLine(lines,'Reasoning tokens',usage,'completion_tokens_details','reasoning_tokens');",
+    "addNestedMetaLine(lines,'Output reasoning tokens',usage,'output_tokens_details','reasoning_tokens');",
     "addNestedMetaLine(lines,'Completion audio tokens',usage,'completion_tokens_details','audio_tokens');",
     "addNestedMetaLine(lines,'Accepted prediction tokens',usage,'completion_tokens_details','accepted_prediction_tokens');",
     "addNestedMetaLine(lines,'Rejected prediction tokens',usage,'completion_tokens_details','rejected_prediction_tokens');",
@@ -1223,7 +1357,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "return t.charAt(0)=='$'?t:'$'+t;}",
     "function formatMetadataSummary(root){var usage=isObj(root)?root.usage:null;",
     "var gen=metadataGen(root);var cost='';var input='';var output='';",
-    "if(isObj(usage)){cost=usage.cost;input=usage.prompt_tokens;output=usage.completion_tokens;}",
+    "if(isObj(usage)){cost=usage.cost;input=firstMetadataValue(usage.input_tokens,usage.prompt_tokens);output=firstMetadataValue(usage.output_tokens,usage.completion_tokens);}",
     "if(metadataSummaryValue(cost)=='-'&&isObj(gen))cost=firstMetadataValue(gen.total_cost,gen.usage,gen.upstream_inference_cost);",
     "if(metadataSummaryValue(input)=='-'&&isObj(gen))input=firstMetadataValue(gen.tokens_prompt,gen.native_tokens_prompt);",
     "if(metadataSummaryValue(output)=='-'&&isObj(gen))output=firstMetadataValue(gen.tokens_completion,gen.native_tokens_completion);",
@@ -1865,7 +1999,8 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     (created_at[0] != '\0') &&
     !render_streaming &&
     !strappy_webview_is_user_role(role) &&
-    !strappy_webview_is_harness_role(role);
+    !strappy_webview_is_harness_role(role) &&
+    !strappy_webview_is_developer_role(role);
 
   if (!has_state && (status_to_render[0] == '\0') &&
       (message != NULL) && (message->http_status >= 400L)) {

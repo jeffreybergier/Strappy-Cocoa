@@ -84,6 +84,78 @@ typedef struct strappy_session_message_input {
   int is_error;
 } strappy_session_message_input;
 
+typedef struct strappy_response_call_begin_input {
+  long long session_id;
+  long long previous_call_id;
+  const char *prompt_group_key;
+  const char *request_kind;
+  long round_index;
+  long attempt_index;
+  long new_input_start_index;
+  const char *request_method;
+  const char *request_url;
+  const char *request_headers_json;
+  const char *request_json;
+} strappy_response_call_begin_input;
+
+typedef struct strappy_response_call_finish_input {
+  long long call_id;
+  const char *state;
+  int is_error;
+  int output_is_canonical;
+  long http_status;
+  long retry_after_seconds;
+  long curl_code;
+  long long started_at_ms;
+  long long completed_at_ms;
+  long long request_bytes;
+  long long response_bytes;
+  double name_lookup_seconds;
+  double connect_seconds;
+  double start_transfer_seconds;
+  double total_seconds;
+  const char *effective_url;
+  const char *transport_error;
+  const char *content_type;
+  const char *request_id;
+  const char *generation_id;
+  const char *rate_limit_limit;
+  const char *rate_limit_remaining;
+  const char *rate_limit_reset;
+  const char *rate_limit_limit_requests;
+  const char *rate_limit_remaining_requests;
+  const char *rate_limit_reset_requests;
+  const char *rate_limit_limit_tokens;
+  const char *rate_limit_remaining_tokens;
+  const char *rate_limit_reset_tokens;
+  const char *response_headers;
+  const char *response_json;
+} strappy_response_call_finish_input;
+
+typedef struct strappy_response_item_raw_record {
+  long long item_id;
+  char *raw_json;
+} strappy_response_item_raw_record;
+
+typedef struct strappy_response_item_raw_record_list {
+  strappy_response_item_raw_record *records;
+  size_t count;
+} strappy_response_item_raw_record_list;
+
+typedef struct strappy_response_tool_execution_input {
+  long long session_id;
+  long long response_call_id;
+  long output_index;
+  const char *call_id;
+  const char *tool_name;
+  const char *arguments_json;
+  const char *status;
+  const char *output_json;
+  const char *error_text;
+  long long started_at_ms;
+  long long completed_at_ms;
+} strappy_response_tool_execution_input;
+
 typedef struct strappy_discovered_database_input {
   const char *path;
   long long size;
@@ -186,6 +258,10 @@ void strappy_session_message_record_init(strappy_session_message_record *record)
 void strappy_session_message_record_destroy(strappy_session_message_record *record);
 void strappy_session_message_record_list_init(strappy_session_message_record_list *list);
 void strappy_session_message_record_list_destroy(strappy_session_message_record_list *list);
+void strappy_response_item_raw_record_list_init(
+  strappy_response_item_raw_record_list *list);
+void strappy_response_item_raw_record_list_destroy(
+  strappy_response_item_raw_record_list *list);
 void strappy_discovered_database_record_init(strappy_discovered_database_record *record);
 void strappy_discovered_database_record_destroy(strappy_discovered_database_record *record);
 void strappy_discovered_database_record_list_init(strappy_discovered_database_record_list *list);
@@ -329,6 +405,37 @@ int strappy_db_load_session_message_by_key(
   strappy_session_message_record *record,
   char **error_out);
 int strappy_db_list_session_context_messages(
+  const char *db_path,
+  long long session_id,
+  strappy_session_message_record_list *list,
+  char **error_out);
+int strappy_db_begin_response_call(
+  const char *db_path,
+  const strappy_response_call_begin_input *input,
+  long long *call_id_out,
+  char **error_out);
+int strappy_db_finish_response_call(
+  const char *db_path,
+  const strappy_response_call_finish_input *input,
+  char **error_out);
+int strappy_db_list_canonical_response_items(
+  const char *db_path,
+  long long session_id,
+  strappy_response_item_raw_record_list *list,
+  char **error_out);
+int strappy_db_save_response_tool_execution(
+  const char *db_path,
+  const strappy_response_tool_execution_input *input,
+  char **error_out);
+int strappy_db_update_response_session_summary(
+  const char *db_path,
+  long long session_id,
+  const char *prompt,
+  const char *response,
+  const char *model,
+  long http_status,
+  char **error_out);
+int strappy_db_list_response_timeline(
   const char *db_path,
   long long session_id,
   strappy_session_message_record_list *list,
