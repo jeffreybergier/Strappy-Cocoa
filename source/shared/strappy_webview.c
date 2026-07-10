@@ -522,6 +522,46 @@ static const char *strappy_webview_response_item_label(
   return "Response Item";
 }
 
+static const char *strappy_webview_request_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->request != NULL) &&
+      (labels->request[0] != '\0')) {
+    return labels->request;
+  }
+  return "Request";
+}
+
+static const char *strappy_webview_response_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->response != NULL) &&
+      (labels->response[0] != '\0')) {
+    return labels->response;
+  }
+  return "Response";
+}
+
+static const char *strappy_webview_round_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->round != NULL) &&
+      (labels->round[0] != '\0')) {
+    return labels->round;
+  }
+  return "Round";
+}
+
+static const char *strappy_webview_attempt_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->attempt != NULL) &&
+      (labels->attempt[0] != '\0')) {
+    return labels->attempt;
+  }
+  return "Attempt";
+}
+
 static int strappy_webview_is_assistant_role(const char *role)
 {
   return (role != NULL) && (strcmp(role, "assistant") == 0);
@@ -823,33 +863,34 @@ static int strappy_webview_append_font_faces(strappy_webview_buffer *buffer)
 static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
 {
   static const char * const chunks[] = {
-    "html,body{margin:0;padding:0;background:#fff;color:#222;",
-    "font:14px/1.38 -apple-system,Helvetica,Arial,sans-serif;",
-    "-webkit-text-size-adjust:none;}",
-    ".page{padding:0 0 12px;}",
+    "html,body{margin:0;padding:0;background:transparent;color:#222;",
+    "font:12px/1.38 -apple-system,'Helvetica Neue',Helvetica,Arial,sans-serif;",
+    "letter-spacing:0;-webkit-text-size-adjust:none;}",
+    ".page{padding:0;}",
     ".empty{margin:80px auto 0;max-width:520px;color:#777;",
     "text-align:center;line-height:1.3;}",
     ".layout{width:100%;}",
     ".chat-column{width:100%;box-sizing:border-box;}",
-    "body.processing-status-active .page{padding-bottom:56px;}",
-    ".processing-status{position:fixed;left:10px;right:10px;bottom:10px;",
-    "z-index:20;box-sizing:border-box;border:1px solid #b8c7d4;",
-    "background:#f8fbfd;color:#26323d;padding:0 50px 0 12px;",
-    "box-shadow:0 2px 9px rgba(0,0,0,.12);font-size:12px;",
-    "line-height:32px;height:34px;}",
+    ".processing-status{position:fixed;left:50%;right:auto;top:auto;bottom:6px;",
+    "z-index:20;box-sizing:border-box;max-width:90%;",
+    "-webkit-transform:translateX(-50%);transform:translateX(-50%);",
+    "border:1px solid #9aa2a8;border-radius:17px;",
+    "background:#e7eaec;color:#3f474d;padding:0 36px 0 12px;",
+    "box-shadow:0 2px 8px rgba(0,0,0,.16);font-size:12px;",
+    "font-weight:bold;line-height:32px;height:34px;}",
     ".processing-status-text{display:block;white-space:nowrap;",
     "overflow:hidden;text-overflow:ellipsis;}",
-    ".processing-autoscroll{position:absolute;right:6px;top:4px;bottom:4px;",
-    "width:34px;box-sizing:border-box;display:block;",
-    "border:1px solid #aab8c4;background:#fff;color:#536677;",
-    "line-height:24px;",
+    ".processing-autoscroll{position:absolute;right:3px;top:3px;bottom:3px;",
+    "width:26px;box-sizing:border-box;display:block;border-radius:13px;",
+    "border:1px solid #a8afb4;background:#f7f8f9;color:#535d64;",
+    "line-height:26px;",
     "padding:0;text-align:center;cursor:pointer;}",
-    ".processing-autoscroll-on{background:#dbeaf5;border-color:#7fa7c5;",
-    "box-shadow:inset 0 1px 3px rgba(0,0,0,.25);color:#174f7a;}",
-    ".processing-status-retry_wait{border-color:#caa85f;background:#fff9e8;",
-    "color:#4d3d15;}",
-    ".processing-status-retrying{border-color:#9eb8d0;background:#f1f7fc;",
-    "color:#253d54;}",
+    ".processing-autoscroll-on{background:#cdd3d7;border-color:#89939a;",
+    "box-shadow:inset 0 1px 3px rgba(0,0,0,.2);color:#30383d;}",
+    ".processing-status-retry_wait{border-color:#aaa69f;background:#ecebea;",
+    "color:#4a4946;}",
+    ".processing-status-retrying{border-color:#979fa5;background:#e3e6e8;",
+    "color:#3d454a;}",
     ".bubble,.reasoning,.tool-column,.request-metadata{box-shadow:none;}",
     ".tool-column{max-width:none;box-sizing:border-box;",
     "margin:0 -12px 10px;border:0;border-top:1px solid #cfe0ea;",
@@ -899,7 +940,7 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".assistant .role{display:none;}",
     ".assistant .bubble{background:#fff;",
     "border-top-color:#e1e5e8;border-bottom-color:#edf0f2;",
-    "font-size:14px;line-height:1.38;}",
+    "font-size:12px;line-height:1.38;}",
     ".bubble-status{color:#777;font-style:italic;}",
     ".tool_call .role,.tool .role{color:#4d6478;}",
     ".tool_call .bubble,.tool .bubble{max-width:100%;box-sizing:border-box;",
@@ -920,11 +961,15 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".api_function_call .role{color:#6a4e0f;}",
     ".api_function_call .bubble{background:#fff9e8;color:#493b17;",
     "border-top-color:#d8c27d;border-bottom-color:#ebdfb8;",
-    "white-space:pre-wrap;font-family:Monaco,Consolas,monospace;font-size:12px;}",
+    "white-space:normal;font-size:12px;padding:4px 12px;}",
     ".api_function_output .role{color:#356047;}",
     ".api_function_output .bubble{background:#f2faf5;color:#284936;",
     "border-top-color:#a9cbb6;border-bottom-color:#cde1d4;",
-    "white-space:pre-wrap;font-family:Monaco,Consolas,monospace;font-size:12px;}",
+    "white-space:normal;font-size:12px;padding:4px 12px;}",
+    ".api-tool-card .tool-card-body{font-family:inherit;",
+    "font-size:12px;white-space:normal;}",
+    ".api-tool-fallback{font-family:Menlo,Monaco,'Courier New',monospace;",
+    "white-space:pre-wrap;word-wrap:break-word;}",
     ".api_item .role{color:#59616a;}",
     ".api_item .bubble{background:#f7f8f9;color:#3f464d;",
     "border-top-color:#d6dbe0;border-bottom-color:#e3e6e9;white-space:pre-wrap;}",
@@ -974,7 +1019,6 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".reasoning-body h1,.reasoning-body h2,.reasoning-body h3,",
     ".reasoning-body h4,.reasoning-body h5,.reasoning-body h6{",
     "font-size:inherit;line-height:1.3;margin:0 0 8px;font-weight:bold;}",
-    ".bubble h1,.bubble h2,.reasoning-body h1,.reasoning-body h2{font-size:14px;}",
     ".bubble ul,.bubble ol,.reasoning-body ul,.reasoning-body ol{",
     "margin:0 0 8px 20px;padding:0;}",
     ".bubble li,.reasoning-body li{margin:0 0 4px;}",
@@ -984,7 +1028,7 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".bubble pre,.reasoning-body pre{margin:0 0 8px;padding:8px;",
     "border:1px solid #ddd;",
     "background:#f2f2f2;overflow:auto;white-space:pre-wrap;}",
-    ".bubble code,.reasoning-body code{font-family:Monaco,Consolas,monospace;",
+    ".bubble code,.reasoning-body code{font-family:Menlo,Monaco,'Courier New',monospace;",
     "font-size:12px;line-height:1.3;",
     "background:#f2f2f2;",
     "padding:1px 3px;}",
@@ -1015,6 +1059,10 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".reasoning-toggle{color:#2468a8;text-decoration:none;margin-right:4px;}",
     ".reasoning-collapsed .reasoning-body{display:none;}",
     ".reasoning-body{white-space:normal;}",
+    ".api-reasoning-toggle{color:#2468a8;text-decoration:none;",
+    "margin-right:4px;}",
+    ".api-reasoning-disclosure{display:inline-block;width:12px;line-height:1;}",
+    ".api-reasoning-collapsed>.bubble{display:none;}",
     ".request-metadata{max-width:none;box-sizing:border-box;",
     "border:0;border-top:1px solid #d9dee3;border-bottom:1px solid #e5e8eb;",
     "background:#f6f7f8;color:#2e3f4f;padding:8px 12px;",
@@ -1053,6 +1101,156 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".state-error .bubble{border-top-color:#d99;border-bottom-color:#e5c2c2;background:#fff7f7;}",
     ".state-error .status{color:#a22;}",
     ".status a{color:#2468a8;text-decoration:none;}",
+    ".api-exchange-row{position:relative;border-top:0;",
+    "border-left:5px solid #68747d;",
+    "padding:0 10px;}",
+    ".api-exchange-row:before{content:'';position:absolute;left:0;right:0;",
+    "top:0;height:1px;background:#cbd2d8;pointer-events:none;}",
+    ".api-exchange-start{margin-top:0;border-top:0;}",
+    ".api-exchange-start:before{display:none;}",
+    ".api-exchange-end{margin-bottom:0;border-bottom:0;}",
+    ".api-exchange-turn-header{margin:0 -10px;padding:6px 10px;",
+    "border-bottom:1px solid #cbd2d8;background:#eef1f3;",
+    "color:#48535c;font-size:12px;font-weight:bold;line-height:1.3;}",
+    ".api-exchange-toggle{color:#2468a8;text-decoration:none;margin-right:4px;}",
+    ".api-exchange-disclosure{display:inline-block;width:12px;line-height:1;}",
+    ".api-exchange-turn-title{vertical-align:middle;}",
+    ".api-exchange-item{background:#fcfcfc;}",
+    ".api-exchange-item .role{margin:0;padding:5px 0 2px;}",
+    ".api-exchange-item.api_function_call+",
+    ".api-exchange-item.api_function_call>.role,",
+    ".api-exchange-item.api_function_output+",
+    ".api-exchange-item.api_function_output>.role{display:none;}",
+    ".api-exchange-item .bubble{margin:0 -10px;}",
+    ".api-exchange-item .reasoning,.api-exchange-item .tool-column{",
+    "margin-bottom:0;}",
+    ".api-exchange-item.user .role,.api-exchange-item.harness .role,",
+    ".api-exchange-item.developer .role{margin:0 -10px;padding:5px 10px 0;}",
+    ".api-exchange-item.user .bubble,.api-exchange-item.harness .bubble,",
+    ".api-exchange-item.developer .bubble{padding:3px 10px 5px;}",
+    ".api-exchange-item.api_function_call .bubble,",
+    ".api-exchange-item.api_function_output .bubble{padding-left:10px;",
+    "padding-right:10px;}",
+    ".api-exchange-metadata{background:#f7f7f7;}",
+    ".api-exchange-metadata.api_call>.role,",
+    ".api-exchange-metadata.api_call>.bubble{display:none;}",
+    ".api-exchange-metadata.api_error>.role{margin:0;padding:5px 0 2px;}",
+    ".api-exchange-metadata>.bubble{margin:0 -10px;}",
+    ".api-exchange-metadata>.request-metadata{margin:0 -10px;",
+    "padding:5px 10px;border-bottom:0;}",
+    ".api-exchange-metadata .request-metadata-collapsed ",
+    ".request-metadata-title{margin-bottom:0;}",
+    ".api-exchange-section-label{margin:0 -10px;padding:4px 10px;",
+    "font-size:12px;line-height:1.2;font-weight:bold;color:#65717b;",
+    "background:rgba(255,255,255,.58);}",
+    ".api-exchange-row>.role,.api-exchange-row>.bubble,",
+    ".api-exchange-row>.reasoning,.api-exchange-row>.tool-column,",
+    ".api-exchange-row>.request-metadata,",
+    ".api-exchange-row .tool-card-body,",
+    ".api-exchange-row .tool-table-wrap,.api-exchange-row .tool-pill,",
+    ".api-exchange-row .tool-raw{background:transparent;}",
+    ".api-exchange-row>.role,.api-exchange-row>.bubble,",
+    ".api-exchange-row>.reasoning,.api-exchange-row>.tool-column,",
+    ".api-exchange-row>.request-metadata{border-top:0;border-bottom:0;}",
+    ".api-exchange-row>.role,.api-exchange-row .reasoning-label,",
+    ".api-exchange-row .request-metadata-title{color:#4b5963;}",
+    ".api-exchange-color-0{background:#f1f7fa;border-left-color:#4f7f9e;}",
+    ".api-exchange-color-0.api-exchange-row:before{background:#bfd3df;}",
+    ".api-exchange-color-0.api-exchange-row,",
+    ".api-exchange-color-0.api-exchange-row *{color:#3f657c;}",
+    ".api-exchange-color-0 .api-exchange-turn-header,",
+    ".api-exchange-color-0 .api-exchange-section-label{",
+    "background:#e3eef4;color:#3f657c;border-color:#bfd3df;}",
+    ".api-exchange-color-0>.bubble,.api-exchange-color-0>.reasoning,",
+    ".api-exchange-color-0>.tool-column,",
+    ".api-exchange-color-0>.request-metadata,",
+    ".api-exchange-color-0 .tool-card-body{border-color:#bfd3df;}",
+    ".api-exchange-color-1{background:#f7f4fa;border-left-color:#7b6995;}",
+    ".api-exchange-color-1.api-exchange-row:before{background:#d4c9df;}",
+    ".api-exchange-color-1.api-exchange-row,",
+    ".api-exchange-color-1.api-exchange-row *{color:#625276;}",
+    ".api-exchange-color-1 .api-exchange-turn-header,",
+    ".api-exchange-color-1 .api-exchange-section-label{",
+    "background:#ece7f2;color:#625276;border-color:#d4c9df;}",
+    ".api-exchange-color-1>.bubble,.api-exchange-color-1>.reasoning,",
+    ".api-exchange-color-1>.tool-column,",
+    ".api-exchange-color-1>.request-metadata,",
+    ".api-exchange-color-1 .tool-card-body{border-color:#d4c9df;}",
+    ".api-exchange-color-2{background:#f1f8f6;border-left-color:#4e8375;}",
+    ".api-exchange-color-2.api-exchange-row:before{background:#bdd8d0;}",
+    ".api-exchange-color-2.api-exchange-row,",
+    ".api-exchange-color-2.api-exchange-row *{color:#3f695e;}",
+    ".api-exchange-color-2 .api-exchange-turn-header,",
+    ".api-exchange-color-2 .api-exchange-section-label{",
+    "background:#e2f0ec;color:#3f695e;border-color:#bdd8d0;}",
+    ".api-exchange-color-2>.bubble,.api-exchange-color-2>.reasoning,",
+    ".api-exchange-color-2>.tool-column,",
+    ".api-exchange-color-2>.request-metadata,",
+    ".api-exchange-color-2 .tool-card-body{border-color:#bdd8d0;}",
+    ".api-exchange-color-3{background:#faf7ef;border-left-color:#92743d;}",
+    ".api-exchange-color-3.api-exchange-row:before{background:#decda8;}",
+    ".api-exchange-color-3.api-exchange-row,",
+    ".api-exchange-color-3.api-exchange-row *{color:#735d32;}",
+    ".api-exchange-color-3 .api-exchange-turn-header,",
+    ".api-exchange-color-3 .api-exchange-section-label{",
+    "background:#f2ead8;color:#735d32;border-color:#decda8;}",
+    ".api-exchange-color-3>.bubble,.api-exchange-color-3>.reasoning,",
+    ".api-exchange-color-3>.tool-column,",
+    ".api-exchange-color-3>.request-metadata,",
+    ".api-exchange-color-3 .tool-card-body{border-color:#decda8;}",
+    ".api-exchange-color-4{background:#faf4f6;border-left-color:#956875;}",
+    ".api-exchange-color-4.api-exchange-row:before{background:#ddc5cc;}",
+    ".api-exchange-color-4.api-exchange-row,",
+    ".api-exchange-color-4.api-exchange-row *{color:#76535d;}",
+    ".api-exchange-color-4 .api-exchange-turn-header,",
+    ".api-exchange-color-4 .api-exchange-section-label{",
+    "background:#f1e5e9;color:#76535d;border-color:#ddc5cc;}",
+    ".api-exchange-color-4>.bubble,.api-exchange-color-4>.reasoning,",
+    ".api-exchange-color-4>.tool-column,",
+    ".api-exchange-color-4>.request-metadata,",
+    ".api-exchange-color-4 .tool-card-body{border-color:#ddc5cc;}",
+    ".api-exchange-color-5{background:#f6f8f1;border-left-color:#788552;}",
+    ".api-exchange-color-5.api-exchange-row:before{background:#ced8b9;}",
+    ".api-exchange-color-5.api-exchange-row,",
+    ".api-exchange-color-5.api-exchange-row *{color:#606a43;}",
+    ".api-exchange-color-5 .api-exchange-turn-header,",
+    ".api-exchange-color-5 .api-exchange-section-label{",
+    "background:#eaf0df;color:#606a43;border-color:#ced8b9;}",
+    ".api-exchange-color-5>.bubble,.api-exchange-color-5>.reasoning,",
+    ".api-exchange-color-5>.tool-column,",
+    ".api-exchange-color-5>.request-metadata,",
+    ".api-exchange-color-5 .tool-card-body{border-color:#ced8b9;}",
+    ".api-exchange-row.api-exchange-response.assistant>.bubble{background:#fff;",
+    "font-size:16px;line-height:1.45;}",
+    ".api-exchange-row.api-exchange-response.assistant>.bubble,",
+    ".api-exchange-row.api-exchange-response.assistant>.bubble *{color:#222;}",
+    ".api-exchange-row.api-exchange-response.assistant>.bubble a{color:#2468a8;}",
+    ".api-exchange-row.state-error>.bubble,",
+    ".api-exchange-metadata.api_error>.bubble{background:#fff7f7;",
+    "color:#742525;border-color:#d99;}",
+    ".api-exchange-row.state-error>.role,",
+    ".api-exchange-metadata.api_error>.role{color:#8a2525;}",
+    ".api-exchange-row.state-error>.bubble *,",
+    ".api-exchange-metadata.api_error>.bubble *{color:#742525;}",
+    ".api-exchange-row.state-error>.status,",
+    ".api-exchange-row.state-error>.status *{color:#a22;}",
+    ".api-exchange-row .request-metadata-error{background:#fff2f2;",
+    "color:#7a253f;border-color:#d99;}",
+    ".api-exchange-row .request-metadata-error *{color:#7a253f;}",
+    ".api-exchange-row .request-metadata-warning{background:#fff8e3;",
+    "color:#4d3d15;border-color:#caa85f;}",
+    ".api-exchange-row .request-metadata-warning *{color:#4d3d15;}",
+    ".api-exchange-row .tool-error{background:#fff7f7;",
+    "color:#7a2525;border-color:#d99;}",
+    ".api-exchange-row .tool-error *{color:#7a2525;}",
+    ".api-exchange-collapsed-anchor>.role,",
+    ".api-exchange-collapsed-anchor>.bubble,",
+    ".api-exchange-collapsed-anchor>.reasoning,",
+    ".api-exchange-collapsed-anchor>.tool-column,",
+    ".api-exchange-collapsed-anchor>.request-metadata,",
+    ".api-exchange-collapsed-anchor>.meta,",
+    ".api-exchange-collapsed-anchor>.api-exchange-section-label{display:none;}",
+    ".api-exchange-collapsed-row{display:none;}",
     "</style>",
     NULL
   };
@@ -1379,6 +1577,55 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(hasClass(p,'request-metadata-collapsed')){",
     "p.className=p.className.replace(/\\srequest-metadata-collapsed/g,'');if(d)d.innerHTML='&#9660;';}",
     "else{p.className+=' request-metadata-collapsed';if(d)d.innerHTML='&#9658;';}return false;}",
+    "var strappyAPIExchangeCollapsed={};",
+    "function apiExchangeId(row){return row&&row.getAttribute?row.getAttribute('data-api-call-id')||'':'';}",
+    "function apiExchangeDirection(row){return row&&row.getAttribute?row.getAttribute('data-direction')||'':'';}",
+    "function apiExchangeKind(row){return row&&row.getAttribute?row.getAttribute('data-kind')||'':'';}",
+    "function apiExchangeColorClass(row){var n=row&&row.getAttribute?parseInt(row.getAttribute('data-round-number'),10):1;",
+    "if(!n||n<1)n=1;return 'api-exchange-color-'+((n-1)%6);}",
+    "function rowIsAPIExchangeMetadata(row){return apiExchangeKind(row)=='response_api_call'||hasClass(row,'api_call')||hasClass(row,'api_error');}",
+    "function rowIsAPIExchangeItem(row){var d=apiExchangeDirection(row);return d=='request'||d=='response';}",
+    "function removeAPIExchangeDecoration(row){var names=['api-exchange-row','api-exchange-start','api-exchange-end',",
+    "'api-exchange-turn-anchor','api-exchange-metadata','api-exchange-item','api-exchange-request','api-exchange-response',",
+    "'api-exchange-section-start','api-exchange-collapsed-anchor','api-exchange-collapsed-row',",
+    "'api-exchange-color-0','api-exchange-color-1','api-exchange-color-2',",
+    "'api-exchange-color-3','api-exchange-color-4','api-exchange-color-5'];",
+    "var i,n;for(i=0;i<names.length;i++)setRowClass(row,names[i],0);",
+    "n=firstByClass(row,'api-exchange-section-label');if(n&&n.parentNode)n.parentNode.removeChild(n);}",
+    "function removeAPIExchangeTurnHeader(row){var n=firstByClass(row,'api-exchange-turn-header');",
+    "if(n&&n.parentNode)n.parentNode.removeChild(n);}",
+    "function ensureAPIExchangeTurnHeader(row,id,collapsed){var h,a,d,title,roundNumber,attemptNumber,roundLabel,attemptLabel;",
+    "if(!row)return;roundNumber=row.getAttribute('data-round-number')||'1';attemptNumber=row.getAttribute('data-attempt-number')||'1';",
+    "roundLabel=row.getAttribute('data-round-label')||'Round';attemptLabel=row.getAttribute('data-attempt-label')||'Attempt';",
+    "h=document.createElement('div');h.className='api-exchange-turn-header';a=document.createElement('a');",
+    "a.className='api-exchange-toggle';a.href='#';a.setAttribute('data-api-call-id',id);",
+    "a.setAttribute('aria-expanded',collapsed?'false':'true');a.onclick=function(){return toggleAPIExchange(this);};",
+    "d=document.createElement('span');d.className='api-exchange-disclosure';d.innerHTML=collapsed?'&#9658;':'&#9660;';",
+    "a.appendChild(d);h.appendChild(a);title=document.createElement('span');title.className='api-exchange-turn-title';",
+    "setNodeText(title,roundLabel+' '+roundNumber+' \\u00b7 '+attemptLabel+' '+attemptNumber);h.appendChild(title);",
+    "row.insertBefore(h,row.firstChild);}",
+    "function ensureAPIExchangeSectionLabel(row){var label=row.getAttribute?row.getAttribute('data-direction-label')||'':'';var n;",
+    "if(label==='')return;n=document.createElement('div');n.className='api-exchange-section-label';setNodeText(n,label);",
+    "row.insertBefore(n,row.firstChild);}",
+    "function decorateAPIExchanges(root){var rows=messageRows();var groups={};var keys=[];var i,j,row,id,key,g,anchor,color,collapsed,last,d,previous;",
+    "for(i=0;i<rows.length;i++){removeAPIExchangeDecoration(rows[i]);removeAPIExchangeTurnHeader(rows[i]);",
+    "id=apiExchangeId(rows[i]);if(id===''||(!rowIsAPIExchangeMetadata(rows[i])&&!rowIsAPIExchangeItem(rows[i])))continue;",
+    "key='$'+id;if(!groups[key]){groups[key]={id:id,rows:[]};keys[keys.length]=key;}groups[key].rows[groups[key].rows.length]=rows[i];}",
+    "for(i=0;i<keys.length;i++){g=groups[keys[i]];anchor=g.rows[0];color=apiExchangeColorClass(anchor);",
+    "collapsed=typeof strappyAPIExchangeCollapsed[g.id]=='undefined'?0:(strappyAPIExchangeCollapsed[g.id]?1:0);",
+    "previous='';last=collapsed?anchor:g.rows[g.rows.length-1];",
+    "for(j=0;j<g.rows.length;j++){row=g.rows[j];d=apiExchangeDirection(row);setRowClass(row,'api-exchange-row',1);",
+    "setRowClass(row,'api-exchange-start',j===0);setRowClass(row,'api-exchange-end',row===last);",
+    "setRowClass(row,'api-exchange-turn-anchor',row===anchor);setRowClass(row,'api-exchange-metadata',rowIsAPIExchangeMetadata(row));",
+    "setRowClass(row,'api-exchange-item',rowIsAPIExchangeItem(row));",
+    "setRowClass(row,color,1);",
+    "setRowClass(row,'api-exchange-request',d=='request');setRowClass(row,'api-exchange-response',d=='response');",
+    "setRowClass(row,'api-exchange-collapsed-anchor',collapsed&&row===anchor);",
+    "setRowClass(row,'api-exchange-collapsed-row',collapsed&&row!==anchor);",
+    "if(d!==''&&d!==previous){setRowClass(row,'api-exchange-section-start',1);ensureAPIExchangeSectionLabel(row);previous=d;}}",
+    "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed);}}",
+    "function toggleAPIExchange(a){var id=a&&a.getAttribute?a.getAttribute('data-api-call-id'):'';if(id==='')return false;",
+    "strappyAPIExchangeCollapsed[id]=strappyAPIExchangeCollapsed[id]?0:1;decorateAPIExchanges(document);decoratePromptGroups(document);return false;}",
     "var strappyPromptGroupCollapsed={};",
     "function promptGroupKey(row){return row&&row.getAttribute?row.getAttribute('data-prompt-group-key')||'':'';}",
     "function rowActor(row){return row&&row.getAttribute?row.getAttribute('data-actor')||'':'';}",
@@ -1429,6 +1676,13 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function setMessageReasoningCollapsed(id,collapsed){var r=byId(id);var box,body;",
     "if(!r)return;box=firstByClass(r,'reasoning');body=firstByClass(r,'reasoning-body');",
     "if(!box||!body||nodeText(body)==='')return;setReasoningCollapsed(box,collapsed);}",
+    "function setAPIReasoningCollapsed(row,collapsed){var d=firstByClass(row,'api-reasoning-disclosure');",
+    "var a=firstByClass(row,'api-reasoning-toggle');if(collapsed){setRowClass(row,'api-reasoning-collapsed',1);",
+    "if(d)d.innerHTML='&#9658;';if(a)a.setAttribute('aria-expanded','false');}",
+    "else{setRowClass(row,'api-reasoning-collapsed',0);if(d)d.innerHTML='&#9660;';",
+    "if(a)a.setAttribute('aria-expanded','true');}}",
+    "function toggleAPIReasoning(a){var row=a;while(row&&!hasClass(row,'api_reasoning'))row=row.parentNode;",
+    "if(!row)return false;setAPIReasoningCollapsed(row,hasClass(row,'api-reasoning-collapsed')?0:1);return false;}",
     "function setToolColumnCollapsed(box,collapsed){var d=firstByClass(box,'tool-column-disclosure');",
     "if(collapsed){if(!hasClass(box,'tool-column-collapsed'))box.className+=' tool-column-collapsed';",
     "if(d)d.innerHTML='&#9658;';}else{box.className=box.className.replace(/\\stool-column-collapsed/g,'');",
@@ -1538,7 +1792,9 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function toggleToolCard(a){var p=a;while(p&&!hasClass(p,'tool-card'))p=p.parentNode;",
     "if(!p)return false;var d=firstByClass(a,'tool-disclosure');",
     "if(hasClass(p,'tool-card-open')){p.className=p.className.replace(/\\stool-card-open/g,'');",
-    "if(d)d.innerHTML='&#9658;';}else{p.className+=' tool-card-open';if(d)d.innerHTML='&#9660;';}return false;}",
+    "if(d)d.innerHTML='&#9658;';if(a.setAttribute)a.setAttribute('aria-expanded','false');}",
+    "else{p.className+=' tool-card-open';if(d)d.innerHTML='&#9660;';",
+    "if(a.setAttribute)a.setAttribute('aria-expanded','true');}return false;}",
     "function toolUsesDatabaseId(name){return name=='database_query'||name=='database_context_read';}",
     "function decorateToolArgs(name,args,dbNames){var parsed=args;var p;var db;var out;var k;",
     "if(typeof args=='string'){p=parseJSONSafe(args);if(p!==null)parsed=p;}",
@@ -1590,6 +1846,26 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(events){for(i=0;i<events.length;i++){o=parseJSONSafe(events[i].result_json||'');collectDatabaseNamesFromObject(dbNames,o);}return;}",
     "o=parseJSONSafe(raw);collectDatabaseNamesFromObject(dbNames,o);}",
     "function collectDatabaseNames(rows){var dbNames={};var i;for(i=0;i<rows.length;i++)collectDatabaseNamesFromRaw(dbNames,toolRowRaw(rows[i]));return dbNames;}",
+    "function isAPIToolCallRow(row){return hasClass(row,'row')&&hasClass(row,'api_function_call');}",
+    "function isAPIToolOutputRow(row){return hasClass(row,'row')&&hasClass(row,'api_function_output');}",
+    "function apiToolRows(){var m=byId('messages');var out=[];var n,i;if(!m)return out;",
+    "n=m.getElementsByTagName('*');for(i=0;i<n.length;i++){if(isAPIToolCallRow(n[i])||isAPIToolOutputRow(n[i]))out[out.length]=n[i];}return out;}",
+    "function apiToolAttr(row,name){return row&&row.getAttribute?row.getAttribute('data-'+name)||'':'';}",
+    "function apiToolRaw(row,name){var raw=apiToolAttr(row,name);var body,fallback;if(raw!=='')return raw;",
+    "body=firstByClass(row,'tool-card-body');fallback=body?firstByClass(body,'api-tool-fallback'):null;return fallback?nodeText(fallback):'';}",
+    "function renderAPIToolRows(){var rows=apiToolRows();var calls={};var dbNames={};var i,row,id,name,raw,body,summary,error,bubble;",
+    "for(i=0;i<rows.length;i++){row=rows[i];id=apiToolAttr(row,'tool-call-id');",
+    "if(isAPIToolCallRow(row)&&id!=='')calls[id]={name:apiToolAttr(row,'tool-name'),args:apiToolRaw(row,'arguments-json')};",
+    "if(isAPIToolOutputRow(row))collectDatabaseNamesFromRaw(dbNames,apiToolRaw(row,'result-json'));}",
+    "for(i=0;i<rows.length;i++){row=rows[i];id=apiToolAttr(row,'tool-call-id');name=apiToolAttr(row,'tool-name');",
+    "if(name===''&&id!==''&&calls[id])name=calls[id].name;if(name==='')name=isAPIToolCallRow(row)?'Tool Call':'Tool Result';",
+    "body=firstByClass(row,'tool-card-body');summary=firstByClass(row,'tool-card-summary');if(summary)setNodeText(summary,name);if(!body)continue;",
+    "bubble=firstByClass(row,'bubble');if(isAPIToolCallRow(row)){raw=apiToolRaw(row,'arguments-json');",
+    "body.innerHTML=toolPanel('Tool Call',name,toolInputHTML(name,raw,dbNames),raw,'');",
+    "if(bubble)bubble.className=bubble.className.replace(/\\stool-error/g,'');}",
+    "else{raw=apiToolRaw(row,'result-json');error=toolOutputHasError(raw);body.innerHTML=toolOutputHTML(raw,name,error);",
+    "if(bubble){if(error&&!hasClass(bubble,'tool-error'))bubble.className+=' tool-error';",
+    "if(!error)bubble.className=bubble.className.replace(/\\stool-error/g,'');}}}}",
     "function appendCardsFromToolCall(cards,pending,raw,dbNames){var calls=toolCallsPayload(raw);var i,c;",
     "if(isArr(calls)){for(i=0;i<calls.length;i++){c=toolCallCardData(calls[i]);c.dbNames=dbNames;cards[cards.length]=c;pending[pending.length]=c;}}",
     "else{c={name:'Tool Call',id:'',args:raw,output:null,error:false};cards[cards.length]=c;pending[pending.length]=c;}}",
@@ -1656,8 +1932,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "else{grouped[target][grouped[target].length]={name:'Tool Result',id:'',args:'',output:raw,outputOnly:true,error:toolOutputHasError(raw)};}}}",
     "for(i=0;i<targets.length;i++)renderToolCardsForTarget(targets[i],grouped[targets[i]]);scrollToolRailBottom();}",
     "function renderToolNode(row){toolRowRaw(row);rebuildToolCards();}",
-    "function renderTools(root){moveToolRows(root);rebuildToolCards();}",
-    "function renderMessageDecorations(root){renderMarkdown(root);renderMetadata(root);renderTools(root);decoratePromptGroups(root);}",
+    "function renderTools(root){renderAPIToolRows();moveToolRows(root);rebuildToolCards();}",
+    "function renderMessageDecorations(root){renderMarkdown(root);renderMetadata(root);renderTools(root);decorateAPIExchanges(root);decoratePromptGroups(root);}",
     "var strappyBatchDepth=0;var strappyNeedsRender=0;var strappyBatchShouldScroll=0;",
     "var strappyUpdateInterval=300;var strappyStatusInterval=1000;",
     "var strappyUpdateTimer=null;var strappyUpdateDue=0;var strappyUpdateFlushing=0;",
@@ -1942,9 +2218,15 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   const char *created_at;
   const char *metadata_json;
   const char *render_state_json;
+  const char *tool_name;
+  const char *direction;
+  const char *direction_label;
   const char *status_to_render;
   char *owned_status_html;
   char http_status_text[64];
+  char api_call_id_text[64];
+  char round_number_text[64];
+  char attempt_number_text[64];
   int has_state;
   int render_created_at;
   int render_streaming;
@@ -1954,6 +2236,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   int render_bubble_status;
   int hide_empty_answer_bubble;
   int suppress_status_meta;
+  int render_api_tool_card;
   int ok;
 
   role = ((message != NULL) && (message->role != NULL) &&
@@ -1967,6 +2250,37 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     strappy_webview_string_or_empty(message->metadata_json) : "";
   render_state_json = (message != NULL) ?
     strappy_webview_string_or_empty(message->render_state_json) : "";
+  tool_name = (message != NULL) ?
+    strappy_webview_string_or_empty(message->tool_name) : "";
+  direction = (message != NULL) ?
+    strappy_webview_string_or_empty(message->direction) : "";
+  direction_label = "";
+  if (strcmp(direction, "request") == 0) {
+    direction_label = strappy_webview_request_label(labels);
+  } else if (strcmp(direction, "response") == 0) {
+    direction_label = strappy_webview_response_label(labels);
+  }
+  api_call_id_text[0] = '\0';
+  round_number_text[0] = '\0';
+  attempt_number_text[0] = '\0';
+  if ((message != NULL) && (message->api_call_id > 0LL)) {
+    snprintf(api_call_id_text,
+             sizeof(api_call_id_text),
+             "%lld",
+             message->api_call_id);
+    if (message->round_number > 0L) {
+      snprintf(round_number_text,
+               sizeof(round_number_text),
+               "%ld",
+               message->round_number);
+    }
+    if (message->attempt_number > 0L) {
+      snprintf(attempt_number_text,
+               sizeof(attempt_number_text),
+               "%ld",
+               message->attempt_number);
+    }
+  }
   status_to_render = strappy_webview_string_or_empty(status_html);
   owned_status_html = NULL;
   has_state = (state != NULL) && (state[0] != '\0');
@@ -1995,8 +2309,12 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     render_streaming &&
     (state != NULL) &&
     (strcmp(state, "pending") == 0);
+  render_api_tool_card =
+    strappy_webview_is_api_function_call_role(role) ||
+    strappy_webview_is_api_function_output_role(role);
   render_created_at =
     (created_at[0] != '\0') &&
+    ((message == NULL) || (message->api_call_id <= 0LL)) &&
     !render_streaming &&
     !strappy_webview_is_user_role(role) &&
     !strappy_webview_is_harness_role(role) &&
@@ -2029,6 +2347,12 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     ok = strappy_webview_buffer_append_cstring(&buffer, " streaming-active");
   }
 
+  if (ok && strappy_webview_is_api_reasoning_role(role)) {
+    ok = strappy_webview_buffer_append_cstring(
+      &buffer,
+      " api-reasoning-collapsed");
+  }
+
   if (ok && has_state) {
     ok = strappy_webview_buffer_append_cstring(&buffer, " state-") &&
          strappy_webview_append_html_escaped(&buffer, state);
@@ -2057,6 +2381,47 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                              (message != NULL) ?
                                                message->target_message_key : NULL) &&
        strappy_webview_append_data_attribute(&buffer,
+                                             "api-call-id",
+                                             api_call_id_text) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "round-number",
+                                             round_number_text) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "round-label",
+                                             (api_call_id_text[0] != '\0') ?
+                                               strappy_webview_round_label(labels) :
+                                               NULL) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "attempt-number",
+                                             attempt_number_text) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "attempt-label",
+                                             (api_call_id_text[0] != '\0') ?
+                                               strappy_webview_attempt_label(labels) :
+                                               NULL) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "direction",
+                                             direction) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "direction-label",
+                                             direction_label) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "tool-call-id",
+                                             (message != NULL) ?
+                                               message->tool_call_id : NULL) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "tool-name",
+                                             (message != NULL) ?
+                                               message->tool_name : NULL) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "arguments-json",
+                                             (message != NULL) ?
+                                               message->arguments_json : NULL) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "result-json",
+                                             (message != NULL) ?
+                                               message->result_json : NULL) &&
+       strappy_webview_append_data_attribute(&buffer,
                                              "render-state",
                                              (message != NULL) ?
                                                message->render_state_json : NULL);
@@ -2067,7 +2432,16 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
            strappy_webview_thinking_label(labels));
   }
   ok = ok &&
-       strappy_webview_buffer_append_cstring(&buffer, "><div class=\"role\">") &&
+       strappy_webview_buffer_append_cstring(&buffer, "><div class=\"role\">");
+  if (ok && strappy_webview_is_api_reasoning_role(role)) {
+    ok = strappy_webview_buffer_append_cstring(
+      &buffer,
+      "<a class=\"api-reasoning-toggle\" href=\"#\" "
+      "aria-expanded=\"false\" "
+      "onclick=\"return toggleAPIReasoning(this)\">"
+      "<span class=\"api-reasoning-disclosure\">&#9658;</span></a>");
+  }
+  ok = ok &&
        strappy_webview_append_html_escaped(&buffer,
                                            strappy_webview_role_label(role, labels)) &&
        strappy_webview_buffer_append_cstring(&buffer, "</div>");
@@ -2086,6 +2460,11 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
 
   ok = ok &&
        strappy_webview_buffer_append_cstring(&buffer, "<div class=\"bubble");
+  if (ok && render_api_tool_card) {
+    ok = strappy_webview_buffer_append_cstring(
+      &buffer,
+      " api-tool-card tool-card");
+  }
   if (ok && render_bubble_status) {
     ok = strappy_webview_buffer_append_cstring(&buffer, " bubble-status");
   }
@@ -2103,6 +2482,24 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
              &buffer,
              strappy_webview_thinking_label(labels));
     }
+  } else if (render_api_tool_card) {
+    ok = strappy_webview_buffer_append_cstring(
+           &buffer,
+           "<a class=\"tool-card-toggle\" href=\"#\" "
+           "aria-expanded=\"false\" "
+           "onclick=\"return toggleToolCard(this)\">"
+           "<span class=\"tool-disclosure\">&#9658;</span>"
+           "<span class=\"tool-card-summary\">") &&
+         strappy_webview_append_html_escaped(
+           &buffer,
+           (tool_name[0] != '\0') ? tool_name :
+             strappy_webview_role_label(role, labels)) &&
+         strappy_webview_buffer_append_cstring(
+           &buffer,
+           "</span></a><div class=\"tool-card-body\">"
+           "<div class=\"api-tool-fallback\">") &&
+         strappy_webview_append_html_escaped(&buffer, text) &&
+         strappy_webview_buffer_append_cstring(&buffer, "</div></div>");
   } else {
     ok = ok && strappy_webview_append_html_escaped(&buffer, text);
   }

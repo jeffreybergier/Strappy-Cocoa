@@ -56,13 +56,20 @@ static int harness_check_page_scripts(void)
     fprintf(stderr, "Could not generate messages page HTML.\n");
     return 0;
   }
-
   ok = harness_expect_contains(page_html, "@font-face") &&
        harness_expect_contains(page_html,
                                "<meta name=\"viewport\" "
                                "content=\"width=device-width,initial-scale=1.0\">") &&
        harness_expect_contains(page_html,
-                               "font:14px/1.38 -apple-system,Helvetica,Arial,sans-serif;") &&
+                               "font:12px/1.38 -apple-system,'Helvetica Neue',"
+                               "Helvetica,Arial,sans-serif;") &&
+       harness_expect_contains(page_html, "letter-spacing:0;") &&
+       harness_expect_contains(page_html,
+                               ".api-tool-card .tool-card-body{"
+                               "font-family:inherit;") &&
+       harness_expect_contains(page_html,
+                               "font-family:Menlo,Monaco,'Courier New',"
+                               "monospace;") &&
        harness_expect_contains(page_html,
                                "-webkit-text-size-adjust:none;") &&
        harness_expect_contains(page_html,
@@ -73,6 +80,83 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function toolJSONHTML") &&
        harness_expect_contains(page_html, "function toolObjectArrayTable") &&
        harness_expect_contains(page_html, "function toolOutputHasError") &&
+       harness_expect_contains(page_html, "function renderAPIToolRows") &&
+       harness_expect_contains(page_html, "function apiToolRows") &&
+       harness_expect_contains(page_html, "function decorateAPIExchanges") &&
+       harness_expect_contains(page_html, "function toggleAPIExchange") &&
+       harness_expect_contains(page_html, "function toggleAPIReasoning") &&
+       harness_expect_contains(page_html, ".api-reasoning-collapsed>.bubble{") &&
+       harness_expect_contains(page_html, ".api-exchange-turn-header{") &&
+       harness_expect_contains(page_html, ".api-exchange-metadata{") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-row{position:relative;border-top:0;"
+                               "border-left:5px solid #68747d;"
+                               "padding:0 10px;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-row:before{content:'';"
+                               "position:absolute;left:0;right:0;top:0;"
+                               "height:1px;background:#cbd2d8;"
+                               "pointer-events:none;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-start{margin-top:0;"
+                               "border-top:0;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-start:before{display:none;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-end{margin-bottom:0;"
+                               "border-bottom:0;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-row>.request-metadata{"
+                               "border-top:0;border-bottom:0;}") &&
+       harness_expect_contains(page_html,
+                               "function apiExchangeColorClass") &&
+       harness_expect_contains(page_html,
+                               "return 'api-exchange-color-'+((n-1)%6)") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-color-0{background:#f1f7fa;"
+                               "border-left-color:#4f7f9e;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-color-0.api-exchange-row:before{"
+                               "background:#bfd3df;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-color-0.api-exchange-row,"
+                               ".api-exchange-color-0.api-exchange-row *{"
+                               "color:#3f657c;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-color-5{background:#f6f8f1;"
+                               "border-left-color:#788552;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-color-5.api-exchange-row:before{"
+                               "background:#ced8b9;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-row.api-exchange-response."
+                               "assistant>.bubble{background:#fff;"
+                               "font-size:16px;line-height:1.45;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-row.api-exchange-response."
+                               "assistant>.bubble *{color:#222;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-item.api_function_call+"
+                               ".api-exchange-item.api_function_call>.role,"
+                               ".api-exchange-item.api_function_output+"
+                               ".api-exchange-item.api_function_output>.role{"
+                               "display:none;}") &&
+       harness_expect_not_contains(page_html,
+                                   ".api-exchange-item.api_function_call>"
+                                   ".role{display:none;}") &&
+       harness_expect_contains(page_html,
+                               "function rowIsAPIExchangeMetadata") &&
+       harness_expect_contains(page_html,
+                               "roundLabel+' '+roundNumber+") &&
+       harness_expect_not_contains(page_html, "setNodeText(n,'#'+id)") &&
+       harness_expect_contains(page_html, ".api-exchange-section-label{") &&
+       harness_expect_contains(page_html,
+                               "renderAPIToolRows();moveToolRows(root)") &&
+       harness_expect_contains(page_html,
+                               "decorateAPIExchanges(root);"
+                               "decoratePromptGroups(root)") &&
+       harness_expect_contains(page_html,
+                               ".api-tool-card .tool-card-body") &&
        harness_expect_contains(page_html, "c.error=toolOutputHasError(raw)") &&
        harness_expect_contains(page_html, "function toolUsesDatabaseId") &&
        harness_expect_contains(page_html, "database_context_read") &&
@@ -84,8 +168,27 @@ static int harness_check_page_scripts(void)
                                "var strappyUpdateInterval=300;"
                                "var strappyStatusInterval=1000;") &&
        harness_expect_contains(page_html, "function scrollBottomNow") &&
-       harness_expect_contains(page_html, ".page{padding:0 0 12px;}") &&
-       harness_expect_contains(page_html, ".processing-autoscroll{position:absolute") &&
+       harness_expect_contains(page_html,
+                               "html,body{margin:0;padding:0;"
+                               "background:transparent;") &&
+       harness_expect_contains(page_html, ".page{padding:0;}") &&
+       harness_expect_not_contains(page_html,
+                                   "body.processing-status-active .page") &&
+       harness_expect_contains(page_html,
+                               ".processing-status{position:fixed;left:50%;"
+                               "right:auto;top:auto;bottom:6px;") &&
+       harness_expect_contains(page_html,
+                               "border-radius:17px;") &&
+       harness_expect_contains(page_html,
+                               "font-weight:bold;line-height:32px;height:34px;") &&
+       harness_expect_contains(page_html,
+                               "background:#e7eaec;color:#3f474d;") &&
+       harness_expect_contains(page_html,
+                               ".processing-autoscroll{position:absolute") &&
+       harness_expect_contains(page_html,
+                               "width:26px;box-sizing:border-box;display:block;"
+                               "border-radius:13px;") &&
+       harness_expect_contains(page_html, "line-height:26px;") &&
        harness_expect_contains(page_html, ".processing-autoscroll-on") &&
        harness_expect_contains(page_html,
                                ".processing-status-text{display:block;"
@@ -769,6 +872,9 @@ static int harness_check_responses_items(void)
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-call-1";
+  message.api_call_id = 1LL;
+  message.round_number = 3L;
+  message.attempt_number = 2L;
   message.role = "api_call";
   message.kind = "response_api_call";
   message.text = "POST /responses\ncompleted / HTTP 200";
@@ -779,27 +885,46 @@ static int harness_check_responses_items(void)
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-reasoning-1";
+  message.api_call_id = 1LL;
+  message.round_number = 3L;
+  message.attempt_number = 2L;
+  message.direction = "response";
   message.role = "api_reasoning";
   message.kind = "reasoning";
   message.text = "Checked the available evidence.";
+  message.created_at = "2026-07-10T12:34:56.000Z";
   reasoning_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-function-1";
+  message.api_call_id = 1LL;
+  message.direction = "response";
   message.role = "api_function_call";
   message.kind = "function_call";
-  message.text = "database_list_info\n{}";
+  message.tool_call_id = "call-database-query";
+  message.tool_name = "database_query";
+  message.arguments_json =
+    "{\"database_id\":\"database-1\",\"sql\":\"SELECT 1\"}";
+  message.text = "database_query\n{\"database_id\":\"database-1\"}";
   function_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-output-1";
+  message.api_call_id = 2LL;
+  message.direction = "request";
   message.role = "api_function_output";
   message.kind = "function_call_output";
+  message.tool_call_id = "call-database-query";
+  message.result_json =
+    "{\"ok\":true,\"columns\":[{\"name\":\"value\"}],"
+    "\"rows\":[[1]]}";
   message.text = "{\"ok\":true}";
   output_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-developer-1";
+  message.api_call_id = 2LL;
+  message.direction = "request";
   message.role = "developer";
   message.kind = "message";
   message.text = "Audit the available tools.";
@@ -809,22 +934,64 @@ static int harness_check_responses_items(void)
        (function_html != NULL) && (output_html != NULL) &&
        (developer_html != NULL) &&
        harness_expect_contains(call_html, "class=\"row api_call\"") &&
+       harness_expect_contains(call_html, "data-api-call-id=\"1\"") &&
+       harness_expect_contains(call_html, "data-round-number=\"3\"") &&
+       harness_expect_contains(call_html, "data-round-label=\"Round\"") &&
+       harness_expect_contains(call_html, "data-attempt-number=\"2\"") &&
+       harness_expect_contains(call_html, "data-attempt-label=\"Attempt\"") &&
        harness_expect_contains(call_html, "<div class=\"role\">API Call</div>") &&
        harness_expect_contains(call_html, "request-metadata") &&
        harness_expect_contains(reasoning_html,
-                               "class=\"row api_reasoning\"") &&
+                               "class=\"row api_reasoning "
+                               "api-reasoning-collapsed\"") &&
        harness_expect_contains(reasoning_html,
-                               "<div class=\"role\">Thinking</div>") &&
+                               "data-direction=\"response\"") &&
+       harness_expect_contains(reasoning_html,
+                               "data-direction-label=\"Response\"") &&
+       harness_expect_contains(reasoning_html,
+                               "class=\"api-reasoning-toggle\"") &&
+       harness_expect_contains(reasoning_html,
+                               "aria-expanded=\"false\"") &&
+       harness_expect_contains(reasoning_html,
+                               "api-reasoning-disclosure\">&#9658;") &&
+       harness_expect_contains(reasoning_html,
+                               "</span></a>Thinking</div>") &&
+       harness_expect_not_contains(reasoning_html,
+                                   "2026-07-10T12:34:56.000Z") &&
        harness_expect_not_contains(reasoning_html, "tool-column") &&
        harness_expect_contains(function_html,
                                "class=\"row api_function_call\"") &&
        harness_expect_contains(function_html,
                                "<div class=\"role\">Tool Call</div>") &&
+       harness_expect_contains(function_html,
+                               "data-tool-call-id=\"call-database-query\"") &&
+       harness_expect_contains(function_html,
+                               "data-tool-name=\"database_query\"") &&
+       harness_expect_contains(function_html,
+                               "data-arguments-json=\"{&quot;database_id&quot;:") &&
+       harness_expect_contains(function_html,
+                               "class=\"bubble api-tool-card tool-card\"") &&
+       harness_expect_contains(function_html,
+                               "aria-expanded=\"false\"") &&
+       harness_expect_contains(function_html,
+                               "class=\"tool-card-body\"") &&
        harness_expect_not_contains(function_html, "class=\"row tool_call\"") &&
        harness_expect_contains(output_html,
                                "class=\"row api_function_output\"") &&
        harness_expect_contains(output_html,
+                               "data-api-call-id=\"2\"") &&
+       harness_expect_contains(output_html,
+                               "data-direction=\"request\"") &&
+       harness_expect_contains(output_html,
+                               "data-direction-label=\"Request\"") &&
+       harness_expect_contains(output_html,
                                "<div class=\"role\">Tool Result</div>") &&
+       harness_expect_contains(output_html,
+                               "data-tool-call-id=\"call-database-query\"") &&
+       harness_expect_contains(output_html,
+                               "data-result-json=\"{&quot;ok&quot;:true,") &&
+       harness_expect_contains(output_html,
+                               "class=\"bubble api-tool-card tool-card\"") &&
        harness_expect_contains(developer_html,
                                "class=\"row developer\"") &&
        harness_expect_contains(developer_html,

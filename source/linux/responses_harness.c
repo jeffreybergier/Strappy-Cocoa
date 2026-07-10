@@ -124,7 +124,14 @@ static int harness_query_int(sqlite3 *db, const char *sql, long long *value_out)
 typedef struct harness_ledger_event_recorder {
   const char *db_path;
   long long count;
+  long long processing_count;
+  long long processing_started_ms;
+  long clear_count;
   int valid;
+  int saw_thinking;
+  int saw_tools;
+  int saw_retry_wait;
+  int saw_retrying;
 } harness_ledger_event_recorder;
 
 static int harness_record_ledger_event(
@@ -139,6 +146,57 @@ static int harness_record_ledger_event(
 
   recorder = (harness_ledger_event_recorder *)user_data;
   if ((recorder == NULL) || (event == NULL)) {
+    return 1;
+  }
+
+  if (event->type == STRAPPY_CHAT_STREAM_EVENT_PROCESSING_STATUS) {
+    cJSON *root;
+    cJSON *active;
+    cJSON *kind;
+    cJSON *started;
+    long long started_ms;
+
+    root = (event->status_json != NULL) ?
+      cJSON_Parse(event->status_json) : NULL;
+    active = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "active") : NULL;
+    if ((event->message_key == NULL) || (event->message_key[0] == '\0') ||
+        (!cJSON_IsTrue(active) && !cJSON_IsFalse(active))) {
+      recorder->valid = 0;
+      cJSON_Delete(root);
+      return 1;
+    }
+    if (cJSON_IsFalse(active)) {
+      recorder->clear_count++;
+      recorder->processing_count++;
+      cJSON_Delete(root);
+      return 1;
+    }
+    kind = cJSON_GetObjectItem(root, "status_kind");
+    started = cJSON_GetObjectItem(root, "started_ms");
+    started_ms = cJSON_IsNumber(started) ?
+      (long long)started->valuedouble : 0LL;
+    if (!cJSON_IsString(kind) || (kind->valuestring == NULL) ||
+        (started_ms <= 0LL) || (event->status_kind == NULL) ||
+        (strcmp(kind->valuestring, event->status_kind) != 0)) {
+      recorder->valid = 0;
+    } else if (recorder->processing_started_ms == 0LL) {
+      recorder->processing_started_ms = started_ms;
+    } else if (recorder->processing_started_ms != started_ms) {
+      recorder->valid = 0;
+    }
+    if (cJSON_IsString(kind) && (kind->valuestring != NULL)) {
+      if (strcmp(kind->valuestring, "thinking") == 0) {
+        recorder->saw_thinking = 1;
+      } else if (strcmp(kind->valuestring, "tools") == 0) {
+        recorder->saw_tools = 1;
+      } else if (strcmp(kind->valuestring, "retry_wait") == 0) {
+        recorder->saw_retry_wait = 1;
+      } else if (strcmp(kind->valuestring, "retrying") == 0) {
+        recorder->saw_retrying = 1;
+      }
+    }
+    recorder->processing_count++;
+    cJSON_Delete(root);
     return 1;
   }
 
@@ -918,7 +976,8 @@ static int harness_test_tool_audit_loop(void)
   server_ok = harness_wait_for_server(server_pid, result == NULL);
   ok = (result != NULL) &&
     (strcmp(result, "Audited final answer.") == 0) && server_ok &&
-    events.valid && (events.count == 2LL);
+    events.valid && (events.count == 2LL) && events.saw_thinking &&
+    (events.processing_count >= 3LL) && (events.clear_count == 1L);
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
@@ -1042,6 +1101,7 @@ static int harness_test_function_tool_continuation(void)
   sqlite3 *db;
   long long session_id;
   long long value;
+  harness_ledger_event_recorder events;
   pid_t server_pid;
   int fd;
   int server_ok;
@@ -1067,7 +1127,10 @@ static int harness_test_function_tool_continuation(void)
     return 0;
   }
 
-  result = strappy_responses_send_prompt_for_session_and_store(
+  memset(&events, 0, sizeof(events));
+  events.db_path = path;
+  events.valid = 1;
+  result = strappy_responses_send_prompt_for_session_and_store_with_events(
     "Run a local function",
     "/dev/null",
     endpoint,
@@ -1075,10 +1138,14 @@ static int harness_test_function_tool_continuation(void)
     "../shared/Resources/PromptSystem.txt",
     path,
     session_id,
+    harness_record_ledger_event,
+    &events,
     &error);
   server_ok = harness_wait_for_server(server_pid, result == NULL);
   ok = (result != NULL) &&
-    (strcmp(result, "Function tool final answer.") == 0) && server_ok;
+    (strcmp(result, "Function tool final answer.") == 0) && server_ok &&
+    events.valid && (events.count == 2LL) && events.saw_thinking &&
+    events.saw_tools && (events.clear_count == 1L);
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
@@ -1168,7 +1235,9 @@ static int harness_test_retry_attempt_ledger(void)
   server_ok = harness_wait_for_server(server_pid, result == NULL);
   ok = (result != NULL) &&
     (strcmp(result, "Retry final answer.") == 0) && server_ok &&
-    events.valid && (events.count == 2LL);
+    events.valid && (events.count == 2LL) && events.saw_thinking &&
+    events.saw_retry_wait && events.saw_retrying &&
+    (events.clear_count == 1L);
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
@@ -1441,12 +1510,20 @@ static int harness_test_ledger(void)
                                          &timeline,
                                          &error) &&
     (timeline.count == 5U) &&
-    (strcmp(timeline.records[0].role, "api_call") == 0) &&
-    (strcmp(timeline.records[1].role, "user") == 0) &&
-    (strcmp(timeline.records[2].role, "api_reasoning") == 0) &&
-    (strcmp(timeline.records[3].role, "api_function_call") == 0) &&
-    (strcmp(timeline.records[4].role, "assistant") == 0) &&
-    (strcmp(timeline.records[4].content, "Done") == 0);
+    (strcmp(timeline.records[0].role, "user") == 0) &&
+    (strcmp(timeline.records[0].direction, "request") == 0) &&
+    (timeline.records[0].round_index == 0L) &&
+    (timeline.records[0].attempt_index == 0L) &&
+    (strcmp(timeline.records[1].role, "api_reasoning") == 0) &&
+    (strcmp(timeline.records[1].direction, "response") == 0) &&
+    (strcmp(timeline.records[2].role, "api_function_call") == 0) &&
+    (strcmp(timeline.records[2].direction, "response") == 0) &&
+    (strcmp(timeline.records[3].role, "assistant") == 0) &&
+    (strcmp(timeline.records[3].content, "Done") == 0) &&
+    (strcmp(timeline.records[4].role, "api_call") == 0) &&
+    (timeline.records[4].direction == NULL) &&
+    (timeline.records[4].round_index == 0L) &&
+    (timeline.records[4].attempt_index == 0L);
   strappy_session_message_record_list_destroy(&timeline);
   if (!ok) {
     fprintf(stderr, "Responses timeline failed: %s\n", error);

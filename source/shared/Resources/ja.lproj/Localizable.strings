@@ -12,6 +12,10 @@
 "Agent" = "エージェント";
 "Tool Call" = "ツール呼び出し";
 "Tool Result" = "ツール結果";
+"Request" = "リクエスト";
+"Response" = "レスポンス";
+"Round" = "ラウンド";
+"Attempt" = "試行";
 "Options" = "オプション";
 "Prompt Options" = "プロンプトオプション";
 "Send" = "送信";

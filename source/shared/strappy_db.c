@@ -336,6 +336,8 @@ void strappy_session_message_record_init(strappy_session_message_record *record)
   record->message_id = 0;
   record->session_id = 0;
   record->turn_id = 0;
+  record->round_index = 0L;
+  record->attempt_index = 0L;
   record->turn_key = NULL;
   record->prompt_group_key = NULL;
   record->actor = NULL;
@@ -351,6 +353,7 @@ void strappy_session_message_record_init(strappy_session_message_record *record)
   record->reasoning = NULL;
   record->message_key = NULL;
   record->target_message_key = NULL;
+  record->direction = NULL;
   record->tool_call_id = NULL;
   record->tool_name = NULL;
   record->arguments_json = NULL;
@@ -382,6 +385,7 @@ void strappy_session_message_record_destroy(strappy_session_message_record *reco
   free(record->reasoning);
   free(record->message_key);
   free(record->target_message_key);
+  free(record->direction);
   free(record->tool_call_id);
   free(record->tool_name);
   free(record->arguments_json);
@@ -9424,7 +9428,7 @@ int strappy_db_list_response_timeline(
 {
   static const char *sql =
     "SELECT 0 AS entry_type,c.id AS row_id,c.id AS call_id,"
-    "0 AS sort_phase,-1 AS item_index,NULL AS direction,"
+    "3 AS sort_phase,-1 AS item_index,NULL AS direction,"
     "c.prompt_group_key,c.request_kind,c.round_index,c.attempt_index,"
     "c.state,c.is_error,c.http_status,"
     "COALESCE(c.response_model,c.request_model),c.request_started_at,"
@@ -9525,6 +9529,8 @@ int strappy_db_list_response_timeline(
       (call_id * 2LL) : ((row_id * 2LL) + 1LL);
     record->session_id = session_id;
     record->turn_id = call_id;
+    record->round_index = (long)sqlite3_column_int64(stmt, 8);
+    record->attempt_index = (long)sqlite3_column_int64(stmt, 9);
     record->turn_key = strappy_db_column_string(stmt, 6);
     record->prompt_group_key = strappy_db_column_string(stmt, 6);
     record->model = strappy_db_column_string(stmt, 13);
@@ -9546,6 +9552,7 @@ int strappy_db_list_response_timeline(
       record->message_key =
         strappy_db_response_timeline_key("response-call", call_id);
     } else {
+      record->direction = strappy_db_column_string(stmt, 5);
       record->kind = strappy_db_column_string(stmt, 17);
       record->render_role = strappy_db_column_string(stmt, 18);
       record->role = strappy_db_column_string(stmt, 18);
@@ -9579,6 +9586,7 @@ int strappy_db_list_response_timeline(
         (record->actor == NULL) || (record->kind == NULL) ||
         (record->render_role == NULL) || (record->role == NULL) ||
         (record->content == NULL) || (record->message_key == NULL) ||
+        ((entry_type != 0) && (record->direction == NULL)) ||
         (record->created_at == NULL)) {
       strappy_session_message_record_destroy(record);
       strappy_set_error(error_out,

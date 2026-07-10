@@ -104,6 +104,142 @@ static long long strappy_responses_now_ms(void)
     ((long long)value.tv_usec / 1000LL);
 }
 
+static void strappy_responses_emit_processing_status(
+  strappy_chat_stream_callback callback,
+  void *callback_data,
+  const char *prompt_group_key,
+  int active,
+  const char *status_kind,
+  long long started_ms,
+  long retry_delay_ms,
+  unsigned int retry_attempt,
+  const char *status_reason)
+{
+  strappy_chat_stream_event event;
+  cJSON *root;
+  char *status_json;
+  long long now_ms;
+  unsigned int retry_after_seconds;
+
+  if (callback == NULL) {
+    return;
+  }
+  now_ms = strappy_responses_now_ms();
+  if (started_ms <= 0LL) {
+    started_ms = now_ms;
+  }
+  retry_after_seconds = 0U;
+  if (retry_delay_ms > 0L) {
+    retry_after_seconds = (unsigned int)((retry_delay_ms + 999L) / 1000L);
+  }
+
+  root = cJSON_CreateObject();
+  if ((root == NULL) ||
+      (cJSON_AddBoolToObject(root, "active", active ? 1 : 0) == NULL)) {
+    cJSON_Delete(root);
+    return;
+  }
+  if (active &&
+      ((cJSON_AddStringToObject(
+          root,
+          "message_key",
+          (prompt_group_key != NULL) ? prompt_group_key :
+            "responses-processing") == NULL) ||
+       (cJSON_AddStringToObject(
+          root,
+          "status_kind",
+          ((status_kind != NULL) && (status_kind[0] != '\0')) ?
+            status_kind : "thinking") == NULL) ||
+       (cJSON_AddNumberToObject(root,
+                               "started_ms",
+                               (double)started_ms) == NULL) ||
+       (cJSON_AddNumberToObject(root,
+                               "updated_ms",
+                               (double)now_ms) == NULL) ||
+       (cJSON_AddNumberToObject(root,
+                               "retry_after_seconds",
+                               (double)retry_after_seconds) == NULL) ||
+       (cJSON_AddNumberToObject(root,
+                               "retry_attempt",
+                               (double)retry_attempt) == NULL) ||
+       (cJSON_AddNumberToObject(
+          root,
+          "retry_max_attempts",
+          (double)((unsigned int)STRAPPY_RESPONSES_MAX_ATTEMPTS)) == NULL))) {
+    cJSON_Delete(root);
+    return;
+  }
+  if (active && (retry_delay_ms > 0L) && (now_ms > 0LL) &&
+      (cJSON_AddNumberToObject(root,
+                              "retry_until_ms",
+                              (double)(now_ms + retry_delay_ms)) == NULL)) {
+    cJSON_Delete(root);
+    return;
+  }
+  if (active && (status_reason != NULL) && (status_reason[0] != '\0') &&
+      (cJSON_AddStringToObject(root,
+                              "retry_reason",
+                              status_reason) == NULL)) {
+    cJSON_Delete(root);
+    return;
+  }
+
+  status_json = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  if (status_json == NULL) {
+    return;
+  }
+  memset(&event, 0, sizeof(event));
+  event.type = STRAPPY_CHAT_STREAM_EVENT_PROCESSING_STATUS;
+  event.text = "";
+  event.prompt_group_key = prompt_group_key;
+  event.actor = "api";
+  event.kind = "response_api_call";
+  event.message_key = (prompt_group_key != NULL) ? prompt_group_key :
+    "responses-processing";
+  event.render_role = "api_call";
+  event.status_json = status_json;
+  event.status_kind = status_kind;
+  event.status_reason = status_reason;
+  event.status_started_ms = started_ms;
+  event.status_updated_ms = now_ms;
+  event.retry_after_seconds = retry_after_seconds;
+  event.retry_attempt = retry_attempt;
+  event.retry_max_attempts =
+    (unsigned int)STRAPPY_RESPONSES_MAX_ATTEMPTS;
+  if ((retry_delay_ms > 0L) && (now_ms > 0LL)) {
+    event.retry_until_ms = now_ms + retry_delay_ms;
+  }
+  (void)callback(&event, callback_data);
+  free(status_json);
+}
+
+static const char *strappy_responses_retry_status_reason(
+  const strappy_responses_http_result *http,
+  const strappy_responses_analysis *analysis,
+  char *buffer,
+  size_t buffer_size)
+{
+  if ((analysis != NULL) && (analysis->error_type != NULL) &&
+      (analysis->error_type[0] != '\0')) {
+    return analysis->error_type;
+  }
+  if ((analysis != NULL) && (analysis->error_message != NULL) &&
+      (analysis->error_message[0] != '\0')) {
+    return analysis->error_message;
+  }
+  if ((http != NULL) && (http->transport_error != NULL) &&
+      (http->transport_error[0] != '\0')) {
+    return http->transport_error;
+  }
+  if ((http != NULL) && (http->http_status > 0L) &&
+      (buffer != NULL) && (buffer_size > 0U)) {
+    snprintf(buffer, buffer_size, "HTTP %ld", http->http_status);
+    return buffer;
+  }
+  return "";
+}
+
 static void strappy_responses_sleep_ms(long milliseconds)
 {
   struct timeval delay;
@@ -1336,6 +1472,7 @@ static int strappy_responses_send_round(
   long new_input_start_index,
   long long *previous_call_id_io,
   long long *successful_call_id_out,
+  long long processing_started_ms,
   strappy_responses_http_result *http_out,
   strappy_responses_analysis *analysis_out,
   strappy_chat_stream_callback callback,
@@ -1470,11 +1607,40 @@ static int strappy_responses_send_round(
     }
     if (should_retry) {
       long delay;
+      char retry_reason_buffer[64];
+      const char *retry_reason;
+      unsigned int next_attempt;
 
       delay = strappy_responses_retry_delay_ms(&http, retry_delay_ms);
+      retry_reason = strappy_responses_retry_status_reason(
+        &http,
+        &analysis,
+        retry_reason_buffer,
+        sizeof(retry_reason_buffer));
+      next_attempt = (unsigned int)(attempt_index + 2L);
+      strappy_responses_emit_processing_status(
+        callback,
+        callback_data,
+        prompt_group_key,
+        1,
+        "retry_wait",
+        processing_started_ms,
+        delay,
+        next_attempt,
+        retry_reason);
       strappy_responses_analysis_destroy(&analysis);
       strappy_responses_http_result_destroy(&http);
       strappy_responses_sleep_ms(delay);
+      strappy_responses_emit_processing_status(
+        callback,
+        callback_data,
+        prompt_group_key,
+        1,
+        "retrying",
+        processing_started_ms,
+        0L,
+        next_attempt,
+        NULL);
       if (retry_delay_ms <=
           (STRAPPY_RESPONSES_MAX_RETRY_DELAY_MS / 2L)) {
         retry_delay_ms *= 2L;
@@ -1571,6 +1737,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   long long previous_call_id;
   long last_http_status;
   long round_index;
+  long long processing_started_ms;
   size_t total_tool_items;
   int tool_audit_sent;
   int ok;
@@ -1589,6 +1756,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   last_model = NULL;
   previous_call_id = 0LL;
   last_http_status = 0L;
+  processing_started_ms = strappy_responses_now_ms();
   total_tool_items = 0U;
   tool_audit_sent = 0;
   next_request_kind = "user";
@@ -1631,6 +1799,15 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
     long new_input_start_index;
     long long successful_call_id;
 
+    strappy_responses_emit_processing_status(callback,
+                                             callback_data,
+                                             prompt_group_key,
+                                             1,
+                                             "thinking",
+                                             processing_started_ms,
+                                             0L,
+                                             0U,
+                                             NULL);
     strappy_response_item_raw_record_list_init(&history);
     strappy_responses_http_result_init(&http);
     strappy_responses_analysis_init(&analysis);
@@ -1681,6 +1858,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
                                       new_input_start_index,
                                       &previous_call_id,
                                       &successful_call_id,
+                                      processing_started_ms,
                                       &http,
                                       &analysis,
                                       callback,
@@ -1725,6 +1903,15 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
     total_tool_items += analysis.tool_item_count;
 
     if (analysis.tool_call_count > 0U) {
+      strappy_responses_emit_processing_status(callback,
+                                               callback_data,
+                                               prompt_group_key,
+                                               1,
+                                               "tools",
+                                               processing_started_ms,
+                                               0L,
+                                               0U,
+                                               NULL);
       if (!strappy_responses_execute_tool_calls(
             session_db_path,
             session_id,
@@ -1781,6 +1968,15 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
       free(final_text);
       final_text = NULL;
     }
+    strappy_responses_emit_processing_status(callback,
+                                             callback_data,
+                                             prompt_group_key,
+                                             0,
+                                             NULL,
+                                             processing_started_ms,
+                                             0L,
+                                             0U,
+                                             NULL);
     free(prompt_group_key);
     free(last_model);
     strappy_responses_owned_items_destroy(&new_items);
@@ -1812,6 +2008,15 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   }
 
   free(final_text);
+  strappy_responses_emit_processing_status(callback,
+                                           callback_data,
+                                           prompt_group_key,
+                                           0,
+                                           NULL,
+                                           processing_started_ms,
+                                           0L,
+                                           0U,
+                                           NULL);
   free(prompt_group_key);
   free(last_model);
   strappy_responses_owned_items_destroy(&new_items);

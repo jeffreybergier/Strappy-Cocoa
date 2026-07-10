@@ -76,6 +76,10 @@ static strappy_webview_labels StrappySessionWebViewLabels(void)
   labels.api_error = StrappySessionCString(NSLocalizedString(@"API Error", nil));
   labels.response_item =
     StrappySessionCString(NSLocalizedString(@"Response Item", nil));
+  labels.request = StrappySessionCString(NSLocalizedString(@"Request", nil));
+  labels.response = StrappySessionCString(NSLocalizedString(@"Response", nil));
+  labels.round = StrappySessionCString(NSLocalizedString(@"Round", nil));
+  labels.attempt = StrappySessionCString(NSLocalizedString(@"Attempt", nil));
   return labels;
 }
 
@@ -100,6 +104,11 @@ static void StrappySessionWebViewMessageFromDictionary(
   NSString *promptGroupKey;
   NSString *messageKey;
   NSString *targetMessageKey;
+  NSString *direction;
+  NSString *toolCallId;
+  NSString *toolName;
+  NSString *argumentsJSON;
+  NSString *resultJSON;
   NSString *text;
   NSString *reasoning;
   NSString *metadataJSON;
@@ -107,6 +116,9 @@ static void StrappySessionWebViewMessageFromDictionary(
   NSString *createdAt;
   NSNumber *httpStatus;
   NSNumber *isError;
+  NSNumber *apiCallId;
+  NSNumber *roundIndex;
+  NSNumber *attemptIndex;
 
   if (message == NULL) {
     return;
@@ -123,6 +135,11 @@ static void StrappySessionWebViewMessageFromDictionary(
   promptGroupKey = [dictionary objectForKey:@"prompt_group_key"];
   messageKey = [dictionary objectForKey:@"message_key"];
   targetMessageKey = [dictionary objectForKey:@"target_message_key"];
+  direction = [dictionary objectForKey:@"direction"];
+  toolCallId = [dictionary objectForKey:@"tool_call_id"];
+  toolName = [dictionary objectForKey:@"tool_name"];
+  argumentsJSON = [dictionary objectForKey:@"arguments_json"];
+  resultJSON = [dictionary objectForKey:@"result_json"];
   text = [dictionary objectForKey:@"text"];
   reasoning = [dictionary objectForKey:@"reasoning"];
   metadataJSON = [dictionary objectForKey:@"metadata_json"];
@@ -130,8 +147,20 @@ static void StrappySessionWebViewMessageFromDictionary(
   createdAt = [dictionary objectForKey:@"created_at"];
   httpStatus = [dictionary objectForKey:@"http_status"];
   isError = [dictionary objectForKey:@"is_error"];
+  apiCallId = [dictionary objectForKey:@"turn_id"];
+  roundIndex = [dictionary objectForKey:@"round_index"];
+  attemptIndex = [dictionary objectForKey:@"attempt_index"];
 
   message->message_id = StrappySessionMessageNumericIdentifier(dictionary);
+  message->api_call_id =
+    [apiCallId isKindOfClass:[NSNumber class]] ?
+      [apiCallId longLongValue] : 0LL;
+  message->round_number =
+    [roundIndex isKindOfClass:[NSNumber class]] ?
+      ([roundIndex longValue] + 1L) : 0L;
+  message->attempt_number =
+    [attemptIndex isKindOfClass:[NSNumber class]] ?
+      ([attemptIndex longValue] + 1L) : 0L;
   message->http_status =
     [httpStatus isKindOfClass:[NSNumber class]] ? [httpStatus longValue] : 0L;
   message->role = StrappySessionCString(role);
@@ -140,6 +169,11 @@ static void StrappySessionWebViewMessageFromDictionary(
   message->prompt_group_key = StrappySessionCString(promptGroupKey);
   message->message_key = StrappySessionCString(messageKey);
   message->target_message_key = StrappySessionCString(targetMessageKey);
+  message->direction = StrappySessionCString(direction);
+  message->tool_call_id = StrappySessionCString(toolCallId);
+  message->tool_name = StrappySessionCString(toolName);
+  message->arguments_json = StrappySessionCString(argumentsJSON);
+  message->result_json = StrappySessionCString(resultJSON);
   message->text = StrappySessionCString(text);
   message->reasoning = StrappySessionCString(reasoning);
   message->metadata_json = StrappySessionCString(metadataJSON);
@@ -872,6 +906,8 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   NSNumber *httpStatus;
   NSNumber *includeInContext;
   NSNumber *isError;
+  NSNumber *roundIndex;
+  NSNumber *attemptIndex;
   NSString *turnKey;
   NSString *promptGroupKey;
   NSString *actor;
@@ -887,6 +923,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   NSString *reasoning;
   NSString *messageKey;
   NSString *targetMessageKey;
+  NSString *direction;
   NSString *toolCallId;
   NSString *toolName;
   NSString *argumentsJSON;
@@ -900,6 +937,8 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   messageId = [NSNumber numberWithLongLong:record->message_id];
   sessionId = [NSNumber numberWithLongLong:record->session_id];
   turnId = [NSNumber numberWithLongLong:record->turn_id];
+  roundIndex = [NSNumber numberWithLong:record->round_index];
+  attemptIndex = [NSNumber numberWithLong:record->attempt_index];
   httpStatus = [NSNumber numberWithLong:record->http_status];
   includeInContext = [NSNumber numberWithBool:(record->include_in_context ? YES : NO)];
   isError = [NSNumber numberWithBool:(record->is_error ? YES : NO)];
@@ -921,6 +960,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   messageKey = [StrappySession stringFromCStringOrEmpty:record->message_key];
   targetMessageKey =
     [StrappySession stringFromCStringOrEmpty:record->target_message_key];
+  direction = [StrappySession stringFromCStringOrEmpty:record->direction];
   toolCallId = [StrappySession stringFromCStringOrEmpty:record->tool_call_id];
   toolName = [StrappySession stringFromCStringOrEmpty:record->tool_name];
   argumentsJSON = [StrappySession stringFromCStringOrEmpty:record->arguments_json];
@@ -931,6 +971,8 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     messageId, @"id",
     sessionId, @"session_id",
     turnId, @"turn_id",
+    roundIndex, @"round_index",
+    attemptIndex, @"attempt_index",
     turnKey, @"turn_key",
     promptGroupKey, @"prompt_group_key",
     actor, @"actor",
@@ -946,6 +988,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     reasoning, @"reasoning",
     messageKey, @"message_key",
     targetMessageKey, @"target_message_key",
+    direction, @"direction",
     toolCallId, @"tool_call_id",
     toolName, @"tool_name",
     argumentsJSON, @"arguments_json",

@@ -12,6 +12,10 @@
 "Agent" = "Agent";
 "Tool Call" = "Tool Call";
 "Tool Result" = "Tool Result";
+"Request" = "Request";
+"Response" = "Response";
+"Round" = "Round";
+"Attempt" = "Attempt";
 "Options" = "Options";
 "Prompt Options" = "Prompt Options";
 "Send" = "Send";

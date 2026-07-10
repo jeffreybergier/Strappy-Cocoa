@@ -406,6 +406,9 @@ static void strappy_session_webview_message_from_record(
   }
 
   message->message_id = record->message_id;
+  message->api_call_id = record->turn_id;
+  message->round_number = record->round_index + 1L;
+  message->attempt_number = record->attempt_index + 1L;
   message->http_status = record->http_status;
   message->role = record->role;
   message->kind = record->kind;
@@ -413,6 +416,11 @@ static void strappy_session_webview_message_from_record(
   message->prompt_group_key = record->prompt_group_key;
   message->message_key = record->message_key;
   message->target_message_key = record->target_message_key;
+  message->direction = record->direction;
+  message->tool_call_id = record->tool_call_id;
+  message->tool_name = record->tool_name;
+  message->arguments_json = record->arguments_json;
+  message->result_json = record->result_json;
   message->text = record->content;
   message->reasoning = record->reasoning;
   message->metadata_json = record->metadata_json;

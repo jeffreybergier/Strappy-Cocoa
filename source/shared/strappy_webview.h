@@ -18,10 +18,17 @@ typedef struct strappy_webview_labels {
   const char *api_call;
   const char *api_error;
   const char *response_item;
+  const char *request;
+  const char *response;
+  const char *round;
+  const char *attempt;
 } strappy_webview_labels;
 
 typedef struct strappy_webview_message {
   long long message_id;
+  long long api_call_id;
+  long round_number;
+  long attempt_number;
   long http_status;
   const char *element_id;
   const char *role;
@@ -30,6 +37,11 @@ typedef struct strappy_webview_message {
   const char *prompt_group_key;
   const char *message_key;
   const char *target_message_key;
+  const char *direction;
+  const char *tool_call_id;
+  const char *tool_name;
+  const char *arguments_json;
+  const char *result_json;
   const char *text;
   const char *reasoning;
   const char *metadata_json;
