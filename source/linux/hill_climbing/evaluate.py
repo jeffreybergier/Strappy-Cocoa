@@ -1,0 +1,455 @@
+#!/usr/bin/env python3
+"""Deterministic ledger scorer for hill-climbing runs.
+
+The score is a regression signal, not a substitute for checking public facts.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import sqlite3
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+
+REQUIRED_GROUP_COUNT = 3
+
+# This is an alias map, not a checklist. Any of these groups may occupy one of
+# the three database-derived ranking slots, and only those three slots are
+# required for full coverage credit.
+ALLOWED_ARTIST_ALIASES: dict[str, tuple[str, ...]] = {
+    "the boyz": ("the boyz", "boyz"),
+    "zerobaseone": ("zerobaseone", "zerobase", "zb1"),
+    "tomorrow x together": ("tomorrow x together", "txt"),
+    "&team": ("&team",),
+    "enhypen": ("enhypen",),
+    "seventeen": ("seventeen",),
+}
+
+
+@dataclass
+class Result:
+    model: str
+    slug: str
+    score: int = 0
+    grade: str = "F"
+    checks: list[dict[str, Any]] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
+
+    def add(self, name: str, passed: bool, points: int, note: str = "") -> None:
+        earned = points if passed else 0
+        self.score += earned
+        self.checks.append(
+            {
+                "name": name,
+                "passed": passed,
+                "earned": earned,
+                "possible": points,
+                "note": note,
+            }
+        )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-dir", required=True, type=Path)
+    return parser.parse_args()
+
+
+def connect_readonly(path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def resolve_media_db(metadata: dict[str, Any]) -> Path:
+    recorded = Path(metadata["media_db"])
+    if recorded.is_file():
+        return recorded
+
+    fallback = (
+        Path(__file__).resolve().parent
+        / "private/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb"
+    )
+    expected_hash = metadata.get("media_db_sha256")
+    if fallback.is_file() and expected_hash and sha256(fallback) == expected_hash:
+        return fallback
+    raise RuntimeError(
+        "The recorded MediaLibrary path is unavailable and the local fixture "
+        "does not have the run's SHA-256 hash."
+    )
+
+
+def expected_artists(media_db: Path, limit: int = 7) -> list[tuple[str, int]]:
+    sql = """
+        SELECT ia.item_artist AS artist,
+               SUM(COALESCE(s.play_count_user, 0)) AS total_plays
+        FROM item i
+        JOIN item_artist ia ON ia.item_artist_pid = i.item_artist_pid
+        JOIN genre g ON g.genre_id = i.genre_id
+        LEFT JOIN item_stats s ON s.item_pid = i.item_pid
+        WHERE LOWER(REPLACE(REPLACE(g.genre, '-', ''), ' ', '')) = 'kpop'
+        GROUP BY ia.item_artist
+        HAVING total_plays > 0
+        ORDER BY total_plays DESC, COUNT(*) DESC
+    """
+    ignored_fragments = (" feat. ", "jonas brothers")
+    with connect_readonly(media_db) as database:
+        rows = database.execute(sql).fetchall()
+    primary = []
+    for row in rows:
+        artist = str(row["artist"])
+        if any(fragment in artist.lower() for fragment in ignored_fragments):
+            continue
+        primary.append((artist, int(row["total_plays"])))
+        if len(primary) == limit:
+            break
+    return primary
+
+
+def safe_json(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def artist_aliases(artist: str) -> tuple[str, ...]:
+    lowered = artist.lower()
+    return ALLOWED_ARTIST_ALIASES.get(lowered, (lowered,))
+
+
+def artist_position(answer_lower: str, artist: str) -> int:
+    positions = [
+        answer_lower.find(alias)
+        for alias in artist_aliases(artist)
+        if answer_lower.find(alias) >= 0
+    ]
+    return min(positions) if positions else -1
+
+
+def efficiency_points(result: Result, cost: float, wall: float, calls: int, web: int) -> None:
+    result.add("Cost budget", cost <= 0.20, 5, f"${cost:.4f}")
+    result.add("Latency budget", wall <= 360.0, 4, f"{wall:.1f}s")
+    if calls <= 8:
+        call_points = 3
+    elif calls <= 12:
+        call_points = 2
+    elif calls <= 16:
+        call_points = 1
+    else:
+        call_points = 0
+    result.score += call_points
+    result.checks.append(
+        {
+            "name": "API-call budget",
+            "passed": call_points == 3,
+            "earned": call_points,
+            "possible": 3,
+            "note": str(calls),
+        }
+    )
+    result.add("Web-search budget", web <= 10, 3, str(web))
+
+
+def score_session(session_db: Path, media_db: Path, slug: str) -> Result:
+    with connect_readonly(session_db) as database:
+        session = database.execute(
+            "SELECT id, model, response FROM sessions ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if session is None:
+            raise RuntimeError(f"No session in {session_db}")
+        session_id = int(session["id"])
+        model = str(session["model"] or slug)
+        answer = str(session["response"] or "")
+        answer_lower = answer.lower()
+
+        calls_row = database.execute(
+            """
+            SELECT COUNT(*) AS calls,
+                   SUM(is_error) AS errors,
+                   COALESCE(SUM(response_usage_cost), 0) AS cost,
+                   COALESCE((MAX(transport_completed_at_ms) -
+                             MIN(request_started_at_ms)) / 1000.0, 0) AS wall
+            FROM response_api_calls WHERE session_id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+        tools = database.execute(
+            """
+            SELECT tool_name, arguments_json, status, error_text
+            FROM response_tool_executions
+            WHERE session_id = ? ORDER BY id
+            """,
+            (session_id,),
+        ).fetchall()
+        media_row = database.execute(
+            """
+            SELECT assistant_database_id FROM discovered_databases
+            WHERE path LIKE '%/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb'
+            LIMIT 1
+            """
+        ).fetchone()
+        web = int(
+            database.execute(
+                """
+                SELECT COUNT(*) FROM response_api_items
+                WHERE session_id = ? AND direction = 'response'
+                  AND type = 'openrouter:web_search'
+                """,
+                (session_id,),
+            ).fetchone()[0]
+        )
+
+    media_id = str(media_row[0]) if media_row else ""
+    tool_names = [str(row["tool_name"]) for row in tools]
+    parsed_tools = [(row, safe_json(row["arguments_json"])) for row in tools]
+    media_queries = [
+        args
+        for row, args in parsed_tools
+        if row["tool_name"] == "database_query"
+        and args.get("database_id") == media_id
+    ]
+    sql_queries = [str(args.get("sql", "")).lower() for args in media_queries]
+    sql_text = "\n".join(sql_queries)
+    tool_errors = [row for row in tools if row["status"] == "error"]
+    favorite_writes = [
+        args
+        for row, args in parsed_tools
+        if row["tool_name"] == "memory_user_fact_remember"
+        and "favorite" in str(args.get("predicate", "")).lower()
+    ]
+
+    calls = int(calls_row["calls"] or 0)
+    errors = int(calls_row["errors"] or 0)
+    cost = float(calls_row["cost"] or 0.0)
+    wall = float(calls_row["wall"] or 0.0)
+    artists = expected_artists(media_db)
+    top_three = artists[:REQUIRED_GROUP_COUNT]
+    mentioned_top_three = [
+        name
+        for name, _ in top_three
+        if artist_position(answer_lower, name) >= 0
+    ]
+
+    result = Result(model=model, slug=slug)
+    result.metrics = {
+        "calls": calls,
+        "api_errors": errors,
+        "local_tools": len(tools),
+        "tool_errors": len(tool_errors),
+        "web_searches": web,
+        "cost": cost,
+        "wall_seconds": wall,
+        "answer_characters": len(answer),
+        "expected_artists": [
+            {"name": name, "total_plays": plays} for name, plays in artists
+        ],
+        "expected_top_three": [
+            {"name": name, "total_plays": plays} for name, plays in top_three
+        ],
+        "mentioned_top_three": mentioned_top_three,
+    }
+
+    result.add("Listed approved databases", "database_list_info" in tool_names, 5)
+    result.add("Queried MediaLibrary", bool(media_queries), 8)
+    aggregate_queries = [
+        sql
+        for sql in sql_queries
+        if all(token in sql for token in ("sum(", "play_count_user", "group by"))
+    ]
+    kpop_lookup = any(
+        ("from genre" in sql) and (("kpop" in sql) or ("k-pop" in sql))
+        for sql in sql_queries
+    )
+    aggregate_filters_genre = any(
+        ("genre_id" in sql) or (("genre" in sql) and ("kpop" in sql))
+        for sql in aggregate_queries
+    )
+    result.add(
+        "Filtered the ranking to KPOP records",
+        kpop_lookup and aggregate_filters_genre,
+        5,
+    )
+    result.add(
+        "Aggregated play counts instead of ranking one track",
+        bool(aggregate_queries),
+        12,
+    )
+    result.add("No local tool errors", not tool_errors, 5, str(len(tool_errors)))
+
+    coverage_points = round(
+        14 * len(mentioned_top_three) / REQUIRED_GROUP_COUNT
+    )
+    result.score += coverage_points
+    result.checks.append(
+        {
+            "name": "Covered the dynamically calculated top three",
+            "passed": len(mentioned_top_three) == REQUIRED_GROUP_COUNT,
+            "earned": coverage_points,
+            "possible": 14,
+            "note": (
+                f"{len(mentioned_top_three)}/{REQUIRED_GROUP_COUNT}: "
+                f"{', '.join(mentioned_top_three)}"
+            ),
+        }
+    )
+    ranking_words = ("most-played", "most played", "play count", "total plays")
+    provenance_words = ("library", "listening")
+    result.add(
+        "Explained the listening-data ranking provenance",
+        any(word in answer_lower for word in ranking_words)
+        and any(word in answer_lower for word in provenance_words),
+        8,
+    )
+    requested_attributes = ("blood type" in answer_lower) and (
+        ("personality" in answer_lower) or ("mbti" in answer_lower)
+    )
+    result.add("Addressed personality and blood type", requested_attributes, 6)
+    result.add(
+        "Linked public sources",
+        bool(re.search(r"https?://", answer, flags=re.IGNORECASE)),
+        5,
+    )
+    positions = [artist_position(answer_lower, name) for name, _ in top_three]
+    correct_order = (
+        len(positions) == 3
+        and all(position >= 0 for position in positions)
+        and positions == sorted(positions)
+    )
+    result.add("Presented the top three in descending order", correct_order, 3)
+    top_artist = top_three[0][0] if top_three else ""
+    result.add(
+        "Included the top aggregate-play artist",
+        bool(top_artist) and artist_position(answer_lower, top_artist) >= 0,
+        4,
+    )
+
+    result.add(
+        "Did not persist inferred favorites as durable memory",
+        not favorite_writes,
+        7,
+        str(len(favorite_writes)),
+    )
+    result.add("No failed API attempts", errors == 0, 3, str(errors))
+    efficiency_points(result, cost, wall, calls, web)
+
+    if result.score >= 90:
+        result.grade = "A"
+    elif result.score >= 80:
+        result.grade = "B"
+    elif result.score >= 70:
+        result.grade = "C"
+    elif result.score >= 60:
+        result.grade = "D"
+    return result
+
+
+def render_markdown(results: list[Result]) -> str:
+    lines = [
+        "# Hill-climbing evaluation",
+        "",
+        "This deterministic score measures database workflow, evidence coverage, "
+        "state safety, and efficiency. Public roster, blood-type, and personality "
+        "claims still require human/source review.",
+        "",
+        "| Model | Score | Grade | Time | Cost | Calls | Local tools | Web |",
+        "|---|---:|:---:|---:|---:|---:|---:|---:|",
+    ]
+    for result in sorted(results, key=lambda item: item.score, reverse=True):
+        metrics = result.metrics
+        lines.append(
+            f"| {result.model} | {result.score}/100 | {result.grade} | "
+            f"{metrics['wall_seconds']:.1f}s | ${metrics['cost']:.4f} | "
+            f"{metrics['calls']} | {metrics['local_tools']} | "
+            f"{metrics['web_searches']} |"
+        )
+    for result in results:
+        lines.extend(["", f"## {result.model}", ""])
+        for check in result.checks:
+            marker = "PASS" if check["passed"] else "MISS"
+            note = f" — {check['note']}" if check["note"] else ""
+            lines.append(
+                f"- {marker} {check['name']}: "
+                f"{check['earned']}/{check['possible']}{note}"
+            )
+    lines.extend(
+        [
+            "",
+            "## Human review checklist",
+            "",
+            "- Are current group rosters checked against current authoritative sources?",
+            "- Are blood types supported by the linked sources rather than recalled?",
+            "- Are personality descriptions qualified as subjective and time-sensitive?",
+            "- Does the answer clearly attribute its ranking to aggregate listening data?",
+            "- Is the answer proportionate, readable, and free of exposed planning text?",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def main() -> int:
+    args = parse_args()
+    run_dir = args.run_dir.resolve()
+    metadata_path = run_dir / "run.json"
+    if not metadata_path.is_file():
+        raise SystemExit(f"Missing run metadata: {metadata_path}")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    media_db = resolve_media_db(metadata)
+
+    results = []
+    for model, run in metadata.get("results", {}).items():
+        slug = str(run["slug"])
+        session_db = run_dir / slug / "strappy.sqlite"
+        if not session_db.is_file():
+            continue
+        result = score_session(session_db, media_db, slug)
+        if result.model != model:
+            result.metrics["requested_model"] = model
+        results.append(result)
+
+    if not results:
+        raise SystemExit("No completed session databases were available to score.")
+
+    report_json = {
+        "run_dir": str(run_dir),
+        "results": [
+            {
+                "model": result.model,
+                "slug": result.slug,
+                "score": result.score,
+                "grade": result.grade,
+                "metrics": result.metrics,
+                "checks": result.checks,
+            }
+            for result in results
+        ],
+    }
+    (run_dir / "report.json").write_text(
+        json.dumps(report_json, indent=2) + "\n", encoding="utf-8"
+    )
+    (run_dir / "report.md").write_text(
+        render_markdown(results), encoding="utf-8"
+    )
+    print(render_markdown(results))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

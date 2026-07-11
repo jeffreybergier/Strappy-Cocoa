@@ -1,0 +1,7 @@
+# Private device fixtures and live-run artifacts must never be committed.
+private/
+runs/
+build/
+build-linux/
+.env
+.env.*

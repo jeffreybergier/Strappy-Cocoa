@@ -629,40 +629,9 @@ static cJSON *harness_read_json_resource(const char *resource_name)
   return root;
 }
 
-static cJSON *harness_database_guidance_rule(cJSON *root,
-                                             const char *guidance_id)
-{
-  cJSON *rules;
-  cJSON *rule;
-
-  if ((root == NULL) || (guidance_id == NULL) || (guidance_id[0] == '\0')) {
-    return NULL;
-  }
-
-  rules = cJSON_GetObjectItem(root, "database_descriptions");
-  if (!cJSON_IsArray(rules)) {
-    return NULL;
-  }
-
-  for (rule = rules->child; rule != NULL; rule = rule->next) {
-    cJSON *id;
-
-    id = cJSON_GetObjectItem(rule, "id");
-    if (cJSON_IsString(id) &&
-        (id->valuestring != NULL) &&
-        (strcmp(id->valuestring, guidance_id) == 0)) {
-      return rule;
-    }
-  }
-
-  return NULL;
-}
-
-static char *harness_database_guidance_string(const char *guidance_id,
-                                              const char *key)
+static char *harness_database_default_string(const char *key)
 {
   cJSON *root;
-  cJSON *rule;
   cJSON *value;
   char *copy;
 
@@ -671,12 +640,10 @@ static char *harness_database_guidance_string(const char *guidance_id,
     return NULL;
   }
 
-  rule = harness_database_guidance_rule(root, guidance_id);
-  value = (rule != NULL) ? cJSON_GetObjectItem(rule, key) : NULL;
+  value = cJSON_GetObjectItem(root, key);
   if (!cJSON_IsString(value) || (value->valuestring == NULL)) {
     fprintf(stderr,
-            "Database guidance %s is missing %s.\n",
-            (guidance_id != NULL) ? guidance_id : "(null)",
+            "Database defaults are missing %s.\n",
             (key != NULL) ? key : "(null)");
     cJSON_Delete(root);
     return NULL;
@@ -1117,17 +1084,16 @@ static cJSON *harness_tool_output_json(const char *catalog_path,
   return root;
 }
 
-static int harness_expect_context_description_from_guidance(
+static int harness_expect_context_default_description(
   const char *catalog_path,
-  const char *arguments_json,
-  const char *guidance_id)
+  const char *arguments_json)
 {
   char *expected;
   cJSON *root;
   cJSON *description;
   int ok;
 
-  expected = harness_database_guidance_string(guidance_id, "description");
+  expected = harness_database_default_string("default_description");
   if (expected == NULL) {
     return 0;
   }
@@ -1146,8 +1112,7 @@ static int harness_expect_context_description_from_guidance(
         (strcmp(description->valuestring, expected) == 0)) ? 1 : 0;
   if (!ok) {
     fprintf(stderr,
-            "Database context description did not match %s guidance.\n",
-            guidance_id);
+            "Database context description did not match the generic default.\n");
   }
 
   cJSON_Delete(root);
@@ -1155,9 +1120,7 @@ static int harness_expect_context_description_from_guidance(
   return ok;
 }
 
-static int harness_expect_list_description_from_guidance(
-  const char *catalog_path,
-  const char *guidance_id)
+static int harness_expect_list_default_description(const char *catalog_path)
 {
   char *expected;
   cJSON *root;
@@ -1165,7 +1128,7 @@ static int harness_expect_list_description_from_guidance(
   cJSON *database;
   int ok;
 
-  expected = harness_database_guidance_string(guidance_id, "description_short");
+  expected = harness_database_default_string("default_description_short");
   if (expected == NULL) {
     return 0;
   }
@@ -1196,8 +1159,7 @@ static int harness_expect_list_description_from_guidance(
 
   if (!ok) {
     fprintf(stderr,
-            "Database list did not contain %s description_short guidance.\n",
-            guidance_id);
+            "Database list did not contain the generic description_short.\n");
   }
 
   cJSON_Delete(root);
@@ -1298,32 +1260,6 @@ static int harness_tool_schemas_hide_display_metadata(cJSON *tools)
   return 1;
 }
 
-static int harness_tool_display_matches(cJSON *registry,
-                                        const char *tool_name,
-                                        const char *promoted_argument,
-                                        const char *transform)
-{
-  cJSON *display;
-  cJSON *argument;
-  cJSON *actual_transform;
-
-  display = cJSON_GetObjectItem(registry, tool_name);
-  argument = cJSON_IsObject(display) ?
-    cJSON_GetObjectItem(display, "promoted_argument") : NULL;
-  actual_transform = cJSON_IsObject(display) ?
-    cJSON_GetObjectItem(display, "transform") : NULL;
-  if (!cJSON_IsString(argument) || (argument->valuestring == NULL) ||
-      (strcmp(argument->valuestring, promoted_argument) != 0)) {
-    return 0;
-  }
-  if (transform == NULL) {
-    return actual_transform == NULL;
-  }
-  return cJSON_IsString(actual_transform) &&
-    (actual_transform->valuestring != NULL) &&
-    (strcmp(actual_transform->valuestring, transform) == 0);
-}
-
 static int harness_run_tool_registry_tests(void)
 {
   char *error;
@@ -1363,57 +1299,9 @@ static int harness_run_tool_registry_tests(void)
         (cJSON_GetArraySize(filtered) == 1) &&
         harness_tool_schemas_hide_display_metadata(filtered) &&
         (registry_json != NULL) && cJSON_IsObject(registry) &&
-        harness_tool_display_matches(registry,
-                                     STRAPPY_TOOL_DATABASE_QUERY,
-                                     "database_id",
-                                     "database_filename") &&
-        harness_tool_display_matches(
-          registry,
-          STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
-          "query",
-          NULL) &&
-        harness_tool_display_matches(
-          registry,
-          STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
-          "shortcodes",
-          "comma_separated") &&
-        harness_tool_display_matches(registry,
-                                     STRAPPY_TOOL_MEMORY_USER_FACT_READ,
-                                     "query",
-                                     NULL) &&
-        harness_tool_display_matches(registry,
-                                     STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
-                                     "subject",
-                                     NULL) &&
-        harness_tool_display_matches(registry,
-                                     STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
-                                     "id",
-                                     "identifier") &&
-        harness_tool_display_matches(registry,
-                                     STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
-                                     "name",
-                                     NULL) &&
-        harness_tool_display_matches(registry,
-                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-                                     "database_id",
-                                     "database_filename") &&
-        harness_tool_display_matches(
-          registry,
-          STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
-          "database_id",
-          "database_filename") &&
-        harness_tool_display_matches(registry,
-                                     STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET,
-                                     "id",
-                                     "database_hint_filename") &&
-        (cJSON_GetObjectItem(registry,
-                             STRAPPY_TOOL_DATABASE_LIST_INFO) == NULL) &&
-        (cJSON_GetObjectItem(
-           registry,
-           STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) == NULL) &&
-        (cJSON_GetObjectItem(
-           registry,
-           STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) == NULL) &&
+        (registry->child == NULL) &&
+        (strstr(tools_json, "\"description\"") == NULL) &&
+        (strstr(filtered_json, "\"description\"") == NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_LIST_INFO) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_QUERY) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) != NULL) &&
@@ -1452,7 +1340,7 @@ static int harness_run_tool_registry_tests(void)
         (strstr(tools_json, "database_learn") == NULL)) ? 1 : 0;
   if (!ok) {
     fprintf(stderr,
-            "Tool registry or display metadata did not match expectations.\n"
+            "Schema-only tool registry did not match expectations.\n"
             "API tools: %s\nDisplay registry: %s\n",
             tools_json,
             (registry_json != NULL) ? registry_json : "(null)");
@@ -1832,7 +1720,6 @@ static int harness_run_empty_database_list_info_tests(
         (strstr(output, "\"availability_state\":\"no_approved_databases\"") != NULL) &&
         (strstr(output, "\"user_action\"") != NULL) &&
         (strstr(output, "\"href\":\"strappy://database-manage\"") != NULL) &&
-        (strstr(output, "manage_href") != NULL) &&
         (strstr(output, "scan_needed") == NULL) &&
         (strstr(output, "whitelist_needed") == NULL) &&
         (strstr(output, "possible_scan_needed") == NULL) &&
@@ -3137,7 +3024,7 @@ static int harness_run_missing_database_query_guidance_test(
   ok = harness_expect_error_contains(catalog_path,
                                      STRAPPY_TOOL_DATABASE_QUERY,
                                      arguments,
-                                     "NEVER retry the same database_id");
+                                     "approved database file is missing");
   free(database_id);
   harness_unlink_sqlite_files(catalog_path);
   return ok;
@@ -3407,10 +3294,8 @@ static int harness_run_mail_guidance_tests(harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_context_description_from_guidance(
-        context->catalog_path,
-        arguments,
-        "apple_mail_envelope_index")) {
+  if (!harness_expect_context_default_description(context->catalog_path,
+                                                  arguments)) {
     return 0;
   }
 
@@ -3423,10 +3308,8 @@ static int harness_run_mail_guidance_tests(harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_context_description_from_guidance(
-        context->catalog_path,
-        arguments,
-        "apple_mail_protected_index")) {
+  if (!harness_expect_context_default_description(context->catalog_path,
+                                                  arguments)) {
     return 0;
   }
 
@@ -3460,14 +3343,12 @@ static int harness_run_sms_guidance_tests(harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_context_description_from_guidance(context->catalog_path,
-                                                        arguments,
-                                                        "apple_messages_sms")) {
+  if (!harness_expect_context_default_description(context->catalog_path,
+                                                  arguments)) {
     return 0;
   }
 
-  if (!harness_expect_list_description_from_guidance(context->catalog_path,
-                                                     "apple_messages_sms")) {
+  if (!harness_expect_list_default_description(context->catalog_path)) {
     return 0;
   }
 

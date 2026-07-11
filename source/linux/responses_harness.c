@@ -599,7 +599,7 @@ static int harness_audit_request_is_valid(cJSON *root,
     harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") &&
     harness_message_role_is(cJSON_GetArrayItem(input, 1), "assistant") &&
     harness_message_role_is(developer, "developer") &&
-    (text != NULL) && (strstr(text, "No function calls have been made") != NULL);
+    (text != NULL) && (strcmp(text, "Continue.") == 0);
 }
 
 static int harness_function_output_request_is_valid(cJSON *root,
