@@ -17,6 +17,7 @@ from typing import Any
 
 
 REQUIRED_GROUP_COUNT = 3
+AUDIT_HIT_PENALTY = 3
 
 # This is an alias map, not a checklist. Any of these groups may occupy one of
 # the three database-derived ranking slots, and only those three slots are
@@ -52,6 +53,36 @@ class Result:
                 "note": note,
             }
         )
+
+    def penalize(self, name: str, hits: int, points_per_hit: int) -> None:
+        penalty = hits * points_per_hit
+        self.score -= penalty
+        self.checks.append(
+            {
+                "name": name,
+                "passed": hits == 0,
+                "earned": -penalty,
+                "possible": 0,
+                "penalty": penalty,
+                "note": (
+                    f"{hits} hit{'s' if hits != 1 else ''} × "
+                    f"{points_per_hit} points"
+                ),
+            }
+        )
+
+    def normalize_positive_score(self, target: int = 100) -> None:
+        possible = sum(
+            int(check["possible"])
+            for check in self.checks
+            if int(check["possible"]) > 0
+        )
+        earned = self.score
+        normalized = round(earned * target / possible) if possible else 0
+        self.metrics["positive_points_earned"] = earned
+        self.metrics["positive_points_possible"] = possible
+        self.metrics["normalized_score_before_penalties"] = normalized
+        self.score = normalized
 
 
 def parse_args() -> argparse.Namespace:
@@ -183,6 +214,8 @@ def score_session(session_db: Path, media_db: Path, slug: str) -> Result:
             """
             SELECT COUNT(*) AS calls,
                    SUM(is_error) AS errors,
+                   SUM(CASE WHEN request_kind = 'tool_audit'
+                            THEN 1 ELSE 0 END) AS audit_hits,
                    COALESCE(SUM(response_usage_cost), 0) AS cost,
                    COALESCE((MAX(transport_completed_at_ms) -
                              MIN(request_started_at_ms)) / 1000.0, 0) AS wall
@@ -237,6 +270,7 @@ def score_session(session_db: Path, media_db: Path, slug: str) -> Result:
 
     calls = int(calls_row["calls"] or 0)
     errors = int(calls_row["errors"] or 0)
+    audit_hits = int(calls_row["audit_hits"] or 0)
     cost = float(calls_row["cost"] or 0.0)
     wall = float(calls_row["wall"] or 0.0)
     artists = expected_artists(media_db)
@@ -251,6 +285,7 @@ def score_session(session_db: Path, media_db: Path, slug: str) -> Result:
     result.metrics = {
         "calls": calls,
         "api_errors": errors,
+        "audit_hits": audit_hits,
         "local_tools": len(tools),
         "tool_errors": len(tool_errors),
         "web_searches": web,
@@ -309,14 +344,6 @@ def score_session(session_db: Path, media_db: Path, slug: str) -> Result:
             ),
         }
     )
-    ranking_words = ("most-played", "most played", "play count", "total plays")
-    provenance_words = ("library", "listening")
-    result.add(
-        "Explained the listening-data ranking provenance",
-        any(word in answer_lower for word in ranking_words)
-        and any(word in answer_lower for word in provenance_words),
-        8,
-    )
     requested_attributes = ("blood type" in answer_lower) and (
         ("personality" in answer_lower) or ("mbti" in answer_lower)
     )
@@ -348,6 +375,13 @@ def score_session(session_db: Path, media_db: Path, slug: str) -> Result:
     )
     result.add("No failed API attempts", errors == 0, 3, str(errors))
     efficiency_points(result, cost, wall, calls, web)
+    result.normalize_positive_score()
+    result.penalize(
+        "Tool-audit interventions",
+        audit_hits,
+        AUDIT_HIT_PENALTY,
+    )
+    result.score = max(0, result.score)
 
     if result.score >= 90:
         result.grade = "A"
@@ -365,11 +399,13 @@ def render_markdown(results: list[Result]) -> str:
         "# Hill-climbing evaluation",
         "",
         "This deterministic score measures database workflow, evidence coverage, "
-        "state safety, and efficiency. Public roster, blood-type, and personality "
-        "claims still require human/source review.",
+        "state safety, and efficiency. Tool-audit interventions directly reduce "
+        "the score. Positive checks are normalized to 100 points before audit "
+        "penalties. Public roster, blood-type, and personality claims still "
+        "require human/source review.",
         "",
-        "| Model | Score | Grade | Time | Cost | Calls | Local tools | Web |",
-        "|---|---:|:---:|---:|---:|---:|---:|---:|",
+        "| Model | Score | Grade | Time | Cost | Calls | Local tools | Web | Audits |",
+        "|---|---:|:---:|---:|---:|---:|---:|---:|---:|",
     ]
     for result in sorted(results, key=lambda item: item.score, reverse=True):
         metrics = result.metrics
@@ -377,17 +413,37 @@ def render_markdown(results: list[Result]) -> str:
             f"| {result.model} | {result.score}/100 | {result.grade} | "
             f"{metrics['wall_seconds']:.1f}s | ${metrics['cost']:.4f} | "
             f"{metrics['calls']} | {metrics['local_tools']} | "
-            f"{metrics['web_searches']} |"
+            f"{metrics['web_searches']} | {metrics['audit_hits']} |"
         )
     for result in results:
         lines.extend(["", f"## {result.model}", ""])
+        metrics = result.metrics
+        lines.extend(
+            [
+                "- Positive-check subtotal: "
+                f"{metrics['positive_points_earned']}/"
+                f"{metrics['positive_points_possible']}, normalized to "
+                f"{metrics['normalized_score_before_penalties']}/100 before "
+                "audit penalties.",
+                "",
+            ]
+        )
         for check in result.checks:
             marker = "PASS" if check["passed"] else "MISS"
             note = f" — {check['note']}" if check["note"] else ""
-            lines.append(
-                f"- {marker} {check['name']}: "
-                f"{check['earned']}/{check['possible']}{note}"
-            )
+            if "penalty" in check:
+                penalty = int(check["penalty"])
+                penalty_text = (
+                    f"-{penalty} points" if penalty else "0 point penalty"
+                )
+                lines.append(
+                    f"- {marker} {check['name']}: {penalty_text}{note}"
+                )
+            else:
+                lines.append(
+                    f"- {marker} {check['name']}: "
+                    f"{check['earned']}/{check['possible']}{note}"
+                )
     lines.extend(
         [
             "",
@@ -396,7 +452,6 @@ def render_markdown(results: list[Result]) -> str:
             "- Are current group rosters checked against current authoritative sources?",
             "- Are blood types supported by the linked sources rather than recalled?",
             "- Are personality descriptions qualified as subjective and time-sensitive?",
-            "- Does the answer clearly attribute its ranking to aggregate listening data?",
             "- Is the answer proportionate, readable, and free of exposed planning text?",
             "",
         ]

@@ -1,13 +1,13 @@
 {
   "assistant_messages": {
-    "tool_round_limit": "Tool limit reached.",
-    "tool_audit_reminder": "Continue."
+    "tool_round_limit": "Tool limit reached."
   },
   "tools": [
     {
       "type": "function",
       "function": {
         "name": "database_list_info",
+        "description": "ALWAYS call this tool to inspect the user's approved databases before finalizing, then continue the task using its result as needed.",
         "parameters": {
           "type": "object",
           "properties": {},
@@ -20,6 +20,7 @@
       "type": "function",
       "function": {
         "name": "database_query",
+        "description": "ALWAYS query the relevant approved database before finalizing when the request depends on personal data. Do not guess the user's data.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -42,6 +43,7 @@
       "type": "function",
       "function": {
         "name": "helper_datetime_to_iso8601",
+        "description": "ALWAYS call this tool when displaying numeric timestamps. Convert one or more numeric timestamps to ISO 8601 datetimes.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -104,6 +106,7 @@
       "type": "function",
       "function": {
         "name": "helper_fontawesome_shortcode_search",
+        "description": "ALWAYS use Font Awesome version 7 Free tools and shortcodes for visual expression instead of Unicode emoji. Search for icon shortcodes and render icons in answers with [fa:icon-shortcode-name] Markdown syntax.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -131,6 +134,7 @@
       "type": "function",
       "function": {
         "name": "helper_fontawesome_shortcode_confirm",
+        "description": "ALWAYS confirm that Font Awesome version 7 Free shortcodes exist before using them. Render confirmed icons in answers with [fa:icon-shortcode-name] Markdown syntax instead of Unicode emoji.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -230,6 +234,7 @@
       "type": "function",
       "function": {
         "name": "helper_session_name_write",
+        "description": "ALWAYS give an untitled session a short, descriptive name before finalizing.",
         "parameters": {
           "type": "object",
           "properties": {

@@ -19,10 +19,10 @@ PROMPT = (
 )
 
 MODELS = (
-    # ("z-ai/glm-5.2", "glm-5.2"),
-    # ("deepseek/deepseek-v4-pro", "deepseek-v4-pro"),
+    ("z-ai/glm-5.2", "glm-5.2"),
+    ("deepseek/deepseek-v4-pro", "deepseek-v4-pro"),
     ("google/gemma-4-31b-it", "gemma-4-31b-it"),
-    # ("qwen/qwen3.6-27b", "qwen3.6-27b"),
+    ("qwen/qwen3.6-27b", "qwen3.6-27b"),
 )
 
 
@@ -168,6 +168,7 @@ def main() -> int:
             for name in (
                 "PromptSystem.txt",
                 "GuidanceTools.json",
+                "GuidanceAudit.json",
                 "GuidanceDatabase.json",
             )
             if (system_prompt.parent / name).is_file()
@@ -185,7 +186,7 @@ def main() -> int:
         session_db = model_dir / "strappy.sqlite"
         answer_file = model_dir / "answer.md"
         output_file = model_dir / "output.json"
-        print(f"\n=== {model} ===", flush=True)
+        print(f"\n> Model | {model}", flush=True)
         started = dt.datetime.now(dt.timezone.utc)
         command = [
             str(runner),
@@ -240,8 +241,9 @@ def main() -> int:
     if evaluation.returncode != 0:
         any_failed = True
 
-    print(f"\nRun artifacts: {run_dir}")
-    print(f"Evaluation: {run_dir / 'report.md'}")
+    print("\n> Run Complete")
+    print(f">> Artifacts | {run_dir}")
+    print(f">> Evaluation | {run_dir / 'report.md'}")
     return 1 if any_failed else 0
 
 

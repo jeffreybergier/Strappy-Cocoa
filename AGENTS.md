@@ -99,10 +99,12 @@ House style for Strappy source:
     row contents in memory.
 16. Active assistant history uses the Responses API ledger: every HTTP attempt
     has one `response_api_calls` row, and every typed input/output item has one
-    ordered `response_api_items` row with its exact raw JSON retained. A prompt
-    group may append one `developer` tool-audit reminder only when no local or
-    server tool-call item occurred; keep that reminder in the same Responses
-    history instead of creating a synthetic harness turn.
+    ordered `response_api_items` row with its exact raw JSON retained. At a
+    candidate final answer, apply the ordered missing-tool rules from
+    `GuidanceAudit.json` one at a time, honoring each rule's optional `when`
+    conditions. Append each rule's `developer` reminder at most once in the
+    same Responses history; if the model ignores a reminder, accept its next
+    final answer without repeating or advancing the audit.
 17. OpenRouter model catalog and selection state live in shared SQLite storage.
     `strappy_db` owns `openrouter_models`, `openrouter_model_settings`, the
     default model app setting, and `sessions.model`; `StrappySession` owns the

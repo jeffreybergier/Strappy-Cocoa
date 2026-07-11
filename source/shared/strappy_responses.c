@@ -20,6 +20,7 @@
 #define STRAPPY_RESPONSES_MAX_ATTEMPTS 3L
 #define STRAPPY_RESPONSES_INITIAL_RETRY_DELAY_MS 500L
 #define STRAPPY_RESPONSES_MAX_RETRY_DELAY_MS 60000L
+#define STRAPPY_RESPONSES_AUDIT_RESOURCE "GuidanceAudit.json"
 
 typedef struct strappy_responses_buffer {
   char *data;
@@ -47,10 +48,28 @@ typedef struct strappy_responses_analysis {
   char *response_text;
   char *error_message;
   char *error_type;
-  size_t tool_item_count;
+  char **tool_activity_names;
+  size_t tool_activity_count;
   strappy_responses_tool_call *tool_calls;
   size_t tool_call_count;
 } strappy_responses_analysis;
+
+typedef struct strappy_responses_audit_rule {
+  char *tool_name;
+  char *if_not_called;
+  char *when_tool_called;
+  int when_tool_called_seen;
+  int when_session_name_empty;
+  int called;
+  int reminder_sent;
+} strappy_responses_audit_rule;
+
+typedef struct strappy_responses_audit {
+  strappy_responses_audit_rule *rules;
+  size_t count;
+  int session_name_empty;
+  int stopped_after_ignored_reminder;
+} strappy_responses_audit;
 
 static void strappy_responses_buffer_destroy(strappy_responses_buffer *buffer)
 {
@@ -91,6 +110,324 @@ static int strappy_responses_buffer_append_string(
 {
   return (text == NULL) ? 1 :
     strappy_responses_buffer_append(buffer, text, strlen(text));
+}
+
+static void strappy_responses_audit_init(strappy_responses_audit *audit)
+{
+  if (audit == NULL) {
+    return;
+  }
+  audit->rules = NULL;
+  audit->count = 0U;
+  audit->session_name_empty = 0;
+  audit->stopped_after_ignored_reminder = 0;
+}
+
+static void strappy_responses_audit_destroy(strappy_responses_audit *audit)
+{
+  size_t index;
+
+  if (audit == NULL) {
+    return;
+  }
+  for (index = 0U; index < audit->count; index++) {
+    free(audit->rules[index].tool_name);
+    free(audit->rules[index].if_not_called);
+    free(audit->rules[index].when_tool_called);
+  }
+  free(audit->rules);
+  strappy_responses_audit_init(audit);
+}
+
+static char *strappy_responses_audit_resource_path(
+  const char *resource_dir,
+  char **error_out)
+{
+  size_t directory_length;
+  size_t filename_length;
+  size_t separator_length;
+  char *path;
+
+  if ((resource_dir == NULL) || (resource_dir[0] == '\0')) {
+    strappy_set_error(error_out,
+                      "Audit guidance resource directory is missing.");
+    return NULL;
+  }
+  directory_length = strlen(resource_dir);
+  filename_length = strlen(STRAPPY_RESPONSES_AUDIT_RESOURCE);
+  separator_length =
+    (resource_dir[directory_length - 1U] == '/') ? 0U : 1U;
+  if (directory_length > (((size_t)-1) - filename_length -
+                          separator_length - 1U)) {
+    strappy_set_error(error_out, "Audit guidance resource path is too long.");
+    return NULL;
+  }
+  path = (char *)malloc(directory_length + separator_length +
+                        filename_length + 1U);
+  if (path == NULL) {
+    strappy_set_error(error_out,
+                      "Could not allocate audit guidance resource path.");
+    return NULL;
+  }
+  memcpy(path, resource_dir, directory_length);
+  if (separator_length > 0U) {
+    path[directory_length] = '/';
+  }
+  memcpy(path + directory_length + separator_length,
+         STRAPPY_RESPONSES_AUDIT_RESOURCE,
+         filename_length + 1U);
+  return path;
+}
+
+static char *strappy_responses_audit_read_file(const char *path,
+                                                char **error_out)
+{
+  FILE *file;
+  long file_length;
+  size_t length;
+  size_t bytes_read;
+  char *text;
+
+  file = fopen(path, "rb");
+  if (file == NULL) {
+    strappy_set_formatted_error(error_out,
+                                "Could not open audit guidance: %s",
+                                path);
+    return NULL;
+  }
+  if ((fseek(file, 0L, SEEK_END) != 0) ||
+      ((file_length = ftell(file)) < 0L) ||
+      (fseek(file, 0L, SEEK_SET) != 0)) {
+    fclose(file);
+    strappy_set_formatted_error(error_out,
+                                "Could not read audit guidance: %s",
+                                path);
+    return NULL;
+  }
+  if ((unsigned long)file_length >= (unsigned long)((size_t)-1)) {
+    fclose(file);
+    strappy_set_error(error_out, "Audit guidance resource is too large.");
+    return NULL;
+  }
+  length = (size_t)file_length;
+  text = (char *)malloc(length + 1U);
+  if (text == NULL) {
+    fclose(file);
+    strappy_set_error(error_out, "Could not allocate audit guidance.");
+    return NULL;
+  }
+  bytes_read = fread(text, 1U, length, file);
+  if ((bytes_read != length) || ferror(file)) {
+    free(text);
+    fclose(file);
+    strappy_set_formatted_error(error_out,
+                                "Could not read audit guidance: %s",
+                                path);
+    return NULL;
+  }
+  text[length] = '\0';
+  fclose(file);
+  return text;
+}
+
+static int strappy_responses_audit_has_rule(
+  const strappy_responses_audit *audit,
+  const char *tool_name)
+{
+  size_t index;
+
+  if ((audit == NULL) || (tool_name == NULL)) {
+    return 0;
+  }
+  for (index = 0U; index < audit->count; index++) {
+    if (strcmp(audit->rules[index].tool_name, tool_name) == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int strappy_responses_audit_load(strappy_responses_audit *audit,
+                                        const char *resource_dir,
+                                        int session_name_empty,
+                                        char **error_out)
+{
+  char *path;
+  char *text;
+  cJSON *root;
+  cJSON *rules;
+  cJSON *item;
+
+  if (audit == NULL) {
+    strappy_set_error(error_out, "Audit guidance destination is missing.");
+    return 0;
+  }
+  strappy_responses_audit_destroy(audit);
+  audit->session_name_empty = session_name_empty ? 1 : 0;
+  path = strappy_responses_audit_resource_path(resource_dir, error_out);
+  if (path == NULL) {
+    return 0;
+  }
+  text = strappy_responses_audit_read_file(path, error_out);
+  if (text == NULL) {
+    free(path);
+    return 0;
+  }
+  root = cJSON_Parse(text);
+  free(text);
+  if (!cJSON_IsObject(root)) {
+    cJSON_Delete(root);
+    strappy_set_formatted_error(error_out,
+                                "Audit guidance must be a JSON object: %s",
+                                path);
+    free(path);
+    return 0;
+  }
+  rules = cJSON_GetObjectItem(root, "tool_usage_priority");
+  if (!cJSON_IsArray(rules)) {
+    cJSON_Delete(root);
+    strappy_set_formatted_error(
+      error_out,
+      "Audit guidance is missing tool_usage_priority: %s",
+      path);
+    free(path);
+    return 0;
+  }
+  for (item = rules->child; item != NULL; item = item->next) {
+    cJSON *tool_name;
+    cJSON *if_not_called;
+    cJSON *when;
+    cJSON *when_tool_called;
+    cJSON *when_session_name_empty;
+    strappy_responses_audit_rule *next;
+    strappy_responses_audit_rule *rule;
+
+    tool_name = cJSON_IsObject(item) ?
+      cJSON_GetObjectItem(item, "tool_name") : NULL;
+    if_not_called = cJSON_IsObject(item) ?
+      cJSON_GetObjectItem(item, "if_not_called") : NULL;
+    when = cJSON_IsObject(item) ? cJSON_GetObjectItem(item, "when") : NULL;
+    when_tool_called = cJSON_IsObject(when) ?
+      cJSON_GetObjectItem(when, "tool_called") : NULL;
+    when_session_name_empty = cJSON_IsObject(when) ?
+      cJSON_GetObjectItem(when, "session_name_empty") : NULL;
+    if ((tool_name == NULL) ||
+        !cJSON_IsString(tool_name) ||
+        (tool_name->valuestring == NULL) ||
+        (tool_name->valuestring[0] == '\0') ||
+        (if_not_called == NULL) ||
+        !cJSON_IsString(if_not_called) ||
+        (if_not_called->valuestring == NULL) ||
+        (if_not_called->valuestring[0] == '\0') ||
+        ((when != NULL) && !cJSON_IsObject(when)) ||
+        ((when_tool_called != NULL) &&
+         (!cJSON_IsString(when_tool_called) ||
+          (when_tool_called->valuestring == NULL) ||
+          (when_tool_called->valuestring[0] == '\0'))) ||
+        ((when_session_name_empty != NULL) &&
+         !cJSON_IsTrue(when_session_name_empty)) ||
+        ((when != NULL) && (when_tool_called == NULL) &&
+         (when_session_name_empty == NULL)) ||
+        strappy_responses_audit_has_rule(audit,
+                                         tool_name->valuestring) ||
+        (audit->count >= (((size_t)-1) /
+                          sizeof(strappy_responses_audit_rule)))) {
+      cJSON_Delete(root);
+      strappy_set_formatted_error(error_out,
+                                  "Audit guidance has an invalid rule: %s",
+                                  path);
+      free(path);
+      strappy_responses_audit_destroy(audit);
+      return 0;
+    }
+    next = (strappy_responses_audit_rule *)realloc(
+      audit->rules,
+      (audit->count + 1U) * sizeof(strappy_responses_audit_rule));
+    if (next == NULL) {
+      cJSON_Delete(root);
+      strappy_set_error(error_out, "Could not allocate audit guidance rules.");
+      free(path);
+      strappy_responses_audit_destroy(audit);
+      return 0;
+    }
+    audit->rules = next;
+    rule = &audit->rules[audit->count];
+    memset(rule, 0, sizeof(*rule));
+    rule->tool_name = strappy_string_duplicate(tool_name->valuestring);
+    rule->if_not_called =
+      strappy_string_duplicate(if_not_called->valuestring);
+    rule->when_tool_called = (when_tool_called != NULL) ?
+      strappy_string_duplicate(when_tool_called->valuestring) : NULL;
+    rule->when_session_name_empty =
+      (when_session_name_empty != NULL) ? 1 : 0;
+    if ((rule->tool_name == NULL) || (rule->if_not_called == NULL) ||
+        ((when_tool_called != NULL) &&
+         (rule->when_tool_called == NULL))) {
+      free(rule->tool_name);
+      free(rule->if_not_called);
+      free(rule->when_tool_called);
+      memset(rule, 0, sizeof(*rule));
+      cJSON_Delete(root);
+      strappy_set_error(error_out, "Could not allocate audit guidance rule.");
+      free(path);
+      strappy_responses_audit_destroy(audit);
+      return 0;
+    }
+    audit->count++;
+  }
+  cJSON_Delete(root);
+  free(path);
+  return 1;
+}
+
+static void strappy_responses_audit_record_tool(
+  strappy_responses_audit *audit,
+  const char *tool_name)
+{
+  size_t index;
+
+  if ((audit == NULL) || (tool_name == NULL) || (tool_name[0] == '\0')) {
+    return;
+  }
+  for (index = 0U; index < audit->count; index++) {
+    if (strcmp(audit->rules[index].tool_name, tool_name) == 0) {
+      audit->rules[index].called = 1;
+    }
+    if ((audit->rules[index].when_tool_called != NULL) &&
+        (strcmp(audit->rules[index].when_tool_called, tool_name) == 0)) {
+      audit->rules[index].when_tool_called_seen = 1;
+    }
+  }
+}
+
+static const char *strappy_responses_audit_next_reminder(
+  strappy_responses_audit *audit)
+{
+  size_t index;
+
+  if ((audit == NULL) || audit->stopped_after_ignored_reminder) {
+    return NULL;
+  }
+  for (index = 0U; index < audit->count; index++) {
+    strappy_responses_audit_rule *rule;
+
+    rule = &audit->rules[index];
+    if (((rule->when_tool_called != NULL) &&
+         !rule->when_tool_called_seen) ||
+        (rule->when_session_name_empty && !audit->session_name_empty)) {
+      continue;
+    }
+    if (rule->called) {
+      continue;
+    }
+    if (rule->reminder_sent) {
+      audit->stopped_after_ignored_reminder = 1;
+      return NULL;
+    }
+    rule->reminder_sent = 1;
+    return rule->if_not_called;
+  }
+  return NULL;
 }
 
 static long long strappy_responses_now_ms(void)
@@ -355,6 +692,10 @@ static void strappy_responses_analysis_destroy(
   free(analysis->response_text);
   free(analysis->error_message);
   free(analysis->error_type);
+  for (index = 0U; index < analysis->tool_activity_count; index++) {
+    free(analysis->tool_activity_names[index]);
+  }
+  free(analysis->tool_activity_names);
   for (index = 0U; index < analysis->tool_call_count; index++) {
     free(analysis->tool_calls[index].call_id);
     free(analysis->tool_calls[index].name);
@@ -362,6 +703,52 @@ static void strappy_responses_analysis_destroy(
   }
   free(analysis->tool_calls);
   strappy_responses_analysis_init(analysis);
+}
+
+static int strappy_responses_analysis_append_tool_activity(
+  strappy_responses_analysis *analysis,
+  cJSON *item,
+  const char *type,
+  char **error_out)
+{
+  cJSON *name;
+  const char *activity_name;
+  char **next;
+
+  if ((analysis == NULL) || (type == NULL)) {
+    strappy_set_error(error_out, "Responses tool activity is incomplete.");
+    return 0;
+  }
+  name = cJSON_IsObject(item) ? cJSON_GetObjectItem(item, "name") : NULL;
+  activity_name = ((name != NULL) &&
+                   cJSON_IsString(name) &&
+                   (name->valuestring != NULL) &&
+                   (name->valuestring[0] != '\0')) ?
+    name->valuestring : type;
+  if (analysis->tool_activity_count >=
+      (((size_t)-1) / sizeof(char *))) {
+    strappy_set_error(error_out,
+                      "Responses tool activity list is too large.");
+    return 0;
+  }
+  next = (char **)realloc(
+    analysis->tool_activity_names,
+    (analysis->tool_activity_count + 1U) * sizeof(char *));
+  if (next == NULL) {
+    strappy_set_error(error_out,
+                      "Could not allocate Responses tool activity list.");
+    return 0;
+  }
+  analysis->tool_activity_names = next;
+  analysis->tool_activity_names[analysis->tool_activity_count] =
+    strappy_string_duplicate(activity_name);
+  if (analysis->tool_activity_names[analysis->tool_activity_count] == NULL) {
+    strappy_set_error(error_out,
+                      "Could not allocate Responses tool activity name.");
+    return 0;
+  }
+  analysis->tool_activity_count++;
+  return 1;
 }
 
 static char *strappy_responses_json_value_text(cJSON *value)
@@ -623,14 +1010,15 @@ static int strappy_responses_analyze_json(
       if ((type != NULL) && cJSON_IsString(type) &&
           (type->valuestring != NULL) &&
           strappy_responses_type_is_tool_activity(type->valuestring)) {
-        if (analysis->tool_item_count == (size_t)-1) {
+        if (!strappy_responses_analysis_append_tool_activity(
+              analysis,
+              item,
+              type->valuestring,
+              error_out)) {
           strappy_responses_buffer_destroy(&text);
           cJSON_Delete(root);
-          strappy_set_error(error_out,
-                            "Responses tool item list is too large.");
           return 0;
         }
-        analysis->tool_item_count++;
       }
       if ((type != NULL) && cJSON_IsString(type) &&
           (type->valuestring != NULL) &&
@@ -975,7 +1363,7 @@ typedef struct strappy_responses_runtime {
   strappy_config config;
   char *system_prompt;
   char *tools_json;
-  char *tool_audit_reminder;
+  strappy_responses_audit audit;
   char *request_url;
 } strappy_responses_runtime;
 
@@ -987,7 +1375,7 @@ static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
   strappy_config_init(&runtime->config);
   runtime->system_prompt = NULL;
   runtime->tools_json = NULL;
-  runtime->tool_audit_reminder = NULL;
+  strappy_responses_audit_init(&runtime->audit);
   runtime->request_url = NULL;
 }
 
@@ -1000,7 +1388,7 @@ static void strappy_responses_runtime_destroy(
   strappy_config_destroy(&runtime->config);
   free(runtime->system_prompt);
   free(runtime->tools_json);
-  free(runtime->tool_audit_reminder);
+  strappy_responses_audit_destroy(&runtime->audit);
   free(runtime->request_url);
   strappy_responses_runtime_init(runtime);
 }
@@ -1018,6 +1406,7 @@ static int strappy_responses_prepare_runtime(
   strappy_session_record session;
   char *resource_dir;
   char *model;
+  int session_name_empty;
   int ok;
 
   if ((runtime == NULL) || (system_prompt_template_path == NULL) ||
@@ -1048,6 +1437,8 @@ static int strappy_responses_prepare_runtime(
     return 0;
   }
   runtime->config.web_search_enabled = session.web_search_enabled ? 1 : 0;
+  session_name_empty =
+    (session.name == NULL) || (session.name[0] == '\0');
   strappy_session_record_destroy(&session);
 
   if (!strappy_db_get_session_model(session_db_path,
@@ -1093,12 +1484,11 @@ static int strappy_responses_prepare_runtime(
     strappy_responses_runtime_destroy(runtime);
     return 0;
   }
-  runtime->tool_audit_reminder =
-    strappy_tools_tool_guidance_string(runtime->config.guidance_resource_dir,
-                                       "assistant_messages",
-                                       "tool_audit_reminder",
-                                       error_out);
-  if (runtime->tool_audit_reminder == NULL) {
+  if (!strappy_responses_audit_load(
+        &runtime->audit,
+        runtime->config.guidance_resource_dir,
+        session_name_empty,
+        error_out)) {
     strappy_responses_runtime_destroy(runtime);
     return 0;
   }
@@ -1786,8 +2176,6 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   long last_http_status;
   long round_index;
   long long processing_started_ms;
-  size_t total_tool_items;
-  int tool_audit_sent;
   int ok;
 
   if ((prompt == NULL) || (prompt[0] == '\0') ||
@@ -1805,8 +2193,6 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   previous_call_id = 0LL;
   last_http_status = 0L;
   processing_started_ms = strappy_responses_now_ms();
-  total_tool_items = 0U;
-  tool_audit_sent = 0;
   next_request_kind = "user";
 
   if (!strappy_responses_prepare_runtime(&runtime,
@@ -1942,13 +2328,17 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
       break;
     }
 
-    if (analysis.tool_item_count > (((size_t)-1) - total_tool_items)) {
-      strappy_set_error(error_out, "Responses tool item count is too large.");
-      strappy_responses_analysis_destroy(&analysis);
-      strappy_responses_http_result_destroy(&http);
-      break;
+    {
+      size_t activity_index;
+
+      for (activity_index = 0U;
+           activity_index < analysis.tool_activity_count;
+           activity_index++) {
+        strappy_responses_audit_record_tool(
+          &runtime.audit,
+          analysis.tool_activity_names[activity_index]);
+      }
     }
-    total_tool_items += analysis.tool_item_count;
 
     if (analysis.tool_call_count > 0U) {
       strappy_responses_emit_processing_status(callback,
@@ -1978,26 +2368,30 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
       continue;
     }
 
-    if ((total_tool_items == 0U) && !tool_audit_sent) {
+    {
+      const char *audit_reminder;
       char *reminder_item;
 
-      reminder_item = strappy_responses_message_item_json(
-        "developer",
-        runtime.tool_audit_reminder,
-        error_out);
-      if ((reminder_item == NULL) ||
-          !strappy_responses_owned_items_append(&new_items,
-                                                reminder_item,
-                                                error_out)) {
+      audit_reminder =
+        strappy_responses_audit_next_reminder(&runtime.audit);
+      if (audit_reminder != NULL) {
+        reminder_item = strappy_responses_message_item_json(
+          "developer",
+          audit_reminder,
+          error_out);
+        if ((reminder_item == NULL) ||
+            !strappy_responses_owned_items_append(&new_items,
+                                                  reminder_item,
+                                                  error_out)) {
+          strappy_responses_analysis_destroy(&analysis);
+          strappy_responses_http_result_destroy(&http);
+          break;
+        }
+        next_request_kind = "tool_audit";
         strappy_responses_analysis_destroy(&analysis);
         strappy_responses_http_result_destroy(&http);
-        break;
+        continue;
       }
-      tool_audit_sent = 1;
-      next_request_kind = "tool_audit";
-      strappy_responses_analysis_destroy(&analysis);
-      strappy_responses_http_result_destroy(&http);
-      continue;
     }
 
     strappy_responses_analysis_destroy(&analysis);

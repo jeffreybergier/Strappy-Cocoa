@@ -1,0 +1,23 @@
+{
+  "tool_usage_priority": [
+    {
+      "tool_name": "database_list_info",
+      "if_not_called": "Before finalizing, call database_list_info to inspect the user's approved databases, then continue the task using its result as needed."
+    },
+    {
+      "tool_name": "database_query",
+      "if_not_called": "You listed the approved databases but did not query one. If the request depends on personal data, query the relevant approved database before finalizing. Do not guess the user's data."
+    },
+    {
+      "tool_name": "openrouter:web_search",
+      "if_not_called": "You did not search the web. If the answer requires current public facts not available in the user's databases, search the web before finalizing."
+    },
+    {
+      "tool_name": "helper_session_name_write",
+      "if_not_called": "This session is still untitled. Give it a short, descriptive name before finalizing.",
+      "when": {
+        "session_name_empty": true
+      }
+    }
+  ]
+}

@@ -1300,8 +1300,29 @@ static int harness_run_tool_registry_tests(void)
         harness_tool_schemas_hide_display_metadata(filtered) &&
         (registry_json != NULL) && cJSON_IsObject(registry) &&
         (registry->child == NULL) &&
-        (strstr(tools_json, "\"description\"") == NULL) &&
-        (strstr(filtered_json, "\"description\"") == NULL) &&
+        (strstr(tools_json,
+                "ALWAYS call this tool to inspect the user's approved "
+                "databases before finalizing") != NULL) &&
+        (strstr(tools_json,
+                "ALWAYS query the relevant approved database before "
+                "finalizing when the request depends on personal data.") !=
+         NULL) &&
+        (strstr(tools_json,
+                "ALWAYS call this tool when displaying numeric timestamps.") !=
+         NULL) &&
+        (strstr(tools_json,
+                "ALWAYS use Font Awesome version 7 Free tools and shortcodes "
+                "for visual expression instead of Unicode emoji.") != NULL) &&
+        (strstr(tools_json,
+                "ALWAYS confirm that Font Awesome version 7 Free shortcodes "
+                "exist before using them.") != NULL) &&
+        (strstr(tools_json,
+                "ALWAYS give an untitled session a short, descriptive name "
+                "before finalizing.") != NULL) &&
+        (strstr(filtered_json,
+                "ALWAYS query the relevant approved database before "
+                "finalizing when the request depends on personal data.") !=
+         NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_LIST_INFO) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_QUERY) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) != NULL) &&

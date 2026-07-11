@@ -4,8 +4,8 @@ This is a manual, live OpenRouter evaluation harness for Strappy. It runs the
 same personal-media question against the currently enabled models while exercising
 the real shared Responses API, tool executor, database catalog, and ledger code.
 
-The checked-in model list currently enables only `google/gemma-4-31b-it`; GLM,
-DeepSeek, and Qwen remain commented beside it for easy re-enabling.
+The checked-in model list enables GLM, DeepSeek, Gemma, and Qwen for the full
+four-model comparison.
 
 The default evaluation prompt is:
 
@@ -17,18 +17,41 @@ minimum baseline:
 
 - `source/shared/Resources/PromptSystem.txt` is used directly;
 - all normal tool names and JSON argument schemas remain available;
-- tool and parameter descriptions are removed;
-- display metadata and behavioral tool instructions are removed;
+- tool-specific behavioral instructions live in their relevant tool
+  descriptions instead of the system prompt;
+- display metadata and unrelated parameter guidance are removed;
+- ordered post-answer tool audits live separately in `GuidanceAudit.json`;
 - database descriptions, matching rules, related-database hints, and recovery
   instructions are removed;
 - the one approved fixture is described only as `Database.`;
 - web search and web fetch remain available as unannotated server tools.
 
-The small remaining control strings and generic database labels are structural
-runtime requirements, not task guidance.
+The audit file checks `database_list_info`, `database_query`, web search, and
+conditional session naming in array order. Session naming applies only when the
+session began untitled. If a candidate final answer omitted an applicable tool,
+the runtime sends that rule's `if_not_called` message once. If the model ignores
+the reminder, the next final answer is accepted without repeating it or
+advancing to a lower-priority rule. The remaining generic database labels are
+structural runtime requirements, not task guidance.
 
 It is intentionally isolated from `source/linux/Makefile`; neither the normal
 `test` target nor a plain invocation of this Makefile performs network calls.
+
+Live output follows the same nested shape as the iOS response timeline. Each
+additional `>` marks another level, while reasoning and large tool results
+use compact previews like their collapsed webview sections:
+
+```text
+> Model | google/gemma-4-31b-it
+>> Session 1 | google/gemma-4-31b-it | Started
+>>> API Turn 1 | User | Round 1 | Attempt 1
+>>>> Request
+>>>>> User Prompt
+>>>>>> Please list out ...
+>>>> Response | completed | HTTP 200 | 12.7s
+>>>>> Reasoning | 2270 characters
+>>>>> Tool Call | database_list_info
+```
 
 ## Private inputs and outputs
 
@@ -100,10 +123,14 @@ play counts in the private fixture. It scores whether the model:
 - filters the ranking to KPOP records and aggregates total play counts rather
   than ranking groups by one song;
 - covers the dynamically calculated top three in descending order;
-- explains that the ranking comes from listening data;
 - provides the requested public details with links;
 - avoids persisting inferred favorites as durable facts;
+- deducts 3 points for every live tool-audit intervention;
 - stays within API-call, web-search, latency, and cost budgets.
+
+The remaining positive checks are proportionally normalized to 100 points
+before audit penalties. This keeps the score ceiling stable without assigning
+the removed provenance points arbitrarily to another behavior.
 
 The score deliberately does not declare public biographical facts correct.
 Roster freshness, blood types, and subjective personality descriptions remain

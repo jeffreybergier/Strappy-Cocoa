@@ -25,6 +25,7 @@ FONTAWESOME_FONT_FILES = \
                      $(FONTAWESOME_FONT_DIR)/FA7-Brands-400.otf
 GUIDANCE_RESOURCES = $(SYSTEM_PROMPT_TEMPLATE) \
                      $(SHARED_DIR)/Resources/GuidanceTools.json \
+                     $(SHARED_DIR)/Resources/GuidanceAudit.json \
                      $(SHARED_DIR)/Resources/GuidanceDatabase.json \
                      $(FONTAWESOME_ICONS_RESOURCE)
 ALTIVECCORE_REQUIRED = 1
