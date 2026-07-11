@@ -25,7 +25,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   const char *system_prompt_template_path,
   const char *session_db_path,
   long long session_id,
-  strappy_chat_stream_callback callback,
+  strappy_responses_event_callback callback,
   void *callback_data,
   char **error_out);
 

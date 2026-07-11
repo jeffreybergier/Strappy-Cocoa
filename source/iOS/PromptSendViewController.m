@@ -287,7 +287,6 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
 enum {
   kStrappyPromptOptionsSectionModels = 0,
   kStrappyPromptOptionsSectionWebSearch,
-  kStrappyPromptOptionsSectionStreaming,
   kStrappyPromptOptionsSectionCount
 };
 
@@ -308,7 +307,6 @@ enum {
 @property (nonatomic, assign) BOOL sending;
 @property (nonatomic, assign) BOOL cancellationRequested;
 @property (nonatomic, assign) BOOL webSearchEnabled;
-@property (nonatomic, assign) BOOL streamingEnabled;
 - (void)buildSubviews;
 - (UIImage *)iconImageForIcon:(AIFontAwesomeIcon)icon
                         style:(AIFontAwesomeStyle)style
@@ -325,7 +323,6 @@ enum {
 - (NSString *)currentSelectedModelIdentifier;
 - (BOOL)setSelectedModelIdentifierFromOptions:(NSString *)modelIdentifier;
 - (BOOL)setWebSearchEnabledFromOptions:(BOOL)enabled;
-- (BOOL)setStreamingEnabledFromOptions:(BOOL)enabled;
 - (UIViewController *)containingViewController;
 - (void)dismissOptionsControllerAnimated:(BOOL)animated;
 - (void)dismissTapped:(id)sender;
@@ -338,9 +335,7 @@ enum {
 @property (nonatomic, copy) NSArray *models;
 @property (nonatomic, copy) NSString *selectedModelIdentifier;
 @property (nonatomic, strong) UISwitch *webSearchSwitch;
-@property (nonatomic, strong) UISwitch *streamingSwitch;
 @property (nonatomic, assign) BOOL webSearchEnabled;
-@property (nonatomic, assign) BOOL streamingEnabled;
 - (instancetype)initWithPromptSendViewController:
     (PromptSendViewController *)promptSendViewController;
 - (void)reloadOptionsFromPrompt;
@@ -362,7 +357,6 @@ enum {
 - (void)viewDidLoad
 {
   UISwitch *webSearchSwitch;
-  UISwitch *streamingSwitch;
 
   [super viewDidLoad];
 
@@ -372,11 +366,6 @@ enum {
             forControlEvents:UIControlEventValueChanged];
   [self setWebSearchSwitch:webSearchSwitch];
 
-  streamingSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
-  [streamingSwitch addTarget:self
-                      action:@selector(streamingSwitchChanged:)
-            forControlEvents:UIControlEventValueChanged];
-  [self setStreamingSwitch:streamingSwitch];
   [self reloadOptionsFromPrompt];
 
   [[self navigationItem] setRightBarButtonItem:
@@ -398,10 +387,6 @@ enum {
     (promptSendViewController != nil)
       ? [promptSendViewController currentSelectedModelIdentifier]
       : @""];
-  [self setStreamingEnabled:
-    (promptSendViewController != nil)
-      ? [promptSendViewController streamingEnabled]
-      : NO];
   [self setWebSearchEnabled:
     (promptSendViewController != nil)
       ? [promptSendViewController webSearchEnabled]
@@ -412,7 +397,6 @@ enum {
 {
   [self reloadOptionsSnapshot];
   [[self webSearchSwitch] setOn:[self webSearchEnabled] animated:NO];
-  [[self streamingSwitch] setOn:[self streamingEnabled] animated:NO];
   [[self tableView] reloadData];
 }
 
@@ -435,19 +419,6 @@ enum {
   [sender setOn:[self webSearchEnabled] animated:YES];
 }
 
-- (void)streamingSwitchChanged:(UISwitch *)sender
-{
-  PromptSendViewController *promptSendViewController;
-
-  promptSendViewController = [self promptSendViewController];
-  if (promptSendViewController != nil) {
-    (void)[promptSendViewController setStreamingEnabledFromOptions:
-      [sender isOn]];
-    [self setStreamingEnabled:[promptSendViewController streamingEnabled]];
-  }
-  [sender setOn:[self streamingEnabled] animated:YES];
-}
-
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
   (void)tableView;
@@ -464,9 +435,6 @@ enum {
   if (section == kStrappyPromptOptionsSectionWebSearch) {
     return 1;
   }
-  if (section == kStrappyPromptOptionsSectionStreaming) {
-    return 1;
-  }
   return 0;
 }
 
@@ -479,9 +447,6 @@ titleForHeaderInSection:(NSInteger)section
   }
   if (section == kStrappyPromptOptionsSectionWebSearch) {
     return NSLocalizedString(@"Web Search", nil);
-  }
-  if (section == kStrappyPromptOptionsSectionStreaming) {
-    return NSLocalizedString(@"Streaming", nil);
   }
   return nil;
 }
@@ -501,19 +466,6 @@ titleForHeaderInSection:(NSInteger)section
     [[cell textLabel] setText:NSLocalizedString(@"Search Web", nil)];
     [[self webSearchSwitch] setOn:[self webSearchEnabled] animated:NO];
     [cell setAccessoryView:[self webSearchSwitch]];
-    return cell;
-  }
-
-  if ([indexPath section] == kStrappyPromptOptionsSectionStreaming) {
-    cell = [tableView dequeueReusableCellWithIdentifier:@"StreamingCell"];
-    if (cell == nil) {
-      cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
-                                    reuseIdentifier:@"StreamingCell"];
-      [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-    }
-    [[cell textLabel] setText:NSLocalizedString(@"Stream Responses", nil)];
-    [[self streamingSwitch] setOn:[self streamingEnabled] animated:NO];
-    [cell setAccessoryView:[self streamingSwitch]];
     return cell;
   }
 
@@ -871,12 +823,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [[self optionsController] reloadOptionsFromPrompt];
 }
 
-- (void)setStreamingEnabled:(BOOL)enabled
-{
-  _streamingEnabled = enabled ? YES : NO;
-  [[self optionsController] reloadOptionsFromPrompt];
-}
-
 - (void)reloadOptionsMenu
 {
   [self updateControls];
@@ -1090,22 +1036,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   }
   if (changed) {
     [self setWebSearchEnabled:enabled];
-  }
-  return changed;
-}
-
-- (BOOL)setStreamingEnabledFromOptions:(BOOL)enabled
-{
-  BOOL changed;
-
-  changed = NO;
-  if ([[self delegate] respondsToSelector:
-        @selector(promptSendViewController:setStreamingEnabled:)]) {
-    changed = [[self delegate] promptSendViewController:self
-                                    setStreamingEnabled:(enabled ? YES : NO)];
-  }
-  if (changed) {
-    [self setStreamingEnabled:enabled];
   }
   return changed;
 }

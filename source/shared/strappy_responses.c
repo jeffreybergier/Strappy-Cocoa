@@ -105,7 +105,7 @@ static long long strappy_responses_now_ms(void)
 }
 
 static void strappy_responses_emit_processing_status(
-  strappy_chat_stream_callback callback,
+  strappy_responses_event_callback callback,
   void *callback_data,
   const char *prompt_group_key,
   int active,
@@ -115,7 +115,7 @@ static void strappy_responses_emit_processing_status(
   unsigned int retry_attempt,
   const char *status_reason)
 {
-  strappy_chat_stream_event event;
+  strappy_responses_event event;
   cJSON *root;
   char *status_json;
   long long now_ms;
@@ -190,8 +190,7 @@ static void strappy_responses_emit_processing_status(
     return;
   }
   memset(&event, 0, sizeof(event));
-  event.type = STRAPPY_CHAT_STREAM_EVENT_PROCESSING_STATUS;
-  event.text = "";
+  event.type = STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS;
   event.prompt_group_key = prompt_group_key;
   event.actor = "api";
   event.kind = "response_api_call";
@@ -241,22 +240,21 @@ static const char *strappy_responses_retry_status_reason(
 }
 
 static int strappy_responses_poll_cancelled(
-  strappy_chat_stream_callback callback,
+  strappy_responses_event_callback callback,
   void *callback_data)
 {
-  strappy_chat_stream_event event;
+  strappy_responses_event event;
 
   if (callback == NULL) {
     return 0;
   }
   memset(&event, 0, sizeof(event));
-  event.type = STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA;
-  event.text = "";
+  event.type = STRAPPY_RESPONSES_EVENT_CANCELLATION_POLL;
   return callback(&event, callback_data) ? 0 : 1;
 }
 
 static int strappy_responses_sleep_ms(long milliseconds,
-                                      strappy_chat_stream_callback callback,
+                                      strappy_responses_event_callback callback,
                                       void *callback_data)
 {
   struct timeval delay;
@@ -1304,10 +1302,10 @@ static void strappy_responses_call_did_finish(
   const strappy_responses_http_result *http,
   const strappy_responses_analysis *analysis,
   int client_ok,
-  strappy_chat_stream_callback callback,
+  strappy_responses_event_callback callback,
   void *callback_data)
 {
-  strappy_chat_stream_event event;
+  strappy_responses_event event;
   const char *state;
   char message_key[64];
 
@@ -1335,8 +1333,7 @@ static void strappy_responses_call_did_finish(
            "response-call-%lld",
            call_id);
   memset(&event, 0, sizeof(event));
-  event.type = STRAPPY_CHAT_STREAM_EVENT_LEDGER_CHANGED;
-  event.text = "";
+  event.type = STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED;
   event.prompt_group_key = prompt_group_key;
   event.actor = "api";
   event.kind = "response_api_call";
@@ -1518,7 +1515,7 @@ static int strappy_responses_send_round(
   long long processing_started_ms,
   strappy_responses_http_result *http_out,
   strappy_responses_analysis *analysis_out,
-  strappy_chat_stream_callback callback,
+  strappy_responses_event_callback callback,
   void *callback_data,
   char **error_out)
 {
@@ -1581,7 +1578,7 @@ static int strappy_responses_send_round(
 
     strappy_responses_http_result_init(&http);
     strappy_responses_analysis_init(&analysis);
-    client_ok = strappy_client_send_responses_json_once_with_events(
+    client_ok = strappy_client_send_responses_json(
       &runtime->config,
       request_json,
       &http,
@@ -1775,7 +1772,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   const char *system_prompt_template_path,
   const char *session_db_path,
   long long session_id,
-  strappy_chat_stream_callback callback,
+  strappy_responses_event_callback callback,
   void *callback_data,
   char **error_out)
 {

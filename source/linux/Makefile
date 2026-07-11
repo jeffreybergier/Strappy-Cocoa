@@ -23,8 +23,6 @@ CFLAGS ?= -std=c99 -Wall -Wextra -Wconversion -Wsign-conversion -Wfloat-conversi
 SQLITE_LIBS ?= -lsqlite3
 DATABASE_QUERY_HARNESS := $(BUILD_DIR)/database_query_harness
 WEBVIEW_HARNESS := $(BUILD_DIR)/webview_harness
-CLIENT_STREAM_HARNESS := $(BUILD_DIR)/client_stream_harness
-ASSISTANT_REASONING_HARNESS := $(BUILD_DIR)/assistant_reasoning_harness
 RESPONSES_HARNESS := $(BUILD_DIR)/responses_harness
 
 DATABASE_QUERY_HARNESS_SOURCES = \
@@ -40,29 +38,6 @@ WEBVIEW_HARNESS_SOURCES = \
 	webview_harness.c \
 	$(SHARED_DIR)/strappy_webview.c
 
-CLIENT_STREAM_HARNESS_SOURCES = \
-	client_stream_harness.c \
-	$(SHARED_DIR)/strappy_cocoa.c \
-	$(SHARED_DIR)/strappy_core.c \
-	$(SHARED_DIR)/strappy_tools.c \
-	$(SHARED_DIR)/strappy_db.c \
-	$(CJSON_DIR)/cJSON.c
-CLIENT_STREAM_HARNESS_DEPS = \
-	$(SHARED_DIR)/strappy_client.c
-
-ASSISTANT_REASONING_HARNESS_SOURCES = \
-	assistant_reasoning_harness.c \
-	$(SHARED_DIR)/strappy_client.c \
-	$(SHARED_DIR)/strappy_config.c \
-	$(SHARED_DIR)/strappy_cocoa.c \
-	$(SHARED_DIR)/strappy_core.c \
-	$(SHARED_DIR)/strappy_db.c \
-	$(SHARED_DIR)/strappy_prompt.c \
-	$(SHARED_DIR)/strappy_tools.c \
-	$(CJSON_DIR)/cJSON.c
-ASSISTANT_REASONING_HARNESS_DEPS = \
-	$(SHARED_DIR)/strappy_assistant.c
-
 RESPONSES_HARNESS_SOURCES = \
 	responses_harness.c \
 	$(SHARED_DIR)/strappy_client.c \
@@ -77,11 +52,9 @@ RESPONSES_HARNESS_SOURCES = \
 
 .PHONY: test clean
 
-test: $(DATABASE_QUERY_HARNESS) $(WEBVIEW_HARNESS) $(CLIENT_STREAM_HARNESS) $(ASSISTANT_REASONING_HARNESS) $(RESPONSES_HARNESS)
+test: $(DATABASE_QUERY_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS)
 	./$(DATABASE_QUERY_HARNESS)
 	./$(WEBVIEW_HARNESS)
-	./$(CLIENT_STREAM_HARNESS)
-	./$(ASSISTANT_REASONING_HARNESS)
 	./$(RESPONSES_HARNESS)
 
 $(BUILD_DIR):
@@ -96,14 +69,8 @@ $(DATABASE_QUERY_HARNESS): $(DATABASE_QUERY_HARNESS_SOURCES) $(FONTAWESOME_GENER
 $(WEBVIEW_HARNESS): $(WEBVIEW_HARNESS_SOURCES) $(FONTAWESOME_GENERATED) | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(WEBVIEW_HARNESS_SOURCES)
 
-$(CLIENT_STREAM_HARNESS): $(CLIENT_STREAM_HARNESS_SOURCES) $(CLIENT_STREAM_HARNESS_DEPS) $(FONTAWESOME_GENERATED) | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(CLIENT_STREAM_HARNESS_SOURCES) $(SQLITE_LIBS) -lcurl
-
-$(ASSISTANT_REASONING_HARNESS): $(ASSISTANT_REASONING_HARNESS_SOURCES) $(ASSISTANT_REASONING_HARNESS_DEPS) $(FONTAWESOME_GENERATED) | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(ASSISTANT_REASONING_HARNESS_SOURCES) $(SQLITE_LIBS) -lcurl
-
 $(RESPONSES_HARNESS): $(RESPONSES_HARNESS_SOURCES) $(FONTAWESOME_GENERATED) | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(RESPONSES_HARNESS_SOURCES) $(SQLITE_LIBS) -lcurl
 
 clean:
-	rm -rf $(BUILD_DIR) database_query_harness webview_harness client_stream_harness assistant_reasoning_harness responses_harness
+	rm -rf $(BUILD_DIR) database_query_harness webview_harness responses_harness

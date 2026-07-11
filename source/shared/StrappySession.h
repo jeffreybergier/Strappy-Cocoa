@@ -82,6 +82,9 @@ extern NSString * const StrappySessionModelCatalogDidChangeNotification;
 - (BOOL)beginNonStreamingPrompt:(NSString *)prompt
                          context:(NSDictionary *)context
                            error:(NSError **)error;
+- (BOOL)beginResponsesPrompt:(NSString *)prompt
+                     context:(NSDictionary *)context
+                       error:(NSError **)error;
 - (void)cancelPrompt;
 
 @end

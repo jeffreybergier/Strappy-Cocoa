@@ -143,7 +143,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 @property (nonatomic, assign) BOOL webViewContentLoaded;
 @property (nonatomic, assign) BOOL sending;
 @property (nonatomic, assign) BOOL cancelPromptRequested;
-@property (nonatomic, assign) BOOL renderedRequestMessages;
 @property (nonatomic, assign) CGFloat composeBarBottomY;
 @property (nonatomic, assign) BOOL composing;
 @property (nonatomic, assign) BOOL tearingDown;
@@ -171,7 +170,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)sendPromptDidFinish:(NSDictionary *)result;
 - (NSString *)javaScriptForStreamEvent:(NSDictionary *)event;
 - (BOOL)queueJavaScriptForStreamEvent:(NSDictionary *)event;
-- (BOOL)streamEventRendersMessage:(NSDictionary *)event;
 - (void)schedulePendingStreamEventFlush;
 - (void)streamEventFlushTimerDidFire:(NSTimer *)timer;
 - (void)flushPendingStreamEvents;
@@ -182,7 +180,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)setPromptCancellationRequested:(BOOL)requested;
 - (BOOL)promptCancellationRequested;
 - (BOOL)appendNewMessagesToWebView;
-- (BOOL)refreshRenderedMessageCountFromSession;
 - (void)reloadContent;
 - (NSString *)writeCurrentHTML;
 - (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error;
@@ -234,7 +231,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
   inFlight = [self sessionPromptIsInFlight];
 
-  NSLog(@"StrappyLifecycle MessageList %@ self=%p appState=%@ backgroundTimeRemaining=%.3f session=%@ webView=%p viewLoaded=%@ viewInWindow=%@ contentLoaded=%@ sending=%@ inFlight=%@ cancelRequested=%@ pendingJS=%lu timer=%@ promptIdleAssertion=%@ tearingDown=%@ renderedRequestMessages=%@",
+  NSLog(@"StrappyLifecycle MessageList %@ self=%p appState=%@ backgroundTimeRemaining=%.3f session=%@ webView=%p viewLoaded=%@ viewInWindow=%@ contentLoaded=%@ sending=%@ inFlight=%@ cancelRequested=%@ pendingJS=%lu timer=%@ promptIdleAssertion=%@ tearingDown=%@",
         [event isKindOfClass:[NSString class]] ? event : @"event",
         (__bridge void *)self,
         StrappyMessageListApplicationStateName(),
@@ -250,8 +247,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
         (unsigned long)pendingJavaScriptLength,
         StrappyMessageListBoolString(([self streamEventFlushTimer] != nil) ? YES : NO),
         StrappyMessageListBoolString([self isPromptIdleTimerAssertionEnabled]),
-        StrappyMessageListBoolString([self tearingDown]),
-        StrappyMessageListBoolString([self renderedRequestMessages]));
+        StrappyMessageListBoolString([self tearingDown]));
 }
 
 - (void)viewDidLoad
@@ -620,7 +616,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)clearRequestState
 {
   [self cancelPendingStreamEventFlush];
-  [self setRenderedRequestMessages:NO];
 }
 
 - (void)reloadWithSession:(StrappySession *)session
@@ -677,8 +672,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self updatePromptIdleTimerAssertion];
   [[self sendBar] setWebSearchEnabled:(session != nil) ?
     [session webSearchEnabled] : YES];
-  [[self sendBar] setStreamingEnabled:(session != nil) ?
-    [session streamingEnabled] : NO];
   [[self sendBar] reloadOptionsMenu];
   if (([self webView] != nil) &&
       (sessionChanged || ![self webViewContentLoaded])) {
@@ -745,33 +738,9 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self promptSendViewControllerDidCancelPrompt:[self sendBar]];
 }
 
-- (BOOL)canToggleStreaming
-{
-  if (([self session] == nil) || [self sending] ||
-      [self sessionPromptIsInFlight]) {
-    return NO;
-  }
-  return YES;
-}
-
-- (BOOL)streamingEnabled
-{
-  return ([self session] != nil) ? [[self session] streamingEnabled] : NO;
-}
-
 - (BOOL)webSearchEnabled
 {
   return ([self session] != nil) ? [[self session] webSearchEnabled] : YES;
-}
-
-- (void)toggleStreaming:(id)sender
-{
-  (void)sender;
-  if (![self canToggleStreaming]) {
-    return;
-  }
-  (void)[self promptSendViewController:[self sendBar]
-                    setStreamingEnabled:![self streamingEnabled]];
 }
 
 - (NSArray *)availableModels
@@ -866,7 +835,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   NSError *error;
 
   (void)controller;
-  if (![self canToggleStreaming]) {
+  if (![self canSelectModel]) {
     return NO;
   }
 
@@ -886,36 +855,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
 
   [[self sendBar] setWebSearchEnabled:[[self session] webSearchEnabled]];
-  [self setStatusText:nil];
-  return YES;
-}
-
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-              setStreamingEnabled:(BOOL)enabled
-{
-  NSError *error;
-
-  (void)controller;
-  if (![self canToggleStreaming]) {
-    return NO;
-  }
-
-  error = nil;
-  if (![[self session] setStreamingEnabled:enabled error:&error]) {
-    NSString *message;
-
-    message = [error localizedDescription];
-    if ([message length] == 0U) {
-      message = NSLocalizedString(@"Could not update streaming setting.", nil);
-    }
-    [self setStatusText:message];
-    [[self sendBar] setStreamingEnabled:[[self session] streamingEnabled]];
-    [self showMessage:message
-                title:NSLocalizedString(@"Streaming Not Changed", nil)];
-    return NO;
-  }
-
-  [[self sendBar] setStreamingEnabled:[[self session] streamingEnabled]];
   [self setStatusText:nil];
   return YES;
 }
@@ -1085,15 +1024,9 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self clearRequestState];
 
   startError = nil;
-  if ([[self session] streamingEnabled]) {
-    didStartPrompt = [[self session] beginStreamingPrompt:prompt
-                                                  context:nil
-                                                    error:&startError];
-  } else {
-    didStartPrompt = [[self session] beginNonStreamingPrompt:prompt
-                                                     context:nil
-                                                       error:&startError];
-  }
+  didStartPrompt = [[self session] beginResponsesPrompt:prompt
+                                                   context:nil
+                                                     error:&startError];
   if (!didStartPrompt) {
     NSString *errorMessage;
 
@@ -1150,19 +1083,14 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   streamEvent = [event objectForKey:@"stream_event"];
   if ([streamEvent isEqualToString:@"ledger_changed"]) {
     [self logLifecycleEvent:@"sessionLedgerDidChange"];
-    if ([self appendNewMessagesToWebView]) {
-      [self setRenderedRequestMessages:YES];
-    } else {
+    if (![self appendNewMessagesToWebView]) {
       NSLog(@"StrappyResponses could not append committed ledger rows for session %@",
             [[[self session] sessionIdentifier] description]);
     }
     return;
   }
 
-  if ([self queueJavaScriptForStreamEvent:event] &&
-      [self streamEventRendersMessage:event]) {
-    [self setRenderedRequestMessages:YES];
-  }
+  (void)[self queueJavaScriptForStreamEvent:event];
 }
 
 - (void)sessionPromptDidFinish:(NSNotification *)notification
@@ -1184,11 +1112,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 {
   NSDictionary *sessionSummary;
   NSString *errorMessage;
-  BOOL streamingPrompt;
-  BOOL renderedRequestMessages;
 
-  streamingPrompt = [[self session] streamingEnabled] ? YES : NO;
-  renderedRequestMessages = [self renderedRequestMessages];
   [self setPromptCancellationRequested:NO];
   [self updateSendingStateFromSession];
 
@@ -1212,14 +1136,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
   [self clearRequestState];
   [self updateSendingStateFromSession];
-  if (!streamingPrompt) {
-    [self appendNewMessagesToWebView];
-  } else if (renderedRequestMessages &&
-      [sessionSummary isKindOfClass:[NSDictionary class]]) {
-    [self refreshRenderedMessageCountFromSession];
-  } else if ([self appendNewMessagesToWebView]) {
-    /* The persisted messages were appended without a full web view reload. */
-  }
+  [self appendNewMessagesToWebView];
 }
 
 - (NSString *)javaScriptForStreamEvent:(NSDictionary *)event
@@ -1253,18 +1170,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [[self pendingStreamJavaScript] appendString:javaScript];
   [self schedulePendingStreamEventFlush];
   return YES;
-}
-
-- (BOOL)streamEventRendersMessage:(NSDictionary *)event
-{
-  NSString *streamEvent;
-
-  streamEvent = [event objectForKey:@"stream_event"];
-  if (![streamEvent isKindOfClass:[NSString class]]) {
-    return NO;
-  }
-
-  return ![streamEvent isEqualToString:@"processing_status"];
 }
 
 - (void)schedulePendingStreamEventFlush
@@ -1377,26 +1282,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self flushPendingStreamEvents];
   [[self webView] stringByEvaluatingJavaScriptFromString:javaScript];
   [self setNewestRenderedMessageCount:count];
-  return YES;
-}
-
-- (BOOL)refreshRenderedMessageCountFromSession
-{
-  NSArray *messages;
-  NSError *error;
-
-  if ([self session] == nil) {
-    [self setNewestRenderedMessageCount:0U];
-    return NO;
-  }
-
-  error = nil;
-  messages = [[self session] messagesWithError:&error];
-  if (![messages isKindOfClass:[NSArray class]]) {
-    return NO;
-  }
-
-  [self setNewestRenderedMessageCount:[messages count]];
   return YES;
 }
 

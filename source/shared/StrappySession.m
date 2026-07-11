@@ -22,10 +22,10 @@ NSString * const StrappySessionModelCatalogDidChangeNotification =
 static NSMutableDictionary *StrappySessionInFlightSessions = nil;
 static BOOL StrappySessionModelCatalogRefreshInFlight = NO;
 
-typedef struct StrappySessionStreamContext {
+typedef struct StrappySessionResponsesContext {
   StrappySession *session;
   NSDictionary *context;
-} StrappySessionStreamContext;
+} StrappySessionResponsesContext;
 
 static const char *StrappySessionCString(NSString *string)
 {
@@ -198,29 +198,21 @@ static void StrappySessionWebViewMessageFromDictionary(
 + (void)refreshOpenRouterModelCatalogInBackground:(id)ignored;
 + (void)openRouterModelCatalogRefreshDidFinish:(NSDictionary *)result;
 - (void)updateCachedSummary:(NSDictionary *)summary;
-- (BOOL)shouldCancelStreamEventOfType:(strappy_chat_stream_event_type)eventType;
-- (int)handleStreamEvent:(const strappy_chat_stream_event *)event
-                 context:(NSDictionary *)context;
+- (int)handleResponsesEvent:(const strappy_responses_event *)event
+                    context:(NSDictionary *)context;
 - (void)postStreamEventAndRelease:(NSDictionary *)event;
 - (NSDictionary *)submitPrompt:(NSString *)prompt
+                       context:(NSDictionary *)context
                          error:(NSError **)error;
-- (NSDictionary *)submitPrompt:(NSString *)prompt
-                      streaming:(BOOL)streaming
-                        context:(NSDictionary *)context
-                          error:(NSError **)error;
-- (BOOL)beginPrompt:(NSString *)prompt
-            context:(NSDictionary *)context
-          streaming:(BOOL)streaming
-              error:(NSError **)error;
 - (void)sendPromptInBackground:(NSDictionary *)request;
-- (void)streamingPromptDidFinish:(NSDictionary *)result;
+- (void)promptDidFinish:(NSDictionary *)result;
 @end
 
-static int StrappySessionHandleStreamEvent(
-  const strappy_chat_stream_event *event,
+static int StrappySessionHandleResponsesEvent(
+  const strappy_responses_event *event,
   void *userData)
 {
-  StrappySessionStreamContext *context;
+  StrappySessionResponsesContext *context;
   StrappySession *session;
   NSAutoreleasePool *pool;
   int result;
@@ -229,14 +221,14 @@ static int StrappySessionHandleStreamEvent(
     return 1;
   }
 
-  context = (StrappySessionStreamContext *)userData;
+  context = (StrappySessionResponsesContext *)userData;
   session = context->session;
   if (session == nil) {
     return 1;
   }
 
   pool = [[NSAutoreleasePool alloc] init];
-  result = [session handleStreamEvent:event context:context->context];
+  result = [session handleResponsesEvent:event context:context->context];
   [pool release];
   return result;
 }
@@ -347,87 +339,32 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
       StrappySessionCString(errorText)));
 }
 
-- (int)handleStreamEvent:(const strappy_chat_stream_event *)event
-                 context:(NSDictionary *)contextDictionary
+- (int)handleResponsesEvent:(const strappy_responses_event *)event
+                    context:(NSDictionary *)contextDictionary
 {
-  NSString *text;
-  NSMutableDictionary *delta;
+  NSMutableDictionary *notification;
 
   if (event == NULL) {
     return 1;
   }
-
-  if ([self shouldCancelStreamEventOfType:event->type]) {
-    return 0;
+  if (event->type == STRAPPY_RESPONSES_EVENT_CANCELLATION_POLL) {
+    return [self promptCancellationRequested] ? 0 : 1;
   }
-
-  text = nil;
-  if (event->text != NULL) {
-    text = [NSString stringWithUTF8String:event->text];
-  }
-  if (text == nil) {
-    text = @"";
-  }
-
-  delta = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
-    text, @"delta",
-    nil];
-  if (event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_CALL) {
-    [delta setObject:@"call" forKey:@"event_type"];
-  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_RESULT) {
-    [delta setObject:@"result" forKey:@"event_type"];
-  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_ERROR) {
-    [delta setObject:@"error" forKey:@"event_type"];
-  }
-  if (contextDictionary != nil) {
-    [delta setObject:contextDictionary forKey:@"context"];
-  }
-
-  if (([text length] == 0U) &&
-      ((event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) ||
-       (event->type == STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA))) {
-    [delta release];
+  if ((event->type != STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) &&
+      (event->type != STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED)) {
     return 1;
   }
 
-  if (event->tool_call_id != NULL) {
-    NSString *toolCallId;
-
-    toolCallId = [NSString stringWithUTF8String:event->tool_call_id];
-    if (toolCallId != nil) {
-      [delta setObject:toolCallId forKey:@"tool_call_id"];
-    }
+  notification = [[NSMutableDictionary alloc] init];
+  if (contextDictionary != nil) {
+    [notification setObject:contextDictionary forKey:@"context"];
   }
-  if (event->tool_name != NULL) {
-    NSString *toolName;
+  if (event->message_key != NULL) {
+    NSString *messageKey;
 
-    toolName = [NSString stringWithUTF8String:event->tool_name];
-    if (toolName != nil) {
-      [delta setObject:toolName forKey:@"tool_name"];
-    }
-  }
-  if (event->arguments_json != NULL) {
-    NSString *argumentsJSON;
-
-    argumentsJSON = [NSString stringWithUTF8String:event->arguments_json];
-    if (argumentsJSON != nil) {
-      [delta setObject:argumentsJSON forKey:@"arguments_json"];
-    }
-  }
-  if (event->result_json != NULL) {
-    NSString *resultJSON;
-
-    resultJSON = [NSString stringWithUTF8String:event->result_json];
-    if (resultJSON != nil) {
-      [delta setObject:resultJSON forKey:@"result_json"];
-    }
-  }
-  if (event->message_json != NULL) {
-    NSString *messageJSON;
-
-    messageJSON = [NSString stringWithUTF8String:event->message_json];
-    if (messageJSON != nil) {
-      [delta setObject:messageJSON forKey:@"message_json"];
+    messageKey = [NSString stringWithUTF8String:event->message_key];
+    if (messageKey != nil) {
+      [notification setObject:messageKey forKey:@"message_key"];
     }
   }
   if (event->status_json != NULL) {
@@ -435,98 +372,15 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
 
     statusJSON = [NSString stringWithUTF8String:event->status_json];
     if (statusJSON != nil) {
-      [delta setObject:statusJSON forKey:@"status_json"];
+      [notification setObject:statusJSON forKey:@"status_json"];
     }
   }
-  if (event->turn_key != NULL) {
-    NSString *turnKey;
-
-    turnKey = [NSString stringWithUTF8String:event->turn_key];
-    if (turnKey != nil) {
-      [delta setObject:turnKey forKey:@"turn_key"];
-    }
-  }
-  if (event->prompt_group_key != NULL) {
-    NSString *promptGroupKey;
-
-    promptGroupKey = [NSString stringWithUTF8String:event->prompt_group_key];
-    if (promptGroupKey != nil) {
-      [delta setObject:promptGroupKey forKey:@"prompt_group_key"];
-    }
-  }
-  if (event->actor != NULL) {
-    NSString *actor;
-
-    actor = [NSString stringWithUTF8String:event->actor];
-    if (actor != nil) {
-      [delta setObject:actor forKey:@"actor"];
-    }
-  }
-  if (event->kind != NULL) {
-    NSString *kind;
-
-    kind = [NSString stringWithUTF8String:event->kind];
-    if (kind != nil) {
-      [delta setObject:kind forKey:@"kind"];
-    }
-  }
-  if (event->message_key != NULL) {
-    NSString *messageKey;
-
-    messageKey = [NSString stringWithUTF8String:event->message_key];
-    if (messageKey != nil) {
-      [delta setObject:messageKey forKey:@"message_key"];
-    }
-  }
-  if (event->target_message_key != NULL) {
-    NSString *targetMessageKey;
-
-    targetMessageKey = [NSString stringWithUTF8String:event->target_message_key];
-    if (targetMessageKey != nil) {
-      [delta setObject:targetMessageKey forKey:@"target_message_key"];
-    }
-  }
-  if (event->render_role != NULL) {
-    NSString *renderRole;
-
-    renderRole = [NSString stringWithUTF8String:event->render_role];
-    if (renderRole != nil) {
-      [delta setObject:renderRole forKey:@"render_role"];
-    }
-  }
-  if (event->api_role != NULL) {
-    NSString *apiRole;
-
-    apiRole = [NSString stringWithUTF8String:event->api_role];
-    if (apiRole != nil) {
-      [delta setObject:apiRole forKey:@"api_role"];
-    }
-  }
-
-  if (event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) {
-    [delta setObject:@"content_delta" forKey:@"stream_event"];
-  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA) {
-    [delta setObject:@"reasoning_delta" forKey:@"stream_event"];
-  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_CALL) {
-    [delta setObject:@"tool_call" forKey:@"stream_event"];
-  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_RESULT) {
-    [delta setObject:@"tool_result" forKey:@"stream_event"];
-  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TOOL_ERROR) {
-    [delta setObject:@"tool_error" forKey:@"stream_event"];
-  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TURN_STARTED) {
-    [delta setObject:@"turn_started" forKey:@"stream_event"];
-  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_TURN_FINISHED) {
-    [delta setObject:@"turn_finished" forKey:@"stream_event"];
-  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_RETRACTED) {
-    [delta setObject:@"content_retracted" forKey:@"stream_event"];
-  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_PROCESSING_STATUS) {
-    [delta setObject:@"processing_status" forKey:@"stream_event"];
-  } else if (event->type == STRAPPY_CHAT_STREAM_EVENT_LEDGER_CHANGED) {
-    [delta setObject:@"ledger_changed" forKey:@"stream_event"];
-  }
-
+  [notification setObject:
+    (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) ?
+      @"processing_status" : @"ledger_changed"
+                    forKey:@"stream_event"];
   [self performSelectorOnMainThread:@selector(postStreamEventAndRelease:)
-                         withObject:delta
+                         withObject:notification
                       waitUntilDone:NO];
   return 1;
 }
@@ -749,16 +603,6 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
       promptCancellationRequested_ = YES;
     }
   }
-}
-
-- (BOOL)shouldCancelStreamEventOfType:(strappy_chat_stream_event_type)eventType
-{
-  if ((eventType != STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) &&
-      (eventType != STRAPPY_CHAT_STREAM_EVENT_REASONING_DELTA)) {
-    return NO;
-  }
-
-  return [self promptCancellationRequested];
 }
 
 - (void)postStreamEventAndRelease:(NSDictionary *)event
@@ -2008,7 +1852,6 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   NSString *messageKey;
   NSString *statusJSON;
   NSString *streamEvent;
-  NSString *delta;
   char *strappyError;
   char *js;
   long long sessionId;
@@ -2025,28 +1868,6 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   }
 
   streamEvent = [event objectForKey:@"stream_event"];
-  delta = [event objectForKey:@"delta"];
-  if (![delta isKindOfClass:[NSString class]]) {
-    delta = @"";
-  }
-
-  if ([streamEvent isEqualToString:@"content_delta"]) {
-    return StrappySessionStringFromCString(
-      strappy_session_webview_append_message_text_by_key_js(
-        [messageKey UTF8String],
-        [delta UTF8String]));
-  }
-  if ([streamEvent isEqualToString:@"reasoning_delta"]) {
-    return StrappySessionStringFromCString(
-      strappy_session_webview_append_reasoning_text_by_key_js(
-        [messageKey UTF8String],
-        [delta UTF8String]));
-  }
-  if ([streamEvent isEqualToString:@"content_retracted"]) {
-    return StrappySessionStringFromCString(
-      strappy_session_webview_move_message_text_to_reasoning_by_key_js(
-        [messageKey UTF8String]));
-  }
   if ([streamEvent isEqualToString:@"processing_status"]) {
     statusJSON = [event objectForKey:@"status_json"];
     if (![statusJSON isKindOfClass:[NSString class]]) {
@@ -2055,6 +1876,9 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     return StrappySessionStringFromCString(
       strappy_session_webview_set_processing_status_js(
         [statusJSON UTF8String]));
+  }
+  if (![streamEvent isEqualToString:@"ledger_changed"]) {
+    return @"";
   }
 
   sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
@@ -2085,15 +1909,6 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     return @"";
   }
 
-  if ([streamEvent isEqualToString:@"turn_finished"]) {
-    NSString *clearJS;
-    NSString *updateJS;
-
-    clearJS = StrappySessionStringFromCString(
-      strappy_session_webview_clear_processing_status_js());
-    updateJS = StrappySessionStringFromCString(js);
-    return [clearJS stringByAppendingString:updateJS];
-  }
   return StrappySessionStringFromCString(js);
 }
 
@@ -2388,6 +2203,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
 }
 
 - (NSDictionary *)submitPrompt:(NSString *)prompt
+                       context:(NSDictionary *)context
                          error:(NSError **)error
 {
   NSString *databasePath;
@@ -2398,85 +2214,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   long long sessionId;
   strappy_session_record record;
   NSDictionary *session;
-
-  if ((prompt == nil) || ([prompt length] == 0U)) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Prompt is empty.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:4
-                               userInfo:userInfo];
-    }
-    return nil;
-  }
-
-  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier_ longLongValue] : 0LL;
-  if (sessionId <= 0) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:userInfo];
-    }
-    return nil;
-  }
-
-  systemPromptTemplatePath = [StrappySession systemPromptTemplatePathWithError:error];
-  if (systemPromptTemplatePath == nil) {
-    return nil;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return nil;
-  }
-
-  apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
-  apiToken = [[StrappyKeychain sharedKeychain] apiToken];
-
-  strappy_session_record_init(&record);
-  strappyError = NULL;
-  if (!strappy_session_send_prompt_and_load(
-        [prompt UTF8String],
-        StrappySessionOptionalCString(apiEndpoint),
-        StrappySessionOptionalCString(apiToken),
-        [systemPromptTemplatePath fileSystemRepresentation],
-        [databasePath UTF8String],
-        sessionId,
-        &record,
-        &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    strappy_session_record_destroy(&record);
-    return nil;
-  }
-
-  session = [StrappySession dictionaryFromSessionRecord:&record];
-  strappy_session_record_destroy(&record);
-  return session;
-}
-
-- (NSDictionary *)submitPrompt:(NSString *)prompt
-                      streaming:(BOOL)streaming
-                        context:(NSDictionary *)context
-                          error:(NSError **)error
-{
-  NSString *databasePath;
-  NSString *systemPromptTemplatePath;
-  NSString *apiEndpoint;
-  NSString *apiToken;
-  char *strappyError;
-  long long sessionId;
-  strappy_session_record record;
-  NSDictionary *session;
-  StrappySessionStreamContext streamContext;
+  StrappySessionResponsesContext responsesContext;
 
   if ((prompt == nil) || ([prompt length] == 0U)) {
     if (error != nil) {
@@ -2519,26 +2257,25 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     return nil;
   }
 
-  streamContext.session = self;
-  streamContext.context = [context retain];
+  responsesContext.session = self;
+  responsesContext.context = [context retain];
   apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
   apiToken = [[StrappyKeychain sharedKeychain] apiToken];
 
   strappy_session_record_init(&record);
   strappyError = NULL;
-  if (!strappy_session_submit_prompt_with_events_and_load(
+  if (!strappy_session_send_prompt_with_events_and_load(
         [prompt UTF8String],
         StrappySessionOptionalCString(apiEndpoint),
         StrappySessionOptionalCString(apiToken),
         [systemPromptTemplatePath fileSystemRepresentation],
         [databasePath UTF8String],
         sessionId,
-        streaming ? 1 : 0,
-        StrappySessionHandleStreamEvent,
-        &streamContext,
+        StrappySessionHandleResponsesEvent,
+        &responsesContext,
         &record,
         &strappyError)) {
-    [streamContext.context release];
+    [responsesContext.context release];
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
@@ -2546,17 +2283,16 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     strappy_session_record_destroy(&record);
     return nil;
   }
-  [streamContext.context release];
+  [responsesContext.context release];
 
   session = [StrappySession dictionaryFromSessionRecord:&record];
   strappy_session_record_destroy(&record);
   return session;
 }
 
-- (BOOL)beginPrompt:(NSString *)prompt
-            context:(NSDictionary *)context
-          streaming:(BOOL)streaming
-              error:(NSError **)error
+- (BOOL)beginResponsesPrompt:(NSString *)prompt
+                     context:(NSDictionary *)context
+                       error:(NSError **)error
 {
   NSMutableDictionary *request;
 
@@ -2600,7 +2336,6 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
 
   request = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
     prompt, @"prompt",
-    [NSNumber numberWithBool:streaming], @"streaming",
     nil];
   if (context != nil) {
     [request setObject:context forKey:@"context"];
@@ -2629,7 +2364,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
                          context:(NSDictionary *)context
                            error:(NSError **)error
 {
-  return [self beginPrompt:prompt context:context streaming:NO error:error];
+  return [self beginResponsesPrompt:prompt context:context error:error];
 }
 
 - (void)sendPromptInBackground:(NSDictionary *)request
@@ -2641,8 +2376,6 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   NSMutableDictionary *result;
   NSString *prompt;
   NSString *errorMessage;
-  NSNumber *streamingValue;
-  BOOL shouldStream;
 
   pool = [[NSAutoreleasePool alloc] init];
 
@@ -2654,10 +2387,6 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   if (![context isKindOfClass:[NSDictionary class]]) {
     context = nil;
   }
-  streamingValue = [request objectForKey:@"streaming"];
-  shouldStream = (![streamingValue isKindOfClass:[NSNumber class]] ||
-                  [streamingValue boolValue]) ? YES : NO;
-
   result = [[NSMutableDictionary alloc] init];
   if (context != nil) {
     [result addEntriesFromDictionary:context];
@@ -2665,7 +2394,6 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
 
   error = nil;
   session = [self submitPrompt:prompt
-                     streaming:shouldStream
                        context:context
                          error:&error];
   if (session != nil) {
@@ -2678,7 +2406,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     [result setObject:errorMessage forKey:@"error"];
   }
 
-  [self performSelectorOnMainThread:@selector(streamingPromptDidFinish:)
+  [self performSelectorOnMainThread:@selector(promptDidFinish:)
                          withObject:result
                       waitUntilDone:NO];
   [result release];
@@ -2686,7 +2414,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   [pool release];
 }
 
-- (void)streamingPromptDidFinish:(NSDictionary *)result
+- (void)promptDidFinish:(NSDictionary *)result
 {
   NSMutableDictionary *userInfo;
   NSDictionary *summary;

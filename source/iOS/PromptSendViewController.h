@@ -13,8 +13,6 @@
         setSelectedModelIdentifier:(NSString *)modelIdentifier;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
              setWebSearchEnabled:(BOOL)enabled;
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-              setStreamingEnabled:(BOOL)enabled;
 - (void)promptSendViewControllerDidCancelPrompt:
     (PromptSendViewController *)controller;
 - (void)promptSendViewControllerDidChangeHeight:
@@ -31,7 +29,6 @@
 - (void)setSending:(BOOL)sending;
 - (void)setCancellationRequested:(BOOL)requested;
 - (void)setWebSearchEnabled:(BOOL)enabled;
-- (void)setStreamingEnabled:(BOOL)enabled;
 - (void)reloadOptionsMenu;
 - (BOOL)canSendCurrentPrompt;
 - (void)performSend:(id)sender;

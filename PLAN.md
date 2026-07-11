@@ -38,31 +38,29 @@ Deliverables:
 - [x] Build system updates so shared core code and third-party libraries link
   into both iOS and macOS targets.
 
-## Phase 2: OpenRouter Assistant Client
+## Phase 2: OpenRouter Responses Client
 
-Goal: make the app able to send chat requests to OpenRouter/OpenAI-compatible
-APIs and parse assistant responses reliably.
+Goal: send typed Responses API requests through OpenRouter and persist the
+complete request/response ledger reliably.
 
 Deliverables:
 
-- [x] C request builder for chat messages and model selection.
+- [x] C request builder for Responses input items, tools, instructions, and
+  model selection.
 - [x] OpenRouter `/models/user` catalog fetch, local persistence, searchable
   and sortable macOS model picker UI, default model selection for new chats,
   user-managed allowed-model whitelist, and per-session model selection from
   allowed models.
-- [x] C request builder support for loading tool definitions from
-  `GuidanceTools.json`, including a tool allowlist for memory-audit turns.
-- [x] C response parser for assistant text, finish reasons, and API errors.
-- [x] C client preservation of non-streamed and streamed assistant
-  `tool_calls`, streamed tool-call deltas, and reasoning text for the assistant
-  loop.
+- [x] C request builder support for loading Responses tool definitions from
+  `GuidanceTools.json`.
+- [x] Typed Responses parser for output items, reasoning, function calls,
+  function outputs, usage, and API errors.
+- [x] Exact raw request/response persistence for every Responses API attempt.
 - [x] Timeout policy for network requests.
-- [x] Request cancellation hook for the UI layer. The macOS prompt bar and Chat
-  menu can request cancellation, and streamed requests propagate that request
-  through `StrappySession` to the client/assistant loop.
-- [x] Minimal Objective-C bridge functions to submit a prompt and receive
-  streamed or complete response text, reasoning deltas, tool events, and turn
-  events.
+- [x] Request cancellation hook for the UI layer that aborts active Responses
+  transfers and retry waits.
+- [x] Minimal Objective-C bridge for prompt submission, processing status, and
+  committed Responses-ledger updates.
 
 ## Phase 3: SQLite Discovery And Catalog
 
@@ -148,10 +146,9 @@ Deliverables:
   synchronized with the stable tool names and stricter current guidance that
   requires `database_list_info` / `database_context_read` before querying,
   explicit timestamp units, and no invented schema or private facts.
-- [x] Bounded multi-round tool execution loop for chat completions: capture
-  assistant `tool_calls`, execute registered local tools, send `role: "tool"`
-  results back to the model, and repeat until the model returns final text or
-  reaches the 20-round tool limit.
+- [x] Bounded multi-round Responses tool loop: execute typed function calls,
+  append `function_call_output` items, and continue until final output or the
+  round limit.
 - [x] Post-answer memory-audit turn that can call `helper_session_name_write`,
   `memory_user_fact_remember`, and `memory_database_hint_remember` with an
   allowlisted tool set and `context_policy = omit`.
@@ -176,25 +173,23 @@ that works on old iOS and macOS targets.
 Deliverables:
 
 - [x] Embedded web chat UI suitable for legacy WebKit/UIWebView-era platforms.
-- [x] Native bridge between the web UI and Objective-C/C assistant core for
-  prompt submission, streaming text, reasoning, tool events, and turn events.
+- [x] Native bridge between the web UI and Objective-C/C Responses core for
+  prompt submission, processing status, cancellation, and ledger updates.
 - [x] Conversation list, active conversation view, message composer, loading
-  state, error state, and cancel action. macOS exposes a Send/Cancel button and
-  an options menu for allowed model selection and streaming in the prompt bar,
-  plus Chat menu commands for New Session, Send Prompt, Cancel Prompt, and
-  Streaming.
+  state, error state, and cancel action. The iOS prompt options expose model
+  selection and web search; the obsolete streaming option has been removed.
 - [x] macOS Preferences tabs for API credentials, sortable model catalog
   browsing/search with allowed-model checkboxes and a default-model picker,
   database scanning/approval, and read-only system prompt inspection.
 - [x] Local conversation persistence in sqlite using `sessions`,
-  `session_turns`, and `session_messages`; the old empty/non-started session
-  path has been removed.
+  `response_api_calls`, `response_api_items`, response item parts, and tool
+  executions.
 - [x] Session titles written by `helper_session_name_write` when the active
   session is untitled.
 - [x] Tool activity display for tool-call inputs and tool outputs, including
   dynamic JSON object rendering and tool-error visualization.
-- [x] Reasoning display for streamed and persisted assistant/harness messages,
-  with collapsed rendering for completed reasoning blocks.
+- [x] Reasoning display for persisted typed Responses reasoning items, with
+  collapsed rendering for completed reasoning blocks.
 - [x] Database approval flow that lets the user whitelist found databases.
   macOS home-folder scan/rescan and approval checkboxes exist; explicit deny
   and forget states are intentionally out of scope because unapproved databases
@@ -286,12 +281,10 @@ implementation plan:
   policies and database/query limits stay code constants so safety behavior is
   deterministic across deployments.
 - Additional generation-setting configuration. Endpoint, model selection,
-  allowed-model whitelisting, streaming, reasoning, and stream usage are enough
-  for now; extra provider knobs would add UI/config noise.
-- Public stable parsed tool-call result API outside the assistant loop. Stream
-  events and persisted `session_messages` are the supported surface.
-- Retry policy for transient network failures. Manual retry is preferred to
-  avoid duplicating paid model requests or local tool work.
+  allowed-model whitelisting, and web search are enough for now; extra provider
+  knobs would add UI/config noise.
+- Public stable parsed tool-call result API outside the Responses loop. Typed
+  persisted response items are the supported surface.
 - Persisted deterministic schema facts for approved databases. Live schema via
   `database_context_read` avoids stale catalog facts and migration burden.
 - Proactive prompt context builder for available-database summaries. Tool-first

@@ -216,70 +216,31 @@ static int strappy_session_load_after_prompt(const char *db_path,
   return strappy_session_load_record(db_path, session_id, record, error_out);
 }
 
-int strappy_session_send_prompt_and_load(
+int strappy_session_send_prompt_with_events_and_load(
   const char *prompt,
   const char *api_endpoint,
   const char *api_token,
   const char *system_prompt_template_path,
   const char *db_path,
   long long session_id,
-  strappy_session_record *record,
-  char **error_out)
-{
-  char *response;
-
-  response =
-    strappy_responses_send_prompt_for_session_and_store(
-      prompt,
-      NULL,
-      api_endpoint,
-      api_token,
-      system_prompt_template_path,
-      db_path,
-      session_id,
-      error_out);
-  return strappy_session_load_after_prompt(db_path,
-                                           session_id,
-                                           response,
-                                           record,
-                                           error_out);
-}
-
-int strappy_session_submit_prompt_with_events_and_load(
-  const char *prompt,
-  const char *api_endpoint,
-  const char *api_token,
-  const char *system_prompt_template_path,
-  const char *db_path,
-  long long session_id,
-  int streaming,
-  strappy_chat_stream_callback callback,
+  strappy_responses_event_callback callback,
   void *callback_data,
   strappy_session_record *record,
   char **error_out)
 {
   char *response;
 
-  if (streaming) {
-    (void)callback;
-    (void)callback_data;
-    strappy_set_error(error_out,
-                      "Streaming Responses API support is intentionally disabled.");
-    return 0;
-  } else {
-    response =
-      strappy_responses_send_prompt_for_session_and_store_with_events(
-      prompt,
-      NULL,
-      api_endpoint,
-      api_token,
-      system_prompt_template_path,
-      db_path,
-      session_id,
-      callback,
-      callback_data,
-      error_out);
-  }
+  response = strappy_responses_send_prompt_for_session_and_store_with_events(
+    prompt,
+    NULL,
+    api_endpoint,
+    api_token,
+    system_prompt_template_path,
+    db_path,
+    session_id,
+    callback,
+    callback_data,
+    error_out);
 
   return strappy_session_load_after_prompt(db_path,
                                            session_id,
@@ -355,42 +316,10 @@ char *strappy_session_webview_messages_page_html(const char *messages_html,
   return page_html;
 }
 
-char *strappy_session_webview_append_message_text_by_key_js(
-  const char *message_key,
-  const char *delta)
-{
-  return strappy_webview_append_message_text_by_key_js(message_key, delta);
-}
-
-char *strappy_session_webview_append_reasoning_text_by_key_js(
-  const char *message_key,
-  const char *delta)
-{
-  return strappy_webview_append_reasoning_text_by_key_js(message_key, delta);
-}
-
-char *strappy_session_webview_move_message_text_to_reasoning_by_key_js(
-  const char *message_key)
-{
-  return strappy_webview_move_message_text_to_reasoning_by_key_js(message_key);
-}
-
 char *strappy_session_webview_set_processing_status_js(
   const char *status_json)
 {
   return strappy_webview_set_processing_status_js(status_json);
-}
-
-char *strappy_session_webview_clear_processing_status_js(void)
-{
-  return strappy_webview_clear_processing_status_js();
-}
-
-char *strappy_session_webview_message_update_js(
-  const strappy_webview_message *message,
-  const strappy_webview_labels *labels)
-{
-  return strappy_webview_message_update_js(message, labels);
 }
 
 static void strappy_session_webview_message_from_record(

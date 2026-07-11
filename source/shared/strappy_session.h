@@ -85,24 +85,14 @@ int strappy_session_update_model(const char *db_path,
                                  const char *model_id,
                                  char **error_out);
 
-int strappy_session_send_prompt_and_load(
+int strappy_session_send_prompt_with_events_and_load(
   const char *prompt,
   const char *api_endpoint,
   const char *api_token,
   const char *system_prompt_template_path,
   const char *db_path,
   long long session_id,
-  strappy_session_record *record,
-  char **error_out);
-int strappy_session_submit_prompt_with_events_and_load(
-  const char *prompt,
-  const char *api_endpoint,
-  const char *api_token,
-  const char *system_prompt_template_path,
-  const char *db_path,
-  long long session_id,
-  int streaming,
-  strappy_chat_stream_callback callback,
+  strappy_responses_event_callback callback,
   void *callback_data,
   strappy_session_record *record,
   char **error_out);
@@ -118,20 +108,8 @@ char *strappy_session_webview_batched_js(const char *java_script);
 char *strappy_session_webview_messages_page_html(const char *messages_html,
                                                  const char *resource_dir,
                                                  const char *error_text);
-char *strappy_session_webview_append_message_text_by_key_js(
-  const char *message_key,
-  const char *delta);
-char *strappy_session_webview_append_reasoning_text_by_key_js(
-  const char *message_key,
-  const char *delta);
-char *strappy_session_webview_move_message_text_to_reasoning_by_key_js(
-  const char *message_key);
 char *strappy_session_webview_set_processing_status_js(
   const char *status_json);
-char *strappy_session_webview_clear_processing_status_js(void);
-char *strappy_session_webview_message_update_js(
-  const strappy_webview_message *message,
-  const strappy_webview_labels *labels);
 char *strappy_session_webview_message_update_js_for_key(
   const char *db_path,
   long long session_id,

@@ -18,9 +18,6 @@
 - (void)sendCurrentPrompt:(id)sender;
 - (BOOL)canCancelCurrentPrompt;
 - (void)cancelCurrentPrompt:(id)sender;
-- (BOOL)canToggleStreaming;
-- (BOOL)streamingEnabled;
-- (void)toggleStreaming:(id)sender;
 - (NSArray *)availableModels;
 - (NSString *)selectedModelIdentifier;
 - (BOOL)canSelectModel;

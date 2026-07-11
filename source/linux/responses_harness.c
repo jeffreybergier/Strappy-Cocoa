@@ -192,7 +192,7 @@ static long long harness_now_ms(void)
 }
 
 static int harness_record_ledger_event(
-  const strappy_chat_stream_event *event,
+  const strappy_responses_event *event,
   void *user_data)
 {
   harness_ledger_event_recorder *recorder;
@@ -206,8 +206,7 @@ static int harness_record_ledger_event(
     return 1;
   }
 
-  if ((event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) &&
-      ((event->text == NULL) || (event->text[0] == '\0'))) {
+  if (event->type == STRAPPY_RESPONSES_EVENT_CANCELLATION_POLL) {
     long long now_ms;
 
     recorder->saw_cancellation_poll = 1;
@@ -225,7 +224,7 @@ static int harness_record_ledger_event(
     return 1;
   }
 
-  if (event->type == STRAPPY_CHAT_STREAM_EVENT_PROCESSING_STATUS) {
+  if (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) {
     cJSON *root;
     cJSON *active;
     cJSON *kind;
@@ -281,7 +280,7 @@ static int harness_record_ledger_event(
   opened = sqlite3_open(recorder->db_path, &db) == SQLITE_OK;
   call_count = 0LL;
   pending_count = 0LL;
-  if ((event->type != STRAPPY_CHAT_STREAM_EVENT_LEDGER_CHANGED) ||
+  if ((event->type != STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED) ||
       (event->kind == NULL) ||
       (strcmp(event->kind, "response_api_call") != 0) ||
       (event->message_key == NULL) ||
