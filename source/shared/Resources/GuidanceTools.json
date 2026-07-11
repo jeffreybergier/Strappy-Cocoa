@@ -1,24 +1,13 @@
 {
-  "assistant_prompts": {
-    "learning_summary": "Learning (internal harness task, not user request):\n- NEVER answer the user.\n- NEVER revise the user-visible answer.\n- ALWAYS call helper_session_name_write with one short title.\n- ALWAYS call memory_user_fact_remember for each new stable user fact from the completed turn.\n- ALWAYS call memory_database_hint_remember for each reusable evidence-backed database hint from the completed turn.\n- NEVER write memory when there is no new fact or hint.\n- NEVER store secrets, credentials, sensitive identifiers, long copied content, private row contents, or raw message text.\n- Reply exactly: Learning Summary Complete",
-    "learning_summary_completion": "Learning Summary Complete",
-    "final_answer": "You were interrupted, please continue where you left off."
-  },
   "assistant_messages": {
-    "tool_round_limit": "I reached the 50-round tool limit while inspecting local data, so I could not finish a reliable answer. Please ask a narrower question or continue with a more specific follow-up.",
-    "tool_audit_reminder": "Before finalizing, audit the user's request against the available tools and the system instructions. No function calls have been made for this request. Call every tool that is actually needed now, and do not call irrelevant tools. If no tool is needed, return the final answer directly."
-  },
-  "tool_errors": {
-    "default": "Tool failed.",
-    "not_allowed_for_turn": "Tool is not allowed for this turn.",
-    "database_query_missing_file": "The approved database file is no longer present on disk. NEVER retry the same database_id. Tell the user to rescan or manage databases, then call database_list_info again before querying."
+    "tool_round_limit": "Tool limit reached.",
+    "tool_audit_reminder": "Continue."
   },
   "tools": [
     {
       "type": "function",
       "function": {
         "name": "database_list_info",
-        "description": "ALWAYS call database_list_info before choosing a database_id. It lists approved SQLite databases only. NEVER infer raw paths or full schema from this list.",
         "parameters": {
           "type": "object",
           "properties": {},
@@ -31,17 +20,14 @@
       "type": "function",
       "function": {
         "name": "database_query",
-        "description": "Call database_query to run exactly one bounded read-only SELECT or EXPLAIN against one approved database_id. NEVER use PRAGMA, ATTACH, writes, paths, multiple statements, or limit-changing SQL. If a result has truncated true, ALWAYS query the next page.",
         "parameters": {
           "type": "object",
           "properties": {
             "database_id": {
-              "type": "string",
-              "description": "ALWAYS use a database_id returned by database_list_info. NEVER use filenames or filesystem paths."
+              "type": "string"
             },
             "sql": {
-              "type": "string",
-              "description": "SQL text. ALWAYS use one SELECT or EXPLAIN. NEVER use PRAGMA, ATTACH, writes, multiple statements, filesystem paths, or limit settings. ALWAYS include ORDER BY for timelines. ALWAYS inspect typeof() and sample values before filtering ambiguous flag or status columns."
+              "type": "string"
             }
           },
           "required": [
@@ -50,27 +36,20 @@
           ],
           "additionalProperties": false
         }
-      },
-      "x-strappy-display": {
-        "promoted_argument": "database_id",
-        "transform": "database_filename"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "helper_datetime_to_iso8601",
-        "description": "Call helper_datetime_to_iso8601 to convert numeric timestamps to UTC ISO8601. ALWAYS include unit. NEVER rely on tool defaults. You are reading databases from Mac OS X or iPhone apps, so the timestamp COULD be UNIX or Apple. ALWAYS confirm the returned date make sense in context.",
         "parameters": {
           "type": "object",
           "properties": {
             "timestamps": {
-              "type": "string",
-              "description": "Comma-separated numeric timestamps from database rows. NEVER mix different timestamp columns or epochs in one call."
+              "type": "string"
             },
             "unit": {
               "type": "string",
-              "description": "Timestamp unit and epoch. ALWAYS set this explicitly.",
               "enum": [
                 "unix_seconds",
                 "unix_milliseconds",
@@ -94,17 +73,14 @@
       "type": "function",
       "function": {
         "name": "helper_datetime_from_iso8601",
-        "description": "Call helper_datetime_from_iso8601 to convert UTC ISO8601 datetimes or YYYY-MM-DD dates to numeric timestamps. ALWAYS include unit. NEVER rely on tool defaults.",
         "parameters": {
           "type": "object",
           "properties": {
             "datetimes": {
-              "type": "string",
-              "description": "Comma-separated UTC ISO8601 datetimes or YYYY-MM-DD dates."
+              "type": "string"
             },
             "unit": {
               "type": "string",
-              "description": "Timestamp unit and epoch. ALWAYS set this explicitly.",
               "enum": [
                 "unix_seconds",
                 "unix_milliseconds",
@@ -128,17 +104,14 @@
       "type": "function",
       "function": {
         "name": "helper_fontawesome_shortcode_search",
-        "description": "Call helper_fontawesome_shortcode_search to find available Font Awesome shortcodes by topic or keyword.",
         "parameters": {
           "type": "object",
           "properties": {
             "query": {
-              "type": "string",
-              "description": "Icon purpose or name, such as warning, calendar, database, github, or send. Use short focused words."
+              "type": "string"
             },
             "style": {
               "type": "string",
-              "description": "Font Awesome style filter.",
               "enum": [
                 "solid",
                 "regular",
@@ -146,29 +119,23 @@
               ]
             },
             "limit": {
-              "type": "integer",
-              "description": "Maximum icons. Default is 20. Maximum is 50."
+              "type": "integer"
             }
           },
           "required": [],
           "additionalProperties": false
         }
-      },
-      "x-strappy-display": {
-        "promoted_argument": "query"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "helper_fontawesome_shortcode_confirm",
-        "description": "ALWAYS call helper_fontawesome_shortcode_confirm before using Font Awesome shortcodes in a user-facing answer. NEVER output unconfirmed Font Awesome shortcodes.",
         "parameters": {
           "type": "object",
           "properties": {
             "shortcodes": {
               "type": "array",
-              "description": "Font Awesome shortcodes to confirm. Use full shortcodes like [fa:heart] or [fa:brands:github]. NEVER include unicode emoji.",
               "items": {
                 "type": "string"
               },
@@ -181,72 +148,54 @@
           ],
           "additionalProperties": false
         }
-      },
-      "x-strappy-display": {
-        "promoted_argument": "shortcodes",
-        "transform": "comma_separated"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "memory_user_fact_read",
-        "description": "ALWAYS call memory_user_fact_read before answering personal-context questions. Read stable remembered user facts only.",
         "parameters": {
           "type": "object",
           "properties": {
             "query": {
-              "type": "string",
-              "description": "Text search. Use the person, project, place, or topic from the user's request."
+              "type": "string"
             },
             "kind": {
-              "type": "string",
-              "description": "Exact kind filter."
+              "type": "string"
             },
             "limit": {
-              "type": "integer",
-              "description": "Maximum facts. Default is 20. Maximum is 50."
+              "type": "integer"
             }
           },
           "required": [],
           "additionalProperties": false
         }
-      },
-      "x-strappy-display": {
-        "promoted_argument": "query"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "memory_user_fact_remember",
-        "description": "Call memory_user_fact_remember to save one small stable user fact. ALWAYS store only durable facts. NEVER store secrets, credentials, sensitive identifiers, raw message text, private row contents, or long copied content.",
         "parameters": {
           "type": "object",
           "properties": {
             "kind": {
-              "type": "string",
-              "description": "Fact category. Use a short stable category."
+              "type": "string"
             },
             "subject": {
-              "type": "string",
-              "description": "Who or what the fact is about."
+              "type": "string"
             },
             "predicate": {
-              "type": "string",
-              "description": "Relationship or property name."
+              "type": "string"
             },
             "value": {
-              "type": "string",
-              "description": "Small stable fact value. NEVER paste private row content."
+              "type": "string"
             },
             "confidence": {
-              "type": "number",
-              "description": "Confidence from 0.0 to 1.0. Default is 0.75."
+              "type": "number"
             },
             "source": {
-              "type": "string",
-              "description": "Short source label. Use the database filename or tool source."
+              "type": "string"
             }
           },
           "required": [
@@ -257,22 +206,17 @@
           ],
           "additionalProperties": false
         }
-      },
-      "x-strappy-display": {
-        "promoted_argument": "subject"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "memory_user_fact_forget",
-        "description": "Call memory_user_fact_forget to forget one remembered user fact by exact id. NEVER guess ids.",
         "parameters": {
           "type": "object",
           "properties": {
             "id": {
-              "type": "integer",
-              "description": "Fact id returned by memory_user_fact_read."
+              "type": "integer"
             }
           },
           "required": [
@@ -280,23 +224,17 @@
           ],
           "additionalProperties": false
         }
-      },
-      "x-strappy-display": {
-        "promoted_argument": "id",
-        "transform": "identifier"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "helper_session_name_write",
-        "description": "Call helper_session_name_write during memory audit to set one short title for an untitled active chat. NEVER write a long title.",
         "parameters": {
           "type": "object",
           "properties": {
             "name": {
-              "type": "string",
-              "description": "Short title based on the user's request. ALWAYS use plain professional wording."
+              "type": "string"
             }
           },
           "required": [
@@ -304,77 +242,58 @@
           ],
           "additionalProperties": false
         }
-      },
-      "x-strappy-display": {
-        "promoted_argument": "name"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "database_context_read",
-        "description": "ALWAYS call database_context_read before querying a database. It returns metadata, live simplified schema, and saved hints. NEVER invent table names, columns, joins, timestamp units, or database facts.",
         "parameters": {
           "type": "object",
           "properties": {
             "database_id": {
-              "type": "string",
-              "description": "database_id returned by database_list_info. ALWAYS use this before database_query."
+              "type": "string"
             },
             "query": {
-              "type": "string",
-              "description": "Text search across saved database hints."
+              "type": "string"
             },
             "kind": {
-              "type": "string",
-              "description": "Exact hint kind."
+              "type": "string"
             },
             "limit": {
-              "type": "integer",
-              "description": "Maximum hints. Default is 20. Maximum is 50."
+              "type": "integer"
             }
           },
           "required": [],
           "minProperties": 1,
           "additionalProperties": false
         }
-      },
-      "x-strappy-display": {
-        "promoted_argument": "database_id",
-        "transform": "database_filename"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "memory_database_hint_remember",
-        "description": "Call memory_database_hint_remember to save one reusable evidence-backed database hint. ALWAYS include evidence. NEVER store secrets, sensitive identifiers, private row content, raw message text, or long copied content.",
         "parameters": {
           "type": "object",
           "properties": {
             "database_id": {
-              "type": "string",
-              "description": "database_id returned by database_list_info. NEVER use filenames or filesystem paths."
+              "type": "string"
             },
             "kind": {
-              "type": "string",
-              "description": "Hint category."
+              "type": "string"
             },
             "title": {
-              "type": "string",
-              "description": "Short title. Use plain professional wording."
+              "type": "string"
             },
             "content": {
-              "type": "string",
-              "description": "Reusable database hint. Store schema, join, timestamp, or query-shape guidance only."
+              "type": "string"
             },
             "evidence": {
-              "type": "string",
-              "description": "Short evidence or sample-query note. NEVER include private row contents."
+              "type": "string"
             },
             "confidence": {
-              "type": "number",
-              "description": "Confidence from 0.0 to 1.0. Default is 0.75."
+              "type": "number"
             }
           },
           "required": [
@@ -385,23 +304,17 @@
           ],
           "additionalProperties": false
         }
-      },
-      "x-strappy-display": {
-        "promoted_argument": "database_id",
-        "transform": "database_filename"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "memory_database_hint_forget",
-        "description": "Call memory_database_hint_forget to forget one remembered database hint by exact id. NEVER guess ids.",
         "parameters": {
           "type": "object",
           "properties": {
             "id": {
-              "type": "integer",
-              "description": "Hint id returned by database_context_read."
+              "type": "integer"
             }
           },
           "required": [
@@ -409,10 +322,6 @@
           ],
           "additionalProperties": false
         }
-      },
-      "x-strappy-display": {
-        "promoted_argument": "id",
-        "transform": "database_hint_filename"
       }
     }
   ]
