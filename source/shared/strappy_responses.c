@@ -240,16 +240,44 @@ static const char *strappy_responses_retry_status_reason(
   return "";
 }
 
-static void strappy_responses_sleep_ms(long milliseconds)
+static int strappy_responses_poll_cancelled(
+  strappy_chat_stream_callback callback,
+  void *callback_data)
+{
+  strappy_chat_stream_event event;
+
+  if (callback == NULL) {
+    return 0;
+  }
+  memset(&event, 0, sizeof(event));
+  event.type = STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA;
+  event.text = "";
+  return callback(&event, callback_data) ? 0 : 1;
+}
+
+static int strappy_responses_sleep_ms(long milliseconds,
+                                      strappy_chat_stream_callback callback,
+                                      void *callback_data)
 {
   struct timeval delay;
+  long remaining;
+  long interval;
 
   if (milliseconds <= 0L) {
-    return;
+    return strappy_responses_poll_cancelled(callback, callback_data) ? 0 : 1;
   }
-  delay.tv_sec = milliseconds / 1000L;
-  delay.tv_usec = (milliseconds % 1000L) * 1000L;
-  select(0, NULL, NULL, NULL, &delay);
+  remaining = milliseconds;
+  while (remaining > 0L) {
+    if (strappy_responses_poll_cancelled(callback, callback_data)) {
+      return 0;
+    }
+    interval = (remaining > 100L) ? 100L : remaining;
+    delay.tv_sec = interval / 1000L;
+    delay.tv_usec = (interval % 1000L) * 1000L;
+    select(0, NULL, NULL, NULL, &delay);
+    remaining -= interval;
+  }
+  return strappy_responses_poll_cancelled(callback, callback_data) ? 0 : 1;
 }
 
 static void strappy_responses_owned_items_init(
@@ -1112,7 +1140,8 @@ static int strappy_responses_http_is_success(
   const strappy_responses_analysis *analysis)
 {
   if ((http == NULL) || (analysis == NULL) ||
-      (http->transport_error != NULL) || (http->http_status < 200L) ||
+      http->cancelled || (http->transport_error != NULL) ||
+      (http->http_status < 200L) ||
       (http->http_status >= 300L) || !analysis->valid_response ||
       analysis->has_api_error) {
     return 0;
@@ -1128,7 +1157,8 @@ static int strappy_responses_output_is_canonical(
   const strappy_responses_analysis *analysis)
 {
   if ((http == NULL) || (analysis == NULL) ||
-      (http->transport_error != NULL) || (http->http_status < 200L) ||
+      http->cancelled || (http->transport_error != NULL) ||
+      (http->http_status < 200L) ||
       (http->http_status >= 300L) || !analysis->valid_response ||
       analysis->has_api_error) {
     return 0;
@@ -1143,6 +1173,9 @@ static int strappy_responses_should_retry(
   const strappy_responses_analysis *analysis)
 {
   if (http == NULL) {
+    return 0;
+  }
+  if (http->cancelled) {
     return 0;
   }
   if (http->transport_error != NULL) {
@@ -1165,6 +1198,9 @@ static const char *strappy_responses_call_state(
   const strappy_responses_analysis *analysis,
   int client_ok)
 {
+  if ((http != NULL) && http->cancelled) {
+    return "cancelled";
+  }
   if (!client_ok) {
     return "client_error";
   }
@@ -1322,7 +1358,11 @@ static char *strappy_responses_failure_message(
   char buffer[1024];
   int written;
 
-  if ((http != NULL) && (http->transport_error != NULL)) {
+  if ((http != NULL) && http->cancelled) {
+    written = snprintf(buffer,
+                       sizeof(buffer),
+                       "Responses request was cancelled.");
+  } else if ((http != NULL) && (http->transport_error != NULL)) {
     written = snprintf(buffer,
                        sizeof(buffer),
                        "Responses request failed: %s",
@@ -1368,10 +1408,13 @@ static long strappy_responses_retry_delay_ms(
   long delay;
 
   delay = fallback_delay_ms;
-  if ((http != NULL) && (http->retry_after_seconds > 0L) &&
-      (http->retry_after_seconds <=
-       (STRAPPY_RESPONSES_MAX_RETRY_DELAY_MS / 1000L))) {
-    delay = http->retry_after_seconds * 1000L;
+  if ((http != NULL) && (http->retry_after_seconds > 0L)) {
+    if (http->retry_after_seconds >=
+        (STRAPPY_RESPONSES_MAX_RETRY_DELAY_MS / 1000L)) {
+      delay = STRAPPY_RESPONSES_MAX_RETRY_DELAY_MS;
+    } else {
+      delay = http->retry_after_seconds * 1000L;
+    }
   }
   if (delay > STRAPPY_RESPONSES_MAX_RETRY_DELAY_MS) {
     delay = STRAPPY_RESPONSES_MAX_RETRY_DELAY_MS;
@@ -1538,14 +1581,17 @@ static int strappy_responses_send_round(
 
     strappy_responses_http_result_init(&http);
     strappy_responses_analysis_init(&analysis);
-    client_ok = strappy_client_send_responses_json_once(&runtime->config,
-                                                        request_json,
-                                                        &http,
-                                                        error_out);
-    analyze_ok = client_ok ?
+    client_ok = strappy_client_send_responses_json_once_with_events(
+      &runtime->config,
+      request_json,
+      &http,
+      callback,
+      callback_data,
+      error_out);
+    analyze_ok = (client_ok && !http.cancelled) ?
       strappy_responses_analyze_json(http.response_json,
                                      &analysis,
-                                     error_out) : 0;
+                                     error_out) : client_ok;
     if (client_ok && !analyze_ok) {
       if (strappy_responses_finish_call(session_db_path,
                                         call_id,
@@ -1628,9 +1674,14 @@ static int strappy_responses_send_round(
         delay,
         next_attempt,
         retry_reason);
+      if (!strappy_responses_sleep_ms(delay, callback, callback_data)) {
+        strappy_set_error(error_out, "Responses request was cancelled.");
+        *http_out = http;
+        *analysis_out = analysis;
+        return 0;
+      }
       strappy_responses_analysis_destroy(&analysis);
       strappy_responses_http_result_destroy(&http);
-      strappy_responses_sleep_ms(delay);
       strappy_responses_emit_processing_status(
         callback,
         callback_data,

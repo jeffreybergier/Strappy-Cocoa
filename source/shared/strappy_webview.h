@@ -111,7 +111,8 @@ char *strappy_webview_message_html_with_reasoning(
   const strappy_webview_labels *labels);
 char *strappy_webview_messages_page_html(
   const char *messages_html,
-  const char *tool_display_registry_json);
+  const char *tool_display_registry_json,
+  const char *error_text);
 
 char *strappy_webview_append_message_js(const char *message_html);
 char *strappy_webview_replace_message_js(const char *element_id,

@@ -57,7 +57,8 @@ static int harness_check_page_scripts(void)
 
   page_html = strappy_webview_messages_page_html(
     message_html,
-    harness_tool_display_registry_json);
+    harness_tool_display_registry_json,
+    "");
   strappy_webview_free(message_html);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate messages page HTML.\n");
@@ -88,6 +89,13 @@ static int harness_check_page_scripts(void)
        harness_expect_not_contains(page_html, "id=\"load-more\"") &&
        harness_expect_not_contains(page_html, "strappy-action://load-more") &&
        harness_expect_not_contains(page_html, "function prependMessages") &&
+       harness_expect_not_contains(page_html, "id=\"timeline-error\"") &&
+       harness_expect_contains(page_html,
+                               "function clearTimelineError(){"
+                               "var e=byId('timeline-error');") &&
+       harness_expect_contains(page_html,
+                               "function appendMessage(html){"
+                               "clearTimelineError();") &&
        harness_expect_contains(page_html,
                                ".api-tool-card .tool-card-body{"
                                "font-family:inherit;") &&
@@ -425,9 +433,6 @@ static int harness_check_page_scripts(void)
                                "html,body{margin:0;padding:0;"
                                "background:#fff;") &&
        harness_expect_contains(page_html, ".page{padding:0;}") &&
-       harness_expect_not_contains(page_html, ".empty{") &&
-       harness_expect_not_contains(page_html, "id=\"empty\"") &&
-       harness_expect_not_contains(page_html, "function clearEmpty") &&
        harness_expect_not_contains(page_html,
                                    "body.processing-status-active .page") &&
        harness_expect_contains(page_html,
@@ -654,6 +659,44 @@ static int harness_check_page_scripts(void)
   return ok;
 }
 
+static int harness_check_timeline_error_state(void)
+{
+  char *empty_page_html;
+  char *page_html;
+  int ok;
+
+  empty_page_html = strappy_webview_messages_page_html("", "{}", "");
+  if (empty_page_html == NULL) {
+    fprintf(stderr, "Could not generate blank timeline page HTML.\n");
+    return 0;
+  }
+  page_html = strappy_webview_messages_page_html(
+    "",
+    "{}",
+    "Timeline failed <retry> & \"later\"");
+  if (page_html == NULL) {
+    fprintf(stderr, "Could not generate timeline error page HTML.\n");
+    strappy_webview_free(empty_page_html);
+    return 0;
+  }
+
+  ok = harness_expect_not_contains(empty_page_html,
+                                   "<div id=\"timeline-error\"") &&
+       harness_expect_not_contains(empty_page_html, "New Session") &&
+       harness_expect_not_contains(empty_page_html,
+                                   "No session selected.") &&
+       harness_expect_contains(
+         page_html,
+         "<div id=\"timeline-error\" class=\"timeline-error\">"
+         "Timeline failed "
+         "&lt;retry&gt; &amp; &quot;later&quot;</div>") &&
+       harness_expect_not_contains(page_html,
+                                   "Timeline failed <retry>");
+  strappy_webview_free(empty_page_html);
+  strappy_webview_free(page_html);
+  return ok;
+}
+
 static int harness_check_fontawesome_rendering(void)
 {
   strappy_webview_message message;
@@ -676,7 +719,7 @@ static int harness_check_fontawesome_rendering(void)
     return 0;
   }
 
-  page_html = strappy_webview_messages_page_html(message_html, "{}");
+  page_html = strappy_webview_messages_page_html(message_html, "{}", "");
   strappy_webview_free(message_html);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate Font Awesome page HTML.\n");
@@ -1075,7 +1118,7 @@ static int harness_check_harness_prompt_group_collapse(void)
            harness_prompt_html,
            harness_assistant_html);
 
-  page_html = strappy_webview_messages_page_html(messages_html, "{}");
+  page_html = strappy_webview_messages_page_html(messages_html, "{}", "");
   free(messages_html);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate prompt group collapse page HTML.\n");
@@ -1414,6 +1457,9 @@ int main(void)
 {
   strappy_webview_set_font_dir("/tmp/Strappy Fonts");
   if (!harness_check_page_scripts()) {
+    return 1;
+  }
+  if (!harness_check_timeline_error_state()) {
     return 1;
   }
   if (!harness_check_fontawesome_rendering()) {

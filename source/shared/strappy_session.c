@@ -336,7 +336,8 @@ char *strappy_session_webview_batched_js(const char *java_script)
 }
 
 char *strappy_session_webview_messages_page_html(const char *messages_html,
-                                                 const char *resource_dir)
+                                                 const char *resource_dir,
+                                                 const char *error_text)
 {
   char *display_registry_json;
   char *display_error;
@@ -347,7 +348,8 @@ char *strappy_session_webview_messages_page_html(const char *messages_html,
     strappy_tools_display_registry_json(resource_dir, &display_error);
   page_html = strappy_webview_messages_page_html(
     messages_html,
-    (display_registry_json != NULL) ? display_registry_json : "{}");
+    (display_registry_json != NULL) ? display_registry_json : "{}",
+    error_text);
   strappy_free_string(display_registry_json);
   strappy_free_string(display_error);
   return page_html;

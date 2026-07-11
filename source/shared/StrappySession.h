@@ -56,7 +56,8 @@ extern NSString * const StrappySessionModelCatalogDidChangeNotification;
                                     endIndex:(NSUInteger)end;
 + (NSString *)webViewAppendMessagesJavaScriptForHTML:(NSString *)messagesHTML;
 + (NSString *)webViewBatchedJavaScriptForJavaScript:(NSString *)javaScript;
-+ (NSString *)webViewMessagesPageHTMLForMessagesHTML:(NSString *)messagesHTML;
++ (NSString *)webViewMessagesPageHTMLForMessagesHTML:(NSString *)messagesHTML
+                                           errorText:(NSString *)errorText;
 
 - (id)initWithSessionIdentifier:(NSNumber *)sessionIdentifier
                         summary:(NSDictionary *)summary;

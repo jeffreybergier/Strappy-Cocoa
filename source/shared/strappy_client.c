@@ -5781,6 +5781,46 @@ typedef struct strappy_responses_header_context {
   strappy_http_buffer raw_headers;
 } strappy_responses_header_context;
 
+typedef struct strappy_responses_transfer_context {
+  strappy_chat_stream_callback callback;
+  void *callback_data;
+  int cancelled;
+} strappy_responses_transfer_context;
+
+static int strappy_responses_transfer_poll_cancelled(
+  strappy_responses_transfer_context *context)
+{
+  strappy_chat_stream_event event;
+
+  if ((context == NULL) || (context->callback == NULL)) {
+    return 0;
+  }
+
+  memset(&event, 0, sizeof(event));
+  event.type = STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA;
+  event.text = "";
+  if (!context->callback(&event, context->callback_data)) {
+    context->cancelled = 1;
+    return 1;
+  }
+  return 0;
+}
+
+static int strappy_responses_transfer_progress_callback(void *clientp,
+                                                        double dltotal,
+                                                        double dlnow,
+                                                        double ultotal,
+                                                        double ulnow)
+{
+  (void)dltotal;
+  (void)dlnow;
+  (void)ultotal;
+  (void)ulnow;
+
+  return strappy_responses_transfer_poll_cancelled(
+    (strappy_responses_transfer_context *)clientp) ? 1 : 0;
+}
+
 static int strappy_responses_replace_header_value(char **target,
                                                    const char *contents,
                                                    size_t length)
@@ -5936,10 +5976,12 @@ static int strappy_responses_copy_curl_info_string(CURL *curl,
   return (*target != NULL) ? 1 : 0;
 }
 
-int strappy_client_send_responses_json_once(
+int strappy_client_send_responses_json_once_with_events(
   const strappy_config *config,
   const char *request_json,
   strappy_responses_http_result *result,
+  strappy_chat_stream_callback callback,
+  void *callback_data,
   char **error_out)
 {
   CURL *curl;
@@ -5947,6 +5989,7 @@ int strappy_client_send_responses_json_once(
   struct curl_slist *headers;
   strappy_http_buffer response_buffer;
   strappy_responses_header_context header_context;
+  strappy_responses_transfer_context transfer_context;
   char curl_error[CURL_ERROR_SIZE];
   char *auth_header;
   char *url;
@@ -6029,6 +6072,9 @@ int strappy_client_send_responses_json_once(
   strappy_http_buffer_init(&response_buffer);
   header_context.result = result;
   strappy_http_buffer_init(&header_context.raw_headers);
+  memset(&transfer_context, 0, sizeof(transfer_context));
+  transfer_context.callback = callback;
+  transfer_context.callback_data = callback_data;
   memset(curl_error, 0, sizeof(curl_error));
   result->started_at_ms = strappy_client_now_ms();
   result->request_bytes = (long long)request_length;
@@ -6045,6 +6091,11 @@ int strappy_client_send_responses_json_once(
                    strappy_client_write_callback);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response_buffer);
   curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, curl_error);
+  curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+  curl_easy_setopt(curl,
+                   CURLOPT_PROGRESSFUNCTION,
+                   strappy_responses_transfer_progress_callback);
+  curl_easy_setopt(curl, CURLOPT_PROGRESSDATA, (void *)&transfer_context);
   curl_easy_setopt(curl, CURLOPT_USERAGENT, "Strappy/0.1");
   curl_easy_setopt(curl,
                    CURLOPT_TIMEOUT,
@@ -6054,9 +6105,14 @@ int strappy_client_send_responses_json_once(
     curl_easy_setopt(curl, CURLOPT_CAINFO, strappy_cainfo_path);
   }
 
-  code = curl_easy_perform(curl);
+  if (strappy_responses_transfer_poll_cancelled(&transfer_context)) {
+    code = CURLE_ABORTED_BY_CALLBACK;
+  } else {
+    code = curl_easy_perform(curl);
+  }
   result->completed_at_ms = strappy_client_now_ms();
   result->curl_code = (long)code;
+  result->cancelled = transfer_context.cancelled;
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result->http_status);
   curl_easy_getinfo(curl, CURLINFO_NAMELOOKUP_TIME,
                     &result->name_lookup_seconds);
@@ -6095,7 +6151,8 @@ int strappy_client_send_responses_json_once(
   if (code != CURLE_OK) {
     const char *message;
 
-    message = (curl_error[0] != '\0') ? curl_error : curl_easy_strerror(code);
+    message = result->cancelled ? "Responses request was cancelled." :
+      ((curl_error[0] != '\0') ? curl_error : curl_easy_strerror(code));
     result->transport_error = strappy_string_duplicate(message);
     if (result->transport_error == NULL) {
       strappy_set_error(error_out,
@@ -6105,4 +6162,18 @@ int strappy_client_send_responses_json_once(
   }
 
   return 1;
+}
+
+int strappy_client_send_responses_json_once(
+  const strappy_config *config,
+  const char *request_json,
+  strappy_responses_http_result *result,
+  char **error_out)
+{
+  return strappy_client_send_responses_json_once_with_events(config,
+                                                             request_json,
+                                                             result,
+                                                             NULL,
+                                                             NULL,
+                                                             error_out);
 }

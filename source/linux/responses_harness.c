@@ -12,6 +12,7 @@
 #include <strings.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -172,7 +173,23 @@ typedef struct harness_ledger_event_recorder {
   int saw_tools;
   int saw_retry_wait;
   int saw_retrying;
+  int saw_cancellation_poll;
+  int cancel_during_retry_wait;
+  long long cancel_after_ms;
+  long long first_poll_ms;
+  unsigned int retry_after_seconds;
 } harness_ledger_event_recorder;
+
+static long long harness_now_ms(void)
+{
+  struct timeval value;
+
+  if (gettimeofday(&value, NULL) != 0) {
+    return 0LL;
+  }
+  return ((long long)value.tv_sec * 1000LL) +
+    ((long long)value.tv_usec / 1000LL);
+}
 
 static int harness_record_ledger_event(
   const strappy_chat_stream_event *event,
@@ -186,6 +203,25 @@ static int harness_record_ledger_event(
 
   recorder = (harness_ledger_event_recorder *)user_data;
   if ((recorder == NULL) || (event == NULL)) {
+    return 1;
+  }
+
+  if ((event->type == STRAPPY_CHAT_STREAM_EVENT_CONTENT_DELTA) &&
+      ((event->text == NULL) || (event->text[0] == '\0'))) {
+    long long now_ms;
+
+    recorder->saw_cancellation_poll = 1;
+    now_ms = harness_now_ms();
+    if (recorder->first_poll_ms == 0LL) {
+      recorder->first_poll_ms = now_ms;
+    }
+    if (recorder->cancel_during_retry_wait && recorder->saw_retry_wait) {
+      return 0;
+    }
+    if ((recorder->cancel_after_ms > 0LL) &&
+        (now_ms >= (recorder->first_poll_ms + recorder->cancel_after_ms))) {
+      return 0;
+    }
     return 1;
   }
 
@@ -231,6 +267,7 @@ static int harness_record_ledger_event(
         recorder->saw_tools = 1;
       } else if (strcmp(kind->valuestring, "retry_wait") == 0) {
         recorder->saw_retry_wait = 1;
+        recorder->retry_after_seconds = event->retry_after_seconds;
       } else if (strcmp(kind->valuestring, "retrying") == 0) {
         recorder->saw_retrying = 1;
       }
@@ -275,7 +312,9 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_TOOL_AUDIT = 1,
   HARNESS_RESPONSES_SERVER_SERVER_TOOL = 2,
   HARNESS_RESPONSES_SERVER_FUNCTION_TOOL = 3,
-  HARNESS_RESPONSES_SERVER_RETRY = 4
+  HARNESS_RESPONSES_SERVER_RETRY = 4,
+  HARNESS_RESPONSES_SERVER_RETRY_AFTER = 5,
+  HARNESS_RESPONSES_SERVER_SLOW = 6
 } harness_responses_server_scenario;
 
 static int harness_send_all(int socket_fd,
@@ -406,9 +445,10 @@ static char *harness_read_request_body(int socket_fd)
   return NULL;
 }
 
-static int harness_send_json_response(int socket_fd,
-                                      long status,
-                                      const char *json)
+static int harness_send_json_response_with_headers(int socket_fd,
+                                                   long status,
+                                                   const char *json,
+                                                   const char *extra_headers)
 {
   char headers[512];
   const char *reason;
@@ -420,17 +460,29 @@ static int harness_send_json_response(int socket_fd,
                      "HTTP/1.1 %ld %s\r\n"
                      "Content-Type: application/json\r\n"
                      "X-Request-Id: harness-%ld\r\n"
+                     "%s"
                      "Content-Length: %lu\r\n"
                      "Connection: close\r\n\r\n",
                      status,
                      reason,
                      status,
+                     (extra_headers != NULL) ? extra_headers : "",
                      (unsigned long)strlen(json));
   if ((written < 0) || ((size_t)written >= sizeof(headers))) {
     return 0;
   }
   return harness_send_all(socket_fd, headers, (size_t)written) &&
     harness_send_all(socket_fd, json, strlen(json));
+}
+
+static int harness_send_json_response(int socket_fd,
+                                      long status,
+                                      const char *json)
+{
+  return harness_send_json_response_with_headers(socket_fd,
+                                                 status,
+                                                 json,
+                                                 NULL);
 }
 
 static int harness_message_role_is(cJSON *item, const char *expected_role)
@@ -856,6 +908,76 @@ static int harness_run_retry_server(int listener_fd)
   return ok;
 }
 
+static int harness_run_retry_after_server(int listener_fd)
+{
+  static const char *retry_response =
+    "{\"error\":{\"code\":\"server_error\","
+    "\"message\":\"Provider is busy.\"},"
+    "\"error_type\":\"provider_overloaded\"}";
+  char *body;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_request_base_is_valid(root,
+                                  "Cancel retry wait",
+                                  NULL,
+                                  NULL) &&
+    harness_send_json_response_with_headers(client_fd,
+                                            503L,
+                                            retry_response,
+                                            "Retry-After: 120\r\n");
+  cJSON_Delete(root);
+  close(client_fd);
+  return ok;
+}
+
+static int harness_run_slow_server(int listener_fd)
+{
+  struct timeval timeout;
+  fd_set read_fds;
+  char *body;
+  char byte;
+  cJSON *root;
+  ssize_t received;
+  int client_fd;
+  int selected;
+  int ok;
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_request_base_is_valid(root,
+                                  "Cancel active request",
+                                  NULL,
+                                  NULL);
+  cJSON_Delete(root);
+  if (!ok) {
+    close(client_fd);
+    return 0;
+  }
+
+  FD_ZERO(&read_fds);
+  FD_SET(client_fd, &read_fds);
+  timeout.tv_sec = 10L;
+  timeout.tv_usec = 0L;
+  selected = select(client_fd + 1, &read_fds, NULL, NULL, &timeout);
+  received = (selected > 0) ? recv(client_fd, &byte, 1U, 0) : 1;
+  close(client_fd);
+  return (selected > 0) && (received == 0);
+}
+
 static int harness_open_listener(unsigned short *port_out)
 {
   struct sockaddr_in address;
@@ -929,6 +1051,10 @@ static int harness_start_server(harness_responses_server_scenario scenario,
       ok = harness_run_server_tool_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_FUNCTION_TOOL) {
       ok = harness_run_function_tool_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_RETRY_AFTER) {
+      ok = harness_run_retry_after_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_SLOW) {
+      ok = harness_run_slow_server(listener_fd);
     } else {
       ok = harness_run_retry_server(listener_fd);
     }
@@ -1324,6 +1450,165 @@ static int harness_test_retry_attempt_ledger(void)
   return ok;
 }
 
+static int harness_test_active_request_cancellation(void)
+{
+  char path[] = "/tmp/strappy-responses-cancel-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *result;
+  sqlite3 *db;
+  long long session_id;
+  long long value;
+  harness_ledger_event_recorder events;
+  pid_t server_pid;
+  int fd;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create cancellation harness database.");
+  }
+  close(fd);
+  error = NULL;
+  session_id = 0LL;
+  if (!harness_create_session_database(path, &session_id, &error) ||
+      !harness_start_server(HARNESS_RESPONSES_SERVER_SLOW,
+                            endpoint,
+                            sizeof(endpoint),
+                            &server_pid)) {
+    fprintf(stderr,
+            "Could not prepare cancellation integration test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  memset(&events, 0, sizeof(events));
+  events.db_path = path;
+  events.valid = 1;
+  events.cancel_after_ms = 250LL;
+  result = strappy_responses_send_prompt_for_session_and_store_with_events(
+    "Cancel active request",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources/PromptSystem.txt",
+    path,
+    session_id,
+    harness_record_ledger_event,
+    &events,
+    &error);
+  server_ok = harness_wait_for_server(server_pid, result != NULL);
+  ok = (result == NULL) && server_ok && events.valid &&
+    events.saw_cancellation_poll && (events.count == 1LL) &&
+    (events.clear_count == 1L) && (error != NULL) &&
+    (strstr(error, "cancelled") != NULL);
+  free(result);
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM response_api_calls WHERE "
+                           "state='cancelled' AND is_error=1 AND "
+                           "transport_error LIKE '%cancelled%';",
+                           &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_api_calls;",
+                        &value) && (value == 1LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Active Responses cancellation failed: %s\n",
+            (error != NULL) ? error : "request or ledger mismatch");
+  }
+  free(error);
+  unlink(path);
+  return ok;
+}
+
+static int harness_test_retry_after_clamp_and_cancellation(void)
+{
+  char path[] = "/tmp/strappy-responses-retry-after-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *result;
+  sqlite3 *db;
+  long long session_id;
+  long long value;
+  harness_ledger_event_recorder events;
+  pid_t server_pid;
+  int fd;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create Retry-After harness database.");
+  }
+  close(fd);
+  error = NULL;
+  session_id = 0LL;
+  if (!harness_create_session_database(path, &session_id, &error) ||
+      !harness_start_server(HARNESS_RESPONSES_SERVER_RETRY_AFTER,
+                            endpoint,
+                            sizeof(endpoint),
+                            &server_pid)) {
+    fprintf(stderr,
+            "Could not prepare Retry-After integration test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  memset(&events, 0, sizeof(events));
+  events.db_path = path;
+  events.valid = 1;
+  events.cancel_during_retry_wait = 1;
+  result = strappy_responses_send_prompt_for_session_and_store_with_events(
+    "Cancel retry wait",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources/PromptSystem.txt",
+    path,
+    session_id,
+    harness_record_ledger_event,
+    &events,
+    &error);
+  server_ok = harness_wait_for_server(server_pid, 0);
+  ok = (result == NULL) && server_ok && events.valid &&
+    events.saw_retry_wait && !events.saw_retrying &&
+    (events.retry_after_seconds == 60U) &&
+    (events.count == 1LL) && (events.clear_count == 1L) &&
+    (error != NULL) && (strstr(error, "cancelled") != NULL);
+  free(result);
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM response_api_calls WHERE "
+                           "state='http_error' AND http_status=503 AND "
+                           "retry_after_seconds=120;",
+                           &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_api_calls;",
+                        &value) && (value == 1LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Retry-After clamp/cancellation failed: %s\n",
+            (error != NULL) ? error : "request or ledger mismatch");
+  }
+  free(error);
+  unlink(path);
+  return ok;
+}
+
 static int harness_verify_call_columns(sqlite3 *db,
                                        const char *request_json,
                                        const char *response_json)
@@ -1618,7 +1903,9 @@ int main(void)
       harness_test_tool_audit_loop() &&
       harness_test_server_tool_suppresses_audit() &&
       harness_test_function_tool_continuation() &&
-      harness_test_retry_attempt_ledger()) {
+      harness_test_retry_attempt_ledger() &&
+      harness_test_active_request_cancellation() &&
+      harness_test_retry_after_clamp_and_cancellation()) {
     printf("responses_harness passed.\n");
     return 0;
   }

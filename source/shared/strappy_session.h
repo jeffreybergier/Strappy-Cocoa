@@ -116,7 +116,8 @@ void strappy_session_webview_message_init(strappy_webview_message *message);
 char *strappy_session_webview_append_messages_js(const char *messages_html);
 char *strappy_session_webview_batched_js(const char *java_script);
 char *strappy_session_webview_messages_page_html(const char *messages_html,
-                                                 const char *resource_dir);
+                                                 const char *resource_dir,
+                                                 const char *error_text);
 char *strappy_session_webview_append_message_text_by_key_js(
   const char *message_key,
   const char *delta);

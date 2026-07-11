@@ -70,6 +70,7 @@ typedef struct strappy_responses_http_result {
   double connect_seconds;
   double start_transfer_seconds;
   double total_seconds;
+  int cancelled;
 } strappy_responses_http_result;
 
 typedef enum strappy_client_finish_status {
@@ -163,6 +164,13 @@ int strappy_client_send_responses_json_once(
   const strappy_config *config,
   const char *request_json,
   strappy_responses_http_result *result,
+  char **error_out);
+int strappy_client_send_responses_json_once_with_events(
+  const strappy_config *config,
+  const char *request_json,
+  strappy_responses_http_result *result,
+  strappy_chat_stream_callback callback,
+  void *callback_data,
   char **error_out);
 char *strappy_client_build_responses_url(const char *endpoint);
 

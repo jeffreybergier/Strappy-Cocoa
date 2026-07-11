@@ -929,6 +929,8 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "font:12px/1.38 -apple-system,'Helvetica Neue',Helvetica,Arial,sans-serif;",
     "letter-spacing:0;-webkit-text-size-adjust:none;}",
     ".page{padding:0;}",
+    ".timeline-error{margin:80px auto 0;max-width:520px;padding:0 20px;",
+    "box-sizing:border-box;color:#606970;text-align:center;line-height:1.3;}",
     ".layout{width:100%;}",
     ".chat-column{width:100%;box-sizing:border-box;}",
     ".processing-status{position:fixed;left:50%;right:auto;top:auto;bottom:6px;",
@@ -2099,6 +2101,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(strappyBatchShouldScroll)scrollBottomNow();strappyBatchShouldScroll=0;}}",
     "function renderAfterMutation(root){if(strappyBatchDepth>0){strappyNeedsRender=1;return;}",
     "renderMessageDecorations(root);}",
+    "function clearTimelineError(){var e=byId('timeline-error');if(e)e.style.display='none';}",
     "function nodesFromHTML(html){var d=document.createElement('div');d.innerHTML=html;return d;}",
     "function clearInsertedRowAnimation(n){if(!n)return;",
     "setClass(n,'row-inserting',0);if(n.removeEventListener)",
@@ -2133,7 +2136,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "n._strappyMarkdown+=q.text;",
     "if(shouldRenderMarkdownBubble(n))renderMarkdownNode(n);",
     "else n.innerHTML=n._strappyMarkdown;}strappyTextQueues={};}",
-    "function appendMessage(html){var m=byId('messages');var previous,n;if(!m)return;previous=m.lastChild;",
+    "function appendMessage(html){clearTimelineError();var m=byId('messages');var previous,n;if(!m)return;previous=m.lastChild;",
     "if(m.insertAdjacentHTML){m.insertAdjacentHTML('beforeend',html);}",
     "else{var d=nodesFromHTML(html);while(d.firstChild)m.appendChild(d.firstChild);}",
     "n=previous?previous.nextSibling:m.firstChild;while(n){prepareInsertedRow(n);n=n.nextSibling;}",
@@ -2146,7 +2149,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function preserveLiveMessageText(oldRow,newRow){if(!oldRow||!newRow)return;",
     "preserveLongerMarkdown(firstByClass(oldRow,'bubble'),firstByClass(newRow,'bubble'));",
     "preserveLongerMarkdown(firstByClass(oldRow,'reasoning-body'),firstByClass(newRow,'reasoning-body'));}",
-    "function replaceMessage(id,html){var old=byId(id);var oldId,target,wasAssistant,next,newId;",
+    "function replaceMessage(id,html){clearTimelineError();var old=byId(id);var oldId,target,wasAssistant,next,newId;",
     "flushTextQueues();",
     "if(!old){appendMessage(html);return;}var d=nodesFromHTML(html);",
     "oldId=rowId(old);target=toolTarget(old);wasAssistant=isAssistantRow(old);",
@@ -2154,7 +2157,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(isAssistantRow(old)&&isAssistantRow(next))preserveLiveMessageText(old,next);",
     "old.parentNode.replaceChild(next,old);newId=rowId(next);if(wasAssistant)updateToolTargets(oldId,newId);}",
     "renderAfterMutation(document);scrollBottom();}",
-    "function insertMessageBefore(id,html){var before=byId(id);var m=byId('messages');var n;",
+    "function insertMessageBefore(id,html){clearTimelineError();var before=byId(id);var m=byId('messages');var n;",
     "if(!m){return;}if(!before){appendMessage(html);return;}var d=nodesFromHTML(html);",
     "while(d.firstChild){n=d.firstChild;prepareInsertedRow(n);m.insertBefore(n,before);}",
     "renderAfterMutation(m);scrollBottom();}",
@@ -2846,11 +2849,15 @@ char *strappy_webview_message_html_with_reasoning(
 
 char *strappy_webview_messages_page_html(
   const char *messages_html,
-  const char *tool_display_registry_json)
+  const char *tool_display_registry_json,
+  const char *error_text)
 {
   strappy_webview_buffer buffer;
   int ok;
 
+  if (messages_html == NULL) {
+    messages_html = "";
+  }
   strappy_webview_buffer_init(&buffer);
   ok = strappy_webview_buffer_append_cstring(
          &buffer,
@@ -2870,6 +2877,15 @@ char *strappy_webview_messages_page_html(
        strappy_webview_buffer_append_cstring(
          &buffer,
          "</head><body><div class=\"page\">");
+
+  if (ok && (messages_html[0] == '\0') &&
+      (error_text != NULL) && (error_text[0] != '\0')) {
+    ok = strappy_webview_buffer_append_cstring(
+           &buffer,
+           "<div id=\"timeline-error\" class=\"timeline-error\">") &&
+         strappy_webview_append_html_escaped(&buffer, error_text) &&
+         strappy_webview_buffer_append_cstring(&buffer, "</div>");
+  }
 
   ok = ok &&
        strappy_webview_buffer_append_cstring(

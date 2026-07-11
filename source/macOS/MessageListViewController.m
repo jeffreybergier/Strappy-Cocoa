@@ -96,7 +96,7 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 - (BOOL)promptCancellationRequested;
 - (BOOL)appendNewMessagesToWebView;
 - (NSString *)writeCurrentHTML;
-- (NSString *)htmlForMessages:(NSArray *)messages;
+- (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error;
 - (void)layoutWebViewAndPromptBar;
 - (void)clearRequestState;
 @end
@@ -499,19 +499,21 @@ static BOOL StrappyEnsureDirectory(NSString *path)
   NSString *path;
   NSString *html;
   NSArray *messages;
+  NSError *error;
 
   path = [htmlDirectoryPath_ stringByAppendingPathComponent:@"session.html"];
   if (!StrappyEnsureDirectory(htmlDirectoryPath_)) {
     return nil;
   }
 
+  error = nil;
   messages = nil;
 
   if (session_ != nil) {
-    messages = [session_ messagesWithError:nil];
+    messages = [session_ messagesWithError:&error];
   }
 
-  html = [self htmlForMessages:messages];
+  html = [self htmlForMessages:messages error:error];
   if (![html writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil]) {
     return nil;
   }
@@ -519,10 +521,11 @@ static BOOL StrappyEnsureDirectory(NSString *path)
   return path;
 }
 
-- (NSString *)htmlForMessages:(NSArray *)messages
+- (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error
 {
   NSMutableString *messagesHTML;
   NSUInteger count;
+  NSString *errorText;
 
   if (![messages isKindOfClass:[NSArray class]]) {
     messages = nil;
@@ -530,6 +533,14 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 
   count = [messages count];
   newestRenderedMessageCount_ = count;
+
+  if ([statusText_ length] > 0U) {
+    errorText = statusText_;
+  } else if (error != nil) {
+    errorText = [error localizedDescription];
+  } else {
+    errorText = nil;
+  }
 
   messagesHTML = [NSMutableString string];
   if (count > 0U) {
@@ -539,7 +550,8 @@ static BOOL StrappyEnsureDirectory(NSString *path)
                                             endIndex:count]];
   }
 
-  return [StrappySession webViewMessagesPageHTMLForMessagesHTML:messagesHTML];
+  return [StrappySession webViewMessagesPageHTMLForMessagesHTML:messagesHTML
+                                                      errorText:errorText];
 }
 
 - (void)promptSendViewController:(PromptSendViewController *)controller

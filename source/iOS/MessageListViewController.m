@@ -185,7 +185,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (BOOL)refreshRenderedMessageCountFromSession;
 - (void)reloadContent;
 - (NSString *)writeCurrentHTML;
-- (NSString *)htmlForMessages:(NSArray *)messages;
+- (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error;
 - (void)clearRequestState;
 - (BOOL)isLeavingNavigationStack;
 - (void)prepareForRemoval;
@@ -944,6 +944,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   NSString *path;
   NSString *html;
   NSArray *messages;
+  NSError *error;
   NSNumber *identifier;
 
   if (!StrappyEnsureDirectory([self htmlDirectoryPath])) {
@@ -955,12 +956,13 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     ([identifier isKindOfClass:[NSNumber class]] ? [identifier stringValue] : @"none")];
   path = [[self htmlDirectoryPath] stringByAppendingPathComponent:filename];
 
+  error = nil;
   messages = nil;
   if ([self session] != nil) {
-    messages = [[self session] messagesWithError:nil];
+    messages = [[self session] messagesWithError:&error];
   }
 
-  html = [self htmlForMessages:messages];
+  html = [self htmlForMessages:messages error:error];
   if (![html isKindOfClass:[NSString class]] ||
       ![html writeToFile:path
               atomically:YES
@@ -972,10 +974,11 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   return path;
 }
 
-- (NSString *)htmlForMessages:(NSArray *)messages
+- (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error
 {
   NSMutableString *messagesHTML;
   NSUInteger count;
+  NSString *errorText;
 
   if (![messages isKindOfClass:[NSArray class]]) {
     messages = nil;
@@ -983,6 +986,14 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
   count = [messages count];
   [self setNewestRenderedMessageCount:count];
+
+  if ([[self statusText] length] > 0U) {
+    errorText = [self statusText];
+  } else if (error != nil) {
+    errorText = [error localizedDescription];
+  } else {
+    errorText = nil;
+  }
 
   messagesHTML = [NSMutableString string];
   if (count > 0U) {
@@ -992,7 +1003,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
                                             endIndex:count]];
   }
 
-  return [StrappySession webViewMessagesPageHTMLForMessagesHTML:messagesHTML];
+  return [StrappySession webViewMessagesPageHTMLForMessagesHTML:messagesHTML
+                                                      errorText:errorText];
 }
 
 - (void)promptSendViewController:(PromptSendViewController *)controller

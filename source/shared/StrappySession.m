@@ -335,6 +335,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
 }
 
 + (NSString *)webViewMessagesPageHTMLForMessagesHTML:(NSString *)messagesHTML
+                                           errorText:(NSString *)errorText
 {
   NSString *resourcePath;
 
@@ -342,7 +343,8 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   return StrappySessionStringFromCString(
     strappy_session_webview_messages_page_html(
       StrappySessionCString(messagesHTML),
-      StrappySessionCString(resourcePath)));
+      StrappySessionCString(resourcePath),
+      StrappySessionCString(errorText)));
 }
 
 - (int)handleStreamEvent:(const strappy_chat_stream_event *)event
