@@ -50,6 +50,10 @@
           ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "database_id",
+        "transform": "database_filename"
       }
     },
     {
@@ -149,6 +153,9 @@
           "required": [],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "query"
       }
     },
     {
@@ -174,6 +181,10 @@
           ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "shortcodes",
+        "transform": "comma_separated"
       }
     },
     {
@@ -200,6 +211,9 @@
           "required": [],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "query"
       }
     },
     {
@@ -243,6 +257,9 @@
           ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "subject"
       }
     },
     {
@@ -263,6 +280,10 @@
           ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "id",
+        "transform": "identifier"
       }
     },
     {
@@ -283,6 +304,9 @@
           ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "name"
       }
     },
     {
@@ -314,6 +338,10 @@
           "minProperties": 1,
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "database_id",
+        "transform": "database_filename"
       }
     },
     {
@@ -357,6 +385,10 @@
           ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "database_id",
+        "transform": "database_filename"
       }
     },
     {
@@ -377,6 +409,10 @@
           ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "id",
+        "transform": "database_hint_filename"
       }
     }
   ]

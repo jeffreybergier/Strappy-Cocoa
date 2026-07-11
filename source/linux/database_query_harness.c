@@ -1283,10 +1283,57 @@ static int harness_expect_output_equals(const char *catalog_path,
   return ok;
 }
 
+static int harness_tool_schemas_hide_display_metadata(cJSON *tools)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    if (cJSON_GetObjectItem(tool, "x-strappy-display") != NULL) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int harness_tool_display_matches(cJSON *registry,
+                                        const char *tool_name,
+                                        const char *promoted_argument,
+                                        const char *transform)
+{
+  cJSON *display;
+  cJSON *argument;
+  cJSON *actual_transform;
+
+  display = cJSON_GetObjectItem(registry, tool_name);
+  argument = cJSON_IsObject(display) ?
+    cJSON_GetObjectItem(display, "promoted_argument") : NULL;
+  actual_transform = cJSON_IsObject(display) ?
+    cJSON_GetObjectItem(display, "transform") : NULL;
+  if (!cJSON_IsString(argument) || (argument->valuestring == NULL) ||
+      (strcmp(argument->valuestring, promoted_argument) != 0)) {
+    return 0;
+  }
+  if (transform == NULL) {
+    return actual_transform == NULL;
+  }
+  return cJSON_IsString(actual_transform) &&
+    (actual_transform->valuestring != NULL) &&
+    (strcmp(actual_transform->valuestring, transform) == 0);
+}
+
 static int harness_run_tool_registry_tests(void)
 {
   char *error;
   char *tools_json;
+  char *filtered_json;
+  char *registry_json;
+  const char *allowed_names[1];
+  cJSON *tools;
+  cJSON *filtered;
+  cJSON *registry;
   int ok;
 
   error = NULL;
@@ -1299,7 +1346,75 @@ static int harness_run_tool_registry_tests(void)
     return 0;
   }
 
-  ok = ((strstr(tools_json, STRAPPY_TOOL_DATABASE_LIST_INFO) != NULL) &&
+  tools = cJSON_Parse(tools_json);
+  allowed_names[0] = STRAPPY_TOOL_DATABASE_QUERY;
+  filtered_json = strappy_tools_request_json_filtered(HARNESS_RESOURCE_DIR,
+                                                      allowed_names,
+                                                      1U,
+                                                      &error);
+  filtered = (filtered_json != NULL) ? cJSON_Parse(filtered_json) : NULL;
+  registry_json = strappy_tools_display_registry_json(HARNESS_RESOURCE_DIR,
+                                                      &error);
+  registry = (registry_json != NULL) ? cJSON_Parse(registry_json) : NULL;
+
+  ok = (cJSON_IsArray(tools) &&
+        harness_tool_schemas_hide_display_metadata(tools) &&
+        (filtered_json != NULL) && cJSON_IsArray(filtered) &&
+        (cJSON_GetArraySize(filtered) == 1) &&
+        harness_tool_schemas_hide_display_metadata(filtered) &&
+        (registry_json != NULL) && cJSON_IsObject(registry) &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_DATABASE_QUERY,
+                                     "database_id",
+                                     "database_filename") &&
+        harness_tool_display_matches(
+          registry,
+          STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+          "query",
+          NULL) &&
+        harness_tool_display_matches(
+          registry,
+          STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+          "shortcodes",
+          "comma_separated") &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                     "query",
+                                     NULL) &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+                                     "subject",
+                                     NULL) &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
+                                     "id",
+                                     "identifier") &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+                                     "name",
+                                     NULL) &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                     "database_id",
+                                     "database_filename") &&
+        harness_tool_display_matches(
+          registry,
+          STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+          "database_id",
+          "database_filename") &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET,
+                                     "id",
+                                     "database_hint_filename") &&
+        (cJSON_GetObjectItem(registry,
+                             STRAPPY_TOOL_DATABASE_LIST_INFO) == NULL) &&
+        (cJSON_GetObjectItem(
+           registry,
+           STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) == NULL) &&
+        (cJSON_GetObjectItem(
+           registry,
+           STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) == NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_DATABASE_LIST_INFO) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_QUERY) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) != NULL) &&
@@ -1336,10 +1451,19 @@ static int harness_run_tool_registry_tests(void)
         (strstr(tools_json, "helper_convert_dates") == NULL) &&
         (strstr(tools_json, "database_learn") == NULL)) ? 1 : 0;
   if (!ok) {
-    fprintf(stderr, "Tool registry did not match expected tools: %s\n", tools_json);
+    fprintf(stderr,
+            "Tool registry or display metadata did not match expectations.\n"
+            "API tools: %s\nDisplay registry: %s\n",
+            tools_json,
+            (registry_json != NULL) ? registry_json : "(null)");
   }
 
+  cJSON_Delete(registry);
+  cJSON_Delete(filtered);
+  cJSON_Delete(tools);
   free(error);
+  free(registry_json);
+  free(filtered_json);
   free(tools_json);
   return ok;
 }

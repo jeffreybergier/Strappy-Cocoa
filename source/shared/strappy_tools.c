@@ -17,6 +17,9 @@
 #define STRAPPY_TOOLS_AVAILABILITY_NO_APPROVED_DATABASES "no_approved_databases"
 #define STRAPPY_TOOLS_AVAILABILITY_AVAILABLE "available"
 #define STRAPPY_TOOL_GUIDANCE_RESOURCE "GuidanceTools.json"
+#define STRAPPY_TOOL_DISPLAY_METADATA_KEY "x-strappy-display"
+#define STRAPPY_TOOL_DISPLAY_PROMOTED_ARGUMENT_KEY "promoted_argument"
+#define STRAPPY_TOOL_DISPLAY_TRANSFORM_KEY "transform"
 #define STRAPPY_DATABASE_GUIDANCE_RESOURCE "GuidanceDatabase.json"
 #define STRAPPY_FONTAWESOME_ICONS_RESOURCE "FontAwesomeIcons.json"
 #define STRAPPY_DATABASE_INFO_MAX_TABLES 64
@@ -697,6 +700,169 @@ static int strappy_tools_schema_list_contains(cJSON *tools,
   return 0;
 }
 
+static int strappy_tools_display_transform_matches_type(
+  const char *transform,
+  const char *property_type)
+{
+  if ((transform == NULL) || (transform[0] == '\0') ||
+      (strcmp(transform, "text") == 0)) {
+    return (strcmp(property_type, "array") != 0) &&
+      (strcmp(property_type, "object") != 0);
+  }
+  if (strcmp(transform, "database_filename") == 0) {
+    return strcmp(property_type, "string") == 0;
+  }
+  if (strcmp(transform, "database_hint_filename") == 0) {
+    return strcmp(property_type, "integer") == 0;
+  }
+  if (strcmp(transform, "comma_separated") == 0) {
+    return strcmp(property_type, "array") == 0;
+  }
+  if (strcmp(transform, "identifier") == 0) {
+    return (strcmp(property_type, "integer") == 0) ||
+      (strcmp(property_type, "string") == 0);
+  }
+  return 0;
+}
+
+static int strappy_tools_validate_display_metadata(cJSON *tool,
+                                                    const char *tool_name,
+                                                    char **error_out)
+{
+  cJSON *display;
+  cJSON *field;
+  cJSON *promoted_argument;
+  cJSON *transform;
+  cJSON *function;
+  cJSON *parameters;
+  cJSON *properties;
+  cJSON *property;
+  cJSON *property_type;
+  const char *transform_name;
+  int promoted_argument_count;
+  int transform_count;
+
+  display = cJSON_GetObjectItemCaseSensitive(
+    tool,
+    STRAPPY_TOOL_DISPLAY_METADATA_KEY);
+  if (display == NULL) {
+    return 1;
+  }
+  if (!cJSON_IsObject(display)) {
+    strappy_set_formatted_error(error_out,
+                                "%s for %s must be an object.",
+                                STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+                                tool_name);
+    return 0;
+  }
+  promoted_argument_count = 0;
+  transform_count = 0;
+  for (field = display->child; field != NULL; field = field->next) {
+    if ((field->string == NULL) ||
+        ((strcmp(field->string,
+                 STRAPPY_TOOL_DISPLAY_PROMOTED_ARGUMENT_KEY) != 0) &&
+         (strcmp(field->string, STRAPPY_TOOL_DISPLAY_TRANSFORM_KEY) != 0))) {
+      strappy_set_formatted_error(error_out,
+                                  "%s for %s contains an unsupported field.",
+                                  STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+                                  tool_name);
+      return 0;
+    }
+    if (strcmp(field->string,
+               STRAPPY_TOOL_DISPLAY_PROMOTED_ARGUMENT_KEY) == 0) {
+      promoted_argument_count++;
+    } else {
+      transform_count++;
+    }
+  }
+  if ((promoted_argument_count != 1) || (transform_count > 1)) {
+    strappy_set_formatted_error(
+      error_out,
+      "%s for %s must contain one promoted_argument and at most one transform.",
+      STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+      tool_name);
+    return 0;
+  }
+
+  promoted_argument = cJSON_GetObjectItemCaseSensitive(
+    display,
+    STRAPPY_TOOL_DISPLAY_PROMOTED_ARGUMENT_KEY);
+  if (!cJSON_IsString(promoted_argument) ||
+      (promoted_argument->valuestring == NULL) ||
+      (promoted_argument->valuestring[0] == '\0')) {
+    strappy_set_formatted_error(
+      error_out,
+      "%s for %s must contain a promoted_argument string.",
+      STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+      tool_name);
+    return 0;
+  }
+
+  transform = cJSON_GetObjectItemCaseSensitive(
+    display,
+    STRAPPY_TOOL_DISPLAY_TRANSFORM_KEY);
+  transform_name = NULL;
+  if ((transform != NULL) &&
+      (!cJSON_IsString(transform) || (transform->valuestring == NULL) ||
+       (transform->valuestring[0] == '\0'))) {
+    strappy_set_formatted_error(error_out,
+                                "%s transform for %s must be a string.",
+                                STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+                                tool_name);
+    return 0;
+  }
+  if (transform != NULL) {
+    transform_name = transform->valuestring;
+  }
+
+  function = cJSON_GetObjectItemCaseSensitive(tool, "function");
+  parameters = cJSON_IsObject(function) ?
+    cJSON_GetObjectItemCaseSensitive(function, "parameters") : NULL;
+  properties = cJSON_IsObject(parameters) ?
+    cJSON_GetObjectItemCaseSensitive(parameters, "properties") : NULL;
+  property = cJSON_IsObject(properties) ?
+    cJSON_GetObjectItemCaseSensitive(properties,
+                                     promoted_argument->valuestring) : NULL;
+  property_type = cJSON_IsObject(property) ?
+    cJSON_GetObjectItemCaseSensitive(property, "type") : NULL;
+  if ((property_type == NULL) || !cJSON_IsString(property_type) ||
+      (property_type->valuestring == NULL)) {
+    strappy_set_formatted_error(
+      error_out,
+      "%s promoted_argument for %s must name a typed schema property.",
+      STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+      tool_name);
+    return 0;
+  }
+  if (!strappy_tools_display_transform_matches_type(
+        transform_name,
+        property_type->valuestring)) {
+    strappy_set_formatted_error(error_out,
+                                "%s transform for %s does not match %s.",
+                                STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+                                tool_name,
+                                property_type->valuestring);
+    return 0;
+  }
+  return 1;
+}
+
+static void strappy_tools_remove_display_metadata(cJSON *tools)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools)) {
+    return;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    if (cJSON_IsObject(tool)) {
+      cJSON_DeleteItemFromObjectCaseSensitive(
+        tool,
+        STRAPPY_TOOL_DISPLAY_METADATA_KEY);
+    }
+  }
+}
+
 static int strappy_tools_validate_guidance_tools(cJSON *tools,
                                                  char **error_out)
 {
@@ -720,6 +886,9 @@ static int strappy_tools_validate_guidance_tools(cJSON *tools,
       strappy_set_formatted_error(error_out,
                                   "Tool guidance contains unsupported tool: %s",
                                   name);
+      return 0;
+    }
+    if (!strappy_tools_validate_display_metadata(tool, name, error_out)) {
       return 0;
     }
   }
@@ -756,6 +925,7 @@ char *strappy_tools_request_json(const char *resource_dir, char **error_out)
     return NULL;
   }
 
+  strappy_tools_remove_display_metadata(tools);
   json = cJSON_PrintUnformatted(tools);
   cJSON_Delete(root);
   if (json == NULL) {
@@ -829,6 +999,11 @@ char *strappy_tools_request_json_filtered(const char *resource_dir,
       cJSON *copy;
 
       copy = cJSON_Duplicate(tool, 1);
+      if (copy != NULL) {
+        cJSON_DeleteItemFromObjectCaseSensitive(
+          copy,
+          STRAPPY_TOOL_DISPLAY_METADATA_KEY);
+      }
       if ((copy == NULL) || !cJSON_AddItemToArray(filtered, copy)) {
         cJSON_Delete(copy);
         cJSON_Delete(filtered);
@@ -847,6 +1022,67 @@ char *strappy_tools_request_json_filtered(const char *resource_dir,
     return NULL;
   }
 
+  return json;
+}
+
+char *strappy_tools_display_registry_json(const char *resource_dir,
+                                          char **error_out)
+{
+  cJSON *root;
+  cJSON *tools;
+  cJSON *registry;
+  cJSON *tool;
+  char *json;
+
+  root = strappy_tools_read_json_resource(resource_dir,
+                                          STRAPPY_TOOL_GUIDANCE_RESOURCE,
+                                          error_out);
+  if (root == NULL) {
+    return NULL;
+  }
+
+  tools = cJSON_GetObjectItem(root, "tools");
+  if (!strappy_tools_validate_guidance_tools(tools, error_out)) {
+    cJSON_Delete(root);
+    return NULL;
+  }
+
+  registry = cJSON_CreateObject();
+  if (registry == NULL) {
+    cJSON_Delete(root);
+    strappy_set_error(error_out, "Could not allocate tool display registry.");
+    return NULL;
+  }
+
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    const char *name;
+    cJSON *display;
+    cJSON *copy;
+
+    name = strappy_tools_tool_schema_name(tool);
+    display = cJSON_GetObjectItemCaseSensitive(
+      tool,
+      STRAPPY_TOOL_DISPLAY_METADATA_KEY);
+    if (display == NULL) {
+      continue;
+    }
+    copy = cJSON_Duplicate(display, 1);
+    if ((copy == NULL) || !cJSON_AddItemToObject(registry, name, copy)) {
+      cJSON_Delete(copy);
+      cJSON_Delete(registry);
+      cJSON_Delete(root);
+      strappy_set_error(error_out, "Could not build tool display registry.");
+      return NULL;
+    }
+  }
+
+  json = cJSON_PrintUnformatted(registry);
+  cJSON_Delete(registry);
+  cJSON_Delete(root);
+  if (json == NULL) {
+    strappy_set_error(error_out, "Could not serialize tool display registry.");
+    return NULL;
+  }
   return json;
 }
 

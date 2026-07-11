@@ -27,6 +27,8 @@ char *strappy_tools_request_json_filtered(const char *resource_dir,
                                           const char * const *allowed_names,
                                           size_t allowed_name_count,
                                           char **error_out);
+char *strappy_tools_display_registry_json(const char *resource_dir,
+                                          char **error_out);
 char *strappy_tools_responses_request_json(
   const char *resource_dir,
   int web_search_enabled,

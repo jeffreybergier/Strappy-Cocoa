@@ -10,6 +10,7 @@
 "Session is not selected." = "セッションが選択されていません。";
 "You" = "あなた";
 "Agent" = "エージェント";
+"Tool" = "ツール";
 "Tool Call" = "ツール呼び出し";
 "Tool Result" = "ツール結果";
 "Request" = "リクエスト";
@@ -181,7 +182,6 @@
 "Services" = "サービス";
 "Session path is not a directory." = "セッションパスがディレクトリではありません。";
 "Show Chat Window" = "チャットウインドウを表示";
-"Show Earlier Messages" = "以前のメッセージを表示";
 "Show Sidebar" = "サイドバーを表示";
 "Show Spelling and Grammar" = "スペルと文法を表示";
 "Show Substitutions" = "置換を表示";

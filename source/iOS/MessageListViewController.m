@@ -5,8 +5,6 @@
 #import "StrappySession.h"
 #import "XPUIKit.h"
 
-static const NSUInteger kStrappyInitialMessageLimit = 80U;
-static const NSUInteger kStrappyMessagePageSize = 40U;
 static const NSTimeInterval kStrappyStreamEventFlushInterval = 0.3;
 static const CGFloat kStrappyInitialSendHeight = 44.0f;
 
@@ -141,7 +139,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 @property (nonatomic, copy) NSString *statusText;
 @property (nonatomic, strong) NSMutableString *pendingStreamJavaScript;
 @property (nonatomic, strong) NSTimer *streamEventFlushTimer;
-@property (nonatomic, assign) NSUInteger oldestRenderedMessageIndex;
 @property (nonatomic, assign) NSUInteger newestRenderedMessageCount;
 @property (nonatomic, assign) BOOL webViewContentLoaded;
 @property (nonatomic, assign) BOOL sending;
@@ -184,12 +181,11 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)beginSendingPrompt:(NSString *)prompt;
 - (void)setPromptCancellationRequested:(BOOL)requested;
 - (BOOL)promptCancellationRequested;
-- (void)loadEarlierMessages;
 - (BOOL)appendNewMessagesToWebView;
 - (BOOL)refreshRenderedMessageCountFromSession;
 - (void)reloadContent;
 - (NSString *)writeCurrentHTML;
-- (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error;
+- (NSString *)htmlForMessages:(NSArray *)messages;
 - (void)clearRequestState;
 - (BOOL)isLeavingNavigationStack;
 - (void)prepareForRemoval;
@@ -948,7 +944,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   NSString *path;
   NSString *html;
   NSArray *messages;
-  NSError *error;
   NSNumber *identifier;
 
   if (!StrappyEnsureDirectory([self htmlDirectoryPath])) {
@@ -960,13 +955,12 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     ([identifier isKindOfClass:[NSNumber class]] ? [identifier stringValue] : @"none")];
   path = [[self htmlDirectoryPath] stringByAppendingPathComponent:filename];
 
-  error = nil;
   messages = nil;
   if ([self session] != nil) {
-    messages = [[self session] messagesWithError:&error];
+    messages = [[self session] messagesWithError:nil];
   }
 
-  html = [self htmlForMessages:messages error:error];
+  html = [self htmlForMessages:messages];
   if (![html isKindOfClass:[NSString class]] ||
       ![html writeToFile:path
               atomically:YES
@@ -978,49 +972,27 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   return path;
 }
 
-- (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error
+- (NSString *)htmlForMessages:(NSArray *)messages
 {
   NSMutableString *messagesHTML;
   NSUInteger count;
-  NSUInteger start;
-  NSString *emptyText;
-  BOOL hasMessages;
 
   if (![messages isKindOfClass:[NSArray class]]) {
     messages = nil;
   }
 
   count = [messages count];
-  start = 0U;
-  if (count > kStrappyInitialMessageLimit) {
-    start = count - kStrappyInitialMessageLimit;
-  }
-  [self setOldestRenderedMessageIndex:start];
   [self setNewestRenderedMessageCount:count];
-
-  hasMessages = (count > 0U) ? YES : NO;
-  if ([[self statusText] length] > 0U) {
-    emptyText = [self statusText];
-  } else if (error != nil) {
-    emptyText = [error localizedDescription];
-  } else if ([self session] == nil) {
-    emptyText = NSLocalizedString(@"No session selected.", nil);
-  } else {
-    emptyText = NSLocalizedString(@"New Session", nil);
-  }
 
   messagesHTML = [NSMutableString string];
   if (count > 0U) {
     [messagesHTML appendString:
       [StrappySession webViewMessagesHTMLForMessages:messages
-                                          startIndex:start
+                                          startIndex:0U
                                             endIndex:count]];
   }
 
-  return [StrappySession webViewMessagesPageHTMLForMessagesHTML:messagesHTML
-                                                      emptyText:emptyText
-                                                    hasMessages:hasMessages
-                                                        hasMore:(start > 0U) ? YES : NO];
+  return [StrappySession webViewMessagesPageHTMLForMessagesHTML:messagesHTML];
 }
 
 - (void)promptSendViewController:(PromptSendViewController *)controller
@@ -1416,47 +1388,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   return YES;
 }
 
-- (void)loadEarlierMessages
-{
-  NSError *error;
-  NSArray *messages;
-  NSUInteger end;
-  NSUInteger start;
-  NSString *html;
-  NSString *javaScript;
-
-  if (([self session] == nil) || ([self oldestRenderedMessageIndex] == 0U)) {
-    return;
-  }
-
-  error = nil;
-  messages = [[self session] messagesWithError:&error];
-  if (![messages isKindOfClass:[NSArray class]]) {
-    return;
-  }
-
-  end = [self oldestRenderedMessageIndex];
-  if (end > [messages count]) {
-    end = [messages count];
-  }
-  if (end == 0U) {
-    return;
-  }
-
-  start = (end > kStrappyMessagePageSize) ?
-    (end - kStrappyMessagePageSize) : 0U;
-
-  html = [StrappySession webViewMessagesHTMLForMessages:messages
-                                             startIndex:start
-                                               endIndex:end];
-  [self setOldestRenderedMessageIndex:start];
-
-  javaScript = [StrappySession webViewPrependMessagesJavaScriptForHTML:html
-                                                               hasMore:(start > 0U) ? YES : NO];
-  [self flushPendingStreamEvents];
-  [[self webView] stringByEvaluatingJavaScriptFromString:javaScript];
-}
-
 - (BOOL)webView:(UIWebView *)webView
 shouldStartLoadWithRequest:(NSURLRequest *)request
  navigationType:(UIWebViewNavigationType)navigationType
@@ -1472,9 +1403,6 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
   url = [request URL];
   scheme = [url scheme];
   if ([scheme isEqualToString:@"strappy-action"]) {
-    if ([[url host] isEqualToString:@"load-more"]) {
-      [self loadEarlierMessages];
-    }
     return NO;
   }
   return YES;
@@ -1488,7 +1416,6 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
   }
   [self logLifecycleEvent:@"webViewDidFinishLoad"];
   [[self webView] XP_setBackgroundTransparent];
-  [[[self webView] XP_scrollView] XP_removeShadow];
   [self setWebViewScrollsToTop:YES];
   [self scrollWebViewToBottom];
 }

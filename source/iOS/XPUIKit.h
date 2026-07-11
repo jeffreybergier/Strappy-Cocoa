@@ -6,7 +6,6 @@
 
 @interface UIView (XPUIKit)
 - (void)XP_setBackgroundTransparent;
-- (void)XP_removeShadow;
 @end
 
 @interface UIScrollView (XPUIKit)

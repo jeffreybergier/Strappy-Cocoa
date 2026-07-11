@@ -47,6 +47,21 @@ static int harness_has_tool_type(cJSON *tools, const char *expected)
   return 0;
 }
 
+static int harness_tools_hide_local_display_metadata(cJSON *tools)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    if (cJSON_GetObjectItem(tool, "x-strappy-display") != NULL) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int harness_test_request_surfaces(void)
 {
   char *url;
@@ -92,12 +107,37 @@ static int harness_test_request_surfaces(void)
   ok = cJSON_IsArray(tools) && cJSON_IsObject(first) &&
     (function == NULL) && cJSON_IsString(name) &&
     (strcmp(name->valuestring, "database_list_info") == 0) &&
+    harness_tools_hide_local_display_metadata(tools) &&
     harness_has_tool_type(tools, "openrouter:web_search") &&
     harness_has_tool_type(tools, "openrouter:web_fetch");
   cJSON_Delete(tools);
   free(error);
   if (!ok) {
     return harness_fail("Responses tool schemas were not flattened.");
+  }
+
+  error = NULL;
+  tools_json = strappy_tools_responses_request_json(
+    "../shared/Resources",
+    0,
+    &error);
+  if (tools_json == NULL) {
+    fprintf(stderr,
+            "Could not build Responses tools without web search: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    return 0;
+  }
+  tools = cJSON_Parse(tools_json);
+  free(tools_json);
+  ok = cJSON_IsArray(tools) &&
+    harness_tools_hide_local_display_metadata(tools) &&
+    !harness_has_tool_type(tools, "openrouter:web_search") &&
+    !harness_has_tool_type(tools, "openrouter:web_fetch");
+  cJSON_Delete(tools);
+  free(error);
+  if (!ok) {
+    return harness_fail("Disabled web tools leaked into a Responses request.");
   }
   return 1;
 }
@@ -455,6 +495,7 @@ static int harness_request_base_is_valid(cJSON *root,
       !harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") ||
       (text == NULL) || (strcmp(text, expected_prompt) != 0) ||
       !cJSON_IsArray(tools) || !cJSON_IsObject(first_tool) ||
+      !harness_tools_hide_local_display_metadata(tools) ||
       (function_wrapper != NULL)) {
     return 0;
   }
@@ -1518,12 +1559,13 @@ static int harness_test_ledger(void)
     (strcmp(timeline.records[1].direction, "response") == 0) &&
     (strcmp(timeline.records[2].role, "api_function_call") == 0) &&
     (strcmp(timeline.records[2].direction, "response") == 0) &&
-    (strcmp(timeline.records[3].role, "assistant") == 0) &&
-    (strcmp(timeline.records[3].content, "Done") == 0) &&
-    (strcmp(timeline.records[4].role, "api_call") == 0) &&
-    (timeline.records[4].direction == NULL) &&
-    (timeline.records[4].round_index == 0L) &&
-    (timeline.records[4].attempt_index == 0L);
+    (strcmp(timeline.records[3].role, "api_call") == 0) &&
+    (timeline.records[3].direction == NULL) &&
+    (timeline.records[3].round_index == 0L) &&
+    (timeline.records[3].attempt_index == 0L) &&
+    (strcmp(timeline.records[4].role, "assistant") == 0) &&
+    (strcmp(timeline.records[4].direction, "response") == 0) &&
+    (strcmp(timeline.records[4].content, "Done") == 0);
   strappy_session_message_record_list_destroy(&timeline);
   if (!ok) {
     fprintf(stderr, "Responses timeline failed: %s\n", error);

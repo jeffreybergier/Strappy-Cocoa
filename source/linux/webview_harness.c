@@ -4,6 +4,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+static const char harness_tool_display_registry_json[] =
+  "{\"database_query\":{\"promoted_argument\":\"database_id\","
+  "\"transform\":\"database_filename\"},"
+  "\"helper_fontawesome_shortcode_confirm\":{"
+  "\"promoted_argument\":\"shortcodes\","
+  "\"transform\":\"comma_separated\"},"
+  "\"memory_database_hint_forget\":{\"promoted_argument\":\"id\","
+  "\"transform\":\"database_hint_filename\"}}";
+
 static int harness_expect_contains(const char *text, const char *needle)
 {
   if ((text != NULL) && (needle != NULL) && (strstr(text, needle) != NULL)) {
@@ -46,11 +55,9 @@ static int harness_check_page_scripts(void)
     return 0;
   }
 
-  page_html = strappy_webview_messages_page_html(message_html,
-                                                "Empty",
-                                                1,
-                                                0,
-                                                "Load More");
+  page_html = strappy_webview_messages_page_html(
+    message_html,
+    harness_tool_display_registry_json);
   strappy_webview_free(message_html);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate messages page HTML.\n");
@@ -65,6 +72,23 @@ static int harness_check_page_scripts(void)
                                "Helvetica,Arial,sans-serif;") &&
        harness_expect_contains(page_html, "letter-spacing:0;") &&
        harness_expect_contains(page_html,
+                               "@-webkit-keyframes strappy-round-fade{"
+                               "from{opacity:0;}to{opacity:1;}}") &&
+       harness_expect_contains(page_html,
+                               ".row-inserting{-webkit-animation:"
+                               "strappy-round-fade .3s ease-out both;}") &&
+       harness_expect_not_contains(page_html,
+                                   "@-webkit-keyframes strappy-row-rise") &&
+       harness_expect_not_contains(page_html, "translateY(") &&
+       harness_expect_not_contains(page_html, "row-insert-pending") &&
+       harness_expect_not_contains(page_html, "function scheduleInsertedRows") &&
+       harness_expect_not_contains(page_html, "function insertedRowsActive") &&
+       harness_expect_not_contains(page_html, "function layoutHeight") &&
+       harness_expect_not_contains(page_html, ".load-more{") &&
+       harness_expect_not_contains(page_html, "id=\"load-more\"") &&
+       harness_expect_not_contains(page_html, "strappy-action://load-more") &&
+       harness_expect_not_contains(page_html, "function prependMessages") &&
+       harness_expect_contains(page_html,
                                ".api-tool-card .tool-card-body{"
                                "font-family:inherit;") &&
        harness_expect_contains(page_html,
@@ -75,33 +99,153 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                ".tool-panel{line-height:1.3;") &&
        harness_expect_contains(page_html, "function faIconHTML") &&
+       harness_expect_contains(page_html, "function disclosureIconHTML") &&
+       harness_expect_contains(page_html,
+                               "collapsed?'angle-right':'angle-down'") &&
+       harness_expect_contains(page_html, "function toolErrorIconHTML") &&
+       harness_expect_contains(page_html, "triangle-exclamation") &&
+       harness_expect_contains(page_html, ".tool-error-icon{") &&
+       harness_expect_not_contains(page_html,
+                                   ".tool-column-error{border-top-color:#d99") &&
+       harness_expect_not_contains(page_html,
+                                   ".tool-error{border-color:#d99") &&
+       harness_expect_not_contains(page_html,
+                                   ".api-exchange-row .tool-error{") &&
        harness_expect_contains(page_html, "\"heart\":'F004'") &&
        harness_expect_contains(page_html, "[fa(?::(solid|regular|brands))?") &&
        harness_expect_contains(page_html, "function toolJSONHTML") &&
        harness_expect_contains(page_html, "function toolObjectArrayTable") &&
        harness_expect_contains(page_html, "function toolOutputHasError") &&
        harness_expect_contains(page_html, "function renderAPIToolRows") &&
+       harness_expect_contains(page_html, "function apiToolLabel(row)") &&
+       harness_expect_contains(page_html,
+                               "setToolCardSummary(summary,apiToolLabel(row)+"
+                               "': '+title,0)") &&
+       harness_expect_contains(page_html,
+                               "setToolCardSummary(summary,apiToolLabel(row)+"
+                               "': '+title,error)") &&
        harness_expect_contains(page_html, "function apiToolRows") &&
+       harness_expect_contains(page_html, "function decorateAPIToolGroups") &&
+       harness_expect_not_contains(page_html, "function toggleAPIToolGroup") &&
        harness_expect_contains(page_html, "function decorateAPIExchanges") &&
        harness_expect_contains(page_html, "function toggleAPIExchange") &&
+       harness_expect_contains(page_html,
+                               "h.className='api-exchange-turn-header "
+                               "disclosure-title'") &&
+       harness_expect_contains(page_html,
+                               "h.onclick=function(){return "
+                               "toggleAPIExchange(a);};") &&
+       harness_expect_not_contains(page_html,
+                                   "a.onclick=function(){return "
+                                   "toggleAPIExchange(this);") &&
+       harness_expect_contains(page_html,
+                               "role.onclick=function(){return "
+                               "togglePromptGroup(a);};") &&
+       harness_expect_contains(page_html,
+                               "a=firstByClass(role,'prompt-group-toggle');"
+                               "if(!a)return;role.onclick=null;") &&
+       harness_expect_not_contains(page_html,
+                                   "toggleAPIToolGroup(a)") &&
+       harness_expect_contains(page_html,
+                               "tool-rail-title disclosure-title") &&
+       harness_expect_contains(page_html,
+                               "tool-card-toggle disclosure-title") &&
+       harness_expect_not_contains(page_html, "function toggleAPIExchangeSection") &&
        harness_expect_contains(page_html, "function toggleAPIReasoning") &&
        harness_expect_contains(page_html, ".api-reasoning-collapsed>.bubble{") &&
        harness_expect_contains(page_html, ".api-exchange-turn-header{") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-turn-header{margin:0 -10px;"
+                               "padding:7px 10px 6px;") &&
+       harness_expect_contains(page_html,
+                               ".disclosure-title{cursor:pointer;"
+                               "-webkit-tap-highlight-color:rgba(0,0,0,.08);}") &&
+       harness_expect_contains(page_html,
+                               ".tool-column-disclosure,"
+                               ".prompt-group-disclosure,.tool-disclosure,"
+                               ".reasoning-disclosure,.metadata-disclosure,"
+                               ".api-reasoning-disclosure{display:inline-block;"
+                               "box-sizing:border-box;width:12px;"
+                               "margin-right:4px;font-size:12px;line-height:1;"
+                               "vertical-align:baseline;text-align:center;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-disclosure{display:inline-block;"
+                               "box-sizing:border-box;width:16px;"
+                               "margin-right:4px;font-size:14px;line-height:1;"
+                               "vertical-align:baseline;text-align:center;}") &&
+       harness_expect_not_contains(page_html,
+                                   ".disclosure-title .fa-angle-right") &&
+       harness_expect_contains(page_html,
+                               "line-height:1;vertical-align:-.08em;}") &&
+       harness_expect_contains(page_html,
+                               ".request-metadata-toggle{color:#4e5961;"
+                               "text-decoration:none;}") &&
+       harness_expect_contains(page_html,
+                               ".tool-column-toggle{color:#4e5961;"
+                               "text-decoration:none;}") &&
+       harness_expect_contains(page_html,
+                               ".processing-status-active .disclosure-title{"
+                               "cursor:default;") &&
+       harness_expect_contains(page_html,
+                               ".tool-rail-title{font-size:12px;font-weight:bold;"
+                               "line-height:1.3;color:#30363b;margin:0 0 8px;}") &&
+       harness_expect_contains(page_html,
+                               ".reasoning-label{font-size:12px;font-weight:bold;"
+                               "line-height:1.3;color:#30363b;margin:0 0 8px;}") &&
+       harness_expect_contains(page_html,
+                               ".request-metadata-title{font-family:inherit;"
+                               "font-size:12px;line-height:1.3;font-weight:bold;"
+                               "color:#30363b;margin:0 0 8px;white-space:nowrap;"
+                               "overflow:hidden;text-overflow:ellipsis;}") &&
+       harness_expect_contains(page_html,
+                               ".request-metadata-summary{display:none;"
+                               "font-weight:inherit;vertical-align:baseline;") &&
+       harness_expect_contains(page_html,
+                               ".tool-card-summary{vertical-align:baseline;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-turn-title{"
+                               "vertical-align:baseline;}") &&
+       harness_expect_contains(page_html,
+                               ".user .role{background:#c1c8ce;color:#30363b;"
+                               "margin:0 -12px;padding:8px 12px;") &&
+       harness_expect_contains(page_html,
+                               ".harness .role,.developer .role{background:#c1c8ce;"
+                               "color:#30363b;margin:0 -12px;"
+                               "padding:8px 12px;") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-item .role{margin:0 -10px;"
+                               "padding:5px 10px;}") &&
        harness_expect_contains(page_html, ".api-exchange-metadata{") &&
+       harness_expect_not_contains(page_html, ".api-exchange-section-toggle{") &&
+       harness_expect_not_contains(page_html,
+                                   ".api-exchange-section-collapsed-row{") &&
+       harness_expect_not_contains(page_html, "api-tool-group-toggle") &&
+       harness_expect_not_contains(page_html, "api-tool-group-collapsed") &&
+       harness_expect_contains(page_html,
+                               ".api-tool-group-secondary>.role{display:none;}") &&
+       harness_expect_not_contains(page_html,
+                                   ".api-tool-card>.tool-card-body{display:block;}") &&
+       harness_expect_contains(page_html,
+                               ".tool-card-body{display:none;") &&
+       harness_expect_contains(page_html,
+                               ".tool-card-open .tool-card-body{display:block;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row{position:relative;border-top:0;"
-                               "border-left:5px solid #68747d;"
+                               "background:#b2bbc2;color:#30363b;"
                                "padding:0 10px;}") &&
+       harness_expect_not_contains(page_html, "border-left:5px solid") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row:before{content:'';"
                                "position:absolute;left:0;right:0;top:0;"
-                               "height:1px;background:#cbd2d8;"
-                               "pointer-events:none;}") &&
+                               "height:1px;background:#68727a;"
+                               "pointer-events:none;display:none;z-index:1;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-start{margin-top:0;"
                                "border-top:0;}") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-start:before{display:none;}") &&
+                               ".api-exchange-start:before{display:block;}") &&
+       harness_expect_not_contains(page_html,
+                                   "height:1px;background:#cbd2d8;") &&
        harness_expect_contains(page_html,
                                ".api-exchange-end{margin-bottom:0;"
                                "border-bottom:0;}") &&
@@ -109,57 +253,166 @@ static int harness_check_page_scripts(void)
                                ".api-exchange-row>.request-metadata{"
                                "border-top:0;border-bottom:0;}") &&
        harness_expect_contains(page_html,
-                               "function apiExchangeColorClass") &&
+                               ".api-exchange-metadata>.request-metadata{"
+                               "margin:0 -10px;padding:8px 10px;"
+                               "border-bottom:0;}") &&
+       harness_expect_not_contains(page_html,
+                                   "function apiExchangeColorClass") &&
+       harness_expect_not_contains(page_html, "api-exchange-color-") &&
        harness_expect_contains(page_html,
-                               "return 'api-exchange-color-'+((n-1)%6)") &&
+                               "border-bottom:1px solid #959fa7;"
+                               "background:#a3adb5;color:#30363b;") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-color-0{background:#f1f7fa;"
-                               "border-left-color:#4f7f9e;}") &&
+                               ".api-exchange-section-label{margin:0 -10px;"
+                               "padding:4px 10px;font-size:12px;"
+                               "line-height:1.2;font-weight:bold;"
+                               "color:#30363b;background:#c1c8ce;}") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-color-0.api-exchange-row:before{"
-                               "background:#bfd3df;}") &&
+                               ".api-exchange-row>.role{background:#c1c8ce;}") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-color-0.api-exchange-row,"
-                               ".api-exchange-color-0.api-exchange-row *{"
-                               "color:#3f657c;}") &&
+                               ".api-exchange-row.api_reasoning>.role{"
+                               "background:#dfe4e8;}") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-color-5{background:#f6f8f1;"
-                               "border-left-color:#788552;}") &&
+                               ".api-exchange-row>.bubble,"
+                               ".api-exchange-row>.reasoning,"
+                               ".api-exchange-row>.request-metadata{"
+                               "background:#dfe4e8;}") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-color-5.api-exchange-row:before{"
-                               "background:#ced8b9;}") &&
+                               ".api-exchange-row>.tool-column{"
+                               "background:#c1c8ce;}") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-row.api-exchange-response."
-                               "assistant>.bubble{background:#fff;"
+                               ".api-exchange-row .tool-card-body,"
+                               ".api-exchange-row .tool-table-wrap,"
+                               ".api-exchange-row .tool-pill,"
+                               ".api-exchange-row .tool-raw{"
+                               "background:#dfe4e8;border-color:#959fa7;}") &&
+       harness_expect_not_contains(page_html, "#4f7f9e") &&
+       harness_expect_not_contains(page_html, "#7b6995") &&
+       harness_expect_not_contains(page_html, "#4e8375") &&
+       harness_expect_not_contains(page_html, "#92743d") &&
+       harness_expect_not_contains(page_html, "#956875") &&
+       harness_expect_not_contains(page_html, "#788552") &&
+       harness_expect_not_contains(page_html, "#eef7fc") &&
+       harness_expect_not_contains(page_html, "#fffdf2") &&
+       harness_expect_not_contains(page_html, "#f7fbff") &&
+       harness_expect_not_contains(page_html, "#fffbed") &&
+       harness_expect_not_contains(page_html, "#fff9e8") &&
+       harness_expect_not_contains(page_html, "#f2faf5") &&
+       harness_expect_not_contains(page_html, "#fff2f2") &&
+       harness_expect_not_contains(page_html, "#fff8e3") &&
+       harness_expect_not_contains(page_html, "#8a2525") &&
+       harness_expect_not_contains(page_html, "#a22") &&
+       harness_expect_contains(page_html,
+                               ".assistant .bubble{background:#fff;"
+                               "border-top-color:#959fa7;"
+                               "border-bottom-color:#959fa7;"
                                "font-size:16px;line-height:1.45;}") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-row.api-exchange-response."
-                               "assistant>.bubble *{color:#222;}") &&
+                               ".user .bubble{background:#fff;border-top:0;"
+                               "border-bottom:0;padding-top:4px;"
+                               "font-size:16px;line-height:1.45;}") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-item.api_function_call+"
-                               ".api-exchange-item.api_function_call>.role,"
-                               ".api-exchange-item.api_function_output+"
-                               ".api-exchange-item.api_function_output>.role{"
-                               "display:none;}") &&
+                               ".harness .bubble,.developer .bubble{"
+                               "background:#fff;border-top:0;"
+                               "border-bottom:0;padding-top:4px;"
+                               "font-size:16px;line-height:1.45;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-row.user>.bubble,"
+                               ".api-exchange-row.harness>.bubble,"
+                               ".api-exchange-row.developer>.bubble,"
+                               ".api-exchange-row.assistant>.bubble{"
+                               "background:#fff;font-size:16px;"
+                               "line-height:1.45;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-row.assistant>.bubble *{"
+                               "color:#222;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-row.assistant>.bubble a{"
+                               "color:#2468a8;}") &&
+       harness_expect_contains(page_html,
+                               ".assistant .role{display:block;}") &&
        harness_expect_not_contains(page_html,
-                                   ".api-exchange-item.api_function_call>"
-                                   ".role{display:none;}") &&
+                                   ".assistant .role{display:none;}") &&
+       harness_expect_contains(page_html,
+                               "var strappyAPIExchangeCollapsed={};") &&
+       harness_expect_not_contains(page_html,
+                                   "strappyAPIExchangeSectionCollapsed") &&
+       harness_expect_contains(page_html,
+                               "function rowIsAPIExchangeAnswer") &&
+       harness_expect_contains(page_html,
+                               "function rowIsAPIExchangeConversation") &&
+       harness_expect_contains(page_html,
+                               "function apiExchangeCollapsed") &&
+       harness_expect_contains(page_html,
+                               "function setAPIExchangesCollapsedForPrompt") &&
+       harness_expect_not_contains(page_html,
+                                   "function apiExchangeSectionCollapsed") &&
+       harness_expect_contains(page_html,
+                               "setRowClass(row,'api-exchange-collapsed-row',"
+                               "collapsed&&row!==anchor&&!conversation);") &&
+       harness_expect_contains(page_html,
+                               "setRowClass(row,'api-exchange-collapsed-"
+                               "conversation',collapsed&&conversation);") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-collapsed-conversation>"
+                               ".api-exchange-section-label{display:none;}") &&
+       harness_expect_not_contains(page_html,
+                                   "strappyAPIToolGroupCollapsed") &&
+       harness_expect_not_contains(page_html,
+                                   "function apiToolGroupCollapsed") &&
+       harness_expect_contains(page_html,
+                               "var kind=isAPIToolCallRow(row)?'calls':"
+                               "'outputs'") &&
+       harness_expect_contains(page_html,
+                               "'api-call-'+id+'-'+kind") &&
+       harness_expect_contains(page_html,
+                               "groups[key]={rows:[]}") &&
+       harness_expect_contains(page_html,
+                               "setRowClass(row,'api-tool-group-anchor',j===0)") &&
+       harness_expect_contains(page_html,
+                               ".api-tool-group-secondary>.role{display:none;}") &&
+       harness_expect_not_contains(page_html,
+                                   "role.style.display='block'") &&
        harness_expect_contains(page_html,
                                "function rowIsAPIExchangeMetadata") &&
        harness_expect_contains(page_html,
-                               "roundLabel+' '+roundNumber+") &&
+                               "titleText=roundLabel+' '+roundNumber;") &&
+       harness_expect_contains(page_html,
+                               "if(parseInt(attemptNumber,10)>1)"
+                               "titleText+=' \\u00b7 '+attemptLabel+' '+"
+                               "attemptNumber;") &&
+       harness_expect_contains(page_html,
+                               "setNodeText(title,titleText);") &&
+       harness_expect_not_contains(page_html,
+                                   "setNodeText(title,roundLabel+' '+roundNumber+") &&
        harness_expect_not_contains(page_html, "setNodeText(n,'#'+id)") &&
        harness_expect_contains(page_html, ".api-exchange-section-label{") &&
        harness_expect_contains(page_html,
                                "renderAPIToolRows();moveToolRows(root)") &&
        harness_expect_contains(page_html,
                                "decorateAPIExchanges(root);"
+                               "decorateAPIToolGroups(root);"
                                "decoratePromptGroups(root)") &&
        harness_expect_contains(page_html,
                                ".api-tool-card .tool-card-body") &&
        harness_expect_contains(page_html, "c.error=toolOutputHasError(raw)") &&
-       harness_expect_contains(page_html, "function toolUsesDatabaseId") &&
-       harness_expect_contains(page_html, "database_context_read") &&
+       harness_expect_contains(
+         page_html,
+         "var strappyToolDisplayRegistry={\"database_query\":") &&
+       harness_expect_contains(page_html, "function toolDisplaySpec") &&
+       harness_expect_contains(page_html, "function toolPromotedValue") &&
+       harness_expect_contains(page_html, "function toolDisplayTitle") &&
+       harness_expect_contains(page_html, "transform=='comma_separated'") &&
+       harness_expect_contains(page_html, "parts.join(', ')") &&
+       harness_expect_contains(page_html, "transform=='database_filename'") &&
+       harness_expect_contains(page_html,
+                               "transform=='database_hint_filename'") &&
+       harness_expect_contains(page_html, "calls[id].args") &&
+       harness_expect_contains(page_html,
+                               "white-space:nowrap;overflow:hidden;"
+                               "text-overflow:ellipsis;") &&
+       harness_expect_not_contains(page_html, "function toolUsesDatabaseId") &&
+       harness_expect_not_contains(page_html, "function toolFilenameForCard") &&
        harness_expect_contains(page_html, "function beginMessageBatch") &&
        harness_expect_contains(page_html, "function scheduleWebViewUpdate") &&
        harness_expect_contains(page_html, "function flushWebViewUpdates") &&
@@ -170,8 +423,11 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function scrollBottomNow") &&
        harness_expect_contains(page_html,
                                "html,body{margin:0;padding:0;"
-                               "background:transparent;") &&
+                               "background:#fff;") &&
        harness_expect_contains(page_html, ".page{padding:0;}") &&
+       harness_expect_not_contains(page_html, ".empty{") &&
+       harness_expect_not_contains(page_html, "id=\"empty\"") &&
+       harness_expect_not_contains(page_html, "function clearEmpty") &&
        harness_expect_not_contains(page_html,
                                    "body.processing-status-active .page") &&
        harness_expect_contains(page_html,
@@ -182,14 +438,36 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "font-weight:bold;line-height:32px;height:34px;") &&
        harness_expect_contains(page_html,
-                               "background:#e7eaec;color:#3f474d;") &&
+                               "background:#b2bbc2;color:#30363b;") &&
        harness_expect_contains(page_html,
                                ".processing-autoscroll{position:absolute") &&
        harness_expect_contains(page_html,
                                "width:26px;box-sizing:border-box;display:block;"
                                "border-radius:13px;") &&
-       harness_expect_contains(page_html, "line-height:26px;") &&
+       harness_expect_contains(page_html,
+                               "font-size:12px;line-height:24px;"
+                               "-webkit-appearance:none;appearance:none;") &&
+       harness_expect_contains(page_html,
+                               ".processing-autoscroll>.fa{position:absolute;"
+                               "left:0;top:50%;width:100%;") &&
+       harness_expect_contains(page_html,
+                               "height:12px;margin-top:-6px;font-size:12px;"
+                               "line-height:12px;") &&
        harness_expect_contains(page_html, ".processing-autoscroll-on") &&
+       harness_expect_contains(page_html,
+                               ".processing-status-active .tool-column-toggle,") &&
+       harness_expect_not_contains(page_html,
+                                   ".processing-status-active "
+                                   ".api-tool-group-toggle") &&
+       harness_expect_contains(page_html,
+                               ".processing-status-active .api-reasoning-toggle{"
+                               "display:none;}") &&
+       harness_expect_contains(page_html,
+                               ".processing-status-active .tool-disclosure{"
+                               "display:none;}") &&
+       harness_expect_contains(page_html,
+                               ".processing-status-active .tool-card-toggle{"
+                               "pointer-events:none;") &&
        harness_expect_contains(page_html,
                                ".processing-status-text{display:block;"
                                "white-space:nowrap;") &&
@@ -209,6 +487,57 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function clearProcessingStatus") &&
        harness_expect_contains(page_html, "function clearProcessingStatusNode") &&
        harness_expect_contains(page_html, "function initProcessingStatusFromRenderState") &&
+       harness_expect_contains(page_html,
+                               "var strappyProcessingPromptGroupKey='';") &&
+       harness_expect_contains(page_html,
+                               "function processingNodePromptGroup") &&
+       harness_expect_contains(page_html,
+                               "if(processingNodePromptGroup(e)!=group)continue;") &&
+       harness_expect_contains(page_html,
+                               "function setProcessingThinkingCollapsed") &&
+       harness_expect_contains(page_html,
+                               "function processingInteractionsLocked") &&
+       harness_expect_contains(page_html,
+                               "syncProcessingInteractionState(1,group)") &&
+       harness_expect_contains(page_html,
+                               "syncProcessingInteractionState(0,group)") &&
+       harness_expect_contains(page_html,
+                               "setAPIExchangesCollapsedForPrompt(group,0);") &&
+       harness_expect_contains(page_html,
+                               "strappyProcessingPromptGroupKey=group;"
+                               "syncProcessingInteractionState(1,group);"
+                               "decorateAPIExchanges(document);"
+                               "decorateAPIToolGroups(document);") &&
+       harness_expect_contains(page_html,
+                               "setAPIExchangesCollapsedForPrompt(group,1);"
+                               "strappyProcessingStatus=null;"
+                               "syncProcessingInteractionState(0,group);"
+                               "strappyProcessingStatusDirty=1;"
+                               "decorateAPIExchanges(document);"
+                               "decorateAPIToolGroups(document);") &&
+       harness_expect_contains(page_html,
+                               "function toggleMetadata(a){"
+                               "if(processingInteractionsLocked())return false;") &&
+       harness_expect_contains(page_html,
+                               "function toggleAPIExchange(a){"
+                               "if(processingInteractionsLocked())return false;") &&
+       harness_expect_not_contains(page_html,
+                                   "function toggleAPIToolGroup(a)") &&
+       harness_expect_contains(page_html,
+                               "function togglePromptGroup(a){"
+                               "if(processingInteractionsLocked())return false;") &&
+       harness_expect_contains(page_html,
+                               "function toggleReasoning(a){"
+                               "if(processingInteractionsLocked())return false;") &&
+       harness_expect_contains(page_html,
+                               "function toggleAPIReasoning(a){"
+                               "if(processingInteractionsLocked())return false;") &&
+       harness_expect_contains(page_html,
+                               "function toggleToolColumn(a){"
+                               "if(processingInteractionsLocked())return false;") &&
+       harness_expect_contains(page_html,
+                               "function toggleToolCard(a){"
+                               "if(processingInteractionsLocked())return false;") &&
        harness_expect_contains(page_html, "processing_status") &&
        harness_expect_contains(page_html, "var strappyAutoScrollEnabled=1") &&
        harness_expect_contains(page_html, "function toggleAutoScroll") &&
@@ -246,8 +575,33 @@ static int harness_check_page_scripts(void)
                                "if(strappyAutoScrollEnabled)"
                                "strappyUpdateShouldScroll=1") &&
        harness_expect_contains(page_html,
-                               "function scrollBottom(){if(!strappyAutoScrollEnabled)return") &&
+                               "function scrollBottom(){"
+                               "if(!strappyAutoScrollEnabled)return;"
+                               "if(strappyBatchDepth>0){"
+                               "strappyBatchShouldScroll=1;return;}") &&
        harness_expect_contains(page_html, "function preserveLiveMessageText") &&
+       harness_expect_contains(page_html,
+                               "function prepareInsertedRow(n)") &&
+       harness_expect_contains(page_html,
+                               "setClass(n,'row-inserting',1);"
+                               "scheduleInsertedRowCleanup(n)") &&
+       harness_expect_contains(page_html,
+                               "setTimeout(function(){"
+                               "clearInsertedRowAnimation(n);},400)") &&
+       harness_expect_contains(page_html,
+                               "e.animationName!='strappy-round-fade'") &&
+       harness_expect_contains(page_html,
+                               "addEventListener('webkitAnimationEnd',"
+                               "finishInsertedRowAnimation,false)") &&
+       harness_expect_contains(page_html,
+                               "removeEventListener('webkitAnimationEnd',"
+                               "finishInsertedRowAnimation,false)") &&
+       harness_expect_contains(page_html,
+                               "while(n){prepareInsertedRow(n);"
+                               "n=n.nextSibling;}") &&
+       harness_expect_contains(page_html,
+                               "while(d.firstChild){n=d.firstChild;"
+                               "prepareInsertedRow(n);m.insertBefore(n,before);}") &&
        harness_expect_contains(page_html,
                                "if(isAssistantRow(old)&&isAssistantRow(next))"
                                "preserveLiveMessageText(old,next)") &&
@@ -263,6 +617,13 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function setToolBoxCount") &&
        harness_expect_contains(page_html, "setToolBoxCount(box,cards.length,last") &&
        harness_expect_contains(page_html, "toolCardSummary(last,cards.length-1)") &&
+       harness_expect_contains(page_html,
+                               "lastError?toolErrorIconHTML():'')") &&
+       harness_expect_contains(page_html,
+                               "card.error?toolErrorIconHTML():'')") &&
+       harness_expect_contains(page_html,
+                               "setToolCardSummary(summary,apiToolLabel(row)+"
+                               "': '+title,error)") &&
        harness_expect_contains(page_html,
                                "tool-column-collapsed .tool-rail-title") &&
        harness_expect_contains(page_html, "Raw JSON preview") &&
@@ -315,11 +676,7 @@ static int harness_check_fontawesome_rendering(void)
     return 0;
   }
 
-  page_html = strappy_webview_messages_page_html(message_html,
-                                                "Empty",
-                                                1,
-                                                0,
-                                                "Load More");
+  page_html = strappy_webview_messages_page_html(message_html, "{}");
   strappy_webview_free(message_html);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate Font Awesome page HTML.\n");
@@ -478,7 +835,13 @@ static int harness_check_tool_column_state(void)
   ok = harness_expect_contains(final_html,
                                "tool-column tool-column-empty tool-column-collapsed") &&
        harness_expect_contains(final_html,
-                               "tool-column-disclosure\">&#9658;") &&
+                               "tool-rail-title disclosure-title\" "
+                               "onclick=\"return toggleToolColumn(this)\"") &&
+       harness_expect_contains(final_html,
+                               "<div class=\"role\">Agent</div>") &&
+       harness_expect_contains(final_html,
+                               "tool-column-disclosure\"><i class=\"fa fa-solid "
+                               "fa-angle-right\"") &&
        harness_expect_contains(streaming_html,
                                "row assistant streaming-active state-pending") &&
        harness_expect_contains(streaming_html,
@@ -488,9 +851,11 @@ static int harness_check_tool_column_state(void)
        harness_expect_contains(streaming_html,
                                "class=\"bubble\" style=\"display:none;\"") &&
        harness_expect_contains(streaming_html,
-                               "tool-column-disclosure\">&#9658;") &&
+                               "tool-column-disclosure\"><i class=\"fa fa-solid "
+                               "fa-angle-right\"") &&
        harness_expect_not_contains(streaming_html,
-                                   "tool-column-disclosure\">&#9660;") &&
+                                   "tool-column-disclosure\"><i class=\"fa fa-solid "
+                                   "fa-angle-down\"") &&
        harness_expect_not_contains(streaming_html,
                                    "bubble bubble-status") &&
        harness_expect_contains(reloaded_streaming_html,
@@ -499,6 +864,9 @@ static int harness_check_tool_column_state(void)
                                "data-render-state=\"{&quot;streaming&quot;:true") &&
        harness_expect_contains(reloaded_streaming_html,
                                "Thinking through it") &&
+       harness_expect_contains(reloaded_streaming_html,
+                               "reasoning-label disclosure-title\" "
+                               "onclick=\"return toggleReasoning(this)\"") &&
        harness_expect_contains(reloaded_streaming_html,
                                "class=\"bubble\" style=\"display:none;\"") &&
        harness_expect_not_contains(reloaded_streaming_html,
@@ -707,11 +1075,7 @@ static int harness_check_harness_prompt_group_collapse(void)
            harness_prompt_html,
            harness_assistant_html);
 
-  page_html = strappy_webview_messages_page_html(messages_html,
-                                                "Empty",
-                                                1,
-                                                0,
-                                                "Load More");
+  page_html = strappy_webview_messages_page_html(messages_html, "{}");
   free(messages_html);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate prompt group collapse page HTML.\n");
@@ -823,6 +1187,9 @@ static int harness_check_harness_assistant_metadata(void)
 
   ok = harness_expect_contains(message_html, "data-actor=\"harness\"") &&
        harness_expect_contains(message_html, "request-metadata") &&
+       harness_expect_contains(message_html,
+                               "request-metadata-title disclosure-title\" "
+                               "onclick=\"return toggleMetadata(this)\"") &&
        harness_expect_contains(message_html, "Harness thinking") &&
        harness_expect_contains(message_html, "Learning Summary Complete");
 
@@ -863,12 +1230,16 @@ static int harness_check_error_message_state(void)
 static int harness_check_responses_items(void)
 {
   strappy_webview_message message;
+  strappy_webview_labels labels;
   char *call_html;
   char *reasoning_html;
   char *function_html;
   char *output_html;
   char *developer_html;
   int ok;
+
+  memset(&labels, 0, sizeof(labels));
+  labels.tool = "Localized Tool";
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-call-1";
@@ -906,7 +1277,7 @@ static int harness_check_responses_items(void)
   message.arguments_json =
     "{\"database_id\":\"database-1\",\"sql\":\"SELECT 1\"}";
   message.text = "database_query\n{\"database_id\":\"database-1\"}";
-  function_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+  function_html = strappy_webview_message_html(&message, &labels, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-output-1";
@@ -919,7 +1290,7 @@ static int harness_check_responses_items(void)
     "{\"ok\":true,\"columns\":[{\"name\":\"value\"}],"
     "\"rows\":[[1]]}";
   message.text = "{\"ok\":true}";
-  output_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+  output_html = strappy_webview_message_html(&message, &labels, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-developer-1";
@@ -949,11 +1320,15 @@ static int harness_check_responses_items(void)
        harness_expect_contains(reasoning_html,
                                "data-direction-label=\"Response\"") &&
        harness_expect_contains(reasoning_html,
+                               "<div class=\"role disclosure-title\" "
+                               "onclick=\"return toggleAPIReasoning(this)\">") &&
+       harness_expect_contains(reasoning_html,
                                "class=\"api-reasoning-toggle\"") &&
        harness_expect_contains(reasoning_html,
                                "aria-expanded=\"false\"") &&
        harness_expect_contains(reasoning_html,
-                               "api-reasoning-disclosure\">&#9658;") &&
+                               "api-reasoning-disclosure\"><i class=\"fa fa-solid "
+                               "fa-angle-right\"") &&
        harness_expect_contains(reasoning_html,
                                "</span></a>Thinking</div>") &&
        harness_expect_not_contains(reasoning_html,
@@ -961,20 +1336,33 @@ static int harness_check_responses_items(void)
        harness_expect_not_contains(reasoning_html, "tool-column") &&
        harness_expect_contains(function_html,
                                "class=\"row api_function_call\"") &&
-       harness_expect_contains(function_html,
-                               "<div class=\"role\">Tool Call</div>") &&
+       harness_expect_not_contains(function_html,
+                                   "<div class=\"role\">Tool Call</div>") &&
        harness_expect_contains(function_html,
                                "data-tool-call-id=\"call-database-query\"") &&
        harness_expect_contains(function_html,
                                "data-tool-name=\"database_query\"") &&
        harness_expect_contains(function_html,
+                               "data-tool-label=\"Localized Tool\"") &&
+       harness_expect_contains(function_html,
                                "data-arguments-json=\"{&quot;database_id&quot;:") &&
        harness_expect_contains(function_html,
                                "class=\"bubble api-tool-card tool-card\"") &&
        harness_expect_contains(function_html,
+                               "class=\"tool-card-toggle disclosure-title\"") &&
+       harness_expect_contains(function_html,
+                               "class=\"tool-card-summary\">Localized Tool: "
+                               "database_query</span>") &&
+       harness_expect_contains(function_html,
                                "aria-expanded=\"false\"") &&
        harness_expect_contains(function_html,
+                               "class=\"tool-disclosure\"") &&
+       harness_expect_contains(function_html,
+                               "fa-angle-right") &&
+       harness_expect_contains(function_html,
                                "class=\"tool-card-body\"") &&
+       harness_expect_not_contains(function_html,
+                                   "tool-card-open") &&
        harness_expect_not_contains(function_html, "class=\"row tool_call\"") &&
        harness_expect_contains(output_html,
                                "class=\"row api_function_output\"") &&
@@ -984,14 +1372,31 @@ static int harness_check_responses_items(void)
                                "data-direction=\"request\"") &&
        harness_expect_contains(output_html,
                                "data-direction-label=\"Request\"") &&
-       harness_expect_contains(output_html,
-                               "<div class=\"role\">Tool Result</div>") &&
+       harness_expect_not_contains(output_html,
+                                   "<div class=\"role\">Tool Result</div>") &&
        harness_expect_contains(output_html,
                                "data-tool-call-id=\"call-database-query\"") &&
+       harness_expect_contains(output_html,
+                               "data-tool-label=\"Localized Tool\"") &&
        harness_expect_contains(output_html,
                                "data-result-json=\"{&quot;ok&quot;:true,") &&
        harness_expect_contains(output_html,
                                "class=\"bubble api-tool-card tool-card\"") &&
+       harness_expect_contains(output_html,
+                               "class=\"tool-card-toggle disclosure-title\"") &&
+       harness_expect_contains(output_html,
+                               "class=\"tool-card-summary\">Localized Tool: "
+                               "Tool Result</span>") &&
+       harness_expect_contains(output_html,
+                               "aria-expanded=\"false\"") &&
+       harness_expect_contains(output_html,
+                               "class=\"tool-disclosure\"") &&
+       harness_expect_contains(output_html,
+                               "fa-angle-right") &&
+       harness_expect_contains(output_html,
+                               "class=\"tool-card-body\"") &&
+       harness_expect_not_contains(output_html,
+                                   "tool-card-open") &&
        harness_expect_contains(developer_html,
                                "class=\"row developer\"") &&
        harness_expect_contains(developer_html,

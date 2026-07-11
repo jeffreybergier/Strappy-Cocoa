@@ -128,23 +128,6 @@ static UITextField *XPUIKitFindTextField(UIView *view)
   [self setBackgroundColor:[UIColor clearColor]];
 }
 
-- (void)XP_removeShadow
-{
-  NSArray *subviews;
-  NSUInteger index;
-
-  subviews = [self subviews];
-  for (index = 0U; index < [subviews count]; index++) {
-    UIView *view;
-
-    view = [subviews objectAtIndex:index];
-    if (![view isKindOfClass:[UIImageView class]]) {
-      break;
-    }
-    [view setHidden:YES];
-  }
-}
-
 @end
 
 @implementation UIScrollView (XPUIKit)

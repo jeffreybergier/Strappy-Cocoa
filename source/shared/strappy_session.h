@@ -114,15 +114,9 @@ char *strappy_session_webview_message_html(
   const char *status_html);
 void strappy_session_webview_message_init(strappy_webview_message *message);
 char *strappy_session_webview_append_messages_js(const char *messages_html);
-char *strappy_session_webview_prepend_messages_js(const char *messages_html,
-                                                  int has_more);
 char *strappy_session_webview_batched_js(const char *java_script);
-char *strappy_session_webview_messages_page_html(
-  const char *messages_html,
-  const char *empty_text,
-  int has_messages,
-  int has_more,
-  const char *load_more_label);
+char *strappy_session_webview_messages_page_html(const char *messages_html,
+                                                 const char *resource_dir);
 char *strappy_session_webview_append_message_text_by_key_js(
   const char *message_key,
   const char *delta);

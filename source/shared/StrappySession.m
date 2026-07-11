@@ -68,6 +68,7 @@ static strappy_webview_labels StrappySessionWebViewLabels(void)
   labels.thinking = StrappySessionCString(NSLocalizedString(@"Thinking", nil));
   labels.request_metadata =
     StrappySessionCString(NSLocalizedString(@"Request Metadata", nil));
+  labels.tool = StrappySessionCString(NSLocalizedString(@"Tool", nil));
   labels.tool_call = StrappySessionCString(NSLocalizedString(@"Tool Call", nil));
   labels.tool_result =
     StrappySessionCString(NSLocalizedString(@"Tool Result", nil));
@@ -315,15 +316,6 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   return html;
 }
 
-+ (NSString *)webViewPrependMessagesJavaScriptForHTML:(NSString *)messagesHTML
-                                             hasMore:(BOOL)hasMore
-{
-  return StrappySessionStringFromCString(
-    strappy_session_webview_prepend_messages_js(
-      StrappySessionCString(messagesHTML),
-      hasMore ? 1 : 0));
-}
-
 + (NSString *)webViewAppendMessagesJavaScriptForHTML:(NSString *)messagesHTML
 {
   return StrappySessionStringFromCString(
@@ -343,17 +335,14 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
 }
 
 + (NSString *)webViewMessagesPageHTMLForMessagesHTML:(NSString *)messagesHTML
-                                           emptyText:(NSString *)emptyText
-                                         hasMessages:(BOOL)hasMessages
-                                             hasMore:(BOOL)hasMore
 {
+  NSString *resourcePath;
+
+  resourcePath = [[NSBundle mainBundle] resourcePath];
   return StrappySessionStringFromCString(
     strappy_session_webview_messages_page_html(
       StrappySessionCString(messagesHTML),
-      StrappySessionCString(emptyText),
-      hasMessages ? 1 : 0,
-      hasMore ? 1 : 0,
-      StrappySessionCString(NSLocalizedString(@"Show Earlier Messages", nil))));
+      StrappySessionCString(resourcePath)));
 }
 
 - (int)handleStreamEvent:(const strappy_chat_stream_event *)event

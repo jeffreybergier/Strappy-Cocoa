@@ -4,6 +4,7 @@
 #include "strappy_model_catalog.h"
 #include "strappy_prompt.h"
 #include "strappy_responses.h"
+#include "strappy_tools.h"
 
 #include <string.h>
 
@@ -305,12 +306,6 @@ void strappy_session_webview_message_init(strappy_webview_message *message)
   memset(message, 0, sizeof(*message));
 }
 
-char *strappy_session_webview_prepend_messages_js(const char *messages_html,
-                                                  int has_more)
-{
-  return strappy_webview_prepend_messages_js(messages_html, has_more);
-}
-
 char *strappy_session_webview_append_messages_js(const char *messages_html)
 {
   return strappy_webview_append_message_js(messages_html);
@@ -340,18 +335,22 @@ char *strappy_session_webview_batched_js(const char *java_script)
   return script;
 }
 
-char *strappy_session_webview_messages_page_html(
-  const char *messages_html,
-  const char *empty_text,
-  int has_messages,
-  int has_more,
-  const char *load_more_label)
+char *strappy_session_webview_messages_page_html(const char *messages_html,
+                                                 const char *resource_dir)
 {
-  return strappy_webview_messages_page_html(messages_html,
-                                           empty_text,
-                                           has_messages,
-                                           has_more,
-                                           load_more_label);
+  char *display_registry_json;
+  char *display_error;
+  char *page_html;
+
+  display_error = NULL;
+  display_registry_json =
+    strappy_tools_display_registry_json(resource_dir, &display_error);
+  page_html = strappy_webview_messages_page_html(
+    messages_html,
+    (display_registry_json != NULL) ? display_registry_json : "{}");
+  strappy_free_string(display_registry_json);
+  strappy_free_string(display_error);
+  return page_html;
 }
 
 char *strappy_session_webview_append_message_text_by_key_js(

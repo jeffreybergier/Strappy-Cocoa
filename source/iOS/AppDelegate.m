@@ -37,11 +37,14 @@ static void StrappyLogApplicationLifecycle(NSString *event,
 @property (nonatomic, assign) UIBackgroundTaskIdentifier longRunningWorkBackgroundTaskIdentifier;
 @property (nonatomic, assign, getter=isLongRunningWorkIdleTimerAssertionEnabled)
   BOOL longRunningWorkIdleTimerAssertionEnabled;
+@property (nonatomic, assign, getter=isLongRunningWorkNetworkActivityIndicatorEnabled)
+  BOOL longRunningWorkNetworkActivityIndicatorEnabled;
 - (void)observeLongRunningWorkLifecycle;
 - (void)longRunningWorkLifecycleDidChange:(NSNotification *)notification;
 - (BOOL)longRunningWorkIsActive;
 - (void)updateLongRunningWorkAssertions;
 - (void)setLongRunningWorkIdleTimerAssertionEnabled:(BOOL)enabled;
+- (void)setLongRunningWorkNetworkActivityIndicatorEnabled:(BOOL)enabled;
 - (void)beginLongRunningWorkBackgroundTaskIfNeeded;
 - (void)endLongRunningWorkBackgroundTaskIfNeeded;
 - (void)longRunningWorkBackgroundTaskDidExpire;
@@ -112,6 +115,7 @@ static void StrappyLogApplicationLifecycle(NSString *event,
 {
   StrappyLogApplicationLifecycle(@"applicationWillTerminate", application);
   [self setLongRunningWorkIdleTimerAssertionEnabled:NO];
+  [self setLongRunningWorkNetworkActivityIndicatorEnabled:NO];
   [self endLongRunningWorkBackgroundTaskIfNeeded];
 }
 
@@ -177,6 +181,7 @@ static void StrappyLogApplicationLifecycle(NSString *event,
 
   active = [self longRunningWorkIsActive];
   [self setLongRunningWorkIdleTimerAssertionEnabled:active];
+  [self setLongRunningWorkNetworkActivityIndicatorEnabled:active];
   if (active) {
     [self beginLongRunningWorkBackgroundTaskIfNeeded];
   } else {
@@ -193,6 +198,19 @@ static void StrappyLogApplicationLifecycle(NSString *event,
   _longRunningWorkIdleTimerAssertionEnabled = enabled ? YES : NO;
   StrappyIdleTimerAssertionSetEnabled(enabled);
   NSLog(@"StrappyLifecycle AppDelegate longRunningWorkIdleTimerAssertion %@",
+        enabled ? @"YES" : @"NO");
+}
+
+- (void)setLongRunningWorkNetworkActivityIndicatorEnabled:(BOOL)enabled
+{
+  if ([self isLongRunningWorkNetworkActivityIndicatorEnabled] == enabled) {
+    return;
+  }
+
+  _longRunningWorkNetworkActivityIndicatorEnabled = enabled ? YES : NO;
+  [[UIApplication sharedApplication]
+    setNetworkActivityIndicatorVisible:enabled];
+  NSLog(@"StrappyLifecycle AppDelegate longRunningWorkNetworkActivityIndicator %@",
         enabled ? @"YES" : @"NO");
 }
 
@@ -277,6 +295,7 @@ static void StrappyLogApplicationLifecycle(NSString *event,
 {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [self setLongRunningWorkIdleTimerAssertionEnabled:NO];
+  [self setLongRunningWorkNetworkActivityIndicatorEnabled:NO];
   [self endLongRunningWorkBackgroundTaskIfNeeded];
 }
 

@@ -2,8 +2,6 @@
 #import "StrappySession.h"
 #import "XPAppKit.h"
 
-static const NSUInteger kStrappyInitialMessageLimit = 80U;
-static const NSUInteger kStrappyMessagePageSize = 40U;
 static const NSTimeInterval kStrappyStreamEventFlushInterval = 0.3;
 
 static NSString *StrappyHTMLDirectory(void)
@@ -97,9 +95,8 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 - (void)setPromptCancellationRequested:(BOOL)requested;
 - (BOOL)promptCancellationRequested;
 - (BOOL)appendNewMessagesToWebView;
-- (void)loadEarlierMessages;
 - (NSString *)writeCurrentHTML;
-- (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error;
+- (NSString *)htmlForMessages:(NSArray *)messages;
 - (void)layoutWebViewAndPromptBar;
 - (void)clearRequestState;
 @end
@@ -482,12 +479,7 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 
 - (void)handleActionURL:(NSURL *)url
 {
-  NSString *host;
-
-  host = [url host];
-  if ([host isEqualToString:@"load-more"]) {
-    [self loadEarlierMessages];
-  }
+  (void)url;
 }
 
 - (NSURL *)contentURL
@@ -507,21 +499,19 @@ static BOOL StrappyEnsureDirectory(NSString *path)
   NSString *path;
   NSString *html;
   NSArray *messages;
-  NSError *error;
 
   path = [htmlDirectoryPath_ stringByAppendingPathComponent:@"session.html"];
   if (!StrappyEnsureDirectory(htmlDirectoryPath_)) {
     return nil;
   }
 
-  error = nil;
   messages = nil;
 
   if (session_ != nil) {
-    messages = [session_ messagesWithError:&error];
+    messages = [session_ messagesWithError:nil];
   }
 
-  html = [self htmlForMessages:messages error:error];
+  html = [self htmlForMessages:messages];
   if (![html writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil]) {
     return nil;
   }
@@ -529,49 +519,27 @@ static BOOL StrappyEnsureDirectory(NSString *path)
   return path;
 }
 
-- (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error
+- (NSString *)htmlForMessages:(NSArray *)messages
 {
   NSMutableString *messagesHTML;
   NSUInteger count;
-  NSUInteger start;
-  NSString *emptyText;
-  BOOL hasMessages;
 
   if (![messages isKindOfClass:[NSArray class]]) {
     messages = nil;
   }
 
   count = [messages count];
-  start = 0U;
-  if (count > kStrappyInitialMessageLimit) {
-    start = count - kStrappyInitialMessageLimit;
-  }
-  oldestRenderedMessageIndex_ = start;
   newestRenderedMessageCount_ = count;
-
-  hasMessages = (count > 0U) ? YES : NO;
-  if ([statusText_ length] > 0U) {
-    emptyText = statusText_;
-  } else if (error != nil) {
-    emptyText = [error localizedDescription];
-  } else if (session_ == nil) {
-    emptyText = NSLocalizedString(@"No session selected.", nil);
-  } else {
-    emptyText = NSLocalizedString(@"New Session", nil);
-  }
 
   messagesHTML = [NSMutableString string];
   if (count > 0U) {
     [messagesHTML appendString:
       [StrappySession webViewMessagesHTMLForMessages:messages
-                                          startIndex:start
+                                          startIndex:0U
                                             endIndex:count]];
   }
 
-  return [StrappySession webViewMessagesPageHTMLForMessagesHTML:messagesHTML
-                                                      emptyText:emptyText
-                                                    hasMessages:hasMessages
-                                                        hasMore:(start > 0U) ? YES : NO];
+  return [StrappySession webViewMessagesPageHTMLForMessagesHTML:messagesHTML];
 }
 
 - (void)promptSendViewController:(PromptSendViewController *)controller
@@ -894,50 +862,6 @@ static BOOL StrappyEnsureDirectory(NSString *path)
   [self pushJavaScript:js];
   newestRenderedMessageCount_ = count;
   return YES;
-}
-
-- (void)loadEarlierMessages
-{
-  NSError *error;
-  NSArray *messages;
-  NSUInteger end;
-  NSUInteger start;
-  NSString *html;
-  NSString *js;
-
-  if ((session_ == nil) || (oldestRenderedMessageIndex_ == 0U)) {
-    return;
-  }
-
-  error = nil;
-  messages = [session_ messagesWithError:&error];
-  if (messages == nil) {
-    return;
-  }
-
-  end = oldestRenderedMessageIndex_;
-  if (end > [messages count]) {
-    end = [messages count];
-  }
-  if (end == 0U) {
-    return;
-  }
-
-  if (end > kStrappyMessagePageSize) {
-    start = end - kStrappyMessagePageSize;
-  } else {
-    start = 0U;
-  }
-
-  html = [StrappySession webViewMessagesHTMLForMessages:messages
-                                             startIndex:start
-                                               endIndex:end];
-  oldestRenderedMessageIndex_ = start;
-
-  js = [StrappySession webViewPrependMessagesJavaScriptForHTML:html
-                                                       hasMore:(start > 0U) ? YES : NO];
-  [self flushPendingStreamEvents];
-  [self pushJavaScript:js];
 }
 
 - (void)dealloc

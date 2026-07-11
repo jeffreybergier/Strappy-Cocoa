@@ -9434,7 +9434,7 @@ int strappy_db_list_response_timeline(
     "COALESCE(c.response_model,c.request_model),c.request_started_at,"
     "c.transport_error,c.response_raw_json,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,"
     "c.request_url,c.response_status,c.response_error_message,"
-    "c.response_incomplete_reason,0 "
+    "c.response_incomplete_reason,0,2 AS presentation_phase "
     "FROM response_api_calls c WHERE c.session_id = ? "
     "AND c.state <> 'pending' "
     "UNION ALL "
@@ -9444,12 +9444,16 @@ int strappy_db_list_response_timeline(
     "COALESCE(c.response_model,c.request_model),i.created_at,NULL,NULL,"
     "i.type,i.display_role,i.display_text,i.raw_json,i.call_id,i.name,"
     "i.arguments,i.output,c.request_url,c.response_status,"
-    "c.response_error_message,c.response_incomplete_reason,i.is_canonical "
+    "c.response_error_message,c.response_incomplete_reason,i.is_canonical,"
+    "CASE WHEN i.display_role IN "
+    "('user','harness','developer','assistant') "
+    "THEN CASE WHEN i.direction = 'request' THEN 0 ELSE 3 END "
+    "ELSE 1 END "
     "FROM response_api_items i JOIN response_api_calls c "
     "ON c.id = i.response_call_id "
     "WHERE i.session_id = ? AND i.timeline_visible = 1 "
     "AND c.state <> 'pending' "
-    "ORDER BY call_id,sort_phase,item_index;";
+    "ORDER BY call_id,presentation_phase,sort_phase,item_index;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;

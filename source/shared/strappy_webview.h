@@ -12,6 +12,7 @@ typedef struct strappy_webview_labels {
   const char *developer;
   const char *thinking;
   const char *request_metadata;
+  const char *tool;
   const char *tool_call;
   const char *tool_result;
   const char *retry;
@@ -108,11 +109,9 @@ char *strappy_webview_message_html_with_reasoning(
   const strappy_webview_message *message,
   const char *reasoning,
   const strappy_webview_labels *labels);
-char *strappy_webview_messages_page_html(const char *messages_html,
-                                         const char *empty_text,
-                                         int has_messages,
-                                         int has_more,
-                                         const char *load_more_label);
+char *strappy_webview_messages_page_html(
+  const char *messages_html,
+  const char *tool_display_registry_json);
 
 char *strappy_webview_append_message_js(const char *message_html);
 char *strappy_webview_replace_message_js(const char *element_id,
@@ -145,8 +144,6 @@ char *strappy_webview_tool_event_text(const char *event_type,
 char *strappy_webview_append_tool_event_text_js(const char *element_id,
                                                 const char *event_text);
 char *strappy_webview_remove_message_js(const char *element_id);
-char *strappy_webview_prepend_messages_js(const char *messages_html,
-                                          int has_more);
 
 #ifdef __cplusplus
 }
