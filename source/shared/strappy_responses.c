@@ -67,8 +67,11 @@ typedef struct strappy_responses_audit_rule {
 typedef struct strappy_responses_audit {
   strappy_responses_audit_rule *rules;
   size_t count;
+  char *after_audit;
   int session_name_empty;
   int stopped_after_ignored_reminder;
+  int reminder_triggered;
+  int finalization_sent;
 } strappy_responses_audit;
 
 static void strappy_responses_buffer_destroy(strappy_responses_buffer *buffer)
@@ -119,8 +122,11 @@ static void strappy_responses_audit_init(strappy_responses_audit *audit)
   }
   audit->rules = NULL;
   audit->count = 0U;
+  audit->after_audit = NULL;
   audit->session_name_empty = 0;
   audit->stopped_after_ignored_reminder = 0;
+  audit->reminder_triggered = 0;
+  audit->finalization_sent = 0;
 }
 
 static void strappy_responses_audit_destroy(strappy_responses_audit *audit)
@@ -136,6 +142,7 @@ static void strappy_responses_audit_destroy(strappy_responses_audit *audit)
     free(audit->rules[index].when_tool_called);
   }
   free(audit->rules);
+  free(audit->after_audit);
   strappy_responses_audit_init(audit);
 }
 
@@ -256,6 +263,7 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
   char *text;
   cJSON *root;
   cJSON *rules;
+  cJSON *after_audit;
   cJSON *item;
 
   if (audit == NULL) {
@@ -284,13 +292,26 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
     return 0;
   }
   rules = cJSON_GetObjectItem(root, "tool_usage_priority");
-  if (!cJSON_IsArray(rules)) {
+  after_audit = cJSON_GetObjectItem(root, "after_audit");
+  if (!cJSON_IsArray(rules) || !cJSON_IsString(after_audit) ||
+      (after_audit->valuestring == NULL) ||
+      (after_audit->valuestring[0] == '\0')) {
     cJSON_Delete(root);
     strappy_set_formatted_error(
       error_out,
-      "Audit guidance is missing tool_usage_priority: %s",
+      "Audit guidance is missing tool_usage_priority or after_audit: %s",
       path);
     free(path);
+    return 0;
+  }
+  audit->after_audit =
+    strappy_string_duplicate(after_audit->valuestring);
+  if (audit->after_audit == NULL) {
+    cJSON_Delete(root);
+    strappy_set_error(error_out,
+                      "Could not allocate post-audit guidance.");
+    free(path);
+    strappy_responses_audit_destroy(audit);
     return 0;
   }
   for (item = rules->child; item != NULL; item = item->next) {
@@ -425,9 +446,21 @@ static const char *strappy_responses_audit_next_reminder(
       return NULL;
     }
     rule->reminder_sent = 1;
+    audit->reminder_triggered = 1;
     return rule->if_not_called;
   }
   return NULL;
+}
+
+static const char *strappy_responses_audit_finalization(
+  strappy_responses_audit *audit)
+{
+  if ((audit == NULL) || !audit->reminder_triggered ||
+      audit->finalization_sent) {
+    return NULL;
+  }
+  audit->finalization_sent = 1;
+  return audit->after_audit;
 }
 
 static long long strappy_responses_now_ms(void)
@@ -1442,6 +1475,7 @@ static char *strappy_responses_build_request_json(
   const char *tools_json,
   const strappy_response_item_raw_record_list *history,
   const strappy_responses_owned_items *new_items,
+  int allow_tool_calls,
   long *new_input_start_index_out,
   char **error_out)
 {
@@ -1543,7 +1577,11 @@ static char *strappy_responses_build_request_json(
     &buffer,
     "],\"include\":[\"reasoning.encrypted_content\"],"
     "\"reasoning\":{\"enabled\":true,\"summary\":\"auto\"},"
-    "\"parallel_tool_calls\":true,\"tool_choice\":\"auto\",\"tools\":") &&
+    "\"parallel_tool_calls\":true,\"tool_choice\":\"") &&
+    strappy_responses_buffer_append_string(
+      &buffer,
+      allow_tool_calls ? "auto" : "none") &&
+    strappy_responses_buffer_append_string(&buffer, "\",\"tools\":") &&
     strappy_responses_buffer_append_string(&buffer, tools_json);
   if (ok && !config->web_search_enabled) {
     ok = strappy_responses_buffer_append_string(
@@ -2377,6 +2415,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   long last_http_status;
   long round_index;
   long long processing_started_ms;
+  int allow_tool_calls;
   int ok;
 
   if ((prompt == NULL) || (prompt[0] == '\0') ||
@@ -2395,6 +2434,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   last_http_status = 0L;
   processing_started_ms = strappy_responses_now_ms();
   next_request_kind = "user";
+  allow_tool_calls = 1;
 
   if (!strappy_responses_prepare_runtime(&runtime,
                                          env_path,
@@ -2479,6 +2519,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
       runtime.tools_json,
       &history,
       &new_items,
+      allow_tool_calls,
       &new_input_start_index,
       error_out);
     strappy_response_item_raw_record_list_destroy(&history);
@@ -2568,6 +2609,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
         break;
       }
       next_request_kind = "tool_continuation";
+      allow_tool_calls = 1;
       strappy_responses_analysis_destroy(&analysis);
       strappy_responses_http_result_destroy(&http);
       continue;
@@ -2593,6 +2635,34 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
           break;
         }
         next_request_kind = "tool_audit";
+        allow_tool_calls = 1;
+        strappy_responses_analysis_destroy(&analysis);
+        strappy_responses_http_result_destroy(&http);
+        continue;
+      }
+    }
+
+    {
+      const char *audit_finalization;
+      char *finalization_item;
+
+      audit_finalization =
+        strappy_responses_audit_finalization(&runtime.audit);
+      if (audit_finalization != NULL) {
+        finalization_item = strappy_responses_message_item_json(
+          "developer",
+          audit_finalization,
+          error_out);
+        if ((finalization_item == NULL) ||
+            !strappy_responses_owned_items_append(&new_items,
+                                                  finalization_item,
+                                                  error_out)) {
+          strappy_responses_analysis_destroy(&analysis);
+          strappy_responses_http_result_destroy(&http);
+          break;
+        }
+        next_request_kind = "audit_finalize";
+        allow_tool_calls = 0;
         strappy_responses_analysis_destroy(&analysis);
         strappy_responses_http_result_destroy(&http);
         continue;

@@ -17,6 +17,7 @@
 
 #define HARNESS_RESOURCE_DIR "../shared/Resources"
 #define HARNESS_DATABASE_GUIDANCE_RESOURCE "GuidanceDatabase.json"
+#define HARNESS_AUDIT_GUIDANCE_RESOURCE "GuidanceAudit.json"
 
 typedef struct harness_context {
   char temp_dir[1024];
@@ -627,6 +628,104 @@ static cJSON *harness_read_json_resource(const char *resource_name)
   }
 
   return root;
+}
+
+static int harness_json_string_equals(cJSON *object,
+                                      const char *key,
+                                      const char *expected)
+{
+  cJSON *value;
+
+  value = cJSON_IsObject(object) ? cJSON_GetObjectItem(object, key) : NULL;
+  return cJSON_IsString(value) && (value->valuestring != NULL) &&
+    (strcmp(value->valuestring, expected) == 0);
+}
+
+static int harness_run_audit_resource_tests(void)
+{
+  cJSON *root;
+  cJSON *rules;
+  cJSON *after_audit;
+  cJSON *user_fact_rule;
+  cJSON *database_hint_rule;
+  cJSON *user_fact_message;
+  cJSON *database_hint_message;
+  cJSON *database_hint_when;
+  cJSON *rule;
+  cJSON *message;
+  int index;
+  int rules_avoid_finalization;
+  int ok;
+
+  root = harness_read_json_resource(HARNESS_AUDIT_GUIDANCE_RESOURCE);
+  after_audit = cJSON_IsObject(root) ?
+    cJSON_GetObjectItem(root, "after_audit") : NULL;
+  rules = cJSON_IsObject(root) ?
+    cJSON_GetObjectItem(root, "tool_usage_priority") : NULL;
+  user_fact_rule = cJSON_GetArrayItem(rules, 3);
+  database_hint_rule = cJSON_GetArrayItem(rules, 4);
+  user_fact_message = cJSON_IsObject(user_fact_rule) ?
+    cJSON_GetObjectItem(user_fact_rule, "if_not_called") : NULL;
+  database_hint_message = cJSON_IsObject(database_hint_rule) ?
+    cJSON_GetObjectItem(database_hint_rule, "if_not_called") : NULL;
+  database_hint_when = cJSON_IsObject(database_hint_rule) ?
+    cJSON_GetObjectItem(database_hint_rule, "when") : NULL;
+  rules_avoid_finalization = cJSON_IsArray(rules) ? 1 : 0;
+  for (index = 0;
+       rules_avoid_finalization && (index < cJSON_GetArraySize(rules));
+       index++) {
+    rule = cJSON_GetArrayItem(rules, index);
+    message = cJSON_IsObject(rule) ?
+      cJSON_GetObjectItem(rule, "if_not_called") : NULL;
+    if (!cJSON_IsString(message) || (message->valuestring == NULL) ||
+        (strstr(message->valuestring, "final") != NULL)) {
+      rules_avoid_finalization = 0;
+    }
+  }
+
+  ok = cJSON_IsString(after_audit) &&
+    (after_audit->valuestring != NULL) &&
+    (strstr(after_audit->valuestring, "Refinalize") != NULL) &&
+    (strstr(after_audit->valuestring, "original question") != NULL) &&
+    rules_avoid_finalization &&
+    cJSON_IsArray(rules) && (cJSON_GetArraySize(rules) == 5) &&
+    harness_json_string_equals(cJSON_GetArrayItem(rules, 0),
+                               "tool_name",
+                               STRAPPY_TOOL_DATABASE_QUERY) &&
+    harness_json_string_equals(cJSON_GetArrayItem(rules, 1),
+                               "tool_name",
+                               "openrouter:web_search") &&
+    harness_json_string_equals(cJSON_GetArrayItem(rules, 2),
+                               "tool_name",
+                               STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) &&
+    harness_json_string_equals(user_fact_rule,
+                               "tool_name",
+                               STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) &&
+    (cJSON_GetObjectItem(user_fact_rule, "when") == NULL) &&
+    cJSON_IsString(user_fact_message) &&
+    (user_fact_message->valuestring != NULL) &&
+    (strstr(user_fact_message->valuestring,
+            "explicitly provided a new stable, non-sensitive fact") != NULL) &&
+    (strstr(user_fact_message->valuestring,
+            "Do not infer preferences from behavior or database contents") !=
+     NULL) &&
+    harness_json_string_equals(database_hint_rule,
+                               "tool_name",
+                               STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
+    cJSON_IsString(database_hint_message) &&
+    (database_hint_message->valuestring != NULL) &&
+    (strstr(database_hint_message->valuestring,
+            "reusable, evidence-backed schema or query hint") != NULL) &&
+    (strstr(database_hint_message->valuestring,
+            "Do not store private row contents") != NULL) &&
+    harness_json_string_equals(database_hint_when,
+                               "tool_called",
+                               STRAPPY_TOOL_DATABASE_QUERY);
+  cJSON_Delete(root);
+  if (!ok) {
+    fprintf(stderr, "Audit guidance order or memory safeguards are invalid.\n");
+  }
+  return ok;
 }
 
 static char *harness_database_default_string(const char *key)
@@ -4793,7 +4892,8 @@ int main(void)
   int ok;
 
   harness_context_init(&context);
-  ok = harness_run_tool_registry_tests() &&
+  ok = harness_run_audit_resource_tests() &&
+       harness_run_tool_registry_tests() &&
        harness_run_helper_datetime_tests() &&
        harness_run_helper_fontawesome_tests() &&
        harness_make_temp_dir(&context) &&

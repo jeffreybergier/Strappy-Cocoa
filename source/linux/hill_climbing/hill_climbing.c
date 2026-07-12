@@ -14,6 +14,7 @@
 #include "strappy_core.h"
 #include "strappy_db.h"
 #include "strappy_responses.h"
+#include "strappy_tools.h"
 
 #define HILL_MAX_DATABASES 512U
 
@@ -58,6 +59,11 @@ static const char *HILL_MODELS_JSON =
   "{\"id\":\"qwen/qwen3.6-27b\",\"name\":\"Qwen 3.6 27B\","
   "\"context_length\":131072,\"supported_parameters\":[\"tools\"]}"
   "]}";
+
+static const char *HILL_USER_FACT_JSON =
+  "{\"kind\":\"identity\",\"subject\":\"user\","
+  "\"predicate\":\"first_name\",\"value\":\"Jeff\","
+  "\"confidence\":1.0,\"source\":\"user_explicit\"}";
 
 static void hill_usage(const char *program)
 {
@@ -736,6 +742,25 @@ static int hill_register_databases(const char *session_db,
   return 1;
 }
 
+static int hill_seed_user_fact(const char *session_db,
+                               long long session_id,
+                               char **error_out)
+{
+  char *result;
+
+  result = strappy_tools_execute(session_db,
+                                 session_id,
+                                 NULL,
+                                 STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+                                 HILL_USER_FACT_JSON,
+                                 error_out);
+  if (result == NULL) {
+    return 0;
+  }
+  free(result);
+  return 1;
+}
+
 int main(int argc, char **argv)
 {
   hill_options options;
@@ -762,6 +787,7 @@ int main(int argc, char **argv)
                                                   session_id,
                                                   1,
                                                   &error) &&
+    hill_seed_user_fact(options.session_db, session_id, &error) &&
     hill_register_databases(options.session_db, &options, &error);
   if (!ok) {
     fprintf(stderr,
@@ -771,11 +797,13 @@ int main(int argc, char **argv)
     strappy_free_string(error);
     return 1;
   }
+  hill_log_line(2U,
+                "Seeded remembered user fact with memory_user_fact_remember");
+  hill_log_line(2U,
+                "Registered %lu approved database fixtures for %s",
+                (unsigned long)options.database_count,
+                options.model);
   if (options.prepare_only) {
-    hill_log_line(2U,
-                  "Prepared %lu approved database fixtures for %s",
-                  (unsigned long)options.database_count,
-                  options.model);
     strappy_free_string(error);
     return 0;
   }

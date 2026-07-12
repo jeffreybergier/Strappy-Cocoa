@@ -12,7 +12,6 @@ RUNNER := $(BUILD_DIR)/hill_climbing
 DEVICE_HOST ?= gomadango
 DEVICE_FIXTURE_DIR ?= private/gomadango
 DATABASE_MANIFEST ?= $(DEVICE_FIXTURE_DIR)/databases.json
-MEDIA_DB ?= $(DEVICE_FIXTURE_DIR)/root/var/mobile/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb
 SYNC_FIXTURES := sync_device_fixtures.py
 ENV_FILE ?= ../../../.env
 SYSTEM_PROMPT ?= $(SHARED_DIR)/Resources/PromptSystem.txt
@@ -51,20 +50,11 @@ verify-fixture: build
 		echo "Run: make refresh-fixture" >&2; \
 		exit 2; \
 	}
-	@test -f "$(MEDIA_DB)" || { \
-		echo "Missing private fixture: $(MEDIA_DB)" >&2; \
-		echo "Run: make refresh-fixture" >&2; \
-		exit 2; \
-	}
 	@python3 "$(SYNC_FIXTURES)" \
 		--fixture-dir "$(DEVICE_FIXTURE_DIR)" --verify-only \
 		--runner "$(RUNNER)"
 	@git check-ignore -q "$(DATABASE_MANIFEST)" || { \
 		echo "Refusing to use a database manifest that is not ignored by git." >&2; \
-		exit 2; \
-	}
-	@git check-ignore -q "$(MEDIA_DB)" || { \
-		echo "Refusing to use a MediaLibrary fixture that is not ignored by git." >&2; \
 		exit 2; \
 	}
 
@@ -76,7 +66,6 @@ run: build verify-fixture
 	}
 	python3 run_hill_climbing.py \
 		--runner "$(RUNNER)" \
-		--media-db "$(MEDIA_DB)" \
 		--database-manifest "$(DATABASE_MANIFEST)" \
 		--env-file "$(ENV_FILE)" \
 		--system-prompt "$(SYSTEM_PROMPT)" \
@@ -89,8 +78,7 @@ refresh-fixture:
 		--host "$(DEVICE_HOST)" --fixture-dir "$(DEVICE_FIXTURE_DIR)"
 	$(MAKE) verify-fixture \
 		DEVICE_FIXTURE_DIR="$(DEVICE_FIXTURE_DIR)" \
-		DATABASE_MANIFEST="$(DATABASE_MANIFEST)" \
-		MEDIA_DB="$(MEDIA_DB)"
+		DATABASE_MANIFEST="$(DATABASE_MANIFEST)"
 
 clean:
 	rm -rf "$(BUILD_DIR)" __pycache__

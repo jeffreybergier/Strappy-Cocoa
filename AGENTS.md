@@ -110,9 +110,17 @@ House style for Strappy source:
     `GuidanceAudit.json` one at a time, honoring each rule's optional `when`
     conditions. Database inventory is an application-seeded preflight tool
     output rather than a missing-tool rule; the database audit checks
-    `database_query`. Append each rule's `developer` reminder at most once in
-    the same Responses history; if the model ignores a reminder, accept its
-    next final answer without repeating or advancing the audit.
+    `database_query`. User-fact and database-hint memory checks are last;
+    database-hint memory applies only after `database_query`, and neither
+    reminder may encourage storing inferred preferences, sensitive/private row
+    values, or one-off query results. Append each rule's `developer` reminder
+    at most once in the same Responses history. Individual reminders contain
+    only their audit action, not final-answer instructions. If any reminder is
+    appended, finish the ordered audit and then append the single
+    `after_audit` developer message from `GuidanceAudit.json`; make one
+    tool-disabled `audit_finalize` call and do not audit that response. Every
+    audit, tool, finalization, and assistant item uses the normal database and
+    timeline paths. If no reminder is appended, do not add a finalization turn.
 17. OpenRouter model catalog and selection state live in shared SQLite storage.
     `strappy_db` owns `openrouter_models`, `openrouter_model_settings`, the
     default model app setting, and `sessions.model`; `StrappySession` owns the

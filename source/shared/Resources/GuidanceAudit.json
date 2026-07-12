@@ -1,18 +1,30 @@
 {
+  "after_audit": "The tool usage audit is not complete. Please provide one complete, standalone answer to the user's original question. Answer the user directly, and do not mention the audit or tool activity.",
   "tool_usage_priority": [
     {
       "tool_name": "database_query",
-      "if_not_called": "The application already supplied the approved-database inventory, but you did not call database_query. If the request depends on personal data, query the relevant approved database before finalizing. Otherwise, finalize without a database query. Do not guess the user's data."
+      "if_not_called": "You did not call database_query. If the user's question depends on personal data, query the relevant approved database now. Otherwise, do not call it. Do not guess the user's data."
     },
     {
       "tool_name": "openrouter:web_search",
-      "if_not_called": "You did not search the web. If the answer requires current public facts not available in the user's databases, search the web before finalizing."
+      "if_not_called": "You did not search the web. If the answer requires current public facts not available in the user's databases, search the web now. Otherwise, do not search."
     },
     {
       "tool_name": "helper_session_name_write",
-      "if_not_called": "This session is still untitled. Give it a short, descriptive name before finalizing.",
+      "if_not_called": "This session is still untitled. Give it a short, descriptive name now.",
       "when": {
         "session_name_empty": true
+      }
+    },
+    {
+      "tool_name": "memory_user_fact_remember",
+      "if_not_called": "You did not call memory_user_fact_remember. If the user explicitly provided a new stable, non-sensitive fact that would be useful in future sessions, remember it now. Do not infer preferences from behavior or database contents, and do not remember sensitive information or private row values."
+    },
+    {
+      "tool_name": "memory_database_hint_remember",
+      "if_not_called": "You queried a database but did not call memory_database_hint_remember. If the database work established a reusable, evidence-backed schema or query hint, remember it now. Do not store private row contents, sensitive values, guesses, or one-off query results.",
+      "when": {
+        "tool_called": "database_query"
       }
     }
   ]

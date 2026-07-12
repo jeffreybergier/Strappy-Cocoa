@@ -243,6 +243,13 @@ def verify_registration(
                 WHERE user_decision = 'allowed' AND is_valid_sqlite = 1
                 """
             ).fetchall()
+            user_facts = connection.execute(
+                """
+                SELECT kind, subject, predicate, value, confidence, source
+                FROM helper_user_info
+                WHERE status = 'active'
+                """
+            ).fetchall()
         finally:
             connection.close()
         registered = {Path(str(row[0])).resolve() for row in rows}
@@ -251,6 +258,14 @@ def verify_registration(
             raise RuntimeError(
                 "Runner registration mismatch: "
                 f"expected {len(expected)}, found {len(registered)}"
+            )
+        expected_user_fact = [
+            ("identity", "user", "first_name", "Jeff", 1.0, "user_explicit")
+        ]
+        if user_facts != expected_user_fact:
+            raise RuntimeError(
+                "Runner remembered-user-fact mismatch: "
+                f"expected {expected_user_fact}, found {user_facts}"
             )
     finally:
         for path in family:
@@ -396,7 +411,7 @@ def main() -> int:
     databases = manifest["databases"]
     print(
         f"Verified {len(databases)} approved database fixtures in "
-        f"{fixture_dir}",
+        f"{fixture_dir}; remembered user fact is seeded",
         flush=True,
     )
     return 0

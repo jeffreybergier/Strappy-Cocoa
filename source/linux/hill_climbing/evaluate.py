@@ -105,32 +105,84 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def resolve_media_db(metadata: dict[str, Any]) -> Path:
-    recorded = Path(metadata["media_db"])
-    if recorded.is_file():
-        return recorded
+def resolve_database_manifest(metadata: dict[str, Any]) -> Path:
+    recorded_value = metadata.get("database_manifest")
+    expected_hash = metadata.get("database_manifest_sha256")
+    if not isinstance(recorded_value, str) or not isinstance(expected_hash, str):
+        raise RuntimeError("Run metadata does not identify its database manifest.")
 
-    expected_hash = metadata.get("media_db_sha256")
+    recorded = Path(recorded_value)
     harness_dir = Path(__file__).resolve().parent
-    fallbacks = (
-        harness_dir
-        / "private/gomadango/root/var/mobile/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb",
-        harness_dir / "private/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb",
-    )
-    for fallback in fallbacks:
-        if (
-            fallback.is_file()
-            and expected_hash
-            and sha256(fallback) == expected_hash
-        ):
-            return fallback
+    candidates = (recorded, harness_dir / "private/gomadango/databases.json")
+    for candidate in candidates:
+        if candidate.is_file() and sha256(candidate) == expected_hash:
+            return candidate
     raise RuntimeError(
-        "The recorded MediaLibrary path is unavailable and the local fixture "
-        "does not have the run's SHA-256 hash."
+        "The run's database manifest is unavailable or its SHA-256 changed."
     )
 
 
-def expected_artists(media_db: Path, limit: int = 7) -> list[tuple[str, int]]:
+def resolve_ranking_database(metadata: dict[str, Any]) -> Path:
+    if "database_manifest" not in metadata:
+        recorded_value = metadata.get("media_db")
+        expected_hash = metadata.get("media_db_sha256")
+        if not isinstance(recorded_value, str) or not isinstance(
+            expected_hash, str
+        ):
+            raise RuntimeError(
+                "Legacy run metadata does not identify its ranking database."
+            )
+        recorded = Path(recorded_value)
+        harness_dir = Path(__file__).resolve().parent
+        candidates = (
+            recorded,
+            harness_dir
+            / "private/gomadango/root/var/mobile/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb",
+            harness_dir
+            / "private/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb",
+        )
+        for candidate in candidates:
+            if candidate.is_file() and sha256(candidate) == expected_hash:
+                return candidate
+        raise RuntimeError(
+            "The legacy run's ranking database is unavailable or its "
+            "SHA-256 changed."
+        )
+
+    suffix = "/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb"
+    manifest_path = resolve_database_manifest(metadata)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entries = manifest.get("databases")
+    if manifest.get("format_version") != 1 or not isinstance(entries, list):
+        raise RuntimeError(f"Invalid database manifest: {manifest_path}")
+
+    matches = [
+        entry
+        for entry in entries
+        if isinstance(entry, dict)
+        and isinstance(entry.get("remote_path"), str)
+        and entry["remote_path"].endswith(suffix)
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            "The run manifest must contain exactly one ranking database; "
+            f"found {len(matches)}."
+        )
+    entry = matches[0]
+    local_path = entry.get("local_path")
+    expected_hash = entry.get("sha256")
+    if not isinstance(local_path, str) or not isinstance(expected_hash, str):
+        raise RuntimeError(f"Invalid ranking database entry in {manifest_path}")
+    database = (manifest_path.parent / local_path).resolve()
+    if not database.is_file() or sha256(database) != expected_hash:
+        raise RuntimeError(
+            "The ranking database is unavailable or its SHA-256 changed: "
+            f"{database}"
+        )
+    return database
+
+
+def expected_artists(ranking_db: Path, limit: int = 7) -> list[tuple[str, int]]:
     sql = """
         SELECT ia.item_artist AS artist,
                SUM(COALESCE(s.play_count_user, 0)) AS total_plays
@@ -144,7 +196,7 @@ def expected_artists(media_db: Path, limit: int = 7) -> list[tuple[str, int]]:
         ORDER BY total_plays DESC, COUNT(*) DESC
     """
     ignored_fragments = (" feat. ", "jonas brothers")
-    with connect_readonly(media_db) as database:
+    with connect_readonly(ranking_db) as database:
         rows = database.execute(sql).fetchall()
     primary = []
     for row in rows:
@@ -165,6 +217,16 @@ def safe_json(value: str | None) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def fact_matches(candidate: Any, expected: dict[str, Any]) -> bool:
+    if not isinstance(candidate, dict):
+        return False
+    return all(
+        str(candidate.get(field, "")).casefold()
+        == str(expected.get(field, "")).casefold()
+        for field in ("kind", "subject", "predicate", "value")
+    )
 
 
 def artist_aliases(artist: str) -> tuple[str, ...]:
@@ -207,9 +269,10 @@ def efficiency_points(result: Result, cost: float, wall: float, calls: int, web:
 
 def score_session(
     session_db: Path,
-    media_db: Path,
+    ranking_db: Path,
     slug: str,
     expected_database_count: int,
+    expected_user_fact: dict[str, Any] | None,
 ) -> Result:
     with connect_readonly(session_db) as database:
         session = database.execute(
@@ -291,6 +354,38 @@ def score_session(
                 """
             ).fetchone()[0]
         )
+        stored_user_facts = [
+            dict(row)
+            for row in database.execute(
+                """
+                SELECT kind, subject, predicate, value, confidence, source
+                FROM helper_user_info
+                WHERE status = 'active'
+                """
+            ).fetchall()
+        ]
+        memory_preflight_outputs = [
+            str(row[0] or "")
+            for row in database.execute(
+                """
+                SELECT outputs.output
+                FROM response_api_items AS calls
+                JOIN response_api_items AS outputs
+                  ON outputs.response_call_id = calls.response_call_id
+                 AND outputs.session_id = calls.session_id
+                 AND outputs.call_id = calls.call_id
+                WHERE calls.session_id = ?
+                  AND calls.direction = 'request'
+                  AND calls.is_canonical = 1
+                  AND calls.type = 'function_call'
+                  AND calls.name = 'memory_user_fact_read'
+                  AND outputs.direction = 'request'
+                  AND outputs.is_canonical = 1
+                  AND outputs.type = 'function_call_output'
+                """,
+                (session_id,),
+            ).fetchall()
+        ]
         if expected_database_count <= 0:
             expected_database_count = approved_databases
 
@@ -317,13 +412,35 @@ def score_session(
     audit_hits = int(calls_row["audit_hits"] or 0)
     cost = float(calls_row["cost"] or 0.0)
     wall = float(calls_row["wall"] or 0.0)
-    artists = expected_artists(media_db)
+    artists = expected_artists(ranking_db)
     top_three = artists[:REQUIRED_GROUP_COUNT]
     mentioned_top_three = [
         name
         for name, _ in top_three
         if artist_position(answer_lower, name) >= 0
     ]
+    user_fact_stored = bool(expected_user_fact) and any(
+        fact_matches(fact, expected_user_fact) for fact in stored_user_facts
+    )
+    user_fact_preflight = bool(expected_user_fact) and any(
+        any(
+            fact_matches(fact, expected_user_fact)
+            for fact in safe_json(output).get("facts", [])
+        )
+        for output in memory_preflight_outputs
+    )
+    expected_user_name = (
+        str(expected_user_fact.get("value", ""))
+        if expected_user_fact
+        else ""
+    )
+    user_name_mentioned = bool(expected_user_name) and bool(
+        re.search(
+            rf"(?<![A-Za-z]){re.escape(expected_user_name)}(?![A-Za-z])",
+            answer,
+            flags=re.IGNORECASE,
+        )
+    )
 
     result = Result(model=model, slug=slug)
     result.metrics = {
@@ -346,6 +463,9 @@ def score_session(
             {"name": name, "total_plays": plays} for name, plays in top_three
         ],
         "mentioned_top_three": mentioned_top_three,
+        "seeded_user_fact_stored": user_fact_stored,
+        "seeded_user_fact_in_preflight": user_fact_preflight,
+        "seeded_user_name_mentioned": user_name_mentioned,
     }
 
     result.add(
@@ -355,6 +475,22 @@ def score_session(
         5,
         f"{approved_databases}/{expected_database_count}",
     )
+    if expected_user_fact:
+        result.add(
+            "Loaded seeded user fact",
+            user_fact_stored and user_fact_preflight,
+            4,
+            (
+                f"stored={'yes' if user_fact_stored else 'no'}, "
+                f"preflight={'yes' if user_fact_preflight else 'no'}"
+            ),
+        )
+        result.add(
+            "Used remembered user name in answer",
+            user_fact_stored and user_fact_preflight and user_name_mentioned,
+            6,
+            expected_user_name,
+        )
     result.add("Queried MediaLibrary", bool(media_queries), 8)
     aggregate_queries = [
         sql
@@ -519,8 +655,11 @@ def main() -> int:
     if not metadata_path.is_file():
         raise SystemExit(f"Missing run metadata: {metadata_path}")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    media_db = resolve_media_db(metadata)
+    ranking_db = resolve_ranking_database(metadata)
     expected_database_count = int(metadata.get("database_count", 0))
+    expected_user_fact = metadata.get("seeded_user_fact")
+    if not isinstance(expected_user_fact, dict):
+        expected_user_fact = None
 
     results = []
     for model, run in metadata.get("results", {}).items():
@@ -530,9 +669,10 @@ def main() -> int:
             continue
         result = score_session(
             session_db,
-            media_db,
+            ranking_db,
             slug,
             expected_database_count,
+            expected_user_fact,
         )
         if result.model != model:
             result.metrics["requested_model"] = model

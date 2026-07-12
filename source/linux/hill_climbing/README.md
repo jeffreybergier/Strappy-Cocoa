@@ -32,13 +32,23 @@ Before round zero, the application supplies fresh `database_list_info` and
 `function_call` / `function_call_output` input pairs. Their call IDs are
 created by the application, and their request-direction ledger rows are not
 counted as model tool calls or response tool executions. The audit file checks
-`database_query`, web search, and conditional session naming in array order.
-Session naming applies only when the session began untitled. If a candidate
-final answer omitted an applicable tool, the runtime sends that rule's
-`if_not_called` message once. If the model ignores the reminder, the next final
-answer is accepted without repeating it or advancing to a lower-priority rule.
-The remaining generic database labels are structural runtime requirements,
-not task guidance.
+`database_query`, web search, conditional session naming, optional durable user
+facts, and query-conditioned database hints in array order. Session naming
+applies only when the session began untitled. Memory reminders forbid inferred
+preferences, sensitive or private row values, and one-off query results. If a
+candidate answer omitted an applicable tool, the runtime sends that rule's
+action-only `if_not_called` message once. After the ordered audit ends, the
+runtime sends the single `after_audit` developer message and makes one
+tool-disabled `audit_finalize` call. This happens only if at least one audit
+reminder was sent. Audit acknowledgements, developer messages, tool activity,
+and the refinalized answer all use the same database ledger and visible
+timeline paths as other turns. The remaining generic database labels are
+structural runtime requirements, not task guidance.
+
+Each isolated model database is seeded first by executing the real
+`memory_user_fact_remember` tool with the stable identity fact that the user's
+first name is Jeff. The prompt does not contain that name. The existing
+`memory_user_fact_read` preflight result is the only way the model receives it.
 
 It is intentionally isolated from `source/linux/Makefile`; neither the normal
 `test` target nor a plain invocation of this Makefile performs network calls.
@@ -69,7 +79,8 @@ use compact previews like their collapsed webview sections:
 - `private/gomadango/root/` mirrors every catalog row whose
   `user_decision` is `allowed`, including available WAL/SHM/journal sidecars;
 - `private/gomadango/databases.json` records the ignored fixture inventory and
-  durable-file checksums used by the runner;
+  durable-file checksums used by the runner. It is the sole database-fixture
+  input to a live run;
 - `runs/` contains answers, per-model Strappy databases, costs, and reports.
 - `.env` files are ignored. The default live run reads the repository-root
   `.env` through the normal Strappy configuration loader.
@@ -77,10 +88,12 @@ use compact previews like their collapsed webview sections:
   add them.
 
 The fixtures retain their original Apple path suffixes under the private mirror
-so duplicate filenames do not collide and MediaLibrary remains identifiable to
-the evaluator. Each model gets a new session database populated with all
-manifest entries as approved databases, preventing model runs from sharing
-remembered facts or other mutable assistant state.
+so duplicate filenames do not collide and task-specific ground truth remains
+identifiable to the evaluator. The runner does not receive a separate
+MediaLibrary path. Each model gets a new session database populated uniformly
+with every manifest entry as an approved database, preventing model runs from
+sharing remembered facts or other mutable assistant state. The run fails if
+the registered set differs from the manifest set.
 
 ## Commands
 
@@ -139,6 +152,8 @@ The evaluator derives the top three K-pop artists dynamically from aggregate
 play counts in the private fixture. It scores whether the runtime and model:
 
 - preload the approved inventory and query MediaLibrary;
+- receive the seeded user fact through the memory preflight and mention Jeff in
+  the final answer;
 - filters the ranking to KPOP records and aggregates total play counts rather
   than ranking groups by one song;
 - covers the dynamically calculated top three in descending order;
