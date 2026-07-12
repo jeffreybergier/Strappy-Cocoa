@@ -106,23 +106,30 @@ House style for Strappy source:
 16. Active assistant history uses the Responses API ledger: every HTTP attempt
     has one `response_api_calls` row, and every typed input/output item has one
     ordered `response_api_items` row with its exact raw JSON retained. At a
-    candidate final answer, apply the ordered missing-tool rules from
-    `GuidanceAudit.json` one at a time, honoring each rule's optional `when`
-    conditions. Database inventory is an application-seeded preflight tool
-    output rather than a missing-tool rule; the database audit checks
-    `database_query`. User-fact and database-hint memory checks are last;
-    database-hint memory applies only after `database_query`, and neither
-    reminder may encourage storing secrets or sensitive information. User-fact
-    memory may include useful durable facts learned from approved databases;
-    database-hint memory must not store private row values or one-off query
-    results. Append each rule's `developer` reminder
-    at most once in the same Responses history. Individual reminders contain
-    only their audit action, not final-answer instructions. If any reminder is
-    appended, finish the ordered audit and then append the single
-    `after_audit` developer message from `GuidanceAudit.json`; make one
-    tool-disabled `audit_finalize` call and do not audit that response. Every
-    audit, tool, finalization, and assistant item uses the normal database and
-    timeline paths. If no reminder is appended, do not add a finalization turn.
+    candidate final answer, collect every applicable missing-tool rule from
+    `GuidanceAudit.json` into one ordered bulleted `developer` message, honoring
+    each rule's optional `when` conditions. Include a tool-conditioned rule
+    prospectively when its prerequisite is another unresolved audit item, so it
+    can still apply if that prerequisite tool is called while resolving the
+    combined audit. Do not include the web-search rule when web search is
+    disabled. Database inventory is an application-seeded preflight tool output
+    rather than a missing-tool rule; the database audit checks `database_query`.
+    User-fact and database-hint memory checks are last, and neither reminder may
+    encourage storing secrets or sensitive information. User-fact memory may
+    include useful durable facts learned from approved databases; database-hint
+    memory must not store private row values or one-off query results. Wrap the
+    bullets with the `audit_header` and `audit_footer` guidance and append that
+    combined message at most once in the same Responses history. Allow normal
+    tool calls and tool-output continuations while resolving it. Once the
+    combined message has been sent, never audit another response from that user
+    request. Accept the first subsequent response without local tool calls when
+    it contains a non-whitespace assistant answer, even if some audit items
+    remain unsatisfied. If it contains no non-whitespace assistant answer,
+    append the audit footer once as a tool-disabled `audit_finalize` recovery
+    turn. Fail explicitly if that recovery is also empty; never silently reuse
+    the pre-audit answer. Every audit, recovery, tool, and assistant item uses
+    the normal database and timeline paths. If no audit item is unresolved, do
+    not add an audit turn.
 17. OpenRouter model catalog and selection state live in shared SQLite storage.
     `strappy_db` owns `openrouter_models`, `openrouter_model_settings`, the
     default model app setting, and `sessions.model`; `StrappySession` owns the

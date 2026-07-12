@@ -1,28 +1,29 @@
 {
-  "after_audit": "The tool usage audit is not complete. Please provide one complete, standalone answer to the user's original question. Answer the user directly, and do not mention the audit or tool activity.",
+  "audit_header": "Please call applicable tools below to improve the user experience:",
+  "audit_footer": "After resolving every applicable item above, YOU MUST FINISH with a standalone answer to the user's original question with all fixes in place. Answer the user directly, and do not mention the audit or tool activity.",
   "tool_usage_priority": [
     {
       "tool_name": "database_query",
-      "if_not_called": "You did not call database_query. If the user's question depends on personal data, query the relevant approved database now. Otherwise, do not call it. Do not guess the user's data."
+      "if_not_called": "database_query: If the user's question depends on personal data, query the relevant approved database now. Do not guess the user's data."
     },
     {
       "tool_name": "openrouter:web_search",
-      "if_not_called": "You did not search the web. If the answer requires current public facts not available in the user's databases, search the web now. Otherwise, do not search."
+      "if_not_called": "openrouter:web_search: You did not search the web. If the answer requires current public facts not available in the user's databases, search the web now."
     },
     {
       "tool_name": "helper_session_name_write",
-      "if_not_called": "This session is still untitled. Give it a short, descriptive name now.",
+      "if_not_called": "helper_session_name_write: This session is still untitled. Give it a short, descriptive name now.",
       "when": {
         "session_name_empty": true
       }
     },
     {
       "tool_name": "memory_user_fact_remember",
-      "if_not_called": "You did not call memory_user_fact_remember. If you learned a useful durable fact, call it now."
+      "if_not_called": "memory_user_fact_remember: If you learned a useful durable fact about the user, save it for use in future prompts. NEVER remember secrets or sensitive information."
     },
     {
       "tool_name": "memory_database_hint_remember",
-      "if_not_called": "You queried a database but did not call memory_database_hint_remember. If the database work established a reusable, evidence-backed schema or query hint, remember it now. Do not store private row contents, sensitive values, guesses, or one-off query results.",
+      "if_not_called": "memory_database_hint_remember: If you queried a database AND learned important information about how to access the user's data, then call memory_database_hint_remember to save database query, schema, or hint information for use in future prompts. NEVER remember secrets, sensitive information, guesses, or one-off query results.",
       "when": {
         "tool_called": "database_query"
       }

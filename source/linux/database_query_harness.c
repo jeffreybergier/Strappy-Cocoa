@@ -645,7 +645,8 @@ static int harness_run_audit_resource_tests(void)
 {
   cJSON *root;
   cJSON *rules;
-  cJSON *after_audit;
+  cJSON *audit_header;
+  cJSON *audit_footer;
   cJSON *user_fact_rule;
   cJSON *database_hint_rule;
   cJSON *user_fact_message;
@@ -658,8 +659,10 @@ static int harness_run_audit_resource_tests(void)
   int ok;
 
   root = harness_read_json_resource(HARNESS_AUDIT_GUIDANCE_RESOURCE);
-  after_audit = cJSON_IsObject(root) ?
-    cJSON_GetObjectItem(root, "after_audit") : NULL;
+  audit_header = cJSON_IsObject(root) ?
+    cJSON_GetObjectItem(root, "audit_header") : NULL;
+  audit_footer = cJSON_IsObject(root) ?
+    cJSON_GetObjectItem(root, "audit_footer") : NULL;
   rules = cJSON_IsObject(root) ?
     cJSON_GetObjectItem(root, "tool_usage_priority") : NULL;
   user_fact_rule = cJSON_GetArrayItem(rules, 3);
@@ -683,10 +686,16 @@ static int harness_run_audit_resource_tests(void)
     }
   }
 
-  ok = cJSON_IsString(after_audit) &&
-    (after_audit->valuestring != NULL) &&
-    (strstr(after_audit->valuestring, "complete, standalone answer") != NULL) &&
-    (strstr(after_audit->valuestring, "original question") != NULL) &&
+  ok = cJSON_IsString(audit_header) &&
+    (audit_header->valuestring != NULL) &&
+    (strstr(audit_header->valuestring, "applicable tools below") != NULL) &&
+    cJSON_IsString(audit_footer) &&
+    (audit_footer->valuestring != NULL) &&
+    (strstr(audit_footer->valuestring,
+            "After resolving every applicable item above") != NULL) &&
+    (strstr(audit_footer->valuestring, "standalone answer") != NULL) &&
+    (strstr(audit_footer->valuestring, "original question") != NULL) &&
+    (strstr(audit_footer->valuestring, "all fixes in place") != NULL) &&
     rules_avoid_finalization &&
     cJSON_IsArray(rules) && (cJSON_GetArraySize(rules) == 5) &&
     harness_json_string_equals(cJSON_GetArrayItem(rules, 0),
@@ -705,17 +714,22 @@ static int harness_run_audit_resource_tests(void)
     cJSON_IsString(user_fact_message) &&
     (user_fact_message->valuestring != NULL) &&
     (strcmp(user_fact_message->valuestring,
-            "You did not call memory_user_fact_remember. If you learned a "
-            "useful durable fact, call it now.") == 0) &&
+            "memory_user_fact_remember: If you learned a useful durable fact "
+            "about the user, save it for use in future prompts. NEVER remember "
+            "secrets or sensitive information.") == 0) &&
     harness_json_string_equals(database_hint_rule,
                                "tool_name",
                                STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
     cJSON_IsString(database_hint_message) &&
     (database_hint_message->valuestring != NULL) &&
     (strstr(database_hint_message->valuestring,
-            "reusable, evidence-backed schema or query hint") != NULL) &&
+            "database query, schema, or hint information") != NULL) &&
     (strstr(database_hint_message->valuestring,
-            "Do not store private row contents") != NULL) &&
+            "use in future prompts") != NULL) &&
+    (strstr(database_hint_message->valuestring,
+            "NEVER remember secrets, sensitive information") != NULL) &&
+    (strstr(database_hint_message->valuestring,
+            "guesses, or one-off query results") != NULL) &&
     harness_json_string_equals(database_hint_when,
                                "tool_called",
                                STRAPPY_TOOL_DATABASE_QUERY);

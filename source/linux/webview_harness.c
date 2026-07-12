@@ -390,7 +390,10 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "function apiExchangeCumulativeUsageCost") &&
        harness_expect_contains(page_html,
-                               "function formatCumulativeUsageCost(value)") &&
+                               "function formatCumulativeUsageCost(value){"
+                               "return '$'+(value!==''?value:'-');}") &&
+       harness_expect_not_contains(page_html,
+                                   "(value!==''?value:'-')+' total'") &&
        harness_expect_contains(page_html,
                                "titleText=roundLabel+' '+roundNumber;") &&
        harness_expect_contains(page_html,

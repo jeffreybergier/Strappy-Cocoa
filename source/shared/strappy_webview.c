@@ -1657,7 +1657,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function apiExchangeKind(row){return row&&row.getAttribute?row.getAttribute('data-kind')||'':'';}",
     "function apiExchangeCumulativeUsageCost(rows){var i,value;for(i=0;i<rows.length;i++){",
     "value=rows[i].getAttribute?rows[i].getAttribute('data-cumulative-usage-cost')||'':'';if(value!=='')return value;}return '';}",
-    "function formatCumulativeUsageCost(value){return '$'+(value!==''?value:'-')+' total';}",
+    "function formatCumulativeUsageCost(value){return '$'+(value!==''?value:'-');}",
     "function rowIsAPIExchangeMetadata(row){return apiExchangeKind(row)=='response_api_call'||hasClass(row,'api_call')||hasClass(row,'api_error');}",
     "function rowIsAPIExchangeItem(row){var d=apiExchangeDirection(row);return d=='request'||d=='response';}",
     "function rowIsAPIExchangeAnswer(row){return hasClass(row,'assistant')&&apiExchangeDirection(row)=='response';}",

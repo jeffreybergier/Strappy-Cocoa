@@ -24,14 +24,55 @@
 #include "../shared/strappy_tools.h"
 
 #define HARNESS_DATABASE_QUERY_AUDIT_MESSAGE \
-  "You did not call database_query. If the user's question depends on " \
-  "personal data, query the relevant approved database now. Otherwise, do " \
-  "not call it. Do not guess the user's data."
+  "database_query: If the user's question depends on personal data, query " \
+  "the relevant approved database now. Do not guess the user's data."
 
-#define HARNESS_AFTER_AUDIT_MESSAGE \
-  "The tool usage audit is not complete. Please provide one complete, " \
-  "standalone answer to the user's original question. Answer the user " \
-  "directly, and do not mention the audit or tool activity."
+#define HARNESS_WEB_SEARCH_AUDIT_MESSAGE \
+  "openrouter:web_search: You did not search the web. If the answer requires " \
+  "current public facts not available in the user's databases, search the " \
+  "web now."
+
+#define HARNESS_SESSION_NAME_AUDIT_MESSAGE \
+  "helper_session_name_write: This session is still untitled. Give it a " \
+  "short, descriptive name now."
+
+#define HARNESS_USER_FACT_AUDIT_MESSAGE \
+  "memory_user_fact_remember: If you learned a useful durable fact about the " \
+  "user, save it for use in future prompts. NEVER remember secrets or " \
+  "sensitive information."
+
+#define HARNESS_DATABASE_HINT_AUDIT_MESSAGE \
+  "memory_database_hint_remember: If you queried a database AND learned " \
+  "important information about how to access the user's data, then call " \
+  "memory_database_hint_remember to save database query, schema, or hint " \
+  "information for use in future prompts. NEVER remember secrets, sensitive " \
+  "information, guesses, or one-off query results."
+
+#define HARNESS_AUDIT_HEADER \
+  "Please call applicable tools below to improve the user experience:"
+
+#define HARNESS_AUDIT_FOOTER \
+  "After resolving every applicable item above, YOU MUST FINISH with a " \
+  "standalone answer to the user's original question with all fixes in place. " \
+  "Answer the user directly, and do not mention the audit or tool activity."
+
+#define HARNESS_EMPTY_AUDIT_FINALIZATION_ERROR \
+  "Responses audit finalization did not return a non-empty assistant answer."
+
+#define HARNESS_COMBINED_AUDIT_MESSAGE \
+  HARNESS_AUDIT_HEADER "\n\n- " HARNESS_DATABASE_QUERY_AUDIT_MESSAGE \
+  "\n- " HARNESS_WEB_SEARCH_AUDIT_MESSAGE \
+  "\n- " HARNESS_SESSION_NAME_AUDIT_MESSAGE \
+  "\n- " HARNESS_USER_FACT_AUDIT_MESSAGE \
+  "\n- " HARNESS_DATABASE_HINT_AUDIT_MESSAGE \
+  "\n\n" HARNESS_AUDIT_FOOTER
+
+#define HARNESS_COMBINED_AUDIT_WITHOUT_WEB_MESSAGE \
+  HARNESS_AUDIT_HEADER "\n\n- " HARNESS_DATABASE_QUERY_AUDIT_MESSAGE \
+  "\n- " HARNESS_SESSION_NAME_AUDIT_MESSAGE \
+  "\n- " HARNESS_USER_FACT_AUDIT_MESSAGE \
+  "\n- " HARNESS_DATABASE_HINT_AUDIT_MESSAGE \
+  "\n\n" HARNESS_AUDIT_FOOTER
 
 #define HARNESS_MEMORY_USER_FACT_REMEMBER_DESCRIPTION \
   "ALWAYS call this tool to store durable facts learned from the user or " \
@@ -416,7 +457,8 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_FUNCTION_TOOL = 3,
   HARNESS_RESPONSES_SERVER_RETRY = 4,
   HARNESS_RESPONSES_SERVER_RETRY_AFTER = 5,
-  HARNESS_RESPONSES_SERVER_SLOW = 6
+  HARNESS_RESPONSES_SERVER_SLOW = 6,
+  HARNESS_RESPONSES_SERVER_EMPTY_AUDIT_FINALIZATION = 7
 } harness_responses_server_scenario;
 
 static int harness_send_all(int socket_fd,
@@ -830,6 +872,13 @@ static int harness_audit_request_is_valid(cJSON *root,
   input_count = cJSON_IsArray(input) ? cJSON_GetArraySize(input) : 0;
   developer = cJSON_GetArrayItem(input, input_count - 1);
   text = harness_message_text(developer);
+  if ((text != NULL) && (expected_message != NULL) &&
+      (strcmp(text, expected_message) != 0)) {
+    fprintf(stderr,
+            "Audit developer message mismatch.\nExpected:\n%s\nActual:\n%s\n",
+            expected_message,
+            text);
+  }
   return cJSON_IsString(request_session) &&
     (request_session->valuestring != NULL) &&
     (strcmp(request_session->valuestring, session_key) == 0) &&
@@ -848,9 +897,50 @@ static int harness_audit_request_is_valid(cJSON *root,
     (strcmp(tool_choice->valuestring, expected_tool_choice) == 0);
 }
 
-static int harness_function_output_request_is_valid(cJSON *root,
-                                                    const char *session_key,
-                                                    const char *prompt_group)
+static int harness_finalization_request_is_valid(cJSON *root,
+                                                 const char *session_key,
+                                                 const char *prompt_group,
+                                                 const char *expected_round)
+{
+  cJSON *request_session;
+  cJSON *metadata;
+  cJSON *request_group;
+  cJSON *round;
+  cJSON *input;
+  cJSON *developer;
+  cJSON *tool_choice;
+  int input_count;
+  const char *text;
+
+  request_session = cJSON_GetObjectItem(root, "session_id");
+  metadata = cJSON_GetObjectItem(root, "metadata");
+  request_group = cJSON_GetObjectItem(metadata, "strappy_prompt_group_key");
+  round = cJSON_GetObjectItem(metadata, "strappy_round");
+  input = cJSON_GetObjectItem(root, "input");
+  tool_choice = cJSON_GetObjectItem(root, "tool_choice");
+  input_count = cJSON_IsArray(input) ? cJSON_GetArraySize(input) : 0;
+  developer = cJSON_GetArrayItem(input, input_count - 1);
+  text = harness_message_text(developer);
+  return cJSON_IsString(request_session) &&
+    (request_session->valuestring != NULL) &&
+    (strcmp(request_session->valuestring, session_key) == 0) &&
+    cJSON_IsString(request_group) && (request_group->valuestring != NULL) &&
+    (strcmp(request_group->valuestring, prompt_group) == 0) &&
+    cJSON_IsString(round) && (round->valuestring != NULL) &&
+    (strcmp(round->valuestring, expected_round) == 0) &&
+    cJSON_IsArray(input) && (input_count >= 3) &&
+    harness_message_role_is(developer, "developer") &&
+    (text != NULL) && (strcmp(text, HARNESS_AUDIT_FOOTER) == 0) &&
+    cJSON_IsString(tool_choice) && (tool_choice->valuestring != NULL) &&
+    (strcmp(tool_choice->valuestring, "none") == 0);
+}
+
+static int harness_named_function_output_request_is_valid(
+  cJSON *root,
+  const char *session_key,
+  const char *prompt_group,
+  const char *expected_function_name,
+  const char *expected_call_id)
 {
   cJSON *request_session;
   cJSON *metadata;
@@ -887,13 +977,25 @@ static int harness_function_output_request_is_valid(cJSON *root,
     cJSON_IsString(function_type) && (function_type->valuestring != NULL) &&
     (strcmp(function_type->valuestring, "function_call") == 0) &&
     cJSON_IsString(function_name) && (function_name->valuestring != NULL) &&
-    (strcmp(function_name->valuestring, "database_list_info") == 0) &&
+    (strcmp(function_name->valuestring, expected_function_name) == 0) &&
     cJSON_IsString(type) && (type->valuestring != NULL) &&
     (strcmp(type->valuestring, "function_call_output") == 0) &&
     cJSON_IsString(call_id) && (call_id->valuestring != NULL) &&
-    (strcmp(call_id->valuestring, "call-database-list") == 0) &&
+    (strcmp(call_id->valuestring, expected_call_id) == 0) &&
     cJSON_IsString(output) && (output->valuestring != NULL) &&
     (output->valuestring[0] != '\0');
+}
+
+static int harness_function_output_request_is_valid(cJSON *root,
+                                                    const char *session_key,
+                                                    const char *prompt_group)
+{
+  return harness_named_function_output_request_is_valid(
+    root,
+    session_key,
+    prompt_group,
+    "database_list_info",
+    "call-database-list");
 }
 
 static int harness_accept_request(int listener_fd,
@@ -928,23 +1030,30 @@ static int harness_run_audit_server(int listener_fd)
     "\"text\":\"Initial answer.\",\"annotations\":[]}]}],"
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":3,"
     "\"total_tokens\":7}}";
-  static const char *second_response =
-    "{\"id\":\"resp-audit-ignored\",\"object\":\"response\","
+  static const char *audit_tool_response =
+    "{\"id\":\"resp-audit-tool\",\"object\":\"response\","
     "\"created_at\":1700000001,\"model\":\"test/model\","
-    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
-    "\"id\":\"msg-audit-ignored\",\"role\":\"assistant\","
-    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
-    "\"text\":\"Audit acknowledgement.\","
-    "\"annotations\":[]}]}],"
-    "\"usage\":{\"input_tokens\":16,\"output_tokens\":6,"
-    "\"total_tokens\":22}}";
-  static const char *final_response =
-    "{\"id\":\"resp-audit-finalized\",\"object\":\"response\","
+    "\"status\":\"completed\",\"output\":[{"
+    "\"type\":\"function_call\",\"id\":\"fc-audit-session-name\","
+    "\"call_id\":\"call-audit-session-name\","
+    "\"name\":\"helper_session_name_write\","
+    "\"arguments\":\"{\\\"name\\\":\\\"Audit Recovery\\\"}\","
+    "\"status\":\"completed\"}],"
+    "\"usage\":{\"input_tokens\":16,\"output_tokens\":4,"
+    "\"total_tokens\":20}}";
+  static const char *empty_response =
+    "{\"id\":\"resp-audit-empty\",\"object\":\"response\","
     "\"created_at\":1700000002,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[],"
+    "\"usage\":{\"input_tokens\":20,\"output_tokens\":5,"
+    "\"total_tokens\":25}}";
+  static const char *final_response =
+    "{\"id\":\"resp-audit-combined\",\"object\":\"response\","
+    "\"created_at\":1700000003,\"model\":\"test/model\","
     "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
-    "\"id\":\"msg-audit-finalized\",\"role\":\"assistant\","
+    "\"id\":\"msg-audit-combined\",\"role\":\"assistant\","
     "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
-    "\"text\":\"Refinalized answer.\",\"annotations\":[]}]}],"
+    "\"text\":\"Combined audited answer.\",\"annotations\":[]}]}],"
     "\"usage\":{\"input_tokens\":20,\"output_tokens\":4,"
     "\"total_tokens\":24}}";
   char *body;
@@ -983,6 +1092,7 @@ static int harness_run_audit_server(int listener_fd)
   cJSON_Delete(root);
   close(client_fd);
   if (!ok) {
+    fprintf(stderr, "Audit recovery server rejected the initial request.\n");
     free(session_key);
     free(prompt_group);
     return 0;
@@ -1001,9 +1111,117 @@ static int harness_run_audit_server(int listener_fd)
                                    session_key,
                                    prompt_group,
                                    "1",
-                                   HARNESS_DATABASE_QUERY_AUDIT_MESSAGE,
+                                   HARNESS_COMBINED_AUDIT_MESSAGE,
                                    "auto") &&
-    harness_send_json_response(client_fd, 200L, second_response);
+    harness_send_json_response(client_fd, 200L, audit_tool_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok) {
+    fprintf(stderr, "Audit recovery server rejected the audit request.\n");
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_named_function_output_request_is_valid(
+      root,
+      session_key,
+      prompt_group,
+      "helper_session_name_write",
+      "call-audit-session-name") &&
+    harness_send_json_response(client_fd, 200L, empty_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok) {
+    fprintf(stderr,
+            "Audit recovery server rejected the tool continuation.\n");
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_finalization_request_is_valid(root,
+                                          session_key,
+                                          prompt_group,
+                                          "3") &&
+    harness_send_json_response(client_fd, 200L, final_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok) {
+    fprintf(stderr,
+            "Audit recovery server rejected the finalization request.\n");
+  }
+  free(session_key);
+  free(prompt_group);
+  return ok;
+}
+
+static int harness_run_empty_audit_finalization_server(int listener_fd)
+{
+  static const char *first_response =
+    "{\"id\":\"resp-empty-finalize-first\",\"object\":\"response\","
+    "\"created_at\":1700000010,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-empty-finalize-first\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Initial answer that must not be reused.\","
+    "\"annotations\":[]}]}],\"usage\":{\"input_tokens\":4,"
+    "\"output_tokens\":6,\"total_tokens\":10}}";
+  static const char *empty_response =
+    "{\"id\":\"resp-empty-finalize-audit\",\"object\":\"response\","
+    "\"created_at\":1700000011,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[],"
+    "\"usage\":{\"input_tokens\":10,\"output_tokens\":5,"
+    "\"total_tokens\":15}}";
+  static const char *whitespace_response =
+    "{\"id\":\"resp-empty-finalize-recovery\","
+    "\"object\":\"response\",\"created_at\":1700000012,"
+    "\"model\":\"test/model\",\"status\":\"completed\","
+    "\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-empty-finalize-recovery\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
+    "\"text\":\" \\n\\t\",\"annotations\":[]}]}],"
+    "\"usage\":{\"input_tokens\":15,\"output_tokens\":2,"
+    "\"total_tokens\":17}}";
+  char *body;
+  char *session_key;
+  char *prompt_group;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  session_key = NULL;
+  prompt_group = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_request_base_is_valid(root,
+                                  "Fail empty audit finalization",
+                                  &session_key,
+                                  &prompt_group) &&
+    harness_send_json_response(client_fd, 200L, first_response);
   cJSON_Delete(root);
   close(client_fd);
   if (!ok) {
@@ -1024,10 +1242,32 @@ static int harness_run_audit_server(int listener_fd)
     harness_audit_request_is_valid(root,
                                    session_key,
                                    prompt_group,
-                                   "2",
-                                   HARNESS_AFTER_AUDIT_MESSAGE,
-                                   "none") &&
-    harness_send_json_response(client_fd, 200L, final_response);
+                                   "1",
+                                   HARNESS_COMBINED_AUDIT_MESSAGE,
+                                   "auto") &&
+    harness_send_json_response(client_fd, 200L, empty_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_finalization_request_is_valid(root,
+                                          session_key,
+                                          prompt_group,
+                                          "2") &&
+    harness_send_json_response(client_fd, 200L, whitespace_response);
   cJSON_Delete(root);
   close(client_fd);
   free(session_key);
@@ -1055,20 +1295,10 @@ static int harness_run_server_tool_server(int listener_fd)
     "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
     "\"id\":\"msg-server-tool-audited\",\"role\":\"assistant\","
     "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
-    "\"text\":\"Server tool audit acknowledgement.\","
+    "\"text\":\"Server tool combined audited answer.\","
     "\"annotations\":[]}]}],"
     "\"usage\":{\"input_tokens\":8,\"output_tokens\":5,"
     "\"total_tokens\":13}}";
-  static const char *final_response =
-    "{\"id\":\"resp-server-tool-finalized\",\"object\":\"response\","
-    "\"created_at\":1700000004,\"model\":\"test/model\","
-    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
-    "\"id\":\"msg-server-tool-finalized\",\"role\":\"assistant\","
-    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
-    "\"text\":\"Server tool refinalized answer.\","
-    "\"annotations\":[]}]}],"
-    "\"usage\":{\"input_tokens\":12,\"output_tokens\":5,"
-    "\"total_tokens\":17}}";
   char *body;
   char *session_key;
   char *prompt_group;
@@ -1111,33 +1341,9 @@ static int harness_run_server_tool_server(int listener_fd)
                                    session_key,
                                    prompt_group,
                                    "1",
-                                   HARNESS_DATABASE_QUERY_AUDIT_MESSAGE,
+                                   HARNESS_COMBINED_AUDIT_WITHOUT_WEB_MESSAGE,
                                    "auto") &&
     harness_send_json_response(client_fd, 200L, second_response);
-  cJSON_Delete(root);
-  close(client_fd);
-  if (!ok) {
-    free(session_key);
-    free(prompt_group);
-    return 0;
-  }
-
-  body = NULL;
-  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
-    free(session_key);
-    free(prompt_group);
-    return 0;
-  }
-  root = cJSON_Parse(body);
-  free(body);
-  ok = cJSON_IsObject(root) &&
-    harness_audit_request_is_valid(root,
-                                   session_key,
-                                   prompt_group,
-                                   "2",
-                                   HARNESS_AFTER_AUDIT_MESSAGE,
-                                   "none") &&
-    harness_send_json_response(client_fd, 200L, final_response);
   cJSON_Delete(root);
   close(client_fd);
   free(session_key);
@@ -1167,25 +1373,16 @@ static int harness_run_function_tool_server(int listener_fd)
     "\"text\":\"Function tool final answer.\",\"annotations\":[]}]}],"
     "\"usage\":{\"input_tokens\":8,\"output_tokens\":4,"
     "\"total_tokens\":12}}";
-  static const char *audit_ignored_response =
-    "{\"id\":\"resp-function-audit-ignored\","
+  static const char *combined_audit_response =
+    "{\"id\":\"resp-function-audit-combined\","
     "\"object\":\"response\",\"created_at\":1700000005,"
     "\"model\":\"test/model\",\"status\":\"completed\","
     "\"output\":[{\"type\":\"message\","
-    "\"id\":\"msg-function-audit-ignored\",\"role\":\"assistant\","
+    "\"id\":\"msg-function-audit-combined\",\"role\":\"assistant\","
     "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
-    "\"text\":\"Function tool audit acknowledgement.\","
+    "\"text\":\"Function tool combined audited answer.\","
     "\"annotations\":[]}]}],\"usage\":{\"input_tokens\":12,"
     "\"output_tokens\":6,\"total_tokens\":18}}";
-  static const char *refinalized_response =
-    "{\"id\":\"resp-function-finalized\",\"object\":\"response\","
-    "\"created_at\":1700000006,\"model\":\"test/model\","
-    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
-    "\"id\":\"msg-function-finalized\",\"role\":\"assistant\","
-    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
-    "\"text\":\"Function tool refinalized answer.\","
-    "\"annotations\":[]}]}],\"usage\":{\"input_tokens\":16,"
-    "\"output_tokens\":5,\"total_tokens\":21}}";
   char *body;
   char *session_key;
   char *prompt_group;
@@ -1249,33 +1446,9 @@ static int harness_run_function_tool_server(int listener_fd)
                                    session_key,
                                    prompt_group,
                                    "2",
-                                   HARNESS_DATABASE_QUERY_AUDIT_MESSAGE,
+                                   HARNESS_COMBINED_AUDIT_WITHOUT_WEB_MESSAGE,
                                    "auto") &&
-    harness_send_json_response(client_fd, 200L, audit_ignored_response);
-  cJSON_Delete(root);
-  close(client_fd);
-  if (!ok) {
-    free(session_key);
-    free(prompt_group);
-    return 0;
-  }
-
-  body = NULL;
-  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
-    free(session_key);
-    free(prompt_group);
-    return 0;
-  }
-  root = cJSON_Parse(body);
-  free(body);
-  ok = cJSON_IsObject(root) &&
-    harness_audit_request_is_valid(root,
-                                   session_key,
-                                   prompt_group,
-                                   "3",
-                                   HARNESS_AFTER_AUDIT_MESSAGE,
-                                   "none") &&
-    harness_send_json_response(client_fd, 200L, refinalized_response);
+    harness_send_json_response(client_fd, 200L, combined_audit_response);
   cJSON_Delete(root);
   close(client_fd);
   free(session_key);
@@ -1308,25 +1481,16 @@ static int harness_run_retry_server(int listener_fd)
     "\"text\":\"Retry final answer.\",\"annotations\":[]}]}],"
     "\"usage\":{\"input_tokens\":8,\"output_tokens\":4,"
     "\"total_tokens\":12}}";
-  static const char *audit_ignored_response =
-    "{\"id\":\"resp-retry-audit-ignored\",\"object\":\"response\","
+  static const char *combined_audit_response =
+    "{\"id\":\"resp-retry-audit-combined\",\"object\":\"response\","
     "\"created_at\":1700000007,\"model\":\"test/model\","
     "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
-    "\"id\":\"msg-retry-audit-ignored\",\"role\":\"assistant\","
+    "\"id\":\"msg-retry-audit-combined\",\"role\":\"assistant\","
     "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
-    "\"text\":\"Retry audit acknowledgement.\","
+    "\"text\":\"Retry combined audited answer.\","
     "\"annotations\":[]}]}],"
     "\"usage\":{\"input_tokens\":12,\"output_tokens\":6,"
     "\"total_tokens\":18}}";
-  static const char *refinalized_response =
-    "{\"id\":\"resp-retry-finalized\",\"object\":\"response\","
-    "\"created_at\":1700000008,\"model\":\"test/model\","
-    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
-    "\"id\":\"msg-retry-finalized\",\"role\":\"assistant\","
-    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
-    "\"text\":\"Retry refinalized answer.\",\"annotations\":[]}]}],"
-    "\"usage\":{\"input_tokens\":16,\"output_tokens\":5,"
-    "\"total_tokens\":21}}";
   char *first_body;
   char *second_body;
   char *third_body;
@@ -1410,33 +1574,9 @@ static int harness_run_retry_server(int listener_fd)
                                    session_key,
                                    prompt_group,
                                    "2",
-                                   HARNESS_DATABASE_QUERY_AUDIT_MESSAGE,
+                                   HARNESS_COMBINED_AUDIT_MESSAGE,
                                    "auto") &&
-    harness_send_json_response(client_fd, 200L, audit_ignored_response);
-  cJSON_Delete(root);
-  close(client_fd);
-  if (!ok) {
-    free(session_key);
-    free(prompt_group);
-    return 0;
-  }
-
-  third_body = NULL;
-  if (!harness_accept_request(listener_fd, &third_body, &client_fd)) {
-    free(session_key);
-    free(prompt_group);
-    return 0;
-  }
-  root = cJSON_Parse(third_body);
-  free(third_body);
-  ok = cJSON_IsObject(root) &&
-    harness_audit_request_is_valid(root,
-                                   session_key,
-                                   prompt_group,
-                                   "3",
-                                   HARNESS_AFTER_AUDIT_MESSAGE,
-                                   "none") &&
-    harness_send_json_response(client_fd, 200L, refinalized_response);
+    harness_send_json_response(client_fd, 200L, combined_audit_response);
   cJSON_Delete(root);
   close(client_fd);
   free(session_key);
@@ -1591,6 +1731,9 @@ static int harness_start_server(harness_responses_server_scenario scenario,
       ok = harness_run_retry_after_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_SLOW) {
       ok = harness_run_slow_server(listener_fd);
+    } else if (scenario ==
+               HARNESS_RESPONSES_SERVER_EMPTY_AUDIT_FINALIZATION) {
+      ok = harness_run_empty_audit_finalization_server(listener_fd);
     } else {
       ok = harness_run_retry_server(listener_fd);
     }
@@ -1701,7 +1844,7 @@ static int harness_create_approved_preflight_database(
                                                          error_out);
 }
 
-static int harness_test_tool_audit_loop(void)
+static int harness_test_combined_tool_audit_once(void)
 {
   char path[] = "/tmp/strappy-responses-audit-XXXXXX";
   char database_path[] = "/tmp/strappy-preflight-db-XXXXXX";
@@ -1786,16 +1929,29 @@ static int harness_test_tool_audit_loop(void)
     &error);
   server_ok = harness_wait_for_server(server_pid, result == NULL);
   ok = (result != NULL) &&
-    (strcmp(result, "Refinalized answer.") == 0) &&
-    server_ok && events.valid && (events.count == 3LL) &&
-    events.saw_thinking && !events.saw_tools &&
-    (events.processing_count >= 3LL) &&
+    (strcmp(result, "Combined audited answer.") == 0) &&
+    server_ok && events.valid && (events.count == 4LL) &&
+    events.saw_thinking && events.saw_tools &&
+    (events.processing_count >= 4LL) &&
     (events.clear_count == 1L);
+  if (!ok) {
+    fprintf(stderr,
+            "Audit recovery result mismatch: result=%s server=%d valid=%d "
+            "events=%lld processing=%lld clear=%ld thinking=%d tools=%d\n",
+            (result != NULL) ? result : "(null)",
+            server_ok,
+            events.valid,
+            events.count,
+            events.processing_count,
+            events.clear_count,
+            events.saw_thinking,
+            events.saw_tools);
+  }
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
                            "SELECT COUNT(*) FROM response_api_calls;",
-                           &value) && (value == 3LL) &&
+                           &value) && (value == 4LL) &&
       harness_query_int(db,
                         "SELECT COUNT(DISTINCT prompt_group_key) "
                         "FROM response_api_calls;",
@@ -1811,10 +1967,10 @@ static int harness_test_tool_audit_loop(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_calls WHERE "
                         "request_kind='tool_continuation';",
-                        &value) && (value == 0LL) &&
+                        &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_tool_executions;",
-                        &value) && (value == 0LL) &&
+                        &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "role='developer' AND is_canonical=1 AND "
@@ -1823,16 +1979,16 @@ static int harness_test_tool_audit_loop(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "is_canonical=1;",
-                        &value) && (value == 10LL) &&
+                        &value) && (value == 11LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM sessions WHERE "
-                        "response='Refinalized answer.';",
+                        "response='Combined audited answer.';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "direction='request' AND is_canonical=1 AND "
                         "type='function_call_output';",
-                        &value) && (value == 2LL) &&
+                        &value) && (value == 3LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items AS calls "
                         "JOIN response_api_items AS outputs "
@@ -1870,11 +2026,101 @@ static int harness_test_tool_audit_loop(void)
   }
   if (!ok) {
     fprintf(stderr,
-            "Tool-audit integration failed: %s\n",
+            "Combined tool-audit integration failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
   free(error);
   unlink(database_path);
+  unlink(path);
+  return ok;
+}
+
+static int harness_test_empty_audit_finalization_fails(void)
+{
+  char path[] = "/tmp/strappy-responses-empty-finalize-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *result;
+  sqlite3 *db;
+  long long session_id;
+  long long value;
+  pid_t server_pid;
+  int fd;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail(
+      "Could not create empty-finalization harness database.");
+  }
+  close(fd);
+  error = NULL;
+  session_id = 0LL;
+  if (!harness_create_session_database(path, &session_id, &error) ||
+      !harness_start_server(
+        HARNESS_RESPONSES_SERVER_EMPTY_AUDIT_FINALIZATION,
+        endpoint,
+        sizeof(endpoint),
+        &server_pid)) {
+    fprintf(stderr,
+            "Could not prepare empty-finalization integration test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  result = strappy_responses_send_prompt_for_session_and_store(
+    "Fail empty audit finalization",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources/PromptSystem.txt",
+    path,
+    session_id,
+    &error);
+  server_ok = harness_wait_for_server(server_pid, 0);
+  ok = (result == NULL) && server_ok && (error != NULL) &&
+    (strcmp(error, HARNESS_EMPTY_AUDIT_FINALIZATION_ERROR) == 0);
+  free(result);
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM response_api_calls;",
+                           &value) && (value == 3LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "request_kind='tool_audit';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "request_kind='audit_finalize';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_api_items WHERE "
+                        "role='developer' AND is_canonical=1;",
+                        &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_tool_executions;",
+                        &value) && (value == 0LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM sessions WHERE response='"
+                        HARNESS_EMPTY_AUDIT_FINALIZATION_ERROR "';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM sessions WHERE "
+                        "response='Initial answer that must not be reused.';",
+                        &value) && (value == 0LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Empty audit finalization integration failed: %s\n",
+            (error != NULL) ? error : "request or ledger mismatch");
+  }
+  free(error);
   unlink(path);
   return ok;
 }
@@ -1924,16 +2170,20 @@ static int harness_test_unrelated_server_tool_does_not_satisfy_audit(void)
     &error);
   server_ok = harness_wait_for_server(server_pid, result == NULL);
   ok = (result != NULL) &&
-    (strcmp(result, "Server tool refinalized answer.") == 0) && server_ok;
+    (strcmp(result, "Server tool combined audited answer.") == 0) && server_ok;
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
                            "SELECT COUNT(*) FROM response_api_calls;",
-                           &value) && (value == 3LL) &&
+                           &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "request_kind='tool_audit';",
+                        &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_calls WHERE "
                         "request_kind='audit_finalize';",
-                        &value) && (value == 1LL) &&
+                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "type='openrouter:web_search' AND is_canonical=1;",
@@ -1941,7 +2191,7 @@ static int harness_test_unrelated_server_tool_does_not_satisfy_audit(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "role='developer' AND is_canonical=1;",
-                        &value) && (value == 2LL);
+                        &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;
@@ -1979,6 +2229,10 @@ static int harness_test_function_tool_continuation(void)
   error = NULL;
   session_id = 0LL;
   if (!harness_create_session_database(path, &session_id, &error) ||
+      !strappy_db_update_session_web_search_enabled(path,
+                                                    session_id,
+                                                    0,
+                                                    &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_FUNCTION_TOOL,
                             endpoint,
                             sizeof(endpoint),
@@ -2007,14 +2261,14 @@ static int harness_test_function_tool_continuation(void)
     &error);
   server_ok = harness_wait_for_server(server_pid, result == NULL);
   ok = (result != NULL) &&
-    (strcmp(result, "Function tool refinalized answer.") == 0) &&
-    server_ok && events.valid && (events.count == 4LL) && events.saw_thinking &&
+    (strcmp(result, "Function tool combined audited answer.") == 0) &&
+    server_ok && events.valid && (events.count == 3LL) && events.saw_thinking &&
     events.saw_tools && (events.clear_count == 1L);
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
                            "SELECT COUNT(*) FROM response_api_calls;",
-                           &value) && (value == 4LL) &&
+                           &value) && (value == 3LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_calls WHERE "
                         "request_kind='tool_continuation';",
@@ -2026,7 +2280,7 @@ static int harness_test_function_tool_continuation(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_calls WHERE "
                         "request_kind='audit_finalize';",
-                        &value) && (value == 1LL) &&
+                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_tool_executions WHERE "
                         "call_id='call-database-list' AND "
@@ -2042,7 +2296,7 @@ static int harness_test_function_tool_continuation(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "role='developer' AND is_canonical=1;",
-                        &value) && (value == 2LL);
+                        &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;
@@ -2108,15 +2362,15 @@ static int harness_test_retry_attempt_ledger(void)
     &error);
   server_ok = harness_wait_for_server(server_pid, result == NULL);
   ok = (result != NULL) &&
-    (strcmp(result, "Retry refinalized answer.") == 0) &&
-    server_ok && events.valid && (events.count == 5LL) && events.saw_thinking &&
+    (strcmp(result, "Retry combined audited answer.") == 0) &&
+    server_ok && events.valid && (events.count == 4LL) && events.saw_thinking &&
     events.saw_tools && events.saw_retry_wait && events.saw_retrying &&
     (events.clear_count == 1L);
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
                            "SELECT COUNT(*) FROM response_api_calls;",
-                           &value) && (value == 5LL) &&
+                           &value) && (value == 4LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_calls WHERE "
                         "attempt_index=0 AND request_kind='user' AND "
@@ -2138,15 +2392,15 @@ static int harness_test_retry_attempt_ledger(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_calls WHERE "
                         "request_kind='audit_finalize';",
-                        &value) && (value == 1LL) &&
+                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "is_canonical=1;",
-                        &value) && (value == 12LL) &&
+                        &value) && (value == 10LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "direction='request' AND is_canonical=1;",
-                        &value) && (value == 8LL);
+                        &value) && (value == 7LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;
@@ -2844,7 +3098,8 @@ int main(void)
   if (harness_test_request_surfaces() &&
       harness_test_ledger() &&
       harness_test_cumulative_session_usage_cost() &&
-      harness_test_tool_audit_loop() &&
+      harness_test_combined_tool_audit_once() &&
+      harness_test_empty_audit_finalization_fails() &&
       harness_test_unrelated_server_tool_does_not_satisfy_audit() &&
       harness_test_function_tool_continuation() &&
       harness_test_retry_attempt_ledger() &&
