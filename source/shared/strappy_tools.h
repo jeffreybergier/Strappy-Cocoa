@@ -20,6 +20,8 @@ extern "C" {
 #define STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET "memory_database_hint_forget"
 #define STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH "helper_fontawesome_shortcode_search"
 #define STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM "helper_fontawesome_shortcode_confirm"
+#define STRAPPY_TOOL_OPENROUTER_WEB_SEARCH "openrouter:web_search"
+#define STRAPPY_TOOL_OPENROUTER_WEB_FETCH "openrouter:web_fetch"
 
 char *strappy_tools_request_json(const char *resource_dir,
                                  char **error_out);

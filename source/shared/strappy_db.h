@@ -50,6 +50,11 @@ typedef struct strappy_session_message_record {
   char *tool_name;
   char *arguments_json;
   char *result_json;
+  char *response_item_action_json;
+  char *response_item_url;
+  char *response_item_title;
+  char *response_item_status;
+  char *response_item_http_status;
   char *created_at;
   int include_in_context;
   int is_error;

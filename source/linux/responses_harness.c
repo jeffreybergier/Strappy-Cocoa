@@ -112,6 +112,26 @@ static int harness_tools_hide_local_display_metadata(cJSON *tools)
   return 1;
 }
 
+static int harness_server_tool_has_request_fields_only(cJSON *tools,
+                                                       const char *tool_type)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools) || (tool_type == NULL)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *type;
+
+    type = cJSON_GetObjectItem(tool, "type");
+    if (cJSON_IsString(type) && (type->valuestring != NULL) &&
+        (strcmp(type->valuestring, tool_type) == 0)) {
+      return cJSON_GetArraySize(tool) == 1;
+    }
+  }
+  return 0;
+}
+
 static int harness_test_request_surfaces(void)
 {
   char *url;
@@ -175,8 +195,14 @@ static int harness_test_request_surfaces(void)
       STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
       HARNESS_MEMORY_USER_FACT_FORGET_DESCRIPTION) &&
     harness_tools_hide_local_display_metadata(tools) &&
-    harness_has_tool_type(tools, "openrouter:web_search") &&
-    harness_has_tool_type(tools, "openrouter:web_fetch");
+    harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+    harness_server_tool_has_request_fields_only(
+      tools,
+      STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    harness_server_tool_has_request_fields_only(
+      tools,
+      STRAPPY_TOOL_OPENROUTER_WEB_FETCH);
   cJSON_Delete(tools);
   free(error);
   if (!ok) {
@@ -199,8 +225,8 @@ static int harness_test_request_surfaces(void)
   free(tools_json);
   ok = cJSON_IsArray(tools) &&
     harness_tools_hide_local_display_metadata(tools) &&
-    !harness_has_tool_type(tools, "openrouter:web_search") &&
-    !harness_has_tool_type(tools, "openrouter:web_fetch");
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH);
   cJSON_Delete(tools);
   free(error);
   if (!ok) {
@@ -2358,7 +2384,15 @@ static int harness_test_ledger(void)
     "{\"type\":\"function_call\",\"id\":\"fc-test\","
     "\"call_id\":\"call-test\",\"name\":\"database_list_info\","
     "\"namespace\":\"local\",\"arguments\":\"{}\","
-    "\"status\":\"completed\"},{\"type\":\"message\","
+    "\"status\":\"completed\"},"
+    "{\"type\":\"openrouter:web_search\",\"id\":\"ws-test\","
+    "\"status\":\"completed\",\"action\":{\"type\":\"search\","
+    "\"query\":\"Strappy Cocoa\",\"sources\":[{\"type\":\"url\","
+    "\"url\":\"https://example.com/search\"}]}},"
+    "{\"type\":\"openrouter:web_fetch\",\"id\":\"wf-test\","
+    "\"status\":\"completed\",\"url\":\"https://example.com/article\","
+    "\"title\":\"Example Article\",\"content\":\"Fetched page body\","
+    "\"httpStatus\":200},{\"type\":\"message\","
     "\"id\":\"msg-test\",\"role\":\"assistant\","
     "\"phase\":\"final_answer\",\"status\":\"completed\","
     "\"content\":[{\"type\":\"output_text\",\"text\":\"Done\","
@@ -2470,7 +2504,7 @@ static int harness_test_ledger(void)
   ok = harness_verify_call_columns(db, request_json, response_json) &&
     harness_query_int(db,
                       "SELECT COUNT(*) FROM response_api_items;",
-                      &value) && (value == 4LL) &&
+                      &value) && (value == 6LL) &&
     harness_query_int(db,
                       "SELECT COUNT(*) FROM response_api_item_parts;",
                       &value) && (value == 3LL) &&
@@ -2485,6 +2519,20 @@ static int harness_test_ledger(void)
                       "type='reasoning' AND format='test-v1' AND "
                       "signature='sig-test';",
                       &value) && (value == 1LL) &&
+    harness_query_int(db,
+                      "SELECT COUNT(*) FROM response_api_items WHERE "
+                      "type='openrouter:web_search' AND "
+                      "action_json='{\"type\":\"search\","
+                      "\"query\":\"Strappy Cocoa\",\"sources\":[{"
+                      "\"type\":\"url\","
+                      "\"url\":\"https://example.com/search\"}]}' ;",
+                      &value) && (value == 1LL) &&
+    harness_query_int(db,
+                      "SELECT COUNT(*) FROM response_api_items WHERE "
+                      "type='openrouter:web_fetch' AND "
+                      "url='https://example.com/article' AND "
+                      "title='Example Article' AND http_status='200';",
+                      &value) && (value == 1LL) &&
     harness_query_int(db, "PRAGMA user_version;", &value) && (value == 1LL);
   sqlite3_close(db);
   if (!ok) {
@@ -2496,7 +2544,7 @@ static int harness_test_ledger(void)
                                                 session_id,
                                                 &context,
                                                 &error) &&
-    (context.count == 4U);
+    (context.count == 6U);
   strappy_response_item_raw_record_list_destroy(&context);
   if (!ok) {
     fprintf(stderr, "Canonical Responses items failed: %s\n", error);
@@ -2509,7 +2557,7 @@ static int harness_test_ledger(void)
                                          session_id,
                                          &timeline,
                                          &error) &&
-    (timeline.count == 5U) &&
+    (timeline.count == 7U) &&
     (strcmp(timeline.records[0].role, "user") == 0) &&
     (strcmp(timeline.records[0].direction, "request") == 0) &&
     (timeline.records[0].round_index == 0L) &&
@@ -2518,13 +2566,31 @@ static int harness_test_ledger(void)
     (strcmp(timeline.records[1].direction, "response") == 0) &&
     (strcmp(timeline.records[2].role, "api_function_call") == 0) &&
     (strcmp(timeline.records[2].direction, "response") == 0) &&
-    (strcmp(timeline.records[3].role, "api_call") == 0) &&
-    (timeline.records[3].direction == NULL) &&
-    (timeline.records[3].round_index == 0L) &&
-    (timeline.records[3].attempt_index == 0L) &&
-    (strcmp(timeline.records[4].role, "assistant") == 0) &&
-    (strcmp(timeline.records[4].direction, "response") == 0) &&
-    (strcmp(timeline.records[4].content, "Done") == 0);
+    (strcmp(timeline.records[3].role, "api_item") == 0) &&
+    (strcmp(timeline.records[3].kind,
+            STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) &&
+    (strcmp(timeline.records[3].response_item_action_json,
+            "{\"type\":\"search\",\"query\":\"Strappy Cocoa\","
+            "\"sources\":[{\"type\":\"url\","
+            "\"url\":\"https://example.com/search\"}]}") == 0) &&
+    (strcmp(timeline.records[4].role, "api_item") == 0) &&
+    (strcmp(timeline.records[4].kind,
+            STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0) &&
+    (strcmp(timeline.records[4].response_item_url,
+            "https://example.com/article") == 0) &&
+    (strcmp(timeline.records[4].response_item_title,
+            "Example Article") == 0) &&
+    (strcmp(timeline.records[4].response_item_status, "completed") == 0) &&
+    (strcmp(timeline.records[4].response_item_http_status, "200") == 0) &&
+    (strstr(timeline.records[4].response_item_title,
+            "Fetched page body") == NULL) &&
+    (strcmp(timeline.records[5].role, "api_call") == 0) &&
+    (timeline.records[5].direction == NULL) &&
+    (timeline.records[5].round_index == 0L) &&
+    (timeline.records[5].attempt_index == 0L) &&
+    (strcmp(timeline.records[6].role, "assistant") == 0) &&
+    (strcmp(timeline.records[6].direction, "response") == 0) &&
+    (strcmp(timeline.records[6].content, "Done") == 0);
   strappy_session_message_record_list_destroy(&timeline);
   if (!ok) {
     fprintf(stderr, "Responses timeline failed: %s\n", error);

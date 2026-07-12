@@ -2,6 +2,30 @@
   "assistant_messages": {
     "tool_round_limit": "Tool limit reached."
   },
+  "server_tools": [
+    {
+      "type": "openrouter:web_search",
+      "feature": "web_search",
+      "x-strappy-display": {
+        "label": "Web Search",
+        "promoted_path": [
+          "action",
+          "query"
+        ]
+      }
+    },
+    {
+      "type": "openrouter:web_fetch",
+      "feature": "web_search",
+      "x-strappy-display": {
+        "label": "Web Fetch",
+        "promoted_path": [
+          "url"
+        ],
+        "transform": "url"
+      }
+    }
+  ],
   "tools": [
     {
       "type": "function",

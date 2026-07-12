@@ -17,8 +17,13 @@
 #define STRAPPY_TOOLS_AVAILABILITY_NO_APPROVED_DATABASES "no_approved_databases"
 #define STRAPPY_TOOLS_AVAILABILITY_AVAILABLE "available"
 #define STRAPPY_TOOL_GUIDANCE_RESOURCE "GuidanceTools.json"
+#define STRAPPY_TOOL_SERVER_TOOLS_KEY "server_tools"
+#define STRAPPY_TOOL_SERVER_FEATURE_KEY "feature"
+#define STRAPPY_TOOL_SERVER_FEATURE_WEB_SEARCH "web_search"
 #define STRAPPY_TOOL_DISPLAY_METADATA_KEY "x-strappy-display"
+#define STRAPPY_TOOL_DISPLAY_LABEL_KEY "label"
 #define STRAPPY_TOOL_DISPLAY_PROMOTED_ARGUMENT_KEY "promoted_argument"
+#define STRAPPY_TOOL_DISPLAY_PROMOTED_PATH_KEY "promoted_path"
 #define STRAPPY_TOOL_DISPLAY_TRANSFORM_KEY "transform"
 #define STRAPPY_DATABASE_GUIDANCE_RESOURCE "GuidanceDatabase.json"
 #define STRAPPY_FONTAWESOME_ICONS_RESOURCE "FontAwesomeIcons.json"
@@ -56,6 +61,11 @@ typedef struct strappy_tool_definition {
   const char *name;
   strappy_tool_kind kind;
 } strappy_tool_definition;
+
+typedef struct strappy_server_tool_definition {
+  const char *type;
+  const char *feature;
+} strappy_server_tool_definition;
 
 typedef struct strappy_tools_catalog_summary {
   int discovered_count;
@@ -155,6 +165,17 @@ static const strappy_tool_definition strappy_tool_definitions[] = {
 static const size_t strappy_tool_definition_count =
   sizeof(strappy_tool_definitions) / sizeof(strappy_tool_definitions[0]);
 
+static const strappy_server_tool_definition strappy_server_tool_definitions[] = {
+  { STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
+    STRAPPY_TOOL_SERVER_FEATURE_WEB_SEARCH },
+  { STRAPPY_TOOL_OPENROUTER_WEB_FETCH,
+    STRAPPY_TOOL_SERVER_FEATURE_WEB_SEARCH }
+};
+
+static const size_t strappy_server_tool_definition_count =
+  sizeof(strappy_server_tool_definitions) /
+  sizeof(strappy_server_tool_definitions[0]);
+
 static int strappy_tools_add_database_schema_context(
   cJSON *object,
   const strappy_discovered_database_record *record,
@@ -172,6 +193,24 @@ static const strappy_tool_definition *strappy_tools_find_definition(
   for (index = 0U; index < strappy_tool_definition_count; index++) {
     if (strcmp(strappy_tool_definitions[index].name, tool_name) == 0) {
       return &strappy_tool_definitions[index];
+    }
+  }
+
+  return NULL;
+}
+
+static const strappy_server_tool_definition *
+strappy_tools_find_server_definition(const char *tool_type)
+{
+  size_t index;
+
+  if ((tool_type == NULL) || (tool_type[0] == '\0')) {
+    return NULL;
+  }
+
+  for (index = 0U; index < strappy_server_tool_definition_count; index++) {
+    if (strcmp(strappy_server_tool_definitions[index].type, tool_type) == 0) {
+      return &strappy_server_tool_definitions[index];
     }
   }
 
@@ -682,6 +721,9 @@ static int strappy_tools_display_transform_matches_type(
   if (strcmp(transform, "database_filename") == 0) {
     return strcmp(property_type, "string") == 0;
   }
+  if (strcmp(transform, "url") == 0) {
+    return strcmp(property_type, "string") == 0;
+  }
   if (strcmp(transform, "database_hint_filename") == 0) {
     return strcmp(property_type, "integer") == 0;
   }
@@ -817,6 +859,224 @@ static int strappy_tools_validate_display_metadata(cJSON *tool,
   return 1;
 }
 
+static const char *strappy_tools_server_schema_type(cJSON *tool)
+{
+  cJSON *type;
+
+  if (!cJSON_IsObject(tool)) {
+    return NULL;
+  }
+  type = cJSON_GetObjectItemCaseSensitive(tool, "type");
+  if (!cJSON_IsString(type) || (type->valuestring == NULL) ||
+      (type->valuestring[0] == '\0')) {
+    return NULL;
+  }
+  return type->valuestring;
+}
+
+static int strappy_tools_validate_server_display_metadata(
+  cJSON *tool,
+  const char *tool_type,
+  char **error_out)
+{
+  cJSON *display;
+  cJSON *field;
+  cJSON *label;
+  cJSON *promoted_path;
+  cJSON *path_part;
+  cJSON *transform;
+  int label_count;
+  int promoted_path_count;
+  int transform_count;
+
+  display = cJSON_GetObjectItemCaseSensitive(
+    tool,
+    STRAPPY_TOOL_DISPLAY_METADATA_KEY);
+  if (!cJSON_IsObject(display)) {
+    strappy_set_formatted_error(error_out,
+                                "%s for %s must be an object.",
+                                STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+                                tool_type);
+    return 0;
+  }
+
+  label_count = 0;
+  promoted_path_count = 0;
+  transform_count = 0;
+  for (field = display->child; field != NULL; field = field->next) {
+    if (field->string == NULL) {
+      strappy_set_formatted_error(error_out,
+                                  "%s for %s contains an unsupported field.",
+                                  STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+                                  tool_type);
+      return 0;
+    }
+    if (strcmp(field->string, STRAPPY_TOOL_DISPLAY_LABEL_KEY) == 0) {
+      label_count++;
+    } else if (strcmp(field->string,
+                      STRAPPY_TOOL_DISPLAY_PROMOTED_PATH_KEY) == 0) {
+      promoted_path_count++;
+    } else if (strcmp(field->string,
+                      STRAPPY_TOOL_DISPLAY_TRANSFORM_KEY) == 0) {
+      transform_count++;
+    } else {
+      strappy_set_formatted_error(error_out,
+                                  "%s for %s contains an unsupported field.",
+                                  STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+                                  tool_type);
+      return 0;
+    }
+  }
+  if ((label_count != 1) || (promoted_path_count != 1) ||
+      (transform_count > 1)) {
+    strappy_set_formatted_error(
+      error_out,
+      "%s for %s must contain one label, one promoted_path, and at most one transform.",
+      STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+      tool_type);
+    return 0;
+  }
+
+  label = cJSON_GetObjectItemCaseSensitive(display,
+                                           STRAPPY_TOOL_DISPLAY_LABEL_KEY);
+  promoted_path = cJSON_GetObjectItemCaseSensitive(
+    display,
+    STRAPPY_TOOL_DISPLAY_PROMOTED_PATH_KEY);
+  transform = cJSON_GetObjectItemCaseSensitive(
+    display,
+    STRAPPY_TOOL_DISPLAY_TRANSFORM_KEY);
+  if (!cJSON_IsString(label) || (label->valuestring == NULL) ||
+      (label->valuestring[0] == '\0')) {
+    strappy_set_formatted_error(error_out,
+                                "%s label for %s must be a non-empty string.",
+                                STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+                                tool_type);
+    return 0;
+  }
+  if (!cJSON_IsArray(promoted_path) ||
+      (cJSON_GetArraySize(promoted_path) < 1) ||
+      (cJSON_GetArraySize(promoted_path) > 8)) {
+    strappy_set_formatted_error(error_out,
+                                "%s promoted_path for %s must contain 1 to 8 keys.",
+                                STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+                                tool_type);
+    return 0;
+  }
+  for (path_part = promoted_path->child;
+       path_part != NULL;
+       path_part = path_part->next) {
+    if (!cJSON_IsString(path_part) || (path_part->valuestring == NULL) ||
+        (path_part->valuestring[0] == '\0')) {
+      strappy_set_formatted_error(
+        error_out,
+        "%s promoted_path for %s must contain non-empty string keys.",
+        STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+        tool_type);
+      return 0;
+    }
+  }
+  if ((transform != NULL) &&
+      (!cJSON_IsString(transform) || (transform->valuestring == NULL) ||
+       !strappy_tools_display_transform_matches_type(transform->valuestring,
+                                                     "string"))) {
+    strappy_set_formatted_error(error_out,
+                                "%s transform for %s is not supported.",
+                                STRAPPY_TOOL_DISPLAY_METADATA_KEY,
+                                tool_type);
+    return 0;
+  }
+  return 1;
+}
+
+static int strappy_tools_validate_guidance_server_tools(cJSON *server_tools,
+                                                        char **error_out)
+{
+  cJSON *tool;
+  size_t definition_index;
+
+  if (!cJSON_IsArray(server_tools)) {
+    strappy_set_error(
+      error_out,
+      "Tool guidance resource must contain a server_tools array.");
+    return 0;
+  }
+
+  for (tool = server_tools->child; tool != NULL; tool = tool->next) {
+    const char *type;
+    const strappy_server_tool_definition *definition;
+    cJSON *feature;
+    cJSON *field;
+
+    type = strappy_tools_server_schema_type(tool);
+    if (type == NULL) {
+      strappy_set_error(error_out,
+                        "Tool guidance contains a malformed server tool.");
+      return 0;
+    }
+    definition = strappy_tools_find_server_definition(type);
+    if (definition == NULL) {
+      strappy_set_formatted_error(error_out,
+                                  "Tool guidance contains unsupported server tool: %s",
+                                  type);
+      return 0;
+    }
+    for (field = tool->child; field != NULL; field = field->next) {
+      if ((field->string == NULL) ||
+          ((strcmp(field->string, "type") != 0) &&
+           (strcmp(field->string, STRAPPY_TOOL_SERVER_FEATURE_KEY) != 0) &&
+           (strcmp(field->string, STRAPPY_TOOL_DISPLAY_METADATA_KEY) != 0))) {
+        strappy_set_formatted_error(
+          error_out,
+          "Tool guidance server tool %s contains an unsupported field.",
+          type);
+        return 0;
+      }
+    }
+    feature = cJSON_GetObjectItemCaseSensitive(
+      tool,
+      STRAPPY_TOOL_SERVER_FEATURE_KEY);
+    if (!cJSON_IsString(feature) || (feature->valuestring == NULL) ||
+        (strcmp(feature->valuestring, definition->feature) != 0)) {
+      strappy_set_formatted_error(error_out,
+                                  "Tool guidance server tool %s has an invalid feature.",
+                                  type);
+      return 0;
+    }
+    if (!strappy_tools_validate_server_display_metadata(tool,
+                                                        type,
+                                                        error_out)) {
+      return 0;
+    }
+  }
+
+  for (definition_index = 0U;
+       definition_index < strappy_server_tool_definition_count;
+       definition_index++) {
+    int matches;
+
+    matches = 0;
+    for (tool = server_tools->child; tool != NULL; tool = tool->next) {
+      const char *type;
+
+      type = strappy_tools_server_schema_type(tool);
+      if ((type != NULL) &&
+          (strcmp(type,
+                  strappy_server_tool_definitions[definition_index].type) ==
+           0)) {
+        matches++;
+      }
+    }
+    if (matches != 1) {
+      strappy_set_formatted_error(
+        error_out,
+        "Tool guidance must contain server tool %s exactly once.",
+        strappy_server_tool_definitions[definition_index].type);
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static void strappy_tools_remove_display_metadata(cJSON *tools)
 {
   cJSON *tool;
@@ -876,6 +1136,24 @@ static int strappy_tools_validate_guidance_tools(cJSON *tools,
   return 1;
 }
 
+static int strappy_tools_validate_guidance_root(cJSON *root,
+                                                char **error_out)
+{
+  cJSON *tools;
+  cJSON *server_tools;
+
+  if (!cJSON_IsObject(root)) {
+    strappy_set_error(error_out, "Tool guidance root must be an object.");
+    return 0;
+  }
+  tools = cJSON_GetObjectItemCaseSensitive(root, "tools");
+  server_tools = cJSON_GetObjectItemCaseSensitive(
+    root,
+    STRAPPY_TOOL_SERVER_TOOLS_KEY);
+  return strappy_tools_validate_guidance_tools(tools, error_out) &&
+    strappy_tools_validate_guidance_server_tools(server_tools, error_out);
+}
+
 char *strappy_tools_request_json(const char *resource_dir, char **error_out)
 {
   cJSON *root;
@@ -890,7 +1168,7 @@ char *strappy_tools_request_json(const char *resource_dir, char **error_out)
   }
 
   tools = cJSON_GetObjectItem(root, "tools");
-  if (!strappy_tools_validate_guidance_tools(tools, error_out)) {
+  if (!strappy_tools_validate_guidance_root(root, error_out)) {
     cJSON_Delete(root);
     return NULL;
   }
@@ -949,7 +1227,7 @@ char *strappy_tools_request_json_filtered(const char *resource_dir,
   }
 
   tools = cJSON_GetObjectItem(root, "tools");
-  if (!strappy_tools_validate_guidance_tools(tools, error_out)) {
+  if (!strappy_tools_validate_guidance_root(root, error_out)) {
     cJSON_Delete(root);
     return NULL;
   }
@@ -1000,6 +1278,7 @@ char *strappy_tools_display_registry_json(const char *resource_dir,
 {
   cJSON *root;
   cJSON *tools;
+  cJSON *server_tools;
   cJSON *registry;
   cJSON *tool;
   char *json;
@@ -1011,8 +1290,11 @@ char *strappy_tools_display_registry_json(const char *resource_dir,
     return NULL;
   }
 
-  tools = cJSON_GetObjectItem(root, "tools");
-  if (!strappy_tools_validate_guidance_tools(tools, error_out)) {
+  tools = cJSON_GetObjectItemCaseSensitive(root, "tools");
+  server_tools = cJSON_GetObjectItemCaseSensitive(
+    root,
+    STRAPPY_TOOL_SERVER_TOOLS_KEY);
+  if (!strappy_tools_validate_guidance_root(root, error_out)) {
     cJSON_Delete(root);
     return NULL;
   }
@@ -1042,6 +1324,28 @@ char *strappy_tools_display_registry_json(const char *resource_dir,
       cJSON_Delete(registry);
       cJSON_Delete(root);
       strappy_set_error(error_out, "Could not build tool display registry.");
+      return NULL;
+    }
+  }
+
+  for (tool = server_tools->child; tool != NULL; tool = tool->next) {
+    const char *type;
+    cJSON *display;
+    cJSON *copy;
+
+    type = strappy_tools_server_schema_type(tool);
+    display = cJSON_GetObjectItemCaseSensitive(
+      tool,
+      STRAPPY_TOOL_DISPLAY_METADATA_KEY);
+    copy = cJSON_Duplicate(display, 1);
+    if ((copy == NULL) ||
+        (cJSON_AddBoolToObject(copy, "response_item", 1) == NULL) ||
+        !cJSON_AddItemToObject(registry, type, copy)) {
+      cJSON_Delete(copy);
+      cJSON_Delete(registry);
+      cJSON_Delete(root);
+      strappy_set_error(error_out,
+                        "Could not build server tool display registry.");
       return NULL;
     }
   }
@@ -1087,27 +1391,66 @@ static int strappy_tools_responses_copy_member(cJSON *target,
   return 1;
 }
 
-static int strappy_tools_responses_append_server_tool(cJSON *tools,
-                                                       const char *type,
-                                                       char **error_out)
+static int strappy_tools_responses_append_server_tools(
+  cJSON *tools,
+  const char *resource_dir,
+  int web_search_enabled,
+  char **error_out)
 {
-  cJSON *tool;
+  cJSON *root;
+  cJSON *server_tools;
+  cJSON *server_tool;
 
-  tool = cJSON_CreateObject();
-  if ((tool == NULL) ||
-      (cJSON_AddStringToObject(tool, "type", type) == NULL) ||
-      !cJSON_AddItemToArray(tools, tool)) {
-    cJSON_Delete(tool);
-    strappy_set_formatted_error(error_out,
-                                "Could not add Responses server tool: %s",
-                                type);
+  root = strappy_tools_read_json_resource(resource_dir,
+                                          STRAPPY_TOOL_GUIDANCE_RESOURCE,
+                                          error_out);
+  if (root == NULL) {
     return 0;
   }
+  if (!strappy_tools_validate_guidance_root(root, error_out)) {
+    cJSON_Delete(root);
+    return 0;
+  }
+
+  server_tools = cJSON_GetObjectItemCaseSensitive(
+    root,
+    STRAPPY_TOOL_SERVER_TOOLS_KEY);
+  for (server_tool = server_tools->child;
+       server_tool != NULL;
+       server_tool = server_tool->next) {
+    const char *type;
+    cJSON *feature;
+    cJSON *response_tool;
+
+    type = strappy_tools_server_schema_type(server_tool);
+    feature = cJSON_GetObjectItemCaseSensitive(
+      server_tool,
+      STRAPPY_TOOL_SERVER_FEATURE_KEY);
+    if (cJSON_IsString(feature) && (feature->valuestring != NULL) &&
+        (strcmp(feature->valuestring,
+                STRAPPY_TOOL_SERVER_FEATURE_WEB_SEARCH) == 0) &&
+        !web_search_enabled) {
+      continue;
+    }
+    response_tool = cJSON_CreateObject();
+    if ((response_tool == NULL) ||
+        (cJSON_AddStringToObject(response_tool, "type", type) == NULL) ||
+        !cJSON_AddItemToArray(tools, response_tool)) {
+      cJSON_Delete(response_tool);
+      cJSON_Delete(root);
+      strappy_set_formatted_error(error_out,
+                                  "Could not add Responses server tool: %s",
+                                  type);
+      return 0;
+    }
+  }
+  cJSON_Delete(root);
   return 1;
 }
 
 static char *strappy_tools_responses_json_from_chat_json(
   const char *chat_tools_json,
+  const char *resource_dir,
   int web_search_enabled,
   char **error_out)
 {
@@ -1198,13 +1541,10 @@ static char *strappy_tools_responses_json_from_chat_json(
     }
   }
 
-  if (web_search_enabled &&
-      (!strappy_tools_responses_append_server_tool(responses_tools,
-                                                   "openrouter:web_search",
-                                                   error_out) ||
-       !strappy_tools_responses_append_server_tool(responses_tools,
-                                                   "openrouter:web_fetch",
-                                                   error_out))) {
+  if (!strappy_tools_responses_append_server_tools(responses_tools,
+                                                   resource_dir,
+                                                   web_search_enabled,
+                                                   error_out)) {
     cJSON_Delete(responses_tools);
     cJSON_Delete(chat_tools);
     return NULL;
@@ -1240,6 +1580,7 @@ char *strappy_tools_responses_request_json_filtered(
 
   responses_tools_json =
     strappy_tools_responses_json_from_chat_json(chat_tools_json,
+                                                resource_dir,
                                                 web_search_enabled,
                                                 error_out);
   free(chat_tools_json);

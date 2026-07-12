@@ -1383,6 +1383,58 @@ static int harness_tool_display_matches(cJSON *registry,
     (strcmp(actual_transform->valuestring, transform) == 0);
 }
 
+static int harness_server_tool_display_matches(cJSON *registry,
+                                               const char *tool_type,
+                                               const char *label,
+                                               const char *path_first,
+                                               const char *path_second,
+                                               const char *transform)
+{
+  cJSON *display;
+  cJSON *actual_label;
+  cJSON *path;
+  cJSON *response_item;
+  cJSON *actual_transform;
+  cJSON *part;
+  int expected_path_count;
+
+  display = cJSON_GetObjectItem(registry, tool_type);
+  actual_label = cJSON_IsObject(display) ?
+    cJSON_GetObjectItem(display, "label") : NULL;
+  path = cJSON_IsObject(display) ?
+    cJSON_GetObjectItem(display, "promoted_path") : NULL;
+  response_item = cJSON_IsObject(display) ?
+    cJSON_GetObjectItem(display, "response_item") : NULL;
+  actual_transform = cJSON_IsObject(display) ?
+    cJSON_GetObjectItem(display, "transform") : NULL;
+  expected_path_count = (path_second != NULL) ? 2 : 1;
+  if (!cJSON_IsString(actual_label) || (actual_label->valuestring == NULL) ||
+      (strcmp(actual_label->valuestring, label) != 0) ||
+      !cJSON_IsArray(path) ||
+      (cJSON_GetArraySize(path) != expected_path_count) ||
+      !cJSON_IsTrue(response_item)) {
+    return 0;
+  }
+  part = cJSON_GetArrayItem(path, 0);
+  if (!cJSON_IsString(part) || (part->valuestring == NULL) ||
+      (strcmp(part->valuestring, path_first) != 0)) {
+    return 0;
+  }
+  if (path_second != NULL) {
+    part = cJSON_GetArrayItem(path, 1);
+    if (!cJSON_IsString(part) || (part->valuestring == NULL) ||
+        (strcmp(part->valuestring, path_second) != 0)) {
+      return 0;
+    }
+  }
+  if (transform == NULL) {
+    return actual_transform == NULL;
+  }
+  return cJSON_IsString(actual_transform) &&
+    (actual_transform->valuestring != NULL) &&
+    (strcmp(actual_transform->valuestring, transform) == 0);
+}
+
 static int harness_run_tool_registry_tests(void)
 {
   char *error;
@@ -1465,6 +1517,20 @@ static int harness_run_tool_registry_tests(void)
                                      STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET,
                                      "id",
                                      "database_hint_filename") &&
+        harness_server_tool_display_matches(
+          registry,
+          STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
+          "Web Search",
+          "action",
+          "query",
+          NULL) &&
+        harness_server_tool_display_matches(
+          registry,
+          STRAPPY_TOOL_OPENROUTER_WEB_FETCH,
+          "Web Fetch",
+          "url",
+          NULL,
+          "url") &&
         (cJSON_GetObjectItem(registry,
                              STRAPPY_TOOL_DATABASE_LIST_INFO) == NULL) &&
         (cJSON_GetObjectItem(

@@ -358,6 +358,11 @@ void strappy_session_message_record_init(strappy_session_message_record *record)
   record->tool_name = NULL;
   record->arguments_json = NULL;
   record->result_json = NULL;
+  record->response_item_action_json = NULL;
+  record->response_item_url = NULL;
+  record->response_item_title = NULL;
+  record->response_item_status = NULL;
+  record->response_item_http_status = NULL;
   record->created_at = NULL;
   record->include_in_context = 0;
   record->is_error = 0;
@@ -390,6 +395,11 @@ void strappy_session_message_record_destroy(strappy_session_message_record *reco
   free(record->tool_name);
   free(record->arguments_json);
   free(record->result_json);
+  free(record->response_item_action_json);
+  free(record->response_item_url);
+  free(record->response_item_title);
+  free(record->response_item_status);
+  free(record->response_item_http_status);
   free(record->created_at);
   strappy_session_message_record_init(record);
 }
@@ -9434,7 +9444,8 @@ int strappy_db_list_response_timeline(
     "COALESCE(c.response_model,c.request_model),c.request_started_at,"
     "c.transport_error,c.response_raw_json,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,"
     "c.request_url,c.response_status,c.response_error_message,"
-    "c.response_incomplete_reason,0,2 AS presentation_phase "
+    "c.response_incomplete_reason,0,NULL,NULL,NULL,NULL,NULL,"
+    "2 AS presentation_phase "
     "FROM response_api_calls c WHERE c.session_id = ? "
     "AND c.state <> 'pending' "
     "UNION ALL "
@@ -9445,6 +9456,7 @@ int strappy_db_list_response_timeline(
     "i.type,i.display_role,i.display_text,i.raw_json,i.call_id,i.name,"
     "i.arguments,i.output,c.request_url,c.response_status,"
     "c.response_error_message,c.response_incomplete_reason,i.is_canonical,"
+    "i.action_json,i.url,i.title,i.status,i.http_status,"
     "CASE WHEN i.display_role IN "
     "('user','harness','developer','assistant') "
     "THEN CASE WHEN i.direction = 'request' THEN 0 ELSE 3 END "
@@ -9568,6 +9580,11 @@ int strappy_db_list_response_timeline(
       record->tool_name = strappy_db_column_string(stmt, 22);
       record->arguments_json = strappy_db_column_string(stmt, 23);
       record->result_json = strappy_db_column_string(stmt, 24);
+      record->response_item_action_json = strappy_db_column_string(stmt, 30);
+      record->response_item_url = strappy_db_column_string(stmt, 31);
+      record->response_item_title = strappy_db_column_string(stmt, 32);
+      record->response_item_status = strappy_db_column_string(stmt, 33);
+      record->response_item_http_status = strappy_db_column_string(stmt, 34);
       if ((record->role != NULL) &&
           (strcmp(record->role, "developer") == 0)) {
         record->actor = strappy_string_duplicate("developer");

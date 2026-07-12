@@ -43,6 +43,11 @@ typedef struct strappy_webview_message {
   const char *tool_name;
   const char *arguments_json;
   const char *result_json;
+  const char *response_item_action_json;
+  const char *response_item_url;
+  const char *response_item_title;
+  const char *response_item_status;
+  const char *response_item_http_status;
   const char *text;
   const char *reasoning;
   const char *metadata_json;

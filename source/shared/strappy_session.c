@@ -351,6 +351,11 @@ static void strappy_session_webview_message_from_record(
   message->tool_name = record->tool_name;
   message->arguments_json = record->arguments_json;
   message->result_json = record->result_json;
+  message->response_item_action_json = record->response_item_action_json;
+  message->response_item_url = record->response_item_url;
+  message->response_item_title = record->response_item_title;
+  message->response_item_status = record->response_item_status;
+  message->response_item_http_status = record->response_item_http_status;
   message->text = record->content;
   message->reasoning = record->reasoning;
   message->metadata_json = record->metadata_json;

@@ -110,6 +110,11 @@ static void StrappySessionWebViewMessageFromDictionary(
   NSString *toolName;
   NSString *argumentsJSON;
   NSString *resultJSON;
+  NSString *responseItemActionJSON;
+  NSString *responseItemURL;
+  NSString *responseItemTitle;
+  NSString *responseItemStatus;
+  NSString *responseItemHTTPStatus;
   NSString *text;
   NSString *reasoning;
   NSString *metadataJSON;
@@ -141,6 +146,13 @@ static void StrappySessionWebViewMessageFromDictionary(
   toolName = [dictionary objectForKey:@"tool_name"];
   argumentsJSON = [dictionary objectForKey:@"arguments_json"];
   resultJSON = [dictionary objectForKey:@"result_json"];
+  responseItemActionJSON =
+    [dictionary objectForKey:@"response_item_action_json"];
+  responseItemURL = [dictionary objectForKey:@"response_item_url"];
+  responseItemTitle = [dictionary objectForKey:@"response_item_title"];
+  responseItemStatus = [dictionary objectForKey:@"response_item_status"];
+  responseItemHTTPStatus =
+    [dictionary objectForKey:@"response_item_http_status"];
   text = [dictionary objectForKey:@"text"];
   reasoning = [dictionary objectForKey:@"reasoning"];
   metadataJSON = [dictionary objectForKey:@"metadata_json"];
@@ -175,6 +187,13 @@ static void StrappySessionWebViewMessageFromDictionary(
   message->tool_name = StrappySessionCString(toolName);
   message->arguments_json = StrappySessionCString(argumentsJSON);
   message->result_json = StrappySessionCString(resultJSON);
+  message->response_item_action_json =
+    StrappySessionCString(responseItemActionJSON);
+  message->response_item_url = StrappySessionCString(responseItemURL);
+  message->response_item_title = StrappySessionCString(responseItemTitle);
+  message->response_item_status = StrappySessionCString(responseItemStatus);
+  message->response_item_http_status =
+    StrappySessionCString(responseItemHTTPStatus);
   message->text = StrappySessionCString(text);
   message->reasoning = StrappySessionCString(reasoning);
   message->metadata_json = StrappySessionCString(metadataJSON);
@@ -763,6 +782,11 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   NSString *toolName;
   NSString *argumentsJSON;
   NSString *resultJSON;
+  NSString *responseItemActionJSON;
+  NSString *responseItemURL;
+  NSString *responseItemTitle;
+  NSString *responseItemStatus;
+  NSString *responseItemHTTPStatus;
   NSString *createdAt;
 
   if (record == NULL) {
@@ -800,6 +824,16 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   toolName = [StrappySession stringFromCStringOrEmpty:record->tool_name];
   argumentsJSON = [StrappySession stringFromCStringOrEmpty:record->arguments_json];
   resultJSON = [StrappySession stringFromCStringOrEmpty:record->result_json];
+  responseItemActionJSON = [StrappySession stringFromCStringOrEmpty:
+    record->response_item_action_json];
+  responseItemURL = [StrappySession stringFromCStringOrEmpty:
+    record->response_item_url];
+  responseItemTitle = [StrappySession stringFromCStringOrEmpty:
+    record->response_item_title];
+  responseItemStatus = [StrappySession stringFromCStringOrEmpty:
+    record->response_item_status];
+  responseItemHTTPStatus = [StrappySession stringFromCStringOrEmpty:
+    record->response_item_http_status];
   createdAt = [StrappySession stringFromCStringOrEmpty:record->created_at];
 
   return [NSDictionary dictionaryWithObjectsAndKeys:
@@ -828,6 +862,11 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     toolName, @"tool_name",
     argumentsJSON, @"arguments_json",
     resultJSON, @"result_json",
+    responseItemActionJSON, @"response_item_action_json",
+    responseItemURL, @"response_item_url",
+    responseItemTitle, @"response_item_title",
+    responseItemStatus, @"response_item_status",
+    responseItemHTTPStatus, @"response_item_http_status",
     includeInContext, @"include_in_context",
     isError, @"is_error",
     httpStatus, @"http_status",

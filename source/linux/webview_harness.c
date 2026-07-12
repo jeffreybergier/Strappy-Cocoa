@@ -11,7 +11,12 @@ static const char harness_tool_display_registry_json[] =
   "\"promoted_argument\":\"shortcodes\","
   "\"transform\":\"comma_separated\"},"
   "\"memory_database_hint_forget\":{\"promoted_argument\":\"id\","
-  "\"transform\":\"database_hint_filename\"}}";
+  "\"transform\":\"database_hint_filename\"},"
+  "\"openrouter:web_search\":{\"label\":\"Web Search\","
+  "\"promoted_path\":[\"action\",\"query\"],\"response_item\":true},"
+  "\"openrouter:web_fetch\":{\"label\":\"Web Fetch\","
+  "\"promoted_path\":[\"url\"],\"transform\":\"url\","
+  "\"response_item\":true}}";
 
 static int harness_expect_contains(const char *text, const char *needle)
 {
@@ -396,7 +401,9 @@ static int harness_check_page_scripts(void)
        harness_expect_not_contains(page_html, "setNodeText(n,'#'+id)") &&
        harness_expect_contains(page_html, ".api-exchange-section-label{") &&
        harness_expect_contains(page_html,
-                               "renderAPIToolRows();moveToolRows(root)") &&
+                               "renderAPIToolRows();"
+                               "renderAPIServerToolRows();"
+                               "moveToolRows(root)") &&
        harness_expect_contains(page_html,
                                "decorateAPIExchanges(root);"
                                "decorateAPIToolGroups(root);"
@@ -408,6 +415,7 @@ static int harness_check_page_scripts(void)
          page_html,
          "var strappyToolDisplayRegistry={\"database_query\":") &&
        harness_expect_contains(page_html, "function toolDisplaySpec") &&
+       harness_expect_contains(page_html, "function toolPathValue") &&
        harness_expect_contains(page_html, "function toolPromotedValue") &&
        harness_expect_contains(page_html, "function toolDisplayTitle") &&
        harness_expect_contains(page_html, "transform=='comma_separated'") &&
@@ -415,6 +423,14 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "transform=='database_filename'") &&
        harness_expect_contains(page_html,
                                "transform=='database_hint_filename'") &&
+       harness_expect_contains(page_html, "function responseItemObject") &&
+       harness_expect_contains(page_html,
+                               "function renderAPIServerToolRows") &&
+       harness_expect_contains(page_html,
+                               "renderAPIToolRows();"
+                               "renderAPIServerToolRows()") &&
+       harness_expect_contains(page_html, ".api_server_tool .bubble{") &&
+       harness_expect_not_contains(page_html, "response-item-content") &&
        harness_expect_contains(page_html, "calls[id].args") &&
        harness_expect_contains(page_html,
                                "white-space:nowrap;overflow:hidden;"
@@ -1278,6 +1294,8 @@ static int harness_check_responses_items(void)
   char *reasoning_html;
   char *function_html;
   char *output_html;
+  char *search_html;
+  char *fetch_html;
   char *developer_html;
   int ok;
 
@@ -1336,6 +1354,33 @@ static int harness_check_responses_items(void)
   output_html = strappy_webview_message_html(&message, &labels, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
+  message.element_id = "response-web-search-1";
+  message.api_call_id = 2LL;
+  message.direction = "response";
+  message.role = "api_item";
+  message.kind = "openrouter:web_search";
+  message.response_item_action_json =
+    "{\"type\":\"search\",\"query\":\"Strappy Cocoa\","
+    "\"sources\":[{\"type\":\"url\","
+    "\"url\":\"https://example.com/search\"}]}";
+  message.response_item_status = "completed";
+  message.text = "openrouter:web_search";
+  search_html = strappy_webview_message_html(&message, &labels, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "response-web-fetch-1";
+  message.api_call_id = 2LL;
+  message.direction = "response";
+  message.role = "api_item";
+  message.kind = "openrouter:web_fetch";
+  message.response_item_url = "https://example.com/article";
+  message.response_item_title = "Example Article";
+  message.response_item_status = "completed";
+  message.response_item_http_status = "200";
+  message.text = "Example Article";
+  fetch_html = strappy_webview_message_html(&message, &labels, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
   message.element_id = "response-developer-1";
   message.api_call_id = 2LL;
   message.direction = "request";
@@ -1346,6 +1391,7 @@ static int harness_check_responses_items(void)
 
   ok = (call_html != NULL) && (reasoning_html != NULL) &&
        (function_html != NULL) && (output_html != NULL) &&
+       (search_html != NULL) && (fetch_html != NULL) &&
        (developer_html != NULL) &&
        harness_expect_contains(call_html, "class=\"row api_call\"") &&
        harness_expect_contains(call_html, "data-api-call-id=\"1\"") &&
@@ -1440,12 +1486,38 @@ static int harness_check_responses_items(void)
                                "class=\"tool-card-body\"") &&
        harness_expect_not_contains(output_html,
                                    "tool-card-open") &&
+       harness_expect_contains(search_html,
+                               "class=\"row api_item\"") &&
+       harness_expect_contains(search_html,
+                               "data-kind=\"openrouter:web_search\"") &&
+       harness_expect_contains(search_html,
+                               "data-tool-label=\"Localized Tool\"") &&
+       harness_expect_contains(
+         search_html,
+         "data-response-item-action-json=\"{&quot;type&quot;:"
+         "&quot;search&quot;,&quot;query&quot;:&quot;Strappy Cocoa&quot;") &&
+       harness_expect_contains(search_html,
+                               "data-response-item-status=\"completed\"") &&
+       harness_expect_contains(fetch_html,
+                               "class=\"row api_item\"") &&
+       harness_expect_contains(fetch_html,
+                               "data-kind=\"openrouter:web_fetch\"") &&
+       harness_expect_contains(
+         fetch_html,
+         "data-response-item-url=\"https://example.com/article\"") &&
+       harness_expect_contains(fetch_html,
+                               "data-response-item-title=\"Example Article\"") &&
+       harness_expect_contains(fetch_html,
+                               "data-response-item-http-status=\"200\"") &&
+       harness_expect_not_contains(fetch_html, "Fetched page body") &&
        harness_expect_contains(developer_html,
                                "class=\"row developer\"") &&
        harness_expect_contains(developer_html,
                                "<div class=\"role\">Developer</div>");
 
   strappy_webview_free(developer_html);
+  strappy_webview_free(fetch_html);
+  strappy_webview_free(search_html);
   strappy_webview_free(output_html);
   strappy_webview_free(function_html);
   strappy_webview_free(reasoning_html);
