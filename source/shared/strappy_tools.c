@@ -40,12 +40,10 @@
 #define STRAPPY_HELPER_INFO_MAX_QUERY_BYTES 512U
 #define STRAPPY_HELPER_INFO_MAX_VALUE_BYTES 2048U
 #define STRAPPY_HELPER_INFO_MAX_CONTENT_BYTES 4096U
-#define STRAPPY_HELPER_INFO_DEFAULT_CONFIDENCE 0.75
 #define STRAPPY_HELPER_INFO_DEFAULT_LIMIT 20
 #define STRAPPY_HELPER_INFO_MAX_LIMIT 50
 #define STRAPPY_HELPER_SESSION_NAME_MAX_BYTES 96U
 #define STRAPPY_HELPER_FONTAWESOME_MAX_QUERY_BYTES 128U
-#define STRAPPY_HELPER_FONTAWESOME_MAX_STYLE_BYTES 16U
 #define STRAPPY_HELPER_FONTAWESOME_MAX_SHORTCODE_BYTES 96U
 #define STRAPPY_HELPER_FONTAWESOME_MAX_SHORTCODES 32U
 
@@ -78,12 +76,7 @@ typedef struct strappy_helper_datetime_arguments {
 } strappy_helper_datetime_arguments;
 
 typedef struct strappy_memory_user_fact_remember_arguments {
-  char *kind;
-  char *subject;
-  char *predicate;
-  char *value;
-  char *source;
-  double confidence;
+  char *fact;
 } strappy_memory_user_fact_remember_arguments;
 
 typedef struct strappy_memory_user_fact_read_arguments {
@@ -102,11 +95,7 @@ typedef struct strappy_helper_info_forget_arguments {
 
 typedef struct strappy_memory_database_hint_remember_arguments {
   char *database_id;
-  char *kind;
-  char *title;
-  char *content;
-  char *evidence;
-  double confidence;
+  char *hint;
 } strappy_memory_database_hint_remember_arguments;
 
 typedef struct strappy_database_context_read_arguments {
@@ -118,7 +107,6 @@ typedef struct strappy_database_context_read_arguments {
 
 typedef struct strappy_helper_fontawesome_shortcode_search_arguments {
   char *query;
-  char *style;
   int limit;
 } strappy_helper_fontawesome_shortcode_search_arguments;
 
@@ -253,12 +241,7 @@ static void strappy_memory_user_fact_remember_arguments_init(
     return;
   }
 
-  arguments->kind = NULL;
-  arguments->subject = NULL;
-  arguments->predicate = NULL;
-  arguments->value = NULL;
-  arguments->source = NULL;
-  arguments->confidence = STRAPPY_HELPER_INFO_DEFAULT_CONFIDENCE;
+  arguments->fact = NULL;
 }
 
 static void strappy_memory_user_fact_remember_arguments_destroy(
@@ -268,11 +251,7 @@ static void strappy_memory_user_fact_remember_arguments_destroy(
     return;
   }
 
-  free(arguments->kind);
-  free(arguments->subject);
-  free(arguments->predicate);
-  free(arguments->value);
-  free(arguments->source);
+  free(arguments->fact);
   strappy_memory_user_fact_remember_arguments_init(arguments);
 }
 
@@ -339,11 +318,7 @@ static void strappy_memory_database_hint_remember_arguments_init(
   }
 
   arguments->database_id = NULL;
-  arguments->kind = NULL;
-  arguments->title = NULL;
-  arguments->content = NULL;
-  arguments->evidence = NULL;
-  arguments->confidence = STRAPPY_HELPER_INFO_DEFAULT_CONFIDENCE;
+  arguments->hint = NULL;
 }
 
 static void strappy_memory_database_hint_remember_arguments_destroy(
@@ -354,10 +329,7 @@ static void strappy_memory_database_hint_remember_arguments_destroy(
   }
 
   free(arguments->database_id);
-  free(arguments->kind);
-  free(arguments->title);
-  free(arguments->content);
-  free(arguments->evidence);
+  free(arguments->hint);
   strappy_memory_database_hint_remember_arguments_init(arguments);
 }
 
@@ -395,7 +367,6 @@ static void strappy_helper_fontawesome_shortcode_search_arguments_init(
   }
 
   arguments->query = NULL;
-  arguments->style = NULL;
   arguments->limit = STRAPPY_HELPER_INFO_DEFAULT_LIMIT;
 }
 
@@ -407,7 +378,6 @@ static void strappy_helper_fontawesome_shortcode_search_arguments_destroy(
   }
 
   free(arguments->query);
-  free(arguments->style);
   strappy_helper_fontawesome_shortcode_search_arguments_init(arguments);
 }
 
@@ -2310,36 +2280,6 @@ static int strappy_tools_parse_limit_argument(const char *tool_name,
   return 1;
 }
 
-static int strappy_tools_parse_confidence_argument(const char *tool_name,
-                                                   cJSON *root,
-                                                   double *confidence_out,
-                                                   char **error_out)
-{
-  cJSON *item;
-
-  if (confidence_out == NULL) {
-    strappy_set_error(error_out, "Tool confidence argument output is missing.");
-    return 0;
-  }
-
-  item = cJSON_GetObjectItemCaseSensitive(root, "confidence");
-  if (item == NULL) {
-    *confidence_out = STRAPPY_HELPER_INFO_DEFAULT_CONFIDENCE;
-    return 1;
-  }
-
-  if (!cJSON_IsNumber(item) || (item->valuedouble < 0.0) ||
-      (item->valuedouble > 1.0)) {
-    strappy_set_formatted_error(error_out,
-                                "%s confidence must be a number from 0.0 to 1.0.",
-                                tool_name);
-    return 0;
-  }
-
-  *confidence_out = item->valuedouble;
-  return 1;
-}
-
 static int strappy_tools_parse_id_argument(const char *tool_name,
                                            const char *arguments_json,
                                            strappy_helper_info_forget_arguments *arguments,
@@ -2600,9 +2540,7 @@ static int strappy_tools_parse_memory_user_fact_remember_arguments(
   strappy_memory_user_fact_remember_arguments *arguments,
   char **error_out)
 {
-  static const char *const allowed_names[] = {
-    "kind", "subject", "predicate", "value", "confidence", "source"
-  };
+  static const char *const allowed_names[] = { "fact" };
   cJSON *root;
   int ok;
 
@@ -2630,47 +2568,10 @@ static int strappy_tools_parse_memory_user_fact_remember_arguments(
        strappy_tools_copy_string_argument(
          STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
          root,
-         "kind",
-         1,
-         STRAPPY_HELPER_INFO_MAX_SHORT_BYTES,
-         &arguments->kind,
-         error_out) &&
-       strappy_tools_copy_string_argument(
-         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
-         root,
-         "subject",
-         1,
-         STRAPPY_HELPER_INFO_MAX_SHORT_BYTES,
-         &arguments->subject,
-         error_out) &&
-       strappy_tools_copy_string_argument(
-         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
-         root,
-         "predicate",
-         1,
-         STRAPPY_HELPER_INFO_MAX_SHORT_BYTES,
-         &arguments->predicate,
-         error_out) &&
-       strappy_tools_copy_string_argument(
-         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
-         root,
-         "value",
+         "fact",
          1,
          STRAPPY_HELPER_INFO_MAX_VALUE_BYTES,
-         &arguments->value,
-         error_out) &&
-       strappy_tools_copy_string_argument(
-         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
-         root,
-         "source",
-         0,
-         STRAPPY_HELPER_INFO_MAX_SHORT_BYTES,
-         &arguments->source,
-         error_out) &&
-       strappy_tools_parse_confidence_argument(
-         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
-         root,
-         &arguments->confidence,
+         &arguments->fact,
          error_out);
   cJSON_Delete(root);
   if (!ok) {
@@ -2801,25 +2702,12 @@ static int strappy_tools_parse_database_context_read_arguments(
   return ok;
 }
 
-static int strappy_tools_fontawesome_style_is_valid(const char *style)
-{
-  if (!strappy_tools_string_has_value(style)) {
-    return 1;
-  }
-
-  return ((strcmp(style, "solid") == 0) ||
-          (strcmp(style, "regular") == 0) ||
-          (strcmp(style, "brands") == 0)) ? 1 : 0;
-}
-
 static int strappy_tools_parse_helper_fontawesome_shortcode_search_arguments(
   const char *arguments_json,
   strappy_helper_fontawesome_shortcode_search_arguments *arguments,
   char **error_out)
 {
-  static const char *const allowed_names[] = {
-    "query", "style", "limit"
-  };
+  static const char *const allowed_names[] = { "query" };
   cJSON *root;
   int ok;
 
@@ -2849,38 +2737,15 @@ static int strappy_tools_parse_helper_fontawesome_shortcode_search_arguments(
          STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
          root,
          "query",
-         0,
+         1,
          STRAPPY_HELPER_FONTAWESOME_MAX_QUERY_BYTES,
          &arguments->query,
-         error_out) &&
-       strappy_tools_copy_string_argument(
-         STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
-         root,
-         "style",
-         0,
-         STRAPPY_HELPER_FONTAWESOME_MAX_STYLE_BYTES,
-         &arguments->style,
-         error_out) &&
-       strappy_tools_parse_limit_argument(
-         STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
-         root,
-         &arguments->limit,
          error_out);
   cJSON_Delete(root);
   if (!ok) {
     strappy_helper_fontawesome_shortcode_search_arguments_destroy(arguments);
-    return 0;
   }
-
-  if (!strappy_tools_fontawesome_style_is_valid(arguments->style)) {
-    strappy_helper_fontawesome_shortcode_search_arguments_destroy(arguments);
-    strappy_set_error(
-      error_out,
-      "helper_fontawesome_shortcode_search style must be solid, regular, or brands.");
-    return 0;
-  }
-
-  return 1;
+  return ok;
 }
 
 static int strappy_tools_parse_helper_fontawesome_shortcode_confirm_arguments(
@@ -2996,9 +2861,7 @@ static int strappy_tools_parse_memory_database_hint_remember_arguments(
   strappy_memory_database_hint_remember_arguments *arguments,
   char **error_out)
 {
-  static const char *const allowed_names[] = {
-    "database_id", "kind", "title", "content", "evidence", "confidence"
-  };
+  static const char *const allowed_names[] = { "database_id", "hint" };
   cJSON *root;
   int ok;
 
@@ -3035,39 +2898,10 @@ static int strappy_tools_parse_memory_database_hint_remember_arguments(
        strappy_tools_copy_string_argument(
          STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
          root,
-         "kind",
-         1,
-         STRAPPY_HELPER_INFO_MAX_SHORT_BYTES,
-         &arguments->kind,
-         error_out) &&
-       strappy_tools_copy_string_argument(
-         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
-         root,
-         "title",
-         1,
-         STRAPPY_HELPER_INFO_MAX_SHORT_BYTES,
-         &arguments->title,
-         error_out) &&
-       strappy_tools_copy_string_argument(
-         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
-         root,
-         "content",
+         "hint",
          1,
          STRAPPY_HELPER_INFO_MAX_CONTENT_BYTES,
-         &arguments->content,
-         error_out) &&
-       strappy_tools_copy_string_argument(
-         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
-         root,
-         "evidence",
-         0,
-         STRAPPY_HELPER_INFO_MAX_CONTENT_BYTES,
-         &arguments->evidence,
-         error_out) &&
-       strappy_tools_parse_confidence_argument(
-         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
-         root,
-         &arguments->confidence,
+         &arguments->hint,
          error_out);
   cJSON_Delete(root);
   if (!ok) {
@@ -3889,8 +3723,8 @@ static char *strappy_tools_remember_user_info(
 {
   static const char *sql =
     "INSERT INTO helper_user_info "
-    "(kind, subject, predicate, value, confidence, source, status) "
-    "VALUES (?, ?, ?, ?, ?, COALESCE(?, 'model_observed'), 'active');";
+    "(kind, subject, predicate, value, status) "
+    "VALUES ('fact', 'user', 'fact', ?, 'active');";
   sqlite3_stmt *stmt;
   cJSON *root;
   char *json;
@@ -3912,21 +3746,11 @@ static char *strappy_tools_remember_user_info(
     return NULL;
   }
 
-  if ((sqlite3_bind_text(stmt, 1, arguments->kind, -1, SQLITE_TRANSIENT) !=
-       SQLITE_OK) ||
-      (sqlite3_bind_text(stmt, 2, arguments->subject, -1, SQLITE_TRANSIENT) !=
-       SQLITE_OK) ||
-      (sqlite3_bind_text(stmt, 3, arguments->predicate, -1, SQLITE_TRANSIENT) !=
-       SQLITE_OK) ||
-      (sqlite3_bind_text(stmt, 4, arguments->value, -1, SQLITE_TRANSIENT) !=
-       SQLITE_OK) ||
-      (sqlite3_bind_double(stmt, 5, arguments->confidence) != SQLITE_OK) ||
-      !strappy_tools_bind_optional_text(db,
-                                        stmt,
-                                        6,
-                                        arguments->source,
-                                        "Could not bind memory_user_fact_remember",
-                                        error_out)) {
+  if (sqlite3_bind_text(stmt,
+                        1,
+                        arguments->fact,
+                        -1,
+                        SQLITE_TRANSIENT) != SQLITE_OK) {
     sqlite3_finalize(stmt);
     if ((error_out != NULL) && (*error_out == NULL)) {
       strappy_set_formatted_error(error_out,
@@ -4308,8 +4132,8 @@ static char *strappy_tools_remember_database_info(
   static const char *sql =
     "INSERT INTO helper_database_info "
     "(database_catalog_id, database_assistant_id, database_size, "
-    "database_modified_at, kind, title, content, evidence, confidence, status) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active');";
+    "database_modified_at, kind, title, content, status) "
+    "VALUES (?, ?, ?, ?, 'hint', 'Database hint', ?, 'active');";
   sqlite3_stmt *stmt;
   cJSON *root;
   char *json;
@@ -4342,20 +4166,11 @@ static char *strappy_tools_remember_database_info(
       (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)record->size) != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)record->modified_at) !=
        SQLITE_OK) ||
-      (sqlite3_bind_text(stmt, 5, arguments->kind, -1, SQLITE_TRANSIENT) !=
-       SQLITE_OK) ||
-      (sqlite3_bind_text(stmt, 6, arguments->title, -1, SQLITE_TRANSIENT) !=
-       SQLITE_OK) ||
-      (sqlite3_bind_text(stmt, 7, arguments->content, -1, SQLITE_TRANSIENT) !=
-       SQLITE_OK) ||
-      !strappy_tools_bind_optional_text(
-        db,
-        stmt,
-        8,
-        arguments->evidence,
-        "Could not bind memory_database_hint_remember",
-        error_out) ||
-      (sqlite3_bind_double(stmt, 9, arguments->confidence) != SQLITE_OK)) {
+      (sqlite3_bind_text(stmt,
+                         5,
+                         arguments->hint,
+                         -1,
+                         SQLITE_TRANSIENT) != SQLITE_OK)) {
     sqlite3_finalize(stmt);
     if ((error_out != NULL) && (*error_out == NULL)) {
       strappy_set_formatted_error(
@@ -6308,11 +6123,6 @@ static int strappy_tools_fontawesome_icon_score(
     return -1;
   }
 
-  if (strappy_tools_string_has_value(arguments->style) &&
-      (strcmp(arguments->style, style->valuestring) != 0)) {
-    return 0;
-  }
-
   if (!strappy_tools_string_has_value(arguments->query)) {
     return 1;
   }
@@ -6662,9 +6472,6 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_search(
       !strappy_tools_add_optional_string_to_object(root,
                                                    "query",
                                                    arguments.query) ||
-      !strappy_tools_add_optional_string_to_object(root,
-                                                   "style",
-                                                   arguments.style) ||
       (cJSON_AddNumberToObject(root,
                                "count",
                                (double)candidate_count) == NULL) ||

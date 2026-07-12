@@ -61,9 +61,7 @@ static const char *HILL_MODELS_JSON =
   "]}";
 
 static const char *HILL_USER_FACT_JSON =
-  "{\"kind\":\"identity\",\"subject\":\"user\","
-  "\"predicate\":\"first_name\",\"value\":\"Jeff\","
-  "\"confidence\":1.0,\"source\":\"user_explicit\"}";
+  "{\"fact\":\"The user's name is Jeff.\"}";
 
 static void hill_usage(const char *program)
 {

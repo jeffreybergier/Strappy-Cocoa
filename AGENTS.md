@@ -112,8 +112,10 @@ House style for Strappy source:
     output rather than a missing-tool rule; the database audit checks
     `database_query`. User-fact and database-hint memory checks are last;
     database-hint memory applies only after `database_query`, and neither
-    reminder may encourage storing inferred preferences, sensitive/private row
-    values, or one-off query results. Append each rule's `developer` reminder
+    reminder may encourage storing secrets or sensitive information. User-fact
+    memory may include useful durable facts learned from approved databases;
+    database-hint memory must not store private row values or one-off query
+    results. Append each rule's `developer` reminder
     at most once in the same Responses history. Individual reminders contain
     only their audit action, not final-answer instructions. If any reminder is
     appended, finish the ordered audit and then append the single

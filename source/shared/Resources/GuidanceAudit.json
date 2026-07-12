@@ -18,7 +18,7 @@
     },
     {
       "tool_name": "memory_user_fact_remember",
-      "if_not_called": "You did not call memory_user_fact_remember. If the user explicitly provided a new stable, non-sensitive fact that would be useful in future sessions, remember it now. Do not infer preferences from behavior or database contents, and do not remember sensitive information or private row values."
+      "if_not_called": "You did not call memory_user_fact_remember. If you learned a useful durable fact, call it now."
     },
     {
       "tool_name": "memory_database_hint_remember",

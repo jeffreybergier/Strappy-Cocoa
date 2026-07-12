@@ -7,7 +7,7 @@
       "type": "function",
       "function": {
         "name": "database_list_info",
-        "description": "Return the current approved-database inventory. The application seeds this result as a typed preflight function call/output pair for each user request; call this tool only to refresh the inventory later in the same request.",
+        "description": "Call this tool to view available databases",
         "parameters": {
           "type": "object",
           "properties": {},
@@ -37,6 +37,10 @@
           ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "database_id",
+        "transform": "database_filename"
       }
     },
     {
@@ -75,6 +79,7 @@
       "type": "function",
       "function": {
         "name": "helper_datetime_from_iso8601",
+        "description": "ALWAYS call this tool when converting ISO 8601 datetimes to numeric timestamps.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -112,22 +117,16 @@
           "properties": {
             "query": {
               "type": "string"
-            },
-            "style": {
-              "type": "string",
-              "enum": [
-                "solid",
-                "regular",
-                "brands"
-              ]
-            },
-            "limit": {
-              "type": "integer"
             }
           },
-          "required": [],
+          "required": [
+            "query"
+          ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "query"
       }
     },
     {
@@ -152,12 +151,17 @@
           ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "shortcodes",
+        "transform": "comma_separated"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "memory_user_fact_read",
+        "description": "Call this tool to retrieve durable facts stored about the user.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -174,48 +178,38 @@
           "required": [],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "query"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "memory_user_fact_remember",
+        "description": "ALWAYS call this tool to store durable facts learned from the user or their databases that will be useful to you in the future. NEVER store secrets or sensitive information.",
         "parameters": {
           "type": "object",
           "properties": {
-            "kind": {
-              "type": "string"
-            },
-            "subject": {
-              "type": "string"
-            },
-            "predicate": {
-              "type": "string"
-            },
-            "value": {
-              "type": "string"
-            },
-            "confidence": {
-              "type": "number"
-            },
-            "source": {
+            "fact": {
               "type": "string"
             }
           },
           "required": [
-            "kind",
-            "subject",
-            "predicate",
-            "value"
+            "fact"
           ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "fact"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "memory_user_fact_forget",
+        "description": "Call this tool to forget durable facts that are no longer correct or useful.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -228,13 +222,17 @@
           ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "id",
+        "transform": "identifier"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "helper_session_name_write",
-        "description": "ALWAYS give an untitled session a short, descriptive name before finalizing.",
+        "description": "ALWAYS give the session a short, descriptive name.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -247,12 +245,16 @@
           ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "name"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "database_context_read",
+        "description": "ALWAYS call this tool before calling database_query to avoid making mistakes when reading databases.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -273,48 +275,44 @@
           "minProperties": 1,
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "database_id",
+        "transform": "database_filename"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "memory_database_hint_remember",
+        "description": "ALWAYS call this tool to store durable information that will help you query a database in the future. NEVER store user data with this tool.",
         "parameters": {
           "type": "object",
           "properties": {
             "database_id": {
               "type": "string"
             },
-            "kind": {
+            "hint": {
               "type": "string"
-            },
-            "title": {
-              "type": "string"
-            },
-            "content": {
-              "type": "string"
-            },
-            "evidence": {
-              "type": "string"
-            },
-            "confidence": {
-              "type": "number"
             }
           },
           "required": [
             "database_id",
-            "kind",
-            "title",
-            "content"
+            "hint"
           ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "database_id",
+        "transform": "database_filename"
       }
     },
     {
       "type": "function",
       "function": {
         "name": "memory_database_hint_forget",
+        "description": "Call this tool to forget information about databases that is no longer correct nor helpful.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -327,6 +325,10 @@
           ],
           "additionalProperties": false
         }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "id",
+        "transform": "database_hint_filename"
       }
     }
   ]

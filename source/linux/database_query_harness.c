@@ -685,7 +685,7 @@ static int harness_run_audit_resource_tests(void)
 
   ok = cJSON_IsString(after_audit) &&
     (after_audit->valuestring != NULL) &&
-    (strstr(after_audit->valuestring, "Refinalize") != NULL) &&
+    (strstr(after_audit->valuestring, "complete, standalone answer") != NULL) &&
     (strstr(after_audit->valuestring, "original question") != NULL) &&
     rules_avoid_finalization &&
     cJSON_IsArray(rules) && (cJSON_GetArraySize(rules) == 5) &&
@@ -704,11 +704,9 @@ static int harness_run_audit_resource_tests(void)
     (cJSON_GetObjectItem(user_fact_rule, "when") == NULL) &&
     cJSON_IsString(user_fact_message) &&
     (user_fact_message->valuestring != NULL) &&
-    (strstr(user_fact_message->valuestring,
-            "explicitly provided a new stable, non-sensitive fact") != NULL) &&
-    (strstr(user_fact_message->valuestring,
-            "Do not infer preferences from behavior or database contents") !=
-     NULL) &&
+    (strcmp(user_fact_message->valuestring,
+            "You did not call memory_user_fact_remember. If you learned a "
+            "useful durable fact, call it now.") == 0) &&
     harness_json_string_equals(database_hint_rule,
                                "tool_name",
                                STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
@@ -1359,6 +1357,32 @@ static int harness_tool_schemas_hide_display_metadata(cJSON *tools)
   return 1;
 }
 
+static int harness_tool_display_matches(cJSON *registry,
+                                        const char *tool_name,
+                                        const char *promoted_argument,
+                                        const char *transform)
+{
+  cJSON *display;
+  cJSON *argument;
+  cJSON *actual_transform;
+
+  display = cJSON_GetObjectItem(registry, tool_name);
+  argument = cJSON_IsObject(display) ?
+    cJSON_GetObjectItem(display, "promoted_argument") : NULL;
+  actual_transform = cJSON_IsObject(display) ?
+    cJSON_GetObjectItem(display, "transform") : NULL;
+  if (!cJSON_IsString(argument) || (argument->valuestring == NULL) ||
+      (strcmp(argument->valuestring, promoted_argument) != 0)) {
+    return 0;
+  }
+  if (transform == NULL) {
+    return actual_transform == NULL;
+  }
+  return cJSON_IsString(actual_transform) &&
+    (actual_transform->valuestring != NULL) &&
+    (strcmp(actual_transform->valuestring, transform) == 0);
+}
+
 static int harness_run_tool_registry_tests(void)
 {
   char *error;
@@ -1398,10 +1422,59 @@ static int harness_run_tool_registry_tests(void)
         (cJSON_GetArraySize(filtered) == 1) &&
         harness_tool_schemas_hide_display_metadata(filtered) &&
         (registry_json != NULL) && cJSON_IsObject(registry) &&
-        (registry->child == NULL) &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_DATABASE_QUERY,
+                                     "database_id",
+                                     "database_filename") &&
+        harness_tool_display_matches(
+          registry,
+          STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+          "query",
+          NULL) &&
+        harness_tool_display_matches(
+          registry,
+          STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+          "shortcodes",
+          "comma_separated") &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                     "query",
+                                     NULL) &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+                                     "fact",
+                                     NULL) &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
+                                     "id",
+                                     "identifier") &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+                                     "name",
+                                     NULL) &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                     "database_id",
+                                     "database_filename") &&
+        harness_tool_display_matches(
+          registry,
+          STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+          "database_id",
+          "database_filename") &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET,
+                                     "id",
+                                     "database_hint_filename") &&
+        (cJSON_GetObjectItem(registry,
+                             STRAPPY_TOOL_DATABASE_LIST_INFO) == NULL) &&
+        (cJSON_GetObjectItem(
+           registry,
+           STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) == NULL) &&
+        (cJSON_GetObjectItem(
+           registry,
+           STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) == NULL) &&
         (strstr(tools_json,
-                "The application seeds this result as a typed preflight "
-                "function call/output pair for each user request") != NULL) &&
+                "Call this tool to view available databases") != NULL) &&
         (strstr(tools_json,
                 "ALWAYS query the relevant approved database before "
                 "finalizing when the request depends on personal data.") !=
@@ -1410,14 +1483,25 @@ static int harness_run_tool_registry_tests(void)
                 "ALWAYS call this tool when displaying numeric timestamps.") !=
          NULL) &&
         (strstr(tools_json,
+                "ALWAYS call this tool when converting ISO 8601 datetimes to "
+                "numeric timestamps.") != NULL) &&
+        (strstr(tools_json,
                 "ALWAYS use Font Awesome version 7 Free tools and shortcodes "
                 "for visual expression instead of Unicode emoji.") != NULL) &&
         (strstr(tools_json,
                 "ALWAYS confirm that Font Awesome version 7 Free shortcodes "
                 "exist before using them.") != NULL) &&
         (strstr(tools_json,
-                "ALWAYS give an untitled session a short, descriptive name "
-                "before finalizing.") != NULL) &&
+                "ALWAYS give the session a short, descriptive name.") !=
+        NULL) &&
+        (strstr(tools_json,
+                "ALWAYS call this tool to store durable facts learned from the "
+                "user or their databases that will be useful to you in the "
+                "future. NEVER store secrets or sensitive information.") !=
+         NULL) &&
+        (strstr(tools_json,
+                "Call this tool to forget durable facts that are no longer "
+                "correct or useful.") != NULL) &&
         (strstr(filtered_json,
                 "ALWAYS query the relevant approved database before "
                 "finalizing when the request depends on personal data.") !=
@@ -1460,7 +1544,7 @@ static int harness_run_tool_registry_tests(void)
         (strstr(tools_json, "database_learn") == NULL)) ? 1 : 0;
   if (!ok) {
     fprintf(stderr,
-            "Schema-only tool registry did not match expectations.\n"
+            "Tool schema/display registry did not match expectations.\n"
             "API tools: %s\nDisplay registry: %s\n",
             tools_json,
             (registry_json != NULL) ? registry_json : "(null)");
@@ -1587,7 +1671,7 @@ static int harness_run_helper_fontawesome_tests(void)
   if (!harness_expect_output_contains_without(
         NULL,
         STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
-        "{\"query\":\"warning\",\"limit\":5}",
+        "{\"query\":\"warning\"}",
         "\"shortcode\":\"[fa:triangle-exclamation]\"",
         "\"label\":\"Triangle Exclamation\"",
         "codepoint")) {
@@ -1597,7 +1681,7 @@ static int harness_run_helper_fontawesome_tests(void)
   if (!harness_expect_output_contains(
         NULL,
         STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
-        "{\"query\":\"github\",\"style\":\"brands\",\"limit\":3}",
+        "{\"query\":\"github\"}",
         "\"shortcode\":\"[fa:brands:github]\"",
         "\"style\":\"brands\"")) {
     return 0;
@@ -1606,8 +1690,24 @@ static int harness_run_helper_fontawesome_tests(void)
   if (!harness_expect_error_contains(
         NULL,
         STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
-        "{\"style\":\"duotone\"}",
-        "style must be solid, regular, or brands")) {
+        "{\"query\":\"github\",\"style\":\"brands\"}",
+        "does not accept argument 'style'")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+        "{\"query\":\"warning\",\"limit\":5}",
+        "does not accept argument 'limit'")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+        "{}",
+        "requires a non-empty query string")) {
     return 0;
   }
 
@@ -3280,9 +3380,7 @@ static int harness_run_helper_info_tests(const harness_context *context)
   if (!harness_expect_output_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
-        "{\"kind\":\"identity\",\"subject\":\"user\","
-        "\"predicate\":\"first_name\",\"value\":\"Jeff\","
-        "\"confidence\":0.95,\"source\":\"user_explicit\"}",
+        "{\"fact\":\"The user's name is Jeff.\"}",
         "\"ok\":true",
         "\"id\":1")) {
     return 0;
@@ -3291,8 +3389,16 @@ static int harness_run_helper_info_tests(const harness_context *context)
   if (!harness_expect_output_contains(context->catalog_path,
                                       STRAPPY_TOOL_MEMORY_USER_FACT_READ,
                                       "{\"query\":\"Jeff\"}",
-                                      "\"first_name\"",
-                                      "\"Jeff\"")) {
+                                      "\"kind\":\"fact\"",
+                                      "The user's name is Jeff.")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        "{\"kind\":\"identity\",\"fact\":\"Jeff\"}",
+        "does not accept argument 'kind'")) {
     return 0;
   }
 
@@ -3315,12 +3421,9 @@ static int harness_run_helper_info_tests(const harness_context *context)
   written = snprintf(
     arguments,
     sizeof(arguments),
-    "{\"database_id\":\"%s\",\"kind\":\"join_hint\","
-    "\"title\":\"messages identifiers join\","
-    "\"content\":\"The messages table can be checked against identifiers "
-    "when validating exact integer serialization.\","
-    "\"evidence\":\"harness fixture query\","
-    "\"confidence\":0.9}",
+    "{\"database_id\":\"%s\","
+    "\"hint\":\"The messages table can be checked against identifiers "
+    "when validating exact integer serialization.\"}",
     context->database_id);
   if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
     fprintf(stderr, "Could not build database hint remember arguments.\n");
@@ -3356,8 +3459,26 @@ static int harness_run_helper_info_tests(const harness_context *context)
   if (!harness_expect_output_contains(context->catalog_path,
                                       STRAPPY_TOOL_DATABASE_CONTEXT_READ,
                                       arguments,
-                                      "\"join_hint\"",
-                                      "\"messages identifiers join\"")) {
+                                      "\"kind\":\"hint\"",
+                                      "\"title\":\"Database hint\"")) {
+    return 0;
+  }
+
+  written = snprintf(arguments,
+                     sizeof(arguments),
+                     "{\"database_id\":\"%s\",\"hint\":\"Useful\","
+                     "\"title\":\"Old title\"}",
+                     context->database_id);
+  if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
+    fprintf(stderr, "Could not build legacy database hint arguments.\n");
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        arguments,
+        "does not accept argument 'title'")) {
     return 0;
   }
 

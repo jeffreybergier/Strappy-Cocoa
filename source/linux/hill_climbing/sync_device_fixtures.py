@@ -260,7 +260,14 @@ def verify_registration(
                 f"expected {len(expected)}, found {len(registered)}"
             )
         expected_user_fact = [
-            ("identity", "user", "first_name", "Jeff", 1.0, "user_explicit")
+            (
+                "fact",
+                "user",
+                "fact",
+                "The user's name is Jeff.",
+                0.75,
+                "model_observed",
+            )
         ]
         if user_facts != expected_user_fact:
             raise RuntimeError(

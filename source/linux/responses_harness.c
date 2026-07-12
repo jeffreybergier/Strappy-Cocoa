@@ -29,10 +29,21 @@
   "not call it. Do not guess the user's data."
 
 #define HARNESS_AFTER_AUDIT_MESSAGE \
-  "The response was audited. Refinalize it now: provide one complete, " \
-  "standalone answer to the user's original question using any relevant " \
-  "information gathered during the audit. Answer the user directly, and do " \
-  "not merely acknowledge the audit or tool activity."
+  "The tool usage audit is not complete. Please provide one complete, " \
+  "standalone answer to the user's original question. Answer the user " \
+  "directly, and do not mention the audit or tool activity."
+
+#define HARNESS_MEMORY_USER_FACT_REMEMBER_DESCRIPTION \
+  "ALWAYS call this tool to store durable facts learned from the user or " \
+  "their databases that will be useful to you in the future. NEVER store " \
+  "secrets or sensitive information."
+
+#define HARNESS_DATETIME_FROM_ISO8601_DESCRIPTION \
+  "ALWAYS call this tool when converting ISO 8601 datetimes to numeric " \
+  "timestamps."
+
+#define HARNESS_MEMORY_USER_FACT_FORGET_DESCRIPTION \
+  "Call this tool to forget durable facts that are no longer correct or useful."
 
 static int harness_fail(const char *message)
 {
@@ -53,6 +64,33 @@ static int harness_has_tool_type(cJSON *tools, const char *expected)
     type = cJSON_GetObjectItem(tool, "type");
     if (cJSON_IsString(type) && (type->valuestring != NULL) &&
         (strcmp(type->valuestring, expected) == 0)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int harness_tool_description_equals(cJSON *tools,
+                                           const char *expected_name,
+                                           const char *expected_description)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools) || (expected_name == NULL) ||
+      (expected_description == NULL)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *name;
+    cJSON *description;
+
+    name = cJSON_GetObjectItem(tool, "name");
+    description = cJSON_GetObjectItem(tool, "description");
+    if (cJSON_IsString(name) && (name->valuestring != NULL) &&
+        (strcmp(name->valuestring, expected_name) == 0) &&
+        cJSON_IsString(description) &&
+        (description->valuestring != NULL) &&
+        (strcmp(description->valuestring, expected_description) == 0)) {
       return 1;
     }
   }
@@ -123,10 +161,19 @@ static int harness_test_request_surfaces(void)
     (strcmp(name->valuestring, "database_list_info") == 0) &&
     cJSON_IsString(description) && (description->valuestring != NULL) &&
     (strcmp(description->valuestring,
-            "Return the current approved-database inventory. The application "
-            "seeds this result as a typed preflight function call/output pair "
-            "for each user request; call this tool only to refresh the "
-            "inventory later in the same request.") == 0) &&
+            "Call this tool to view available databases") == 0) &&
+    harness_tool_description_equals(
+      tools,
+      STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+      HARNESS_DATETIME_FROM_ISO8601_DESCRIPTION) &&
+    harness_tool_description_equals(
+      tools,
+      STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+      HARNESS_MEMORY_USER_FACT_REMEMBER_DESCRIPTION) &&
+    harness_tool_description_equals(
+      tools,
+      STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
+      HARNESS_MEMORY_USER_FACT_FORGET_DESCRIPTION) &&
     harness_tools_hide_local_display_metadata(tools) &&
     harness_has_tool_type(tools, "openrouter:web_search") &&
     harness_has_tool_type(tools, "openrouter:web_fetch");
@@ -891,8 +938,10 @@ static int harness_run_audit_server(int listener_fd)
       "\"availability_state\":\"available\"") &&
     harness_request_preflight_contains(
       root,
-      "\"predicate\":\"favorite_color\"") &&
-    harness_request_preflight_contains(root, "\"value\":\"purple\"") &&
+      "\"predicate\":\"fact\"") &&
+    harness_request_preflight_contains(
+      root,
+      "\"value\":\"The user's favorite color is purple.\"") &&
     harness_send_json_response(client_fd, 200L, first_response);
   cJSON_Delete(root);
   close(client_fd);
@@ -1664,8 +1713,7 @@ static int harness_test_tool_audit_loop(void)
     session_id,
     "../shared/Resources",
     STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
-    "{\"kind\":\"preference\",\"subject\":\"user\","
-    "\"predicate\":\"favorite_color\",\"value\":\"purple\"}",
+    "{\"fact\":\"The user's favorite color is purple.\"}",
     &error);
   if ((seed_output == NULL) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_TOOL_AUDIT,
@@ -1772,7 +1820,7 @@ static int harness_test_tool_audit_loop(void)
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "direction='request' AND is_canonical=1 AND "
                         "type='function_call_output' AND "
-                        "instr(display_text,'favorite_color')>0;",
+                        "instr(display_text,'favorite color is purple')>0;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_calls WHERE "

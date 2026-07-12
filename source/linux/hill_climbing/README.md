@@ -34,8 +34,10 @@ created by the application, and their request-direction ledger rows are not
 counted as model tool calls or response tool executions. The audit file checks
 `database_query`, web search, conditional session naming, optional durable user
 facts, and query-conditioned database hints in array order. Session naming
-applies only when the session began untitled. Memory reminders forbid inferred
-preferences, sensitive or private row values, and one-off query results. If a
+applies only when the session began untitled. The user-fact reminder encourages
+useful durable facts learned from the user or their databases while forbidding
+secrets and sensitive information. Database-hint memory excludes private row
+values and one-off query results. If a
 candidate answer omitted an applicable tool, the runtime sends that rule's
 action-only `if_not_called` message once. After the ordered audit ends, the
 runtime sends the single `after_audit` developer message and makes one
@@ -158,9 +160,9 @@ play counts in the private fixture. It scores whether the runtime and model:
   than ranking groups by one song;
 - covers the dynamically calculated top three in descending order;
 - provides the requested public details with links;
-- avoids persisting inferred favorites as durable facts;
+- stores the dynamically calculated favorite bands as durable user memory;
 - deducts 3 points for every live tool-audit intervention;
-- stays within API-call, web-search, latency, and cost budgets.
+- stays within API-call, web-search, latency, and the $0.01 cost budget.
 
 The remaining positive checks are proportionally normalized to 100 points
 before audit penalties. This keeps the score ceiling stable without assigning

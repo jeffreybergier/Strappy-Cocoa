@@ -18,6 +18,7 @@ from typing import Any
 
 REQUIRED_GROUP_COUNT = 3
 AUDIT_HIT_PENALTY = 3
+COST_BUDGET_USD = 0.01
 
 # This is an alias map, not a checklist. Any of these groups may occupy one of
 # the three database-derived ranking slots, and only those three slots are
@@ -244,7 +245,7 @@ def artist_position(answer_lower: str, artist: str) -> int:
 
 
 def efficiency_points(result: Result, cost: float, wall: float, calls: int, web: int) -> None:
-    result.add("Cost budget", cost <= 0.20, 5, f"${cost:.4f}")
+    result.add("Cost budget", cost <= COST_BUDGET_USD, 5, f"${cost:.4f}")
     result.add("Latency budget", wall <= 360.0, 4, f"{wall:.1f}s")
     if calls <= 8:
         call_points = 3
@@ -300,7 +301,7 @@ def score_session(
         ).fetchone()
         tools = database.execute(
             """
-            SELECT tool_name, arguments_json, status, error_text
+            SELECT tool_name, arguments_json, status, output_json, error_text
             FROM response_tool_executions
             WHERE session_id = ? ORDER BY id
             """,
@@ -358,7 +359,7 @@ def score_session(
             dict(row)
             for row in database.execute(
                 """
-                SELECT kind, subject, predicate, value, confidence, source
+                SELECT id, kind, subject, predicate, value, confidence, source
                 FROM helper_user_info
                 WHERE status = 'active'
                 """
@@ -400,12 +401,20 @@ def score_session(
     sql_queries = [str(args.get("sql", "")).lower() for args in media_queries]
     sql_text = "\n".join(sql_queries)
     tool_errors = [row for row in tools if row["status"] == "error"]
-    favorite_writes = [
-        args
-        for row, args in parsed_tools
-        if row["tool_name"] == "memory_user_fact_remember"
-        and "favorite" in str(args.get("predicate", "")).lower()
-    ]
+    completed_user_fact_write_ids: set[int] = set()
+    for row in tools:
+        if (
+            row["tool_name"] != "memory_user_fact_remember"
+            or row["status"] != "completed"
+        ):
+            continue
+        memory_id = safe_json(row["output_json"]).get("id")
+        if (
+            isinstance(memory_id, int)
+            and not isinstance(memory_id, bool)
+            and memory_id > 0
+        ):
+            completed_user_fact_write_ids.add(memory_id)
 
     calls = int(calls_row["calls"] or 0)
     errors = int(calls_row["errors"] or 0)
@@ -414,6 +423,16 @@ def score_session(
     wall = float(calls_row["wall"] or 0.0)
     artists = expected_artists(ranking_db)
     top_three = artists[:REQUIRED_GROUP_COUNT]
+    favorite_memory_facts = [
+        fact
+        for fact in stored_user_facts
+        if str(fact.get("subject", "")).casefold() == "user"
+        and fact.get("id") in completed_user_fact_write_ids
+        and all(
+            artist_position(str(fact.get("value", "")).lower(), artist) >= 0
+            for artist, _ in top_three
+        )
+    ]
     mentioned_top_three = [
         name
         for name, _ in top_three
@@ -430,7 +449,11 @@ def score_session(
         for output in memory_preflight_outputs
     )
     expected_user_name = (
-        str(expected_user_fact.get("value", ""))
+        str(
+            expected_user_fact.get(
+                "expected_name", expected_user_fact.get("value", "")
+            )
+        )
         if expected_user_fact
         else ""
     )
@@ -466,6 +489,8 @@ def score_session(
         "seeded_user_fact_stored": user_fact_stored,
         "seeded_user_fact_in_preflight": user_fact_preflight,
         "seeded_user_name_mentioned": user_name_mentioned,
+        "completed_user_fact_writes": len(completed_user_fact_write_ids),
+        "favorite_memory_facts": len(favorite_memory_facts),
     }
 
     result.add(
@@ -557,10 +582,13 @@ def score_session(
     )
 
     result.add(
-        "Did not persist inferred favorites as durable memory",
-        not favorite_writes,
+        "Stored favorite bands in durable memory",
+        bool(favorite_memory_facts),
         7,
-        str(len(favorite_writes)),
+        (
+            f"{len(favorite_memory_facts)} matching active fact"
+            f"{'s' if len(favorite_memory_facts) != 1 else ''}"
+        ),
     )
     result.add("No failed API attempts", errors == 0, 3, str(errors))
     efficiency_points(result, cost, wall, calls, web)

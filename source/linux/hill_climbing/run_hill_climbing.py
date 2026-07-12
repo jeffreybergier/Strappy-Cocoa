@@ -26,12 +26,11 @@ MODELS = (
 )
 
 SEEDED_USER_FACT = {
-    "kind": "identity",
+    "kind": "fact",
     "subject": "user",
-    "predicate": "first_name",
-    "value": "Jeff",
-    "confidence": 1.0,
-    "source": "user_explicit",
+    "predicate": "fact",
+    "value": "The user's name is Jeff.",
+    "expected_name": "Jeff",
 }
 
 
