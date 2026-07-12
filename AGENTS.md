@@ -89,6 +89,12 @@ House style for Strappy source:
     descriptions only. `database_context_read` returns selected database
     context, live simplified schema, and remembered database hints.
     `database_query` runs bounded read-only SQL against approved databases.
+    The Responses runtime executes `database_list_info` and
+    `memory_user_fact_read` before round zero of each user request and seeds
+    each result as a typed `function_call` plus matching
+    `function_call_output` input pair. These application-created,
+    request-direction items do not create response tool-execution rows or
+    count as model-generated calls for the tool audit.
     Do not put raw filesystem paths, full schema dumps, or learned hint caches
     into `database_list_info`.
 15. Memory and session-title tools persist durable assistant state.
@@ -102,9 +108,11 @@ House style for Strappy source:
     ordered `response_api_items` row with its exact raw JSON retained. At a
     candidate final answer, apply the ordered missing-tool rules from
     `GuidanceAudit.json` one at a time, honoring each rule's optional `when`
-    conditions. Append each rule's `developer` reminder at most once in the
-    same Responses history; if the model ignores a reminder, accept its next
-    final answer without repeating or advancing the audit.
+    conditions. Database inventory is an application-seeded preflight tool
+    output rather than a missing-tool rule; the database audit checks
+    `database_query`. Append each rule's `developer` reminder at most once in
+    the same Responses history; if the model ignores a reminder, accept its
+    next final answer without repeating or advancing the audit.
 17. OpenRouter model catalog and selection state live in shared SQLite storage.
     `strappy_db` owns `openrouter_models`, `openrouter_model_settings`, the
     default model app setting, and `sessions.model`; `StrappySession` owns the

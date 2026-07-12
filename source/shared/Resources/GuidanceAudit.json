@@ -1,12 +1,8 @@
 {
   "tool_usage_priority": [
     {
-      "tool_name": "database_list_info",
-      "if_not_called": "Before finalizing, call database_list_info to inspect the user's approved databases, then continue the task using its result as needed."
-    },
-    {
       "tool_name": "database_query",
-      "if_not_called": "You listed the approved databases but did not query one. If the request depends on personal data, query the relevant approved database before finalizing. Do not guess the user's data."
+      "if_not_called": "The application already supplied the approved-database inventory, but you did not call database_query. If the request depends on personal data, query the relevant approved database before finalizing. Otherwise, finalize without a database query. Do not guess the user's data."
     },
     {
       "tool_name": "openrouter:web_search",

@@ -1139,6 +1139,44 @@ static char *strappy_responses_message_item_json(const char *role,
   return json;
 }
 
+static char *strappy_responses_function_call_item_json(
+  const char *item_id,
+  const char *call_id,
+  const char *name,
+  const char *arguments,
+  char **error_out)
+{
+  cJSON *item;
+  char *json;
+
+  if ((item_id == NULL) || (call_id == NULL) || (name == NULL) ||
+      (arguments == NULL)) {
+    strappy_set_error(error_out,
+                      "Responses function call item is incomplete.");
+    return NULL;
+  }
+
+  item = cJSON_CreateObject();
+  if ((item == NULL) ||
+      (cJSON_AddStringToObject(item, "type", "function_call") == NULL) ||
+      (cJSON_AddStringToObject(item, "id", item_id) == NULL) ||
+      (cJSON_AddStringToObject(item, "call_id", call_id) == NULL) ||
+      (cJSON_AddStringToObject(item, "name", name) == NULL) ||
+      (cJSON_AddStringToObject(item, "arguments", arguments) == NULL)) {
+    cJSON_Delete(item);
+    strappy_set_error(error_out,
+                      "Could not build Responses function call item.");
+    return NULL;
+  }
+  json = cJSON_PrintUnformatted(item);
+  cJSON_Delete(item);
+  if (json == NULL) {
+    strappy_set_error(error_out,
+                      "Could not serialize Responses function call item.");
+  }
+  return json;
+}
+
 static char *strappy_responses_function_output_item_json(
   const char *call_id,
   const char *output,
@@ -1168,6 +1206,169 @@ static char *strappy_responses_function_output_item_json(
                       "Could not serialize Responses function output item.");
   }
   return json;
+}
+
+static char *strappy_responses_preflight_identifier(
+  const char *prefix,
+  const char *prompt_group_key,
+  char **error_out)
+{
+  strappy_responses_buffer buffer;
+
+  if ((prefix == NULL) || (prompt_group_key == NULL)) {
+    strappy_set_error(error_out,
+                      "Responses preflight identifier is incomplete.");
+    return NULL;
+  }
+  memset(&buffer, 0, sizeof(buffer));
+  if (!strappy_responses_buffer_append_string(&buffer, prefix) ||
+      !strappy_responses_buffer_append_string(&buffer, prompt_group_key)) {
+    strappy_responses_buffer_destroy(&buffer);
+    strappy_set_error(error_out,
+                      "Could not allocate Responses preflight identifier.");
+    return NULL;
+  }
+  return buffer.data;
+}
+
+static int strappy_responses_append_preflight_items(
+  strappy_responses_owned_items *items,
+  const char *session_db_path,
+  long long session_id,
+  const char *resource_dir,
+  const char *prompt_group_key,
+  char **error_out)
+{
+  char *database_call_id;
+  char *database_item_id;
+  char *database_result;
+  char *memory_call_id;
+  char *memory_item_id;
+  char *memory_result;
+  char *item_json;
+  int ok;
+
+  database_call_id = NULL;
+  database_item_id = NULL;
+  database_result = NULL;
+  memory_call_id = NULL;
+  memory_item_id = NULL;
+  memory_result = NULL;
+  ok = 0;
+
+  database_result = strappy_tools_execute(
+    session_db_path,
+    session_id,
+    resource_dir,
+    STRAPPY_TOOL_DATABASE_LIST_INFO,
+    "{}",
+    error_out);
+  if (database_result == NULL) {
+    goto cleanup;
+  }
+  memory_result = strappy_tools_execute(
+    session_db_path,
+    session_id,
+    resource_dir,
+    STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+    "{}",
+    error_out);
+  if (memory_result == NULL) {
+    goto cleanup;
+  }
+
+  database_call_id = strappy_responses_preflight_identifier(
+    "call_pf_db_",
+    prompt_group_key,
+    error_out);
+  database_item_id = strappy_responses_preflight_identifier(
+    "fc_pf_db_",
+    prompt_group_key,
+    error_out);
+  memory_call_id = strappy_responses_preflight_identifier(
+    "call_pf_mem_",
+    prompt_group_key,
+    error_out);
+  memory_item_id = strappy_responses_preflight_identifier(
+    "fc_pf_mem_",
+    prompt_group_key,
+    error_out);
+  if ((database_call_id == NULL) || (database_item_id == NULL) ||
+      (memory_call_id == NULL) || (memory_item_id == NULL)) {
+    goto cleanup;
+  }
+
+  item_json = strappy_responses_function_call_item_json(
+    database_item_id,
+    database_call_id,
+    STRAPPY_TOOL_DATABASE_LIST_INFO,
+    "{}",
+    error_out);
+  if ((item_json == NULL) ||
+      !strappy_responses_owned_items_append(items, item_json, error_out)) {
+    goto cleanup;
+  }
+  item_json = strappy_responses_function_call_item_json(
+    memory_item_id,
+    memory_call_id,
+    STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+    "{}",
+    error_out);
+  if ((item_json == NULL) ||
+      !strappy_responses_owned_items_append(items, item_json, error_out)) {
+    goto cleanup;
+  }
+  item_json = strappy_responses_function_output_item_json(database_call_id,
+                                                           database_result,
+                                                           error_out);
+  if ((item_json == NULL) ||
+      !strappy_responses_owned_items_append(items, item_json, error_out)) {
+    goto cleanup;
+  }
+  item_json = strappy_responses_function_output_item_json(memory_call_id,
+                                                           memory_result,
+                                                           error_out);
+  if ((item_json == NULL) ||
+      !strappy_responses_owned_items_append(items, item_json, error_out)) {
+    goto cleanup;
+  }
+  ok = 1;
+
+cleanup:
+  free(database_call_id);
+  free(database_item_id);
+  free(database_result);
+  free(memory_call_id);
+  free(memory_item_id);
+  free(memory_result);
+  return ok;
+}
+
+static int strappy_responses_append_initial_items(
+  strappy_responses_owned_items *items,
+  const char *prompt,
+  const char *session_db_path,
+  long long session_id,
+  const char *resource_dir,
+  const char *prompt_group_key,
+  char **error_out)
+{
+  char *item_json;
+
+  item_json = strappy_responses_message_item_json("user",
+                                                  prompt,
+                                                  error_out);
+  if ((item_json == NULL) ||
+      !strappy_responses_owned_items_append(items, item_json, error_out)) {
+    return 0;
+  }
+
+  return strappy_responses_append_preflight_items(items,
+                                                   session_db_path,
+                                                   session_id,
+                                                   resource_dir,
+                                                   prompt_group_key,
+                                                   error_out);
 }
 
 static char *strappy_responses_tool_error_output(const char *tool_name,
@@ -2208,9 +2409,13 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   prompt_group_key = strappy_responses_prompt_group_key(session_id);
   last_model = strappy_string_duplicate(runtime.config.api_model);
   if ((prompt_group_key == NULL) || (last_model == NULL) ||
-      !strappy_responses_owned_items_append(
+      !strappy_responses_append_initial_items(
         &new_items,
-        strappy_responses_message_item_json("user", prompt, error_out),
+        prompt,
+        session_db_path,
+        session_id,
+        runtime.config.guidance_resource_dir,
+        prompt_group_key,
         error_out)) {
     free(prompt_group_key);
     free(last_model);

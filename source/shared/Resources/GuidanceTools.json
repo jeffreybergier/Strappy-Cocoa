@@ -7,7 +7,7 @@
       "type": "function",
       "function": {
         "name": "database_list_info",
-        "description": "ALWAYS call this tool to inspect the user's approved databases before finalizing, then continue the task using its result as needed.",
+        "description": "Return the current approved-database inventory. The application seeds this result as a typed preflight function call/output pair for each user request; call this tool only to refresh the inventory later in the same request.",
         "parameters": {
           "type": "object",
           "properties": {},

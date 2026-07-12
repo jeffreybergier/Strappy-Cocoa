@@ -28,15 +28,17 @@ minimum baseline:
 - web search and web fetch remain available as unannotated server tools.
 
 Before round zero, the application supplies fresh `database_list_info` and
-`memory_user_fact_read` results as labeled developer context; these reads are
-not represented as model tool calls. The audit file checks `database_query`,
-web search, and conditional session naming in array order. Session naming
-applies only when the session began untitled. If a candidate final answer
-omitted an applicable tool, the runtime sends that rule's `if_not_called`
-message once. If the model ignores the reminder, the next final answer is
-accepted without repeating it or advancing to a lower-priority rule. The
-remaining generic database labels are structural runtime requirements, not
-task guidance.
+`memory_user_fact_read` results as application-seeded, matched
+`function_call` / `function_call_output` input pairs. Their call IDs are
+created by the application, and their request-direction ledger rows are not
+counted as model tool calls or response tool executions. The audit file checks
+`database_query`, web search, and conditional session naming in array order.
+Session naming applies only when the session began untitled. If a candidate
+final answer omitted an applicable tool, the runtime sends that rule's
+`if_not_called` message once. If the model ignores the reminder, the next final
+answer is accepted without repeating it or advancing to a lower-priority rule.
+The remaining generic database labels are structural runtime requirements,
+not task guidance.
 
 It is intentionally isolated from `source/linux/Makefile`; neither the normal
 `test` target nor a plain invocation of this Makefile performs network calls.
@@ -52,7 +54,10 @@ use compact previews like their collapsed webview sections:
 >>>> Request
 >>>>> User Prompt
 >>>>>> Please list out ...
->>>>> Developer | Application-provided preflight context ...
+>>>>> Tool Call | database_list_info
+>>>>> Tool Call | memory_user_fact_read
+>>>>> Tool Output | {"databases":[...]}
+>>>>> Tool Output | {"facts":[...]}
 >>>> Response | completed | HTTP 200 | 12.7s
 >>>>> Reasoning | 2270 characters
 >>>>> Tool Call | database_query

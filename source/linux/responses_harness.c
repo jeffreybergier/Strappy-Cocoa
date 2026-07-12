@@ -119,9 +119,9 @@ static int harness_test_request_surfaces(void)
     cJSON_IsString(description) && (description->valuestring != NULL) &&
     (strcmp(description->valuestring,
             "Return the current approved-database inventory. The application "
-            "supplies this result as preflight context for each user request; "
-            "call this tool only to refresh the inventory later in the same "
-            "request.") == 0) &&
+            "seeds this result as a typed preflight function call/output pair "
+            "for each user request; call this tool only to refresh the "
+            "inventory later in the same request.") == 0) &&
     harness_tools_hide_local_display_metadata(tools) &&
     harness_has_tool_type(tools, "openrouter:web_search") &&
     harness_has_tool_type(tools, "openrouter:web_fetch");
@@ -527,29 +527,133 @@ static const char *harness_message_text(cJSON *item)
     text->valuestring : NULL;
 }
 
-static int harness_preflight_context_is_valid(cJSON *item)
+static int harness_string_has_prefix_and_suffix(const char *value,
+                                                const char *prefix,
+                                                const char *suffix)
 {
-  const char *text;
+  size_t prefix_length;
 
-  text = harness_message_text(item);
-  return harness_message_role_is(item, "developer") &&
-    (text != NULL) &&
-    (strstr(text, "Application-provided preflight context") != NULL) &&
-    (strstr(text, "not requested by the assistant") != NULL) &&
-    (strstr(text, "database_list_info result:\n{") != NULL) &&
-    (strstr(text, "memory_user_fact_read result:\n{") != NULL);
+  if ((value == NULL) || (prefix == NULL) || (suffix == NULL)) {
+    return 0;
+  }
+  prefix_length = strlen(prefix);
+  return (strncmp(value, prefix, prefix_length) == 0) &&
+    (strcmp(value + prefix_length, suffix) == 0);
+}
+
+static int harness_preflight_call_is_valid(cJSON *item,
+                                           const char *expected_name,
+                                           const char *item_id_prefix,
+                                           const char *call_id_prefix,
+                                           const char *prompt_group)
+{
+  cJSON *type;
+  cJSON *item_id;
+  cJSON *call_id;
+  cJSON *name;
+  cJSON *arguments;
+
+  type = cJSON_GetObjectItem(item, "type");
+  item_id = cJSON_GetObjectItem(item, "id");
+  call_id = cJSON_GetObjectItem(item, "call_id");
+  name = cJSON_GetObjectItem(item, "name");
+  arguments = cJSON_GetObjectItem(item, "arguments");
+  return cJSON_IsObject(item) &&
+    cJSON_IsString(type) && (type->valuestring != NULL) &&
+    (strcmp(type->valuestring, "function_call") == 0) &&
+    cJSON_IsString(item_id) && (item_id->valuestring != NULL) &&
+    harness_string_has_prefix_and_suffix(item_id->valuestring,
+                                         item_id_prefix,
+                                         prompt_group) &&
+    cJSON_IsString(call_id) && (call_id->valuestring != NULL) &&
+    harness_string_has_prefix_and_suffix(call_id->valuestring,
+                                         call_id_prefix,
+                                         prompt_group) &&
+    cJSON_IsString(name) && (name->valuestring != NULL) &&
+    (strcmp(name->valuestring, expected_name) == 0) &&
+    cJSON_IsString(arguments) && (arguments->valuestring != NULL) &&
+    (strcmp(arguments->valuestring, "{}") == 0);
+}
+
+static int harness_preflight_output_matches(cJSON *item, cJSON *call)
+{
+  cJSON *type;
+  cJSON *call_id;
+  cJSON *expected_call_id;
+  cJSON *output;
+  cJSON *result;
+  int ok;
+
+  type = cJSON_GetObjectItem(item, "type");
+  call_id = cJSON_GetObjectItem(item, "call_id");
+  expected_call_id = cJSON_GetObjectItem(call, "call_id");
+  output = cJSON_GetObjectItem(item, "output");
+  ok = cJSON_IsObject(item) &&
+    cJSON_IsString(type) && (type->valuestring != NULL) &&
+    (strcmp(type->valuestring, "function_call_output") == 0) &&
+    cJSON_IsString(call_id) && (call_id->valuestring != NULL) &&
+    cJSON_IsString(expected_call_id) &&
+    (expected_call_id->valuestring != NULL) &&
+    (strcmp(call_id->valuestring, expected_call_id->valuestring) == 0) &&
+    cJSON_IsString(output) && (output->valuestring != NULL) &&
+    (output->valuestring[0] != '\0');
+  if (!ok) {
+    return 0;
+  }
+  result = cJSON_Parse(output->valuestring);
+  ok = cJSON_IsObject(result);
+  cJSON_Delete(result);
+  return ok;
+}
+
+static int harness_preflight_input_is_valid(cJSON *input,
+                                            const char *prompt_group)
+{
+  cJSON *database_call;
+  cJSON *memory_call;
+
+  database_call = cJSON_GetArrayItem(input, 1);
+  memory_call = cJSON_GetArrayItem(input, 2);
+  return harness_preflight_call_is_valid(database_call,
+                                         "database_list_info",
+                                         "fc_pf_db_",
+                                         "call_pf_db_",
+                                         prompt_group) &&
+    harness_preflight_call_is_valid(memory_call,
+                                    "memory_user_fact_read",
+                                    "fc_pf_mem_",
+                                    "call_pf_mem_",
+                                    prompt_group) &&
+    harness_preflight_output_matches(cJSON_GetArrayItem(input, 3),
+                                     database_call) &&
+    harness_preflight_output_matches(cJSON_GetArrayItem(input, 4),
+                                     memory_call);
 }
 
 static int harness_request_preflight_contains(cJSON *root,
                                               const char *expected)
 {
   cJSON *input;
-  const char *text;
+  cJSON *item;
 
   input = cJSON_GetObjectItem(root, "input");
-  text = harness_message_text(cJSON_GetArrayItem(input, 1));
-  return (text != NULL) && (expected != NULL) &&
-    (strstr(text, expected) != NULL);
+  if (!cJSON_IsArray(input) || (expected == NULL)) {
+    return 0;
+  }
+  for (item = input->child; item != NULL; item = item->next) {
+    cJSON *type;
+    cJSON *output;
+
+    type = cJSON_IsObject(item) ? cJSON_GetObjectItem(item, "type") : NULL;
+    output = cJSON_IsObject(item) ? cJSON_GetObjectItem(item, "output") : NULL;
+    if (cJSON_IsString(type) && (type->valuestring != NULL) &&
+        (strcmp(type->valuestring, "function_call_output") == 0) &&
+        cJSON_IsString(output) && (output->valuestring != NULL) &&
+        (strstr(output->valuestring, expected) != NULL)) {
+      return 1;
+    }
+  }
+  return 0;
 }
 
 static int harness_request_base_is_valid(cJSON *root,
@@ -583,9 +687,9 @@ static int harness_request_base_is_valid(cJSON *root,
   if (!cJSON_IsFalse(stream) || !cJSON_IsFalse(store) ||
       !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
       !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
-      !cJSON_IsArray(input) || (input_count != 2) ||
+      !cJSON_IsArray(input) || (input_count != 5) ||
       !harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") ||
-      !harness_preflight_context_is_valid(cJSON_GetArrayItem(input, 1)) ||
+      !harness_preflight_input_is_valid(input, prompt_group->valuestring) ||
       (text == NULL) || (strcmp(text, expected_prompt) != 0) ||
       !cJSON_IsArray(tools) || !cJSON_IsObject(first_tool) ||
       !harness_tools_hide_local_display_metadata(tools) ||
@@ -1480,20 +1584,41 @@ static int harness_test_tool_audit_loop(void)
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "role='developer' AND is_canonical=1 AND "
                         "timeline_visible=1;",
-                        &value) && (value == 2LL) &&
+                        &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "is_canonical=1;",
-                        &value) && (value == 5LL) &&
+                        &value) && (value == 8LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
+                        "direction='request' AND is_canonical=1 AND "
                         "type='function_call_output';",
-                        &value) && (value == 0LL) &&
+                        &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_api_items AS calls "
+                        "JOIN response_api_items AS outputs "
+                        "ON outputs.session_id=calls.session_id AND "
+                        "outputs.call_id=calls.call_id WHERE "
+                        "calls.direction='request' AND "
+                        "calls.is_canonical=1 AND "
+                        "calls.type='function_call' AND "
+                        "calls.name IN ('database_list_info',"
+                        "'memory_user_fact_read') AND "
+                        "outputs.direction='request' AND "
+                        "outputs.is_canonical=1 AND "
+                        "outputs.type='function_call_output';",
+                        &value) && (value == 2LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
-                        "role='developer' AND is_canonical=1 AND "
-                        "instr(display_text,'favorite_color')>0 AND "
+                        "direction='request' AND is_canonical=1 AND "
+                        "type='function_call_output' AND "
                         "instr(display_text,'strappy-preflight-db-')>0;",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_api_items WHERE "
+                        "direction='request' AND is_canonical=1 AND "
+                        "type='function_call_output' AND "
+                        "instr(display_text,'favorite_color')>0;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_calls WHERE "
@@ -1573,7 +1698,7 @@ static int harness_test_unrelated_server_tool_does_not_satisfy_audit(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "role='developer';",
-                        &value) && (value == 3LL);
+                        &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;
@@ -1671,7 +1796,7 @@ static int harness_test_function_tool_continuation(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "role='developer';",
-                        &value) && (value == 4LL);
+                        &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;
@@ -1768,11 +1893,11 @@ static int harness_test_retry_attempt_ledger(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "is_canonical=1;",
-                        &value) && (value == 7LL) &&
+                        &value) && (value == 10LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "direction='request' AND is_canonical=1;",
-                        &value) && (value == 4LL);
+                        &value) && (value == 7LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;

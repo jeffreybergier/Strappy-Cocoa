@@ -260,14 +260,25 @@ def score_session(
                 (session_id,),
             ).fetchone()[0]
         )
-        preflight_contexts = int(
+        preflight_pairs = int(
             database.execute(
                 """
-                SELECT COUNT(*) FROM response_api_items
-                WHERE session_id = ? AND direction = 'request'
-                  AND is_canonical = 1 AND role = 'developer'
-                  AND instr(display_text, 'database_list_info result:') > 0
-                  AND instr(display_text, 'memory_user_fact_read result:') > 0
+                SELECT COUNT(DISTINCT calls.name)
+                FROM response_api_items AS calls
+                WHERE calls.session_id = ?
+                  AND calls.direction = 'request'
+                  AND calls.is_canonical = 1
+                  AND calls.type = 'function_call'
+                  AND calls.name IN ('database_list_info',
+                                     'memory_user_fact_read')
+                  AND EXISTS (
+                    SELECT 1 FROM response_api_items AS outputs
+                    WHERE outputs.session_id = calls.session_id
+                      AND outputs.direction = 'request'
+                      AND outputs.is_canonical = 1
+                      AND outputs.type = 'function_call_output'
+                      AND outputs.call_id = calls.call_id
+                  )
                 """,
                 (session_id,),
             ).fetchone()[0]
@@ -322,7 +333,7 @@ def score_session(
         "local_tools": len(tools),
         "tool_errors": len(tool_errors),
         "web_searches": web,
-        "preflight_contexts": preflight_contexts,
+        "preflight_tool_pairs": preflight_pairs,
         "approved_databases": approved_databases,
         "expected_databases": expected_database_count,
         "cost": cost,
@@ -339,7 +350,7 @@ def score_session(
 
     result.add(
         "Loaded all approved fixtures",
-        preflight_contexts > 0
+        preflight_pairs == 2
         and approved_databases == expected_database_count,
         5,
         f"{approved_databases}/{expected_database_count}",
