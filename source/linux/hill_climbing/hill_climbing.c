@@ -15,14 +15,18 @@
 #include "strappy_db.h"
 #include "strappy_responses.h"
 
+#define HILL_MAX_DATABASES 512U
+
 typedef struct hill_options {
   const char *model;
   const char *session_db;
-  const char *media_db;
+  const char *databases[HILL_MAX_DATABASES];
+  size_t database_count;
   const char *env_file;
   const char *system_prompt;
   const char *answer_file;
   const char *prompt;
+  int prepare_only;
 } hill_options;
 
 typedef struct hill_event_context {
@@ -58,9 +62,9 @@ static const char *HILL_MODELS_JSON =
 static void hill_usage(const char *program)
 {
   fprintf(stderr,
-          "Usage: %s --model ID --session-db PATH --media-db PATH "
+          "Usage: %s --model ID --session-db PATH --database PATH [...] "
           "--env-file PATH --system-prompt PATH --answer-file PATH "
-          "--prompt TEXT\n",
+          "--prompt TEXT [--prepare-only]\n",
           program);
 }
 
@@ -77,6 +81,10 @@ static int hill_parse_options(int argc, char **argv, hill_options *options)
     if ((strcmp(name, "--help") == 0) || (strcmp(name, "-h") == 0)) {
       return -1;
     }
+    if (strcmp(name, "--prepare-only") == 0) {
+      options->prepare_only = 1;
+      continue;
+    }
     if ((index + 1) >= argc) {
       fprintf(stderr, "Missing value for %s.\n", name);
       return 0;
@@ -86,8 +94,14 @@ static int hill_parse_options(int argc, char **argv, hill_options *options)
       options->model = value;
     } else if (strcmp(name, "--session-db") == 0) {
       options->session_db = value;
-    } else if (strcmp(name, "--media-db") == 0) {
-      options->media_db = value;
+    } else if (strcmp(name, "--database") == 0) {
+      if (options->database_count >= HILL_MAX_DATABASES) {
+        fprintf(stderr,
+                "Too many fixture databases; maximum is %u.\n",
+                (unsigned int)HILL_MAX_DATABASES);
+        return 0;
+      }
+      options->databases[options->database_count++] = value;
     } else if (strcmp(name, "--env-file") == 0) {
       options->env_file = value;
     } else if (strcmp(name, "--system-prompt") == 0) {
@@ -102,10 +116,15 @@ static int hill_parse_options(int argc, char **argv, hill_options *options)
     }
   }
 
-  return (options->model != NULL) &&
-    (options->session_db != NULL) &&
-    (options->media_db != NULL) &&
-    (options->env_file != NULL) &&
+  if ((options->model == NULL) ||
+      (options->session_db == NULL) ||
+      (options->database_count == 0U)) {
+    return 0;
+  }
+  if (options->prepare_only) {
+    return 1;
+  }
+  return (options->env_file != NULL) &&
     (options->system_prompt != NULL) &&
     (options->answer_file != NULL) &&
     (options->prompt != NULL);
@@ -620,28 +639,29 @@ static int hill_seed_model(const char *session_db,
   return 1;
 }
 
-static int hill_register_media_database(const char *session_db,
-                                        const char *media_db,
-                                        char **error_out)
+static int hill_register_database(const char *session_db,
+                                  const char *database_path,
+                                  char **error_out)
 {
   strappy_discovered_database_input input;
   strappy_discovered_database_record_list list;
   struct stat info;
   char resolved[PATH_MAX];
+  const char *root_marker;
   size_t index;
   long long catalog_id;
   int found;
   int ok;
 
-  if (realpath(media_db, resolved) == NULL) {
+  if (realpath(database_path, resolved) == NULL) {
     strappy_set_formatted_error(error_out,
-                                "Could not resolve MediaLibrary path: %s",
+                                "Could not resolve fixture database path: %s",
                                 strerror(errno));
     return 0;
   }
   if (stat(resolved, &info) != 0) {
     strappy_set_formatted_error(error_out,
-                                "Could not stat MediaLibrary fixture: %s",
+                                "Could not stat fixture database: %s",
                                 strerror(errno));
     return 0;
   }
@@ -654,12 +674,10 @@ static int hill_register_media_database(const char *session_db,
   input.inode = (unsigned long long)info.st_ino;
   input.is_valid_sqlite = 1;
   input.scan_root = "hill_climbing/private";
-  input.app_group_key = "com.apple.mobileipod";
-  input.app_name = "Music";
-  input.app_bundle_id = "com.apple.mobileipod";
   input.app_source = "hill_climbing private fixture";
   input.origin_kind = "device_fixture";
-  input.location_tail = "Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb";
+  root_marker = strstr(resolved, "/root/");
+  input.location_tail = (root_marker != NULL) ? root_marker + 6 : resolved;
   input.hidden = 0;
 
   if (!strappy_db_save_discovered_databases(session_db,
@@ -686,7 +704,7 @@ static int hill_register_media_database(const char *session_db,
   }
   if (!found) {
     strappy_set_error(error_out,
-                      "MediaLibrary fixture disappeared from the catalog.");
+                      "Fixture database disappeared from the catalog.");
     strappy_discovered_database_record_list_destroy(&list);
     return 0;
   }
@@ -696,6 +714,26 @@ static int hill_register_media_database(const char *session_db,
                                                        error_out);
   strappy_discovered_database_record_list_destroy(&list);
   return ok;
+}
+
+static int hill_register_databases(const char *session_db,
+                                   const hill_options *options,
+                                   char **error_out)
+{
+  size_t index;
+
+  if (options == NULL) {
+    strappy_set_error(error_out, "Fixture database options are missing.");
+    return 0;
+  }
+  for (index = 0U; index < options->database_count; index++) {
+    if (!hill_register_database(session_db,
+                                options->databases[index],
+                                error_out)) {
+      return 0;
+    }
+  }
+  return 1;
 }
 
 int main(int argc, char **argv)
@@ -724,9 +762,7 @@ int main(int argc, char **argv)
                                                   session_id,
                                                   1,
                                                   &error) &&
-    hill_register_media_database(options.session_db,
-                                 options.media_db,
-                                 &error);
+    hill_register_databases(options.session_db, &options, &error);
   if (!ok) {
     fprintf(stderr,
             "Could not prepare hill-climbing run for %s: %s\n",
@@ -734,6 +770,14 @@ int main(int argc, char **argv)
             (error != NULL) ? error : "unknown error");
     strappy_free_string(error);
     return 1;
+  }
+  if (options.prepare_only) {
+    hill_log_line(2U,
+                  "Prepared %lu approved database fixtures for %s",
+                  (unsigned long)options.database_count,
+                  options.model);
+    strappy_free_string(error);
+    return 0;
   }
 
   memset(&events, 0, sizeof(events));

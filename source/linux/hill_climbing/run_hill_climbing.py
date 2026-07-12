@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--runner", required=True, type=Path)
     parser.add_argument("--media-db", required=True, type=Path)
+    parser.add_argument("--database-manifest", required=True, type=Path)
     parser.add_argument("--env-file", required=True, type=Path)
     parser.add_argument("--system-prompt", required=True, type=Path)
     parser.add_argument(
@@ -58,6 +59,36 @@ def unique_run_directory(root: Path) -> Path:
         suffix += 1
     candidate.mkdir(parents=True)
     return candidate
+
+
+def load_database_fixtures(manifest_path: Path) -> list[Path]:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entries = manifest.get("databases")
+    if manifest.get("format_version") != 1 or not isinstance(entries, list):
+        raise RuntimeError(f"Invalid database manifest: {manifest_path}")
+    fixture_root = manifest_path.parent.resolve()
+    databases: list[Path] = []
+    seen: set[Path] = set()
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(
+            entry.get("local_path"), str
+        ):
+            raise RuntimeError(f"Invalid database entry in {manifest_path}")
+        database = (fixture_root / entry["local_path"]).resolve()
+        if fixture_root not in database.parents:
+            raise RuntimeError(f"Database fixture escapes private root: {database}")
+        if database in seen:
+            raise RuntimeError(f"Duplicate database fixture: {database}")
+        if not database.is_file():
+            raise RuntimeError(f"Missing database fixture: {database}")
+        expected_hash = entry.get("sha256")
+        if not isinstance(expected_hash, str) or sha256(database) != expected_hash:
+            raise RuntimeError(f"Database fixture checksum mismatch: {database}")
+        seen.add(database)
+        databases.append(database)
+    if not databases:
+        raise RuntimeError(f"Database manifest is empty: {manifest_path}")
+    return databases
 
 
 def export_output(session_db: Path, output_file: Path) -> None:
@@ -137,15 +168,27 @@ def main() -> int:
     harness_dir = Path(__file__).resolve().parent
     runner = args.runner.resolve()
     media_db = args.media_db.resolve()
+    database_manifest = args.database_manifest.resolve()
     env_file = args.env_file.resolve()
     system_prompt = args.system_prompt.resolve()
 
-    required = (runner, media_db, env_file, system_prompt)
+    required = (runner, media_db, database_manifest, env_file, system_prompt)
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         print("Missing required file(s):", file=sys.stderr)
         for path in missing:
             print(f"  {path}", file=sys.stderr)
+        return 2
+    try:
+        databases = load_database_fixtures(database_manifest)
+    except (json.JSONDecodeError, OSError, RuntimeError) as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    if media_db not in databases:
+        print(
+            f"MediaLibrary fixture is not in {database_manifest}: {media_db}",
+            file=sys.stderr,
+        )
         return 2
 
     selected = [entry for entry in MODELS if args.model in (None, entry[0])]
@@ -161,6 +204,9 @@ def main() -> int:
             if Path(f"{media_db}-wal").is_file()
             else None
         ),
+        "database_manifest": str(database_manifest),
+        "database_manifest_sha256": sha256(database_manifest),
+        "database_count": len(databases),
         "system_prompt": str(system_prompt),
         "system_prompt_sha256": sha256(system_prompt),
         "resource_sha256": {
@@ -194,8 +240,6 @@ def main() -> int:
             model,
             "--session-db",
             str(session_db),
-            "--media-db",
-            str(media_db),
             "--env-file",
             str(env_file),
             "--system-prompt",
@@ -205,6 +249,8 @@ def main() -> int:
             "--prompt",
             args.prompt,
         ]
+        for database in databases:
+            command.extend(["--database", str(database)])
         completed = subprocess.run(command, check=False)
         finished = dt.datetime.now(dt.timezone.utc)
         export_error = None

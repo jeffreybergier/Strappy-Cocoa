@@ -23,16 +23,20 @@ minimum baseline:
 - ordered post-answer tool audits live separately in `GuidanceAudit.json`;
 - database descriptions, matching rules, related-database hints, and recovery
   instructions are removed;
-- the one approved fixture is described only as `Database.`;
+- every database selected in the device's Strappy catalog is approved in each
+  model's isolated run and described only as `Database.`;
 - web search and web fetch remain available as unannotated server tools.
 
-The audit file checks `database_list_info`, `database_query`, web search, and
-conditional session naming in array order. Session naming applies only when the
-session began untitled. If a candidate final answer omitted an applicable tool,
-the runtime sends that rule's `if_not_called` message once. If the model ignores
-the reminder, the next final answer is accepted without repeating it or
-advancing to a lower-priority rule. The remaining generic database labels are
-structural runtime requirements, not task guidance.
+Before round zero, the application supplies fresh `database_list_info` and
+`memory_user_fact_read` results as labeled developer context; these reads are
+not represented as model tool calls. The audit file checks `database_query`,
+web search, and conditional session naming in array order. Session naming
+applies only when the session began untitled. If a candidate final answer
+omitted an applicable tool, the runtime sends that rule's `if_not_called`
+message once. If the model ignores the reminder, the next final answer is
+accepted without repeating it or advancing to a lower-priority rule. The
+remaining generic database labels are structural runtime requirements, not
+task guidance.
 
 It is intentionally isolated from `source/linux/Makefile`; neither the normal
 `test` target nor a plain invocation of this Makefile performs network calls.
@@ -48,23 +52,30 @@ use compact previews like their collapsed webview sections:
 >>>> Request
 >>>>> User Prompt
 >>>>>> Please list out ...
+>>>>> Developer | Application-provided preflight context ...
 >>>> Response | completed | HTTP 200 | 12.7s
 >>>>> Reasoning | 2270 characters
->>>>> Tool Call | database_list_info
+>>>>> Tool Call | database_query
 ```
 
 ## Private inputs and outputs
 
-- `private/` contains the copied `MediaLibrary.sqlitedb` main/WAL/SHM files.
+- `private/gomadango/catalog/strappy.sqlite` is the copied device catalog;
+- `private/gomadango/root/` mirrors every catalog row whose
+  `user_decision` is `allowed`, including available WAL/SHM/journal sidecars;
+- `private/gomadango/databases.json` records the ignored fixture inventory and
+  durable-file checksums used by the runner;
 - `runs/` contains answers, per-model Strappy databases, costs, and reports.
 - `.env` files are ignored. The default live run reads the repository-root
   `.env` through the normal Strappy configuration loader.
 - All of those paths are ignored by this directory's `.gitignore`. Never force
   add them.
 
-The fixture retains its Apple path suffix for stable run metadata. Each model
-gets a new session database, preventing model runs from sharing remembered
-facts or other mutable assistant state.
+The fixtures retain their original Apple path suffixes under the private mirror
+so duplicate filenames do not collide and MediaLibrary remains identifiable to
+the evaluator. Each model gets a new session database populated with all
+manifest entries as approved databases, preventing model runs from sharing
+remembered facts or other mutable assistant state.
 
 ## Commands
 
@@ -74,14 +85,17 @@ Build without contacting OpenRouter:
 make -C source/linux/hill_climbing
 ```
 
-Validate that the private fixture exists, is ignored, and passes SQLite's quick
-check:
+Validate that the private manifest and all copied databases exist, are ignored,
+match their checksums, and pass SQLite's quick check. This also prepares a
+temporary model session and confirms that every manifest entry becomes an
+approved database in its catalog:
 
 ```sh
 make -C source/linux/hill_climbing verify-fixture
 ```
 
-Refresh the complete main/WAL/SHM fixture from `gomadango`:
+Fetch the current Strappy catalog from `gomadango`, then refresh every selected
+database and its available SQLite sidecars:
 
 ```sh
 make -C source/linux/hill_climbing refresh-fixture
@@ -117,9 +131,9 @@ headers.
 ## Scoring and iteration
 
 The evaluator derives the top three K-pop artists dynamically from aggregate
-play counts in the private fixture. It scores whether the model:
+play counts in the private fixture. It scores whether the runtime and model:
 
-- discovers and queries MediaLibrary;
+- preload the approved inventory and query MediaLibrary;
 - filters the ranking to KPOP records and aggregates total play counts rather
   than ranking groups by one song;
 - covers the dynamically calculated top three in descending order;

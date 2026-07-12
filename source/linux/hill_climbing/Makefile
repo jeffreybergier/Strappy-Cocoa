@@ -9,7 +9,11 @@ CJSON_DIR ?= /altivec/libs/core/third_party/cJSON
 SHARED_DIR := ../../shared
 BUILD_DIR := build-linux
 RUNNER := $(BUILD_DIR)/hill_climbing
-MEDIA_DB ?= private/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb
+DEVICE_HOST ?= gomadango
+DEVICE_FIXTURE_DIR ?= private/gomadango
+DATABASE_MANIFEST ?= $(DEVICE_FIXTURE_DIR)/databases.json
+MEDIA_DB ?= $(DEVICE_FIXTURE_DIR)/root/var/mobile/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb
+SYNC_FIXTURES := sync_device_fixtures.py
 ENV_FILE ?= ../../../.env
 SYSTEM_PROMPT ?= $(SHARED_DIR)/Resources/PromptSystem.txt
 
@@ -41,14 +45,24 @@ $(BUILD_DIR):
 $(RUNNER): $(RUNNER_SOURCES) | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(RUNNER_SOURCES) $(SQLITE_LIBS) -lcurl
 
-verify-fixture:
+verify-fixture: build
+	@test -f "$(DATABASE_MANIFEST)" || { \
+		echo "Missing private fixture manifest: $(DATABASE_MANIFEST)" >&2; \
+		echo "Run: make refresh-fixture" >&2; \
+		exit 2; \
+	}
 	@test -f "$(MEDIA_DB)" || { \
 		echo "Missing private fixture: $(MEDIA_DB)" >&2; \
 		echo "Run: make refresh-fixture" >&2; \
 		exit 2; \
 	}
-	@sqlite3 -readonly "$(MEDIA_DB)" "PRAGMA quick_check;" | \
-		grep -qx ok || { echo "MediaLibrary fixture failed quick_check" >&2; exit 2; }
+	@python3 "$(SYNC_FIXTURES)" \
+		--fixture-dir "$(DEVICE_FIXTURE_DIR)" --verify-only \
+		--runner "$(RUNNER)"
+	@git check-ignore -q "$(DATABASE_MANIFEST)" || { \
+		echo "Refusing to use a database manifest that is not ignored by git." >&2; \
+		exit 2; \
+	}
 	@git check-ignore -q "$(MEDIA_DB)" || { \
 		echo "Refusing to use a MediaLibrary fixture that is not ignored by git." >&2; \
 		exit 2; \
@@ -63,18 +77,20 @@ run: build verify-fixture
 	python3 run_hill_climbing.py \
 		--runner "$(RUNNER)" \
 		--media-db "$(MEDIA_DB)" \
+		--database-manifest "$(DATABASE_MANIFEST)" \
 		--env-file "$(ENV_FILE)" \
 		--system-prompt "$(SYSTEM_PROMPT)" \
 		$(if $(MODEL),--model "$(MODEL)",)
 
-# This copies the complete WAL set. It is never a dependency of build or run.
+# This copies every Strappy-approved database and its SQLite sidecars. It is
+# never a dependency of build or run.
 refresh-fixture:
-	mkdir -p "$(dir $(MEDIA_DB))"
-	rm -f "$(MEDIA_DB)" "$(MEDIA_DB)-wal" "$(MEDIA_DB)-shm"
-	scp -T -p -o BatchMode=yes \
-		'gomadango:/private/var/mobile/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb*' \
-		"$(dir $(MEDIA_DB))"
-	$(MAKE) verify-fixture MEDIA_DB="$(MEDIA_DB)"
+	python3 "$(SYNC_FIXTURES)" \
+		--host "$(DEVICE_HOST)" --fixture-dir "$(DEVICE_FIXTURE_DIR)"
+	$(MAKE) verify-fixture \
+		DEVICE_FIXTURE_DIR="$(DEVICE_FIXTURE_DIR)" \
+		DATABASE_MANIFEST="$(DATABASE_MANIFEST)" \
+		MEDIA_DB="$(MEDIA_DB)"
 
 clean:
 	rm -rf "$(BUILD_DIR)" __pycache__

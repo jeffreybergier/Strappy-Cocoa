@@ -110,13 +110,20 @@ def resolve_media_db(metadata: dict[str, Any]) -> Path:
     if recorded.is_file():
         return recorded
 
-    fallback = (
-        Path(__file__).resolve().parent
-        / "private/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb"
-    )
     expected_hash = metadata.get("media_db_sha256")
-    if fallback.is_file() and expected_hash and sha256(fallback) == expected_hash:
-        return fallback
+    harness_dir = Path(__file__).resolve().parent
+    fallbacks = (
+        harness_dir
+        / "private/gomadango/root/var/mobile/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb",
+        harness_dir / "private/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb",
+    )
+    for fallback in fallbacks:
+        if (
+            fallback.is_file()
+            and expected_hash
+            and sha256(fallback) == expected_hash
+        ):
+            return fallback
     raise RuntimeError(
         "The recorded MediaLibrary path is unavailable and the local fixture "
         "does not have the run's SHA-256 hash."
@@ -198,7 +205,12 @@ def efficiency_points(result: Result, cost: float, wall: float, calls: int, web:
     result.add("Web-search budget", web <= 10, 3, str(web))
 
 
-def score_session(session_db: Path, media_db: Path, slug: str) -> Result:
+def score_session(
+    session_db: Path,
+    media_db: Path,
+    slug: str,
+    expected_database_count: int,
+) -> Result:
     with connect_readonly(session_db) as database:
         session = database.execute(
             "SELECT id, model, response FROM sessions ORDER BY id DESC LIMIT 1"
@@ -248,9 +260,30 @@ def score_session(session_db: Path, media_db: Path, slug: str) -> Result:
                 (session_id,),
             ).fetchone()[0]
         )
+        preflight_contexts = int(
+            database.execute(
+                """
+                SELECT COUNT(*) FROM response_api_items
+                WHERE session_id = ? AND direction = 'request'
+                  AND is_canonical = 1 AND role = 'developer'
+                  AND instr(display_text, 'database_list_info result:') > 0
+                  AND instr(display_text, 'memory_user_fact_read result:') > 0
+                """,
+                (session_id,),
+            ).fetchone()[0]
+        )
+        approved_databases = int(
+            database.execute(
+                """
+                SELECT COUNT(*) FROM discovered_databases
+                WHERE user_decision = 'allowed' AND is_valid_sqlite = 1
+                """
+            ).fetchone()[0]
+        )
+        if expected_database_count <= 0:
+            expected_database_count = approved_databases
 
     media_id = str(media_row[0]) if media_row else ""
-    tool_names = [str(row["tool_name"]) for row in tools]
     parsed_tools = [(row, safe_json(row["arguments_json"])) for row in tools]
     media_queries = [
         args
@@ -289,6 +322,9 @@ def score_session(session_db: Path, media_db: Path, slug: str) -> Result:
         "local_tools": len(tools),
         "tool_errors": len(tool_errors),
         "web_searches": web,
+        "preflight_contexts": preflight_contexts,
+        "approved_databases": approved_databases,
+        "expected_databases": expected_database_count,
         "cost": cost,
         "wall_seconds": wall,
         "answer_characters": len(answer),
@@ -301,7 +337,13 @@ def score_session(session_db: Path, media_db: Path, slug: str) -> Result:
         "mentioned_top_three": mentioned_top_three,
     }
 
-    result.add("Listed approved databases", "database_list_info" in tool_names, 5)
+    result.add(
+        "Loaded all approved fixtures",
+        preflight_contexts > 0
+        and approved_databases == expected_database_count,
+        5,
+        f"{approved_databases}/{expected_database_count}",
+    )
     result.add("Queried MediaLibrary", bool(media_queries), 8)
     aggregate_queries = [
         sql
@@ -467,6 +509,7 @@ def main() -> int:
         raise SystemExit(f"Missing run metadata: {metadata_path}")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     media_db = resolve_media_db(metadata)
+    expected_database_count = int(metadata.get("database_count", 0))
 
     results = []
     for model, run in metadata.get("results", {}).items():
@@ -474,7 +517,12 @@ def main() -> int:
         session_db = run_dir / slug / "strappy.sqlite"
         if not session_db.is_file():
             continue
-        result = score_session(session_db, media_db, slug)
+        result = score_session(
+            session_db,
+            media_db,
+            slug,
+            expected_database_count,
+        )
         if result.model != model:
             result.metrics["requested_model"] = model
         results.append(result)

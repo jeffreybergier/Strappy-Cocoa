@@ -23,13 +23,11 @@
 #include "../shared/strappy_responses.h"
 #include "../shared/strappy_tools.h"
 
-#define HARNESS_DATABASE_LIST_AUDIT_MESSAGE \
-  "Before finalizing, call database_list_info to inspect the user's approved " \
-  "databases, then continue the task using its result as needed."
 #define HARNESS_DATABASE_QUERY_AUDIT_MESSAGE \
-  "You listed the approved databases but did not query one. If the request " \
-  "depends on personal data, query the relevant approved database before " \
-  "finalizing. Do not guess the user's data."
+  "The application already supplied the approved-database inventory, but " \
+  "you did not call database_query. If the request depends on personal data, " \
+  "query the relevant approved database before finalizing. Otherwise, " \
+  "finalize without a database query. Do not guess the user's data."
 
 static int harness_fail(const char *message)
 {
@@ -120,9 +118,10 @@ static int harness_test_request_surfaces(void)
     (strcmp(name->valuestring, "database_list_info") == 0) &&
     cJSON_IsString(description) && (description->valuestring != NULL) &&
     (strcmp(description->valuestring,
-            "ALWAYS call this tool to inspect the user's approved databases "
-            "before finalizing, then continue the task using its result as "
-            "needed.") == 0) &&
+            "Return the current approved-database inventory. The application "
+            "supplies this result as preflight context for each user request; "
+            "call this tool only to refresh the inventory later in the same "
+            "request.") == 0) &&
     harness_tools_hide_local_display_metadata(tools) &&
     harness_has_tool_type(tools, "openrouter:web_search") &&
     harness_has_tool_type(tools, "openrouter:web_fetch");
@@ -528,6 +527,31 @@ static const char *harness_message_text(cJSON *item)
     text->valuestring : NULL;
 }
 
+static int harness_preflight_context_is_valid(cJSON *item)
+{
+  const char *text;
+
+  text = harness_message_text(item);
+  return harness_message_role_is(item, "developer") &&
+    (text != NULL) &&
+    (strstr(text, "Application-provided preflight context") != NULL) &&
+    (strstr(text, "not requested by the assistant") != NULL) &&
+    (strstr(text, "database_list_info result:\n{") != NULL) &&
+    (strstr(text, "memory_user_fact_read result:\n{") != NULL);
+}
+
+static int harness_request_preflight_contains(cJSON *root,
+                                              const char *expected)
+{
+  cJSON *input;
+  const char *text;
+
+  input = cJSON_GetObjectItem(root, "input");
+  text = harness_message_text(cJSON_GetArrayItem(input, 1));
+  return (text != NULL) && (expected != NULL) &&
+    (strstr(text, expected) != NULL);
+}
+
 static int harness_request_base_is_valid(cJSON *root,
                                          const char *expected_prompt,
                                          char **session_key_out,
@@ -542,6 +566,7 @@ static int harness_request_base_is_valid(cJSON *root,
   cJSON *tools;
   cJSON *first_tool;
   cJSON *function_wrapper;
+  int input_count;
   const char *text;
 
   stream = cJSON_GetObjectItem(root, "stream");
@@ -553,12 +578,14 @@ static int harness_request_base_is_valid(cJSON *root,
   tools = cJSON_GetObjectItem(root, "tools");
   first_tool = cJSON_GetArrayItem(tools, 0);
   function_wrapper = cJSON_GetObjectItem(first_tool, "function");
+  input_count = cJSON_IsArray(input) ? cJSON_GetArraySize(input) : 0;
   text = harness_message_text(cJSON_GetArrayItem(input, 0));
   if (!cJSON_IsFalse(stream) || !cJSON_IsFalse(store) ||
       !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
       !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
-      !cJSON_IsArray(input) ||
+      !cJSON_IsArray(input) || (input_count != 2) ||
       !harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") ||
+      !harness_preflight_context_is_valid(cJSON_GetArrayItem(input, 1)) ||
       (text == NULL) || (strcmp(text, expected_prompt) != 0) ||
       !cJSON_IsArray(tools) || !cJSON_IsObject(first_tool) ||
       !harness_tools_hide_local_display_metadata(tools) ||
@@ -704,27 +731,8 @@ static int harness_run_audit_server(int listener_fd)
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":3,"
     "\"total_tokens\":7}}";
   static const char *second_response =
-    "{\"id\":\"resp-audit-tool\",\"object\":\"response\","
-    "\"created_at\":1700000001,\"model\":\"test/model\","
-    "\"status\":\"completed\",\"output\":[{"
-    "\"type\":\"function_call\",\"id\":\"fc-database-list-audit\","
-    "\"call_id\":\"call-database-list\","
-    "\"name\":\"database_list_info\",\"arguments\":\"{}\","
-    "\"status\":\"completed\"}],"
-    "\"usage\":{\"input_tokens\":8,\"output_tokens\":4,"
-    "\"total_tokens\":12}}";
-  static const char *third_response =
-    "{\"id\":\"resp-audit-final\",\"object\":\"response\","
-    "\"created_at\":1700000002,\"model\":\"test/model\","
-    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
-    "\"id\":\"msg-audit-final\",\"role\":\"assistant\","
-    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
-    "\"text\":\"Audited final answer.\",\"annotations\":[]}]}],"
-    "\"usage\":{\"input_tokens\":12,\"output_tokens\":4,"
-    "\"total_tokens\":16}}";
-  static const char *fourth_response =
     "{\"id\":\"resp-audit-ignored\",\"object\":\"response\","
-    "\"created_at\":1700000003,\"model\":\"test/model\","
+    "\"created_at\":1700000001,\"model\":\"test/model\","
     "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
     "\"id\":\"msg-audit-ignored\",\"role\":\"assistant\","
     "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
@@ -752,6 +760,16 @@ static int harness_run_audit_server(int listener_fd)
                                   "Audit this request",
                                   &session_key,
                                   &prompt_group) &&
+    harness_request_preflight_contains(
+      root,
+      "\"filename\":\"strappy-preflight-db-") &&
+    harness_request_preflight_contains(
+      root,
+      "\"availability_state\":\"available\"") &&
+    harness_request_preflight_contains(
+      root,
+      "\"predicate\":\"favorite_color\"") &&
+    harness_request_preflight_contains(root, "\"value\":\"purple\"") &&
     harness_send_json_response(client_fd, 200L, first_response);
   cJSON_Delete(root);
   close(client_fd);
@@ -774,52 +792,8 @@ static int harness_run_audit_server(int listener_fd)
                                    session_key,
                                    prompt_group,
                                    "1",
-                                   HARNESS_DATABASE_LIST_AUDIT_MESSAGE) &&
-    harness_send_json_response(client_fd, 200L, second_response);
-  cJSON_Delete(root);
-  close(client_fd);
-  if (!ok) {
-    free(session_key);
-    free(prompt_group);
-    return 0;
-  }
-
-  body = NULL;
-  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
-    free(session_key);
-    free(prompt_group);
-    return 0;
-  }
-  root = cJSON_Parse(body);
-  free(body);
-  ok = cJSON_IsObject(root) &&
-    harness_function_output_request_is_valid(root,
-                                             session_key,
-                                             prompt_group) &&
-    harness_send_json_response(client_fd, 200L, third_response);
-  cJSON_Delete(root);
-  close(client_fd);
-  if (!ok) {
-    free(session_key);
-    free(prompt_group);
-    return 0;
-  }
-
-  body = NULL;
-  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
-    free(session_key);
-    free(prompt_group);
-    return 0;
-  }
-  root = cJSON_Parse(body);
-  free(body);
-  ok = cJSON_IsObject(root) &&
-    harness_audit_request_is_valid(root,
-                                   session_key,
-                                   prompt_group,
-                                   "3",
                                    HARNESS_DATABASE_QUERY_AUDIT_MESSAGE) &&
-    harness_send_json_response(client_fd, 200L, fourth_response);
+    harness_send_json_response(client_fd, 200L, second_response);
   cJSON_Delete(root);
   close(client_fd);
   free(session_key);
@@ -893,7 +867,7 @@ static int harness_run_server_tool_server(int listener_fd)
                                    session_key,
                                    prompt_group,
                                    "1",
-                                   HARNESS_DATABASE_LIST_AUDIT_MESSAGE) &&
+                                   HARNESS_DATABASE_QUERY_AUDIT_MESSAGE) &&
     harness_send_json_response(client_fd, 200L, second_response);
   cJSON_Delete(root);
   close(client_fd);
@@ -1314,12 +1288,90 @@ static int harness_create_session_database(const char *path,
   return strappy_db_create_session(path, session_id_out, error_out);
 }
 
+static int harness_create_approved_preflight_database(
+  const char *catalog_path,
+  const char *database_path,
+  char **error_out)
+{
+  strappy_discovered_database_input input;
+  strappy_discovered_database_record_list list;
+  sqlite3 *db;
+  char *sqlite_error;
+  long long catalog_id;
+  size_t index;
+  int rc;
+
+  db = NULL;
+  sqlite_error = NULL;
+  rc = sqlite3_open(database_path, &db);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_exec(db,
+                      "CREATE TABLE preflight_fixture (id INTEGER);",
+                      NULL,
+                      NULL,
+                      &sqlite_error);
+  }
+  if (db != NULL) {
+    sqlite3_close(db);
+  }
+  if (rc != SQLITE_OK) {
+    fprintf(stderr,
+            "Could not create preflight fixture database: %s\n",
+            (sqlite_error != NULL) ? sqlite_error : "unknown");
+    sqlite3_free(sqlite_error);
+    return 0;
+  }
+  sqlite3_free(sqlite_error);
+
+  memset(&input, 0, sizeof(input));
+  input.path = database_path;
+  input.size = 4096LL;
+  input.modified_at = 1LL;
+  input.device = 7ULL;
+  input.inode = 11ULL;
+  input.is_valid_sqlite = 1;
+  input.scan_root = "/tmp";
+  if (!strappy_db_save_discovered_databases(catalog_path,
+                                             &input,
+                                             1U,
+                                             error_out)) {
+    return 0;
+  }
+
+  catalog_id = 0LL;
+  strappy_discovered_database_record_list_init(&list);
+  if (!strappy_db_list_discovered_databases(catalog_path,
+                                             &list,
+                                             error_out)) {
+    strappy_discovered_database_record_list_destroy(&list);
+    return 0;
+  }
+  for (index = 0U; index < list.count; index++) {
+    if ((list.records[index].path != NULL) &&
+        (strcmp(list.records[index].path, database_path) == 0)) {
+      catalog_id = list.records[index].catalog_id;
+      break;
+    }
+  }
+  strappy_discovered_database_record_list_destroy(&list);
+  if (catalog_id <= 0LL) {
+    fprintf(stderr, "Preflight fixture database was not cataloged.\n");
+    return 0;
+  }
+  return strappy_db_update_discovered_database_decision(catalog_path,
+                                                         catalog_id,
+                                                         "allowed",
+                                                         error_out);
+}
+
 static int harness_test_tool_audit_loop(void)
 {
   char path[] = "/tmp/strappy-responses-audit-XXXXXX";
+  char database_path[] = "/tmp/strappy-preflight-db-XXXXXX";
   char endpoint[128];
   char *error;
   char *result;
+  char *seed_output;
   sqlite3 *db;
   long long session_id;
   long long value;
@@ -1327,6 +1379,7 @@ static int harness_test_tool_audit_loop(void)
   pid_t server_pid;
   int fd;
   int server_ok;
+  int database_fd;
   int ok;
 
   fd = mkstemp(path);
@@ -1334,9 +1387,36 @@ static int harness_test_tool_audit_loop(void)
     return harness_fail("Could not create tool-audit harness database.");
   }
   close(fd);
+  database_fd = mkstemp(database_path);
+  if (database_fd < 0) {
+    unlink(path);
+    return harness_fail("Could not create preflight fixture database.");
+  }
+  close(database_fd);
   error = NULL;
+  seed_output = NULL;
   session_id = 0LL;
   if (!harness_create_session_database(path, &session_id, &error) ||
+      !harness_create_approved_preflight_database(path,
+                                                   database_path,
+                                                   &error)) {
+    fprintf(stderr,
+            "Could not prepare preflight integration data: %s\n",
+            (error != NULL) ? error : "database setup failed");
+    free(error);
+    unlink(database_path);
+    unlink(path);
+    return 0;
+  }
+  seed_output = strappy_tools_execute(
+    path,
+    session_id,
+    "../shared/Resources",
+    STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+    "{\"kind\":\"preference\",\"subject\":\"user\","
+    "\"predicate\":\"favorite_color\",\"value\":\"purple\"}",
+    &error);
+  if ((seed_output == NULL) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_TOOL_AUDIT,
                             endpoint,
                             sizeof(endpoint),
@@ -1344,10 +1424,13 @@ static int harness_test_tool_audit_loop(void)
     fprintf(stderr,
             "Could not prepare tool-audit integration test: %s\n",
             (error != NULL) ? error : "server setup failed");
+    free(seed_output);
     free(error);
+    unlink(database_path);
     unlink(path);
     return 0;
   }
+  free(seed_output);
 
   unsetenv("APIENDPOINT");
   unsetenv("APITOKEN");
@@ -1369,15 +1452,15 @@ static int harness_test_tool_audit_loop(void)
   ok = (result != NULL) &&
     (strcmp(result,
             "Audited final answer after ignored query reminder.") == 0) &&
-    server_ok && events.valid && (events.count == 4LL) &&
-    events.saw_thinking && events.saw_tools &&
-    (events.processing_count >= 5LL) &&
+    server_ok && events.valid && (events.count == 2LL) &&
+    events.saw_thinking && !events.saw_tools &&
+    (events.processing_count >= 3LL) &&
     (events.clear_count == 1L);
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
                            "SELECT COUNT(*) FROM response_api_calls;",
-                           &value) && (value == 4LL) &&
+                           &value) && (value == 2LL) &&
       harness_query_int(db,
                         "SELECT COUNT(DISTINCT prompt_group_key) "
                         "FROM response_api_calls;",
@@ -1385,16 +1468,14 @@ static int harness_test_tool_audit_loop(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_calls WHERE "
                         "request_kind='tool_audit';",
-                        &value) && (value == 2LL) &&
+                        &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_calls WHERE "
                         "request_kind='tool_continuation';",
-                        &value) && (value == 1LL) &&
+                        &value) && (value == 0LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_tool_executions WHERE "
-                        "tool_name='database_list_info' AND "
-                        "status='completed';",
-                        &value) && (value == 1LL) &&
+                        "SELECT COUNT(*) FROM response_tool_executions;",
+                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "role='developer' AND is_canonical=1 AND "
@@ -1403,7 +1484,17 @@ static int harness_test_tool_audit_loop(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "is_canonical=1;",
-                        &value) && (value == 8LL) &&
+                        &value) && (value == 5LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_api_items WHERE "
+                        "type='function_call_output';",
+                        &value) && (value == 0LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_api_items WHERE "
+                        "role='developer' AND is_canonical=1 AND "
+                        "instr(display_text,'favorite_color')>0 AND "
+                        "instr(display_text,'strappy-preflight-db-')>0;",
+                        &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_calls WHERE "
                         "instr(request_headers_json,'test-token')>0 OR "
@@ -1419,6 +1510,7 @@ static int harness_test_tool_audit_loop(void)
             (error != NULL) ? error : "request or ledger mismatch");
   }
   free(error);
+  unlink(database_path);
   unlink(path);
   return ok;
 }
@@ -1481,7 +1573,7 @@ static int harness_test_unrelated_server_tool_does_not_satisfy_audit(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "role='developer';",
-                        &value) && (value == 1LL);
+                        &value) && (value == 3LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;
@@ -1579,7 +1671,7 @@ static int harness_test_function_tool_continuation(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "role='developer';",
-                        &value) && (value == 1LL);
+                        &value) && (value == 4LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;
@@ -1676,11 +1768,11 @@ static int harness_test_retry_attempt_ledger(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "is_canonical=1;",
-                        &value) && (value == 6LL) &&
+                        &value) && (value == 7LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
                         "direction='request' AND is_canonical=1;",
-                        &value) && (value == 3LL);
+                        &value) && (value == 4LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;

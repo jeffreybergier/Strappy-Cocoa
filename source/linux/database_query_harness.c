@@ -1301,8 +1301,8 @@ static int harness_run_tool_registry_tests(void)
         (registry_json != NULL) && cJSON_IsObject(registry) &&
         (registry->child == NULL) &&
         (strstr(tools_json,
-                "ALWAYS call this tool to inspect the user's approved "
-                "databases before finalizing") != NULL) &&
+                "The application supplies this result as preflight context "
+                "for each user request") != NULL) &&
         (strstr(tools_json,
                 "ALWAYS query the relevant approved database before "
                 "finalizing when the request depends on personal data.") !=
