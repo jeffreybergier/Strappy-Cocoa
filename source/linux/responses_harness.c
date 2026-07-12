@@ -51,6 +51,17 @@ static int harness_fail(const char *message)
   return 0;
 }
 
+static int harness_double_matches(double actual, double expected)
+{
+  double difference;
+
+  difference = actual - expected;
+  if (difference < 0.0) {
+    difference = -difference;
+  }
+  return difference < 0.000000000001;
+}
+
 static int harness_has_tool_type(cJSON *tools, const char *expected)
 {
   cJSON *tool;
@@ -2355,6 +2366,198 @@ static int harness_verify_call_columns(sqlite3 *db,
   return ok;
 }
 
+static int harness_append_usage_cost_call(
+  const char *path,
+  long long session_id,
+  long long previous_call_id,
+  const char *prompt_group_key,
+  const char *request_kind,
+  long round_index,
+  long attempt_index,
+  const char *state,
+  int is_error,
+  const char *response_json,
+  long long *call_id_out,
+  char **error_out)
+{
+  static const char *request_json =
+    "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
+    "\"instructions\":\"System\",\"input\":[]}";
+  strappy_response_call_begin_input begin;
+  strappy_response_call_finish_input finish;
+  long long call_id;
+
+  memset(&begin, 0, sizeof(begin));
+  begin.session_id = session_id;
+  begin.previous_call_id = previous_call_id;
+  begin.prompt_group_key = prompt_group_key;
+  begin.request_kind = request_kind;
+  begin.round_index = round_index;
+  begin.attempt_index = attempt_index;
+  begin.new_input_start_index = (attempt_index == 0L) ? 0L : -1L;
+  begin.request_method = "POST";
+  begin.request_url = "https://openrouter.ai/api/v1/responses";
+  begin.request_headers_json = "{}";
+  begin.request_json = request_json;
+  call_id = 0LL;
+  if (!strappy_db_begin_response_call(path, &begin, &call_id, error_out)) {
+    return 0;
+  }
+
+  memset(&finish, 0, sizeof(finish));
+  finish.call_id = call_id;
+  finish.state = state;
+  finish.is_error = is_error;
+  finish.output_is_canonical = is_error ? 0 : 1;
+  finish.http_status = 200L;
+  finish.started_at_ms = call_id * 1000LL;
+  finish.completed_at_ms = finish.started_at_ms + 100LL;
+  finish.request_bytes = (long long)strlen(request_json);
+  finish.response_bytes = (long long)strlen(response_json);
+  finish.total_seconds = 0.1;
+  finish.effective_url = begin.request_url;
+  finish.content_type = "application/json";
+  finish.response_headers = "";
+  finish.response_json = response_json;
+  if (!strappy_db_finish_response_call(path, &finish, error_out)) {
+    return 0;
+  }
+  if (call_id_out != NULL) {
+    *call_id_out = call_id;
+  }
+  return 1;
+}
+
+static int harness_test_cumulative_session_usage_cost(void)
+{
+  static const char *cost_one =
+    "{\"id\":\"cost-1\",\"status\":\"completed\","
+    "\"model\":\"test/model\",\"output\":[],"
+    "\"usage\":{\"cost\":0.001}}";
+  static const char *cost_error =
+    "{\"id\":\"cost-error\",\"status\":\"failed\","
+    "\"model\":\"test/model\",\"output\":[],"
+    "\"usage\":{\"cost\":0.0025}}";
+  static const char *cost_retry =
+    "{\"id\":\"cost-retry\",\"status\":\"completed\","
+    "\"model\":\"test/model\",\"output\":[],"
+    "\"usage\":{\"cost\":0.004}}";
+  static const char *cost_missing =
+    "{\"id\":\"cost-missing\",\"status\":\"completed\","
+    "\"model\":\"test/model\",\"output\":[],\"usage\":{}}";
+  static const char *cost_final =
+    "{\"id\":\"cost-final\",\"status\":\"completed\","
+    "\"model\":\"test/model\",\"output\":[],"
+    "\"usage\":{\"cost\":0.0005}}";
+  char path[] = "/tmp/strappy-cumulative-cost-XXXXXX";
+  strappy_session_message_record_list timeline;
+  char *error;
+  long long session_id;
+  long long previous_call_id;
+  int fd;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create cumulative-cost harness database.");
+  }
+  close(fd);
+  unlink(path);
+
+  error = NULL;
+  session_id = 0LL;
+  previous_call_id = 0LL;
+  strappy_session_message_record_list_init(&timeline);
+  ok = strappy_db_create_session(path, &session_id, &error) &&
+    harness_append_usage_cost_call(path,
+                                   session_id,
+                                   previous_call_id,
+                                   "group-one",
+                                   "user",
+                                   0L,
+                                   0L,
+                                   "completed",
+                                   0,
+                                   cost_one,
+                                   &previous_call_id,
+                                   &error) &&
+    harness_append_usage_cost_call(path,
+                                   session_id,
+                                   previous_call_id,
+                                   "group-one",
+                                   "tool_continuation",
+                                   1L,
+                                   0L,
+                                   "response_error",
+                                   1,
+                                   cost_error,
+                                   &previous_call_id,
+                                   &error) &&
+    harness_append_usage_cost_call(path,
+                                   session_id,
+                                   previous_call_id,
+                                   "group-one",
+                                   "retry",
+                                   1L,
+                                   1L,
+                                   "completed",
+                                   0,
+                                   cost_retry,
+                                   &previous_call_id,
+                                   &error) &&
+    harness_append_usage_cost_call(path,
+                                   session_id,
+                                   previous_call_id,
+                                   "group-two",
+                                   "user",
+                                   0L,
+                                   0L,
+                                   "completed",
+                                   0,
+                                   cost_missing,
+                                   &previous_call_id,
+                                   &error) &&
+    harness_append_usage_cost_call(path,
+                                   session_id,
+                                   previous_call_id,
+                                   "group-two",
+                                   "tool_continuation",
+                                   1L,
+                                   0L,
+                                   "completed",
+                                   0,
+                                   cost_final,
+                                   &previous_call_id,
+                                   &error) &&
+    strappy_db_list_response_timeline(path,
+                                      session_id,
+                                      &timeline,
+                                      &error) &&
+    (timeline.count == 5U) &&
+    timeline.records[0].has_cumulative_usage_cost &&
+    harness_double_matches(timeline.records[0].cumulative_usage_cost, 0.001) &&
+    timeline.records[1].has_cumulative_usage_cost &&
+    timeline.records[1].is_error &&
+    harness_double_matches(timeline.records[1].cumulative_usage_cost, 0.0035) &&
+    (timeline.records[2].round_index == 1L) &&
+    (timeline.records[2].attempt_index == 1L) &&
+    harness_double_matches(timeline.records[2].cumulative_usage_cost, 0.0075) &&
+    (strcmp(timeline.records[3].prompt_group_key, "group-two") == 0) &&
+    (timeline.records[3].round_index == 0L) &&
+    harness_double_matches(timeline.records[3].cumulative_usage_cost, 0.0075) &&
+    harness_double_matches(timeline.records[4].cumulative_usage_cost, 0.008);
+
+  if (!ok) {
+    fprintf(stderr,
+            "Cumulative session usage cost failed: %s\n",
+            (error != NULL) ? error : "timeline total mismatch");
+  }
+  strappy_session_message_record_list_destroy(&timeline);
+  free(error);
+  unlink(path);
+  return ok;
+}
+
 static int harness_test_ledger(void)
 {
   static const char *request_json =
@@ -2640,6 +2843,7 @@ int main(void)
 {
   if (harness_test_request_surfaces() &&
       harness_test_ledger() &&
+      harness_test_cumulative_session_usage_cost() &&
       harness_test_tool_audit_loop() &&
       harness_test_unrelated_server_tool_does_not_satisfy_audit() &&
       harness_test_function_tool_continuation() &&

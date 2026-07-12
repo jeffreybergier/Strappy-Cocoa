@@ -125,6 +125,8 @@ static void StrappySessionWebViewMessageFromDictionary(
   NSNumber *apiCallId;
   NSNumber *roundIndex;
   NSNumber *attemptIndex;
+  NSNumber *cumulativeUsageCost;
+  NSNumber *hasCumulativeUsageCost;
 
   if (message == NULL) {
     return;
@@ -163,6 +165,9 @@ static void StrappySessionWebViewMessageFromDictionary(
   apiCallId = [dictionary objectForKey:@"turn_id"];
   roundIndex = [dictionary objectForKey:@"round_index"];
   attemptIndex = [dictionary objectForKey:@"attempt_index"];
+  cumulativeUsageCost = [dictionary objectForKey:@"cumulative_usage_cost"];
+  hasCumulativeUsageCost =
+    [dictionary objectForKey:@"has_cumulative_usage_cost"];
 
   message->message_id = StrappySessionMessageNumericIdentifier(dictionary);
   message->api_call_id =
@@ -176,6 +181,12 @@ static void StrappySessionWebViewMessageFromDictionary(
       ([attemptIndex longValue] + 1L) : 0L;
   message->http_status =
     [httpStatus isKindOfClass:[NSNumber class]] ? [httpStatus longValue] : 0L;
+  message->cumulative_usage_cost =
+    [cumulativeUsageCost isKindOfClass:[NSNumber class]] ?
+      [cumulativeUsageCost doubleValue] : 0.0;
+  message->has_cumulative_usage_cost =
+    [hasCumulativeUsageCost isKindOfClass:[NSNumber class]] ?
+      ([hasCumulativeUsageCost boolValue] ? 1 : 0) : 0;
   message->role = StrappySessionCString(role);
   message->kind = StrappySessionCString(kind);
   message->actor = StrappySessionCString(actor);
@@ -762,6 +773,8 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   NSNumber *isError;
   NSNumber *roundIndex;
   NSNumber *attemptIndex;
+  NSNumber *cumulativeUsageCost;
+  NSNumber *hasCumulativeUsageCost;
   NSString *turnKey;
   NSString *promptGroupKey;
   NSString *actor;
@@ -798,6 +811,10 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   turnId = [NSNumber numberWithLongLong:record->turn_id];
   roundIndex = [NSNumber numberWithLong:record->round_index];
   attemptIndex = [NSNumber numberWithLong:record->attempt_index];
+  cumulativeUsageCost =
+    [NSNumber numberWithDouble:record->cumulative_usage_cost];
+  hasCumulativeUsageCost =
+    [NSNumber numberWithBool:(record->has_cumulative_usage_cost ? YES : NO)];
   httpStatus = [NSNumber numberWithLong:record->http_status];
   includeInContext = [NSNumber numberWithBool:(record->include_in_context ? YES : NO)];
   isError = [NSNumber numberWithBool:(record->is_error ? YES : NO)];
@@ -842,6 +859,8 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     turnId, @"turn_id",
     roundIndex, @"round_index",
     attemptIndex, @"attempt_index",
+    cumulativeUsageCost, @"cumulative_usage_cost",
+    hasCumulativeUsageCost, @"has_cumulative_usage_cost",
     turnKey, @"turn_key",
     promptGroupKey, @"prompt_group_key",
     actor, @"actor",

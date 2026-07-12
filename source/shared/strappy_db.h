@@ -30,6 +30,8 @@ typedef struct strappy_session_message_record {
   long long turn_id;
   long round_index;
   long attempt_index;
+  double cumulative_usage_cost;
+  int has_cumulative_usage_cost;
   char *turn_key;
   char *prompt_group_key;
   char *actor;

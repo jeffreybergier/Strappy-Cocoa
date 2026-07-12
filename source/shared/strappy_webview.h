@@ -31,6 +31,8 @@ typedef struct strappy_webview_message {
   long round_number;
   long attempt_number;
   long http_status;
+  double cumulative_usage_cost;
+  int has_cumulative_usage_cost;
   const char *element_id;
   const char *role;
   const char *kind;

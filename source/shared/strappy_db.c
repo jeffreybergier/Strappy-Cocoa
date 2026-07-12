@@ -338,6 +338,8 @@ void strappy_session_message_record_init(strappy_session_message_record *record)
   record->turn_id = 0;
   record->round_index = 0L;
   record->attempt_index = 0L;
+  record->cumulative_usage_cost = 0.0;
+  record->has_cumulative_usage_cost = 0;
   record->turn_key = NULL;
   record->prompt_group_key = NULL;
   record->actor = NULL;
@@ -9445,6 +9447,7 @@ int strappy_db_list_response_timeline(
     "c.transport_error,c.response_raw_json,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,"
     "c.request_url,c.response_status,c.response_error_message,"
     "c.response_incomplete_reason,0,NULL,NULL,NULL,NULL,NULL,"
+    "c.response_usage_cost,"
     "2 AS presentation_phase "
     "FROM response_api_calls c WHERE c.session_id = ? "
     "AND c.state <> 'pending' "
@@ -9457,6 +9460,7 @@ int strappy_db_list_response_timeline(
     "i.arguments,i.output,c.request_url,c.response_status,"
     "c.response_error_message,c.response_incomplete_reason,i.is_canonical,"
     "i.action_json,i.url,i.title,i.status,i.http_status,"
+    "c.response_usage_cost,"
     "CASE WHEN i.display_role IN "
     "('user','harness','developer','assistant') "
     "THEN CASE WHEN i.direction = 'request' THEN 0 ELSE 3 END "
@@ -9468,6 +9472,9 @@ int strappy_db_list_response_timeline(
     "ORDER BY call_id,presentation_phase,sort_phase,item_index;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
+  long long cumulative_call_id;
+  double cumulative_usage_cost;
+  int has_cumulative_usage_cost;
   int rc;
 
   if (list == NULL) {
@@ -9509,6 +9516,9 @@ int strappy_db_list_response_timeline(
     return 0;
   }
 
+  cumulative_call_id = 0LL;
+  cumulative_usage_cost = 0.0;
+  has_cumulative_usage_cost = 0;
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
     strappy_session_message_record *records;
     strappy_session_message_record *record;
@@ -9541,12 +9551,21 @@ int strappy_db_list_response_timeline(
     entry_type = sqlite3_column_int(stmt, 0);
     row_id = (long long)sqlite3_column_int64(stmt, 1);
     call_id = (long long)sqlite3_column_int64(stmt, 2);
+    if (call_id != cumulative_call_id) {
+      cumulative_call_id = call_id;
+      if (sqlite3_column_type(stmt, 35) != SQLITE_NULL) {
+        cumulative_usage_cost += sqlite3_column_double(stmt, 35);
+        has_cumulative_usage_cost = 1;
+      }
+    }
     record->message_id = (entry_type == 0) ?
       (call_id * 2LL) : ((row_id * 2LL) + 1LL);
     record->session_id = session_id;
     record->turn_id = call_id;
     record->round_index = (long)sqlite3_column_int64(stmt, 8);
     record->attempt_index = (long)sqlite3_column_int64(stmt, 9);
+    record->cumulative_usage_cost = cumulative_usage_cost;
+    record->has_cumulative_usage_cost = has_cumulative_usage_cost;
     record->turn_key = strappy_db_column_string(stmt, 6);
     record->prompt_group_key = strappy_db_column_string(stmt, 6);
     record->model = strappy_db_column_string(stmt, 13);

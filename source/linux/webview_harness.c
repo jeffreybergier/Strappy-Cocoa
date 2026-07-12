@@ -210,9 +210,8 @@ static int harness_check_page_scripts(void)
                                "font-size:12px;line-height:1.3;font-weight:bold;"
                                "color:#30363b;margin:0 0 8px;white-space:nowrap;"
                                "overflow:hidden;text-overflow:ellipsis;}") &&
-       harness_expect_contains(page_html,
-                               ".request-metadata-summary{display:none;"
-                               "font-weight:inherit;vertical-align:baseline;") &&
+       harness_expect_not_contains(page_html,
+                                   ".request-metadata-summary{") &&
        harness_expect_contains(page_html,
                                ".tool-card-summary{vertical-align:baseline;}") &&
        harness_expect_contains(page_html,
@@ -389,11 +388,23 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "function rowIsAPIExchangeMetadata") &&
        harness_expect_contains(page_html,
+                               "function apiExchangeCumulativeUsageCost") &&
+       harness_expect_contains(page_html,
+                               "function formatCumulativeUsageCost(value)") &&
+       harness_expect_contains(page_html,
                                "titleText=roundLabel+' '+roundNumber;") &&
        harness_expect_contains(page_html,
                                "if(parseInt(attemptNumber,10)>1)"
                                "titleText+=' \\u00b7 '+attemptLabel+' '+"
                                "attemptNumber;") &&
+       harness_expect_contains(page_html,
+                               "titleText+=' \\u00b7 '+"
+                               "formatCumulativeUsageCost("
+                               "cumulativeUsageCost);") &&
+       harness_expect_contains(
+         page_html,
+         "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed,"
+         "apiExchangeCumulativeUsageCost(g.rows));") &&
        harness_expect_contains(page_html,
                                "setNodeText(title,titleText);") &&
        harness_expect_not_contains(page_html,
@@ -503,7 +514,16 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function metadataFinishStatus") &&
        harness_expect_contains(page_html, "native_finish_reason") &&
        harness_expect_contains(page_html, "request-metadata-error") &&
-       harness_expect_contains(page_html, "ERROR '+detail+' | '") &&
+       harness_expect_contains(page_html,
+                               "addMetaLine(lines,'Cost',usage.cost);") &&
+       harness_expect_contains(page_html,
+                               "addMetaLine(lines,'Input tokens',"
+                               "usage.input_tokens);") &&
+       harness_expect_contains(page_html,
+                               "addMetaLine(lines,'Output tokens',"
+                               "usage.output_tokens);") &&
+       harness_expect_not_contains(page_html, "formatMetadataSummary") &&
+       harness_expect_not_contains(page_html, "ERROR '+detail+' | '") &&
        harness_expect_contains(page_html, "function setProcessingStatus") &&
        harness_expect_contains(page_html, "function clearProcessingStatus") &&
        harness_expect_contains(page_html, "function clearProcessingStatusNode") &&
@@ -1249,6 +1269,8 @@ static int harness_check_harness_assistant_metadata(void)
        harness_expect_contains(message_html,
                                "request-metadata-title disclosure-title\" "
                                "onclick=\"return toggleMetadata(this)\"") &&
+       harness_expect_not_contains(message_html,
+                                   "request-metadata-summary") &&
        harness_expect_contains(message_html, "Harness thinking") &&
        harness_expect_contains(message_html, "Learning Summary Complete");
 
@@ -1307,6 +1329,8 @@ static int harness_check_responses_items(void)
   message.api_call_id = 1LL;
   message.round_number = 3L;
   message.attempt_number = 2L;
+  message.cumulative_usage_cost = 0.02392002;
+  message.has_cumulative_usage_cost = 1;
   message.role = "api_call";
   message.kind = "response_api_call";
   message.text = "POST /responses\ncompleted / HTTP 200";
@@ -1399,6 +1423,8 @@ static int harness_check_responses_items(void)
        harness_expect_contains(call_html, "data-round-label=\"Round\"") &&
        harness_expect_contains(call_html, "data-attempt-number=\"2\"") &&
        harness_expect_contains(call_html, "data-attempt-label=\"Attempt\"") &&
+       harness_expect_contains(call_html,
+                               "data-cumulative-usage-cost=\"0.02392002\"") &&
        harness_expect_contains(call_html, "<div class=\"role\">API Call</div>") &&
        harness_expect_contains(call_html, "request-metadata") &&
        harness_expect_contains(reasoning_html,

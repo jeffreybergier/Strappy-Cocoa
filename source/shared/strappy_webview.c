@@ -735,6 +735,44 @@ static int strappy_webview_append_data_attribute(strappy_webview_buffer *buffer,
          strappy_webview_buffer_append_cstring(buffer, "\"");
 }
 
+static int strappy_webview_format_usage_cost(double value,
+                                             char *buffer,
+                                             size_t buffer_size)
+{
+  size_t index;
+  size_t length;
+  int written;
+
+  if ((buffer == NULL) || (buffer_size == 0U)) {
+    return 0;
+  }
+
+  written = snprintf(buffer, buffer_size, "%.10f", value);
+  if ((written < 0) || ((size_t)written >= buffer_size)) {
+    buffer[0] = '\0';
+    return 0;
+  }
+
+  length = (size_t)written;
+  for (index = 0U; index < length; index++) {
+    if (buffer[index] == ',') {
+      buffer[index] = '.';
+    }
+  }
+  while ((length > 0U) && (buffer[length - 1U] == '0')) {
+    length--;
+  }
+  if ((length > 0U) && (buffer[length - 1U] == '.')) {
+    length--;
+  }
+  buffer[length] = '\0';
+  if (strcmp(buffer, "-0") == 0) {
+    buffer[0] = '0';
+    buffer[1] = '\0';
+  }
+  return 1;
+}
+
 static const char *strappy_webview_disclosure_icon_html(int collapsed)
 {
   return collapsed ?
@@ -841,7 +879,7 @@ static int strappy_webview_append_metadata_html(
            strappy_webview_request_metadata_label(labels)) &&
          strappy_webview_buffer_append_cstring(
            buffer,
-           "<span class=\"request-metadata-summary\"></span></div>"
+           "</div>"
            "<div class=\"request-metadata-body\"></div></div>");
 }
 
@@ -1159,9 +1197,6 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "line-height:1.3;font-weight:bold;color:#30363b;margin:0 0 8px;",
     "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
     ".request-metadata-toggle{color:#4e5961;text-decoration:none;}",
-    ".request-metadata-summary{display:none;font-weight:inherit;",
-    "vertical-align:baseline;color:#606970;margin-left:8px;}",
-    ".request-metadata-collapsed .request-metadata-summary{display:inline;}",
     ".request-metadata-collapsed .request-metadata-body{display:none;}",
     ".request-metadata-body{white-space:pre-wrap;}",
     ".user .role,.user .meta{text-align:left;}",
@@ -1235,8 +1270,7 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".api-exchange-row>.reasoning,.api-exchange-row>.tool-column,",
     ".api-exchange-row>.request-metadata{border-top:0;border-bottom:0;}",
     ".api-exchange-row .meta,.api-exchange-row .status,",
-    ".api-exchange-row .tool-subtle,",
-    ".api-exchange-row .request-metadata-summary{color:#606970;}",
+    ".api-exchange-row .tool-subtle{color:#606970;}",
     ".api-exchange-row .tool-column-toggle,",
     ".api-exchange-row .prompt-group-toggle,",
     ".api-exchange-row .reasoning-toggle,",
@@ -1540,15 +1574,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(isObj(root)&&(metadataValueIsWarning(root.finish_reason)||metadataValueIsWarning(root.native_finish_reason)))return 'warning';",
     "if(isObj(gen)&&(metadataValueIsWarning(gen.finish_reason)||metadataValueIsWarning(gen.native_finish_reason)))return 'warning';",
     "return 'ok';}",
-    "function metadataFinishDetail(root){var gen=metadataGen(root);",
-    "if(isObj(root)&&isObj(root.error)&&jsonText(root.error.message)!=='')return root.error.message;",
-    "if(isObj(root)&&isObj(root.incomplete_details)&&jsonText(root.incomplete_details.reason)!=='')return root.incomplete_details.reason;",
-    "if(isObj(root)&&jsonText(root.status)!==''&&metadataLower(root.status)!='completed')return root.status;",
-    "if(isObj(root)&&jsonText(root.native_finish_reason)!=='')return root.native_finish_reason;",
-    "if(isObj(root)&&jsonText(root.finish_reason)!=='')return root.finish_reason;",
-    "if(isObj(gen)&&jsonText(gen.native_finish_reason)!=='')return gen.native_finish_reason;",
-    "if(isObj(gen)&&jsonText(gen.finish_reason)!=='')return gen.finish_reason;",
-    "return '';}",
     "function formatMetadata(root){var lines=[];var usage;var gen;",
     "if(!isObj(root))return jsonText(root);",
     "addMetaLine(lines,'Response ID',firstMetadataValue(root.id,root.response_id));",
@@ -1607,30 +1632,17 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(lines.length)return lines.join('\\n');return jsonText(root);}",
     "function metadataGen(root){var gen=isObj(root)?root.generation:null;",
     "if(isObj(gen)&&isObj(gen.data))gen=gen.data;return gen;}",
-    "function metadataSummaryValue(v){var t=jsonText(v);return t!==''?t:'-';}",
     "function firstMetadataValue(){for(var i=0;i<arguments.length;i++){",
-    "if(metadataSummaryValue(arguments[i])!='-')return arguments[i];}return '';}",
-    "function metadataSummaryCost(v){var t=jsonText(v);if(t==='')return '$-';",
-    "return t.charAt(0)=='$'?t:'$'+t;}",
-    "function formatMetadataSummary(root){var usage=isObj(root)?root.usage:null;",
-    "var gen=metadataGen(root);var cost='';var input='';var output='';",
-    "if(isObj(usage)){cost=usage.cost;input=firstMetadataValue(usage.input_tokens,usage.prompt_tokens);output=firstMetadataValue(usage.output_tokens,usage.completion_tokens);}",
-    "if(metadataSummaryValue(cost)=='-'&&isObj(gen))cost=firstMetadataValue(gen.total_cost,gen.usage,gen.upstream_inference_cost);",
-    "if(metadataSummaryValue(input)=='-'&&isObj(gen))input=firstMetadataValue(gen.tokens_prompt,gen.native_tokens_prompt);",
-    "if(metadataSummaryValue(output)=='-'&&isObj(gen))output=firstMetadataValue(gen.tokens_completion,gen.native_tokens_completion);",
-    "var status=metadataFinishStatus(root);var detail=metadataSummaryValue(metadataFinishDetail(root));",
-    "var prefix=status=='error'?'ERROR '+detail+' | ':(status=='warning'?'WARNING '+detail+' | ':'');",
-    "return prefix+metadataSummaryCost(cost)+' \\u2191 '+metadataSummaryValue(input)+' \\u2193 '+metadataSummaryValue(output);}",
+    "if(jsonText(arguments[i])!=='')return arguments[i];}return '';}",
     "function parseMetadata(raw){if(typeof JSON!='undefined'&&JSON.parse)",
     "return JSON.parse(raw);return eval('('+raw+')');}",
     "function renderMetadata(root){root=root||document;var n=root.getElementsByTagName('*');",
     "for(var i=0;i<n.length;i++){if(!hasClass(n[i],'request-metadata'))continue;",
     "var raw=n[i].getAttribute('data-metadata');var body=firstByClass(n[i],'request-metadata-body');",
-    "var summary=firstByClass(n[i],'request-metadata-summary');var parsed;",
+    "var parsed;",
     "if(!raw||!body)continue;try{parsed=parseMetadata(raw);setClass(n[i],'request-metadata-error',metadataFinishStatus(parsed)=='error');",
-    "setClass(n[i],'request-metadata-warning',metadataFinishStatus(parsed)=='warning');setNodeText(body,formatMetadata(parsed));",
-    "if(summary)setNodeText(summary,formatMetadataSummary(parsed));}",
-    "catch(e){setNodeText(body,raw);if(summary)setNodeText(summary,'');}}}",
+    "setClass(n[i],'request-metadata-warning',metadataFinishStatus(parsed)=='warning');setNodeText(body,formatMetadata(parsed));}",
+    "catch(e){setNodeText(body,raw);}}}",
     "function toggleMetadata(a){if(processingInteractionsLocked())return false;",
     "var p=a;while(p&&!hasClass(p,'request-metadata'))p=p.parentNode;",
     "if(!p)return false;var d=firstByClass(p,'metadata-disclosure');var t=firstByClass(p,'request-metadata-toggle');",
@@ -1643,6 +1655,9 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function apiExchangeId(row){return row&&row.getAttribute?row.getAttribute('data-api-call-id')||'':'';}",
     "function apiExchangeDirection(row){return row&&row.getAttribute?row.getAttribute('data-direction')||'':'';}",
     "function apiExchangeKind(row){return row&&row.getAttribute?row.getAttribute('data-kind')||'':'';}",
+    "function apiExchangeCumulativeUsageCost(rows){var i,value;for(i=0;i<rows.length;i++){",
+    "value=rows[i].getAttribute?rows[i].getAttribute('data-cumulative-usage-cost')||'':'';if(value!=='')return value;}return '';}",
+    "function formatCumulativeUsageCost(value){return '$'+(value!==''?value:'-')+' total';}",
     "function rowIsAPIExchangeMetadata(row){return apiExchangeKind(row)=='response_api_call'||hasClass(row,'api_call')||hasClass(row,'api_error');}",
     "function rowIsAPIExchangeItem(row){var d=apiExchangeDirection(row);return d=='request'||d=='response';}",
     "function rowIsAPIExchangeAnswer(row){return hasClass(row,'assistant')&&apiExchangeDirection(row)=='response';}",
@@ -1662,7 +1677,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "n=firstByClass(row,'api-exchange-section-label');if(n&&n.parentNode)n.parentNode.removeChild(n);}",
     "function removeAPIExchangeTurnHeader(row){var n=firstByClass(row,'api-exchange-turn-header');",
     "if(n&&n.parentNode)n.parentNode.removeChild(n);}",
-    "function ensureAPIExchangeTurnHeader(row,id,collapsed){var h,a,d,title,titleText,roundNumber,attemptNumber,roundLabel,attemptLabel;",
+    "function ensureAPIExchangeTurnHeader(row,id,collapsed,cumulativeUsageCost){var h,a,d,title,titleText,roundNumber,attemptNumber,roundLabel,attemptLabel;",
     "if(!row)return;roundNumber=row.getAttribute('data-round-number')||'1';attemptNumber=row.getAttribute('data-attempt-number')||'1';",
     "roundLabel=row.getAttribute('data-round-label')||'Round';attemptLabel=row.getAttribute('data-attempt-label')||'Attempt';",
     "h=document.createElement('div');h.className='api-exchange-turn-header disclosure-title';a=document.createElement('a');",
@@ -1671,7 +1686,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "d=document.createElement('span');d.className='api-exchange-disclosure';d.innerHTML=disclosureIconHTML(collapsed);",
     "a.appendChild(d);h.appendChild(a);title=document.createElement('span');title.className='api-exchange-turn-title';",
     "titleText=roundLabel+' '+roundNumber;if(parseInt(attemptNumber,10)>1)",
-    "titleText+=' \\u00b7 '+attemptLabel+' '+attemptNumber;setNodeText(title,titleText);h.appendChild(title);",
+    "titleText+=' \\u00b7 '+attemptLabel+' '+attemptNumber;titleText+=' \\u00b7 '+formatCumulativeUsageCost(cumulativeUsageCost);",
+    "setNodeText(title,titleText);h.appendChild(title);",
     "h.onclick=function(){return toggleAPIExchange(a);};",
     "row.insertBefore(h,row.firstChild);}",
     "function ensureAPIExchangeSectionLabel(row){var label=row.getAttribute?row.getAttribute('data-direction-label')||'':'';var n;",
@@ -1698,7 +1714,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "setRowClass(row,'api-exchange-collapsed-anchor',collapsed&&row===anchor&&!conversation);",
     "setRowClass(row,'api-exchange-collapsed-row',collapsed&&row!==anchor&&!conversation);",
     "if(d!==''&&d!==previous){setRowClass(row,'api-exchange-section-start',1);ensureAPIExchangeSectionLabel(row);previous=d;}}",
-    "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed);}}",
+    "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed,apiExchangeCumulativeUsageCost(g.rows));}}",
     "function toggleAPIExchange(a){if(processingInteractionsLocked())return false;",
     "var id=a&&a.getAttribute?a.getAttribute('data-api-call-id'):'';var current;if(id==='')return false;",
     "current=apiExchangeCollapsed(id,'');strappyAPIExchangeCollapsed[id]=current?0:1;",
@@ -2395,6 +2411,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   char api_call_id_text[64];
   char round_number_text[64];
   char attempt_number_text[64];
+  char cumulative_usage_cost_text[64];
   int has_state;
   int render_created_at;
   int render_streaming;
@@ -2431,6 +2448,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   api_call_id_text[0] = '\0';
   round_number_text[0] = '\0';
   attempt_number_text[0] = '\0';
+  cumulative_usage_cost_text[0] = '\0';
   if ((message != NULL) && (message->api_call_id > 0LL)) {
     snprintf(api_call_id_text,
              sizeof(api_call_id_text),
@@ -2447,6 +2465,12 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                sizeof(attempt_number_text),
                "%ld",
                message->attempt_number);
+    }
+    if (message->has_cumulative_usage_cost &&
+        !strappy_webview_format_usage_cost(message->cumulative_usage_cost,
+                                          cumulative_usage_cost_text,
+                                          sizeof(cumulative_usage_cost_text))) {
+      return NULL;
     }
   }
   status_to_render = strappy_webview_string_or_empty(status_html);
@@ -2567,6 +2591,10 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                              (api_call_id_text[0] != '\0') ?
                                                strappy_webview_attempt_label(labels) :
                                                NULL) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "cumulative-usage-cost",
+         cumulative_usage_cost_text) &&
        strappy_webview_append_data_attribute(&buffer,
                                              "direction",
                                              direction) &&

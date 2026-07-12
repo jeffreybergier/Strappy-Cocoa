@@ -340,6 +340,8 @@ static void strappy_session_webview_message_from_record(
   message->round_number = record->round_index + 1L;
   message->attempt_number = record->attempt_index + 1L;
   message->http_status = record->http_status;
+  message->cumulative_usage_cost = record->cumulative_usage_cost;
+  message->has_cumulative_usage_cost = record->has_cumulative_usage_cost;
   message->role = record->role;
   message->kind = record->kind;
   message->actor = record->actor;
