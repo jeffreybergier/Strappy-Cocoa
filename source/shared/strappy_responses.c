@@ -69,6 +69,7 @@ typedef struct strappy_responses_audit {
   size_t count;
   char *audit_header;
   char *audit_footer;
+  char *empty_answer;
   int session_name_empty;
   int message_sent;
 } strappy_responses_audit;
@@ -123,6 +124,7 @@ static void strappy_responses_audit_init(strappy_responses_audit *audit)
   audit->count = 0U;
   audit->audit_header = NULL;
   audit->audit_footer = NULL;
+  audit->empty_answer = NULL;
   audit->session_name_empty = 0;
   audit->message_sent = 0;
 }
@@ -142,6 +144,7 @@ static void strappy_responses_audit_destroy(strappy_responses_audit *audit)
   free(audit->rules);
   free(audit->audit_header);
   free(audit->audit_footer);
+  free(audit->empty_answer);
   strappy_responses_audit_init(audit);
 }
 
@@ -264,6 +267,7 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
   cJSON *rules;
   cJSON *audit_header;
   cJSON *audit_footer;
+  cJSON *empty_answer;
   cJSON *item;
 
   if (audit == NULL) {
@@ -294,17 +298,21 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
   rules = cJSON_GetObjectItem(root, "tool_usage_priority");
   audit_header = cJSON_GetObjectItem(root, "audit_header");
   audit_footer = cJSON_GetObjectItem(root, "audit_footer");
+  empty_answer = cJSON_GetObjectItem(root, "empty_answer");
   if (!cJSON_IsArray(rules) || !cJSON_IsString(audit_header) ||
       (audit_header->valuestring == NULL) ||
       (audit_header->valuestring[0] == '\0') ||
       !cJSON_IsString(audit_footer) ||
       (audit_footer->valuestring == NULL) ||
-      (audit_footer->valuestring[0] == '\0')) {
+      (audit_footer->valuestring[0] == '\0') ||
+      !cJSON_IsString(empty_answer) ||
+      (empty_answer->valuestring == NULL) ||
+      (empty_answer->valuestring[0] == '\0')) {
     cJSON_Delete(root);
     strappy_set_formatted_error(
       error_out,
       "Audit guidance is missing tool_usage_priority, audit_header, or "
-      "audit_footer: %s",
+      "audit_footer, or empty_answer: %s",
       path);
     free(path);
     return 0;
@@ -313,7 +321,10 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
     strappy_string_duplicate(audit_header->valuestring);
   audit->audit_footer =
     strappy_string_duplicate(audit_footer->valuestring);
-  if ((audit->audit_header == NULL) || (audit->audit_footer == NULL)) {
+  audit->empty_answer =
+    strappy_string_duplicate(empty_answer->valuestring);
+  if ((audit->audit_header == NULL) || (audit->audit_footer == NULL) ||
+      (audit->empty_answer == NULL)) {
     cJSON_Delete(root);
     strappy_set_error(error_out,
                       "Could not allocate combined audit guidance.");
@@ -2529,7 +2540,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   long round_index;
   long long processing_started_ms;
   int allow_tool_calls;
-  int audit_finalize_sent;
+  int finalization_sent;
   int ok;
 
   if ((prompt == NULL) || (prompt[0] == '\0') ||
@@ -2549,7 +2560,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   processing_started_ms = strappy_responses_now_ms();
   next_request_kind = "user";
   allow_tool_calls = 1;
-  audit_finalize_sent = 0;
+  finalization_sent = 0;
 
   if (!strappy_responses_prepare_runtime(&runtime,
                                          env_path,
@@ -2764,16 +2775,15 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
       }
     }
 
-    if (runtime.audit.message_sent &&
-        !strappy_responses_text_has_non_whitespace(
+    if (!strappy_responses_text_has_non_whitespace(
           analysis.response_text)) {
       const char *failure_message;
       char *finalization_item;
 
       failure_message =
-        "Responses audit finalization did not return a non-empty "
+        "Responses finalization did not return a non-empty "
         "assistant answer.";
-      if (audit_finalize_sent) {
+      if (finalization_sent) {
         strappy_set_error(error_out, failure_message);
         strappy_responses_update_failure_summary(session_db_path,
                                                  session_id,
@@ -2787,7 +2797,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
       }
       finalization_item = strappy_responses_message_item_json(
         "developer",
-        runtime.audit.audit_footer,
+        runtime.audit.empty_answer,
         error_out);
       if ((finalization_item == NULL) ||
           !strappy_responses_owned_items_append(&new_items,
@@ -2797,7 +2807,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
         strappy_responses_http_result_destroy(&http);
         break;
       }
-      audit_finalize_sent = 1;
+      finalization_sent = 1;
       next_request_kind = "audit_finalize";
       allow_tool_calls = 0;
       strappy_responses_analysis_destroy(&analysis);

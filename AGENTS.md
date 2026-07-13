@@ -132,14 +132,14 @@ House style for Strappy source:
     combined message at most once in the same Responses history. Allow normal
     tool calls and tool-output continuations while resolving it. Once the
     combined message has been sent, never audit another response from that user
-    request. Accept the first subsequent response without local tool calls when
-    it contains a non-whitespace assistant answer, even if some audit items
-    remain unsatisfied. If it contains no non-whitespace assistant answer,
-    append the audit footer once as a tool-disabled `audit_finalize` recovery
-    turn. Fail explicitly if that recovery is also empty; never silently reuse
-    the pre-audit answer. Every audit, recovery, tool, and assistant item uses
-    the normal database and timeline paths. If no audit item is unresolved, do
-    not add an audit turn.
+    request. Accept a response without local tool calls only when it contains a
+    non-whitespace assistant answer, even if some audit items remain
+    unsatisfied. For every empty tool-free candidate answer, whether or not an
+    audit message was needed, append the `empty_answer` guidance once as a
+    tool-disabled `audit_finalize` recovery turn. Fail explicitly if that
+    recovery is also empty; never silently reuse an earlier answer. Every audit,
+    recovery, tool, and assistant item uses the normal database and timeline
+    paths. If no audit item is unresolved, do not add an audit turn.
 17. OpenRouter model catalog and selection state live in shared SQLite storage.
     `strappy_db` owns `openrouter_models`, `openrouter_model_settings`, the
     default model app setting, and `sessions.model`; `StrappySession` owns the

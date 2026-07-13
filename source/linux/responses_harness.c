@@ -59,8 +59,11 @@
   "standalone answer to the user's original question with all fixes in place. " \
   "Answer the user directly, and do not mention the audit or tool activity."
 
-#define HARNESS_EMPTY_AUDIT_FINALIZATION_ERROR \
-  "Responses audit finalization did not return a non-empty assistant answer."
+#define HARNESS_EMPTY_ANSWER \
+  "Your answer was empty. Please answer the user's original question."
+
+#define HARNESS_EMPTY_FINALIZATION_ERROR \
+  "Responses finalization did not return a non-empty assistant answer."
 
 #define HARNESS_COMBINED_AUDIT_MESSAGE \
   HARNESS_AUDIT_HEADER "\n\n- " HARNESS_DATABASE_CONTEXT_AUDIT_MESSAGE \
@@ -804,7 +807,8 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_RETRY = 4,
   HARNESS_RESPONSES_SERVER_RETRY_AFTER = 5,
   HARNESS_RESPONSES_SERVER_SLOW = 6,
-  HARNESS_RESPONSES_SERVER_EMPTY_AUDIT_FINALIZATION = 7
+  HARNESS_RESPONSES_SERVER_EMPTY_AUDIT_FINALIZATION = 7,
+  HARNESS_RESPONSES_SERVER_EMPTY_FINAL_WITHOUT_AUDIT = 8
 } harness_responses_server_scenario;
 
 static int harness_send_all(int socket_fd,
@@ -1276,7 +1280,7 @@ static int harness_finalization_request_is_valid(cJSON *root,
     (strcmp(round->valuestring, expected_round) == 0) &&
     cJSON_IsArray(input) && (input_count >= 3) &&
     harness_message_role_is(developer, "developer") &&
-    (text != NULL) && (strcmp(text, HARNESS_AUDIT_FOOTER) == 0) &&
+    (text != NULL) && (strcmp(text, HARNESS_EMPTY_ANSWER) == 0) &&
     cJSON_IsString(tool_choice) && (tool_choice->valuestring != NULL) &&
     (strcmp(tool_choice->valuestring, "none") == 0);
 }
@@ -1330,6 +1334,91 @@ static int harness_named_function_output_request_is_valid(
     (strcmp(call_id->valuestring, expected_call_id) == 0) &&
     cJSON_IsString(output) && (output->valuestring != NULL) &&
     (output->valuestring[0] != '\0');
+}
+
+static int harness_required_function_outputs_request_is_valid(
+  cJSON *root,
+  const char *session_key,
+  const char *prompt_group)
+{
+  static const char *names[] = {
+    "database_context_read",
+    "helper_session_name_write",
+    "helper_fontawesome_shortcode_confirm",
+    "memory_user_fact_remember",
+    "memory_database_hint_remember"
+  };
+  static const char *call_ids[] = {
+    "call-empty-context",
+    "call-empty-session",
+    "call-empty-icon",
+    "call-empty-user-fact",
+    "call-empty-database-hint"
+  };
+  cJSON *request_session;
+  cJSON *metadata;
+  cJSON *request_group;
+  cJSON *input;
+  size_t expected_index;
+
+  request_session = cJSON_GetObjectItem(root, "session_id");
+  metadata = cJSON_GetObjectItem(root, "metadata");
+  request_group = cJSON_GetObjectItem(metadata,
+                                      "strappy_prompt_group_key");
+  input = cJSON_GetObjectItem(root, "input");
+  if (!cJSON_IsString(request_session) ||
+      (request_session->valuestring == NULL) ||
+      (strcmp(request_session->valuestring, session_key) != 0) ||
+      !cJSON_IsString(request_group) ||
+      (request_group->valuestring == NULL) ||
+      (strcmp(request_group->valuestring, prompt_group) != 0) ||
+      !cJSON_IsArray(input) ||
+      !harness_message_role_is(cJSON_GetArrayItem(input, 0), "user")) {
+    return 0;
+  }
+
+  for (expected_index = 0U;
+       expected_index < (sizeof(names) / sizeof(names[0]));
+       expected_index++) {
+    cJSON *item;
+    int call_found;
+    int output_found;
+
+    call_found = 0;
+    output_found = 0;
+    for (item = input->child; item != NULL; item = item->next) {
+      cJSON *type;
+      cJSON *call_id;
+
+      type = cJSON_IsObject(item) ? cJSON_GetObjectItem(item, "type") : NULL;
+      call_id = cJSON_IsObject(item) ?
+        cJSON_GetObjectItem(item, "call_id") : NULL;
+      if (!cJSON_IsString(type) || (type->valuestring == NULL) ||
+          !cJSON_IsString(call_id) || (call_id->valuestring == NULL) ||
+          (strcmp(call_id->valuestring, call_ids[expected_index]) != 0)) {
+        continue;
+      }
+      if (strcmp(type->valuestring, "function_call") == 0) {
+        cJSON *name;
+
+        name = cJSON_GetObjectItem(item, "name");
+        call_found = cJSON_IsString(name) &&
+          (name->valuestring != NULL) &&
+          (strcmp(name->valuestring, names[expected_index]) == 0);
+      } else if (strcmp(type->valuestring, "function_call_output") == 0) {
+        cJSON *output;
+
+        output = cJSON_GetObjectItem(item, "output");
+        output_found = cJSON_IsString(output) &&
+          (output->valuestring != NULL) &&
+          (output->valuestring[0] != '\0');
+      }
+    }
+    if (!call_found || !output_found) {
+      return 0;
+    }
+  }
+  return 1;
 }
 
 static int harness_function_output_request_is_valid(cJSON *root,
@@ -1614,6 +1703,128 @@ static int harness_run_empty_audit_finalization_server(int listener_fd)
                                           prompt_group,
                                           "2") &&
     harness_send_json_response(client_fd, 200L, whitespace_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  free(session_key);
+  free(prompt_group);
+  return ok;
+}
+
+static int harness_run_empty_final_without_audit_server(int listener_fd)
+{
+  static const char *tool_response =
+    "{\"id\":\"resp-empty-no-audit-tools\",\"object\":\"response\","
+    "\"created_at\":1700000020,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{"
+    "\"type\":\"function_call\",\"id\":\"fc-empty-context\","
+    "\"call_id\":\"call-empty-context\","
+    "\"name\":\"database_context_read\",\"arguments\":\"{}\","
+    "\"status\":\"completed\"},{"
+    "\"type\":\"function_call\",\"id\":\"fc-empty-session\","
+    "\"call_id\":\"call-empty-session\","
+    "\"name\":\"helper_session_name_write\","
+    "\"arguments\":\"{\\\"name\\\":\\\"Empty Final Recovery\\\"}\","
+    "\"status\":\"completed\"},{"
+    "\"type\":\"function_call\",\"id\":\"fc-empty-icon\","
+    "\"call_id\":\"call-empty-icon\","
+    "\"name\":\"helper_fontawesome_shortcode_confirm\","
+    "\"arguments\":\"{\\\"shortcodes\\\":[\\\"fa:music\\\"]}\","
+    "\"status\":\"completed\"},{"
+    "\"type\":\"function_call\",\"id\":\"fc-empty-user-fact\","
+    "\"call_id\":\"call-empty-user-fact\","
+    "\"name\":\"memory_user_fact_remember\",\"arguments\":\"{}\","
+    "\"status\":\"completed\"},{"
+    "\"type\":\"function_call\",\"id\":\"fc-empty-database-hint\","
+    "\"call_id\":\"call-empty-database-hint\","
+    "\"name\":\"memory_database_hint_remember\","
+    "\"arguments\":\"{}\",\"status\":\"completed\"}],"
+    "\"usage\":{\"input_tokens\":4,\"output_tokens\":10,"
+    "\"total_tokens\":14}}";
+  static const char *reasoning_only_response =
+    "{\"id\":\"resp-empty-no-audit-reasoning\","
+    "\"object\":\"response\",\"created_at\":1700000021,"
+    "\"model\":\"test/model\",\"status\":\"completed\","
+    "\"output\":[{\"type\":\"reasoning\","
+    "\"id\":\"rs-empty-no-audit\",\"status\":\"completed\","
+    "\"content\":[{\"type\":\"reasoning_text\","
+    "\"text\":\"I should now provide the final answer.\"}],"
+    "\"summary\":[]}],\"usage\":{\"input_tokens\":14,"
+    "\"output_tokens\":4,\"total_tokens\":18}}";
+  static const char *final_response =
+    "{\"id\":\"resp-empty-no-audit-final\","
+    "\"object\":\"response\",\"created_at\":1700000022,"
+    "\"model\":\"test/model\",\"status\":\"completed\","
+    "\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-empty-no-audit-final\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{"
+    "\"type\":\"output_text\","
+    "\"text\":\"Recovered non-empty answer.\","
+    "\"annotations\":[]}]}],\"usage\":{\"input_tokens\":18,"
+    "\"output_tokens\":4,\"total_tokens\":22}}";
+  char *body;
+  char *session_key;
+  char *prompt_group;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  session_key = NULL;
+  prompt_group = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_request_base_is_valid(root,
+                                  "Recover empty final without audit",
+                                  &session_key,
+                                  &prompt_group) &&
+    harness_send_json_response(client_fd, 200L, tool_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_required_function_outputs_request_is_valid(root,
+                                                       session_key,
+                                                       prompt_group) &&
+    harness_send_json_response(client_fd, 200L, reasoning_only_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_finalization_request_is_valid(root,
+                                          session_key,
+                                          prompt_group,
+                                          "2") &&
+    harness_send_json_response(client_fd, 200L, final_response);
   cJSON_Delete(root);
   close(client_fd);
   free(session_key);
@@ -2080,6 +2291,9 @@ static int harness_start_server(harness_responses_server_scenario scenario,
     } else if (scenario ==
                HARNESS_RESPONSES_SERVER_EMPTY_AUDIT_FINALIZATION) {
       ok = harness_run_empty_audit_finalization_server(listener_fd);
+    } else if (scenario ==
+               HARNESS_RESPONSES_SERVER_EMPTY_FINAL_WITHOUT_AUDIT) {
+      ok = harness_run_empty_final_without_audit_server(listener_fd);
     } else {
       ok = harness_run_retry_server(listener_fd);
     }
@@ -2449,7 +2663,7 @@ static int harness_test_empty_audit_finalization_fails(void)
     &error);
   server_ok = harness_wait_for_server(server_pid, 0);
   ok = (result == NULL) && server_ok && (error != NULL) &&
-    (strcmp(error, HARNESS_EMPTY_AUDIT_FINALIZATION_ERROR) == 0);
+    (strcmp(error, HARNESS_EMPTY_FINALIZATION_ERROR) == 0);
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
@@ -2472,7 +2686,7 @@ static int harness_test_empty_audit_finalization_fails(void)
                         &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM sessions WHERE response='"
-                        HARNESS_EMPTY_AUDIT_FINALIZATION_ERROR "';",
+                        HARNESS_EMPTY_FINALIZATION_ERROR "';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM sessions WHERE "
@@ -2485,6 +2699,108 @@ static int harness_test_empty_audit_finalization_fails(void)
   if (!ok) {
     fprintf(stderr,
             "Empty audit finalization integration failed: %s\n",
+            (error != NULL) ? error : "request or ledger mismatch");
+  }
+  free(error);
+  unlink(path);
+  return ok;
+}
+
+static int harness_test_empty_final_without_audit_recovers(void)
+{
+  char path[] = "/tmp/strappy-responses-empty-no-audit-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *result;
+  sqlite3 *db;
+  long long session_id;
+  long long value;
+  pid_t server_pid;
+  int fd;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail(
+      "Could not create empty-final-without-audit harness database.");
+  }
+  close(fd);
+  error = NULL;
+  session_id = 0LL;
+  if (!harness_create_session_database(path, &session_id, &error) ||
+      !harness_start_server(
+        HARNESS_RESPONSES_SERVER_EMPTY_FINAL_WITHOUT_AUDIT,
+        endpoint,
+        sizeof(endpoint),
+        &server_pid)) {
+    fprintf(stderr,
+            "Could not prepare empty-final-without-audit test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  result = strappy_responses_send_prompt_for_session_and_store(
+    "Recover empty final without audit",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources/PromptSystem.txt",
+    path,
+    session_id,
+    &error);
+  server_ok = harness_wait_for_server(server_pid, result == NULL);
+  ok = (result != NULL) &&
+    (strcmp(result, "Recovered non-empty answer.") == 0) &&
+    server_ok && (error == NULL);
+  free(result);
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM response_api_calls;",
+                           &value) && (value == 3LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "request_kind='tool_audit';",
+                        &value) && (value == 0LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "request_kind='tool_continuation';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "request_kind='audit_finalize';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_tool_executions WHERE "
+                        "status='completed';",
+                        &value) && (value == 5LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(DISTINCT tool_name) FROM "
+                        "response_tool_executions WHERE tool_name IN ("
+                        "'database_context_read',"
+                        "'helper_session_name_write',"
+                        "'helper_fontawesome_shortcode_confirm',"
+                        "'memory_user_fact_remember',"
+                        "'memory_database_hint_remember');",
+                        &value) && (value == 5LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM response_api_items WHERE "
+                        "role='developer' AND is_canonical=1;",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM sessions WHERE "
+                        "response='Recovered non-empty answer.' AND "
+                        "name='Empty Final Recovery';",
+                        &value) && (value == 1LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Empty final without audit recovery failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
   free(error);
@@ -3467,6 +3783,7 @@ int main(void)
       harness_test_cumulative_session_usage_cost() &&
       harness_test_combined_tool_audit_once() &&
       harness_test_empty_audit_finalization_fails() &&
+      harness_test_empty_final_without_audit_recovers() &&
       harness_test_web_search_remains_outside_audit() &&
       harness_test_function_tool_continuation() &&
       harness_test_retry_attempt_ledger() &&

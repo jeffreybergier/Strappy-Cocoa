@@ -647,6 +647,7 @@ static int harness_run_audit_resource_tests(void)
   cJSON *rules;
   cJSON *audit_header;
   cJSON *audit_footer;
+  cJSON *empty_answer;
   cJSON *database_context_rule;
   cJSON *session_name_rule;
   cJSON *fontawesome_confirm_rule;
@@ -668,6 +669,8 @@ static int harness_run_audit_resource_tests(void)
     cJSON_GetObjectItem(root, "audit_header") : NULL;
   audit_footer = cJSON_IsObject(root) ?
     cJSON_GetObjectItem(root, "audit_footer") : NULL;
+  empty_answer = cJSON_IsObject(root) ?
+    cJSON_GetObjectItem(root, "empty_answer") : NULL;
   rules = cJSON_IsObject(root) ?
     cJSON_GetObjectItem(root, "tool_usage_priority") : NULL;
   database_context_rule = cJSON_GetArrayItem(rules, 0);
@@ -709,6 +712,11 @@ static int harness_run_audit_resource_tests(void)
     (strstr(audit_footer->valuestring, "standalone answer") != NULL) &&
     (strstr(audit_footer->valuestring, "original question") != NULL) &&
     (strstr(audit_footer->valuestring, "all fixes in place") != NULL) &&
+    cJSON_IsString(empty_answer) &&
+    (empty_answer->valuestring != NULL) &&
+    (strcmp(empty_answer->valuestring,
+            "Your answer was empty. Please answer the user's original "
+            "question.") == 0) &&
     rules_avoid_finalization &&
     cJSON_IsArray(rules) && (cJSON_GetArraySize(rules) == 5) &&
     harness_json_string_equals(database_context_rule,
