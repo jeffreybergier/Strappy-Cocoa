@@ -23,36 +23,39 @@
 #include "../shared/strappy_responses.h"
 #include "../shared/strappy_tools.h"
 
-#define HARNESS_DATABASE_QUERY_AUDIT_MESSAGE \
-  "database_query: If the user's question depends on personal data, query " \
-  "the relevant approved database now. Do not guess the user's data."
-
-#define HARNESS_WEB_SEARCH_AUDIT_MESSAGE \
-  "openrouter:web_search: You did not search the web. If the answer requires " \
-  "current public facts not available in the user's databases, search the " \
-  "web now."
+#define HARNESS_DATABASE_CONTEXT_AUDIT_MESSAGE \
+  "database_context_read: ALWAYS call this tool now. Read relevant approved " \
+  "database context before querying personal data. Otherwise call with no " \
+  "arguments to report that no database context was needed."
 
 #define HARNESS_SESSION_NAME_AUDIT_MESSAGE \
-  "helper_session_name_write: This session is still untitled. Give it a " \
-  "short, descriptive name now."
+  "helper_session_name_write: ALWAYS call this tool now. Update the session " \
+  "with a short, descriptive name for the user's latest prompt."
+
+#define HARNESS_FONTAWESOME_CONFIRM_AUDIT_MESSAGE \
+  "helper_fontawesome_shortcode_confirm: ALWAYS call this tool now. Confirm " \
+  "at least one Font Awesome version 7 Free shortcode to use in your answer. " \
+  "shortcodes must be a non-empty array; null and empty arrays are invalid. " \
+  "NEVER use unicode emoji in your answer."
 
 #define HARNESS_USER_FACT_AUDIT_MESSAGE \
-  "memory_user_fact_remember: If you learned a useful durable fact about the " \
-  "user, save it for use in future prompts. NEVER remember secrets or " \
-  "sensitive information."
+  "memory_user_fact_remember: ALWAYS call this tool now. Save any useful " \
+  "durable fact learned about the user for future prompts. Otherwise call " \
+  "with no arguments to report that there is nothing new to remember. NEVER " \
+  "remember secrets or sensitive information."
 
 #define HARNESS_DATABASE_HINT_AUDIT_MESSAGE \
-  "memory_database_hint_remember: If you queried a database AND learned " \
-  "important information about how to access the user's data, then call " \
-  "memory_database_hint_remember to save database query, schema, or hint " \
-  "information for use in future prompts. NEVER remember secrets, sensitive " \
+  "memory_database_hint_remember: ALWAYS call this tool now. Save any durable " \
+  "query, schema, or access information learned about an approved database " \
+  "for future prompts. Otherwise call with no arguments to report that there " \
+  "is nothing new to remember. NEVER remember user data, secrets, sensitive " \
   "information, guesses, or one-off query results."
 
 #define HARNESS_AUDIT_HEADER \
-  "Please call applicable tools below to improve the user experience:"
+  "You have been audited due to your failure to follow instructions:"
 
 #define HARNESS_AUDIT_FOOTER \
-  "After resolving every applicable item above, YOU MUST FINISH with a " \
+  "After fixing all of the issues above, YOU MUST FINISH with a " \
   "standalone answer to the user's original question with all fixes in place. " \
   "Answer the user directly, and do not mention the audit or tool activity."
 
@@ -60,24 +63,45 @@
   "Responses audit finalization did not return a non-empty assistant answer."
 
 #define HARNESS_COMBINED_AUDIT_MESSAGE \
-  HARNESS_AUDIT_HEADER "\n\n- " HARNESS_DATABASE_QUERY_AUDIT_MESSAGE \
-  "\n- " HARNESS_WEB_SEARCH_AUDIT_MESSAGE \
+  HARNESS_AUDIT_HEADER "\n\n- " HARNESS_DATABASE_CONTEXT_AUDIT_MESSAGE \
   "\n- " HARNESS_SESSION_NAME_AUDIT_MESSAGE \
-  "\n- " HARNESS_USER_FACT_AUDIT_MESSAGE \
-  "\n- " HARNESS_DATABASE_HINT_AUDIT_MESSAGE \
-  "\n\n" HARNESS_AUDIT_FOOTER
-
-#define HARNESS_COMBINED_AUDIT_WITHOUT_WEB_MESSAGE \
-  HARNESS_AUDIT_HEADER "\n\n- " HARNESS_DATABASE_QUERY_AUDIT_MESSAGE \
-  "\n- " HARNESS_SESSION_NAME_AUDIT_MESSAGE \
+  "\n- " HARNESS_FONTAWESOME_CONFIRM_AUDIT_MESSAGE \
   "\n- " HARNESS_USER_FACT_AUDIT_MESSAGE \
   "\n- " HARNESS_DATABASE_HINT_AUDIT_MESSAGE \
   "\n\n" HARNESS_AUDIT_FOOTER
 
 #define HARNESS_MEMORY_USER_FACT_REMEMBER_DESCRIPTION \
-  "ALWAYS call this tool to store durable facts learned from the user or " \
-  "their databases that will be useful to you in the future. NEVER store " \
-  "secrets or sensitive information."
+  "ALWAYS call this tool. Set fact to a useful durable user fact, or null if " \
+  "there is nothing new to remember. NEVER store secrets or sensitive " \
+  "information."
+
+#define HARNESS_DATABASE_QUERY_DESCRIPTION \
+  "ALWAYS query the relevant approved database before finalizing when the " \
+  "request depends on personal data. Do not guess the user's data."
+
+#define HARNESS_DATABASE_CONTEXT_READ_DESCRIPTION \
+  "ALWAYS call this tool before the final answer. Read relevant approved " \
+  "database context before calling database_query. Otherwise call with no " \
+  "arguments, null arguments, or empty strings to report that no database " \
+  "context was needed."
+
+#define HARNESS_SESSION_NAME_WRITE_DESCRIPTION \
+  "ALWAYS call this tool before the final answer. Update the session with a " \
+  "short, descriptive name for the user's latest prompt. A non-empty name " \
+  "is required; null and empty values are invalid."
+
+#define HARNESS_FONTAWESOME_CONFIRM_DESCRIPTION \
+  "ALWAYS call this tool before the final answer. Set shortcodes to a " \
+  "non-empty array of Font Awesome version 7 Free shortcodes to confirm " \
+  "before using them. Null and empty arrays are invalid. Render confirmed " \
+  "icons in answers with [fa:icon-shortcode-name] Markdown syntax. NEVER use " \
+  "unicode emoji."
+
+#define HARNESS_MEMORY_DATABASE_HINT_REMEMBER_DESCRIPTION \
+  "ALWAYS call this tool. Set database_id to the approved database ID and " \
+  "hint to useful durable query, schema, or access information, or set both " \
+  "to null if there is nothing new to remember. NEVER store user data, " \
+  "secrets, sensitive information, guesses, or one-off query results."
 
 #define HARNESS_DATETIME_FROM_ISO8601_DESCRIPTION \
   "ALWAYS call this tool when converting ISO 8601 datetimes to numeric " \
@@ -145,6 +169,288 @@ static int harness_tool_description_equals(cJSON *tools,
         (strcmp(description->valuestring, expected_description) == 0)) {
       return 1;
     }
+  }
+  return 0;
+}
+
+static int harness_schema_type_is_nullable(cJSON *property,
+                                           const char *expected_type)
+{
+  cJSON *type;
+  cJSON *item;
+  int saw_expected;
+  int saw_null;
+
+  if (expected_type == NULL) {
+    return 0;
+  }
+  type = cJSON_IsObject(property) ?
+    cJSON_GetObjectItem(property, "type") : NULL;
+  if (!cJSON_IsArray(type) || (cJSON_GetArraySize(type) != 2)) {
+    return 0;
+  }
+  saw_expected = 0;
+  saw_null = 0;
+  for (item = type->child; item != NULL; item = item->next) {
+    if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
+      return 0;
+    }
+    if (strcmp(item->valuestring, expected_type) == 0) {
+      saw_expected = 1;
+    } else if (strcmp(item->valuestring, "null") == 0) {
+      saw_null = 1;
+    } else {
+      return 0;
+    }
+  }
+  return saw_expected && saw_null;
+}
+
+static int harness_tool_has_optional_nullable_string_parameters(
+  cJSON *tools,
+  const char *expected_name,
+  const char *first_parameter,
+  const char *second_parameter)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools) || (expected_name == NULL) ||
+      (first_parameter == NULL)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *name;
+    cJSON *parameters;
+    cJSON *properties;
+    cJSON *required;
+    cJSON *additional_properties;
+    int expected_count;
+
+    name = cJSON_GetObjectItem(tool, "name");
+    if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
+        (strcmp(name->valuestring, expected_name) != 0)) {
+      continue;
+    }
+    parameters = cJSON_GetObjectItem(tool, "parameters");
+    properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItem(parameters, "properties") : NULL;
+    required = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItem(parameters, "required") : NULL;
+    additional_properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItem(parameters, "additionalProperties") : NULL;
+    expected_count = (second_parameter != NULL) ? 2 : 1;
+    if (!cJSON_IsObject(properties) ||
+        (cJSON_GetArraySize(properties) != expected_count) ||
+        !cJSON_IsArray(required) || (cJSON_GetArraySize(required) != 0) ||
+        !cJSON_IsFalse(additional_properties) ||
+        !harness_schema_type_is_nullable(
+          cJSON_GetObjectItem(properties, first_parameter), "string")) {
+      return 0;
+    }
+    return (second_parameter == NULL) ||
+      harness_schema_type_is_nullable(
+        cJSON_GetObjectItem(properties, second_parameter), "string");
+  }
+  return 0;
+}
+
+static int harness_database_context_parameters_are_optional_nullable(
+  cJSON *tools)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *name;
+    cJSON *parameters;
+    cJSON *properties;
+    cJSON *required;
+    cJSON *additional_properties;
+
+    name = cJSON_GetObjectItem(tool, "name");
+    if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
+        (strcmp(name->valuestring, STRAPPY_TOOL_DATABASE_CONTEXT_READ) != 0)) {
+      continue;
+    }
+    parameters = cJSON_GetObjectItem(tool, "parameters");
+    properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItem(parameters, "properties") : NULL;
+    required = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItem(parameters, "required") : NULL;
+    additional_properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItem(parameters, "additionalProperties") : NULL;
+    return cJSON_IsObject(properties) &&
+      (cJSON_GetArraySize(properties) == 4) &&
+      cJSON_IsArray(required) && (cJSON_GetArraySize(required) == 0) &&
+      (cJSON_GetObjectItem(parameters, "minProperties") == NULL) &&
+      cJSON_IsFalse(additional_properties) &&
+      harness_schema_type_is_nullable(
+        cJSON_GetObjectItem(properties, "database_id"), "string") &&
+      harness_schema_type_is_nullable(
+        cJSON_GetObjectItem(properties, "query"), "string") &&
+      harness_schema_type_is_nullable(
+        cJSON_GetObjectItem(properties, "kind"), "string") &&
+      harness_schema_type_is_nullable(
+        cJSON_GetObjectItem(properties, "limit"), "integer");
+  }
+  return 0;
+}
+
+static int harness_array_contains_string(cJSON *array, const char *expected)
+{
+  cJSON *item;
+
+  if (!cJSON_IsArray(array) || (expected == NULL)) {
+    return 0;
+  }
+  for (item = array->child; item != NULL; item = item->next) {
+    if (cJSON_IsString(item) && (item->valuestring != NULL) &&
+        (strcmp(item->valuestring, expected) == 0)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int harness_database_query_parameters_are_required_strings(cJSON *tools)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *name;
+    cJSON *parameters;
+    cJSON *properties;
+    cJSON *database_id;
+    cJSON *sql;
+    cJSON *database_id_type;
+    cJSON *sql_type;
+    cJSON *required;
+
+    name = cJSON_GetObjectItem(tool, "name");
+    if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
+        (strcmp(name->valuestring, STRAPPY_TOOL_DATABASE_QUERY) != 0)) {
+      continue;
+    }
+    parameters = cJSON_GetObjectItem(tool, "parameters");
+    properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItem(parameters, "properties") : NULL;
+    database_id = cJSON_IsObject(properties) ?
+      cJSON_GetObjectItem(properties, "database_id") : NULL;
+    sql = cJSON_IsObject(properties) ?
+      cJSON_GetObjectItem(properties, "sql") : NULL;
+    database_id_type = cJSON_IsObject(database_id) ?
+      cJSON_GetObjectItem(database_id, "type") : NULL;
+    sql_type = cJSON_IsObject(sql) ? cJSON_GetObjectItem(sql, "type") : NULL;
+    required = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItem(parameters, "required") : NULL;
+    return cJSON_IsObject(properties) &&
+      (cJSON_GetArraySize(properties) == 2) &&
+      cJSON_IsString(database_id_type) &&
+      (database_id_type->valuestring != NULL) &&
+      (strcmp(database_id_type->valuestring, "string") == 0) &&
+      cJSON_IsString(sql_type) && (sql_type->valuestring != NULL) &&
+      (strcmp(sql_type->valuestring, "string") == 0) &&
+      cJSON_IsArray(required) && (cJSON_GetArraySize(required) == 2) &&
+      harness_array_contains_string(required, "database_id") &&
+      harness_array_contains_string(required, "sql");
+  }
+  return 0;
+}
+
+static int harness_tool_has_required_string_parameter(cJSON *tools,
+                                                      const char *tool_name,
+                                                      const char *parameter_name)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools) || (tool_name == NULL) ||
+      (parameter_name == NULL)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *name;
+    cJSON *parameters;
+    cJSON *properties;
+    cJSON *property;
+    cJSON *type;
+    cJSON *required;
+
+    name = cJSON_GetObjectItem(tool, "name");
+    if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
+        (strcmp(name->valuestring, tool_name) != 0)) {
+      continue;
+    }
+    parameters = cJSON_GetObjectItem(tool, "parameters");
+    properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItem(parameters, "properties") : NULL;
+    property = cJSON_IsObject(properties) ?
+      cJSON_GetObjectItem(properties, parameter_name) : NULL;
+    type = cJSON_IsObject(property) ?
+      cJSON_GetObjectItem(property, "type") : NULL;
+    required = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItem(parameters, "required") : NULL;
+    return cJSON_IsString(type) && (type->valuestring != NULL) &&
+      (strcmp(type->valuestring, "string") == 0) &&
+      cJSON_IsArray(required) &&
+      harness_array_contains_string(required, parameter_name);
+  }
+  return 0;
+}
+
+static int harness_tool_has_required_nonempty_string_array_parameter(
+  cJSON *tools,
+  const char *tool_name,
+  const char *parameter_name)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools) || (tool_name == NULL) ||
+      (parameter_name == NULL)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *name;
+    cJSON *parameters;
+    cJSON *properties;
+    cJSON *property;
+    cJSON *type;
+    cJSON *items;
+    cJSON *item_type;
+    cJSON *min_items;
+    cJSON *required;
+
+    name = cJSON_GetObjectItem(tool, "name");
+    if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
+        (strcmp(name->valuestring, tool_name) != 0)) {
+      continue;
+    }
+    parameters = cJSON_GetObjectItem(tool, "parameters");
+    properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItem(parameters, "properties") : NULL;
+    property = cJSON_IsObject(properties) ?
+      cJSON_GetObjectItem(properties, parameter_name) : NULL;
+    type = cJSON_IsObject(property) ?
+      cJSON_GetObjectItem(property, "type") : NULL;
+    items = cJSON_IsObject(property) ?
+      cJSON_GetObjectItem(property, "items") : NULL;
+    item_type = cJSON_IsObject(items) ?
+      cJSON_GetObjectItem(items, "type") : NULL;
+    min_items = cJSON_IsObject(property) ?
+      cJSON_GetObjectItem(property, "minItems") : NULL;
+    required = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItem(parameters, "required") : NULL;
+    return cJSON_IsString(type) && (type->valuestring != NULL) &&
+      (strcmp(type->valuestring, "array") == 0) &&
+      cJSON_IsString(item_type) && (item_type->valuestring != NULL) &&
+      (strcmp(item_type->valuestring, "string") == 0) &&
+      cJSON_IsNumber(min_items) && (min_items->valueint == 1) &&
+      cJSON_IsArray(required) &&
+      harness_array_contains_string(required, parameter_name);
   }
   return 0;
 }
@@ -236,6 +542,10 @@ static int harness_test_request_surfaces(void)
             "Call this tool to view available databases") == 0) &&
     harness_tool_description_equals(
       tools,
+      STRAPPY_TOOL_DATABASE_QUERY,
+      HARNESS_DATABASE_QUERY_DESCRIPTION) &&
+    harness_tool_description_equals(
+      tools,
       STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
       HARNESS_DATETIME_FROM_ISO8601_DESCRIPTION) &&
     harness_tool_description_equals(
@@ -246,6 +556,42 @@ static int harness_test_request_surfaces(void)
       tools,
       STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
       HARNESS_MEMORY_USER_FACT_FORGET_DESCRIPTION) &&
+    harness_tool_description_equals(
+      tools,
+      STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+      HARNESS_MEMORY_DATABASE_HINT_REMEMBER_DESCRIPTION) &&
+    harness_tool_description_equals(
+      tools,
+      STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+      HARNESS_DATABASE_CONTEXT_READ_DESCRIPTION) &&
+    harness_tool_description_equals(
+      tools,
+      STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+      HARNESS_SESSION_NAME_WRITE_DESCRIPTION) &&
+    harness_tool_description_equals(
+      tools,
+      STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+      HARNESS_FONTAWESOME_CONFIRM_DESCRIPTION) &&
+    harness_database_query_parameters_are_required_strings(tools) &&
+    harness_tool_has_required_string_parameter(
+      tools,
+      STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+      "name") &&
+    harness_tool_has_required_nonempty_string_array_parameter(
+      tools,
+      STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+      "shortcodes") &&
+    harness_database_context_parameters_are_optional_nullable(tools) &&
+    harness_tool_has_optional_nullable_string_parameters(
+      tools,
+      STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+      "fact",
+      NULL) &&
+    harness_tool_has_optional_nullable_string_parameters(
+      tools,
+      STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+      "database_id",
+      "hint") &&
     harness_tools_hide_local_display_metadata(tools) &&
     harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
     harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
@@ -1341,7 +1687,7 @@ static int harness_run_server_tool_server(int listener_fd)
                                    session_key,
                                    prompt_group,
                                    "1",
-                                   HARNESS_COMBINED_AUDIT_WITHOUT_WEB_MESSAGE,
+                                   HARNESS_COMBINED_AUDIT_MESSAGE,
                                    "auto") &&
     harness_send_json_response(client_fd, 200L, second_response);
   cJSON_Delete(root);
@@ -1446,7 +1792,7 @@ static int harness_run_function_tool_server(int listener_fd)
                                    session_key,
                                    prompt_group,
                                    "2",
-                                   HARNESS_COMBINED_AUDIT_WITHOUT_WEB_MESSAGE,
+                                   HARNESS_COMBINED_AUDIT_MESSAGE,
                                    "auto") &&
     harness_send_json_response(client_fd, 200L, combined_audit_response);
   cJSON_Delete(root);
@@ -1895,13 +2241,30 @@ static int harness_test_combined_tool_audit_once(void)
     STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
     "{\"fact\":\"The user's favorite color is purple.\"}",
     &error);
+  if (seed_output == NULL) {
+    fprintf(stderr,
+            "Could not prepare tool-audit integration test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(database_path);
+    unlink(path);
+    return 0;
+  }
+  free(seed_output);
+  seed_output = strappy_tools_execute(
+    path,
+    session_id,
+    "../shared/Resources",
+    STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+    "{\"name\":\"Earlier Request\"}",
+    &error);
   if ((seed_output == NULL) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_TOOL_AUDIT,
                             endpoint,
                             sizeof(endpoint),
                             &server_pid)) {
     fprintf(stderr,
-            "Could not prepare tool-audit integration test: %s\n",
+            "Could not prepare titled tool-audit integration test: %s\n",
             (error != NULL) ? error : "server setup failed");
     free(seed_output);
     free(error);
@@ -1983,6 +2346,10 @@ static int harness_test_combined_tool_audit_once(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM sessions WHERE "
                         "response='Combined audited answer.';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM sessions WHERE "
+                        "name='Audit Recovery';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM response_api_items WHERE "
@@ -2125,7 +2492,7 @@ static int harness_test_empty_audit_finalization_fails(void)
   return ok;
 }
 
-static int harness_test_unrelated_server_tool_does_not_satisfy_audit(void)
+static int harness_test_web_search_remains_outside_audit(void)
 {
   char path[] = "/tmp/strappy-responses-server-tool-XXXXXX";
   char endpoint[128];
@@ -2198,7 +2565,7 @@ static int harness_test_unrelated_server_tool_does_not_satisfy_audit(void)
   }
   if (!ok) {
     fprintf(stderr,
-            "Unrelated server-tool audit failed: %s\n",
+            "Web-search audit exclusion failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
   free(error);
@@ -3100,7 +3467,7 @@ int main(void)
       harness_test_cumulative_session_usage_cost() &&
       harness_test_combined_tool_audit_once() &&
       harness_test_empty_audit_finalization_fails() &&
-      harness_test_unrelated_server_tool_does_not_satisfy_audit() &&
+      harness_test_web_search_remains_outside_audit() &&
       harness_test_function_tool_continuation() &&
       harness_test_retry_attempt_ledger() &&
       harness_test_active_request_cancellation() &&

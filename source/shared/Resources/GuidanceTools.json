@@ -157,7 +157,7 @@
       "type": "function",
       "function": {
         "name": "helper_fontawesome_shortcode_confirm",
-        "description": "ALWAYS confirm that Font Awesome version 7 Free shortcodes exist before using them. Render confirmed icons in answers with [fa:icon-shortcode-name] Markdown syntax instead of Unicode emoji.",
+        "description": "ALWAYS call this tool before the final answer. Set shortcodes to a non-empty array of Font Awesome version 7 Free shortcodes to confirm before using them. Null and empty arrays are invalid. Render confirmed icons in answers with [fa:icon-shortcode-name] Markdown syntax. NEVER use unicode emoji.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -211,17 +211,18 @@
       "type": "function",
       "function": {
         "name": "memory_user_fact_remember",
-        "description": "ALWAYS call this tool to store durable facts learned from the user or their databases that will be useful to you in the future. NEVER store secrets or sensitive information.",
+        "description": "ALWAYS call this tool. Set fact to a useful durable user fact, or null if there is nothing new to remember. NEVER store secrets or sensitive information.",
         "parameters": {
           "type": "object",
           "properties": {
             "fact": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
-          "required": [
-            "fact"
-          ],
+          "required": [],
           "additionalProperties": false
         }
       },
@@ -256,7 +257,7 @@
       "type": "function",
       "function": {
         "name": "helper_session_name_write",
-        "description": "ALWAYS give the session a short, descriptive name.",
+        "description": "ALWAYS call this tool before the final answer. Update the session with a short, descriptive name for the user's latest prompt. A non-empty name is required; null and empty values are invalid.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -278,25 +279,36 @@
       "type": "function",
       "function": {
         "name": "database_context_read",
-        "description": "ALWAYS call this tool before calling database_query to avoid making mistakes when reading databases.",
+        "description": "ALWAYS call this tool before the final answer. Read relevant approved database context before calling database_query. Otherwise call with no arguments, null arguments, or empty strings to report that no database context was needed.",
         "parameters": {
           "type": "object",
           "properties": {
             "database_id": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "query": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "kind": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "limit": {
-              "type": "integer"
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           },
           "required": [],
-          "minProperties": 1,
           "additionalProperties": false
         }
       },
@@ -309,21 +321,24 @@
       "type": "function",
       "function": {
         "name": "memory_database_hint_remember",
-        "description": "ALWAYS call this tool to store durable information that will help you query a database in the future. NEVER store user data with this tool.",
+        "description": "ALWAYS call this tool. Set database_id to the approved database ID and hint to useful durable query, schema, or access information, or set both to null if there is nothing new to remember. NEVER store user data, secrets, sensitive information, guesses, or one-off query results.",
         "parameters": {
           "type": "object",
           "properties": {
             "database_id": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "hint": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
-          "required": [
-            "database_id",
-            "hint"
-          ],
+          "required": [],
           "additionalProperties": false
         }
       },

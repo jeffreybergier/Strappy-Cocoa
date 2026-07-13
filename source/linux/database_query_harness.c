@@ -647,11 +647,16 @@ static int harness_run_audit_resource_tests(void)
   cJSON *rules;
   cJSON *audit_header;
   cJSON *audit_footer;
+  cJSON *database_context_rule;
+  cJSON *session_name_rule;
+  cJSON *fontawesome_confirm_rule;
   cJSON *user_fact_rule;
   cJSON *database_hint_rule;
+  cJSON *database_context_message;
+  cJSON *session_name_message;
+  cJSON *fontawesome_confirm_message;
   cJSON *user_fact_message;
   cJSON *database_hint_message;
-  cJSON *database_hint_when;
   cJSON *rule;
   cJSON *message;
   int index;
@@ -665,14 +670,21 @@ static int harness_run_audit_resource_tests(void)
     cJSON_GetObjectItem(root, "audit_footer") : NULL;
   rules = cJSON_IsObject(root) ?
     cJSON_GetObjectItem(root, "tool_usage_priority") : NULL;
+  database_context_rule = cJSON_GetArrayItem(rules, 0);
+  session_name_rule = cJSON_GetArrayItem(rules, 1);
+  fontawesome_confirm_rule = cJSON_GetArrayItem(rules, 2);
   user_fact_rule = cJSON_GetArrayItem(rules, 3);
   database_hint_rule = cJSON_GetArrayItem(rules, 4);
+  database_context_message = cJSON_IsObject(database_context_rule) ?
+    cJSON_GetObjectItem(database_context_rule, "if_not_called") : NULL;
+  session_name_message = cJSON_IsObject(session_name_rule) ?
+    cJSON_GetObjectItem(session_name_rule, "if_not_called") : NULL;
+  fontawesome_confirm_message = cJSON_IsObject(fontawesome_confirm_rule) ?
+    cJSON_GetObjectItem(fontawesome_confirm_rule, "if_not_called") : NULL;
   user_fact_message = cJSON_IsObject(user_fact_rule) ?
     cJSON_GetObjectItem(user_fact_rule, "if_not_called") : NULL;
   database_hint_message = cJSON_IsObject(database_hint_rule) ?
     cJSON_GetObjectItem(database_hint_rule, "if_not_called") : NULL;
-  database_hint_when = cJSON_IsObject(database_hint_rule) ?
-    cJSON_GetObjectItem(database_hint_rule, "when") : NULL;
   rules_avoid_finalization = cJSON_IsArray(rules) ? 1 : 0;
   for (index = 0;
        rules_avoid_finalization && (index < cJSON_GetArraySize(rules));
@@ -688,51 +700,77 @@ static int harness_run_audit_resource_tests(void)
 
   ok = cJSON_IsString(audit_header) &&
     (audit_header->valuestring != NULL) &&
-    (strstr(audit_header->valuestring, "applicable tools below") != NULL) &&
+    (strstr(audit_header->valuestring,
+            "audited due to your failure to follow instructions") != NULL) &&
     cJSON_IsString(audit_footer) &&
     (audit_footer->valuestring != NULL) &&
     (strstr(audit_footer->valuestring,
-            "After resolving every applicable item above") != NULL) &&
+            "After fixing all of the issues above") != NULL) &&
     (strstr(audit_footer->valuestring, "standalone answer") != NULL) &&
     (strstr(audit_footer->valuestring, "original question") != NULL) &&
     (strstr(audit_footer->valuestring, "all fixes in place") != NULL) &&
     rules_avoid_finalization &&
     cJSON_IsArray(rules) && (cJSON_GetArraySize(rules) == 5) &&
-    harness_json_string_equals(cJSON_GetArrayItem(rules, 0),
+    harness_json_string_equals(database_context_rule,
                                "tool_name",
-                               STRAPPY_TOOL_DATABASE_QUERY) &&
-    harness_json_string_equals(cJSON_GetArrayItem(rules, 1),
-                               "tool_name",
-                               "openrouter:web_search") &&
-    harness_json_string_equals(cJSON_GetArrayItem(rules, 2),
+                               STRAPPY_TOOL_DATABASE_CONTEXT_READ) &&
+    (cJSON_GetObjectItem(database_context_rule, "when") == NULL) &&
+    cJSON_IsString(database_context_message) &&
+    (database_context_message->valuestring != NULL) &&
+    (strstr(database_context_message->valuestring, "ALWAYS call") != NULL) &&
+    (strstr(database_context_message->valuestring,
+            "no database context was needed") != NULL) &&
+    harness_json_string_equals(session_name_rule,
                                "tool_name",
                                STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) &&
+    (cJSON_GetObjectItem(session_name_rule, "when") == NULL) &&
+    cJSON_IsString(session_name_message) &&
+    (session_name_message->valuestring != NULL) &&
+    (strstr(session_name_message->valuestring, "ALWAYS call") != NULL) &&
+    (strstr(session_name_message->valuestring,
+            "latest prompt") != NULL) &&
+    harness_json_string_equals(
+      fontawesome_confirm_rule,
+      "tool_name",
+      STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM) &&
+    (cJSON_GetObjectItem(fontawesome_confirm_rule, "when") == NULL) &&
+    cJSON_IsString(fontawesome_confirm_message) &&
+    (fontawesome_confirm_message->valuestring != NULL) &&
+    (strstr(fontawesome_confirm_message->valuestring,
+            "ALWAYS call") != NULL) &&
+    (strstr(fontawesome_confirm_message->valuestring,
+            "non-empty array") != NULL) &&
+    (strstr(fontawesome_confirm_message->valuestring,
+            "null and empty arrays are invalid") != NULL) &&
+    (strstr(fontawesome_confirm_message->valuestring,
+            "NEVER use unicode emoji") != NULL) &&
     harness_json_string_equals(user_fact_rule,
                                "tool_name",
                                STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) &&
     (cJSON_GetObjectItem(user_fact_rule, "when") == NULL) &&
     cJSON_IsString(user_fact_message) &&
     (user_fact_message->valuestring != NULL) &&
-    (strcmp(user_fact_message->valuestring,
-            "memory_user_fact_remember: If you learned a useful durable fact "
-            "about the user, save it for use in future prompts. NEVER remember "
-            "secrets or sensitive information.") == 0) &&
+    (strstr(user_fact_message->valuestring, "ALWAYS call") != NULL) &&
+    (strstr(user_fact_message->valuestring,
+            "nothing new to remember") != NULL) &&
+    (strstr(user_fact_message->valuestring,
+            "NEVER remember secrets or sensitive information") != NULL) &&
     harness_json_string_equals(database_hint_rule,
                                "tool_name",
                                STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
+    (cJSON_GetObjectItem(database_hint_rule, "when") == NULL) &&
     cJSON_IsString(database_hint_message) &&
     (database_hint_message->valuestring != NULL) &&
     (strstr(database_hint_message->valuestring,
-            "database query, schema, or hint information") != NULL) &&
+            "ALWAYS call") != NULL) &&
     (strstr(database_hint_message->valuestring,
-            "use in future prompts") != NULL) &&
+            "query, schema, or access information") != NULL) &&
     (strstr(database_hint_message->valuestring,
-            "NEVER remember secrets, sensitive information") != NULL) &&
+            "nothing new to remember") != NULL) &&
     (strstr(database_hint_message->valuestring,
-            "guesses, or one-off query results") != NULL) &&
-    harness_json_string_equals(database_hint_when,
-                               "tool_called",
-                               STRAPPY_TOOL_DATABASE_QUERY);
+            "NEVER remember user data, secrets, sensitive information") != NULL) &&
+    (strstr(database_hint_message->valuestring,
+            "guesses, or one-off query results") != NULL);
   cJSON_Delete(root);
   if (!ok) {
     fprintf(stderr, "Audit guidance order or memory safeguards are invalid.\n");
@@ -1091,10 +1129,11 @@ static int harness_create_mail_database(const harness_context *context,
   return ok;
 }
 
-static int harness_expect_error_contains(const char *catalog_path,
-                                         const char *tool_name,
-                                         const char *arguments_json,
-                                         const char *needle)
+static int harness_expect_session_error_contains(const char *catalog_path,
+                                                 long long session_id,
+                                                 const char *tool_name,
+                                                 const char *arguments_json,
+                                                 const char *needle)
 {
   char *error;
   char *output;
@@ -1102,7 +1141,7 @@ static int harness_expect_error_contains(const char *catalog_path,
 
   error = NULL;
   output = strappy_tools_execute(catalog_path,
-                                 0LL,
+                                 session_id,
                                  HARNESS_RESOURCE_DIR,
                                  tool_name,
                                  arguments_json,
@@ -1123,6 +1162,18 @@ static int harness_expect_error_contains(const char *catalog_path,
 
   free(error);
   return ok;
+}
+
+static int harness_expect_error_contains(const char *catalog_path,
+                                         const char *tool_name,
+                                         const char *arguments_json,
+                                         const char *needle)
+{
+  return harness_expect_session_error_contains(catalog_path,
+                                               0LL,
+                                               tool_name,
+                                               arguments_json,
+                                               needle);
 }
 
 static int harness_expect_output_contains(const char *catalog_path,
@@ -1569,16 +1620,34 @@ static int harness_run_tool_registry_tests(void)
                 "ALWAYS use Font Awesome version 7 Free tools and shortcodes "
                 "for visual expression instead of Unicode emoji.") != NULL) &&
         (strstr(tools_json,
-                "ALWAYS confirm that Font Awesome version 7 Free shortcodes "
-                "exist before using them.") != NULL) &&
+                "ALWAYS call this tool before the final answer. Set "
+                "shortcodes to a non-empty array of Font Awesome version 7 "
+                "Free shortcodes to confirm before using them. Null and "
+                "empty arrays are invalid.") != NULL) &&
+        (strstr(tools_json, "NEVER use unicode emoji.") != NULL) &&
         (strstr(tools_json,
-                "ALWAYS give the session a short, descriptive name.") !=
+                "ALWAYS call this tool before the final answer. Update the "
+                "session with a short, descriptive name for the user's "
+                "latest prompt. A non-empty name is required; null and empty "
+                "values are invalid.") !=
         NULL) &&
         (strstr(tools_json,
-                "ALWAYS call this tool to store durable facts learned from the "
-                "user or their databases that will be useful to you in the "
-                "future. NEVER store secrets or sensitive information.") !=
+                "ALWAYS call this tool. Set fact to a useful durable user "
+                "fact, or null if there is nothing new to remember.") !=
          NULL) &&
+        (strstr(tools_json,
+                "ALWAYS call this tool. Set database_id to the approved "
+                "database ID and hint to useful durable query, schema, or "
+                "access information, or set both to null if there is nothing "
+                "new to remember.") !=
+         NULL) &&
+        (strstr(tools_json,
+                "ALWAYS call this tool before the final answer. Read relevant "
+                "approved database context before calling database_query.") !=
+         NULL) &&
+        (strstr(tools_json,
+                "empty strings to report that no database context was "
+                "needed.") != NULL) &&
         (strstr(tools_json,
                 "Call this tool to forget durable facts that are no longer "
                 "correct or useful.") != NULL) &&
@@ -1810,6 +1879,31 @@ static int harness_run_helper_fontawesome_tests(void)
   }
 
   if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        NULL,
+        "requires a shortcodes array") ||
+      !harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        "null",
+        "must be a JSON object") ||
+      !harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        "{}",
+        "requires a shortcodes array") ||
+      !harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        "{\"shortcodes\":null}",
+        "requires a shortcodes array") ||
+      !harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        "{\"shortcodes\":[]}",
+        "shortcodes must contain 1 to") ||
+      !harness_expect_error_contains(
         NULL,
         STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
         "{\"shortcodes\":\"[fa:heart]\"}",
@@ -3094,6 +3188,34 @@ static int harness_run_database_query_tests(const harness_context *context)
     return 0;
   }
 
+  if (!harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_QUERY,
+        NULL,
+        "requires database_id and sql arguments") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_QUERY,
+        "null",
+        "must be a JSON object") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_QUERY,
+        "{}",
+        "requires non-empty database_id and sql strings") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_QUERY,
+        "{\"database_id\":null,\"sql\":null}",
+        "requires non-empty database_id and sql strings") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_QUERY,
+        "{\"database_id\":null,\"sql\":\"SELECT 1\"}",
+        "requires non-empty database_id and sql strings")) {
+    return 0;
+  }
+
   if (!harness_build_query_arguments(
         arguments,
         sizeof(arguments),
@@ -3436,6 +3558,10 @@ static int harness_run_wide_schema_database_query_test(
 
 static int harness_run_helper_info_tests(const harness_context *context)
 {
+  static const char *noop_result =
+    "{\"ok\":true,\"remembered\":false,\"reason\":\"nothing_new\"}";
+  static const char *context_noop_result =
+    "{\"ok\":true,\"read\":false,\"reason\":\"no_database_needed\"}";
   char arguments[4096];
   int written;
 
@@ -3443,17 +3569,80 @@ static int harness_run_helper_info_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_error_contains(context->catalog_path,
-                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-                                     NULL,
-                                     "requires at least one argument")) {
+  if (!harness_expect_output_equals(context->catalog_path,
+                                    STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                    NULL,
+                                    context_noop_result) ||
+      !harness_expect_output_equals(context->catalog_path,
+                                    STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                    "",
+                                    context_noop_result) ||
+      !harness_expect_output_equals(context->catalog_path,
+                                    STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                    "null",
+                                    context_noop_result) ||
+      !harness_expect_output_equals(context->catalog_path,
+                                    STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                    "\" NULL \"",
+                                    context_noop_result) ||
+      !harness_expect_output_equals(context->catalog_path,
+                                    STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                    "{}",
+                                    context_noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        "{\"database_id\":null,\"query\":null,\"kind\":null,\"limit\":null}",
+        context_noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        "{\"database_id\":\"null\",\"query\":\"NULL\","
+        "\"kind\":\" Null \",\"limit\":\"null\"}",
+        context_noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        "{\"database_id\":\"  \",\"query\":\"\\n\",\"kind\":\"\\t\"}",
+        context_noop_result)) {
     return 0;
   }
 
-  if (!harness_expect_error_contains(context->catalog_path,
-                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-                                     "{}",
-                                     "requires at least one argument")) {
+  if (!harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        NULL,
+        noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        "null",
+        noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        "\"null\"",
+        noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        "{}",
+        noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        "{\"fact\":null}",
+        noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        "{\"fact\":\" NULL \"}",
+        noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        "{\"fact\":\"  \\n\\t\"}",
+        noop_result)) {
     return 0;
   }
 
@@ -3495,6 +3684,62 @@ static int harness_run_helper_info_tests(const harness_context *context)
                                       "{\"query\":\"Jeff\"}",
                                       "\"facts\"",
                                       "\"count\":0")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        NULL,
+        noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        "null",
+        noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        "\"null\"",
+        noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        "{}",
+        noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        "{\"database_id\":null,\"hint\":null}",
+        noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        "{\"database_id\":\"null\",\"hint\":\"null\"}",
+        noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        "{\"database_id\":\"unused\",\"hint\":\" NULL \"}",
+        noop_result) ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        "{\"database_id\":\"unused\",\"hint\":\"\"}",
+        noop_result)) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        "{\"database_id\":null,\"hint\":\"Useful\"}",
+        "requires database_id when hint is provided") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        "{\"database_id\":\"null\",\"hint\":\"Useful\"}",
+        "requires database_id when hint is provided")) {
     return 0;
   }
 
@@ -3797,6 +4042,33 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
     return 0;
   }
 
+  if (!harness_expect_session_error_contains(
+        context->catalog_path,
+        session_id,
+        STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+        NULL,
+        "requires a non-empty name string") ||
+      !harness_expect_session_error_contains(
+        context->catalog_path,
+        session_id,
+        STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+        "{}",
+        "requires a non-empty name string") ||
+      !harness_expect_session_error_contains(
+        context->catalog_path,
+        session_id,
+        STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+        "{\"name\":null}",
+        "name must be a string") ||
+      !harness_expect_session_error_contains(
+        context->catalog_path,
+        session_id,
+        STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+        "{\"name\":\"\"}",
+        "requires a non-empty name string")) {
+    return 0;
+  }
+
   error = NULL;
   output = strappy_tools_execute(context->catalog_path,
                                  session_id,
@@ -3854,10 +4126,12 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
     strappy_free_string(error);
     return 0;
   }
-  ok = (strstr(output, "\"updated\":false") != NULL);
+  ok = (strstr(output, "\"name\":\"Different Title\"") != NULL) &&
+       (strstr(output, "\"updated\":true") != NULL) &&
+       (strstr(output, "\"status\":\"updated\"") != NULL);
   free(output);
   if (!ok) {
-    fprintf(stderr, "Second session name write unexpectedly updated.\n");
+    fprintf(stderr, "Second session name write did not report an update.\n");
     return 0;
   }
 
@@ -3868,17 +4142,17 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
                                &error);
   if (!ok) {
     fprintf(stderr,
-            "Could not load unchanged named session: %s\n",
+            "Could not load renamed session: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
     strappy_session_record_destroy(&session);
     return 0;
   }
   ok = (session.name != NULL) &&
-       (strcmp(session.name, "Find Receipts") == 0);
+       (strcmp(session.name, "Different Title") == 0);
   strappy_session_record_destroy(&session);
   if (!ok) {
-    fprintf(stderr, "Session name was unexpectedly changed.\n");
+    fprintf(stderr, "Session name was not updated.\n");
     return 0;
   }
 
@@ -3960,7 +4234,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   }
 
   ok = (session.name != NULL) &&
-       (strcmp(session.name, "Find Receipts") == 0) &&
+       (strcmp(session.name, "Different Title") == 0) &&
        (session.prompt != NULL) &&
        (strcmp(session.prompt, "First prompt") == 0) &&
        (session.response != NULL) &&

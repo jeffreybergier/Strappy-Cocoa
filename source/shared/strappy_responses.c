@@ -70,7 +70,6 @@ typedef struct strappy_responses_audit {
   char *audit_header;
   char *audit_footer;
   int session_name_empty;
-  int web_search_enabled;
   int message_sent;
 } strappy_responses_audit;
 
@@ -125,7 +124,6 @@ static void strappy_responses_audit_init(strappy_responses_audit *audit)
   audit->audit_header = NULL;
   audit->audit_footer = NULL;
   audit->session_name_empty = 0;
-  audit->web_search_enabled = 0;
   audit->message_sent = 0;
 }
 
@@ -258,7 +256,6 @@ static int strappy_responses_audit_has_rule(
 static int strappy_responses_audit_load(strappy_responses_audit *audit,
                                         const char *resource_dir,
                                         int session_name_empty,
-                                        int web_search_enabled,
                                         char **error_out)
 {
   char *path;
@@ -275,7 +272,6 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
   }
   strappy_responses_audit_destroy(audit);
   audit->session_name_empty = session_name_empty ? 1 : 0;
-  audit->web_search_enabled = web_search_enabled ? 1 : 0;
   path = strappy_responses_audit_resource_path(resource_dir, error_out);
   if (path == NULL) {
     return 0;
@@ -438,10 +434,6 @@ static int strappy_responses_audit_rule_can_be_selected(
 {
   if ((audit == NULL) || (rule == NULL) || rule->called ||
       (rule->when_session_name_empty && !audit->session_name_empty)) {
-    return 0;
-  }
-  if (!audit->web_search_enabled &&
-      (strcmp(rule->tool_name, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0)) {
     return 0;
   }
   return 1;
@@ -1831,7 +1823,6 @@ static int strappy_responses_prepare_runtime(
         &runtime->audit,
         runtime->config.guidance_resource_dir,
         session_name_empty,
-        runtime->config.web_search_enabled,
         error_out)) {
     strappy_responses_runtime_destroy(runtime);
     return 0;

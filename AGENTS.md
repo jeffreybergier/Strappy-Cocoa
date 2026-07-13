@@ -100,9 +100,10 @@ House style for Strappy source:
 15. Memory and session-title tools persist durable assistant state.
     `memory_user_fact_*` stores small stable user facts,
     `memory_database_hint_*` stores reusable evidence-backed database hints, and
-    `helper_session_name_write` names an untitled active session. Do not store
-    secrets, credentials, sensitive identifiers, long copied content, or private
-    row contents in memory.
+    `helper_session_name_write` updates the active session name for every user
+    prompt and requires a non-empty string name. Do not store secrets,
+    credentials, sensitive identifiers, long copied content, or private row
+    contents in memory.
 16. Active assistant history uses the Responses API ledger: every HTTP attempt
     has one `response_api_calls` row, and every typed input/output item has one
     ordered `response_api_items` row with its exact raw JSON retained. At a
@@ -111,13 +112,22 @@ House style for Strappy source:
     each rule's optional `when` conditions. Include a tool-conditioned rule
     prospectively when its prerequisite is another unresolved audit item, so it
     can still apply if that prerequisite tool is called while resolving the
-    combined audit. Do not include the web-search rule when web search is
-    disabled. Database inventory is an application-seeded preflight tool output
-    rather than a missing-tool rule; the database audit checks `database_query`.
-    User-fact and database-hint memory checks are last, and neither reminder may
-    encourage storing secrets or sensitive information. User-fact memory may
-    include useful durable facts learned from approved databases; database-hint
-    memory must not store private row values or one-off query results. Wrap the
+    combined audit. Web search is not a missing-tool audit rule. Database
+    inventory is an application-seeded preflight tool output rather than a
+    missing-tool rule. The audit always checks `database_context_read`,
+    `helper_session_name_write`, `helper_fontawesome_shortcode_confirm`,
+    `memory_user_fact_remember`, and `memory_database_hint_remember`. The
+    database-context and memory tools are report-or-act tools whose fully empty,
+    JSON-null, or quoted `"null"` arguments produce a successful no-op. The
+    session-name tool instead requires a non-empty string and updates the active
+    session name. The Font
+    Awesome confirmation tool requires a non-empty `shortcodes` array and does
+    not accept a null or empty-array no-op. `database_query` is not an audit rule
+    and still requires both an approved database id and read-only SQL. User-fact
+    and database-hint memory checks are last, and neither reminder may encourage
+    storing secrets or sensitive information. User-fact memory may include
+    useful durable facts learned from approved databases; database-hint memory
+    must not store private row values or one-off query results. Wrap the
     bullets with the `audit_header` and `audit_footer` guidance and append that
     combined message at most once in the same Responses history. Allow normal
     tool calls and tool-output continuations while resolving it. Once the

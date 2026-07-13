@@ -5714,24 +5714,18 @@ int strappy_db_delete_session(const char *db_path,
   return 1;
 }
 
-int strappy_db_update_session_name_if_empty(const char *db_path,
-                                            long long session_id,
-                                            const char *name,
-                                            int *did_update_out,
-                                            char **error_out)
+int strappy_db_update_session_name(const char *db_path,
+                                   long long session_id,
+                                   const char *name,
+                                   char **error_out)
 {
   static const char *sql =
     "UPDATE sessions "
     "SET name = ? "
-    "WHERE id = ? AND name = '';";
+    "WHERE id = ?;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;
-  int changed;
-
-  if (did_update_out != NULL) {
-    *did_update_out = 0;
-  }
 
   if ((name == NULL) || (name[0] == '\0')) {
     strappy_set_error(error_out, "Session name is empty.");
@@ -5780,11 +5774,6 @@ int strappy_db_update_session_name_if_empty(const char *db_path,
     sqlite3_finalize(stmt);
     sqlite3_close(db);
     return 0;
-  }
-
-  changed = sqlite3_changes(db);
-  if (did_update_out != NULL) {
-    *did_update_out = (changed > 0) ? 1 : 0;
   }
 
   sqlite3_finalize(stmt);

@@ -1,32 +1,26 @@
 {
-  "audit_header": "Please call applicable tools below to improve the user experience:",
-  "audit_footer": "After resolving every applicable item above, YOU MUST FINISH with a standalone answer to the user's original question with all fixes in place. Answer the user directly, and do not mention the audit or tool activity.",
+  "audit_header": "You have been audited due to your failure to follow instructions:",
+  "audit_footer": "After fixing all of the issues above, YOU MUST FINISH with a standalone answer to the user's original question with all fixes in place. Answer the user directly, and do not mention the audit or tool activity.",
   "tool_usage_priority": [
     {
-      "tool_name": "database_query",
-      "if_not_called": "database_query: If the user's question depends on personal data, query the relevant approved database now. Do not guess the user's data."
-    },
-    {
-      "tool_name": "openrouter:web_search",
-      "if_not_called": "openrouter:web_search: You did not search the web. If the answer requires current public facts not available in the user's databases, search the web now."
+      "tool_name": "database_context_read",
+      "if_not_called": "database_context_read: ALWAYS call this tool now. Read relevant approved database context before querying personal data. Otherwise call with no arguments to report that no database context was needed."
     },
     {
       "tool_name": "helper_session_name_write",
-      "if_not_called": "helper_session_name_write: This session is still untitled. Give it a short, descriptive name now.",
-      "when": {
-        "session_name_empty": true
-      }
+      "if_not_called": "helper_session_name_write: ALWAYS call this tool now. Update the session with a short, descriptive name for the user's latest prompt."
+    },
+    {
+      "tool_name": "helper_fontawesome_shortcode_confirm",
+      "if_not_called": "helper_fontawesome_shortcode_confirm: ALWAYS call this tool now. Confirm at least one Font Awesome version 7 Free shortcode to use in your answer. shortcodes must be a non-empty array; null and empty arrays are invalid. NEVER use unicode emoji in your answer."
     },
     {
       "tool_name": "memory_user_fact_remember",
-      "if_not_called": "memory_user_fact_remember: If you learned a useful durable fact about the user, save it for use in future prompts. NEVER remember secrets or sensitive information."
+      "if_not_called": "memory_user_fact_remember: ALWAYS call this tool now. Save any useful durable fact learned about the user for future prompts. Otherwise call with no arguments to report that there is nothing new to remember. NEVER remember secrets or sensitive information."
     },
     {
       "tool_name": "memory_database_hint_remember",
-      "if_not_called": "memory_database_hint_remember: If you queried a database AND learned important information about how to access the user's data, then call memory_database_hint_remember to save database query, schema, or hint information for use in future prompts. NEVER remember secrets, sensitive information, guesses, or one-off query results.",
-      "when": {
-        "tool_called": "database_query"
-      }
+      "if_not_called": "memory_database_hint_remember: ALWAYS call this tool now. Save any durable query, schema, or access information learned about an approved database for future prompts. Otherwise call with no arguments to report that there is nothing new to remember. NEVER remember user data, secrets, sensitive information, guesses, or one-off query results."
     }
   ]
 }
