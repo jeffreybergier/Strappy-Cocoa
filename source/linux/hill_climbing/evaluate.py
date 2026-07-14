@@ -220,6 +220,16 @@ def safe_json(value: str | None) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def safe_json_array(value: str | None) -> list[Any]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
 def fact_matches(candidate: Any, expected: dict[str, Any]) -> bool:
     if not isinstance(candidate, dict):
         return False
@@ -228,6 +238,14 @@ def fact_matches(candidate: Any, expected: dict[str, Any]) -> bool:
         == str(expected.get(field, "")).casefold()
         for field in ("kind", "subject", "predicate", "value")
     )
+
+
+def preflight_fact_matches(candidate: Any, expected: dict[str, Any]) -> bool:
+    if not isinstance(candidate, dict):
+        return False
+    return str(candidate.get("fact", "")).casefold() == str(
+        expected.get("value", "")
+    ).casefold()
 
 
 def artist_aliases(artist: str) -> tuple[str, ...]:
@@ -443,8 +461,8 @@ def score_session(
     )
     user_fact_preflight = bool(expected_user_fact) and any(
         any(
-            fact_matches(fact, expected_user_fact)
-            for fact in safe_json(output).get("facts", [])
+            preflight_fact_matches(fact, expected_user_fact)
+            for fact in safe_json_array(output)
         )
         for output in memory_preflight_outputs
     )

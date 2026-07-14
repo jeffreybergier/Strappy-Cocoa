@@ -79,6 +79,9 @@
   "there is nothing new to remember. NEVER store secrets or sensitive " \
   "information."
 
+#define HARNESS_MEMORY_USER_FACT_READ_DESCRIPTION \
+  "Call this tool to retrieve durable facts stored about the user."
+
 #define HARNESS_DATABASE_QUERY_DESCRIPTION \
   "ALWAYS query the relevant approved database before finalizing when the " \
   "request depends on personal data. Do not guess the user's data."
@@ -627,6 +630,10 @@ static int harness_test_request_surfaces(void)
       HARNESS_DATETIME_FROM_ISO8601_DESCRIPTION) &&
     harness_tool_description_equals(
       tools,
+      STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+      HARNESS_MEMORY_USER_FACT_READ_DESCRIPTION) &&
+    harness_tool_description_equals(
+      tools,
       STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
       HARNESS_MEMORY_USER_FACT_REMEMBER_DESCRIPTION) &&
     harness_tool_description_equals(
@@ -1151,7 +1158,9 @@ static int harness_preflight_call_is_valid(cJSON *item,
     (strcmp(arguments->valuestring, "{}") == 0);
 }
 
-static int harness_preflight_output_matches(cJSON *item, cJSON *call)
+static int harness_preflight_output_matches(cJSON *item,
+                                            cJSON *call,
+                                            int expect_array)
 {
   cJSON *type;
   cJSON *call_id;
@@ -1177,7 +1186,7 @@ static int harness_preflight_output_matches(cJSON *item, cJSON *call)
     return 0;
   }
   result = cJSON_Parse(output->valuestring);
-  ok = cJSON_IsObject(result);
+  ok = expect_array ? cJSON_IsArray(result) : cJSON_IsObject(result);
   cJSON_Delete(result);
   return ok;
 }
@@ -1201,9 +1210,11 @@ static int harness_preflight_input_is_valid(cJSON *input,
                                     "call_pf_mem_",
                                     prompt_group) &&
     harness_preflight_output_matches(cJSON_GetArrayItem(input, 3),
-                                     database_call) &&
+                                     database_call,
+                                     0) &&
     harness_preflight_output_matches(cJSON_GetArrayItem(input, 4),
-                                     memory_call);
+                                     memory_call,
+                                     1);
 }
 
 static int harness_request_preflight_contains(cJSON *root,
@@ -1624,10 +1635,10 @@ static int harness_run_audit_server(int listener_fd)
       "\"availability_state\":\"available\"") &&
     harness_request_preflight_contains(
       root,
-      "\"predicate\":\"fact\"") &&
+      "\"date_saved\":\"") &&
     harness_request_preflight_contains(
       root,
-      "\"value\":\"The user's favorite color is purple.\"") &&
+      "\"fact\":\"The user's favorite color is purple.\"") &&
     harness_send_json_response(client_fd, 200L, first_response);
   cJSON_Delete(root);
   close(client_fd);

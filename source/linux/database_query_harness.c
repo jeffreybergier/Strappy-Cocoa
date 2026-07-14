@@ -1258,6 +1258,54 @@ static cJSON *harness_tool_output_json(const char *catalog_path,
   return root;
 }
 
+static int harness_expect_user_fact_read_result(const char *catalog_path,
+                                                const char *arguments_json,
+                                                long long expected_id,
+                                                const char *expected_fact)
+{
+  cJSON *root;
+  cJSON *item;
+  cJSON *id;
+  cJSON *fact;
+  cJSON *date_saved;
+  cJSON *property;
+  int property_count;
+  int ok;
+
+  root = harness_tool_output_json(catalog_path,
+                                  STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                  arguments_json);
+  if (root == NULL) {
+    return 0;
+  }
+
+  item = cJSON_IsArray(root) ? cJSON_GetArrayItem(root, 0) : NULL;
+  id = cJSON_IsObject(item) ? cJSON_GetObjectItem(item, "id") : NULL;
+  fact = cJSON_IsObject(item) ? cJSON_GetObjectItem(item, "fact") : NULL;
+  date_saved = cJSON_IsObject(item) ?
+    cJSON_GetObjectItem(item, "date_saved") : NULL;
+  property_count = 0;
+  if (cJSON_IsObject(item)) {
+    for (property = item->child; property != NULL; property = property->next) {
+      property_count++;
+    }
+  }
+
+  ok = cJSON_IsArray(root) && (cJSON_GetArraySize(root) == 1) &&
+    cJSON_IsNumber(id) && (id->valuedouble == (double)expected_id) &&
+    cJSON_IsString(fact) && (fact->valuestring != NULL) &&
+    (expected_fact != NULL) && (strcmp(fact->valuestring, expected_fact) == 0) &&
+    cJSON_IsString(date_saved) && (date_saved->valuestring != NULL) &&
+    (date_saved->valuestring[0] != '\0') && (property_count == 3);
+  if (!ok) {
+    fprintf(stderr,
+            "memory_user_fact_read result did not match its public shape.\n");
+  }
+
+  cJSON_Delete(root);
+  return ok;
+}
+
 static int harness_expect_context_default_description(
   const char *catalog_path,
   const char *arguments_json)
@@ -1538,6 +1586,49 @@ static int harness_datetime_tool_schema_matches(cJSON *tools,
   return 0;
 }
 
+static int harness_tool_schema_has_no_properties(cJSON *tools,
+                                                 const char *tool_name)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools) || (tool_name == NULL)) {
+    return 0;
+  }
+
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *function;
+    cJSON *name;
+    cJSON *parameters;
+    cJSON *properties;
+    cJSON *required;
+    cJSON *additional_properties;
+
+    function = cJSON_GetObjectItemCaseSensitive(tool, "function");
+    name = cJSON_IsObject(function) ?
+      cJSON_GetObjectItemCaseSensitive(function, "name") : NULL;
+    if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
+        (strcmp(name->valuestring, tool_name) != 0)) {
+      continue;
+    }
+
+    parameters = cJSON_GetObjectItemCaseSensitive(function, "parameters");
+    properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters, "properties") : NULL;
+    required = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters, "required") : NULL;
+    additional_properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters,
+                                       "additionalProperties") : NULL;
+
+    return cJSON_IsObject(properties) && (properties->child == NULL) &&
+      cJSON_IsArray(required) &&
+      (cJSON_GetArraySize(required) == 0) &&
+      cJSON_IsFalse(additional_properties);
+  }
+
+  return 0;
+}
+
 static int harness_tool_display_matches(cJSON *registry,
                                         const char *tool_name,
                                         const char *promoted_argument,
@@ -1659,6 +1750,9 @@ static int harness_run_tool_registry_tests(void)
           tools,
           STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
           "datetimes") &&
+        harness_tool_schema_has_no_properties(
+          tools,
+          STRAPPY_TOOL_MEMORY_USER_FACT_READ) &&
         (filtered_json != NULL) && cJSON_IsArray(filtered) &&
         (cJSON_GetArraySize(filtered) == 1) &&
         harness_tool_schemas_hide_display_metadata(filtered) &&
@@ -1677,10 +1771,6 @@ static int harness_run_tool_registry_tests(void)
           STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
           "shortcodes",
           "comma_separated") &&
-        harness_tool_display_matches(registry,
-                                     STRAPPY_TOOL_MEMORY_USER_FACT_READ,
-                                     "query",
-                                     NULL) &&
         harness_tool_display_matches(registry,
                                      STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
                                      "fact",
@@ -1728,6 +1818,8 @@ static int harness_run_tool_registry_tests(void)
         (cJSON_GetObjectItem(
            registry,
            STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) == NULL) &&
+        (cJSON_GetObjectItem(registry,
+                             STRAPPY_TOOL_MEMORY_USER_FACT_READ) == NULL) &&
         (strstr(tools_json,
                 "Call this tool to view available databases") != NULL) &&
         (strstr(tools_json,
@@ -1757,14 +1849,19 @@ static int harness_run_tool_registry_tests(void)
                 "values are invalid.") !=
         NULL) &&
         (strstr(tools_json,
+                "Call this tool to retrieve durable facts stored about the "
+                "user.") != NULL) &&
+        (strstr(tools_json,
                 "ALWAYS call this tool. Set fact to a useful durable user "
-                "fact, or null if there is nothing new to remember.") !=
+                "fact, or null if there is nothing new to remember. NEVER "
+                "store secrets or sensitive information.") !=
          NULL) &&
         (strstr(tools_json,
                 "ALWAYS call this tool. Set database_id to the approved "
                 "database ID and hint to useful durable query, schema, or "
                 "access information, or set both to null if there is nothing "
-                "new to remember.") !=
+                "new to remember. NEVER store user data, secrets, sensitive "
+                "information, guesses, or one-off query results.") !=
          NULL) &&
         (strstr(tools_json,
                 "ALWAYS call this tool before the final answer. Read relevant "
@@ -3782,8 +3879,7 @@ static int harness_run_wide_schema_database_query_test(
 
 static int harness_run_helper_info_tests(const harness_context *context)
 {
-  static const char *noop_result =
-    "{\"ok\":true,\"remembered\":false,\"reason\":\"nothing_new\"}";
+  static const char *noop_result = "{}";
   static const char *context_noop_result =
     "{\"ok\":true,\"read\":false,\"reason\":\"no_database_needed\"}";
   char arguments[4096];
@@ -3870,20 +3966,19 @@ static int harness_run_helper_info_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_contains(
+  if (!harness_expect_output_equals(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
         "{\"fact\":\"The user's name is Jeff.\"}",
-        "\"ok\":true",
-        "\"id\":1")) {
+        "{}")) {
     return 0;
   }
 
-  if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_MEMORY_USER_FACT_READ,
-                                      "{\"query\":\"Jeff\"}",
-                                      "\"kind\":\"fact\"",
-                                      "The user's name is Jeff.")) {
+  if (!harness_expect_user_fact_read_result(
+        context->catalog_path,
+        "{}",
+        1LL,
+        "The user's name is Jeff.")) {
     return 0;
   }
 
@@ -3892,6 +3987,21 @@ static int harness_run_helper_info_tests(const harness_context *context)
         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
         "{\"kind\":\"identity\",\"fact\":\"Jeff\"}",
         "does not accept argument 'kind'")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(context->catalog_path,
+                                     STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                     "{\"query\":\"Jeff\"}",
+                                     "takes no arguments") ||
+      !harness_expect_error_contains(context->catalog_path,
+                                     STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                     "{\"kind\":\"fact\"}",
+                                     "takes no arguments") ||
+      !harness_expect_error_contains(context->catalog_path,
+                                     STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                     "{\"limit\":1}",
+                                     "takes no arguments")) {
     return 0;
   }
 
@@ -3906,11 +4016,10 @@ static int harness_run_helper_info_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_MEMORY_USER_FACT_READ,
-                                      "{\"query\":\"Jeff\"}",
-                                      "\"facts\"",
-                                      "\"count\":0")) {
+  if (!harness_expect_output_equals(context->catalog_path,
+                                    STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                    "{}",
+                                    "[]")) {
     return 0;
   }
 
@@ -3982,12 +4091,11 @@ static int harness_run_helper_info_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_contains(
+  if (!harness_expect_output_equals(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
         arguments,
-        "\"ok\":true",
-        "\"id\":1")) {
+        "{}")) {
     return 0;
   }
 
