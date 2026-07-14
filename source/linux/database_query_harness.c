@@ -1342,53 +1342,6 @@ static int harness_expect_context_default_description(
   return ok;
 }
 
-static int harness_expect_list_default_description(const char *catalog_path)
-{
-  char *expected;
-  cJSON *root;
-  cJSON *databases;
-  cJSON *database;
-  int ok;
-
-  expected = harness_database_default_string("default_description_short");
-  if (expected == NULL) {
-    return 0;
-  }
-
-  root = harness_tool_output_json(catalog_path,
-                                  STRAPPY_TOOL_DATABASE_LIST_INFO,
-                                  "{}");
-  if (root == NULL) {
-    free(expected);
-    return 0;
-  }
-
-  ok = 0;
-  databases = cJSON_GetObjectItem(root, "databases");
-  if (cJSON_IsArray(databases)) {
-    for (database = databases->child; database != NULL; database = database->next) {
-      cJSON *description_short;
-
-      description_short = cJSON_GetObjectItem(database, "description_short");
-      if (cJSON_IsString(description_short) &&
-          (description_short->valuestring != NULL) &&
-          (strcmp(description_short->valuestring, expected) == 0)) {
-        ok = 1;
-        break;
-      }
-    }
-  }
-
-  if (!ok) {
-    fprintf(stderr,
-            "Database list did not contain the generic description_short.\n");
-  }
-
-  cJSON_Delete(root);
-  free(expected);
-  return ok;
-}
-
 static int harness_expect_output_contains_without(const char *catalog_path,
                                                   const char *tool_name,
                                                   const char *arguments_json,
@@ -1821,7 +1774,9 @@ static int harness_run_tool_registry_tests(void)
         (cJSON_GetObjectItem(registry,
                              STRAPPY_TOOL_MEMORY_USER_FACT_READ) == NULL) &&
         (strstr(tools_json,
-                "Call this tool to view available databases") != NULL) &&
+                "Call this tool to view approved databases. Returns an "
+                "array containing database_id, app_name, path, size_bytes, "
+                "and modified_at in Unix seconds.") != NULL) &&
         (strstr(tools_json,
                 "ALWAYS query the relevant approved database before "
                 "finalizing when the request depends on personal data.") !=
@@ -2271,6 +2226,7 @@ static int harness_register_database_path(harness_context *context,
   input.inode = inode;
   input.is_valid_sqlite = 1;
   input.scan_root = context->temp_dir;
+  input.app_name = "Harness App";
 
   if (!strappy_db_save_discovered_databases(context->catalog_path,
                                             &input,
@@ -2352,8 +2308,17 @@ static int harness_register_database(harness_context *context)
 
 static int harness_run_database_list_info_tests(const harness_context *context)
 {
+  cJSON *root;
+  cJSON *database;
+  cJSON *database_id;
+  cJSON *app_name;
+  cJSON *path;
+  cJSON *size_bytes;
+  cJSON *modified_at;
+  cJSON *property;
   char *error;
   char *output;
+  int property_count;
   int ok;
 
   if (context == NULL) {
@@ -2375,24 +2340,47 @@ static int harness_run_database_list_info_tests(const harness_context *context)
     return 0;
   }
 
-  ok = ((strstr(output, "\"database_id\"") != NULL) &&
-        (strstr(output, "\"filename\":\"user.sqlite\"") != NULL) &&
-        (strstr(output, "\"description_short\"") != NULL) &&
-        (strstr(output, "\"description\":") == NULL) &&
-        (strstr(output, "\"availability_state\":\"available\"") != NULL) &&
-        (strstr(output, "\"schema\"") == NULL) &&
-        (strstr(output, "\"database_info\"") == NULL) &&
-        (strstr(output, "\"database_hints\"") == NULL) &&
-        (strstr(output, "\"remembered_info\"") == NULL) &&
-        (strstr(output, "\"user_action\"") == NULL) &&
-        (strstr(output, "\"messages\"") == NULL) &&
-        (strstr(output, "\"database_query\"") == NULL) &&
-        (strstr(output, "learned_info") == NULL) &&
-        (strstr(output, "database_learn") == NULL)) ? 1 : 0;
+  root = cJSON_Parse(output);
+  database = cJSON_IsArray(root) ? cJSON_GetArrayItem(root, 0) : NULL;
+  database_id = cJSON_IsObject(database) ?
+    cJSON_GetObjectItem(database, "database_id") : NULL;
+  app_name = cJSON_IsObject(database) ?
+    cJSON_GetObjectItem(database, "app_name") : NULL;
+  path = cJSON_IsObject(database) ?
+    cJSON_GetObjectItem(database, "path") : NULL;
+  size_bytes = cJSON_IsObject(database) ?
+    cJSON_GetObjectItem(database, "size_bytes") : NULL;
+  modified_at = cJSON_IsObject(database) ?
+    cJSON_GetObjectItem(database, "modified_at") : NULL;
+  property_count = 0;
+  if (cJSON_IsObject(database)) {
+    for (property = database->child;
+         property != NULL;
+         property = property->next) {
+      property_count++;
+    }
+  }
+  ok = cJSON_IsArray(root) &&
+       (cJSON_GetArraySize(root) == 1) &&
+       cJSON_IsString(database_id) &&
+       (database_id->valuestring != NULL) &&
+       (strcmp(database_id->valuestring, context->database_id) == 0) &&
+       cJSON_IsString(app_name) &&
+       (app_name->valuestring != NULL) &&
+       (strcmp(app_name->valuestring, "Harness App") == 0) &&
+       cJSON_IsString(path) &&
+       (path->valuestring != NULL) &&
+       (strcmp(path->valuestring, context->database_path) == 0) &&
+       cJSON_IsNumber(size_bytes) &&
+       (size_bytes->valuedouble == 4096.0) &&
+       cJSON_IsNumber(modified_at) &&
+       (modified_at->valuedouble == 1.0) &&
+       (property_count == 5);
   if (!ok) {
     fprintf(stderr, "database_list_info output was not expected: %s\n", output);
   }
 
+  cJSON_Delete(root);
   free(output);
   return ok;
 }
@@ -2431,14 +2419,7 @@ static int harness_run_empty_database_list_info_tests(
     return 0;
   }
 
-  ok = ((strstr(output, "\"count\":0") != NULL) &&
-        (strstr(output, "\"availability_state\":\"no_approved_databases\"") != NULL) &&
-        (strstr(output, "\"user_action\"") != NULL) &&
-        (strstr(output, "\"href\":\"strappy://database-manage\"") != NULL) &&
-        (strstr(output, "scan_needed") == NULL) &&
-        (strstr(output, "whitelist_needed") == NULL) &&
-        (strstr(output, "possible_scan_needed") == NULL) &&
-        (strstr(output, "possible_whitelist_needed") == NULL)) ? 1 : 0;
+  ok = (strcmp(output, "[]") == 0) ? 1 : 0;
   if (!ok) {
     fprintf(stderr, "empty database_list_info output was not expected: %s\n", output);
   }
@@ -4250,10 +4231,6 @@ static int harness_run_sms_guidance_tests(harness_context *context)
 
   if (!harness_expect_context_default_description(context->catalog_path,
                                                   arguments)) {
-    return 0;
-  }
-
-  if (!harness_expect_list_default_description(context->catalog_path)) {
     return 0;
   }
 

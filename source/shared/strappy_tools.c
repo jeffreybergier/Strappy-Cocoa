@@ -13,9 +13,6 @@
 #include <sys/stat.h>
 #include <time.h>
 
-#define STRAPPY_TOOLS_AVAILABILITY_ERROR "error"
-#define STRAPPY_TOOLS_AVAILABILITY_NO_APPROVED_DATABASES "no_approved_databases"
-#define STRAPPY_TOOLS_AVAILABILITY_AVAILABLE "available"
 #define STRAPPY_TOOL_GUIDANCE_RESOURCE "GuidanceTools.json"
 #define STRAPPY_TOOL_SERVER_TOOLS_KEY "server_tools"
 #define STRAPPY_TOOL_SERVER_FEATURE_KEY "feature"
@@ -67,14 +64,6 @@ typedef struct strappy_server_tool_definition {
   const char *type;
   const char *feature;
 } strappy_server_tool_definition;
-
-typedef struct strappy_tools_catalog_summary {
-  int discovered_count;
-  int valid_sqlite_count;
-  int approved_count;
-  int pending_approval_count;
-  int denied_count;
-} strappy_tools_catalog_summary;
 
 typedef struct strappy_database_query_arguments {
   char *database_id;
@@ -1739,20 +1728,6 @@ static int strappy_tools_add_database_metadata(
 	  return 1;
 }
 
-static void strappy_tools_catalog_summary_init(
-  strappy_tools_catalog_summary *summary)
-{
-  if (summary == NULL) {
-    return;
-  }
-
-  summary->discovered_count = 0;
-  summary->valid_sqlite_count = 0;
-  summary->approved_count = 0;
-  summary->pending_approval_count = 0;
-  summary->denied_count = 0;
-}
-
 static int strappy_tools_record_has_database_id(
   const strappy_discovered_database_record *record)
 {
@@ -1778,44 +1753,6 @@ static int strappy_tools_record_is_available_database(
           record->is_valid_sqlite &&
           strappy_tools_record_has_database_id(record) &&
           strappy_tools_record_decision_is(record, "allowed")) ? 1 : 0;
-}
-
-static void strappy_tools_catalog_summary_add_record(
-  strappy_tools_catalog_summary *summary,
-  const strappy_discovered_database_record *record)
-{
-  if ((summary == NULL) || (record == NULL)) {
-    return;
-  }
-
-  summary->discovered_count++;
-  if (!record->is_valid_sqlite) {
-    return;
-  }
-
-  summary->valid_sqlite_count++;
-  if (strappy_tools_record_decision_is(record, "allowed") &&
-      strappy_tools_record_has_database_id(record)) {
-    summary->approved_count++;
-  } else if (strappy_tools_record_decision_is(record, "denied")) {
-    summary->denied_count++;
-  } else {
-    summary->pending_approval_count++;
-  }
-}
-
-static const char *strappy_tools_availability_state(
-  const strappy_tools_catalog_summary *summary)
-{
-  if (summary == NULL) {
-    return STRAPPY_TOOLS_AVAILABILITY_ERROR;
-  }
-
-  if (summary->approved_count > 0) {
-    return STRAPPY_TOOLS_AVAILABILITY_AVAILABLE;
-  }
-
-  return STRAPPY_TOOLS_AVAILABILITY_NO_APPROVED_DATABASES;
 }
 
 static int strappy_tools_add_bool_to_object(cJSON *object,
@@ -2214,34 +2151,6 @@ static int strappy_tools_add_database_guidance(
   return 1;
 }
 
-static cJSON *strappy_tools_create_database_manage_step(const char *action,
-                                                        const char *label,
-                                                        const char *href,
-                                                        const char *purpose)
-{
-  cJSON *step;
-
-  step = cJSON_CreateObject();
-  if (step == NULL) {
-    return NULL;
-  }
-
-  if ((cJSON_AddStringToObject(step, "type", "user_action") == NULL) ||
-      (cJSON_AddStringToObject(step, "action", action) == NULL) ||
-      (cJSON_AddStringToObject(step, "label", label) == NULL) ||
-      (cJSON_AddStringToObject(step, "href", href) == NULL) ||
-      !strappy_tools_add_bool_to_object(step,
-                                        "requires_user_click",
-                                        1) ||
-      ((purpose != NULL) &&
-       (cJSON_AddStringToObject(step, "purpose", purpose) == NULL))) {
-    cJSON_Delete(step);
-    return NULL;
-  }
-
-  return step;
-}
-
 static char *strappy_tools_database_guidance_string(const char *resource_dir,
                                                     const char *section_name,
                                                     const char *key,
@@ -2324,82 +2233,6 @@ static void strappy_tools_set_error_with_database_guidance(
   }
 
   free(guidance);
-}
-
-static int strappy_tools_add_database_user_action(
-  cJSON *root,
-  const char *availability_state,
-  const char *resource_dir,
-  char **error_out)
-{
-  cJSON *step;
-  char *action;
-  char *label;
-  char *href;
-  char *purpose;
-
-  if ((root == NULL) || (availability_state == NULL)) {
-    return 0;
-  }
-
-  if (strcmp(availability_state,
-             STRAPPY_TOOLS_AVAILABILITY_NO_APPROVED_DATABASES) != 0) {
-    return 1;
-  }
-
-  purpose = strappy_tools_database_guidance_string(resource_dir,
-                                                   "user_actions",
-                                                   "manage_needed",
-                                                   error_out);
-  if (purpose == NULL) {
-    return 0;
-  }
-
-  action = strappy_tools_database_guidance_string(resource_dir,
-                                                  "user_actions",
-                                                  "manage_action",
-                                                  error_out);
-  if (action == NULL) {
-    free(purpose);
-    return 0;
-  }
-
-  label = strappy_tools_database_guidance_string(resource_dir,
-                                                 "user_actions",
-                                                 "manage_label",
-                                                 error_out);
-  if (label == NULL) {
-    free(action);
-    free(purpose);
-    return 0;
-  }
-
-  href = strappy_tools_database_guidance_string(resource_dir,
-                                                "user_actions",
-                                                "manage_href",
-                                                error_out);
-  if (href == NULL) {
-    free(label);
-    free(action);
-    free(purpose);
-    return 0;
-  }
-
-  step = strappy_tools_create_database_manage_step(action,
-                                                   label,
-                                                   href,
-                                                   purpose);
-  free(href);
-  free(label);
-  free(action);
-  free(purpose);
-  if ((step == NULL) || !cJSON_AddItemToObject(root, "user_action", step)) {
-    cJSON_Delete(step);
-    strappy_set_error(error_out, "Could not build database user action.");
-    return 0;
-  }
-
-  return 1;
 }
 
 static int strappy_tools_add_null_to_object(cJSON *object, const char *key)
@@ -4808,39 +4641,40 @@ static int strappy_tools_add_database_schema_context(
 static int strappy_tools_add_database_list_info_record(
   cJSON *databases,
   const strappy_discovered_database_record *record,
-  const char *resource_dir,
   char **error_out)
 {
   cJSON *object;
 
-  if ((databases == NULL) || (record == NULL)) {
+  if ((databases == NULL) || (record == NULL) ||
+      (record->assistant_database_id == NULL) ||
+      (record->path == NULL)) {
     strappy_set_error(error_out, "Database list info request is incomplete.");
     return 0;
   }
 
   object = cJSON_CreateObject();
   if (object == NULL) {
-    strappy_set_error(error_out, "Could not allocate database hint result.");
+    strappy_set_error(error_out, "Could not allocate database list result.");
     return 0;
   }
 
-  if (!strappy_tools_add_database_metadata(object, record)) {
+  if ((cJSON_AddStringToObject(object,
+                               "database_id",
+                               record->assistant_database_id) == NULL) ||
+      (((record->app_name != NULL) && (record->app_name[0] != '\0')) ?
+         (cJSON_AddStringToObject(object,
+                                  "app_name",
+                                  record->app_name) == NULL) :
+         !strappy_tools_add_null_to_object(object, "app_name")) ||
+      (cJSON_AddStringToObject(object, "path", record->path) == NULL) ||
+      (cJSON_AddNumberToObject(object,
+                               "size_bytes",
+                               (double)record->size) == NULL) ||
+      (cJSON_AddNumberToObject(object,
+                               "modified_at",
+                               (double)record->modified_at) == NULL)) {
     cJSON_Delete(object);
     strappy_set_error(error_out, "Could not build database metadata result.");
-    return 0;
-  }
-
-  if (!strappy_tools_add_database_guidance(object,
-                                           record,
-                                           resource_dir,
-                                           1,
-                                           0,
-                                           1,
-                                           error_out)) {
-    cJSON_Delete(object);
-    if ((error_out != NULL) && (*error_out == NULL)) {
-      strappy_set_error(error_out, "Could not build database guidance result.");
-    }
     return 0;
   }
 
@@ -6976,18 +6810,13 @@ static char *strappy_tools_execute_memory_database_hint_forget(
 
 static char *strappy_tools_execute_database_list_info(
   const char *session_db_path,
-  const char *resource_dir,
   const char *arguments_json,
   char **error_out)
 {
   strappy_discovered_database_record_list list;
-  strappy_tools_catalog_summary summary;
-  cJSON *root;
   cJSON *databases;
-  const char *availability_state;
   char *json;
   size_t index;
-  int count;
 
   if ((session_db_path == NULL) || (session_db_path[0] == '\0')) {
     strappy_set_error(error_out, "Catalog database path is not configured.");
@@ -7007,68 +6836,32 @@ static char *strappy_tools_execute_database_list_info(
     return NULL;
   }
 
-  root = cJSON_CreateObject();
   databases = cJSON_CreateArray();
-  if ((root == NULL) || (databases == NULL)) {
-    cJSON_Delete(root);
-    cJSON_Delete(databases);
+  if (databases == NULL) {
     strappy_discovered_database_record_list_destroy(&list);
     strappy_set_error(error_out, "Could not allocate tool result.");
     return NULL;
   }
 
-  count = 0;
-  strappy_tools_catalog_summary_init(&summary);
   for (index = 0U; index < list.count; index++) {
     const strappy_discovered_database_record *record;
 
     record = &list.records[index];
-    strappy_tools_catalog_summary_add_record(&summary, record);
     if (!strappy_tools_record_is_available_database(record)) {
       continue;
     }
 
     if (!strappy_tools_add_database_list_info_record(databases,
                                                      record,
-                                                     resource_dir,
                                                      error_out)) {
-      cJSON_Delete(root);
       cJSON_Delete(databases);
       strappy_discovered_database_record_list_destroy(&list);
       return NULL;
     }
-
-    count++;
-  }
-  availability_state = strappy_tools_availability_state(&summary);
-
-  if (!cJSON_AddItemToObject(root, "databases", databases)) {
-    cJSON_Delete(root);
-    cJSON_Delete(databases);
-    strappy_discovered_database_record_list_destroy(&list);
-    strappy_set_error(error_out, "Could not build tool result.");
-    return NULL;
-  }
-  databases = NULL;
-
-  if ((cJSON_AddNumberToObject(root, "count", (double)count) == NULL) ||
-      (cJSON_AddStringToObject(root,
-                               "availability_state",
-                               availability_state) == NULL) ||
-      !strappy_tools_add_database_user_action(root,
-                                              availability_state,
-                                              resource_dir,
-                                              error_out)) {
-    cJSON_Delete(root);
-    strappy_discovered_database_record_list_destroy(&list);
-    if ((error_out != NULL) && (*error_out == NULL)) {
-      strappy_set_error(error_out, "Could not build tool result.");
-    }
-    return NULL;
   }
 
-  json = cJSON_PrintUnformatted(root);
-  cJSON_Delete(root);
+  json = cJSON_PrintUnformatted(databases);
+  cJSON_Delete(databases);
   strappy_discovered_database_record_list_destroy(&list);
   if (json == NULL) {
     strappy_set_error(error_out, "Could not serialize tool result.");
@@ -7092,7 +6885,6 @@ char *strappy_tools_execute(const char *session_db_path,
 
   if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_LIST_INFO) == 0) {
     return strappy_tools_execute_database_list_info(session_db_path,
-                                                   resource_dir,
                                                    arguments_json,
                                                    error_out);
   }

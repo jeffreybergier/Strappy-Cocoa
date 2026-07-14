@@ -73,7 +73,7 @@ use compact previews like their collapsed webview sections:
 >>>>>> Please list out ...
 >>>>> Tool Call | database_list_info
 >>>>> Tool Call | memory_user_fact_read
->>>>> Tool Output | {"databases":[...]}
+>>>>> Tool Output | [{"database_id":"...","app_name":"...","path":"...","size_bytes":4096,"modified_at":...}]
 >>>>> Tool Output | [{"id":1,"fact":"The user's name is Jeff.","date_saved":"..."}]
 >>>> Response | completed | HTTP 200 | 12.7s
 >>>>> Reasoning | 2270 characters

@@ -85,9 +85,10 @@ House style for Strappy source:
     memory guidance, and database-specific instructions belong in these
     resources, not in scattered C or Objective-C strings.
 14. Database tool flow is split by responsibility. `database_list_info` lists
-    approved databases by assistant-visible IDs with safe metadata and short
-    descriptions only. `database_context_read` returns selected database
-    context, live simplified schema, and remembered database hints.
+    approved databases as a compact array containing assistant-visible IDs,
+    inferred app names, paths, sizes, and modification times.
+    `database_context_read` returns selected database context, live simplified
+    schema, and remembered database hints.
     `database_query` runs bounded read-only SQL against approved databases.
     The Responses runtime executes `database_list_info` and
     `memory_user_fact_read` before round zero of each user request and seeds
@@ -95,8 +96,8 @@ House style for Strappy source:
     `function_call_output` input pair. These application-created,
     request-direction items do not create response tool-execution rows or
     count as model-generated calls for the tool audit.
-    Do not put raw filesystem paths, full schema dumps, or learned hint caches
-    into `database_list_info`.
+    Do not put full schema dumps or learned hint caches into
+    `database_list_info`.
 15. Memory and session-title tools persist durable assistant state.
     `memory_user_fact_*` stores small stable user facts,
     `memory_database_hint_*` stores reusable evidence-backed database hints, and

@@ -619,7 +619,9 @@ static int harness_test_request_surfaces(void)
     (strcmp(name->valuestring, "database_list_info") == 0) &&
     cJSON_IsString(description) && (description->valuestring != NULL) &&
     (strcmp(description->valuestring,
-            "Call this tool to view available databases") == 0) &&
+            "Call this tool to view approved databases. Returns an array "
+            "containing database_id, app_name, path, size_bytes, and "
+            "modified_at in Unix seconds.") == 0) &&
     harness_tool_description_equals(
       tools,
       STRAPPY_TOOL_DATABASE_QUERY,
@@ -1211,7 +1213,7 @@ static int harness_preflight_input_is_valid(cJSON *input,
                                     prompt_group) &&
     harness_preflight_output_matches(cJSON_GetArrayItem(input, 3),
                                      database_call,
-                                     0) &&
+                                     1) &&
     harness_preflight_output_matches(cJSON_GetArrayItem(input, 4),
                                      memory_call,
                                      1);
@@ -1629,10 +1631,10 @@ static int harness_run_audit_server(int listener_fd)
                                   &prompt_group) &&
     harness_request_preflight_contains(
       root,
-      "\"filename\":\"strappy-preflight-db-") &&
+      "\"path\":\"/tmp/strappy-preflight-db-") &&
     harness_request_preflight_contains(
       root,
-      "\"availability_state\":\"available\"") &&
+      "\"app_name\":null") &&
     harness_request_preflight_contains(
       root,
       "\"date_saved\":\"") &&
