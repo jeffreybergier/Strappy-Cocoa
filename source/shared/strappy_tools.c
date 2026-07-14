@@ -81,7 +81,8 @@ typedef struct strappy_database_query_arguments {
 } strappy_database_query_arguments;
 
 typedef struct strappy_helper_datetime_arguments {
-  char *items;
+  char **items;
+  size_t item_count;
   strappy_cocoa_timestamp_unit unit;
 } strappy_helper_datetime_arguments;
 
@@ -126,11 +127,6 @@ typedef struct strappy_helper_fontawesome_shortcode_confirm_arguments {
   size_t shortcode_count;
 } strappy_helper_fontawesome_shortcode_confirm_arguments;
 
-typedef struct strappy_helper_text_buffer {
-  char *data;
-  size_t length;
-} strappy_helper_text_buffer;
-
 typedef struct strappy_database_query_authorizer_context {
   int denied_action;
 } strappy_database_query_authorizer_context;
@@ -146,6 +142,8 @@ typedef char *(*strappy_tools_datetime_token_converter)(
   size_t length,
   strappy_cocoa_timestamp_unit unit,
   char **error_out);
+
+static int strappy_tools_helper_is_space(char value);
 
 static const strappy_tool_definition strappy_tool_definitions[] = {
   { STRAPPY_TOOL_DATABASE_LIST_INFO, STRAPPY_TOOL_KIND_DATABASE },
@@ -251,27 +249,31 @@ static void strappy_database_query_arguments_destroy(
 }
 
 static void strappy_helper_datetime_arguments_init(
-  strappy_helper_datetime_arguments *arguments,
-  strappy_cocoa_timestamp_unit default_unit)
+  strappy_helper_datetime_arguments *arguments)
 {
   if (arguments == NULL) {
     return;
   }
 
   arguments->items = NULL;
-  arguments->unit = default_unit;
+  arguments->item_count = 0U;
+  arguments->unit = (strappy_cocoa_timestamp_unit)0;
 }
 
 static void strappy_helper_datetime_arguments_destroy(
-  strappy_helper_datetime_arguments *arguments,
-  strappy_cocoa_timestamp_unit default_unit)
+  strappy_helper_datetime_arguments *arguments)
 {
+  size_t index;
+
   if (arguments == NULL) {
     return;
   }
 
+  for (index = 0U; index < arguments->item_count; index++) {
+    free(arguments->items[index]);
+  }
   free(arguments->items);
-  strappy_helper_datetime_arguments_init(arguments, default_unit);
+  strappy_helper_datetime_arguments_init(arguments);
 }
 
 static void strappy_memory_user_fact_remember_arguments_init(
@@ -447,56 +449,6 @@ static void strappy_helper_fontawesome_shortcode_confirm_arguments_destroy(
   }
   free(arguments->shortcodes);
   strappy_helper_fontawesome_shortcode_confirm_arguments_init(arguments);
-}
-
-static void strappy_helper_text_buffer_init(strappy_helper_text_buffer *buffer)
-{
-  if (buffer == NULL) {
-    return;
-  }
-
-  buffer->data = NULL;
-  buffer->length = 0U;
-}
-
-static void strappy_helper_text_buffer_destroy(strappy_helper_text_buffer *buffer)
-{
-  if (buffer == NULL) {
-    return;
-  }
-
-  free(buffer->data);
-  strappy_helper_text_buffer_init(buffer);
-}
-
-static int strappy_helper_text_buffer_append(
-  strappy_helper_text_buffer *buffer,
-  const char *text)
-{
-  size_t length;
-  char *next_data;
-
-  if ((buffer == NULL) || (text == NULL)) {
-    return 0;
-  }
-
-  length = strlen(text);
-  if (buffer->length > (((size_t)-1) - length - 1U)) {
-    return 0;
-  }
-
-  next_data = (char *)realloc(buffer->data, buffer->length + length + 1U);
-  if (next_data == NULL) {
-    return 0;
-  }
-
-  buffer->data = next_data;
-  if (length > 0U) {
-    memcpy(buffer->data + buffer->length, text, length);
-  }
-  buffer->length += length;
-  buffer->data[buffer->length] = '\0';
-  return 1;
 }
 
 static char *strappy_tools_resource_path(const char *resource_dir,
@@ -2986,21 +2938,23 @@ static int strappy_tools_parse_helper_datetime_arguments(
   const char *tool_name,
   const char *arguments_json,
   const char *items_argument_name,
-  strappy_cocoa_timestamp_unit default_unit,
   strappy_helper_datetime_arguments *arguments,
   char **error_out)
 {
   const char *allowed_names[2];
   cJSON *root;
+  cJSON *items;
   cJSON *unit;
-  int ok;
+  int item_count;
+  int index;
+  size_t total_length;
 
   if ((tool_name == NULL) || (items_argument_name == NULL) ||
       (arguments == NULL)) {
     strappy_set_error(error_out, "Datetime helper argument output is missing.");
     return 0;
   }
-  strappy_helper_datetime_arguments_init(arguments, default_unit);
+  strappy_helper_datetime_arguments_init(arguments);
 
   root = strappy_tools_parse_arguments_object(tool_name,
                                               arguments_json,
@@ -3011,40 +2965,125 @@ static int strappy_tools_parse_helper_datetime_arguments(
 
   allowed_names[0] = items_argument_name;
   allowed_names[1] = "unit";
-  ok = strappy_tools_json_object_accepts_only(root,
-                                              tool_name,
-                                              allowed_names,
-                                              sizeof(allowed_names) /
-                                                sizeof(allowed_names[0]),
-                                              error_out) &&
-       strappy_tools_copy_string_argument(tool_name,
-                                          root,
-                                          items_argument_name,
-                                          1,
-                                          STRAPPY_HELPER_DATETIME_MAX_INPUT_BYTES,
-                                          &arguments->items,
-                                          error_out);
-  if (!ok) {
+  if (!strappy_tools_json_object_accepts_only(
+        root,
+        tool_name,
+        allowed_names,
+        sizeof(allowed_names) / sizeof(allowed_names[0]),
+        error_out)) {
     cJSON_Delete(root);
-    strappy_helper_datetime_arguments_destroy(arguments, default_unit);
     return 0;
   }
 
   unit = cJSON_GetObjectItemCaseSensitive(root, "unit");
-  if (unit != NULL) {
-    if (!cJSON_IsString(unit)) {
+  if (!cJSON_IsString(unit) ||
+      !strappy_tools_string_has_non_whitespace(unit->valuestring)) {
+    cJSON_Delete(root);
+    strappy_set_formatted_error(error_out,
+                                "%s requires a non-empty unit string.",
+                                tool_name);
+    return 0;
+  }
+  if (!strappy_cocoa_parse_timestamp_unit(unit->valuestring,
+                                          &arguments->unit,
+                                          error_out)) {
+    cJSON_Delete(root);
+    return 0;
+  }
+
+  items = cJSON_GetObjectItemCaseSensitive(root, items_argument_name);
+  if (!cJSON_IsArray(items)) {
+    cJSON_Delete(root);
+    strappy_set_formatted_error(error_out,
+                                "%s %s must be an array of strings.",
+                                tool_name,
+                                items_argument_name);
+    return 0;
+  }
+
+  item_count = cJSON_GetArraySize(items);
+  if ((item_count < 1) ||
+      ((size_t)item_count > STRAPPY_HELPER_DATETIME_MAX_ITEMS)) {
+    cJSON_Delete(root);
+    strappy_set_formatted_error(
+      error_out,
+      "%s %s must contain between 1 and %u items.",
+      tool_name,
+      items_argument_name,
+      (unsigned int)STRAPPY_HELPER_DATETIME_MAX_ITEMS);
+    return 0;
+  }
+
+  arguments->items = (char **)calloc((size_t)item_count, sizeof(char *));
+  if (arguments->items == NULL) {
+    cJSON_Delete(root);
+    strappy_set_formatted_error(error_out,
+                                "Could not allocate %s arguments.",
+                                tool_name);
+    return 0;
+  }
+  arguments->item_count = (size_t)item_count;
+
+  total_length = 0U;
+  for (index = 0; index < item_count; index++) {
+    cJSON *item;
+    const char *value;
+    size_t length;
+    size_t start;
+    size_t end;
+
+    item = cJSON_GetArrayItem(items, index);
+    if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
       cJSON_Delete(root);
-      strappy_helper_datetime_arguments_destroy(arguments, default_unit);
+      strappy_helper_datetime_arguments_destroy(arguments);
       strappy_set_formatted_error(error_out,
-                                  "%s unit must be a string.",
-                                  tool_name);
+                                  "%s %s items must be strings.",
+                                  tool_name,
+                                  items_argument_name);
       return 0;
     }
-    if (!strappy_cocoa_parse_timestamp_unit(unit->valuestring,
-                                            &arguments->unit,
-                                            error_out)) {
+
+    value = item->valuestring;
+    length = strlen(value);
+    if (length > (STRAPPY_HELPER_DATETIME_MAX_INPUT_BYTES - total_length)) {
       cJSON_Delete(root);
-      strappy_helper_datetime_arguments_destroy(arguments, default_unit);
+      strappy_helper_datetime_arguments_destroy(arguments);
+      strappy_set_formatted_error(
+        error_out,
+        "%s %s exceeds the %u-byte combined input limit.",
+        tool_name,
+        items_argument_name,
+        (unsigned int)STRAPPY_HELPER_DATETIME_MAX_INPUT_BYTES);
+      return 0;
+    }
+    total_length += length;
+
+    start = 0U;
+    end = length;
+    while ((start < end) && strappy_tools_helper_is_space(value[start])) {
+      start++;
+    }
+    while ((end > start) && strappy_tools_helper_is_space(value[end - 1U])) {
+      end--;
+    }
+    if (start == end) {
+      cJSON_Delete(root);
+      strappy_helper_datetime_arguments_destroy(arguments);
+      strappy_set_formatted_error(error_out,
+                                  "%s %s contains an empty item.",
+                                  tool_name,
+                                  items_argument_name);
+      return 0;
+    }
+
+    arguments->items[index] =
+      strappy_string_duplicate_length(value + start, end - start);
+    if (arguments->items[index] == NULL) {
+      cJSON_Delete(root);
+      strappy_helper_datetime_arguments_destroy(arguments);
+      strappy_set_formatted_error(error_out,
+                                  "Could not allocate %s arguments.",
+                                  tool_name);
       return 0;
     }
   }
@@ -6128,109 +6167,69 @@ static char *strappy_tools_execute_helper_datetime(
   const char *tool_name,
   const char *arguments_json,
   const char *items_argument_name,
-  strappy_cocoa_timestamp_unit default_unit,
   strappy_tools_datetime_token_converter converter,
   char **error_out)
 {
   strappy_helper_datetime_arguments arguments;
-  strappy_helper_text_buffer buffer;
-  const char *cursor;
-  size_t item_count;
+  cJSON *results;
+  char *json;
+  size_t index;
 
-  strappy_helper_datetime_arguments_init(&arguments, default_unit);
+  strappy_helper_datetime_arguments_init(&arguments);
   if (!strappy_tools_parse_helper_datetime_arguments(tool_name,
                                                      arguments_json,
                                                      items_argument_name,
-                                                     default_unit,
                                                      &arguments,
                                                      error_out)) {
     return NULL;
   }
 
-  strappy_helper_text_buffer_init(&buffer);
-  cursor = arguments.items;
-  item_count = 0U;
-  while (cursor != NULL) {
-    const char *item_start;
-    const char *item_end;
-    const char *item_delimiter;
+  results = cJSON_CreateArray();
+  if (results == NULL) {
+    strappy_helper_datetime_arguments_destroy(&arguments);
+    strappy_set_formatted_error(error_out,
+                                "Could not build %s result.",
+                                tool_name);
+    return NULL;
+  }
+
+  for (index = 0U; index < arguments.item_count; index++) {
     char *converted;
+    cJSON *result;
 
-    converted = NULL;
-    item_start = cursor;
-    item_delimiter = cursor;
-    while ((*item_delimiter != '\0') && (*item_delimiter != ',')) {
-      item_delimiter++;
-    }
-    item_end = item_delimiter;
-
-    while ((item_start < item_end) &&
-           strappy_tools_helper_is_space(*item_start)) {
-      item_start++;
-    }
-    while ((item_end > item_start) &&
-           strappy_tools_helper_is_space(*(item_end - 1))) {
-      item_end--;
-    }
-
-    if (item_start == item_end) {
-      strappy_helper_text_buffer_destroy(&buffer);
-      strappy_helper_datetime_arguments_destroy(&arguments, default_unit);
-      strappy_set_formatted_error(error_out,
-                                  "%s %s contains an empty item.",
-                                  tool_name,
-                                  items_argument_name);
-      return NULL;
-    }
-
-    if (item_count >= STRAPPY_HELPER_DATETIME_MAX_ITEMS) {
-      strappy_helper_text_buffer_destroy(&buffer);
-      strappy_helper_datetime_arguments_destroy(&arguments, default_unit);
-      strappy_set_formatted_error(
-        error_out,
-        "%s accepts at most %u items.",
-        tool_name,
-        (unsigned int)STRAPPY_HELPER_DATETIME_MAX_ITEMS);
-      return NULL;
-    }
-
-    converted = converter(item_start,
-                          (size_t)(item_end - item_start),
+    converted = converter(arguments.items[index],
+                          strlen(arguments.items[index]),
                           arguments.unit,
                           error_out);
     if (converted == NULL) {
-      strappy_helper_text_buffer_destroy(&buffer);
-      strappy_helper_datetime_arguments_destroy(&arguments, default_unit);
+      cJSON_Delete(results);
+      strappy_helper_datetime_arguments_destroy(&arguments);
       return NULL;
     }
 
-    if (((item_count > 0U) &&
-        !strappy_helper_text_buffer_append(&buffer, ",")) ||
-        !strappy_helper_text_buffer_append(&buffer, converted)) {
-      free(converted);
-      strappy_helper_text_buffer_destroy(&buffer);
-      strappy_helper_datetime_arguments_destroy(&arguments, default_unit);
+    result = cJSON_CreateString(converted);
+    free(converted);
+    if ((result == NULL) || !cJSON_AddItemToArray(results, result)) {
+      cJSON_Delete(result);
+      cJSON_Delete(results);
+      strappy_helper_datetime_arguments_destroy(&arguments);
       strappy_set_formatted_error(error_out,
                                   "Could not build %s result.",
                                   tool_name);
       return NULL;
     }
-
-    free(converted);
-    item_count++;
-    cursor = (*item_delimiter == ',') ? item_delimiter + 1 : NULL;
   }
 
-  strappy_helper_datetime_arguments_destroy(&arguments, default_unit);
-  if (item_count == 0U) {
-    strappy_helper_text_buffer_destroy(&buffer);
+  json = cJSON_PrintUnformatted(results);
+  cJSON_Delete(results);
+  strappy_helper_datetime_arguments_destroy(&arguments);
+  if (json == NULL) {
     strappy_set_formatted_error(error_out,
-                                "%s requires at least one item.",
+                                "Could not serialize %s result.",
                                 tool_name);
     return NULL;
   }
-
-  return buffer.data;
+  return json;
 }
 
 static char *strappy_tools_execute_helper_datetime_to_iso8601(
@@ -6241,7 +6240,6 @@ static char *strappy_tools_execute_helper_datetime_to_iso8601(
     STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
     arguments_json,
     "timestamps",
-    STRAPPY_COCOA_TIMESTAMP_UNIT_UNIX_SECONDS,
     strappy_tools_convert_timestamp_token_to_iso8601,
     error_out);
 }
@@ -6254,7 +6252,6 @@ static char *strappy_tools_execute_helper_datetime_from_iso8601(
     STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
     arguments_json,
     "datetimes",
-    STRAPPY_COCOA_TIMESTAMP_UNIT_APPLE_SECONDS,
     strappy_tools_convert_iso8601_token_to_timestamp,
     error_out);
 }

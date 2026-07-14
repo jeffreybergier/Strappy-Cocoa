@@ -1430,6 +1430,110 @@ static int harness_tool_schemas_hide_display_metadata(cJSON *tools)
   return 1;
 }
 
+static int harness_json_array_contains_string(cJSON *array,
+                                              const char *expected)
+{
+  cJSON *item;
+
+  if (!cJSON_IsArray(array) || (expected == NULL)) {
+    return 0;
+  }
+  for (item = array->child; item != NULL; item = item->next) {
+    if (cJSON_IsString(item) && (item->valuestring != NULL) &&
+        (strcmp(item->valuestring, expected) == 0)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int harness_datetime_tool_schema_matches(cJSON *tools,
+                                                const char *tool_name,
+                                                const char *items_name)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools) || (tool_name == NULL) ||
+      (items_name == NULL)) {
+    return 0;
+  }
+
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *function;
+    cJSON *name;
+    cJSON *parameters;
+    cJSON *properties;
+    cJSON *items_property;
+    cJSON *item_schema;
+    cJSON *unit_property;
+    cJSON *required;
+    cJSON *additional_properties;
+    cJSON *value;
+
+    function = cJSON_GetObjectItemCaseSensitive(tool, "function");
+    name = cJSON_IsObject(function) ?
+      cJSON_GetObjectItemCaseSensitive(function, "name") : NULL;
+    if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
+        (strcmp(name->valuestring, tool_name) != 0)) {
+      continue;
+    }
+
+    parameters = cJSON_GetObjectItemCaseSensitive(function, "parameters");
+    properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters, "properties") : NULL;
+    items_property = cJSON_IsObject(properties) ?
+      cJSON_GetObjectItemCaseSensitive(properties, items_name) : NULL;
+    item_schema = cJSON_IsObject(items_property) ?
+      cJSON_GetObjectItemCaseSensitive(items_property, "items") : NULL;
+    unit_property = cJSON_IsObject(properties) ?
+      cJSON_GetObjectItemCaseSensitive(properties, "unit") : NULL;
+    required = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters, "required") : NULL;
+    additional_properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters,
+                                       "additionalProperties") : NULL;
+
+    value = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters, "type") : NULL;
+    if (!cJSON_IsString(value) || (value->valuestring == NULL) ||
+        (strcmp(value->valuestring, "object") != 0)) {
+      return 0;
+    }
+    value = cJSON_IsObject(items_property) ?
+      cJSON_GetObjectItemCaseSensitive(items_property, "type") : NULL;
+    if (!cJSON_IsString(value) || (value->valuestring == NULL) ||
+        (strcmp(value->valuestring, "array") != 0)) {
+      return 0;
+    }
+    value = cJSON_IsObject(item_schema) ?
+      cJSON_GetObjectItemCaseSensitive(item_schema, "type") : NULL;
+    if (!cJSON_IsString(value) || (value->valuestring == NULL) ||
+        (strcmp(value->valuestring, "string") != 0)) {
+      return 0;
+    }
+    value = cJSON_GetObjectItemCaseSensitive(items_property, "minItems");
+    if (!cJSON_IsNumber(value) || (value->valuedouble != 1.0)) {
+      return 0;
+    }
+    value = cJSON_GetObjectItemCaseSensitive(items_property, "maxItems");
+    if (!cJSON_IsNumber(value) || (value->valuedouble != 256.0)) {
+      return 0;
+    }
+    value = cJSON_IsObject(unit_property) ?
+      cJSON_GetObjectItemCaseSensitive(unit_property, "type") : NULL;
+    if (!cJSON_IsString(value) || (value->valuestring == NULL) ||
+        (strcmp(value->valuestring, "string") != 0) ||
+        !harness_json_array_contains_string(required, items_name) ||
+        !harness_json_array_contains_string(required, "unit") ||
+        !cJSON_IsFalse(additional_properties)) {
+      return 0;
+    }
+    return 1;
+  }
+
+  return 0;
+}
+
 static int harness_tool_display_matches(cJSON *registry,
                                         const char *tool_name,
                                         const char *promoted_argument,
@@ -1543,6 +1647,14 @@ static int harness_run_tool_registry_tests(void)
 
   ok = (cJSON_IsArray(tools) &&
         harness_tool_schemas_hide_display_metadata(tools) &&
+        harness_datetime_tool_schema_matches(
+          tools,
+          STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+          "timestamps") &&
+        harness_datetime_tool_schema_matches(
+          tools,
+          STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+          "datetimes") &&
         (filtered_json != NULL) && cJSON_IsArray(filtered) &&
         (cJSON_GetArraySize(filtered) == 1) &&
         harness_tool_schemas_hide_display_metadata(filtered) &&
@@ -1722,32 +1834,67 @@ static int harness_run_helper_datetime_tests(void)
   if (!harness_expect_output_equals(
         NULL,
         STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
-        "{\"timestamps\":\"0,1,-1,-0.5\"}",
-        "1970-01-01T00:00:00Z,1970-01-01T00:00:01Z,"
-        "1969-12-31T23:59:59Z,1969-12-31T23:59:59.5Z")) {
+        "{\"timestamps\":[\"0\",\"1\",\"-1\",\"-0.5\"],"
+        "\"unit\":\"unix_seconds\"}",
+        "[\"1970-01-01T00:00:00Z\",\"1970-01-01T00:00:01Z\","
+        "\"1969-12-31T23:59:59Z\",\"1969-12-31T23:59:59.5Z\"]")) {
     return 0;
   }
 
   if (!harness_expect_output_equals(
         NULL,
         STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
-        "{\"timestamps\":\"1700000000123\",\"unit\":\"unix_milliseconds\"}",
-        "2023-11-14T22:13:20.123Z")) {
+        "{\"timestamps\":[\"1700000000123\"],"
+        "\"unit\":\"unix_milliseconds\"}",
+        "[\"2023-11-14T22:13:20.123Z\"]")) {
     return 0;
   }
 
   if (!harness_expect_output_equals(
         NULL,
         STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
-        "{\"timestamps\":\"0, 1.25\",\"unit\":\"apple_seconds\"}",
-        "2001-01-01T00:00:00Z,2001-01-01T00:00:01.25Z")) {
+        "{\"timestamps\":[\"0\",\" 1.25 \"],"
+        "\"unit\":\"apple_seconds\"}",
+        "[\"2001-01-01T00:00:00Z\",\"2001-01-01T00:00:01.25Z\"]")) {
     return 0;
   }
 
   if (!harness_expect_error_contains(
         NULL,
         STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
-        "{\"timestamps\":\"1,,2\"}",
+        "{\"timestamps\":[\"1\"]}",
+        "requires a non-empty unit string")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+        "{\"timestamps\":\"1,2\",\"unit\":\"unix_seconds\"}",
+        "must be an array of strings")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+        "{\"timestamps\":[],\"unit\":\"unix_seconds\"}",
+        "must contain between 1 and 256 items")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+        "{\"timestamps\":[1],\"unit\":\"unix_seconds\"}",
+        "items must be strings")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+        "{\"timestamps\":[\"1\",\" \"],\"unit\":\"unix_seconds\"}",
         "empty item")) {
     return 0;
   }
@@ -1755,7 +1902,7 @@ static int harness_run_helper_datetime_tests(void)
   if (!harness_expect_error_contains(
         NULL,
         STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
-        "{\"timestamps\":\"1\",\"unit\":\"banana_seconds\"}",
+        "{\"timestamps\":[\"1\"],\"unit\":\"banana_seconds\"}",
         "unit is not supported")) {
     return 0;
   }
@@ -1763,51 +1910,63 @@ static int harness_run_helper_datetime_tests(void)
   if (!harness_expect_output_equals(
         NULL,
         STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
-        "{\"datetimes\":\"1970-01-01T00:00:00Z,1970-01-01T00:00:01Z\","
+        "{\"datetimes\":[\"1970-01-01T00:00:00Z\","
+        "\"1970-01-01T00:00:01Z\"],"
         "\"unit\":\"unix_seconds\"}",
-        "0,1")) {
+        "[\"0\",\"1\"]")) {
     return 0;
   }
 
   if (!harness_expect_output_equals(
         NULL,
         STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
-        "{\"datetimes\":\"2001-01-01T00:00:00Z,2026-01-01T00:00:00Z,"
-        "2027-01-01T00:00:00Z\",\"unit\":\"apple_seconds\"}",
-        "0,788918400,820454400")) {
-    return 0;
-  }
-
-  if (!harness_expect_output_equals(
-        NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
-        "{\"datetimes\":\"2026-01-01,2027-01-01\"}",
-        "788918400,820454400")) {
-    return 0;
-  }
-
-  if (!harness_expect_output_equals(
-        NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
-        "{\"datetimes\":\"1969-12-31T23:59:59.5Z\","
-        "\"unit\":\"unix_seconds\"}",
-        "-0.5")) {
-    return 0;
-  }
-
-  if (!harness_expect_output_equals(
-        NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
-        "{\"datetimes\":\"2026-01-01T05:00:00+05:00\","
+        "{\"datetimes\":[\"2001-01-01T00:00:00Z\","
+        "\"2026-01-01T00:00:00Z\",\"2027-01-01T00:00:00Z\"],"
         "\"unit\":\"apple_seconds\"}",
-        "788918400")) {
+        "[\"0\",\"788918400\",\"820454400\"]")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":[\"2026-01-01\",\"2027-01-01\"],"
+        "\"unit\":\"apple_seconds\"}",
+        "[\"788918400\",\"820454400\"]")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":[\"1969-12-31T23:59:59.5Z\"],"
+        "\"unit\":\"unix_seconds\"}",
+        "[\"-0.5\"]")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":[\"2026-01-01T05:00:00+05:00\"],"
+        "\"unit\":\"apple_seconds\"}",
+        "[\"788918400\"]")) {
     return 0;
   }
 
   if (!harness_expect_error_contains(
         NULL,
         STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
-        "{\"datetimes\":\"2026-01-01,,2027-01-01\"}",
+        "{\"datetimes\":[\"2026-01-01\"]}",
+        "requires a non-empty unit string")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":[\"2026-01-01\",\"\",\"2027-01-01\"],"
+        "\"unit\":\"apple_seconds\"}",
         "empty item")) {
     return 0;
   }
@@ -1815,7 +1974,8 @@ static int harness_run_helper_datetime_tests(void)
   if (!harness_expect_error_contains(
         NULL,
         STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
-        "{\"datetimes\":\"2026-02-30\"}",
+        "{\"datetimes\":[\"2026-02-30\"],"
+        "\"unit\":\"apple_seconds\"}",
         "date is invalid")) {
     return 0;
   }

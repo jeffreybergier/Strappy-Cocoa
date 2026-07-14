@@ -108,7 +108,7 @@
 
 #define HARNESS_DATETIME_FROM_ISO8601_DESCRIPTION \
   "ALWAYS call this tool when converting ISO 8601 datetimes to numeric " \
-  "timestamps."
+  "timestamps. Returns a JSON array of timestamp strings in input order."
 
 #define HARNESS_MEMORY_USER_FACT_FORGET_DESCRIPTION \
   "Call this tool to forget durable facts that are no longer correct or useful."
@@ -576,6 +576,22 @@ static int harness_test_request_surfaces(void)
       STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
       HARNESS_FONTAWESOME_CONFIRM_DESCRIPTION) &&
     harness_database_query_parameters_are_required_strings(tools) &&
+    harness_tool_has_required_nonempty_string_array_parameter(
+      tools,
+      STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+      "timestamps") &&
+    harness_tool_has_required_string_parameter(
+      tools,
+      STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+      "unit") &&
+    harness_tool_has_required_nonempty_string_array_parameter(
+      tools,
+      STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+      "datetimes") &&
+    harness_tool_has_required_string_parameter(
+      tools,
+      STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+      "unit") &&
     harness_tool_has_required_string_parameter(
       tools,
       STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,

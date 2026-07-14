@@ -71,12 +71,17 @@
       "type": "function",
       "function": {
         "name": "helper_datetime_to_iso8601",
-        "description": "ALWAYS call this tool when displaying numeric timestamps. Convert one or more numeric timestamps to ISO 8601 datetimes.",
+        "description": "ALWAYS call this tool when displaying numeric timestamps. Convert numeric timestamp strings to ISO 8601 datetimes. Returns a JSON array in input order.",
         "parameters": {
           "type": "object",
           "properties": {
             "timestamps": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 256
             },
             "unit": {
               "type": "string",
@@ -93,7 +98,8 @@
             }
           },
           "required": [
-            "timestamps"
+            "timestamps",
+            "unit"
           ],
           "additionalProperties": false
         }
@@ -103,12 +109,17 @@
       "type": "function",
       "function": {
         "name": "helper_datetime_from_iso8601",
-        "description": "ALWAYS call this tool when converting ISO 8601 datetimes to numeric timestamps.",
+        "description": "ALWAYS call this tool when converting ISO 8601 datetimes to numeric timestamps. Returns a JSON array of timestamp strings in input order.",
         "parameters": {
           "type": "object",
           "properties": {
             "datetimes": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 256
             },
             "unit": {
               "type": "string",
@@ -125,7 +136,8 @@
             }
           },
           "required": [
-            "datetimes"
+            "datetimes",
+            "unit"
           ],
           "additionalProperties": false
         }
