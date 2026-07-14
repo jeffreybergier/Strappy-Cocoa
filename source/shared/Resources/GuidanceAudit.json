@@ -13,7 +13,7 @@
     },
     {
       "tool_name": "helper_fontawesome_shortcode_confirm",
-      "if_not_called": "helper_fontawesome_shortcode_confirm: ALWAYS call this tool now. Confirm at least one Font Awesome version 7 Free shortcode to use in your answer. shortcodes must be a non-empty array; null and empty arrays are invalid. NEVER use unicode emoji in your answer."
+      "if_not_called": "helper_fontawesome_shortcode_confirm: ALWAYS call this tool now. Confirm at least one Font Awesome version 7 Free Markdown shortcode, such as [fa:heart], to use in your answer. shortcodes must be a non-empty array; null and empty arrays are invalid. NEVER use unicode emoji in your answer."
     },
     {
       "tool_name": "memory_user_fact_remember",

@@ -747,6 +747,10 @@ static int harness_run_audit_resource_tests(void)
     (strstr(fontawesome_confirm_message->valuestring,
             "ALWAYS call") != NULL) &&
     (strstr(fontawesome_confirm_message->valuestring,
+            "Markdown shortcode") != NULL) &&
+    (strstr(fontawesome_confirm_message->valuestring,
+            "[fa:heart]") != NULL) &&
+    (strstr(fontawesome_confirm_message->valuestring,
             "non-empty array") != NULL) &&
     (strstr(fontawesome_confirm_message->valuestring,
             "null and empty arrays are invalid") != NULL) &&
@@ -1742,8 +1746,9 @@ static int harness_run_tool_registry_tests(void)
         (strstr(tools_json,
                 "ALWAYS call this tool before the final answer. Set "
                 "shortcodes to a non-empty array of Font Awesome version 7 "
-                "Free shortcodes to confirm before using them. Null and "
-                "empty arrays are invalid.") != NULL) &&
+                "Free Markdown shortcodes, such as [fa:heart] or "
+                "[fa:brands:github], to confirm before using them. Returns "
+                "confirmed and not_found arrays.") != NULL) &&
         (strstr(tools_json, "NEVER use unicode emoji.") != NULL) &&
         (strstr(tools_json,
                 "ALWAYS call this tool before the final answer. Update the "
@@ -1983,24 +1988,60 @@ static int harness_run_helper_datetime_tests(void)
   return 1;
 }
 
+static int harness_expect_fontawesome_search_output(
+  const char *arguments_json,
+  const char *expected_first_shortcode)
+{
+  cJSON *root;
+  cJSON *item;
+  int count;
+  int ok;
+
+  root = harness_tool_output_json(
+    NULL,
+    STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+    arguments_json);
+  count = cJSON_IsArray(root) ? cJSON_GetArraySize(root) : 0;
+  item = cJSON_GetArrayItem(root, 0);
+  ok = cJSON_IsArray(root) && (count > 0) && (count <= 20) &&
+    cJSON_IsString(item) && (item->valuestring != NULL) &&
+    (strcmp(item->valuestring, expected_first_shortcode) == 0);
+  for (item = cJSON_IsArray(root) ? root->child : NULL;
+       ok && (item != NULL);
+       item = item->next) {
+    size_t length;
+
+    if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
+      ok = 0;
+      break;
+    }
+    length = strlen(item->valuestring);
+    if ((length < 6U) || (strncmp(item->valuestring, "[fa:", 4U) != 0) ||
+        (item->valuestring[length - 1U] != ']')) {
+      ok = 0;
+    }
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Font Awesome search did not return a ranked shortcode array.\n");
+  }
+  cJSON_Delete(root);
+  return ok;
+}
+
 static int harness_run_helper_fontawesome_tests(void)
 {
-  if (!harness_expect_output_contains_without(
-        NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+  if (!harness_expect_fontawesome_search_output(
         "{\"query\":\"warning\"}",
-        "\"shortcode\":\"[fa:triangle-exclamation]\"",
-        "\"label\":\"Triangle Exclamation\"",
-        "codepoint")) {
-    return 0;
-  }
-
-  if (!harness_expect_output_contains(
+        "[fa:triangle-exclamation]") ||
+      !harness_expect_fontawesome_search_output(
+        "{\"query\":\"github\"}",
+        "[fa:brands:github]") ||
+      !harness_expect_output_equals(
         NULL,
         STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
-        "{\"query\":\"github\"}",
-        "\"shortcode\":\"[fa:brands:github]\"",
-        "\"style\":\"brands\"")) {
+        "{\"query\":\"strappy-no-such-icon-query\"}",
+        "[]")) {
     return 0;
   }
 
@@ -2024,25 +2065,40 @@ static int harness_run_helper_fontawesome_tests(void)
         NULL,
         STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
         "{}",
-        "requires a non-empty query string")) {
+        "requires a non-empty query string") ||
+      !harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+        "{\"query\":\" \\t \\n\"}",
+        "query must not be blank")) {
     return 0;
   }
 
-  if (!harness_expect_output_contains(
+  if (!harness_expect_output_equals(
         NULL,
         STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
         "{\"shortcodes\":[\"[fa:heart]\",\"database\",\"[fa:not-real]\"]}",
-        "\"available_count\":2",
-        "\"unavailable_count\":1")) {
+        "{\"confirmed\":[\"[fa:heart]\"],"
+        "\"not_found\":[\"database\",\"[fa:not-real]\"]}")) {
     return 0;
   }
 
-  if (!harness_expect_output_contains(
+  if (!harness_expect_output_equals(
         NULL,
         STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
         "{\"shortcodes\":[\"[fa:brands:github]\",\"[fa:regular:heart]\"]}",
-        "\"shortcode\":\"[fa:brands:github]\"",
-        "\"shortcode\":\"[fa:regular:heart]\"")) {
+        "{\"confirmed\":[\"[fa:brands:github]\","
+        "\"[fa:regular:heart]\"],\"not_found\":[]}")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        "{\"shortcodes\":[\"heart\",\"fa:heart\","
+        "\"[FA:heart]\",\" [fa:heart] \"]}",
+        "{\"confirmed\":[],\"not_found\":[\"heart\",\"fa:heart\","
+        "\"[FA:heart]\",\" [fa:heart] \"]}")) {
     return 0;
   }
 

@@ -147,12 +147,16 @@
       "type": "function",
       "function": {
         "name": "helper_fontawesome_shortcode_search",
-        "description": "ALWAYS use Font Awesome version 7 Free tools and shortcodes for visual expression instead of Unicode emoji. Search for icon shortcodes and render icons in answers with [fa:icon-shortcode-name] Markdown syntax.",
+        "description": "ALWAYS use Font Awesome version 7 Free tools and shortcodes for visual expression instead of Unicode emoji. Search for icon shortcodes and render icons in answers with full Markdown shortcode syntax, such as [fa:heart] or [fa:brands:github]. Returns a ranked JSON array of Markdown shortcodes.",
         "parameters": {
           "type": "object",
           "properties": {
             "query": {
-              "type": "string"
+              "type": "string",
+              "description": "Non-blank search terms for the desired icon.",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "\\S"
             }
           },
           "required": [
@@ -169,14 +173,17 @@
       "type": "function",
       "function": {
         "name": "helper_fontawesome_shortcode_confirm",
-        "description": "ALWAYS call this tool before the final answer. Set shortcodes to a non-empty array of Font Awesome version 7 Free shortcodes to confirm before using them. Null and empty arrays are invalid. Render confirmed icons in answers with [fa:icon-shortcode-name] Markdown syntax. NEVER use unicode emoji.",
+        "description": "ALWAYS call this tool before the final answer. Set shortcodes to a non-empty array of Font Awesome version 7 Free Markdown shortcodes, such as [fa:heart] or [fa:brands:github], to confirm before using them. Returns confirmed and not_found arrays. Null and empty arrays are invalid. Render confirmed icons in answers with the returned Markdown shortcode syntax. NEVER use unicode emoji.",
         "parameters": {
           "type": "object",
           "properties": {
             "shortcodes": {
               "type": "array",
+              "description": "Font Awesome Markdown shortcodes to confirm, such as [fa:heart] or [fa:brands:github].",
               "items": {
-                "type": "string"
+                "type": "string",
+                "description": "A complete Font Awesome Markdown shortcode, such as [fa:heart].",
+                "maxLength": 96
               },
               "minItems": 1,
               "maxItems": 32

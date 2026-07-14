@@ -34,7 +34,8 @@
 
 #define HARNESS_FONTAWESOME_CONFIRM_AUDIT_MESSAGE \
   "helper_fontawesome_shortcode_confirm: ALWAYS call this tool now. Confirm " \
-  "at least one Font Awesome version 7 Free shortcode to use in your answer. " \
+  "at least one Font Awesome version 7 Free Markdown shortcode, such as " \
+  "[fa:heart], to use in your answer. " \
   "shortcodes must be a non-empty array; null and empty arrays are invalid. " \
   "NEVER use unicode emoji in your answer."
 
@@ -95,10 +96,11 @@
 
 #define HARNESS_FONTAWESOME_CONFIRM_DESCRIPTION \
   "ALWAYS call this tool before the final answer. Set shortcodes to a " \
-  "non-empty array of Font Awesome version 7 Free shortcodes to confirm " \
-  "before using them. Null and empty arrays are invalid. Render confirmed " \
-  "icons in answers with [fa:icon-shortcode-name] Markdown syntax. NEVER use " \
-  "unicode emoji."
+  "non-empty array of Font Awesome version 7 Free Markdown shortcodes, such " \
+  "as [fa:heart] or [fa:brands:github], to confirm before using them. Returns " \
+  "confirmed and not_found arrays. Null and empty arrays are invalid. Render " \
+  "confirmed icons in answers with the returned Markdown shortcode syntax. " \
+  "NEVER use unicode emoji."
 
 #define HARNESS_MEMORY_DATABASE_HINT_REMEMBER_DESCRIPTION \
   "ALWAYS call this tool. Set database_id to the approved database ID and " \
@@ -458,6 +460,78 @@ static int harness_tool_has_required_nonempty_string_array_parameter(
   return 0;
 }
 
+static cJSON *harness_tool_parameter_schema(cJSON *tools,
+                                            const char *tool_name,
+                                            const char *parameter_name)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools) || (tool_name == NULL) ||
+      (parameter_name == NULL)) {
+    return NULL;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *name;
+    cJSON *parameters;
+    cJSON *properties;
+
+    name = cJSON_GetObjectItem(tool, "name");
+    if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
+        (strcmp(name->valuestring, tool_name) != 0)) {
+      continue;
+    }
+    parameters = cJSON_GetObjectItem(tool, "parameters");
+    properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItem(parameters, "properties") : NULL;
+    return cJSON_IsObject(properties) ?
+      cJSON_GetObjectItem(properties, parameter_name) : NULL;
+  }
+  return NULL;
+}
+
+static int harness_fontawesome_parameter_constraints_match(cJSON *tools)
+{
+  cJSON *query;
+  cJSON *shortcodes;
+  cJSON *items;
+  cJSON *value;
+
+  query = harness_tool_parameter_schema(
+    tools,
+    STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+    "query");
+  shortcodes = harness_tool_parameter_schema(
+    tools,
+    STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+    "shortcodes");
+  items = cJSON_IsObject(shortcodes) ?
+    cJSON_GetObjectItem(shortcodes, "items") : NULL;
+  if (!cJSON_IsObject(query) || !cJSON_IsObject(shortcodes) ||
+      !cJSON_IsObject(items)) {
+    return 0;
+  }
+
+  value = cJSON_GetObjectItem(query, "minLength");
+  if (!cJSON_IsNumber(value) || (value->valueint != 1)) {
+    return 0;
+  }
+  value = cJSON_GetObjectItem(query, "maxLength");
+  if (!cJSON_IsNumber(value) || (value->valueint != 128)) {
+    return 0;
+  }
+  value = cJSON_GetObjectItem(query, "pattern");
+  if (!cJSON_IsString(value) || (value->valuestring == NULL) ||
+      (strcmp(value->valuestring, "\\S") != 0)) {
+    return 0;
+  }
+  value = cJSON_GetObjectItem(shortcodes, "maxItems");
+  if (!cJSON_IsNumber(value) || (value->valueint != 32)) {
+    return 0;
+  }
+  value = cJSON_GetObjectItem(items, "maxLength");
+  return cJSON_IsNumber(value) && (value->valueint == 96);
+}
+
 static int harness_tools_hide_local_display_metadata(cJSON *tools)
 {
   cJSON *tool;
@@ -600,6 +674,11 @@ static int harness_test_request_surfaces(void)
       tools,
       STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
       "shortcodes") &&
+    harness_tool_has_required_string_parameter(
+      tools,
+      STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+      "query") &&
+    harness_fontawesome_parameter_constraints_match(tools) &&
     harness_database_context_parameters_are_optional_nullable(tools) &&
     harness_tool_has_optional_nullable_string_parameters(
       tools,
@@ -1432,7 +1511,11 @@ static int harness_required_function_outputs_request_is_valid(
           (output->valuestring != NULL) &&
           ((expected_index == 1U) ?
             (strcmp(output->valuestring, "{}") == 0) :
-            (output->valuestring[0] != '\0'));
+            ((expected_index == 2U) ?
+              (strcmp(output->valuestring,
+                      "{\"confirmed\":[\"[fa:music]\"],"
+                      "\"not_found\":[]}") == 0) :
+              (output->valuestring[0] != '\0')));
       }
     }
     if (!call_found || !output_found) {
@@ -1751,7 +1834,7 @@ static int harness_run_empty_final_without_audit_server(int listener_fd)
     "\"type\":\"function_call\",\"id\":\"fc-empty-icon\","
     "\"call_id\":\"call-empty-icon\","
     "\"name\":\"helper_fontawesome_shortcode_confirm\","
-    "\"arguments\":\"{\\\"shortcodes\\\":[\\\"fa:music\\\"]}\","
+    "\"arguments\":\"{\\\"shortcodes\\\":[\\\"[fa:music]\\\"]}\","
     "\"status\":\"completed\"},{"
     "\"type\":\"function_call\",\"id\":\"fc-empty-user-fact\","
     "\"call_id\":\"call-empty-user-fact\","
