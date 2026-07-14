@@ -16,7 +16,6 @@
 #include <unistd.h>
 
 #define HARNESS_RESOURCE_DIR "../shared/Resources"
-#define HARNESS_DATABASE_GUIDANCE_RESOURCE "GuidanceDatabase.json"
 #define HARNESS_AUDIT_GUIDANCE_RESOURCE "GuidanceAudit.json"
 
 typedef struct harness_context {
@@ -790,35 +789,6 @@ static int harness_run_audit_resource_tests(void)
   return ok;
 }
 
-static char *harness_database_default_string(const char *key)
-{
-  cJSON *root;
-  cJSON *value;
-  char *copy;
-
-  root = harness_read_json_resource(HARNESS_DATABASE_GUIDANCE_RESOURCE);
-  if (root == NULL) {
-    return NULL;
-  }
-
-  value = cJSON_GetObjectItem(root, key);
-  if (!cJSON_IsString(value) || (value->valuestring == NULL)) {
-    fprintf(stderr,
-            "Database defaults are missing %s.\n",
-            (key != NULL) ? key : "(null)");
-    cJSON_Delete(root);
-    return NULL;
-  }
-
-  copy = strappy_string_duplicate(value->valuestring);
-  cJSON_Delete(root);
-  if (copy == NULL) {
-    fprintf(stderr, "Could not copy database guidance string.\n");
-  }
-
-  return copy;
-}
-
 static int harness_create_user_database(const char *database_path)
 {
   sqlite3 *db;
@@ -1306,16 +1276,141 @@ static int harness_expect_user_fact_read_result(const char *catalog_path,
   return ok;
 }
 
-static int harness_expect_context_default_description(
-  const char *catalog_path,
-  const char *arguments_json)
+typedef struct harness_database_context_expectation {
+  size_t hint_count;
+  const char *first_hint;
+  const char *last_hint;
+  int hints_truncated;
+  const char *const *tables;
+  size_t table_count;
+  int tables_truncated;
+  const char *const *views;
+  size_t view_count;
+  int views_truncated;
+} harness_database_context_expectation;
+
+static int harness_object_has_exact_keys(cJSON *object,
+                                         const char *const *keys,
+                                         size_t key_count)
 {
-  char *expected;
+  cJSON *property;
+  size_t index;
+
+  if (!cJSON_IsObject(object) || ((key_count > 0U) && (keys == NULL))) {
+    return 0;
+  }
+
+  property = object->child;
+  for (index = 0U; index < key_count; index++) {
+    if ((property == NULL) || (property->string == NULL) ||
+        (strcmp(property->string, keys[index]) != 0)) {
+      return 0;
+    }
+    property = property->next;
+  }
+  return (property == NULL) ? 1 : 0;
+}
+
+static int harness_string_array_equals(cJSON *array,
+                                       const char *const *expected,
+                                       size_t expected_count)
+{
+  cJSON *item;
+  size_t index;
+
+  if (!cJSON_IsArray(array) ||
+      ((expected_count > 0U) && (expected == NULL))) {
+    return 0;
+  }
+
+  item = array->child;
+  for (index = 0U; index < expected_count; index++) {
+    if (!cJSON_IsString(item) || (item->valuestring == NULL) ||
+        (strcmp(item->valuestring, expected[index]) != 0)) {
+      return 0;
+    }
+    item = item->next;
+  }
+  return (item == NULL) ? 1 : 0;
+}
+
+static int harness_database_hint_array_matches(cJSON *array,
+                                               size_t expected_count,
+                                               const char *first_hint,
+                                               const char *last_hint)
+{
+  static const char *const keys[] = { "id", "hint", "date_saved" };
+  cJSON *item;
+  size_t index;
+
+  if (!cJSON_IsArray(array)) {
+    return 0;
+  }
+
+  item = array->child;
+  for (index = 0U; index < expected_count; index++) {
+    cJSON *id;
+    cJSON *hint;
+    cJSON *date_saved;
+
+    if ((item == NULL) ||
+        !harness_object_has_exact_keys(item,
+                                       keys,
+                                       sizeof(keys) / sizeof(keys[0]))) {
+      return 0;
+    }
+    id = cJSON_GetObjectItemCaseSensitive(item, "id");
+    hint = cJSON_GetObjectItemCaseSensitive(item, "hint");
+    date_saved = cJSON_GetObjectItemCaseSensitive(item, "date_saved");
+    if (!cJSON_IsNumber(id) || !cJSON_IsString(hint) ||
+        (hint->valuestring == NULL) || !cJSON_IsString(date_saved) ||
+        (date_saved->valuestring == NULL) ||
+        (date_saved->valuestring[0] == '\0')) {
+      return 0;
+    }
+    if ((index == 0U) &&
+        ((first_hint == NULL) ||
+         (strcmp(hint->valuestring, first_hint) != 0))) {
+      return 0;
+    }
+    if ((index == (expected_count - 1U)) &&
+        ((last_hint == NULL) ||
+         (strcmp(hint->valuestring, last_hint) != 0))) {
+      return 0;
+    }
+    item = item->next;
+  }
+
+  return (item == NULL) ? 1 : 0;
+}
+
+static int harness_json_bool_equals(cJSON *value, int expected)
+{
+  return expected ? cJSON_IsTrue(value) : cJSON_IsFalse(value);
+}
+
+static int harness_expect_database_context_result(
+  const char *catalog_path,
+  const char *arguments_json,
+  const harness_database_context_expectation *expected)
+{
+  static const char *const keys[] = {
+    "remembered_hints",
+    "remembered_hints_truncated",
+    "tables",
+    "tables_truncated",
+    "views",
+    "views_truncated"
+  };
   cJSON *root;
-  cJSON *description;
+  cJSON *hints;
+  cJSON *hints_truncated;
+  cJSON *tables;
+  cJSON *tables_truncated;
+  cJSON *views;
+  cJSON *views_truncated;
   int ok;
 
-  expected = harness_database_default_string("default_description");
   if (expected == NULL) {
     return 0;
   }
@@ -1324,21 +1419,48 @@ static int harness_expect_context_default_description(
                                   STRAPPY_TOOL_DATABASE_CONTEXT_READ,
                                   arguments_json);
   if (root == NULL) {
-    free(expected);
     return 0;
   }
 
-  description = cJSON_GetObjectItem(root, "description");
-  ok = (cJSON_IsString(description) &&
-        (description->valuestring != NULL) &&
-        (strcmp(description->valuestring, expected) == 0)) ? 1 : 0;
+  hints = cJSON_GetObjectItemCaseSensitive(root, "remembered_hints");
+  hints_truncated = cJSON_GetObjectItemCaseSensitive(
+    root,
+    "remembered_hints_truncated");
+  tables = cJSON_GetObjectItemCaseSensitive(root, "tables");
+  tables_truncated = cJSON_GetObjectItemCaseSensitive(root,
+                                                       "tables_truncated");
+  views = cJSON_GetObjectItemCaseSensitive(root, "views");
+  views_truncated = cJSON_GetObjectItemCaseSensitive(root,
+                                                      "views_truncated");
+
+  ok = harness_object_has_exact_keys(root,
+                                     keys,
+                                     sizeof(keys) / sizeof(keys[0])) &&
+    harness_database_hint_array_matches(hints,
+                                        expected->hint_count,
+                                        expected->first_hint,
+                                        expected->last_hint) &&
+    harness_json_bool_equals(hints_truncated, expected->hints_truncated) &&
+    harness_string_array_equals(tables,
+                                expected->tables,
+                                expected->table_count) &&
+    harness_json_bool_equals(tables_truncated, expected->tables_truncated) &&
+    harness_string_array_equals(views,
+                                expected->views,
+                                expected->view_count) &&
+    harness_json_bool_equals(views_truncated, expected->views_truncated);
   if (!ok) {
+    char *actual;
+
+    actual = cJSON_PrintUnformatted(root);
     fprintf(stderr,
-            "Database context description did not match the generic default.\n");
+            "database_context_read result did not match its compact public "
+            "shape: %s\n",
+            (actual != NULL) ? actual : "(unserializable)");
+    free(actual);
   }
 
   cJSON_Delete(root);
-  free(expected);
   return ok;
 }
 
@@ -1582,6 +1704,72 @@ static int harness_tool_schema_has_no_properties(cJSON *tools,
   return 0;
 }
 
+static int harness_database_context_schema_matches(cJSON *tools)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools)) {
+    return 0;
+  }
+
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *function;
+    cJSON *name;
+    cJSON *parameters;
+    cJSON *properties;
+    cJSON *database_id;
+    cJSON *type;
+    cJSON *description;
+    cJSON *min_length;
+    cJSON *max_length;
+    cJSON *required;
+    cJSON *additional_properties;
+
+    function = cJSON_GetObjectItemCaseSensitive(tool, "function");
+    name = cJSON_IsObject(function) ?
+      cJSON_GetObjectItemCaseSensitive(function, "name") : NULL;
+    if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
+        (strcmp(name->valuestring, STRAPPY_TOOL_DATABASE_CONTEXT_READ) != 0)) {
+      continue;
+    }
+
+    parameters = cJSON_GetObjectItemCaseSensitive(function, "parameters");
+    properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters, "properties") : NULL;
+    database_id = cJSON_IsObject(properties) ?
+      cJSON_GetObjectItemCaseSensitive(properties, "database_id") : NULL;
+    type = cJSON_IsObject(database_id) ?
+      cJSON_GetObjectItemCaseSensitive(database_id, "type") : NULL;
+    description = cJSON_IsObject(database_id) ?
+      cJSON_GetObjectItemCaseSensitive(database_id, "description") : NULL;
+    min_length = cJSON_IsObject(database_id) ?
+      cJSON_GetObjectItemCaseSensitive(database_id, "minLength") : NULL;
+    max_length = cJSON_IsObject(database_id) ?
+      cJSON_GetObjectItemCaseSensitive(database_id, "maxLength") : NULL;
+    required = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters, "required") : NULL;
+    additional_properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters,
+                                       "additionalProperties") : NULL;
+
+    return cJSON_IsObject(properties) &&
+      (cJSON_GetArraySize(properties) == 1) &&
+      cJSON_IsArray(type) && (cJSON_GetArraySize(type) == 2) &&
+      harness_json_array_contains_string(type, "string") &&
+      harness_json_array_contains_string(type, "null") &&
+      cJSON_IsString(description) && (description->valuestring != NULL) &&
+      (strcmp(description->valuestring,
+              "Approved database ID returned by database_list_info, or null "
+              "when no database context is needed.") == 0) &&
+      cJSON_IsNumber(min_length) && (min_length->valuedouble == 1.0) &&
+      cJSON_IsNumber(max_length) && (max_length->valuedouble == 128.0) &&
+      cJSON_IsArray(required) && (cJSON_GetArraySize(required) == 0) &&
+      cJSON_IsFalse(additional_properties);
+  }
+
+  return 0;
+}
+
 static int harness_tool_display_matches(cJSON *registry,
                                         const char *tool_name,
                                         const char *promoted_argument,
@@ -1706,6 +1894,7 @@ static int harness_run_tool_registry_tests(void)
         harness_tool_schema_has_no_properties(
           tools,
           STRAPPY_TOOL_MEMORY_USER_FACT_READ) &&
+        harness_database_context_schema_matches(tools) &&
         (filtered_json != NULL) && cJSON_IsArray(filtered) &&
         (cJSON_GetArraySize(filtered) == 1) &&
         harness_tool_schemas_hide_display_metadata(filtered) &&
@@ -1819,12 +2008,11 @@ static int harness_run_tool_registry_tests(void)
                 "information, guesses, or one-off query results.") !=
          NULL) &&
         (strstr(tools_json,
-                "ALWAYS call this tool before the final answer. Read relevant "
-                "approved database context before calling database_query.") !=
+                "ALWAYS call this tool before the final answer. Set "
+                "database_id to the relevant approved database before "
+                "database_query, or null when no database context is needed. "
+                "Returns remembered hints, table names, and view names.") !=
          NULL) &&
-        (strstr(tools_json,
-                "empty strings to report that no database context was "
-                "needed.") != NULL) &&
         (strstr(tools_json,
                 "Call this tool to forget durable facts that are no longer "
                 "correct or useful.") != NULL) &&
@@ -3861,8 +4049,8 @@ static int harness_run_wide_schema_database_query_test(
 static int harness_run_helper_info_tests(const harness_context *context)
 {
   static const char *noop_result = "{}";
-  static const char *context_noop_result =
-    "{\"ok\":true,\"read\":false,\"reason\":\"no_database_needed\"}";
+  static const char *const base_tables[] = { "identifiers", "messages" };
+  harness_database_context_expectation expected_context;
   char arguments[4096];
   int written;
 
@@ -3873,39 +4061,53 @@ static int harness_run_helper_info_tests(const harness_context *context)
   if (!harness_expect_output_equals(context->catalog_path,
                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
                                     NULL,
-                                    context_noop_result) ||
+                                    noop_result) ||
       !harness_expect_output_equals(context->catalog_path,
                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
                                     "",
-                                    context_noop_result) ||
+                                    noop_result) ||
       !harness_expect_output_equals(context->catalog_path,
                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
                                     "null",
-                                    context_noop_result) ||
+                                    noop_result) ||
       !harness_expect_output_equals(context->catalog_path,
                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
                                     "\" NULL \"",
-                                    context_noop_result) ||
+                                    noop_result) ||
       !harness_expect_output_equals(context->catalog_path,
                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
                                     "{}",
-                                    context_noop_result) ||
+                                    noop_result) ||
       !harness_expect_output_equals(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-        "{\"database_id\":null,\"query\":null,\"kind\":null,\"limit\":null}",
-        context_noop_result) ||
+        "{\"database_id\":null}",
+        noop_result) ||
       !harness_expect_output_equals(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-        "{\"database_id\":\"null\",\"query\":\"NULL\","
-        "\"kind\":\" Null \",\"limit\":\"null\"}",
-        context_noop_result) ||
+        "{\"database_id\":\"null\"}",
+        noop_result) ||
       !harness_expect_output_equals(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-        "{\"database_id\":\"  \",\"query\":\"\\n\",\"kind\":\"\\t\"}",
-        context_noop_result)) {
+        "{\"database_id\":\"  \"}",
+        noop_result)) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(context->catalog_path,
+                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                     "{\"query\":null}",
+                                     "does not accept argument 'query'") ||
+      !harness_expect_error_contains(context->catalog_path,
+                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                     "{\"kind\":null}",
+                                     "does not accept argument 'kind'") ||
+      !harness_expect_error_contains(context->catalog_path,
+                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                     "{\"limit\":null}",
+                                     "does not accept argument 'limit'")) {
     return 0;
   }
 
@@ -4082,26 +4284,24 @@ static int harness_run_helper_info_tests(const harness_context *context)
 
   written = snprintf(arguments,
                      sizeof(arguments),
-                     "{\"database_id\":\"%s\",\"query\":\"identifiers\"}",
+                     "{\"database_id\":\"%s\"}",
                      context->database_id);
   if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
     fprintf(stderr, "Could not build database hint read arguments.\n");
     return 0;
   }
 
-  if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-                                      arguments,
-                                      "\"schema\"",
-                                      "\"messages\"")) {
-    return 0;
-  }
-
-  if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-                                      arguments,
-                                      "\"kind\":\"hint\"",
-                                      "\"title\":\"Database hint\"")) {
+  memset(&expected_context, 0, sizeof(expected_context));
+  expected_context.hint_count = 1U;
+  expected_context.first_hint =
+    "The messages table can be checked against identifiers when validating "
+    "exact integer serialization.";
+  expected_context.last_hint = expected_context.first_hint;
+  expected_context.tables = base_tables;
+  expected_context.table_count = sizeof(base_tables) / sizeof(base_tables[0]);
+  if (!harness_expect_database_context_result(context->catalog_path,
+                                              arguments,
+                                              &expected_context)) {
     return 0;
   }
 
@@ -4136,19 +4336,152 @@ static int harness_run_helper_info_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-                                      "{\"query\":\"identifiers\"}",
-                                      "\"database_hints\"",
-                                      "\"count\":0")) {
+  written = snprintf(arguments,
+                     sizeof(arguments),
+                     "{\"database_id\":\"%s\"}",
+                     context->database_id);
+  if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
+    fprintf(stderr, "Could not rebuild database context arguments.\n");
+    return 0;
+  }
+
+  memset(&expected_context, 0, sizeof(expected_context));
+  expected_context.tables = base_tables;
+  expected_context.table_count = sizeof(base_tables) / sizeof(base_tables[0]);
+  if (!harness_expect_database_context_result(context->catalog_path,
+                                              arguments,
+                                              &expected_context)) {
     return 0;
   }
 
   return 1;
 }
 
-static int harness_run_mail_guidance_tests(harness_context *context)
+static int harness_expand_database_context_fixture(const char *database_path)
 {
+  sqlite3 *db;
+  char sql[256];
+  int index;
+  int rc;
+  int written;
+
+  db = NULL;
+  rc = sqlite3_open_v2(database_path,
+                       &db,
+                       SQLITE_OPEN_READWRITE,
+                       NULL);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr,
+            "Could not open database context fixture: %s\n",
+            (db != NULL) ? sqlite3_errmsg(db) : "unknown");
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    return 0;
+  }
+
+  for (index = 0; index < 19; index++) {
+    written = snprintf(sql,
+                       sizeof(sql),
+                       "CREATE TABLE table_%02d (id INTEGER);",
+                       index);
+    if ((written <= 0) || ((size_t)written >= sizeof(sql)) ||
+        !harness_exec_sql(db, sql)) {
+      sqlite3_close(db);
+      return 0;
+    }
+  }
+
+  for (index = 0; index < 21; index++) {
+    written = snprintf(sql,
+                       sizeof(sql),
+                       "CREATE VIEW view_%02d AS SELECT id FROM messages;",
+                       index);
+    if ((written <= 0) || ((size_t)written >= sizeof(sql)) ||
+        !harness_exec_sql(db, sql)) {
+      sqlite3_close(db);
+      return 0;
+    }
+  }
+
+  sqlite3_close(db);
+  return 1;
+}
+
+static int harness_run_database_context_limit_tests(
+  const harness_context *context)
+{
+  static const char *const expected_tables[] = {
+    "identifiers", "messages",
+    "table_00", "table_01", "table_02", "table_03", "table_04",
+    "table_05", "table_06", "table_07", "table_08", "table_09",
+    "table_10", "table_11", "table_12", "table_13", "table_14",
+    "table_15", "table_16", "table_17"
+  };
+  static const char *const expected_views[] = {
+    "view_00", "view_01", "view_02", "view_03", "view_04",
+    "view_05", "view_06", "view_07", "view_08", "view_09",
+    "view_10", "view_11", "view_12", "view_13", "view_14",
+    "view_15", "view_16", "view_17", "view_18", "view_19"
+  };
+  harness_database_context_expectation expected_context;
+  char arguments[4096];
+  int index;
+  int written;
+
+  if ((context == NULL) || (context->database_id == NULL) ||
+      !harness_expand_database_context_fixture(context->database_path)) {
+    return 0;
+  }
+
+  for (index = 0; index < 41; index++) {
+    written = snprintf(arguments,
+                       sizeof(arguments),
+                       "{\"database_id\":\"%s\",\"hint\":\"Hint %02d\"}",
+                       context->database_id,
+                       index);
+    if ((written <= 0) || ((size_t)written >= sizeof(arguments)) ||
+        !harness_expect_output_equals(
+          context->catalog_path,
+          STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+          arguments,
+          "{}")) {
+      return 0;
+    }
+  }
+
+  written = snprintf(arguments,
+                     sizeof(arguments),
+                     "{\"database_id\":\"%s\"}",
+                     context->database_id);
+  if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
+    fprintf(stderr, "Could not build bounded database context arguments.\n");
+    return 0;
+  }
+
+  memset(&expected_context, 0, sizeof(expected_context));
+  expected_context.hint_count = 40U;
+  expected_context.first_hint = "Hint 40";
+  expected_context.last_hint = "Hint 01";
+  expected_context.hints_truncated = 1;
+  expected_context.tables = expected_tables;
+  expected_context.table_count =
+    sizeof(expected_tables) / sizeof(expected_tables[0]);
+  expected_context.tables_truncated = 1;
+  expected_context.views = expected_views;
+  expected_context.view_count =
+    sizeof(expected_views) / sizeof(expected_views[0]);
+  expected_context.views_truncated = 1;
+  return harness_expect_database_context_result(context->catalog_path,
+                                                arguments,
+                                                &expected_context);
+}
+
+static int harness_run_mail_context_tests(harness_context *context)
+{
+  static const char *const envelope_tables[] = { "mailboxes", "messages" };
+  static const char *const protected_tables[] = { "message_data", "messages" };
+  harness_database_context_expectation expected_context;
   char arguments[4096];
   int written;
 
@@ -4180,8 +4513,13 @@ static int harness_run_mail_guidance_tests(harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_context_default_description(context->catalog_path,
-                                                  arguments)) {
+  memset(&expected_context, 0, sizeof(expected_context));
+  expected_context.tables = envelope_tables;
+  expected_context.table_count =
+    sizeof(envelope_tables) / sizeof(envelope_tables[0]);
+  if (!harness_expect_database_context_result(context->catalog_path,
+                                              arguments,
+                                              &expected_context)) {
     return 0;
   }
 
@@ -4194,16 +4532,31 @@ static int harness_run_mail_guidance_tests(harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_context_default_description(context->catalog_path,
-                                                  arguments)) {
+  memset(&expected_context, 0, sizeof(expected_context));
+  expected_context.tables = protected_tables;
+  expected_context.table_count =
+    sizeof(protected_tables) / sizeof(protected_tables[0]);
+  if (!harness_expect_database_context_result(context->catalog_path,
+                                              arguments,
+                                              &expected_context)) {
     return 0;
   }
 
   return 1;
 }
 
-static int harness_run_sms_guidance_tests(harness_context *context)
+static int harness_run_sms_context_tests(harness_context *context)
 {
+  static const char *const tables[] = {
+    "attachment",
+    "chat",
+    "chat_handle_join",
+    "chat_message_join",
+    "handle",
+    "message",
+    "message_attachment_join"
+  };
+  harness_database_context_expectation expected_context;
   char arguments[4096];
   int written;
 
@@ -4229,8 +4582,12 @@ static int harness_run_sms_guidance_tests(harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_context_default_description(context->catalog_path,
-                                                  arguments)) {
+  memset(&expected_context, 0, sizeof(expected_context));
+  expected_context.tables = tables;
+  expected_context.table_count = sizeof(tables) / sizeof(tables[0]);
+  if (!harness_expect_database_context_result(context->catalog_path,
+                                              arguments,
+                                              &expected_context)) {
     return 0;
   }
 
@@ -5699,11 +6056,12 @@ int main(void)
        harness_run_readonly_wal_database_query_test(&context) &&
        harness_run_wide_schema_database_query_test(&context) &&
        harness_run_helper_info_tests(&context) &&
+       harness_run_database_context_limit_tests(&context) &&
        harness_run_empty_session_storage_tests(&context) &&
        harness_run_session_turn_storage_tests(&context) &&
        harness_run_openrouter_model_catalog_tests(&context) &&
-       harness_run_sms_guidance_tests(&context) &&
-       harness_run_mail_guidance_tests(&context);
+       harness_run_sms_context_tests(&context) &&
+       harness_run_mail_context_tests(&context);
 
   harness_context_destroy(&context);
 

@@ -285,7 +285,7 @@
       "type": "function",
       "function": {
         "name": "database_context_read",
-        "description": "ALWAYS call this tool before the final answer. Read relevant approved database context before calling database_query. Otherwise call with no arguments, null arguments, or empty strings to report that no database context was needed.",
+        "description": "ALWAYS call this tool before the final answer. Set database_id to the relevant approved database before database_query, or null when no database context is needed. Returns remembered hints, table names, and view names.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -293,25 +293,10 @@
               "type": [
                 "string",
                 "null"
-              ]
-            },
-            "query": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "kind": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "limit": {
-              "type": [
-                "integer",
-                "null"
-              ]
+              ],
+              "description": "Approved database ID returned by database_list_info, or null when no database context is needed.",
+              "minLength": 1,
+              "maxLength": 128
             }
           },
           "required": [],

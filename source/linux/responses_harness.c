@@ -87,10 +87,10 @@
   "request depends on personal data. Do not guess the user's data."
 
 #define HARNESS_DATABASE_CONTEXT_READ_DESCRIPTION \
-  "ALWAYS call this tool before the final answer. Read relevant approved " \
-  "database context before calling database_query. Otherwise call with no " \
-  "arguments, null arguments, or empty strings to report that no database " \
-  "context was needed."
+  "ALWAYS call this tool before the final answer. Set database_id to the " \
+  "relevant approved database before database_query, or null when no " \
+  "database context is needed. Returns remembered hints, table names, and " \
+  "view names."
 
 #define HARNESS_SESSION_NAME_WRITE_DESCRIPTION \
   "ALWAYS call this tool before the final answer. Update the session with a " \
@@ -274,6 +274,10 @@ static int harness_database_context_parameters_are_optional_nullable(
     cJSON *name;
     cJSON *parameters;
     cJSON *properties;
+    cJSON *database_id;
+    cJSON *description;
+    cJSON *min_length;
+    cJSON *max_length;
     cJSON *required;
     cJSON *additional_properties;
 
@@ -285,23 +289,30 @@ static int harness_database_context_parameters_are_optional_nullable(
     parameters = cJSON_GetObjectItem(tool, "parameters");
     properties = cJSON_IsObject(parameters) ?
       cJSON_GetObjectItem(parameters, "properties") : NULL;
+    database_id = cJSON_IsObject(properties) ?
+      cJSON_GetObjectItem(properties, "database_id") : NULL;
+    description = cJSON_IsObject(database_id) ?
+      cJSON_GetObjectItem(database_id, "description") : NULL;
+    min_length = cJSON_IsObject(database_id) ?
+      cJSON_GetObjectItem(database_id, "minLength") : NULL;
+    max_length = cJSON_IsObject(database_id) ?
+      cJSON_GetObjectItem(database_id, "maxLength") : NULL;
     required = cJSON_IsObject(parameters) ?
       cJSON_GetObjectItem(parameters, "required") : NULL;
     additional_properties = cJSON_IsObject(parameters) ?
       cJSON_GetObjectItem(parameters, "additionalProperties") : NULL;
     return cJSON_IsObject(properties) &&
-      (cJSON_GetArraySize(properties) == 4) &&
+      (cJSON_GetArraySize(properties) == 1) &&
       cJSON_IsArray(required) && (cJSON_GetArraySize(required) == 0) &&
       (cJSON_GetObjectItem(parameters, "minProperties") == NULL) &&
       cJSON_IsFalse(additional_properties) &&
-      harness_schema_type_is_nullable(
-        cJSON_GetObjectItem(properties, "database_id"), "string") &&
-      harness_schema_type_is_nullable(
-        cJSON_GetObjectItem(properties, "query"), "string") &&
-      harness_schema_type_is_nullable(
-        cJSON_GetObjectItem(properties, "kind"), "string") &&
-      harness_schema_type_is_nullable(
-        cJSON_GetObjectItem(properties, "limit"), "integer");
+      harness_schema_type_is_nullable(database_id, "string") &&
+      cJSON_IsString(description) && (description->valuestring != NULL) &&
+      (strcmp(description->valuestring,
+              "Approved database ID returned by database_list_info, or null "
+              "when no database context is needed.") == 0) &&
+      cJSON_IsNumber(min_length) && (min_length->valuedouble == 1.0) &&
+      cJSON_IsNumber(max_length) && (max_length->valuedouble == 128.0);
   }
   return 0;
 }

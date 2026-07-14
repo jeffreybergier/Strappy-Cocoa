@@ -87,8 +87,9 @@ House style for Strappy source:
 14. Database tool flow is split by responsibility. `database_list_info` lists
     approved databases as a compact array containing assistant-visible IDs,
     inferred app names, paths, sizes, and modification times.
-    `database_context_read` returns selected database context, live simplified
-    schema, and remembered database hints.
+    `database_context_read` returns remembered database hints plus compact,
+    bounded lists of table and view names. Use targeted read-only SQL through
+    `database_query` when column or other schema metadata is needed.
     `database_query` runs bounded read-only SQL against approved databases.
     The Responses runtime executes `database_list_info` and
     `memory_user_fact_read` before round zero of each user request and seeds

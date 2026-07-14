@@ -24,7 +24,6 @@
 #define STRAPPY_TOOL_DISPLAY_TRANSFORM_KEY "transform"
 #define STRAPPY_DATABASE_GUIDANCE_RESOURCE "GuidanceDatabase.json"
 #define STRAPPY_FONTAWESOME_ICONS_RESOURCE "FontAwesomeIcons.json"
-#define STRAPPY_DATABASE_INFO_MAX_TABLES 64
 #define STRAPPY_DATABASE_QUERY_MAX_ROWS 100
 #define STRAPPY_DATABASE_QUERY_MAX_COLUMNS 64
 #define STRAPPY_DATABASE_QUERY_MAX_SQL_BYTES 8192U
@@ -39,11 +38,12 @@
 #define STRAPPY_HELPER_DATETIME_MAX_INPUT_BYTES 8192U
 #define STRAPPY_HELPER_DATETIME_MAX_ITEMS 256U
 #define STRAPPY_HELPER_INFO_MAX_SHORT_BYTES 128U
-#define STRAPPY_HELPER_INFO_MAX_QUERY_BYTES 512U
 #define STRAPPY_HELPER_INFO_MAX_VALUE_BYTES 2048U
 #define STRAPPY_HELPER_INFO_MAX_CONTENT_BYTES 4096U
 #define STRAPPY_HELPER_INFO_DEFAULT_LIMIT 20
-#define STRAPPY_HELPER_INFO_MAX_LIMIT 50
+#define STRAPPY_DATABASE_CONTEXT_HINT_LIMIT 40
+#define STRAPPY_DATABASE_CONTEXT_TABLE_LIMIT 20
+#define STRAPPY_DATABASE_CONTEXT_VIEW_LIMIT 20
 #define STRAPPY_HELPER_SESSION_NAME_MAX_BYTES 96U
 #define STRAPPY_HELPER_FONTAWESOME_MAX_QUERY_BYTES 128U
 #define STRAPPY_HELPER_FONTAWESOME_MAX_SHORTCODE_BYTES 96U
@@ -95,10 +95,6 @@ typedef struct strappy_memory_database_hint_remember_arguments {
 
 typedef struct strappy_database_context_read_arguments {
   char *database_id;
-  char *query;
-  char *kind;
-  int limit;
-  int has_input;
 } strappy_database_context_read_arguments;
 
 typedef struct strappy_helper_fontawesome_shortcode_search_arguments {
@@ -157,11 +153,6 @@ static const strappy_server_tool_definition strappy_server_tool_definitions[] = 
 static const size_t strappy_server_tool_definition_count =
   sizeof(strappy_server_tool_definitions) /
   sizeof(strappy_server_tool_definitions[0]);
-
-static int strappy_tools_add_database_schema_context(
-  cJSON *object,
-  const strappy_discovered_database_record *record,
-  char **error_out);
 
 static const strappy_tool_definition *strappy_tools_find_definition(
   const char *tool_name)
@@ -342,10 +333,6 @@ static void strappy_database_context_read_arguments_init(
   }
 
   arguments->database_id = NULL;
-  arguments->query = NULL;
-  arguments->kind = NULL;
-  arguments->limit = STRAPPY_HELPER_INFO_DEFAULT_LIMIT;
-  arguments->has_input = 0;
 }
 
 static void strappy_database_context_read_arguments_destroy(
@@ -356,8 +343,6 @@ static void strappy_database_context_read_arguments_destroy(
   }
 
   free(arguments->database_id);
-  free(arguments->query);
-  free(arguments->kind);
   strappy_database_context_read_arguments_init(arguments);
 }
 
@@ -1663,71 +1648,6 @@ static int strappy_tools_validate_empty_arguments(const char *tool_name,
   return 1;
 }
 
-static const char *strappy_tools_path_basename(const char *path)
-{
-  const char *slash;
-
-  if ((path == NULL) || (path[0] == '\0')) {
-    return NULL;
-  }
-
-  slash = strrchr(path, '/');
-  if ((slash == NULL) || (*(slash + 1) == '\0')) {
-    return path;
-  }
-
-  return slash + 1;
-}
-
-static int strappy_tools_string_ends_with(const char *value,
-                                          const char *suffix)
-{
-  size_t value_length;
-  size_t suffix_length;
-
-  if ((value == NULL) || (suffix == NULL)) {
-    return 0;
-  }
-
-  value_length = strlen(value);
-  suffix_length = strlen(suffix);
-  if (suffix_length > value_length) {
-    return 0;
-  }
-
-  return (strcmp(value + value_length - suffix_length, suffix) == 0) ? 1 : 0;
-}
-
-static int strappy_tools_add_database_metadata(
-  cJSON *object,
-  const strappy_discovered_database_record *record)
-{
-  const char *filename;
-
-  if ((object == NULL) || (record == NULL)) {
-    return 0;
-  }
-
-  filename = strappy_tools_path_basename(record->path);
-  if ((cJSON_AddStringToObject(object,
-                               "database_id",
-                               record->assistant_database_id) == NULL) ||
-      ((filename != NULL) &&
-       (cJSON_AddStringToObject(object,
-	                               "filename",
-	                               filename) == NULL)) ||
-	      (cJSON_AddNumberToObject(object,
-	                               "size_bytes",
-	                               (double)record->size) == NULL) ||
-	      (cJSON_AddNumberToObject(object,
-	                               "modified_at",
-	                               (double)record->modified_at) == NULL)) {
-	    return 0;
-	  }
-
-	  return 1;
-}
-
 static int strappy_tools_record_has_database_id(
   const strappy_discovered_database_record *record)
 {
@@ -1778,36 +1698,6 @@ static int strappy_tools_add_bool_to_object(cJSON *object,
   return 1;
 }
 
-static char *strappy_tools_build_noop_result(const char *action_key,
-                                             const char *reason,
-                                             char **error_out)
-{
-  cJSON *root;
-  char *json;
-
-  if ((action_key == NULL) || (reason == NULL)) {
-    strappy_set_error(error_out, "Tool no-op result is incomplete.");
-    return NULL;
-  }
-
-  root = cJSON_CreateObject();
-  if ((root == NULL) ||
-      !strappy_tools_add_bool_to_object(root, "ok", 1) ||
-      !strappy_tools_add_bool_to_object(root, action_key, 0) ||
-      (cJSON_AddStringToObject(root, "reason", reason) == NULL)) {
-    cJSON_Delete(root);
-    strappy_set_error(error_out, "Could not build tool no-op result.");
-    return NULL;
-  }
-
-  json = cJSON_PrintUnformatted(root);
-  cJSON_Delete(root);
-  if (json == NULL) {
-    strappy_set_error(error_out, "Could not serialize tool no-op result.");
-  }
-  return json;
-}
-
 static char *strappy_tools_build_empty_result(char **error_out)
 {
   char *json;
@@ -1817,338 +1707,6 @@ static char *strappy_tools_build_empty_result(char **error_out)
     strappy_set_error(error_out, "Could not allocate empty tool result.");
   }
   return json;
-}
-
-static int strappy_tools_copy_string_array_to_object(cJSON *object,
-                                                     const char *key,
-                                                     cJSON *source,
-                                                     char **error_out)
-{
-  cJSON *array;
-  cJSON *item;
-  int count;
-
-  if ((object == NULL) || (key == NULL) || (source == NULL)) {
-    return 1;
-  }
-
-  if (!cJSON_IsArray(source)) {
-    strappy_set_formatted_error(error_out,
-                                "Database guidance %s must be an array.",
-                                key);
-    return 0;
-  }
-
-  array = cJSON_CreateArray();
-  if (array == NULL) {
-    strappy_set_error(error_out, "Could not allocate database guidance array.");
-    return 0;
-  }
-
-  count = 0;
-  for (item = source->child; item != NULL; item = item->next) {
-    cJSON *copy;
-
-    if (!cJSON_IsString(item) || (item->valuestring == NULL) ||
-        (item->valuestring[0] == '\0')) {
-      cJSON_Delete(array);
-      strappy_set_formatted_error(error_out,
-                                  "Database guidance %s contains a malformed item.",
-                                  key);
-      return 0;
-    }
-    copy = cJSON_CreateString(item->valuestring);
-    if ((copy == NULL) || !cJSON_AddItemToArray(array, copy)) {
-      cJSON_Delete(copy);
-      cJSON_Delete(array);
-      strappy_set_error(error_out, "Could not build database guidance array.");
-      return 0;
-    }
-    count++;
-  }
-
-  if (count == 0) {
-    cJSON_Delete(array);
-    return 1;
-  }
-
-  if (!cJSON_AddItemToObject(object, key, array)) {
-    cJSON_Delete(array);
-    return 0;
-  }
-
-  return 1;
-}
-
-typedef enum strappy_tools_database_guidance_match_kind {
-  STRAPPY_TOOLS_DATABASE_GUIDANCE_MATCH_EXACT,
-  STRAPPY_TOOLS_DATABASE_GUIDANCE_MATCH_SUFFIX,
-  STRAPPY_TOOLS_DATABASE_GUIDANCE_MATCH_CONTAINS
-} strappy_tools_database_guidance_match_kind;
-
-static int strappy_tools_check_database_guidance_match(
-  cJSON *match,
-  const char *key,
-  const char *candidate,
-  strappy_tools_database_guidance_match_kind kind,
-  int *saw_condition,
-  int *matches,
-  char **error_out)
-{
-  cJSON *value;
-  int condition_matches;
-
-  if ((match == NULL) || (key == NULL) || (saw_condition == NULL) ||
-      (matches == NULL)) {
-    return 0;
-  }
-
-  value = cJSON_GetObjectItem(match, key);
-  if (value == NULL) {
-    return 1;
-  }
-
-  if (!cJSON_IsString(value) || (value->valuestring == NULL) ||
-      (value->valuestring[0] == '\0')) {
-    strappy_set_formatted_error(error_out,
-                                "Database guidance match.%s is malformed.",
-                                key);
-    return 0;
-  }
-
-  *saw_condition = 1;
-  condition_matches = 0;
-  if (candidate != NULL) {
-    if (kind == STRAPPY_TOOLS_DATABASE_GUIDANCE_MATCH_EXACT) {
-      condition_matches =
-        (strcmp(candidate, value->valuestring) == 0) ? 1 : 0;
-    } else if (kind == STRAPPY_TOOLS_DATABASE_GUIDANCE_MATCH_SUFFIX) {
-      condition_matches =
-        strappy_tools_string_ends_with(candidate, value->valuestring);
-    } else if (kind == STRAPPY_TOOLS_DATABASE_GUIDANCE_MATCH_CONTAINS) {
-      condition_matches =
-        (strstr(candidate, value->valuestring) != NULL) ? 1 : 0;
-    }
-  }
-
-  if (!condition_matches) {
-    *matches = 0;
-  }
-
-  return 1;
-}
-
-static int strappy_tools_database_guidance_rule_matches(
-  cJSON *rule,
-  const char *filename,
-  const char *path,
-  int *matches_out,
-  char **error_out)
-{
-  cJSON *match;
-  int saw_condition;
-  int matches;
-
-  if ((rule == NULL) || (matches_out == NULL)) {
-    return 0;
-  }
-
-  *matches_out = 0;
-  match = cJSON_GetObjectItem(rule, "match");
-  if (!cJSON_IsObject(match)) {
-    strappy_set_error(error_out,
-                      "Database guidance description rule is missing match.");
-    return 0;
-  }
-
-  saw_condition = 0;
-  matches = 1;
-  if (!strappy_tools_check_database_guidance_match(
-        match,
-        "filename",
-        filename,
-        STRAPPY_TOOLS_DATABASE_GUIDANCE_MATCH_EXACT,
-        &saw_condition,
-        &matches,
-        error_out) ||
-      !strappy_tools_check_database_guidance_match(
-        match,
-        "path_suffix",
-        path,
-        STRAPPY_TOOLS_DATABASE_GUIDANCE_MATCH_SUFFIX,
-        &saw_condition,
-        &matches,
-        error_out) ||
-      !strappy_tools_check_database_guidance_match(
-        match,
-        "path_contains",
-        path,
-        STRAPPY_TOOLS_DATABASE_GUIDANCE_MATCH_CONTAINS,
-        &saw_condition,
-        &matches,
-        error_out)) {
-    return 0;
-  }
-
-  if (!saw_condition) {
-    strappy_set_error(
-      error_out,
-      "Database guidance match must include filename, path_suffix, or path_contains.");
-    return 0;
-  }
-
-  *matches_out = matches;
-  return 1;
-}
-
-static int strappy_tools_add_database_guidance(
-  cJSON *object,
-  const strappy_discovered_database_record *record,
-  const char *resource_dir,
-  int include_short_description,
-  int include_full_description,
-  int include_related_databases,
-  char **error_out)
-{
-  const char *filename;
-  const char *description;
-  const char *description_short;
-  cJSON *root;
-  cJSON *rules;
-  cJSON *default_description;
-  cJSON *default_description_short;
-  cJSON *related_databases;
-  cJSON *rule;
-
-  if ((object == NULL) || (record == NULL)) {
-    return 0;
-  }
-
-  root = strappy_tools_read_json_resource(resource_dir,
-                                          STRAPPY_DATABASE_GUIDANCE_RESOURCE,
-                                          error_out);
-  if (root == NULL) {
-    return 0;
-  }
-
-  default_description = cJSON_GetObjectItem(root, "default_description");
-  if (include_full_description &&
-      (!cJSON_IsString(default_description) ||
-      (default_description->valuestring == NULL) ||
-      (default_description->valuestring[0] == '\0'))) {
-    cJSON_Delete(root);
-    strappy_set_error(error_out,
-                      "Database guidance is missing default_description.");
-    return 0;
-  }
-
-  default_description_short =
-    cJSON_GetObjectItem(root, "default_description_short");
-  if (include_short_description &&
-      (!cJSON_IsString(default_description_short) ||
-       (default_description_short->valuestring == NULL) ||
-       (default_description_short->valuestring[0] == '\0'))) {
-    cJSON_Delete(root);
-    strappy_set_error(
-      error_out,
-      "Database guidance is missing default_description_short.");
-    return 0;
-  }
-
-  rules = cJSON_GetObjectItem(root, "database_descriptions");
-  if (!cJSON_IsArray(rules)) {
-    cJSON_Delete(root);
-    strappy_set_error(error_out,
-                      "Database guidance must contain database_descriptions.");
-    return 0;
-  }
-
-  filename = strappy_tools_path_basename(record->path);
-  description =
-    include_full_description ? default_description->valuestring : NULL;
-  description_short =
-    include_short_description ? default_description_short->valuestring : NULL;
-  related_databases = NULL;
-  for (rule = rules->child; rule != NULL; rule = rule->next) {
-    int rule_matches;
-
-    if (!cJSON_IsObject(rule)) {
-      cJSON_Delete(root);
-      strappy_set_error(error_out,
-                        "Database guidance contains a malformed description.");
-      return 0;
-    }
-
-    if (!strappy_tools_database_guidance_rule_matches(rule,
-                                                      filename,
-                                                      record->path,
-                                                      &rule_matches,
-                                                      error_out)) {
-      cJSON_Delete(root);
-      return 0;
-    }
-    if (!rule_matches) {
-      continue;
-    }
-
-    {
-      cJSON *rule_description;
-      cJSON *rule_description_short;
-
-      rule_description = cJSON_GetObjectItem(rule, "description");
-      if (include_full_description &&
-          (!cJSON_IsString(rule_description) ||
-          (rule_description->valuestring == NULL) ||
-          (rule_description->valuestring[0] == '\0'))) {
-        cJSON_Delete(root);
-        strappy_set_error(error_out,
-                          "Database guidance description rule is malformed.");
-        return 0;
-      }
-
-      rule_description_short = cJSON_GetObjectItem(rule, "description_short");
-      if (include_short_description &&
-          (!cJSON_IsString(rule_description_short) ||
-           (rule_description_short->valuestring == NULL) ||
-           (rule_description_short->valuestring[0] == '\0'))) {
-        cJSON_Delete(root);
-        strappy_set_error(
-          error_out,
-          "Database guidance description_short rule is malformed.");
-        return 0;
-      }
-
-      if (include_full_description) {
-        description = rule_description->valuestring;
-      }
-      if (include_short_description) {
-        description_short = rule_description_short->valuestring;
-      }
-      related_databases = cJSON_GetObjectItem(rule, "related_databases");
-    }
-    break;
-  }
-
-  if ((include_short_description &&
-       (cJSON_AddStringToObject(object,
-                                "description_short",
-                                description_short) == NULL)) ||
-      (include_full_description &&
-       (cJSON_AddStringToObject(object, "description", description) == NULL)) ||
-      (include_related_databases &&
-       !strappy_tools_copy_string_array_to_object(object,
-                                                  "related_databases",
-                                                  related_databases,
-                                                  error_out))) {
-    cJSON_Delete(root);
-    if ((error_out != NULL) && (*error_out == NULL)) {
-      strappy_set_error(error_out, "Could not build database guidance result.");
-    }
-    return 0;
-  }
-
-  cJSON_Delete(root);
-  return 1;
 }
 
 static char *strappy_tools_database_guidance_string(const char *resource_dir,
@@ -2556,74 +2114,6 @@ static int strappy_tools_copy_nullable_report_string_argument(
   return 1;
 }
 
-static int strappy_tools_parse_limit_argument(const char *tool_name,
-                                              cJSON *root,
-                                              int *limit_out,
-                                              char **error_out)
-{
-  cJSON *item;
-
-  if (limit_out == NULL) {
-    strappy_set_error(error_out, "Tool limit argument output is missing.");
-    return 0;
-  }
-
-  item = cJSON_GetObjectItemCaseSensitive(root, "limit");
-  if (item == NULL) {
-    *limit_out = STRAPPY_HELPER_INFO_DEFAULT_LIMIT;
-    return 1;
-  }
-
-  if (!cJSON_IsNumber(item) || ((double)item->valueint != item->valuedouble) ||
-      (item->valueint <= 0) ||
-      (item->valueint > STRAPPY_HELPER_INFO_MAX_LIMIT)) {
-    strappy_set_formatted_error(
-      error_out,
-      "%s limit must be an integer from 1 to %d.",
-      tool_name,
-      STRAPPY_HELPER_INFO_MAX_LIMIT);
-    return 0;
-  }
-
-  *limit_out = item->valueint;
-  return 1;
-}
-
-static int strappy_tools_parse_nullable_report_limit_argument(
-  const char *tool_name,
-  cJSON *root,
-  int *limit_out,
-  int *provided_out,
-  char **error_out)
-{
-  cJSON *item;
-
-  if ((limit_out == NULL) || (provided_out == NULL)) {
-    strappy_set_error(error_out, "Tool report limit output is missing.");
-    return 0;
-  }
-  *limit_out = STRAPPY_HELPER_INFO_DEFAULT_LIMIT;
-  *provided_out = 0;
-  item = cJSON_GetObjectItemCaseSensitive(root, "limit");
-  if ((item == NULL) || cJSON_IsNull(item)) {
-    return 1;
-  }
-  if (cJSON_IsString(item) &&
-      ((item->valuestring == NULL) ||
-       !strappy_tools_string_has_non_whitespace(item->valuestring) ||
-       strappy_tools_string_is_null_report_value(item->valuestring))) {
-    return 1;
-  }
-  if (!strappy_tools_parse_limit_argument(tool_name,
-                                          root,
-                                          limit_out,
-                                          error_out)) {
-    return 0;
-  }
-  *provided_out = 1;
-  return 1;
-}
-
 static int strappy_tools_parse_id_argument(const char *tool_name,
                                            const char *arguments_json,
                                            strappy_helper_info_forget_arguments *arguments,
@@ -3007,11 +2497,8 @@ static int strappy_tools_parse_database_context_read_arguments(
   strappy_database_context_read_arguments *arguments,
   char **error_out)
 {
-  static const char *const allowed_names[] = {
-    "database_id", "query", "kind", "limit"
-  };
+  static const char *const allowed_names[] = { "database_id" };
   cJSON *root;
-  int limit_provided;
   int ok;
 
   if (arguments == NULL) {
@@ -3029,7 +2516,6 @@ static int strappy_tools_parse_database_context_read_arguments(
     return 0;
   }
 
-  limit_provided = 0;
   ok = strappy_tools_json_object_accepts_only(
          root,
          STRAPPY_TOOL_DATABASE_CONTEXT_READ,
@@ -3042,35 +2528,12 @@ static int strappy_tools_parse_database_context_read_arguments(
          "database_id",
          STRAPPY_HELPER_INFO_MAX_SHORT_BYTES,
          &arguments->database_id,
-         error_out) &&
-       strappy_tools_copy_nullable_report_string_argument(
-         STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-         root,
-         "query",
-         STRAPPY_HELPER_INFO_MAX_QUERY_BYTES,
-         &arguments->query,
-         error_out) &&
-       strappy_tools_copy_nullable_report_string_argument(
-         STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-         root,
-         "kind",
-         STRAPPY_HELPER_INFO_MAX_SHORT_BYTES,
-         &arguments->kind,
-         error_out) &&
-       strappy_tools_parse_nullable_report_limit_argument(
-         STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-         root,
-         &arguments->limit,
-         &limit_provided,
          error_out);
   cJSON_Delete(root);
   if (!ok) {
     strappy_database_context_read_arguments_destroy(arguments);
     return 0;
   }
-  arguments->has_input =
-    (arguments->database_id != NULL) || (arguments->query != NULL) ||
-    (arguments->kind != NULL) || limit_provided;
   return 1;
 }
 
@@ -3514,127 +2977,6 @@ static const char *strappy_tools_sqlite_column_text(sqlite3_stmt *stmt,
   return (const char *)value;
 }
 
-static int strappy_tools_prepare_identifier_statement(sqlite3 *db,
-                                                      const char *prefix,
-                                                      const char *identifier,
-                                                      const char *suffix,
-                                                      sqlite3_stmt **stmt_out,
-                                                      char **error_out)
-{
-  sqlite3_stmt *stmt;
-  char *sql;
-  int rc;
-
-  if (stmt_out == NULL) {
-    strappy_set_error(error_out, "SQLite statement output is missing.");
-    return 0;
-  }
-  *stmt_out = NULL;
-
-  sql = strappy_tools_build_identifier_sql(prefix, identifier, suffix);
-  if (sql == NULL) {
-    strappy_set_error(error_out, "Could not allocate SQLite statement.");
-    return 0;
-  }
-
-  stmt = NULL;
-  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-  free(sql);
-  if (rc != SQLITE_OK) {
-    strappy_set_formatted_error(error_out,
-                                "Could not prepare SQLite statement: %s",
-                                sqlite3_errmsg(db));
-    return 0;
-  }
-
-  *stmt_out = stmt;
-  return 1;
-}
-
-static int strappy_tools_add_table_columns(sqlite3 *db,
-                                           cJSON *table_object,
-                                           const char *table_name,
-                                           char **error_out)
-{
-  sqlite3_stmt *stmt;
-  cJSON *columns;
-  int rc;
-
-  columns = cJSON_CreateArray();
-  if (columns == NULL) {
-    strappy_set_error(error_out, "Could not allocate database columns.");
-    return 0;
-  }
-
-  if (!strappy_tools_prepare_identifier_statement(db,
-                                                  "PRAGMA table_info(",
-                                                  table_name,
-                                                  ");",
-                                                  &stmt,
-                                                  error_out)) {
-    cJSON_Delete(columns);
-    return 0;
-  }
-
-	  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-	    cJSON *column;
-	    const char *name;
-	    const char *type;
-	    int primary_key_position;
-
-	    name = strappy_tools_sqlite_column_text(stmt, 1);
-	    type = strappy_tools_sqlite_column_text(stmt, 2);
-	    primary_key_position = sqlite3_column_int(stmt, 5);
-
-    if (!strappy_tools_string_has_value(name)) {
-      sqlite3_finalize(stmt);
-      cJSON_Delete(columns);
-      strappy_set_error(error_out, "Database column name is empty.");
-      return 0;
-    }
-
-    column = cJSON_CreateObject();
-    if (column == NULL) {
-      sqlite3_finalize(stmt);
-      cJSON_Delete(columns);
-      strappy_set_error(error_out, "Could not allocate database column.");
-      return 0;
-    }
-
-	    if ((cJSON_AddStringToObject(column, "name", name) == NULL) ||
-	        !strappy_tools_add_optional_string_to_object(column, "type", type) ||
-	        ((primary_key_position > 0) &&
-	         (cJSON_AddNumberToObject(column,
-	                                  "primary_key_position",
-	                                  (double)primary_key_position) == NULL)) ||
-	        !cJSON_AddItemToArray(columns, column)) {
-      cJSON_Delete(column);
-      sqlite3_finalize(stmt);
-      cJSON_Delete(columns);
-      strappy_set_error(error_out, "Could not build database column result.");
-      return 0;
-    }
-  }
-
-  if (rc != SQLITE_DONE) {
-    strappy_set_formatted_error(error_out,
-                                "Could not read database columns: %s",
-                                sqlite3_errmsg(db));
-    sqlite3_finalize(stmt);
-    cJSON_Delete(columns);
-    return 0;
-  }
-
-  sqlite3_finalize(stmt);
-  if (!cJSON_AddItemToObject(table_object, "columns", columns)) {
-    cJSON_Delete(columns);
-    strappy_set_error(error_out, "Could not build database columns result.");
-    return 0;
-  }
-
-  return 1;
-}
-
 static int strappy_tools_open_readonly_database(const char *path,
                                                 sqlite3 **db_out,
                                                 char **error_out)
@@ -3844,77 +3186,6 @@ static int strappy_tools_open_helper_info_database(const char *session_db_path,
 
   *db_out = db;
   return 1;
-}
-
-static int strappy_tools_bind_optional_text(sqlite3 *db,
-                                            sqlite3_stmt *stmt,
-                                            int index,
-                                            const char *value,
-                                            const char *error_prefix,
-                                            char **error_out)
-{
-  int rc;
-
-  if ((value != NULL) && (value[0] != '\0')) {
-    rc = sqlite3_bind_text(stmt, index, value, -1, SQLITE_TRANSIENT);
-  } else {
-    rc = sqlite3_bind_null(stmt, index);
-  }
-
-  if (rc != SQLITE_OK) {
-    strappy_set_formatted_error(error_out,
-                                "%s: %s",
-                                error_prefix,
-                                sqlite3_errmsg(db));
-    return 0;
-  }
-
-  return 1;
-}
-
-static char *strappy_tools_create_like_pattern(const char *query)
-{
-  size_t length;
-  size_t index;
-  size_t output_index;
-  size_t extra;
-  char *pattern;
-
-  if (!strappy_tools_string_has_value(query)) {
-    return NULL;
-  }
-
-  length = strlen(query);
-  extra = 0U;
-  for (index = 0U; index < length; index++) {
-    if ((query[index] == '%') || (query[index] == '_') ||
-        (query[index] == '\\')) {
-      extra++;
-    }
-  }
-
-  if ((length > (((size_t)-1) - extra - 3U))) {
-    return NULL;
-  }
-
-  pattern = (char *)malloc(length + extra + 3U);
-  if (pattern == NULL) {
-    return NULL;
-  }
-
-  output_index = 0U;
-  pattern[output_index++] = '%';
-  for (index = 0U; index < length; index++) {
-    if ((query[index] == '%') || (query[index] == '_') ||
-        (query[index] == '\\')) {
-      pattern[output_index++] = '\\';
-    }
-    pattern[output_index++] = query[index];
-  }
-  pattern[output_index++] = '%';
-  pattern[output_index] = '\0';
-
-  return pattern;
 }
 
 static int strappy_tools_add_user_info_row(cJSON *array,
@@ -4144,44 +3415,20 @@ static int strappy_tools_add_database_info_row(cJSON *array,
                                                char **error_out)
 {
   cJSON *object;
-  const char *database_id;
-  const char *path;
-  const char *filename;
-  const char *kind;
-  const char *title;
-  const char *content;
-  const char *evidence;
-  const char *created_at;
-  const char *updated_at;
-  sqlite3_int64 stored_size;
-  sqlite3_int64 stored_modified_at;
-  sqlite3_int64 current_size;
-  sqlite3_int64 current_modified_at;
-  int database_available;
-  int possibly_stale;
+  const char *hint;
+  const char *date_saved;
 
   if ((array == NULL) || (stmt == NULL)) {
     strappy_set_error(error_out, "Database hint row request is incomplete.");
     return 0;
   }
 
-  database_id = strappy_tools_sqlite_column_text(stmt, 1);
-  path = strappy_tools_sqlite_column_text(stmt, 2);
-  filename = strappy_tools_path_basename(path);
-  kind = strappy_tools_sqlite_column_text(stmt, 3);
-  title = strappy_tools_sqlite_column_text(stmt, 4);
-  content = strappy_tools_sqlite_column_text(stmt, 5);
-  evidence = strappy_tools_sqlite_column_text(stmt, 6);
-  stored_size = sqlite3_column_int64(stmt, 8);
-  stored_modified_at = sqlite3_column_int64(stmt, 9);
-  database_available = (sqlite3_column_type(stmt, 10) != SQLITE_NULL) ? 1 : 0;
-  current_size = database_available ? sqlite3_column_int64(stmt, 10) : 0;
-  current_modified_at = database_available ? sqlite3_column_int64(stmt, 11) : 0;
-  created_at = strappy_tools_sqlite_column_text(stmt, 12);
-  updated_at = strappy_tools_sqlite_column_text(stmt, 13);
-  possibly_stale =
-    (!database_available || (stored_size != current_size) ||
-     (stored_modified_at != current_modified_at)) ? 1 : 0;
+  hint = strappy_tools_sqlite_column_text(stmt, 1);
+  date_saved = strappy_tools_sqlite_column_text(stmt, 2);
+  if ((hint == NULL) || (date_saved == NULL)) {
+    strappy_set_error(error_out, "Stored database hint is incomplete.");
+    return 0;
+  }
 
   object = cJSON_CreateObject();
   if (object == NULL) {
@@ -4192,33 +3439,8 @@ static int strappy_tools_add_database_info_row(cJSON *array,
   if ((cJSON_AddNumberToObject(object,
                                "id",
                                (double)sqlite3_column_int64(stmt, 0)) == NULL) ||
-      !strappy_tools_add_optional_string_to_object(object,
-                                                   "database_id",
-                                                   database_id) ||
-      !strappy_tools_add_optional_string_to_object(object,
-                                                   "filename",
-                                                   filename) ||
-      !strappy_tools_add_optional_string_to_object(object, "kind", kind) ||
-      !strappy_tools_add_optional_string_to_object(object, "title", title) ||
-      !strappy_tools_add_optional_string_to_object(object, "content", content) ||
-      !strappy_tools_add_optional_string_to_object(object,
-                                                   "evidence",
-                                                   evidence) ||
-      (cJSON_AddNumberToObject(object,
-                               "confidence",
-                               sqlite3_column_double(stmt, 7)) == NULL) ||
-      !strappy_tools_add_bool_to_object(object,
-                                        "database_available",
-                                        database_available) ||
-      !strappy_tools_add_bool_to_object(object,
-                                        "possibly_stale",
-                                        possibly_stale) ||
-      !strappy_tools_add_optional_string_to_object(object,
-                                                   "created_at",
-                                                   created_at) ||
-      !strappy_tools_add_optional_string_to_object(object,
-                                                   "updated_at",
-                                                   updated_at) ||
+      (cJSON_AddStringToObject(object, "hint", hint) == NULL) ||
+      (cJSON_AddStringToObject(object, "date_saved", date_saved) == NULL) ||
       !cJSON_AddItemToArray(array, object)) {
     cJSON_Delete(object);
     strappy_set_error(error_out, "Could not build database hint row.");
@@ -4228,162 +3450,294 @@ static int strappy_tools_add_database_info_row(cJSON *array,
   return 1;
 }
 
-static char *strappy_tools_read_database_info(
+static int strappy_tools_read_database_hints(
   sqlite3 *db,
-  const strappy_database_context_read_arguments *arguments,
   const strappy_discovered_database_record *record,
-  const char *resource_dir,
+  cJSON *hints,
+  int *truncated_out,
   char **error_out)
 {
   static const char *sql =
-    "SELECT h.id, "
-    "COALESCE(d.assistant_database_id, h.database_assistant_id), "
-    "d.path, h.kind, h.title, h.content, h.evidence, h.confidence, "
-    "h.database_size, h.database_modified_at, d.size, d.modified_at, "
-    "h.created_at, h.updated_at "
-    "FROM helper_database_info h "
-    "LEFT JOIN discovered_databases d ON d.id = h.database_catalog_id "
-    "WHERE h.status = 'active' "
-    "AND (?1 IS NULL OR h.database_assistant_id = ?1 "
-    "OR d.assistant_database_id = ?1) "
-    "AND (?2 IS NULL OR h.kind = ?2) "
-    "AND (?3 IS NULL OR h.title LIKE ?3 ESCAPE '\\' "
-    "OR h.content LIKE ?3 ESCAPE '\\' "
-    "OR h.evidence LIKE ?3 ESCAPE '\\') "
-    "ORDER BY h.updated_at DESC, h.id DESC "
-    "LIMIT ?4;";
+    "SELECT id, content, created_at "
+    "FROM helper_database_info "
+    "WHERE status = 'active' AND kind = 'hint' "
+    "AND (database_catalog_id = ?1 OR database_assistant_id = ?2) "
+    "ORDER BY created_at DESC, id DESC "
+    "LIMIT ?3;";
   sqlite3_stmt *stmt;
-  cJSON *root;
-  cJSON *items;
-  char *pattern;
-  char *json;
   int rc;
   int count;
 
-  if ((db == NULL) || (arguments == NULL)) {
-    strappy_set_error(error_out,
-                      "database_context_read request is incomplete.");
-    return NULL;
+  if ((db == NULL) || (record == NULL) ||
+      !strappy_tools_string_has_value(record->assistant_database_id) ||
+      (hints == NULL) ||
+      (truncated_out == NULL)) {
+    strappy_set_error(error_out, "Database hint read request is incomplete.");
+    return 0;
   }
-
-  pattern = strappy_tools_create_like_pattern(arguments->query);
-  if ((arguments->query != NULL) && (pattern == NULL)) {
-    strappy_set_error(error_out,
-                      "Could not allocate database hint search pattern.");
-    return NULL;
-  }
+  *truncated_out = 0;
 
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
-    free(pattern);
-    strappy_set_formatted_error(
-      error_out,
-      "Could not prepare database_context_read: %s",
-      sqlite3_errmsg(db));
-    return NULL;
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare database hint read: %s",
+                                sqlite3_errmsg(db));
+    return 0;
   }
 
-  if (!strappy_tools_bind_optional_text(
-        db,
-        stmt,
-        1,
-        arguments->database_id,
-        "Could not bind database_context_read",
-        error_out) ||
-      !strappy_tools_bind_optional_text(db,
-                                        stmt,
-                                        2,
-                                        arguments->kind,
-                                        "Could not bind database_context_read",
-                                        error_out) ||
-      !strappy_tools_bind_optional_text(db,
-                                        stmt,
-                                        3,
-                                        pattern,
-                                        "Could not bind database_context_read",
-                                        error_out) ||
-      (sqlite3_bind_int(stmt, 4, arguments->limit) != SQLITE_OK)) {
-    free(pattern);
+  if ((sqlite3_bind_int64(stmt,
+                          1,
+                          (sqlite3_int64)record->catalog_id) != SQLITE_OK) ||
+      (sqlite3_bind_text(stmt,
+                         2,
+                         record->assistant_database_id,
+                         -1,
+                         SQLITE_TRANSIENT) != SQLITE_OK) ||
+      (sqlite3_bind_int(stmt,
+                        3,
+                        STRAPPY_DATABASE_CONTEXT_HINT_LIMIT + 1) != SQLITE_OK)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind database hint read: %s",
+                                sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    if ((error_out != NULL) && (*error_out == NULL)) {
-      strappy_set_formatted_error(
-        error_out,
-        "Could not bind database_context_read: %s",
-        sqlite3_errmsg(db));
-    }
-    return NULL;
-  }
-  free(pattern);
-
-  root = cJSON_CreateObject();
-  items = cJSON_CreateArray();
-  if ((root == NULL) || (items == NULL)) {
-    cJSON_Delete(root);
-    cJSON_Delete(items);
-    sqlite3_finalize(stmt);
-    strappy_set_error(error_out, "Could not allocate database hint result.");
-    return NULL;
+    return 0;
   }
 
   count = 0;
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-    if (!strappy_tools_add_database_info_row(items, stmt, error_out)) {
-      cJSON_Delete(root);
-      cJSON_Delete(items);
+    if (count >= STRAPPY_DATABASE_CONTEXT_HINT_LIMIT) {
+      *truncated_out = 1;
+      continue;
+    }
+    if (!strappy_tools_add_database_info_row(hints, stmt, error_out)) {
       sqlite3_finalize(stmt);
-      return NULL;
+      return 0;
     }
     count++;
   }
 
   if (rc != SQLITE_DONE) {
-    cJSON_Delete(root);
-    cJSON_Delete(items);
     strappy_set_formatted_error(error_out,
-                                "Could not read memory_database_hint rows: %s",
+                                "Could not read database hints: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    return NULL;
+    return 0;
   }
+
   sqlite3_finalize(stmt);
+  return 1;
+}
 
-  if ((record != NULL) &&
-      (!strappy_tools_add_database_metadata(root, record) ||
-       !strappy_tools_add_database_guidance(root,
-                                            record,
-                                            resource_dir,
-                                            0,
-                                            1,
-                                            1,
-                                            error_out) ||
-       !strappy_tools_add_database_schema_context(root, record, error_out))) {
-    cJSON_Delete(root);
-    cJSON_Delete(items);
-    if ((error_out != NULL) && (*error_out == NULL)) {
-      strappy_set_error(error_out, "Could not build database context result.");
+static int strappy_tools_read_database_object_names(sqlite3 *db,
+                                                    const char *object_type,
+                                                    int limit,
+                                                    cJSON *names,
+                                                    int *truncated_out,
+                                                    char **error_out)
+{
+  static const char *sql =
+    "SELECT name FROM sqlite_master "
+    "WHERE type = ?1 AND name NOT LIKE 'sqlite_%' "
+    "ORDER BY name "
+    "LIMIT ?2;";
+  sqlite3_stmt *stmt;
+  int rc;
+  int count;
+
+  if ((db == NULL) || !strappy_tools_string_has_value(object_type) ||
+      (limit <= 0) || (names == NULL) || (truncated_out == NULL)) {
+    strappy_set_error(error_out,
+                      "Database object-name read request is incomplete.");
+    return 0;
+  }
+  *truncated_out = 0;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare database object-name read: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+
+  if ((sqlite3_bind_text(stmt,
+                         1,
+                         object_type,
+                         -1,
+                         SQLITE_STATIC) != SQLITE_OK) ||
+      (sqlite3_bind_int(stmt, 2, limit + 1) != SQLITE_OK)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind database object-name read: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  count = 0;
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    cJSON *name_item;
+    const char *name;
+
+    if (count >= limit) {
+      *truncated_out = 1;
+      continue;
     }
+
+    name = strappy_tools_sqlite_column_text(stmt, 0);
+    if (!strappy_tools_string_has_value(name)) {
+      strappy_set_error(error_out, "Stored database object name is empty.");
+      sqlite3_finalize(stmt);
+      return 0;
+    }
+
+    name_item = cJSON_CreateString(name);
+    if ((name_item == NULL) || !cJSON_AddItemToArray(names, name_item)) {
+      cJSON_Delete(name_item);
+      strappy_set_error(error_out, "Could not build database object-name list.");
+      sqlite3_finalize(stmt);
+      return 0;
+    }
+    count++;
+  }
+
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read database object names: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+static char *strappy_tools_read_database_info(
+  sqlite3 *catalog_db,
+  const strappy_discovered_database_record *record,
+  char **error_out)
+{
+  sqlite3 *database;
+  cJSON *root;
+  cJSON *hints;
+  cJSON *tables;
+  cJSON *views;
+  char *json;
+  int hints_truncated;
+  int tables_truncated;
+  int views_truncated;
+
+  if ((catalog_db == NULL) || (record == NULL) ||
+      !strappy_tools_string_has_value(record->path)) {
+    strappy_set_error(error_out,
+                      "database_context_read request is incomplete.");
     return NULL;
   }
 
-  if (!strappy_tools_add_bool_to_object(root, "ok", 1) ||
-      !cJSON_AddItemToObject(root, "database_hints", items)) {
+  root = cJSON_CreateObject();
+  hints = cJSON_CreateArray();
+  tables = cJSON_CreateArray();
+  views = cJSON_CreateArray();
+  if ((root == NULL) || (hints == NULL) || (tables == NULL) ||
+      (views == NULL)) {
     cJSON_Delete(root);
-    cJSON_Delete(items);
-    strappy_set_error(error_out, "Could not build database hint result.");
+    cJSON_Delete(hints);
+    cJSON_Delete(tables);
+    cJSON_Delete(views);
+    strappy_set_error(error_out, "Could not allocate database context result.");
     return NULL;
   }
-  items = NULL;
-  if (cJSON_AddNumberToObject(root, "count", (double)count) == NULL) {
+
+  if (!strappy_tools_read_database_hints(catalog_db,
+                                         record,
+                                         hints,
+                                         &hints_truncated,
+                                         error_out)) {
     cJSON_Delete(root);
-    strappy_set_error(error_out, "Could not build database hint result.");
+    cJSON_Delete(hints);
+    cJSON_Delete(tables);
+    cJSON_Delete(views);
+    return NULL;
+  }
+
+  database = NULL;
+  if (!strappy_tools_open_readonly_database(record->path,
+                                            &database,
+                                            error_out)) {
+    cJSON_Delete(root);
+    cJSON_Delete(hints);
+    cJSON_Delete(tables);
+    cJSON_Delete(views);
+    return NULL;
+  }
+
+  if (!strappy_tools_read_database_object_names(
+        database,
+        "table",
+        STRAPPY_DATABASE_CONTEXT_TABLE_LIMIT,
+        tables,
+        &tables_truncated,
+        error_out) ||
+      !strappy_tools_read_database_object_names(
+        database,
+        "view",
+        STRAPPY_DATABASE_CONTEXT_VIEW_LIMIT,
+        views,
+        &views_truncated,
+        error_out)) {
+    sqlite3_close(database);
+    cJSON_Delete(root);
+    cJSON_Delete(hints);
+    cJSON_Delete(tables);
+    cJSON_Delete(views);
+    return NULL;
+  }
+  sqlite3_close(database);
+
+  if (!cJSON_AddItemToObject(root, "remembered_hints", hints)) {
+    cJSON_Delete(root);
+    cJSON_Delete(hints);
+    cJSON_Delete(tables);
+    cJSON_Delete(views);
+    strappy_set_error(error_out, "Could not build database context result.");
+    return NULL;
+  }
+  hints = NULL;
+  if (!strappy_tools_add_bool_to_object(root,
+                                        "remembered_hints_truncated",
+                                        hints_truncated) ||
+      !cJSON_AddItemToObject(root, "tables", tables)) {
+    cJSON_Delete(root);
+    cJSON_Delete(tables);
+    cJSON_Delete(views);
+    strappy_set_error(error_out, "Could not build database context result.");
+    return NULL;
+  }
+  tables = NULL;
+  if (!strappy_tools_add_bool_to_object(root,
+                                        "tables_truncated",
+                                        tables_truncated) ||
+      !cJSON_AddItemToObject(root, "views", views)) {
+    cJSON_Delete(root);
+    cJSON_Delete(views);
+    strappy_set_error(error_out, "Could not build database context result.");
+    return NULL;
+  }
+  views = NULL;
+  if (!strappy_tools_add_bool_to_object(root,
+                                        "views_truncated",
+                                        views_truncated)) {
+    cJSON_Delete(root);
+    strappy_set_error(error_out, "Could not build database context result.");
     return NULL;
   }
 
   json = cJSON_PrintUnformatted(root);
   cJSON_Delete(root);
   if (json == NULL) {
-    strappy_set_error(error_out, "Could not serialize database hint result.");
+    strappy_set_error(error_out, "Could not serialize database context result.");
     return NULL;
   }
 
@@ -4456,186 +3810,6 @@ static char *strappy_tools_remember_database_info(
   sqlite3_finalize(stmt);
 
   return strappy_tools_build_empty_result(error_out);
-}
-
-static cJSON *strappy_tools_read_database_schema(
-  const strappy_discovered_database_record *record,
-  char **error_out)
-{
-  static const char *sql =
-    "SELECT name, type FROM sqlite_master "
-    "WHERE type IN ('table', 'view') "
-    "AND name NOT LIKE 'sqlite_%' "
-    "ORDER BY type, name "
-    "LIMIT 65;";
-  sqlite3 *db;
-  sqlite3_stmt *stmt;
-  cJSON *schema;
-  cJSON *tables;
-	  int rc;
-	  int table_count;
-	  int truncated;
-
-	  if (record == NULL) {
-    strappy_set_error(error_out, "Database record is missing.");
-    return NULL;
-  }
-
-  if (!strappy_tools_open_readonly_database(record->path, &db, error_out)) {
-    return NULL;
-  }
-
-  schema = cJSON_CreateObject();
-  tables = cJSON_CreateArray();
-  if ((schema == NULL) || (tables == NULL)) {
-    cJSON_Delete(schema);
-    cJSON_Delete(tables);
-    sqlite3_close(db);
-    strappy_set_error(error_out, "Could not allocate database schema result.");
-    return NULL;
-  }
-
-  stmt = NULL;
-  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-  if (rc != SQLITE_OK) {
-    strappy_set_formatted_error(error_out,
-                                "Could not prepare database schema lookup: %s",
-                                sqlite3_errmsg(db));
-    cJSON_Delete(schema);
-    cJSON_Delete(tables);
-    sqlite3_close(db);
-    return NULL;
-  }
-
-	  table_count = 0;
-	  truncated = 0;
-
-	  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-    cJSON *table_object;
-    const char *name;
-    const char *type;
-
-    if (table_count >= STRAPPY_DATABASE_INFO_MAX_TABLES) {
-      truncated = 1;
-      continue;
-    }
-
-    name = strappy_tools_sqlite_column_text(stmt, 0);
-    type = strappy_tools_sqlite_column_text(stmt, 1);
-    if (!strappy_tools_string_has_value(name)) {
-      sqlite3_finalize(stmt);
-      cJSON_Delete(schema);
-      cJSON_Delete(tables);
-      sqlite3_close(db);
-      strappy_set_error(error_out, "Database table name is empty.");
-      return NULL;
-    }
-
-    table_object = cJSON_CreateObject();
-    if (table_object == NULL) {
-      sqlite3_finalize(stmt);
-      cJSON_Delete(schema);
-      cJSON_Delete(tables);
-      sqlite3_close(db);
-      strappy_set_error(error_out, "Could not allocate database table result.");
-      return NULL;
-    }
-
-    if ((cJSON_AddStringToObject(table_object, "name", name) == NULL) ||
-        !strappy_tools_add_optional_string_to_object(table_object,
-                                                     "type",
-                                                     type) ||
-        !strappy_tools_add_table_columns(db, table_object, name, error_out) ||
-        !cJSON_AddItemToArray(tables, table_object)) {
-      cJSON_Delete(table_object);
-      sqlite3_finalize(stmt);
-      cJSON_Delete(schema);
-      cJSON_Delete(tables);
-      sqlite3_close(db);
-      if ((error_out != NULL) && (*error_out == NULL)) {
-        strappy_set_error(error_out, "Could not build database schema result.");
-      }
-      return NULL;
-    }
-
-    table_count++;
-  }
-
-  if (rc != SQLITE_DONE) {
-    strappy_set_formatted_error(error_out,
-                                "Could not read database schema: %s",
-                                sqlite3_errmsg(db));
-    sqlite3_finalize(stmt);
-    cJSON_Delete(schema);
-    cJSON_Delete(tables);
-    sqlite3_close(db);
-    return NULL;
-  }
-
-  sqlite3_finalize(stmt);
-  sqlite3_close(db);
-
-  if (!cJSON_AddItemToObject(schema, "tables", tables)) {
-    cJSON_Delete(schema);
-    cJSON_Delete(tables);
-    strappy_set_error(error_out, "Could not build database schema result.");
-    return NULL;
-  }
-  tables = NULL;
-
-  if ((cJSON_AddNumberToObject(schema,
-                               "table_count",
-                               (double)table_count) == NULL) ||
-      (cJSON_AddNumberToObject(schema,
-                               "max_tables_returned",
-                               (double)STRAPPY_DATABASE_INFO_MAX_TABLES) == NULL) ||
-      !strappy_tools_add_bool_to_object(schema, "truncated", truncated)) {
-    cJSON_Delete(schema);
-    strappy_set_error(error_out, "Could not build database schema result.");
-    return NULL;
-  }
-
-  return schema;
-}
-
-static int strappy_tools_add_database_schema_context(
-  cJSON *object,
-  const strappy_discovered_database_record *record,
-  char **error_out)
-{
-  cJSON *schema;
-  char *schema_error;
-
-  if ((object == NULL) || (record == NULL)) {
-    return 0;
-  }
-
-  schema_error = NULL;
-  schema = strappy_tools_read_database_schema(record, &schema_error);
-  if (schema != NULL) {
-    if (!cJSON_AddItemToObject(object, "schema", schema)) {
-      cJSON_Delete(schema);
-      free(schema_error);
-      strappy_set_error(error_out, "Could not build database schema result.");
-      return 0;
-    }
-    free(schema_error);
-    return 1;
-  }
-
-  if (!strappy_tools_add_null_to_object(object, "schema") ||
-      (cJSON_AddStringToObject(object,
-                               "schema_error",
-                               (schema_error != NULL) ?
-                                 schema_error : "Could not read database schema.") ==
-       NULL)) {
-    free(schema_error);
-    strappy_set_error(error_out, "Could not build database schema result.");
-    return 0;
-  }
-
-  free(schema_error);
-  return 1;
 }
 
 static int strappy_tools_add_database_list_info_record(
@@ -6620,7 +5794,6 @@ static char *strappy_tools_execute_helper_session_name_write(
 
 static char *strappy_tools_execute_database_context_read(
   const char *session_db_path,
-  const char *resource_dir,
   const char *arguments_json,
   char **error_out)
 {
@@ -6637,47 +5810,37 @@ static char *strappy_tools_execute_database_context_read(
                                                                error_out)) {
     return NULL;
   }
-  if (!arguments.has_input) {
-    json = strappy_tools_build_noop_result("read",
-                                           "no_database_needed",
-                                           error_out);
+  if (arguments.database_id == NULL) {
+    json = strappy_tools_build_empty_result(error_out);
     strappy_database_context_read_arguments_destroy(&arguments);
     return json;
   }
 
   strappy_discovered_database_record_list_init(&list);
   record = NULL;
-  if (strappy_tools_string_has_value(arguments.database_id)) {
-    if (!strappy_db_list_discovered_databases(session_db_path,
-                                             &list,
-                                             error_out)) {
-      strappy_database_context_read_arguments_destroy(&arguments);
-      return NULL;
-    }
+  if (!strappy_db_list_discovered_databases(session_db_path,
+                                           &list,
+                                           error_out)) {
+    strappy_database_context_read_arguments_destroy(&arguments);
+    return NULL;
+  }
 
-    matched_unavailable = 0;
-    record = strappy_tools_find_database_query_record(&list,
-                                                      arguments.database_id,
-                                                      &matched_unavailable);
-    if (record == NULL) {
-      if (matched_unavailable) {
-        strappy_tools_set_error_with_database_guidance(
-          error_out,
-          "database_context_read database_id is not approved or is no "
-          "longer valid.",
-          resource_dir,
-          "database_context_read_unavailable_database_id");
-      } else {
-        strappy_tools_set_error_with_database_guidance(
-          error_out,
-          "database_context_read database_id was not found.",
-          resource_dir,
-          "database_context_read_missing_database_id");
-      }
-      strappy_discovered_database_record_list_destroy(&list);
-      strappy_database_context_read_arguments_destroy(&arguments);
-      return NULL;
+  matched_unavailable = 0;
+  record = strappy_tools_find_database_query_record(&list,
+                                                    arguments.database_id,
+                                                    &matched_unavailable);
+  if (record == NULL) {
+    if (matched_unavailable) {
+      strappy_set_error(error_out,
+                        "database_context_read database_id is not approved "
+                        "or is no longer valid.");
+    } else {
+      strappy_set_error(error_out,
+                        "database_context_read database_id was not found.");
     }
+    strappy_discovered_database_record_list_destroy(&list);
+    strappy_database_context_read_arguments_destroy(&arguments);
+    return NULL;
   }
 
   db = NULL;
@@ -6690,9 +5853,7 @@ static char *strappy_tools_execute_database_context_read(
   }
 
   json = strappy_tools_read_database_info(db,
-                                          &arguments,
                                           record,
-                                          resource_dir,
                                           error_out);
   sqlite3_close(db);
   strappy_discovered_database_record_list_destroy(&list);
@@ -6933,7 +6094,6 @@ char *strappy_tools_execute(const char *session_db_path,
 
   if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_CONTEXT_READ) == 0) {
     return strappy_tools_execute_database_context_read(session_db_path,
-                                                       resource_dir,
                                                        arguments_json,
                                                        error_out);
   }
