@@ -1306,7 +1306,8 @@ static int harness_named_function_output_request_is_valid(
   const char *session_key,
   const char *prompt_group,
   const char *expected_function_name,
-  const char *expected_call_id)
+  const char *expected_call_id,
+  const char *expected_output)
 {
   cJSON *request_session;
   cJSON *metadata;
@@ -1349,7 +1350,9 @@ static int harness_named_function_output_request_is_valid(
     cJSON_IsString(call_id) && (call_id->valuestring != NULL) &&
     (strcmp(call_id->valuestring, expected_call_id) == 0) &&
     cJSON_IsString(output) && (output->valuestring != NULL) &&
-    (output->valuestring[0] != '\0');
+    ((expected_output != NULL) ?
+      (strcmp(output->valuestring, expected_output) == 0) :
+      (output->valuestring[0] != '\0'));
 }
 
 static int harness_required_function_outputs_request_is_valid(
@@ -1427,7 +1430,9 @@ static int harness_required_function_outputs_request_is_valid(
         output = cJSON_GetObjectItem(item, "output");
         output_found = cJSON_IsString(output) &&
           (output->valuestring != NULL) &&
-          (output->valuestring[0] != '\0');
+          ((expected_index == 1U) ?
+            (strcmp(output->valuestring, "{}") == 0) :
+            (output->valuestring[0] != '\0'));
       }
     }
     if (!call_found || !output_found) {
@@ -1446,7 +1451,8 @@ static int harness_function_output_request_is_valid(cJSON *root,
     session_key,
     prompt_group,
     "database_list_info",
-    "call-database-list");
+    "call-database-list",
+    "Error: database_list_info takes no arguments.");
 }
 
 static int harness_accept_request(int listener_fd,
@@ -1588,7 +1594,8 @@ static int harness_run_audit_server(int listener_fd)
       session_key,
       prompt_group,
       "helper_session_name_write",
-      "call-audit-session-name") &&
+      "call-audit-session-name",
+      "{}") &&
     harness_send_json_response(client_fd, 200L, empty_response);
   cJSON_Delete(root);
   close(client_fd);
@@ -1933,7 +1940,7 @@ static int harness_run_function_tool_server(int listener_fd)
     "\"type\":\"function_call\",\"id\":\"fc-database-list\","
     "\"call_id\":\"call-database-list\","
     "\"name\":\"database_list_info\","
-    "\"arguments\":\"{}\","
+    "\"arguments\":\"{\\\"unexpected\\\":true}\","
     "\"status\":\"completed\"}],"
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":4,"
     "\"total_tokens\":8}}";
@@ -2122,9 +2129,13 @@ static int harness_run_retry_server(int listener_fd)
   root = cJSON_Parse(third_body);
   free(third_body);
   ok = cJSON_IsObject(root) &&
-    harness_function_output_request_is_valid(root,
-                                             session_key,
-                                             prompt_group) &&
+    harness_named_function_output_request_is_valid(
+      root,
+      session_key,
+      prompt_group,
+      "database_list_info",
+      "call-database-list",
+      NULL) &&
     harness_send_json_response(client_fd, 200L, final_response);
   cJSON_Delete(root);
   close(client_fd);
@@ -2984,7 +2995,11 @@ static int harness_test_function_tool_continuation(void)
                         "SELECT COUNT(*) FROM response_tool_executions WHERE "
                         "call_id='call-database-list' AND "
                         "tool_name='database_list_info' AND "
-                        "status='completed' AND "
+                        "status='error' AND "
+                        "output_json='Error: database_list_info takes no "
+                        "arguments.' AND "
+                        "error_text='database_list_info takes no arguments.' "
+                        "AND "
                         "response_item_id IS NOT NULL;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,

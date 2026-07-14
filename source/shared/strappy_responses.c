@@ -1511,35 +1511,24 @@ static int strappy_responses_append_initial_items(
                                                    error_out);
 }
 
-static char *strappy_responses_tool_error_output(const char *tool_name,
-                                                 const char *message,
+static char *strappy_responses_tool_error_output(const char *message,
                                                  char **error_out)
 {
-  cJSON *root;
-  char *json;
+  strappy_responses_buffer buffer;
+  const char *detail;
 
-  root = cJSON_CreateObject();
-  if ((root == NULL) ||
-      (cJSON_AddBoolToObject(root, "ok", 0) == NULL) ||
-      (cJSON_AddStringToObject(root,
-                               "tool_name",
-                               (tool_name != NULL) ? tool_name : "") == NULL) ||
-      (cJSON_AddStringToObject(root,
-                               "error",
-                               (message != NULL) ? message : "Tool failed.") ==
-       NULL)) {
-    cJSON_Delete(root);
+  buffer.data = NULL;
+  buffer.length = 0U;
+  detail = ((message != NULL) && (message[0] != '\0')) ?
+    message : "Tool failed.";
+  if (!strappy_responses_buffer_append_string(&buffer, "Error: ") ||
+      !strappy_responses_buffer_append_string(&buffer, detail)) {
+    strappy_responses_buffer_destroy(&buffer);
     strappy_set_error(error_out,
                       "Could not build Responses tool error output.");
     return NULL;
   }
-  json = cJSON_PrintUnformatted(root);
-  cJSON_Delete(root);
-  if (json == NULL) {
-    strappy_set_error(error_out,
-                      "Could not serialize Responses tool error output.");
-  }
-  return json;
+  return buffer.data;
 }
 
 static char *strappy_responses_prompt_group_key(long long session_id)
@@ -2190,7 +2179,6 @@ static int strappy_responses_execute_tool_calls(
     tool_succeeded = (output != NULL) ? 1 : 0;
     if (output == NULL) {
       output = strappy_responses_tool_error_output(
-        call->name,
         (tool_error != NULL) ? tool_error : "Tool failed.",
         error_out);
       if (output == NULL) {

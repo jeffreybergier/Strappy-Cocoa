@@ -3839,11 +3839,14 @@ static int harness_run_helper_info_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_contains(context->catalog_path,
-                                      STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
-                                      "{\"id\":1}",
-                                      "\"forgotten\":true",
-                                      "\"ok\":true")) {
+  if (!harness_expect_output_equals(context->catalog_path,
+                                    STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
+                                    "{\"id\":1}",
+                                    "{}") ||
+      !harness_expect_output_equals(context->catalog_path,
+                                    STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
+                                    "{\"id\":1}",
+                                    "{}")) {
     return 0;
   }
 
@@ -3975,12 +3978,16 @@ static int harness_run_helper_info_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_contains(
+  if (!harness_expect_output_equals(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET,
         "{\"id\":1}",
-        "\"forgotten\":true",
-        "\"ok\":true")) {
+        "{}") ||
+      !harness_expect_output_equals(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET,
+        "{\"id\":1}",
+        "{}")) {
     return 0;
   }
 
@@ -4251,11 +4258,10 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
     strappy_free_string(error);
     return 0;
   }
-  ok = (strstr(output, "\"name\":\"Find Receipts\"") != NULL) &&
-       (strstr(output, "\"updated\":true") != NULL);
+  ok = (strcmp(output, "{}") == 0);
   free(output);
   if (!ok) {
-    fprintf(stderr, "Session name tool did not report a write.\n");
+    fprintf(stderr, "Session name tool did not return an empty result.\n");
     return 0;
   }
 
@@ -4294,12 +4300,11 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
     strappy_free_string(error);
     return 0;
   }
-  ok = (strstr(output, "\"name\":\"Different Title\"") != NULL) &&
-       (strstr(output, "\"updated\":true") != NULL) &&
-       (strstr(output, "\"status\":\"updated\"") != NULL);
+  ok = (strcmp(output, "{}") == 0);
   free(output);
   if (!ok) {
-    fprintf(stderr, "Second session name write did not report an update.\n");
+    fprintf(stderr,
+            "Second session name write did not return an empty result.\n");
     return 0;
   }
 

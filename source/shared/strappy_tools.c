@@ -1895,6 +1895,17 @@ static char *strappy_tools_build_noop_result(const char *action_key,
   return json;
 }
 
+static char *strappy_tools_build_empty_result(char **error_out)
+{
+  char *json;
+
+  json = strappy_string_duplicate("{}");
+  if (json == NULL) {
+    strappy_set_error(error_out, "Could not allocate empty tool result.");
+  }
+  return json;
+}
+
 static int strappy_tools_copy_string_array_to_object(cJSON *object,
                                                      const char *key,
                                                      cJSON *source,
@@ -4410,10 +4421,7 @@ static char *strappy_tools_forget_info_row(sqlite3 *db,
                                            char **error_out)
 {
   sqlite3_stmt *stmt;
-  cJSON *root;
   char *sql;
-  char *json;
-  int changed;
   int rc;
 
   if ((db == NULL) || !strappy_tools_string_has_value(table_name) ||
@@ -4461,27 +4469,7 @@ static char *strappy_tools_forget_info_row(sqlite3 *db,
   }
   sqlite3_finalize(stmt);
 
-  changed = sqlite3_changes(db);
-  root = cJSON_CreateObject();
-  if ((root == NULL) ||
-      !strappy_tools_add_bool_to_object(root, "ok", 1) ||
-      (cJSON_AddNumberToObject(root, "id", (double)id) == NULL) ||
-      !strappy_tools_add_bool_to_object(root,
-                                        "forgotten",
-                                        (changed > 0) ? 1 : 0)) {
-    cJSON_Delete(root);
-    strappy_set_error(error_out, "Could not build forget memory result.");
-    return NULL;
-  }
-
-  json = cJSON_PrintUnformatted(root);
-  cJSON_Delete(root);
-  if (json == NULL) {
-    strappy_set_error(error_out, "Could not serialize forget memory result.");
-    return NULL;
-  }
-
-  return json;
+  return strappy_tools_build_empty_result(error_out);
 }
 
 static int strappy_tools_add_database_info_row(cJSON *array,
@@ -7391,7 +7379,6 @@ static char *strappy_tools_execute_helper_session_name_write(
   char **error_out)
 {
   strappy_helper_session_name_write_arguments arguments;
-  cJSON *root;
   char *name;
   char *json;
 
@@ -7422,26 +7409,8 @@ static char *strappy_tools_execute_helper_session_name_write(
     return NULL;
   }
 
-  root = cJSON_CreateObject();
-  if ((root == NULL) ||
-      !strappy_tools_add_bool_to_object(root, "ok", 1) ||
-      (cJSON_AddStringToObject(root, "name", name) == NULL) ||
-      !strappy_tools_add_bool_to_object(root, "updated", 1) ||
-      (cJSON_AddStringToObject(root, "status", "updated") == NULL)) {
-    cJSON_Delete(root);
-    free(name);
-    strappy_set_error(error_out, "Could not build session name result.");
-    return NULL;
-  }
-
-  json = cJSON_PrintUnformatted(root);
-  cJSON_Delete(root);
+  json = strappy_tools_build_empty_result(error_out);
   free(name);
-  if (json == NULL) {
-    strappy_set_error(error_out, "Could not serialize session name result.");
-    return NULL;
-  }
-
   return json;
 }
 
