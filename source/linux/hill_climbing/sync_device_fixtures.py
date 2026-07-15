@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import hashlib
 import json
 import os
 import shlex
@@ -29,14 +28,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runner", type=Path)
     parser.add_argument("--verify-only", action="store_true")
     return parser.parse_args()
-
-
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def verify_sqlite(path: Path) -> None:
@@ -141,8 +132,6 @@ def verify_manifest(fixture_dir: Path) -> dict[str, object]:
         seen.add(database)
         if not database.is_file():
             raise RuntimeError(f"Missing database fixture: {database}")
-        if sha256(database) != entry.get("sha256"):
-            raise RuntimeError(f"Database checksum mismatch: {database}")
         companions = entry.get("companions", [])
         if not isinstance(companions, list):
             raise RuntimeError(f"Invalid companion list for {database}")
@@ -156,15 +145,8 @@ def verify_manifest(fixture_dir: Path) -> dict[str, object]:
                 raise RuntimeError(
                     f"SQLite companion escapes private root: {companion_path}"
                 )
-            if not companion_path.is_file():
-                raise RuntimeError(f"Missing SQLite companion: {companion_path}")
-            if (
-                companion.get("suffix") != "-shm"
-                and sha256(companion_path) != companion.get("sha256")
-            ):
-                raise RuntimeError(
-                    f"SQLite companion checksum mismatch: {companion_path}"
-                )
+            if companion_path.exists() and not companion_path.is_file():
+                raise RuntimeError(f"Invalid SQLite companion: {companion_path}")
         verify_sqlite(database)
 
     catalog_entry = manifest.get("catalog")
@@ -175,8 +157,8 @@ def verify_manifest(fixture_dir: Path) -> dict[str, object]:
     ).resolve()
     if fixture_dir.resolve() not in catalog.parents:
         raise RuntimeError(f"Catalog escapes private root: {catalog}")
-    if not catalog.is_file() or sha256(catalog) != catalog_entry.get("sha256"):
-        raise RuntimeError(f"Catalog checksum mismatch: {catalog}")
+    if not catalog.is_file():
+        raise RuntimeError(f"Missing catalog fixture: {catalog}")
     catalog_companions = catalog_entry.get("companions", [])
     if not isinstance(catalog_companions, list):
         raise RuntimeError(f"Invalid catalog companion list: {catalog}")
@@ -190,15 +172,8 @@ def verify_manifest(fixture_dir: Path) -> dict[str, object]:
             raise RuntimeError(
                 f"Catalog companion escapes private root: {companion_path}"
             )
-        if not companion_path.is_file():
-            raise RuntimeError(f"Missing catalog companion: {companion_path}")
-        if (
-            companion.get("suffix") != "-shm"
-            and sha256(companion_path) != companion.get("sha256")
-        ):
-            raise RuntimeError(
-                f"Catalog companion checksum mismatch: {companion_path}"
-            )
+        if companion_path.exists() and not companion_path.is_file():
+            raise RuntimeError(f"Invalid catalog companion: {companion_path}")
     verify_sqlite(catalog)
     return manifest
 
@@ -337,9 +312,6 @@ def sync(host: str, fixture_dir: Path) -> dict[str, object]:
                         Path(f"{final_path}{suffix}").relative_to(fixture_dir)
                     ),
                     "size": local_companion.stat().st_size,
-                    "sha256": (
-                        None if suffix == "-shm" else sha256(local_companion)
-                    ),
                 }
             )
         verify_sqlite(local_path)
@@ -351,7 +323,6 @@ def sync(host: str, fixture_dir: Path) -> dict[str, object]:
                 "catalog_size": row["size"],
                 "catalog_modified_at": row["modified_at"],
                 "size": local_path.stat().st_size,
-                "sha256": sha256(local_path),
                 "companions": companions,
             }
         )
@@ -364,7 +335,6 @@ def sync(host: str, fixture_dir: Path) -> dict[str, object]:
         "catalog": {
             "local_path": str(catalog.relative_to(fixture_dir)),
             "size": catalog_download.stat().st_size,
-            "sha256": sha256(catalog_download),
             "companions": [
                 {
                     "suffix": suffix,
@@ -372,7 +342,6 @@ def sync(host: str, fixture_dir: Path) -> dict[str, object]:
                         Path(f"{catalog}{suffix}").relative_to(fixture_dir)
                     ),
                     "size": path.stat().st_size,
-                    "sha256": None if suffix == "-shm" else sha256(path),
                 }
                 for suffix, path in catalog_companion_paths
             ],

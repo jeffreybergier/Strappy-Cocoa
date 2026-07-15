@@ -7,7 +7,6 @@ The score is a regression signal, not a substitute for checking public facts.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import sqlite3
@@ -98,38 +97,24 @@ def connect_readonly(path: Path) -> sqlite3.Connection:
     return connection
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def resolve_database_manifest(metadata: dict[str, Any]) -> Path:
     recorded_value = metadata.get("database_manifest")
-    expected_hash = metadata.get("database_manifest_sha256")
-    if not isinstance(recorded_value, str) or not isinstance(expected_hash, str):
+    if not isinstance(recorded_value, str):
         raise RuntimeError("Run metadata does not identify its database manifest.")
 
     recorded = Path(recorded_value)
     harness_dir = Path(__file__).resolve().parent
     candidates = (recorded, harness_dir / "private/gomadango/databases.json")
     for candidate in candidates:
-        if candidate.is_file() and sha256(candidate) == expected_hash:
+        if candidate.is_file():
             return candidate
-    raise RuntimeError(
-        "The run's database manifest is unavailable or its SHA-256 changed."
-    )
+    raise RuntimeError("The run's database manifest is unavailable.")
 
 
 def resolve_ranking_database(metadata: dict[str, Any]) -> Path:
     if "database_manifest" not in metadata:
         recorded_value = metadata.get("media_db")
-        expected_hash = metadata.get("media_db_sha256")
-        if not isinstance(recorded_value, str) or not isinstance(
-            expected_hash, str
-        ):
+        if not isinstance(recorded_value, str):
             raise RuntimeError(
                 "Legacy run metadata does not identify its ranking database."
             )
@@ -143,12 +128,9 @@ def resolve_ranking_database(metadata: dict[str, Any]) -> Path:
             / "private/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb",
         )
         for candidate in candidates:
-            if candidate.is_file() and sha256(candidate) == expected_hash:
+            if candidate.is_file():
                 return candidate
-        raise RuntimeError(
-            "The legacy run's ranking database is unavailable or its "
-            "SHA-256 changed."
-        )
+        raise RuntimeError("The legacy run's ranking database is unavailable.")
 
     suffix = "/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb"
     manifest_path = resolve_database_manifest(metadata)
@@ -171,14 +153,15 @@ def resolve_ranking_database(metadata: dict[str, Any]) -> Path:
         )
     entry = matches[0]
     local_path = entry.get("local_path")
-    expected_hash = entry.get("sha256")
-    if not isinstance(local_path, str) or not isinstance(expected_hash, str):
+    if not isinstance(local_path, str):
         raise RuntimeError(f"Invalid ranking database entry in {manifest_path}")
-    database = (manifest_path.parent / local_path).resolve()
-    if not database.is_file() or sha256(database) != expected_hash:
+    fixture_root = manifest_path.parent.resolve()
+    database = (fixture_root / local_path).resolve()
+    if fixture_root not in database.parents:
+        raise RuntimeError(f"Ranking database escapes private root: {database}")
+    if not database.is_file():
         raise RuntimeError(
-            "The ranking database is unavailable or its SHA-256 changed: "
-            f"{database}"
+            f"The ranking database is unavailable: {database}"
         )
     return database
 

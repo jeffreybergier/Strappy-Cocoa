@@ -82,6 +82,12 @@
 #define HARNESS_MEMORY_USER_FACT_READ_DESCRIPTION \
   "Call this tool to retrieve durable facts stored about the user."
 
+#define HARNESS_DATABASE_LIST_INFO_DESCRIPTION \
+  "Call this tool to view approved databases. Returns an object containing " \
+  "a databases array with database_id, app_name, path, size_bytes, and " \
+  "modified_at in Unix seconds. When no databases are approved, the array " \
+  "is empty and guidance explains why."
+
 #define HARNESS_DATABASE_QUERY_DESCRIPTION \
   "ALWAYS query the relevant approved database before finalizing when the " \
   "request depends on personal data. Do not guess the user's data."
@@ -89,8 +95,8 @@
 #define HARNESS_DATABASE_CONTEXT_READ_DESCRIPTION \
   "ALWAYS call this tool before the final answer. Set database_id to the " \
   "relevant approved database before database_query, or null when no " \
-  "database context is needed. Returns remembered hints, table names, and " \
-  "view names."
+  "database context is needed. Returns remembered hints, table names, view " \
+  "names, and guidance for exploring them."
 
 #define HARNESS_SESSION_NAME_WRITE_DESCRIPTION \
   "ALWAYS call this tool before the final answer. Update the session with a " \
@@ -630,9 +636,7 @@ static int harness_test_request_surfaces(void)
     (strcmp(name->valuestring, "database_list_info") == 0) &&
     cJSON_IsString(description) && (description->valuestring != NULL) &&
     (strcmp(description->valuestring,
-            "Call this tool to view approved databases. Returns an array "
-            "containing database_id, app_name, path, size_bytes, and "
-            "modified_at in Unix seconds.") == 0) &&
+            HARNESS_DATABASE_LIST_INFO_DESCRIPTION) == 0) &&
     harness_tool_description_equals(
       tools,
       STRAPPY_TOOL_DATABASE_QUERY,
@@ -1224,7 +1228,7 @@ static int harness_preflight_input_is_valid(cJSON *input,
                                     prompt_group) &&
     harness_preflight_output_matches(cJSON_GetArrayItem(input, 3),
                                      database_call,
-                                     1) &&
+                                     0) &&
     harness_preflight_output_matches(cJSON_GetArrayItem(input, 4),
                                      memory_call,
                                      1);

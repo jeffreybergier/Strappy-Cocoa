@@ -88,9 +88,6 @@ def load_database_fixtures(manifest_path: Path) -> list[Path]:
             raise RuntimeError(f"Duplicate database fixture: {database}")
         if not database.is_file():
             raise RuntimeError(f"Missing database fixture: {database}")
-        expected_hash = entry.get("sha256")
-        if not isinstance(expected_hash, str) or sha256(database) != expected_hash:
-            raise RuntimeError(f"Database fixture checksum mismatch: {database}")
         seen.add(database)
         databases.append(database)
     if not databases:
@@ -214,7 +211,6 @@ def main() -> int:
         "prompt": args.prompt,
         "models": [model for model, _ in selected],
         "database_manifest": str(database_manifest),
-        "database_manifest_sha256": sha256(database_manifest),
         "database_count": len(databases),
         "database_fixtures": [
             {"path": str(database)} for database in databases

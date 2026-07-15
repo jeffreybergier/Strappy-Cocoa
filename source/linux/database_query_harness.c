@@ -17,6 +17,12 @@
 
 #define HARNESS_RESOURCE_DIR "../shared/Resources"
 #define HARNESS_AUDIT_GUIDANCE_RESOURCE "GuidanceAudit.json"
+#define HARNESS_DATABASE_CONTEXT_QUERY_GUIDANCE \
+  "Use database_query to inspect columns and view definitions with SELECT " \
+  "type, sql FROM sqlite_schema WHERE name = 'table_or_view_name', then use " \
+  "targeted SELECT queries to inspect rows."
+#define HARNESS_DATABASE_LIST_EMPTY_GUIDANCE \
+  "The user has not approved any databases for use."
 
 typedef struct harness_context {
   char temp_dir[1024];
@@ -1394,7 +1400,16 @@ static int harness_expect_database_context_result(
   const char *arguments_json,
   const harness_database_context_expectation *expected)
 {
-  static const char *const keys[] = {
+  static const char *const keys_with_guidance[] = {
+    "guidance",
+    "remembered_hints",
+    "remembered_hints_truncated",
+    "tables",
+    "tables_truncated",
+    "views",
+    "views_truncated"
+  };
+  static const char *const keys_without_guidance[] = {
     "remembered_hints",
     "remembered_hints_truncated",
     "tables",
@@ -1403,12 +1418,14 @@ static int harness_expect_database_context_result(
     "views_truncated"
   };
   cJSON *root;
+  cJSON *guidance;
   cJSON *hints;
   cJSON *hints_truncated;
   cJSON *tables;
   cJSON *tables_truncated;
   cJSON *views;
   cJSON *views_truncated;
+  int expects_guidance;
   int ok;
 
   if (expected == NULL) {
@@ -1422,6 +1439,7 @@ static int harness_expect_database_context_result(
     return 0;
   }
 
+  guidance = cJSON_GetObjectItemCaseSensitive(root, "guidance");
   hints = cJSON_GetObjectItemCaseSensitive(root, "remembered_hints");
   hints_truncated = cJSON_GetObjectItemCaseSensitive(
     root,
@@ -1433,9 +1451,20 @@ static int harness_expect_database_context_result(
   views_truncated = cJSON_GetObjectItemCaseSensitive(root,
                                                       "views_truncated");
 
-  ok = harness_object_has_exact_keys(root,
-                                     keys,
-                                     sizeof(keys) / sizeof(keys[0])) &&
+  expects_guidance =
+    ((expected->table_count > 0U) || (expected->view_count > 0U)) ? 1 : 0;
+  ok = harness_object_has_exact_keys(
+         root,
+         expects_guidance ? keys_with_guidance : keys_without_guidance,
+         expects_guidance ?
+           (sizeof(keys_with_guidance) / sizeof(keys_with_guidance[0])) :
+           (sizeof(keys_without_guidance) /
+            sizeof(keys_without_guidance[0]))) &&
+    (expects_guidance ?
+       (cJSON_IsString(guidance) && (guidance->valuestring != NULL) &&
+        (strcmp(guidance->valuestring,
+                HARNESS_DATABASE_CONTEXT_QUERY_GUIDANCE) == 0)) :
+       (guidance == NULL)) &&
     harness_database_hint_array_matches(hints,
                                         expected->hint_count,
                                         expected->first_hint,
@@ -1964,8 +1993,10 @@ static int harness_run_tool_registry_tests(void)
                              STRAPPY_TOOL_MEMORY_USER_FACT_READ) == NULL) &&
         (strstr(tools_json,
                 "Call this tool to view approved databases. Returns an "
-                "array containing database_id, app_name, path, size_bytes, "
-                "and modified_at in Unix seconds.") != NULL) &&
+                "object containing a databases array with database_id, "
+                "app_name, path, size_bytes, and modified_at in Unix seconds. "
+                "When no databases are approved, the array is empty and "
+                "guidance explains why.") != NULL) &&
         (strstr(tools_json,
                 "ALWAYS query the relevant approved database before "
                 "finalizing when the request depends on personal data.") !=
@@ -2011,7 +2042,8 @@ static int harness_run_tool_registry_tests(void)
                 "ALWAYS call this tool before the final answer. Set "
                 "database_id to the relevant approved database before "
                 "database_query, or null when no database context is needed. "
-                "Returns remembered hints, table names, and view names.") !=
+                "Returns remembered hints, table names, view names, and "
+                "guidance for exploring them.") !=
          NULL) &&
         (strstr(tools_json,
                 "Call this tool to forget durable facts that are no longer "
@@ -2496,7 +2528,9 @@ static int harness_register_database(harness_context *context)
 
 static int harness_run_database_list_info_tests(const harness_context *context)
 {
+  static const char *const root_keys[] = { "databases" };
   cJSON *root;
+  cJSON *databases;
   cJSON *database;
   cJSON *database_id;
   cJSON *app_name;
@@ -2529,7 +2563,10 @@ static int harness_run_database_list_info_tests(const harness_context *context)
   }
 
   root = cJSON_Parse(output);
-  database = cJSON_IsArray(root) ? cJSON_GetArrayItem(root, 0) : NULL;
+  databases = cJSON_IsObject(root) ?
+    cJSON_GetObjectItemCaseSensitive(root, "databases") : NULL;
+  database = cJSON_IsArray(databases) ?
+    cJSON_GetArrayItem(databases, 0) : NULL;
   database_id = cJSON_IsObject(database) ?
     cJSON_GetObjectItem(database, "database_id") : NULL;
   app_name = cJSON_IsObject(database) ?
@@ -2548,8 +2585,12 @@ static int harness_run_database_list_info_tests(const harness_context *context)
       property_count++;
     }
   }
-  ok = cJSON_IsArray(root) &&
-       (cJSON_GetArraySize(root) == 1) &&
+  ok = harness_object_has_exact_keys(
+         root,
+         root_keys,
+         sizeof(root_keys) / sizeof(root_keys[0])) &&
+       cJSON_IsArray(databases) &&
+       (cJSON_GetArraySize(databases) == 1) &&
        cJSON_IsString(database_id) &&
        (database_id->valuestring != NULL) &&
        (strcmp(database_id->valuestring, context->database_id) == 0) &&
@@ -2576,6 +2617,10 @@ static int harness_run_database_list_info_tests(const harness_context *context)
 static int harness_run_empty_database_list_info_tests(
   const harness_context *context)
 {
+  static const char *const root_keys[] = { "databases", "guidance" };
+  cJSON *root;
+  cJSON *databases;
+  cJSON *guidance;
   char *error;
   char *output;
   int ok;
@@ -2607,11 +2652,24 @@ static int harness_run_empty_database_list_info_tests(
     return 0;
   }
 
-  ok = (strcmp(output, "[]") == 0) ? 1 : 0;
+  root = cJSON_Parse(output);
+  databases = cJSON_IsObject(root) ?
+    cJSON_GetObjectItemCaseSensitive(root, "databases") : NULL;
+  guidance = cJSON_IsObject(root) ?
+    cJSON_GetObjectItemCaseSensitive(root, "guidance") : NULL;
+  ok = harness_object_has_exact_keys(
+         root,
+         root_keys,
+         sizeof(root_keys) / sizeof(root_keys[0])) &&
+    cJSON_IsArray(databases) && (cJSON_GetArraySize(databases) == 0) &&
+    cJSON_IsString(guidance) && (guidance->valuestring != NULL) &&
+    (strcmp(guidance->valuestring,
+            HARNESS_DATABASE_LIST_EMPTY_GUIDANCE) == 0);
   if (!ok) {
     fprintf(stderr, "empty database_list_info output was not expected: %s\n", output);
   }
 
+  cJSON_Delete(root);
   free(output);
   return ok;
 }
@@ -3720,6 +3778,23 @@ static int harness_run_database_query_tests(const harness_context *context)
                                       arguments,
                                       "alice",
                                       "\"rows\"")) {
+    return 0;
+  }
+
+  if (!harness_build_query_arguments(
+        arguments,
+        sizeof(arguments),
+        context->database_id,
+        "SELECT type, sql FROM sqlite_schema WHERE name = 'messages'")) {
+    fprintf(stderr, "Could not build column exploration query arguments.\n");
+    return 0;
+  }
+
+  if (!harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_DATABASE_QUERY,
+                                      arguments,
+                                      "CREATE TABLE messages",
+                                      "sender TEXT NOT NULL")) {
     return 0;
   }
 

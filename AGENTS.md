@@ -85,8 +85,10 @@ House style for Strappy source:
     memory guidance, and database-specific instructions belong in these
     resources, not in scattered C or Objective-C strings.
 14. Database tool flow is split by responsibility. `database_list_info` lists
-    approved databases as a compact array containing assistant-visible IDs,
-    inferred app names, paths, sizes, and modification times.
+    approved databases in a compact `databases` array containing
+    assistant-visible IDs, inferred app names, paths, sizes, and modification
+    times. Its result is always an object; when the array is empty, a guidance
+    string explains that the user has not approved any databases.
     `database_context_read` returns remembered database hints plus compact,
     bounded lists of table and view names. Use targeted read-only SQL through
     `database_query` when column or other schema metadata is needed.

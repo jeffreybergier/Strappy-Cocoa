@@ -31,7 +31,7 @@
       "type": "function",
       "function": {
         "name": "database_list_info",
-        "description": "Call this tool to view approved databases. Returns an array containing database_id, app_name, path, size_bytes, and modified_at in Unix seconds.",
+        "description": "Call this tool to view approved databases. Returns an object containing a databases array with database_id, app_name, path, size_bytes, and modified_at in Unix seconds. When no databases are approved, the array is empty and guidance explains why.",
         "parameters": {
           "type": "object",
           "properties": {},
@@ -285,7 +285,7 @@
       "type": "function",
       "function": {
         "name": "database_context_read",
-        "description": "ALWAYS call this tool before the final answer. Set database_id to the relevant approved database before database_query, or null when no database context is needed. Returns remembered hints, table names, and view names.",
+        "description": "ALWAYS call this tool before the final answer. Set database_id to the relevant approved database before database_query, or null when no database context is needed. Returns remembered hints, table names, view names, and guidance for exploring them.",
         "parameters": {
           "type": "object",
           "properties": {

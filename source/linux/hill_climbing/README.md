@@ -73,7 +73,7 @@ use compact previews like their collapsed webview sections:
 >>>>>> Please list out ...
 >>>>> Tool Call | database_list_info
 >>>>> Tool Call | memory_user_fact_read
->>>>> Tool Output | [{"database_id":"...","app_name":"...","path":"...","size_bytes":4096,"modified_at":...}]
+>>>>> Tool Output | {"databases":[{"database_id":"...","app_name":"...","path":"...","size_bytes":4096,"modified_at":...}]}
 >>>>> Tool Output | [{"id":1,"fact":"The user's name is Jeff.","date_saved":"..."}]
 >>>> Response | completed | HTTP 200 | 12.7s
 >>>>> Reasoning | 2270 characters
@@ -85,9 +85,8 @@ use compact previews like their collapsed webview sections:
 - `private/gomadango/catalog/strappy.sqlite` is the copied device catalog;
 - `private/gomadango/root/` mirrors every catalog row whose
   `user_decision` is `allowed`, including available WAL/SHM/journal sidecars;
-- `private/gomadango/databases.json` records the ignored fixture inventory and
-  durable-file checksums used by the runner. It is the sole database-fixture
-  input to a live run;
+- `private/gomadango/databases.json` records the ignored fixture inventory used
+  by the runner. It is the sole database-fixture input to a live run;
 - `runs/` contains answers, per-model Strappy databases, costs, and reports.
 - `.env` files are ignored. The default live run reads the repository-root
   `.env` through the normal Strappy configuration loader.
@@ -102,6 +101,11 @@ with every manifest entry as an approved database, preventing model runs from
 sharing remembered facts or other mutable assistant state. The run fails if
 the registered set differs from the manifest set.
 
+Fixture validation deliberately does not compare file checksums. SQLite may
+checkpoint copied WAL data into a database or recreate transient sidecars while
+preserving the same logical contents. The harness instead checks safe manifest
+paths, required database files, SQLite integrity, and runner registration.
+
 ## Commands
 
 Build without contacting OpenRouter:
@@ -111,9 +115,9 @@ make -C source/linux/hill_climbing
 ```
 
 Validate that the private manifest and all copied databases exist, are ignored,
-match their checksums, and pass SQLite's quick check. This also prepares a
-temporary model session and confirms that every manifest entry becomes an
-approved database in its catalog:
+use safe paths, and pass SQLite's quick check. This also prepares a temporary
+model session and confirms that every manifest entry becomes an approved
+database in its catalog:
 
 ```sh
 make -C source/linux/hill_climbing verify-fixture

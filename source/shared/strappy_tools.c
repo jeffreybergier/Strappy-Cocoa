@@ -44,6 +44,12 @@
 #define STRAPPY_DATABASE_CONTEXT_HINT_LIMIT 40
 #define STRAPPY_DATABASE_CONTEXT_TABLE_LIMIT 20
 #define STRAPPY_DATABASE_CONTEXT_VIEW_LIMIT 20
+#define STRAPPY_DATABASE_CONTEXT_QUERY_GUIDANCE \
+  "Use database_query to inspect columns and view definitions with SELECT " \
+  "type, sql FROM sqlite_schema WHERE name = 'table_or_view_name', then use " \
+  "targeted SELECT queries to inspect rows."
+#define STRAPPY_DATABASE_LIST_EMPTY_GUIDANCE \
+  "The user has not approved any databases for use."
 #define STRAPPY_HELPER_SESSION_NAME_MAX_BYTES 96U
 #define STRAPPY_HELPER_FONTAWESOME_MAX_QUERY_BYTES 128U
 #define STRAPPY_HELPER_FONTAWESOME_MAX_SHORTCODE_BYTES 96U
@@ -3696,7 +3702,12 @@ static char *strappy_tools_read_database_info(
   }
   sqlite3_close(database);
 
-  if (!cJSON_AddItemToObject(root, "remembered_hints", hints)) {
+  if ((((tables->child != NULL) || (views->child != NULL)) &&
+       (cJSON_AddStringToObject(root,
+                               "guidance",
+                               STRAPPY_DATABASE_CONTEXT_QUERY_GUIDANCE) ==
+        NULL)) ||
+      !cJSON_AddItemToObject(root, "remembered_hints", hints)) {
     cJSON_Delete(root);
     cJSON_Delete(hints);
     cJSON_Delete(tables);
@@ -5975,9 +5986,11 @@ static char *strappy_tools_execute_database_list_info(
   char **error_out)
 {
   strappy_discovered_database_record_list list;
+  cJSON *root;
   cJSON *databases;
   char *json;
   size_t index;
+  int empty;
 
   if ((session_db_path == NULL) || (session_db_path[0] == '\0')) {
     strappy_set_error(error_out, "Catalog database path is not configured.");
@@ -5997,8 +6010,11 @@ static char *strappy_tools_execute_database_list_info(
     return NULL;
   }
 
+  root = cJSON_CreateObject();
   databases = cJSON_CreateArray();
-  if (databases == NULL) {
+  if ((root == NULL) || (databases == NULL)) {
+    cJSON_Delete(root);
+    cJSON_Delete(databases);
     strappy_discovered_database_record_list_destroy(&list);
     strappy_set_error(error_out, "Could not allocate tool result.");
     return NULL;
@@ -6015,14 +6031,34 @@ static char *strappy_tools_execute_database_list_info(
     if (!strappy_tools_add_database_list_info_record(databases,
                                                      record,
                                                      error_out)) {
+      cJSON_Delete(root);
       cJSON_Delete(databases);
       strappy_discovered_database_record_list_destroy(&list);
       return NULL;
     }
   }
 
-  json = cJSON_PrintUnformatted(databases);
-  cJSON_Delete(databases);
+  empty = (databases->child == NULL) ? 1 : 0;
+  if (!cJSON_AddItemToObject(root, "databases", databases)) {
+    cJSON_Delete(root);
+    cJSON_Delete(databases);
+    strappy_discovered_database_record_list_destroy(&list);
+    strappy_set_error(error_out, "Could not build database list result.");
+    return NULL;
+  }
+  databases = NULL;
+  if (empty &&
+      (cJSON_AddStringToObject(root,
+                              "guidance",
+                              STRAPPY_DATABASE_LIST_EMPTY_GUIDANCE) == NULL)) {
+    cJSON_Delete(root);
+    strappy_discovered_database_record_list_destroy(&list);
+    strappy_set_error(error_out, "Could not build database list result.");
+    return NULL;
+  }
+
+  json = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
   strappy_discovered_database_record_list_destroy(&list);
   if (json == NULL) {
     strappy_set_error(error_out, "Could not serialize tool result.");
