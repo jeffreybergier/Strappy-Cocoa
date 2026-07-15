@@ -27,14 +27,6 @@ typedef struct StrappySessionResponsesContext {
   NSDictionary *context;
 } StrappySessionResponsesContext;
 
-static const char *StrappySessionCString(NSString *string)
-{
-  if (![string isKindOfClass:[NSString class]]) {
-    return "";
-  }
-  return [string UTF8String];
-}
-
 static const char *StrappySessionOptionalCString(NSString *string)
 {
   if (![string isKindOfClass:[NSString class]] || ([string length] == 0U)) {
@@ -54,136 +46,6 @@ static NSString *StrappySessionStringFromCString(char *value)
   string = [NSString stringWithUTF8String:value];
   strappy_session_free_string(value);
   return (string != nil) ? string : @"";
-}
-
-static long long StrappySessionMessageNumericIdentifier(NSDictionary *message)
-{
-  NSNumber *identifier;
-
-  identifier = [message objectForKey:@"id"];
-  if (![identifier isKindOfClass:[NSNumber class]]) {
-    return 0LL;
-  }
-  return [identifier longLongValue];
-}
-
-static void StrappySessionWebViewMessageFromDictionary(
-  NSDictionary *dictionary,
-  strappy_webview_message *message)
-{
-  NSString *role;
-  NSString *kind;
-  NSString *actor;
-  NSString *promptGroupKey;
-  NSString *messageKey;
-  NSString *targetMessageKey;
-  NSString *direction;
-  NSString *toolCallId;
-  NSString *toolName;
-  NSString *argumentsJSON;
-  NSString *resultJSON;
-  NSString *responseItemActionJSON;
-  NSString *responseItemURL;
-  NSString *responseItemTitle;
-  NSString *responseItemStatus;
-  NSString *responseItemHTTPStatus;
-  NSString *text;
-  NSString *reasoning;
-  NSString *metadataJSON;
-  NSString *renderStateJSON;
-  NSString *createdAt;
-  NSNumber *httpStatus;
-  NSNumber *isError;
-  NSNumber *apiCallId;
-  NSNumber *roundIndex;
-  NSNumber *attemptIndex;
-  NSNumber *cumulativeUsageCost;
-  NSNumber *hasCumulativeUsageCost;
-
-  if (message == NULL) {
-    return;
-  }
-  strappy_session_webview_message_init(message);
-
-  if (![dictionary isKindOfClass:[NSDictionary class]]) {
-    return;
-  }
-
-  role = [dictionary objectForKey:@"role"];
-  kind = [dictionary objectForKey:@"kind"];
-  actor = [dictionary objectForKey:@"actor"];
-  promptGroupKey = [dictionary objectForKey:@"prompt_group_key"];
-  messageKey = [dictionary objectForKey:@"message_key"];
-  targetMessageKey = [dictionary objectForKey:@"target_message_key"];
-  direction = [dictionary objectForKey:@"direction"];
-  toolCallId = [dictionary objectForKey:@"tool_call_id"];
-  toolName = [dictionary objectForKey:@"tool_name"];
-  argumentsJSON = [dictionary objectForKey:@"arguments_json"];
-  resultJSON = [dictionary objectForKey:@"result_json"];
-  responseItemActionJSON =
-    [dictionary objectForKey:@"response_item_action_json"];
-  responseItemURL = [dictionary objectForKey:@"response_item_url"];
-  responseItemTitle = [dictionary objectForKey:@"response_item_title"];
-  responseItemStatus = [dictionary objectForKey:@"response_item_status"];
-  responseItemHTTPStatus =
-    [dictionary objectForKey:@"response_item_http_status"];
-  text = [dictionary objectForKey:@"text"];
-  reasoning = [dictionary objectForKey:@"reasoning"];
-  metadataJSON = [dictionary objectForKey:@"metadata_json"];
-  renderStateJSON = [dictionary objectForKey:@"render_state_json"];
-  createdAt = [dictionary objectForKey:@"created_at"];
-  httpStatus = [dictionary objectForKey:@"http_status"];
-  isError = [dictionary objectForKey:@"is_error"];
-  apiCallId = [dictionary objectForKey:@"turn_id"];
-  roundIndex = [dictionary objectForKey:@"round_index"];
-  attemptIndex = [dictionary objectForKey:@"attempt_index"];
-  cumulativeUsageCost = [dictionary objectForKey:@"cumulative_usage_cost"];
-  hasCumulativeUsageCost =
-    [dictionary objectForKey:@"has_cumulative_usage_cost"];
-
-  message->message_id = StrappySessionMessageNumericIdentifier(dictionary);
-  message->api_call_id =
-    [apiCallId isKindOfClass:[NSNumber class]] ?
-      [apiCallId longLongValue] : 0LL;
-  message->round_number =
-    [roundIndex isKindOfClass:[NSNumber class]] ?
-      ([roundIndex longValue] + 1L) : 0L;
-  message->attempt_number =
-    [attemptIndex isKindOfClass:[NSNumber class]] ?
-      ([attemptIndex longValue] + 1L) : 0L;
-  message->http_status =
-    [httpStatus isKindOfClass:[NSNumber class]] ? [httpStatus longValue] : 0L;
-  message->cumulative_usage_cost =
-    [cumulativeUsageCost isKindOfClass:[NSNumber class]] ?
-      [cumulativeUsageCost doubleValue] : 0.0;
-  message->has_cumulative_usage_cost =
-    [hasCumulativeUsageCost isKindOfClass:[NSNumber class]] ?
-      ([hasCumulativeUsageCost boolValue] ? 1 : 0) : 0;
-  message->role = StrappySessionCString(role);
-  message->kind = StrappySessionCString(kind);
-  message->actor = StrappySessionCString(actor);
-  message->prompt_group_key = StrappySessionCString(promptGroupKey);
-  message->message_key = StrappySessionCString(messageKey);
-  message->target_message_key = StrappySessionCString(targetMessageKey);
-  message->direction = StrappySessionCString(direction);
-  message->tool_call_id = StrappySessionCString(toolCallId);
-  message->tool_name = StrappySessionCString(toolName);
-  message->arguments_json = StrappySessionCString(argumentsJSON);
-  message->result_json = StrappySessionCString(resultJSON);
-  message->response_item_action_json =
-    StrappySessionCString(responseItemActionJSON);
-  message->response_item_url = StrappySessionCString(responseItemURL);
-  message->response_item_title = StrappySessionCString(responseItemTitle);
-  message->response_item_status = StrappySessionCString(responseItemStatus);
-  message->response_item_http_status =
-    StrappySessionCString(responseItemHTTPStatus);
-  message->text = StrappySessionCString(text);
-  message->reasoning = StrappySessionCString(reasoning);
-  message->metadata_json = StrappySessionCString(metadataJSON);
-  message->render_state_json = StrappySessionCString(renderStateJSON);
-  message->created_at = StrappySessionCString(createdAt);
-  message->is_error =
-    [isError isKindOfClass:[NSNumber class]] ? ([isError boolValue] ? 1 : 0) : 0;
 }
 
 @interface StrappySession ()
@@ -265,55 +127,6 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
 
 @implementation StrappySession
 
-+ (NSString *)webViewMessageHTMLForMessage:(NSDictionary *)message
-                         elementIdentifier:(NSString *)elementIdentifier
-                                      state:(NSString *)state
-                                 statusHTML:(NSString *)statusHTML
-{
-  strappy_webview_message webMessage;
-
-  StrappySessionWebViewMessageFromDictionary(message, &webMessage);
-  webMessage.element_id = StrappySessionCString(elementIdentifier);
-  return StrappySessionStringFromCString(
-    strappy_session_webview_message_html(&webMessage,
-                                         StrappySessionCString(state),
-                                         StrappySessionCString(statusHTML)));
-}
-
-+ (NSString *)webViewMessagesHTMLForMessages:(NSArray *)messages
-                                  startIndex:(NSUInteger)start
-                                    endIndex:(NSUInteger)end
-{
-  NSMutableString *html;
-  NSUInteger index;
-
-  html = [NSMutableString string];
-  if (end > [messages count]) {
-    end = [messages count];
-  }
-  for (index = start; index < end; index++) {
-    NSDictionary *message;
-
-    message = [messages objectAtIndex:index];
-    if (![message isKindOfClass:[NSDictionary class]]) {
-      continue;
-    }
-    [html appendString:
-      [self webViewMessageHTMLForMessage:message
-                       elementIdentifier:nil
-                                    state:nil
-                               statusHTML:nil]];
-  }
-  return html;
-}
-
-+ (NSString *)webViewAppendMessagesJavaScriptForHTML:(NSString *)messagesHTML
-{
-  return StrappySessionStringFromCString(
-    strappy_session_webview_append_messages_js(
-      StrappySessionCString(messagesHTML)));
-}
-
 + (NSString *)webViewBatchedJavaScriptForJavaScript:(NSString *)javaScript
 {
   if (![javaScript isKindOfClass:[NSString class]] ||
@@ -323,19 +136,6 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
 
   return StrappySessionStringFromCString(
     strappy_session_webview_batched_js([javaScript UTF8String]));
-}
-
-+ (NSString *)webViewMessagesPageHTMLForMessagesHTML:(NSString *)messagesHTML
-                                           errorText:(NSString *)errorText
-{
-  NSString *resourcePath;
-
-  resourcePath = [[NSBundle mainBundle] resourcePath];
-  return StrappySessionStringFromCString(
-    strappy_session_webview_messages_page_html(
-      StrappySessionCString(messagesHTML),
-      StrappySessionCString(resourcePath),
-      StrappySessionCString(errorText)));
 }
 
 - (int)handleResponsesEvent:(const strappy_responses_event *)event
@@ -1870,6 +1670,103 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
 {
   return [StrappySession messagesForSessionIdentifier:sessionIdentifier_
                                                error:error];
+}
+
+- (NSString *)webViewMessagesPageHTMLWithErrorText:(NSString *)errorText
+                                      messageCount:(NSUInteger *)messageCount
+                                             error:(NSError **)error
+{
+  NSString *databasePath;
+  NSString *resourcePath;
+  const char *displayErrorText;
+  char *pageHTML;
+  char *strappyError;
+  long long sessionId;
+  size_t storedMessageCount;
+
+  if (messageCount != NULL) {
+    *messageCount = 0U;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+
+  resourcePath = [[NSBundle mainBundle] resourcePath];
+  displayErrorText =
+    ([errorText isKindOfClass:[NSString class]] && ([errorText length] > 0U)) ?
+      [errorText UTF8String] : NULL;
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  storedMessageCount = 0U;
+  strappyError = NULL;
+  pageHTML = strappy_session_webview_messages_page_html_for_session(
+    [databasePath fileSystemRepresentation],
+    sessionId,
+    [resourcePath fileSystemRepresentation],
+    displayErrorText,
+    &storedMessageCount,
+    &strappyError);
+  if (messageCount != NULL) {
+    *messageCount = (NSUInteger)storedMessageCount;
+  }
+  if (pageHTML == NULL) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return nil;
+  }
+
+  strappy_session_free_string(strappyError);
+  return StrappySessionStringFromCString(pageHTML);
+}
+
+- (NSString *)webViewAppendMessagesJavaScriptFromIndex:(NSUInteger)startIndex
+                                          messageCount:(NSUInteger *)messageCount
+                                                 error:(NSError **)error
+{
+  NSString *databasePath;
+  char *javaScript;
+  char *strappyError;
+  long long sessionId;
+  size_t storedMessageCount;
+
+  if (messageCount != NULL) {
+    *messageCount = 0U;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  storedMessageCount = 0U;
+  strappyError = NULL;
+  javaScript = strappy_session_webview_append_messages_js_for_session(
+    [databasePath fileSystemRepresentation],
+    sessionId,
+    (size_t)startIndex,
+    &storedMessageCount,
+    &strappyError);
+  if (messageCount != NULL) {
+    *messageCount = (NSUInteger)storedMessageCount;
+  }
+  if (javaScript == NULL) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return nil;
+  }
+
+  strappy_session_free_string(strappyError);
+  return StrappySessionStringFromCString(javaScript);
 }
 
 - (NSString *)webViewJavaScriptForStreamEvent:(NSDictionary *)event

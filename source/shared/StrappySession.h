@@ -47,17 +47,7 @@ extern NSString * const StrappySessionModelCatalogDidChangeNotification;
                 forModelIdentifier:(NSString *)modelIdentifier
                              error:(NSError **)error;
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error;
-+ (NSString *)webViewMessageHTMLForMessage:(NSDictionary *)message
-                         elementIdentifier:(NSString *)elementIdentifier
-                                      state:(NSString *)state
-                                 statusHTML:(NSString *)statusHTML;
-+ (NSString *)webViewMessagesHTMLForMessages:(NSArray *)messages
-                                  startIndex:(NSUInteger)start
-                                    endIndex:(NSUInteger)end;
-+ (NSString *)webViewAppendMessagesJavaScriptForHTML:(NSString *)messagesHTML;
 + (NSString *)webViewBatchedJavaScriptForJavaScript:(NSString *)javaScript;
-+ (NSString *)webViewMessagesPageHTMLForMessagesHTML:(NSString *)messagesHTML
-                                           errorText:(NSString *)errorText;
 
 - (id)initWithSessionIdentifier:(NSNumber *)sessionIdentifier
                         summary:(NSDictionary *)summary;
@@ -65,6 +55,12 @@ extern NSString * const StrappySessionModelCatalogDidChangeNotification;
 - (NSDictionary *)cachedSummary;
 - (NSDictionary *)summaryWithError:(NSError **)error;
 - (NSArray *)messagesWithError:(NSError **)error;
+- (NSString *)webViewMessagesPageHTMLWithErrorText:(NSString *)errorText
+                                      messageCount:(NSUInteger *)messageCount
+                                             error:(NSError **)error;
+- (NSString *)webViewAppendMessagesJavaScriptFromIndex:(NSUInteger)startIndex
+                                          messageCount:(NSUInteger *)messageCount
+                                                 error:(NSError **)error;
 - (NSString *)webViewJavaScriptForStreamEvent:(NSDictionary *)event
                                         error:(NSError **)error;
 - (BOOL)webSearchEnabled;

@@ -96,7 +96,6 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 - (BOOL)promptCancellationRequested;
 - (BOOL)appendNewMessagesToWebView;
 - (NSString *)writeCurrentHTML;
-- (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error;
 - (void)layoutWebViewAndPromptBar;
 - (void)clearRequestState;
 @end
@@ -498,60 +497,28 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 {
   NSString *path;
   NSString *html;
-  NSArray *messages;
-  NSError *error;
+  NSString *errorText;
+  NSUInteger count;
 
   path = [htmlDirectoryPath_ stringByAppendingPathComponent:@"session.html"];
   if (!StrappyEnsureDirectory(htmlDirectoryPath_)) {
     return nil;
   }
-
-  error = nil;
-  messages = nil;
-
-  if (session_ != nil) {
-    messages = [session_ messagesWithError:&error];
+  if (session_ == nil) {
+    return nil;
   }
 
-  html = [self htmlForMessages:messages error:error];
+  errorText = ([statusText_ length] > 0U) ? statusText_ : nil;
+  count = 0U;
+  html = [session_ webViewMessagesPageHTMLWithErrorText:errorText
+                                           messageCount:&count
+                                                  error:nil];
+  newestRenderedMessageCount_ = count;
   if (![html writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil]) {
     return nil;
   }
 
   return path;
-}
-
-- (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error
-{
-  NSMutableString *messagesHTML;
-  NSUInteger count;
-  NSString *errorText;
-
-  if (![messages isKindOfClass:[NSArray class]]) {
-    messages = nil;
-  }
-
-  count = [messages count];
-  newestRenderedMessageCount_ = count;
-
-  if ([statusText_ length] > 0U) {
-    errorText = statusText_;
-  } else if (error != nil) {
-    errorText = [error localizedDescription];
-  } else {
-    errorText = nil;
-  }
-
-  messagesHTML = [NSMutableString string];
-  if (count > 0U) {
-    [messagesHTML appendString:
-      [StrappySession webViewMessagesHTMLForMessages:messages
-                                          startIndex:0U
-                                            endIndex:count]];
-  }
-
-  return [StrappySession webViewMessagesPageHTMLForMessagesHTML:messagesHTML
-                                                      errorText:errorText];
 }
 
 - (void)promptSendViewController:(PromptSendViewController *)controller
@@ -836,23 +803,21 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 
 - (BOOL)appendNewMessagesToWebView
 {
-  NSArray *messages;
-  NSError *error;
   NSUInteger count;
   NSUInteger start;
-  NSString *html;
   NSString *js;
 
   if (session_ == nil) {
     return NO;
   }
-  error = nil;
-  messages = [session_ messagesWithError:&error];
-  if (![messages isKindOfClass:[NSArray class]]) {
+  start = newestRenderedMessageCount_;
+  count = 0U;
+  js = [session_ webViewAppendMessagesJavaScriptFromIndex:start
+                                             messageCount:&count
+                                                    error:nil];
+  if (![js isKindOfClass:[NSString class]]) {
     return NO;
   }
-  count = [messages count];
-  start = newestRenderedMessageCount_;
   if (start > count) {
     return NO;
   }
@@ -860,13 +825,6 @@ static BOOL StrappyEnsureDirectory(NSString *path)
     return YES;
   }
 
-  html = [StrappySession webViewMessagesHTMLForMessages:messages
-                                             startIndex:start
-                                               endIndex:count];
-  if ([html length] == 0U) {
-    return NO;
-  }
-  js = [StrappySession webViewAppendMessagesJavaScriptForHTML:html];
   if ([js length] == 0U) {
     return NO;
   }

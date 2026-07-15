@@ -47,9 +47,12 @@ RESPONSES_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_cocoa.c \
 	$(SHARED_DIR)/strappy_core.c \
 	$(SHARED_DIR)/strappy_db.c \
+	$(SHARED_DIR)/strappy_model_catalog.c \
 	$(SHARED_DIR)/strappy_prompt.c \
 	$(SHARED_DIR)/strappy_responses.c \
+	$(SHARED_DIR)/strappy_session.c \
 	$(SHARED_DIR)/strappy_tools.c \
+	$(SHARED_DIR)/strappy_webview.c \
 	$(CJSON_DIR)/cJSON.c
 
 .PHONY: test clean

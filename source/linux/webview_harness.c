@@ -92,6 +92,62 @@ static int harness_check_localized_labels(void)
   return ok;
 }
 
+static int harness_check_message_batch(void)
+{
+  strappy_webview_message messages[2];
+  char *first_html;
+  char *second_html;
+  char *batch_html;
+  char *empty_html;
+  char *invalid_html;
+  char *expected_html;
+  size_t first_length;
+  size_t second_length;
+  int ok;
+
+  memset(messages, 0, sizeof(messages));
+  messages[0].element_id = "batch-user-1";
+  messages[0].role = "user";
+  messages[0].text = "First batch message";
+  messages[1].element_id = "batch-assistant-2";
+  messages[1].role = "assistant";
+  messages[1].text = "Second batch message";
+
+  first_html = strappy_webview_message_html(&messages[0], NULL, NULL, NULL);
+  second_html = strappy_webview_message_html(&messages[1], NULL, NULL, NULL);
+  batch_html = strappy_webview_messages_html(messages, 2U, NULL);
+  empty_html = strappy_webview_messages_html(NULL, 0U, NULL);
+  invalid_html = strappy_webview_messages_html(NULL, 1U, NULL);
+  expected_html = NULL;
+
+  if ((first_html != NULL) && (second_html != NULL)) {
+    first_length = strlen(first_html);
+    second_length = strlen(second_html);
+    expected_html = (char *)malloc(first_length + second_length + 1U);
+    if (expected_html != NULL) {
+      memcpy(expected_html, first_html, first_length);
+      memcpy(expected_html + first_length, second_html, second_length + 1U);
+    }
+  }
+
+  ok = (expected_html != NULL) &&
+       harness_expect_equal(batch_html, expected_html) &&
+       harness_expect_equal(empty_html, "") &&
+       (invalid_html == NULL);
+  if (invalid_html != NULL) {
+    fprintf(stderr,
+            "Expected a non-empty WebView batch with no messages to fail.\n");
+  }
+
+  free(expected_html);
+  strappy_webview_free(invalid_html);
+  strappy_webview_free(empty_html);
+  strappy_webview_free(batch_html);
+  strappy_webview_free(second_html);
+  strappy_webview_free(first_html);
+  return ok;
+}
+
 static int harness_check_page_scripts(void)
 {
   strappy_webview_message message;
@@ -1610,6 +1666,9 @@ int main(void)
 {
   strappy_webview_set_font_dir("/tmp/Strappy Fonts");
   if (!harness_check_localized_labels()) {
+    return 1;
+  }
+  if (!harness_check_message_batch()) {
     return 1;
   }
   if (!harness_check_page_scripts()) {

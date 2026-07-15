@@ -182,7 +182,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (BOOL)appendNewMessagesToWebView;
 - (void)reloadContent;
 - (NSString *)writeCurrentHTML;
-- (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error;
 - (void)clearRequestState;
 - (BOOL)isLeavingNavigationStack;
 - (void)prepareForRemoval;
@@ -882,11 +881,14 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   NSString *filename;
   NSString *path;
   NSString *html;
-  NSArray *messages;
-  NSError *error;
+  NSString *errorText;
   NSNumber *identifier;
+  NSUInteger count;
 
   if (!StrappyEnsureDirectory([self htmlDirectoryPath])) {
+    return nil;
+  }
+  if ([self session] == nil) {
     return nil;
   }
 
@@ -895,13 +897,13 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     ([identifier isKindOfClass:[NSNumber class]] ? [identifier stringValue] : @"none")];
   path = [[self htmlDirectoryPath] stringByAppendingPathComponent:filename];
 
-  error = nil;
-  messages = nil;
-  if ([self session] != nil) {
-    messages = [[self session] messagesWithError:&error];
-  }
-
-  html = [self htmlForMessages:messages error:error];
+  errorText = ([[self statusText] length] > 0U) ? [self statusText] : nil;
+  count = 0U;
+  html = [[self session]
+    webViewMessagesPageHTMLWithErrorText:errorText
+                            messageCount:&count
+                                   error:nil];
+  [self setNewestRenderedMessageCount:count];
   if (![html isKindOfClass:[NSString class]] ||
       ![html writeToFile:path
               atomically:YES
@@ -911,39 +913,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
 
   return path;
-}
-
-- (NSString *)htmlForMessages:(NSArray *)messages error:(NSError *)error
-{
-  NSMutableString *messagesHTML;
-  NSUInteger count;
-  NSString *errorText;
-
-  if (![messages isKindOfClass:[NSArray class]]) {
-    messages = nil;
-  }
-
-  count = [messages count];
-  [self setNewestRenderedMessageCount:count];
-
-  if ([[self statusText] length] > 0U) {
-    errorText = [self statusText];
-  } else if (error != nil) {
-    errorText = [error localizedDescription];
-  } else {
-    errorText = nil;
-  }
-
-  messagesHTML = [NSMutableString string];
-  if (count > 0U) {
-    [messagesHTML appendString:
-      [StrappySession webViewMessagesHTMLForMessages:messages
-                                          startIndex:0U
-                                            endIndex:count]];
-  }
-
-  return [StrappySession webViewMessagesPageHTMLForMessagesHTML:messagesHTML
-                                                      errorText:errorText];
 }
 
 - (void)promptSendViewController:(PromptSendViewController *)controller
@@ -1241,25 +1210,23 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
 - (BOOL)appendNewMessagesToWebView
 {
-  NSArray *messages;
-  NSError *error;
   NSUInteger count;
   NSUInteger start;
-  NSString *html;
   NSString *javaScript;
 
   if ([self session] == nil) {
     return NO;
   }
 
-  error = nil;
-  messages = [[self session] messagesWithError:&error];
-  if (![messages isKindOfClass:[NSArray class]]) {
+  start = [self newestRenderedMessageCount];
+  count = 0U;
+  javaScript = [[self session]
+    webViewAppendMessagesJavaScriptFromIndex:start
+                                messageCount:&count
+                                       error:nil];
+  if (![javaScript isKindOfClass:[NSString class]]) {
     return NO;
   }
-
-  count = [messages count];
-  start = [self newestRenderedMessageCount];
   if (start > count) {
     return NO;
   }
@@ -1267,14 +1234,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     return YES;
   }
 
-  html = [StrappySession webViewMessagesHTMLForMessages:messages
-                                             startIndex:start
-                                               endIndex:count];
-  if ([html length] == 0U) {
-    return NO;
-  }
-
-  javaScript = [StrappySession webViewAppendMessagesJavaScriptForHTML:html];
   if ([javaScript length] == 0U) {
     return NO;
   }

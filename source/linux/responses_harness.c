@@ -21,6 +21,7 @@
 #include "../shared/strappy_config.h"
 #include "../shared/strappy_db.h"
 #include "../shared/strappy_responses.h"
+#include "../shared/strappy_session.h"
 #include "../shared/strappy_tools.h"
 
 #define HARNESS_DATABASE_CONTEXT_AUDIT_MESSAGE \
@@ -3970,6 +3971,182 @@ static int harness_test_ledger(void)
   return 1;
 }
 
+static int harness_test_session_webview_rendering(void)
+{
+  static const char *first_text = "First stored WebView message";
+  static const char *second_text = "Second stored WebView message";
+  static const char *request_json =
+    "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
+    "\"input\":[{\"type\":\"message\",\"role\":\"user\","
+    "\"content\":[{\"type\":\"input_text\","
+    "\"text\":\"First stored WebView message\"}]}]}";
+  static const char *response_json =
+    "{\"id\":\"resp-webview\",\"object\":\"response\","
+    "\"created_at\":1700000000,\"completed_at\":1700000001,"
+    "\"model\":\"test/model\",\"status\":\"completed\","
+    "\"output\":[{\"type\":\"message\",\"id\":\"msg-webview\","
+    "\"role\":\"assistant\",\"status\":\"completed\","
+    "\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Second stored WebView message\","
+    "\"annotations\":[],\"logprobs\":[]}]}],"
+    "\"output_text\":\"Second stored WebView message\","
+    "\"usage\":{\"input_tokens\":4,\"output_tokens\":5,"
+    "\"total_tokens\":9}}";
+  const char *path = "/tmp/strappy_session_webview_harness.sqlite";
+  strappy_response_call_begin_input begin;
+  strappy_response_call_finish_input finish;
+  const char *first_position;
+  const char *second_position;
+  char *append_script;
+  char *empty_script;
+  char *error;
+  char *invalid_script;
+  char *page_html;
+  long long call_id;
+  long long session_id;
+  size_t message_count;
+  int ok;
+
+  unlink(path);
+  append_script = NULL;
+  call_id = 0LL;
+  empty_script = NULL;
+  error = NULL;
+  invalid_script = NULL;
+  page_html = NULL;
+  session_id = 0LL;
+  message_count = 0U;
+  ok = strappy_webview_configure_localized_labels(&error) &&
+       strappy_db_create_session(path, &session_id, &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not create the session WebView fixture: %s\n",
+            (error != NULL) ? error : "unknown error");
+    goto cleanup;
+  }
+
+  memset(&begin, 0, sizeof(begin));
+  begin.session_id = session_id;
+  begin.prompt_group_key = "webview-group";
+  begin.request_kind = "user";
+  begin.round_index = 0L;
+  begin.attempt_index = 0L;
+  begin.new_input_start_index = 0L;
+  begin.request_method = "POST";
+  begin.request_url = "https://openrouter.ai/api/v1/responses";
+  begin.request_headers_json = "{}";
+  begin.request_json = request_json;
+  ok = strappy_db_begin_response_call(path, &begin, &call_id, &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not begin the session WebView fixture call: %s\n",
+            (error != NULL) ? error : "unknown error");
+    goto cleanup;
+  }
+
+  memset(&finish, 0, sizeof(finish));
+  finish.call_id = call_id;
+  finish.state = "completed";
+  finish.output_is_canonical = 1;
+  finish.http_status = 200L;
+  finish.started_at_ms = 1000LL;
+  finish.completed_at_ms = 1100LL;
+  finish.request_bytes = (long long)strlen(request_json);
+  finish.response_bytes = (long long)strlen(response_json);
+  finish.total_seconds = 0.1;
+  finish.effective_url = begin.request_url;
+  finish.content_type = "application/json";
+  finish.response_headers = "";
+  finish.response_json = response_json;
+  ok = strappy_db_finish_response_call(path, &finish, &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not finish the session WebView fixture call: %s\n",
+            (error != NULL) ? error : "unknown error");
+    goto cleanup;
+  }
+
+  page_html = strappy_session_webview_messages_page_html_for_session(
+    path,
+    session_id,
+    "../shared/Resources",
+    NULL,
+    &message_count,
+    &error);
+  first_position = (page_html != NULL) ?
+    strstr(page_html, first_text) : NULL;
+  second_position = (page_html != NULL) ?
+    strstr(page_html, second_text) : NULL;
+  ok = (page_html != NULL) && (message_count == 3U) &&
+       (first_position != NULL) && (second_position != NULL) &&
+       (first_position < second_position);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not render the stored WebView page: %s "
+            "(count=%lu, first=%d, second=%d)\n",
+            (error != NULL) ? error : "unexpected output",
+            (unsigned long)message_count,
+            (first_position != NULL) ? 1 : 0,
+            (second_position != NULL) ? 1 : 0);
+    goto cleanup;
+  }
+
+  append_script = strappy_session_webview_append_messages_js_for_session(
+    path,
+    session_id,
+    2U,
+    &message_count,
+    &error);
+  ok = (append_script != NULL) && (message_count == 3U) &&
+       (strstr(append_script, "appendMessage(") != NULL) &&
+       (strstr(append_script, first_text) == NULL) &&
+       (strstr(append_script, second_text) != NULL);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not render stored WebView append JavaScript: %s\n",
+            (error != NULL) ? error : "unexpected output");
+    goto cleanup;
+  }
+
+  empty_script = strappy_session_webview_append_messages_js_for_session(
+    path,
+    session_id,
+    3U,
+    &message_count,
+    &error);
+  ok = (empty_script != NULL) && (message_count == 3U) &&
+       (strcmp(empty_script, "") == 0);
+  if (!ok) {
+    fprintf(stderr,
+            "Empty stored WebView append range was not empty: %s\n",
+            (error != NULL) ? error : "unexpected output");
+    goto cleanup;
+  }
+
+  strappy_session_free_string(error);
+  error = NULL;
+  invalid_script = strappy_session_webview_append_messages_js_for_session(
+    path,
+    session_id,
+    4U,
+    &message_count,
+    &error);
+  ok = (invalid_script == NULL) && (message_count == 3U) && (error != NULL);
+  if (!ok) {
+    fprintf(stderr,
+            "Invalid stored WebView append range unexpectedly succeeded.\n");
+  }
+
+cleanup:
+  strappy_session_free_string(page_html);
+  strappy_session_free_string(append_script);
+  strappy_session_free_string(empty_script);
+  strappy_session_free_string(invalid_script);
+  strappy_session_free_string(error);
+  unlink(path);
+  return ok;
+}
+
 int main(void)
 {
   if (harness_test_request_surfaces() &&
@@ -3982,7 +4159,8 @@ int main(void)
       harness_test_function_tool_continuation() &&
       harness_test_retry_attempt_ledger() &&
       harness_test_active_request_cancellation() &&
-      harness_test_retry_after_clamp_and_cancellation()) {
+      harness_test_retry_after_clamp_and_cancellation() &&
+      harness_test_session_webview_rendering()) {
     printf("responses_harness passed.\n");
     return 0;
   }

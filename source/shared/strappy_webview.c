@@ -2882,6 +2882,40 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   return strappy_webview_buffer_finish(&buffer);
 }
 
+char *strappy_webview_messages_html(
+  const strappy_webview_message *messages,
+  size_t count,
+  const strappy_webview_labels *labels)
+{
+  strappy_webview_buffer buffer;
+  char *message_html;
+  size_t index;
+
+  if ((messages == NULL) && (count > 0U)) {
+    return NULL;
+  }
+
+  strappy_webview_buffer_init(&buffer);
+  for (index = 0U; index < count; index++) {
+    message_html = strappy_webview_message_html(&messages[index],
+                                                labels,
+                                                NULL,
+                                                NULL);
+    if (message_html == NULL) {
+      strappy_webview_buffer_destroy(&buffer);
+      return NULL;
+    }
+    if (!strappy_webview_buffer_append_cstring(&buffer, message_html)) {
+      free(message_html);
+      strappy_webview_buffer_destroy(&buffer);
+      return NULL;
+    }
+    free(message_html);
+  }
+
+  return strappy_webview_buffer_finish(&buffer);
+}
+
 char *strappy_webview_pending_message_html(
   const char *prompt,
   const char *element_id,

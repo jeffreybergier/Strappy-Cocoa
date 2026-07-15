@@ -97,16 +97,20 @@ int strappy_session_send_prompt_with_events_and_load(
   strappy_session_record *record,
   char **error_out);
 
-char *strappy_session_webview_message_html(
-  const strappy_webview_message *message,
-  const char *state,
-  const char *status_html);
-void strappy_session_webview_message_init(strappy_webview_message *message);
-char *strappy_session_webview_append_messages_js(const char *messages_html);
 char *strappy_session_webview_batched_js(const char *java_script);
-char *strappy_session_webview_messages_page_html(const char *messages_html,
-                                                 const char *resource_dir,
-                                                 const char *error_text);
+char *strappy_session_webview_messages_page_html_for_session(
+  const char *db_path,
+  long long session_id,
+  const char *resource_dir,
+  const char *error_text,
+  size_t *message_count_out,
+  char **error_out);
+char *strappy_session_webview_append_messages_js_for_session(
+  const char *db_path,
+  long long session_id,
+  size_t start_index,
+  size_t *message_count_out,
+  char **error_out);
 char *strappy_session_webview_set_processing_status_js(
   const char *status_json);
 char *strappy_session_webview_message_update_js_for_key(

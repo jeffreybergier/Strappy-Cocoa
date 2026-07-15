@@ -1,6 +1,8 @@
 #ifndef STRAPPY_WEBVIEW_H
 #define STRAPPY_WEBVIEW_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -83,6 +85,10 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                    const strappy_webview_labels *labels,
                                    const char *state,
                                    const char *status_html);
+char *strappy_webview_messages_html(
+  const strappy_webview_message *messages,
+  size_t count,
+  const strappy_webview_labels *labels);
 char *strappy_webview_message_update_js(
   const strappy_webview_message *message,
   const strappy_webview_labels *labels);
