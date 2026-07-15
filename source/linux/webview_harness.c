@@ -1375,9 +1375,9 @@ static int harness_check_responses_items(void)
   message.kind = "function_call_output";
   message.tool_call_id = "call-database-query";
   message.result_json =
-    "{\"ok\":true,\"columns\":[{\"name\":\"value\"}],"
-    "\"rows\":[[1]]}";
-  message.text = "{\"ok\":true}";
+    "{\"columns\":[\"value\"],\"rows\":[[1]],"
+    "\"rows_truncated\":false}";
+  message.text = "{\"columns\":[\"value\"]}";
   output_html = strappy_webview_message_html(&message, &labels, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
@@ -1497,7 +1497,7 @@ static int harness_check_responses_items(void)
        harness_expect_contains(output_html,
                                "data-tool-label=\"Localized Tool\"") &&
        harness_expect_contains(output_html,
-                               "data-result-json=\"{&quot;ok&quot;:true,") &&
+                               "data-result-json=\"{&quot;columns&quot;:") &&
        harness_expect_contains(output_html,
                                "class=\"bubble api-tool-card tool-card\"") &&
        harness_expect_contains(output_html,

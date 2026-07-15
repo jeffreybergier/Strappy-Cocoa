@@ -832,7 +832,13 @@ static int harness_create_user_database(const char *database_path)
     "INSERT INTO identifiers(value) VALUES "
     "(2556198414531480000),"
     "(-5023472826755880000),"
-    "(42);");
+    "(42);"
+    "CREATE TABLE payloads ("
+    "large_text TEXT NOT NULL,"
+    "data BLOB NOT NULL"
+    ");"
+    "INSERT INTO payloads(large_text, data) VALUES "
+    "(printf('%05000d', 0), zeroblob(20));");
 
   sqlite3_close(db);
   return ok;
@@ -1393,6 +1399,68 @@ static int harness_database_hint_array_matches(cJSON *array,
 static int harness_json_bool_equals(cJSON *value, int expected)
 {
   return expected ? cJSON_IsTrue(value) : cJSON_IsFalse(value);
+}
+
+static int harness_expect_database_query_shape(
+  const char *catalog_path,
+  const char *arguments_json,
+  const char *const *expected_columns,
+  size_t expected_column_count,
+  size_t expected_row_count,
+  int expected_rows_truncated)
+{
+  static const char *const keys[] = {
+    "columns",
+    "rows",
+    "rows_truncated"
+  };
+  cJSON *root;
+  cJSON *columns;
+  cJSON *rows;
+  cJSON *rows_truncated;
+  cJSON *row;
+  int ok;
+
+  root = harness_tool_output_json(catalog_path,
+                                  STRAPPY_TOOL_DATABASE_QUERY,
+                                  arguments_json);
+  if (root == NULL) {
+    return 0;
+  }
+
+  columns = cJSON_GetObjectItemCaseSensitive(root, "columns");
+  rows = cJSON_GetObjectItemCaseSensitive(root, "rows");
+  rows_truncated = cJSON_GetObjectItemCaseSensitive(root,
+                                                     "rows_truncated");
+  ok = harness_object_has_exact_keys(root,
+                                     keys,
+                                     sizeof(keys) / sizeof(keys[0])) &&
+    harness_string_array_equals(columns,
+                                expected_columns,
+                                expected_column_count) &&
+    cJSON_IsArray(rows) &&
+    (cJSON_GetArraySize(rows) == (int)expected_row_count) &&
+    harness_json_bool_equals(rows_truncated, expected_rows_truncated);
+  for (row = cJSON_IsArray(rows) ? rows->child : NULL;
+       ok && (row != NULL);
+       row = row->next) {
+    ok = cJSON_IsArray(row) &&
+      (cJSON_GetArraySize(row) == (int)expected_column_count);
+  }
+
+  if (!ok) {
+    char *actual;
+
+    actual = cJSON_PrintUnformatted(root);
+    fprintf(stderr,
+            "database_query result did not match its compact public shape: "
+            "%s\n",
+            (actual != NULL) ? actual : "(unserializable)");
+    free(actual);
+  }
+
+  cJSON_Delete(root);
+  return ok;
 }
 
 static int harness_expect_database_context_result(
@@ -1998,8 +2066,8 @@ static int harness_run_tool_registry_tests(void)
                 "When no databases are approved, the array is empty and "
                 "guidance explains why.") != NULL) &&
         (strstr(tools_json,
-                "ALWAYS query the relevant approved database before "
-                "finalizing when the request depends on personal data.") !=
+                "ALWAYS call this tool before finalizing when the request "
+                "depends on personal data.") !=
          NULL) &&
         (strstr(tools_json,
                 "ALWAYS call this tool when displaying numeric timestamps.") !=
@@ -2049,8 +2117,8 @@ static int harness_run_tool_registry_tests(void)
                 "Call this tool to forget durable facts that are no longer "
                 "correct or useful.") != NULL) &&
         (strstr(filtered_json,
-                "ALWAYS query the relevant approved database before "
-                "finalizing when the request depends on personal data.") !=
+                "ALWAYS call this tool before finalizing when the request "
+                "depends on personal data.") !=
          NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_LIST_INFO) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_QUERY) != NULL) &&
@@ -3730,6 +3798,10 @@ static int harness_build_query_arguments(char *output,
 
 static int harness_run_database_query_tests(const harness_context *context)
 {
+  static const char *const message_columns[] = { "sender", "body" };
+  static const char *const schema_columns[] = { "type", "sql" };
+  static const char *const value_columns[] = { "value" };
+  static const char *const payload_columns[] = { "large_text", "data" };
   char arguments[2048];
 
   if ((context == NULL) || (context->database_id == NULL)) {
@@ -3760,7 +3832,12 @@ static int harness_run_database_query_tests(const harness_context *context)
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_QUERY,
         "{\"database_id\":null,\"sql\":\"SELECT 1\"}",
-        "requires non-empty database_id and sql strings")) {
+        "requires non-empty database_id and sql strings") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_QUERY,
+        "{\"database_id\":\"db_1\",\"sql\":\" \\t\\n\"}",
+        "sql must not be blank")) {
     return 0;
   }
 
@@ -3773,11 +3850,36 @@ static int harness_run_database_query_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_contains(context->catalog_path,
+  if (!harness_expect_database_query_shape(
+        context->catalog_path,
+        arguments,
+        message_columns,
+        sizeof(message_columns) / sizeof(message_columns[0]),
+        2U,
+        0) ||
+      !harness_expect_output_contains(context->catalog_path,
                                       STRAPPY_TOOL_DATABASE_QUERY,
                                       arguments,
                                       "alice",
-                                      "\"rows\"")) {
+                                      "bob")) {
+    return 0;
+  }
+
+  if (!harness_build_query_arguments(
+        arguments,
+        sizeof(arguments),
+        context->database_id,
+        "SELECT sender, body FROM messages WHERE 0")) {
+    fprintf(stderr, "Could not build empty query arguments.\n");
+    return 0;
+  }
+  if (!harness_expect_database_query_shape(
+        context->catalog_path,
+        arguments,
+        message_columns,
+        sizeof(message_columns) / sizeof(message_columns[0]),
+        0U,
+        0)) {
     return 0;
   }
 
@@ -3790,7 +3892,14 @@ static int harness_run_database_query_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_contains(context->catalog_path,
+  if (!harness_expect_database_query_shape(
+        context->catalog_path,
+        arguments,
+        schema_columns,
+        sizeof(schema_columns) / sizeof(schema_columns[0]),
+        1U,
+        0) ||
+      !harness_expect_output_contains(context->catalog_path,
                                       STRAPPY_TOOL_DATABASE_QUERY,
                                       arguments,
                                       "CREATE TABLE messages",
@@ -3807,7 +3916,14 @@ static int harness_run_database_query_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_contains_without(
+  if (!harness_expect_database_query_shape(
+        context->catalog_path,
+        arguments,
+        value_columns,
+        sizeof(value_columns) / sizeof(value_columns[0]),
+        3U,
+        0) ||
+      !harness_expect_output_contains_without(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_QUERY,
         arguments,
@@ -3822,6 +3938,53 @@ static int harness_run_database_query_tests(const harness_context *context)
                                       arguments,
                                       "[42]",
                                       "\"rows\"")) {
+    return 0;
+  }
+
+  if (!harness_build_query_arguments(
+        arguments,
+        sizeof(arguments),
+        context->database_id,
+        "SELECT large_text, data FROM payloads")) {
+    fprintf(stderr, "Could not build exceptional cell query arguments.\n");
+    return 0;
+  }
+  if (!harness_expect_database_query_shape(
+        context->catalog_path,
+        arguments,
+        payload_columns,
+        sizeof(payload_columns) / sizeof(payload_columns[0]),
+        1U,
+        0) ||
+      !harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_DATABASE_QUERY,
+                                      arguments,
+                                      "\"type\":\"text\"",
+                                      "\"size_bytes\":5000") ||
+      !harness_expect_output_contains(context->catalog_path,
+                                      STRAPPY_TOOL_DATABASE_QUERY,
+                                      arguments,
+                                      "\"type\":\"blob\"",
+                                      "\"omitted\":true")) {
+    return 0;
+  }
+
+  if (!harness_build_query_arguments(
+        arguments,
+        sizeof(arguments),
+        context->database_id,
+        "WITH RECURSIVE counter(value) AS (SELECT 1 UNION ALL SELECT "
+        "value + 1 FROM counter WHERE value < 101) SELECT value FROM counter")) {
+    fprintf(stderr, "Could not build row truncation query arguments.\n");
+    return 0;
+  }
+  if (!harness_expect_database_query_shape(
+        context->catalog_path,
+        arguments,
+        value_columns,
+        sizeof(value_columns) / sizeof(value_columns[0]),
+        100U,
+        1)) {
     return 0;
   }
 
@@ -4069,6 +4232,7 @@ static int harness_run_readonly_wal_database_query_test(
 static int harness_run_wide_schema_database_query_test(
   harness_context *context)
 {
+  static const char *const count_columns[] = { "count(*)" };
   char database_path[1200];
   char arguments[2048];
   char *database_id;
@@ -4099,11 +4263,18 @@ static int harness_run_wide_schema_database_query_test(
          sizeof(arguments),
          database_id,
          "SELECT count(*) FROM sqlite_master WHERE name = 'wide_table'") &&
+       harness_expect_database_query_shape(
+         context->catalog_path,
+         arguments,
+         count_columns,
+         sizeof(count_columns) / sizeof(count_columns[0]),
+         1U,
+         0) &&
        harness_expect_output_contains(context->catalog_path,
                                       STRAPPY_TOOL_DATABASE_QUERY,
                                       arguments,
                                       "\"rows\":[[1]]",
-                                      "\"ok\":true");
+                                      "\"rows_truncated\":false");
 
   if (ok) {
     ok = harness_build_query_arguments(arguments,
@@ -4124,7 +4295,9 @@ static int harness_run_wide_schema_database_query_test(
 static int harness_run_helper_info_tests(const harness_context *context)
 {
   static const char *noop_result = "{}";
-  static const char *const base_tables[] = { "identifiers", "messages" };
+  static const char *const base_tables[] = {
+    "identifiers", "messages", "payloads"
+  };
   harness_database_context_expectation expected_context;
   char arguments[4096];
   int written;
@@ -4487,11 +4660,11 @@ static int harness_run_database_context_limit_tests(
   const harness_context *context)
 {
   static const char *const expected_tables[] = {
-    "identifiers", "messages",
+    "identifiers", "messages", "payloads",
     "table_00", "table_01", "table_02", "table_03", "table_04",
     "table_05", "table_06", "table_07", "table_08", "table_09",
     "table_10", "table_11", "table_12", "table_13", "table_14",
-    "table_15", "table_16", "table_17"
+    "table_15", "table_16"
   };
   static const char *const expected_views[] = {
     "view_00", "view_01", "view_02", "view_03", "view_04",

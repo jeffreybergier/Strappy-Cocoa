@@ -92,7 +92,10 @@ House style for Strappy source:
     `database_context_read` returns remembered database hints plus compact,
     bounded lists of table and view names. Use targeted read-only SQL through
     `database_query` when column or other schema metadata is needed.
-    `database_query` runs bounded read-only SQL against approved databases.
+    `database_query` runs bounded read-only SQL against approved databases and
+    returns only ordered column-name and positional-row arrays plus a
+    `rows_truncated` boolean. Exceptional text and BLOB cells carry their own
+    compact metadata.
     The Responses runtime executes `database_list_info` and
     `memory_user_fact_read` before round zero of each user request and seeds
     each result as a typed `function_call` plus matching

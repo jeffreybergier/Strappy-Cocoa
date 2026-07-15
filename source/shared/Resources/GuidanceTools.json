@@ -44,15 +44,22 @@
       "type": "function",
       "function": {
         "name": "database_query",
-        "description": "ALWAYS query the relevant approved database before finalizing when the request depends on personal data. Do not guess the user's data.",
+        "description": "ALWAYS call this tool before finalizing when the request depends on personal data. Run one read-only SQLite query against an approved database; do not guess the user's data. Returns ordered column names and positional rows. At most 100 rows and 64 columns are returned.",
         "parameters": {
           "type": "object",
           "properties": {
             "database_id": {
-              "type": "string"
+              "type": "string",
+              "description": "Approved database ID returned by database_list_info.",
+              "minLength": 1,
+              "maxLength": 64
             },
             "sql": {
-              "type": "string"
+              "type": "string",
+              "description": "One read-only SQLite SELECT or EXPLAIN query that returns columns. Select only needed columns and use LIMIT when practical. Query sqlite_schema for schema details. PRAGMA, writes, ATTACH, multiple statements, and bind parameters are not allowed.",
+              "minLength": 1,
+              "maxLength": 8192,
+              "pattern": "\\S"
             }
           },
           "required": [

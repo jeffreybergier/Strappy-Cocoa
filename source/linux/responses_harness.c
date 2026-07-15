@@ -89,8 +89,17 @@
   "is empty and guidance explains why."
 
 #define HARNESS_DATABASE_QUERY_DESCRIPTION \
-  "ALWAYS query the relevant approved database before finalizing when the " \
-  "request depends on personal data. Do not guess the user's data."
+  "ALWAYS call this tool before finalizing when the request depends on " \
+  "personal data. Run one read-only SQLite query against an approved " \
+  "database; do not guess the user's data. Returns ordered column names and " \
+  "positional rows. At most 100 rows and 64 columns are returned."
+#define HARNESS_DATABASE_QUERY_DATABASE_ID_DESCRIPTION \
+  "Approved database ID returned by database_list_info."
+#define HARNESS_DATABASE_QUERY_SQL_DESCRIPTION \
+  "One read-only SQLite SELECT or EXPLAIN query that returns columns. Select " \
+  "only needed columns and use LIMIT when practical. Query sqlite_schema for " \
+  "schema details. PRAGMA, writes, ATTACH, multiple statements, and bind " \
+  "parameters are not allowed."
 
 #define HARNESS_DATABASE_CONTEXT_READ_DESCRIPTION \
   "ALWAYS call this tool before the final answer. Set database_id to the " \
@@ -339,7 +348,7 @@ static int harness_array_contains_string(cJSON *array, const char *expected)
   return 0;
 }
 
-static int harness_database_query_parameters_are_required_strings(cJSON *tools)
+static int harness_database_query_parameters_match_contract(cJSON *tools)
 {
   cJSON *tool;
 
@@ -353,8 +362,16 @@ static int harness_database_query_parameters_are_required_strings(cJSON *tools)
     cJSON *database_id;
     cJSON *sql;
     cJSON *database_id_type;
+    cJSON *database_id_description;
+    cJSON *database_id_min_length;
+    cJSON *database_id_max_length;
     cJSON *sql_type;
+    cJSON *sql_description;
+    cJSON *sql_min_length;
+    cJSON *sql_max_length;
+    cJSON *sql_pattern;
     cJSON *required;
+    cJSON *additional_properties;
 
     name = cJSON_GetObjectItem(tool, "name");
     if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
@@ -370,19 +387,54 @@ static int harness_database_query_parameters_are_required_strings(cJSON *tools)
       cJSON_GetObjectItem(properties, "sql") : NULL;
     database_id_type = cJSON_IsObject(database_id) ?
       cJSON_GetObjectItem(database_id, "type") : NULL;
+    database_id_description = cJSON_IsObject(database_id) ?
+      cJSON_GetObjectItem(database_id, "description") : NULL;
+    database_id_min_length = cJSON_IsObject(database_id) ?
+      cJSON_GetObjectItem(database_id, "minLength") : NULL;
+    database_id_max_length = cJSON_IsObject(database_id) ?
+      cJSON_GetObjectItem(database_id, "maxLength") : NULL;
     sql_type = cJSON_IsObject(sql) ? cJSON_GetObjectItem(sql, "type") : NULL;
+    sql_description = cJSON_IsObject(sql) ?
+      cJSON_GetObjectItem(sql, "description") : NULL;
+    sql_min_length = cJSON_IsObject(sql) ?
+      cJSON_GetObjectItem(sql, "minLength") : NULL;
+    sql_max_length = cJSON_IsObject(sql) ?
+      cJSON_GetObjectItem(sql, "maxLength") : NULL;
+    sql_pattern = cJSON_IsObject(sql) ?
+      cJSON_GetObjectItem(sql, "pattern") : NULL;
     required = cJSON_IsObject(parameters) ?
       cJSON_GetObjectItem(parameters, "required") : NULL;
+    additional_properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItem(parameters, "additionalProperties") : NULL;
     return cJSON_IsObject(properties) &&
       (cJSON_GetArraySize(properties) == 2) &&
       cJSON_IsString(database_id_type) &&
       (database_id_type->valuestring != NULL) &&
       (strcmp(database_id_type->valuestring, "string") == 0) &&
+      cJSON_IsString(database_id_description) &&
+      (database_id_description->valuestring != NULL) &&
+      (strcmp(database_id_description->valuestring,
+              HARNESS_DATABASE_QUERY_DATABASE_ID_DESCRIPTION) == 0) &&
+      cJSON_IsNumber(database_id_min_length) &&
+      (database_id_min_length->valuedouble == 1.0) &&
+      cJSON_IsNumber(database_id_max_length) &&
+      (database_id_max_length->valuedouble == 64.0) &&
       cJSON_IsString(sql_type) && (sql_type->valuestring != NULL) &&
       (strcmp(sql_type->valuestring, "string") == 0) &&
+      cJSON_IsString(sql_description) &&
+      (sql_description->valuestring != NULL) &&
+      (strcmp(sql_description->valuestring,
+              HARNESS_DATABASE_QUERY_SQL_DESCRIPTION) == 0) &&
+      cJSON_IsNumber(sql_min_length) &&
+      (sql_min_length->valuedouble == 1.0) &&
+      cJSON_IsNumber(sql_max_length) &&
+      (sql_max_length->valuedouble == 8192.0) &&
+      cJSON_IsString(sql_pattern) && (sql_pattern->valuestring != NULL) &&
+      (strcmp(sql_pattern->valuestring, "\\S") == 0) &&
       cJSON_IsArray(required) && (cJSON_GetArraySize(required) == 2) &&
       harness_array_contains_string(required, "database_id") &&
-      harness_array_contains_string(required, "sql");
+      harness_array_contains_string(required, "sql") &&
+      cJSON_IsFalse(additional_properties);
   }
   return 0;
 }
@@ -673,7 +725,7 @@ static int harness_test_request_surfaces(void)
       tools,
       STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
       HARNESS_FONTAWESOME_CONFIRM_DESCRIPTION) &&
-    harness_database_query_parameters_are_required_strings(tools) &&
+    harness_database_query_parameters_match_contract(tools) &&
     harness_tool_has_required_nonempty_string_array_parameter(
       tools,
       STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
