@@ -60,6 +60,8 @@ typedef struct strappy_webview_message {
 
 typedef struct strappy_webview_script_batch strappy_webview_script_batch;
 
+int strappy_webview_configure_localized_labels(char **error_out);
+const strappy_webview_labels *strappy_webview_localized_labels(void);
 void strappy_webview_set_font_dir(const char *abs_dir);
 void strappy_webview_free(char *value);
 

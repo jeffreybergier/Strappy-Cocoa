@@ -99,7 +99,6 @@ int strappy_session_send_prompt_with_events_and_load(
 
 char *strappy_session_webview_message_html(
   const strappy_webview_message *message,
-  const strappy_webview_labels *labels,
   const char *state,
   const char *status_html);
 void strappy_session_webview_message_init(strappy_webview_message *message);
@@ -114,7 +113,6 @@ char *strappy_session_webview_message_update_js_for_key(
   const char *db_path,
   long long session_id,
   const char *message_key,
-  const strappy_webview_labels *labels,
   char **error_out);
 
 #ifdef __cplusplus

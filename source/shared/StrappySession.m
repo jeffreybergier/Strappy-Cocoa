@@ -56,34 +56,6 @@ static NSString *StrappySessionStringFromCString(char *value)
   return (string != nil) ? string : @"";
 }
 
-static strappy_webview_labels StrappySessionWebViewLabels(void)
-{
-  strappy_webview_labels labels;
-
-  labels.agent = StrappySessionCString(NSLocalizedString(@"Agent", nil));
-  labels.you = StrappySessionCString(NSLocalizedString(@"You", nil));
-  labels.harness = StrappySessionCString(NSLocalizedString(@"Harness", nil));
-  labels.developer =
-    StrappySessionCString(NSLocalizedString(@"Developer", nil));
-  labels.thinking = StrappySessionCString(NSLocalizedString(@"Thinking", nil));
-  labels.request_metadata =
-    StrappySessionCString(NSLocalizedString(@"Request Metadata", nil));
-  labels.tool = StrappySessionCString(NSLocalizedString(@"Tool", nil));
-  labels.tool_call = StrappySessionCString(NSLocalizedString(@"Tool Call", nil));
-  labels.tool_result =
-    StrappySessionCString(NSLocalizedString(@"Tool Result", nil));
-  labels.retry = StrappySessionCString(NSLocalizedString(@"Retry", nil));
-  labels.api_call = StrappySessionCString(NSLocalizedString(@"API Call", nil));
-  labels.api_error = StrappySessionCString(NSLocalizedString(@"API Error", nil));
-  labels.response_item =
-    StrappySessionCString(NSLocalizedString(@"Response Item", nil));
-  labels.request = StrappySessionCString(NSLocalizedString(@"Request", nil));
-  labels.response = StrappySessionCString(NSLocalizedString(@"Response", nil));
-  labels.round = StrappySessionCString(NSLocalizedString(@"Round", nil));
-  labels.attempt = StrappySessionCString(NSLocalizedString(@"Attempt", nil));
-  return labels;
-}
-
 static long long StrappySessionMessageNumericIdentifier(NSDictionary *message)
 {
   NSNumber *identifier;
@@ -298,15 +270,12 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
                                       state:(NSString *)state
                                  statusHTML:(NSString *)statusHTML
 {
-  strappy_webview_labels labels;
   strappy_webview_message webMessage;
 
-  labels = StrappySessionWebViewLabels();
   StrappySessionWebViewMessageFromDictionary(message, &webMessage);
   webMessage.element_id = StrappySessionCString(elementIdentifier);
   return StrappySessionStringFromCString(
     strappy_session_webview_message_html(&webMessage,
-                                         &labels,
                                          StrappySessionCString(state),
                                          StrappySessionCString(statusHTML)));
 }
@@ -1913,7 +1882,6 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   char *strappyError;
   char *js;
   long long sessionId;
-  strappy_webview_labels labels;
 
   if (![event isKindOfClass:[NSDictionary class]]) {
     return @"";
@@ -1952,12 +1920,10 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   }
 
   strappyError = NULL;
-  labels = StrappySessionWebViewLabels();
   js = strappy_session_webview_message_update_js_for_key(
     [databasePath UTF8String],
     sessionId,
     [messageKey UTF8String],
-    &labels,
     &strappyError);
   if (js == NULL) {
     if (error != nil) {

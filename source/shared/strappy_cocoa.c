@@ -795,7 +795,7 @@ static char *strappy_cocoa_copy_cf_string_utf8(CFStringRef string,
   char *result;
 
   if (string == NULL) {
-    strappy_set_error(error_out, "CoreFoundation returned no timestamp.");
+    strappy_set_error(error_out, "CoreFoundation returned no string.");
     return NULL;
   }
 
@@ -803,13 +803,13 @@ static char *strappy_cocoa_copy_cf_string_utf8(CFStringRef string,
   max_size = CFStringGetMaximumSizeForEncoding(length,
                                                kCFStringEncodingUTF8);
   if (max_size < 0) {
-    strappy_set_error(error_out, "Could not measure CoreFoundation timestamp.");
+    strappy_set_error(error_out, "Could not measure CoreFoundation string.");
     return NULL;
   }
 
   result = (char *)malloc((size_t)max_size + 1U);
   if (result == NULL) {
-    strappy_set_error(error_out, "Could not allocate CoreFoundation timestamp.");
+    strappy_set_error(error_out, "Could not allocate CoreFoundation string.");
     return NULL;
   }
 
@@ -818,10 +818,49 @@ static char *strappy_cocoa_copy_cf_string_utf8(CFStringRef string,
                           max_size + 1,
                           kCFStringEncodingUTF8)) {
     free(result);
-    strappy_set_error(error_out, "Could not encode CoreFoundation timestamp.");
+    strappy_set_error(error_out, "Could not encode CoreFoundation string.");
     return NULL;
   }
 
+  return result;
+}
+
+char *strappy_cocoa_copy_localized_string(const char *key,
+                                           char **error_out)
+{
+  CFBundleRef bundle;
+  CFStringRef key_string;
+  CFStringRef localized_string;
+  char *result;
+
+  if (!strappy_cocoa_string_has_value(key)) {
+    strappy_set_error(error_out, "Localization key is empty.");
+    return NULL;
+  }
+
+  bundle = CFBundleGetMainBundle();
+  if (bundle == NULL) {
+    strappy_set_error(error_out, "Could not load the main application bundle.");
+    return NULL;
+  }
+
+  key_string = CFStringCreateWithCString(kCFAllocatorDefault,
+                                         key,
+                                         kCFStringEncodingUTF8);
+  if (key_string == NULL) {
+    strappy_set_error(error_out, "Could not encode localization key.");
+    return NULL;
+  }
+
+  localized_string = CFBundleCopyLocalizedString(bundle,
+                                                 key_string,
+                                                 key_string,
+                                                 NULL);
+  result = strappy_cocoa_copy_cf_string_utf8(localized_string, error_out);
+  if (localized_string != NULL) {
+    CFRelease(localized_string);
+  }
+  CFRelease(key_string);
   return result;
 }
 
@@ -893,6 +932,23 @@ static char *strappy_cocoa_copy_base_iso8601_timestamp(
   return result;
 }
 #else
+char *strappy_cocoa_copy_localized_string(const char *key,
+                                           char **error_out)
+{
+  char *result;
+
+  if (!strappy_cocoa_string_has_value(key)) {
+    strappy_set_error(error_out, "Localization key is empty.");
+    return NULL;
+  }
+
+  result = strappy_string_duplicate(key);
+  if (result == NULL) {
+    strappy_set_error(error_out, "Could not allocate localized string.");
+  }
+  return result;
+}
+
 static char *strappy_cocoa_copy_base_iso8601_timestamp(
   long long unix_seconds,
   char **error_out)

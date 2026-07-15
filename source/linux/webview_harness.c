@@ -40,6 +40,58 @@ static int harness_expect_not_contains(const char *text, const char *needle)
   return 0;
 }
 
+static int harness_expect_equal(const char *actual, const char *expected)
+{
+  if ((actual != NULL) && (expected != NULL) &&
+      (strcmp(actual, expected) == 0)) {
+    return 1;
+  }
+
+  fprintf(stderr,
+          "Expected generated webview value '%s', got '%s'.\n",
+          (expected != NULL) ? expected : "(null)",
+          (actual != NULL) ? actual : "(null)");
+  return 0;
+}
+
+static int harness_check_localized_labels(void)
+{
+  const strappy_webview_labels *labels;
+  char *error;
+  int ok;
+
+  error = NULL;
+  if (!strappy_webview_configure_localized_labels(&error)) {
+    fprintf(stderr,
+            "Could not configure webview localization: %s\n",
+            (error != NULL) ? error : "unknown error");
+    strappy_webview_free(error);
+    return 0;
+  }
+
+  labels = strappy_webview_localized_labels();
+  ok = (labels != NULL) &&
+       harness_expect_equal(labels->agent, "Agent") &&
+       harness_expect_equal(labels->you, "You") &&
+       harness_expect_equal(labels->harness, "Harness") &&
+       harness_expect_equal(labels->developer, "Developer") &&
+       harness_expect_equal(labels->thinking, "Thinking") &&
+       harness_expect_equal(labels->request_metadata, "Request Metadata") &&
+       harness_expect_equal(labels->tool, "Tool") &&
+       harness_expect_equal(labels->tool_call, "Tool Call") &&
+       harness_expect_equal(labels->tool_result, "Tool Result") &&
+       harness_expect_equal(labels->retry, "Retry") &&
+       harness_expect_equal(labels->api_call, "API Call") &&
+       harness_expect_equal(labels->api_error, "API Error") &&
+       harness_expect_equal(labels->response_item, "Response Item") &&
+       harness_expect_equal(labels->request, "Request") &&
+       harness_expect_equal(labels->response, "Response") &&
+       harness_expect_equal(labels->round, "Round") &&
+       harness_expect_equal(labels->attempt, "Attempt");
+  strappy_webview_free(error);
+  return ok;
+}
+
 static int harness_check_page_scripts(void)
 {
   strappy_webview_message message;
@@ -1557,6 +1609,9 @@ static int harness_check_responses_items(void)
 int main(void)
 {
   strappy_webview_set_font_dir("/tmp/Strappy Fonts");
+  if (!harness_check_localized_labels()) {
+    return 1;
+  }
   if (!harness_check_page_scripts()) {
     return 1;
   }

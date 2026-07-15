@@ -13,6 +13,9 @@
 "Tool" = "Tool";
 "Tool Call" = "Tool Call";
 "Tool Result" = "Tool Result";
+"API Call" = "API Call";
+"API Error" = "API Error";
+"Response Item" = "Response Item";
 "Request" = "Request";
 "Response" = "Response";
 "Round" = "Round";

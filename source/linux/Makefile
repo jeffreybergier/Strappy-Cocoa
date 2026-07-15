@@ -36,7 +36,9 @@ DATABASE_QUERY_HARNESS_SOURCES = \
 
 WEBVIEW_HARNESS_SOURCES = \
 	webview_harness.c \
-	$(SHARED_DIR)/strappy_webview.c
+	$(SHARED_DIR)/strappy_webview.c \
+	$(SHARED_DIR)/strappy_cocoa.c \
+	$(SHARED_DIR)/strappy_core.c
 
 RESPONSES_HARNESS_SOURCES = \
 	responses_harness.c \

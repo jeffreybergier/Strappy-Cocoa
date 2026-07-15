@@ -13,6 +13,9 @@
 "Tool" = "ツール";
 "Tool Call" = "ツール呼び出し";
 "Tool Result" = "ツール結果";
+"API Call" = "API 呼び出し";
+"API Error" = "API エラー";
+"Response Item" = "レスポンス項目";
 "Request" = "リクエスト";
 "Response" = "レスポンス";
 "Round" = "ラウンド";

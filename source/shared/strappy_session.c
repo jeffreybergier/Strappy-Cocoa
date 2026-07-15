@@ -27,6 +27,9 @@ int strappy_session_configure_process(const char *ca_cert_path,
                                       const char *font_dir,
                                       char **error_out)
 {
+  if (!strappy_webview_configure_localized_labels(error_out)) {
+    return 0;
+  }
   if (!strappy_client_set_cainfo(ca_cert_path, error_out)) {
     return 0;
   }
@@ -251,11 +254,13 @@ int strappy_session_send_prompt_with_events_and_load(
 
 char *strappy_session_webview_message_html(
   const strappy_webview_message *message,
-  const strappy_webview_labels *labels,
   const char *state,
   const char *status_html)
 {
-  return strappy_webview_message_html(message, labels, state, status_html);
+  return strappy_webview_message_html(message,
+                                      strappy_webview_localized_labels(),
+                                      state,
+                                      status_html);
 }
 
 void strappy_session_webview_message_init(strappy_webview_message *message)
@@ -370,7 +375,6 @@ char *strappy_session_webview_message_update_js_for_key(
   const char *db_path,
   long long session_id,
   const char *message_key,
-  const strappy_webview_labels *labels,
   char **error_out)
 {
   strappy_session_message_record record;
@@ -388,7 +392,9 @@ char *strappy_session_webview_message_update_js_for_key(
   }
 
   strappy_session_webview_message_from_record(&record, &message);
-  script = strappy_webview_message_update_js(&message, labels);
+  script = strappy_webview_message_update_js(
+    &message,
+    strappy_webview_localized_labels());
   strappy_session_message_record_destroy(&record);
   return script;
 }

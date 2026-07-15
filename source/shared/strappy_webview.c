@@ -1,5 +1,7 @@
 #include "strappy_webview.h"
 
+#include "strappy_cocoa.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +20,114 @@ struct strappy_webview_script_batch {
 };
 
 static char *g_strappy_webview_font_dir = NULL;
+
+typedef enum strappy_webview_label_index {
+  STRAPPY_WEBVIEW_LABEL_AGENT = 0,
+  STRAPPY_WEBVIEW_LABEL_YOU,
+  STRAPPY_WEBVIEW_LABEL_HARNESS,
+  STRAPPY_WEBVIEW_LABEL_DEVELOPER,
+  STRAPPY_WEBVIEW_LABEL_THINKING,
+  STRAPPY_WEBVIEW_LABEL_REQUEST_METADATA,
+  STRAPPY_WEBVIEW_LABEL_TOOL,
+  STRAPPY_WEBVIEW_LABEL_TOOL_CALL,
+  STRAPPY_WEBVIEW_LABEL_TOOL_RESULT,
+  STRAPPY_WEBVIEW_LABEL_RETRY,
+  STRAPPY_WEBVIEW_LABEL_API_CALL,
+  STRAPPY_WEBVIEW_LABEL_API_ERROR,
+  STRAPPY_WEBVIEW_LABEL_RESPONSE_ITEM,
+  STRAPPY_WEBVIEW_LABEL_REQUEST,
+  STRAPPY_WEBVIEW_LABEL_RESPONSE,
+  STRAPPY_WEBVIEW_LABEL_ROUND,
+  STRAPPY_WEBVIEW_LABEL_ATTEMPT,
+  STRAPPY_WEBVIEW_LABEL_COUNT
+} strappy_webview_label_index;
+
+static const char * const g_strappy_webview_label_keys[
+  STRAPPY_WEBVIEW_LABEL_COUNT] = {
+  "Agent",
+  "You",
+  "Harness",
+  "Developer",
+  "Thinking",
+  "Request Metadata",
+  "Tool",
+  "Tool Call",
+  "Tool Result",
+  "Retry",
+  "API Call",
+  "API Error",
+  "Response Item",
+  "Request",
+  "Response",
+  "Round",
+  "Attempt"
+};
+
+static char *g_strappy_webview_localized_label_values[
+  STRAPPY_WEBVIEW_LABEL_COUNT];
+static strappy_webview_labels g_strappy_webview_localized_labels;
+
+static void strappy_webview_assign_localized_labels(
+  strappy_webview_labels *labels,
+  char * const *values)
+{
+  if ((labels == NULL) || (values == NULL)) {
+    return;
+  }
+
+  labels->agent = values[STRAPPY_WEBVIEW_LABEL_AGENT];
+  labels->you = values[STRAPPY_WEBVIEW_LABEL_YOU];
+  labels->harness = values[STRAPPY_WEBVIEW_LABEL_HARNESS];
+  labels->developer = values[STRAPPY_WEBVIEW_LABEL_DEVELOPER];
+  labels->thinking = values[STRAPPY_WEBVIEW_LABEL_THINKING];
+  labels->request_metadata = values[STRAPPY_WEBVIEW_LABEL_REQUEST_METADATA];
+  labels->tool = values[STRAPPY_WEBVIEW_LABEL_TOOL];
+  labels->tool_call = values[STRAPPY_WEBVIEW_LABEL_TOOL_CALL];
+  labels->tool_result = values[STRAPPY_WEBVIEW_LABEL_TOOL_RESULT];
+  labels->retry = values[STRAPPY_WEBVIEW_LABEL_RETRY];
+  labels->api_call = values[STRAPPY_WEBVIEW_LABEL_API_CALL];
+  labels->api_error = values[STRAPPY_WEBVIEW_LABEL_API_ERROR];
+  labels->response_item = values[STRAPPY_WEBVIEW_LABEL_RESPONSE_ITEM];
+  labels->request = values[STRAPPY_WEBVIEW_LABEL_REQUEST];
+  labels->response = values[STRAPPY_WEBVIEW_LABEL_RESPONSE];
+  labels->round = values[STRAPPY_WEBVIEW_LABEL_ROUND];
+  labels->attempt = values[STRAPPY_WEBVIEW_LABEL_ATTEMPT];
+}
+
+int strappy_webview_configure_localized_labels(char **error_out)
+{
+  char *localized_values[STRAPPY_WEBVIEW_LABEL_COUNT];
+  size_t index;
+
+  memset(localized_values, 0, sizeof(localized_values));
+  for (index = 0U; index < STRAPPY_WEBVIEW_LABEL_COUNT; index++) {
+    localized_values[index] = strappy_cocoa_copy_localized_string(
+      g_strappy_webview_label_keys[index],
+      error_out);
+    if (localized_values[index] == NULL) {
+      size_t cleanup_index;
+
+      for (cleanup_index = 0U; cleanup_index < index; cleanup_index++) {
+        free(localized_values[cleanup_index]);
+      }
+      return 0;
+    }
+  }
+
+  for (index = 0U; index < STRAPPY_WEBVIEW_LABEL_COUNT; index++) {
+    free(g_strappy_webview_localized_label_values[index]);
+    g_strappy_webview_localized_label_values[index] = localized_values[index];
+  }
+  strappy_webview_assign_localized_labels(
+    &g_strappy_webview_localized_labels,
+    g_strappy_webview_localized_label_values);
+  return 1;
+}
+
+const strappy_webview_labels *strappy_webview_localized_labels(void)
+{
+  return &g_strappy_webview_localized_labels;
+}
 
 static void strappy_webview_buffer_init(strappy_webview_buffer *buffer)
 {
