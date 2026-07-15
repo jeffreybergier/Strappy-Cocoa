@@ -335,6 +335,14 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                ".api-exchange-item .role{margin:0 -10px;"
                                "padding:5px 10px;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-metadata>.role{margin:0 -10px;"
+                               "padding:5px 10px;}") &&
+       harness_expect_not_contains(page_html,
+                                   ".api-exchange-metadata.api_call>.role") &&
+       harness_expect_not_contains(page_html,
+                                   ".api-exchange-metadata.api_call>.bubble"
+                                   "{display:none;}") &&
        harness_expect_contains(page_html, ".api-exchange-metadata{") &&
        harness_expect_not_contains(page_html, ".api-exchange-section-toggle{") &&
        harness_expect_not_contains(page_html,
@@ -464,7 +472,20 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "function apiExchangeCollapsed") &&
        harness_expect_contains(page_html,
+                               "function rowIsAPIExchangeError(row)") &&
+       harness_expect_contains(page_html,
+                               "function apiExchangeRowsHaveError(rows)") &&
+       harness_expect_contains(page_html,
+                               "?(hasError?0:1):") &&
+       harness_expect_contains(page_html,
                                "function setAPIExchangesCollapsedForPrompt") &&
+       harness_expect_contains(page_html,
+                               "function settleAPIExchangesForPrompt(group)") &&
+       harness_expect_contains(page_html,
+                               "exchanges[key].hasError?0:1;") &&
+       harness_expect_contains(page_html,
+                               "current=a.getAttribute('aria-expanded')=="
+                               "'false'?1:0;") &&
        harness_expect_not_contains(page_html,
                                    "function apiExchangeSectionCollapsed") &&
        harness_expect_contains(page_html,
@@ -656,17 +677,22 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "setAPIExchangesCollapsedForPrompt(group,0);") &&
        harness_expect_contains(page_html,
+                               "settleAPIExchangesForPrompt("
+                               "strappyProcessingPromptGroupKey);") &&
+       harness_expect_contains(page_html,
                                "strappyProcessingPromptGroupKey=group;"
                                "syncProcessingInteractionState(1,group);"
                                "decorateAPIExchanges(document);"
                                "decorateAPIToolGroups(document);") &&
        harness_expect_contains(page_html,
-                               "setAPIExchangesCollapsedForPrompt(group,1);"
+                               "settleAPIExchangesForPrompt(group);"
                                "strappyProcessingStatus=null;"
                                "syncProcessingInteractionState(0,group);"
                                "strappyProcessingStatusDirty=1;"
                                "decorateAPIExchanges(document);"
                                "decorateAPIToolGroups(document);") &&
+       harness_expect_not_contains(page_html,
+                                   "setAPIExchangesCollapsedForPrompt(group,1)") &&
        harness_expect_contains(page_html,
                                "function toggleMetadata(a){"
                                "if(processingInteractionsLocked())return false;") &&
@@ -1419,6 +1445,65 @@ static int harness_check_error_message_state(void)
   return ok;
 }
 
+static int harness_check_api_exchange_status_states(void)
+{
+  strappy_webview_message message;
+  char *error_html;
+  char *success_html;
+  int ok;
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "response-call-success";
+  message.api_call_id = 20LL;
+  message.round_number = 1L;
+  message.attempt_number = 1L;
+  message.http_status = 200L;
+  message.role = "api_call";
+  message.kind = "response_api_call";
+  message.text = "POST /responses\ncompleted / HTTP 200";
+  message.metadata_json =
+    "{\"id\":\"resp-success\",\"status\":\"completed\"}";
+  success_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "response-call-error";
+  message.api_call_id = 21LL;
+  message.round_number = 2L;
+  message.attempt_number = 1L;
+  message.http_status = 400L;
+  message.role = "api_error";
+  message.kind = "response_api_call";
+  message.text =
+    "POST /responses\nhttp_error / HTTP 400\nServer tool request failed";
+  message.metadata_json =
+    "{\"error\":{\"code\":400,"
+    "\"message\":\"Server tool request failed\"}}";
+  message.is_error = 1;
+  error_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+
+  ok = (success_html != NULL) && (error_html != NULL) &&
+       harness_expect_contains(success_html,
+                               "class=\"row api_call\"") &&
+       harness_expect_contains(success_html,
+                               "<div class=\"role\">API Call</div>") &&
+       harness_expect_contains(success_html,
+                               "completed / HTTP 200") &&
+       harness_expect_not_contains(success_html, "state-error") &&
+       harness_expect_contains(error_html,
+                               "class=\"row api_error state-error\"") &&
+       harness_expect_contains(error_html,
+                               "<div class=\"role\">API Error</div>") &&
+       harness_expect_contains(error_html,
+                               "Server tool request failed") &&
+       harness_expect_contains(error_html,
+                               "<div class=\"meta status\">HTTP 400</div>") &&
+       harness_expect_contains(error_html, "request-metadata");
+
+  strappy_webview_free(error_html);
+  strappy_webview_free(success_html);
+  return ok;
+}
+
 static int harness_check_responses_items(void)
 {
   strappy_webview_message message;
@@ -1705,6 +1790,9 @@ int main(void)
     return 1;
   }
   if (!harness_check_error_message_state()) {
+    return 1;
+  }
+  if (!harness_check_api_exchange_status_states()) {
     return 1;
   }
   if (!harness_check_responses_items()) {

@@ -85,15 +85,46 @@ def load_allowed_databases(catalog: Path) -> list[sqlite3.Row]:
     connection = sqlite3.connect(f"file:{catalog}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
-        rows = connection.execute(
-            """
-            SELECT assistant_database_id, path, size, modified_at,
-                   scan_status, is_valid_sqlite
-            FROM discovered_databases
-            WHERE user_decision = 'allowed'
-            ORDER BY id
-            """
-        ).fetchall()
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        if {
+            "databases",
+            "database_locations",
+            "database_permissions",
+        }.issubset(tables):
+            rows = connection.execute(
+                """
+                SELECT d.assistant_database_id, l.path,
+                       l.size_bytes AS size,
+                       l.modified_at_s AS modified_at,
+                       l.validation_state AS scan_status,
+                       CASE WHEN l.validation_state = 'valid'
+                            THEN 1 ELSE 0 END AS is_valid_sqlite
+                FROM databases d
+                JOIN database_locations l
+                  ON l.database_id = d.id AND l.active = 1
+                JOIN database_permissions p ON p.database_id = d.id
+                WHERE p.decision = 'allowed'
+                ORDER BY d.id, l.id
+                """
+            ).fetchall()
+        else:
+            # Device fixtures may come from an older installed app. Reading
+            # that catalog remains useful; every runner-created database below
+            # is required to use the current semantic schema.
+            rows = connection.execute(
+                """
+                SELECT assistant_database_id, path, size, modified_at,
+                       scan_status, is_valid_sqlite
+                FROM discovered_databases
+                WHERE user_decision = 'allowed'
+                ORDER BY id
+                """
+            ).fetchall()
     finally:
         connection.close()
         for candidate in transient_paths:
@@ -214,15 +245,22 @@ def verify_registration(
         try:
             rows = connection.execute(
                 """
-                SELECT path FROM discovered_databases
-                WHERE user_decision = 'allowed' AND is_valid_sqlite = 1
+                SELECT l.path
+                FROM databases d
+                JOIN database_locations l
+                  ON l.database_id = d.id AND l.active = 1
+                JOIN database_permissions p ON p.database_id = d.id
+                WHERE p.decision = 'allowed'
+                  AND l.validation_state = 'valid'
                 """
             ).fetchall()
             user_facts = connection.execute(
                 """
-                SELECT kind, subject, predicate, value, confidence, source
-                FROM helper_user_info
-                WHERE status = 'active'
+                SELECT kind, subject, predicate, value,
+                       confidence_basis_points / 10000.0,
+                       'model_observed'
+                FROM user_facts
+                ORDER BY id
                 """
             ).fetchall()
         finally:

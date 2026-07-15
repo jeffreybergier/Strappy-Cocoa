@@ -213,6 +213,87 @@ def safe_json_array(value: str | None) -> list[Any]:
     return parsed if isinstance(parsed, list) else []
 
 
+def structured_value(
+    database: sqlite3.Connection,
+    owner_item_id: int,
+    purpose: str,
+) -> object | None:
+    document = database.execute(
+        """
+        SELECT id FROM structured_documents
+        WHERE owner_item_id = ? AND purpose = ?
+        """,
+        (owner_item_id, purpose),
+    ).fetchone()
+    if document is None:
+        return None
+    rows = database.execute(
+        """
+        SELECT node_id, parent_node_id, ordinal, member_name, value_type,
+               text_value, number_value, boolean_value
+        FROM structured_nodes WHERE document_id = ? ORDER BY node_id
+        """,
+        (document["id"],),
+    ).fetchall()
+    if not rows:
+        return None
+    nodes = {int(row["node_id"]): row for row in rows}
+    children: dict[int, list[sqlite3.Row]] = {}
+    for row in rows:
+        parent = row["parent_node_id"]
+        if parent is not None:
+            children.setdefault(int(parent), []).append(row)
+    for values in children.values():
+        values.sort(key=lambda row: int(row["ordinal"]))
+
+    def build(node_id: int) -> object | None:
+        row = nodes[node_id]
+        value_type = str(row["value_type"])
+        child_rows = children.get(node_id, [])
+        if value_type == "object":
+            return {
+                str(child["member_name"]): build(int(child["node_id"]))
+                for child in child_rows
+            }
+        if value_type == "array":
+            return [build(int(child["node_id"])) for child in child_rows]
+        if value_type == "string":
+            return str(row["text_value"] or "")
+        if value_type == "number":
+            number = str(row["number_value"] or "0")
+            try:
+                return json.loads(number)
+            except json.JSONDecodeError:
+                return number
+        if value_type == "boolean":
+            return bool(row["boolean_value"])
+        return None
+
+    return build(0)
+
+
+def item_text(database: sqlite3.Connection, item_id: int) -> str:
+    rows = database.execute(
+        """
+        SELECT text FROM item_text_parts
+        WHERE item_id = ? AND collection_name = 'content'
+        ORDER BY ordinal
+        """,
+        (item_id,),
+    ).fetchall()
+    return "\n".join(str(row["text"]) for row in rows)
+
+
+def output_json(database: sqlite3.Connection, row: sqlite3.Row) -> str:
+    item_id = row["output_item_id"]
+    if item_id is None:
+        return ""
+    if row["output_format"] == "structured":
+        value = structured_value(database, int(item_id), "output")
+        return json.dumps(value, ensure_ascii=False)
+    return str(row["text_output"] or "")
+
+
 def fact_matches(candidate: Any, expected: dict[str, Any]) -> bool:
     if not isinstance(candidate, dict):
         return False
@@ -278,49 +359,101 @@ def score_session(
 ) -> Result:
     with connect_readonly(session_db) as database:
         session = database.execute(
-            "SELECT id, model, response FROM sessions ORDER BY id DESC LIMIT 1"
+            "SELECT id, model_id FROM sessions ORDER BY id DESC LIMIT 1"
         ).fetchone()
         if session is None:
             raise RuntimeError(f"No session in {session_db}")
         session_id = int(session["id"])
-        model = str(session["model"] or slug)
-        answer = str(session["response"] or "")
+        model = str(session["model_id"] or slug)
+        answer_item = database.execute(
+            """
+            SELECT i.id FROM conversation_items i
+            JOIN message_items m ON m.item_id = i.id
+            WHERE i.session_id = ? AND m.role = 'assistant'
+            ORDER BY i.sequence DESC LIMIT 1
+            """,
+            (session_id,),
+        ).fetchone()
+        answer = (
+            item_text(database, int(answer_item["id"]))
+            if answer_item
+            else ""
+        )
         answer_lower = answer.lower()
 
         calls_row = database.execute(
             """
             SELECT COUNT(*) AS calls,
-                   SUM(is_error) AS errors,
-                   SUM(CASE WHEN request_kind = 'tool_audit'
-                            THEN 1 ELSE 0 END) AS audit_hits,
-                   COALESCE(SUM(response_usage_cost), 0) AS cost,
-                   COALESCE((MAX(transport_completed_at_ms) -
-                             MIN(request_started_at_ms)) / 1000.0, 0) AS wall
-            FROM response_api_calls WHERE session_id = ?
+                   COALESCE(SUM(CASE
+                     WHEN a.state != 'completed' OR a.http_status >= 400
+                       OR ar.error_type IS NOT NULL
+                       OR ar.error_message IS NOT NULL
+                       OR ar.parse_error IS NOT NULL
+                     THEN 1 ELSE 0 END), 0) AS errors,
+                   COALESCE(SUM(CASE WHEN r.request_kind = 'tool_audit'
+                            THEN 1 ELSE 0 END), 0) AS audit_hits,
+                   COALESCE(SUM(u.cost_nano_usd), 0) / 1000000000.0 AS cost,
+                   COALESCE((MAX(COALESCE(a.completed_at_ms,
+                                         a.started_at_ms)) -
+                             MIN(a.started_at_ms)) / 1000.0, 0) AS wall
+            FROM http_attempts a
+            JOIN model_requests r ON r.id = a.request_id
+            JOIN turns t ON t.id = r.turn_id
+            LEFT JOIN api_results ar ON ar.attempt_id = a.id
+            LEFT JOIN api_usage u ON u.attempt_id = a.id
+            WHERE t.session_id = ?
             """,
             (session_id,),
         ).fetchone()
-        tools = database.execute(
+        tool_rows = database.execute(
             """
-            SELECT tool_name, arguments_json, status, output_json, error_text
-            FROM response_tool_executions
-            WHERE session_id = ? ORDER BY id
+            SELECT e.id, f.tool_name, f.item_id AS call_item_id,
+                   e.state AS status, e.error_message AS error_text,
+                   fo.item_id AS output_item_id, fo.output_format,
+                   fo.text_output
+            FROM tool_executions e
+            JOIN function_calls f ON f.item_id = e.function_call_item_id
+            JOIN conversation_items i ON i.id = f.item_id
+            LEFT JOIN function_outputs fo
+              ON fo.function_call_item_id = f.item_id
+            WHERE i.session_id = ? ORDER BY e.id
             """,
             (session_id,),
         ).fetchall()
+        tools = []
+        for row in tool_rows:
+            arguments = structured_value(
+                database, int(row["call_item_id"]), "arguments"
+            )
+            tools.append(
+                {
+                    "tool_name": row["tool_name"],
+                    "arguments_json": json.dumps(
+                        arguments if arguments is not None else {},
+                        ensure_ascii=False,
+                    ),
+                    "status": row["status"],
+                    "output_json": output_json(database, row),
+                    "error_text": row["error_text"],
+                }
+            )
         media_row = database.execute(
             """
-            SELECT assistant_database_id FROM discovered_databases
-            WHERE path LIKE '%/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb'
+            SELECT d.assistant_database_id
+            FROM databases d
+            JOIN database_locations l
+              ON l.database_id = d.id AND l.active = 1
+            WHERE l.path LIKE
+              '%/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb'
             LIMIT 1
             """
         ).fetchone()
         web = int(
             database.execute(
                 """
-                SELECT COUNT(*) FROM response_api_items
-                WHERE session_id = ? AND direction = 'response'
-                  AND type = 'openrouter:web_search'
+                SELECT COUNT(*) FROM conversation_items
+                WHERE session_id = ? AND kind = 'openrouter:web_search'
+                  AND source_attempt_id IS NOT NULL
                 """,
                 (session_id,),
             ).fetchone()[0]
@@ -328,21 +461,16 @@ def score_session(
         preflight_pairs = int(
             database.execute(
                 """
-                SELECT COUNT(DISTINCT calls.name)
-                FROM response_api_items AS calls
-                WHERE calls.session_id = ?
-                  AND calls.direction = 'request'
-                  AND calls.is_canonical = 1
-                  AND calls.type = 'function_call'
-                  AND calls.name IN ('database_list_info',
-                                     'memory_user_fact_read')
+                SELECT COUNT(DISTINCT calls.tool_name)
+                FROM function_calls AS calls
+                JOIN conversation_items AS call_items
+                  ON call_items.id = calls.item_id
+                WHERE call_items.session_id = ?
+                  AND calls.tool_name IN ('database_list_info',
+                                          'memory_user_fact_read')
                   AND EXISTS (
-                    SELECT 1 FROM response_api_items AS outputs
-                    WHERE outputs.session_id = calls.session_id
-                      AND outputs.direction = 'request'
-                      AND outputs.is_canonical = 1
-                      AND outputs.type = 'function_call_output'
-                      AND outputs.call_id = calls.call_id
+                    SELECT 1 FROM function_outputs AS outputs
+                    WHERE outputs.function_call_item_id = calls.item_id
                   )
                 """,
                 (session_id,),
@@ -351,8 +479,13 @@ def score_session(
         approved_databases = int(
             database.execute(
                 """
-                SELECT COUNT(*) FROM discovered_databases
-                WHERE user_decision = 'allowed' AND is_valid_sqlite = 1
+                SELECT COUNT(DISTINCT d.id)
+                FROM databases d
+                JOIN database_locations l
+                  ON l.database_id = d.id AND l.active = 1
+                JOIN database_permissions p ON p.database_id = d.id
+                WHERE p.decision = 'allowed'
+                  AND l.validation_state = 'valid'
                 """
             ).fetchone()[0]
         )
@@ -360,33 +493,29 @@ def score_session(
             dict(row)
             for row in database.execute(
                 """
-                SELECT id, kind, subject, predicate, value, confidence, source
-                FROM helper_user_info
-                WHERE status = 'active'
+                SELECT id, kind, subject, predicate, value,
+                       confidence_basis_points / 10000.0 AS confidence,
+                       'model_observed' AS source
+                FROM user_facts ORDER BY id
                 """
             ).fetchall()
         ]
+        memory_rows = database.execute(
+            """
+            SELECT outputs.item_id AS output_item_id,
+                   outputs.output_format, outputs.text_output
+            FROM function_calls AS calls
+            JOIN conversation_items AS call_items
+              ON call_items.id = calls.item_id
+            JOIN function_outputs AS outputs
+              ON outputs.function_call_item_id = calls.item_id
+            WHERE call_items.session_id = ?
+              AND calls.tool_name = 'memory_user_fact_read'
+            """,
+            (session_id,),
+        ).fetchall()
         memory_preflight_outputs = [
-            str(row[0] or "")
-            for row in database.execute(
-                """
-                SELECT outputs.output
-                FROM response_api_items AS calls
-                JOIN response_api_items AS outputs
-                  ON outputs.response_call_id = calls.response_call_id
-                 AND outputs.session_id = calls.session_id
-                 AND outputs.call_id = calls.call_id
-                WHERE calls.session_id = ?
-                  AND calls.direction = 'request'
-                  AND calls.is_canonical = 1
-                  AND calls.type = 'function_call'
-                  AND calls.name = 'memory_user_fact_read'
-                  AND outputs.direction = 'request'
-                  AND outputs.is_canonical = 1
-                  AND outputs.type = 'function_call_output'
-                """,
-                (session_id,),
-            ).fetchall()
+            output_json(database, row) for row in memory_rows
         ]
         if expected_database_count <= 0:
             expected_database_count = approved_databases
@@ -402,20 +531,16 @@ def score_session(
     sql_queries = [str(args.get("sql", "")).lower() for args in media_queries]
     sql_text = "\n".join(sql_queries)
     tool_errors = [row for row in tools if row["status"] == "error"]
-    completed_user_fact_write_ids: set[int] = set()
+    completed_user_fact_write_values: set[str] = set()
     for row in tools:
         if (
             row["tool_name"] != "memory_user_fact_remember"
             or row["status"] != "completed"
         ):
             continue
-        memory_id = safe_json(row["output_json"]).get("id")
-        if (
-            isinstance(memory_id, int)
-            and not isinstance(memory_id, bool)
-            and memory_id > 0
-        ):
-            completed_user_fact_write_ids.add(memory_id)
+        fact = safe_json(row["arguments_json"]).get("fact")
+        if isinstance(fact, str) and fact:
+            completed_user_fact_write_values.add(fact.casefold())
 
     calls = int(calls_row["calls"] or 0)
     errors = int(calls_row["errors"] or 0)
@@ -428,7 +553,8 @@ def score_session(
         fact
         for fact in stored_user_facts
         if str(fact.get("subject", "")).casefold() == "user"
-        and fact.get("id") in completed_user_fact_write_ids
+        and str(fact.get("value", "")).casefold()
+        in completed_user_fact_write_values
         and all(
             artist_position(str(fact.get("value", "")).lower(), artist) >= 0
             for artist, _ in top_three
@@ -490,7 +616,7 @@ def score_session(
         "seeded_user_fact_stored": user_fact_stored,
         "seeded_user_fact_in_preflight": user_fact_preflight,
         "seeded_user_name_mentioned": user_name_mentioned,
-        "completed_user_fact_writes": len(completed_user_fact_write_ids),
+        "completed_user_fact_writes": len(completed_user_fact_write_values),
         "favorite_memory_facts": len(favorite_memory_facts),
     }
 

@@ -95,71 +95,336 @@ def load_database_fixtures(manifest_path: Path) -> list[Path]:
     return databases
 
 
+def structured_value(
+    connection: sqlite3.Connection,
+    owner_item_id: int,
+    purpose: str,
+) -> object | None:
+    document = connection.execute(
+        """
+        SELECT id FROM structured_documents
+        WHERE owner_item_id = ? AND purpose = ?
+        """,
+        (owner_item_id, purpose),
+    ).fetchone()
+    if document is None:
+        return None
+    rows = connection.execute(
+        """
+        SELECT node_id, parent_node_id, ordinal, member_name, value_type,
+               text_value, number_value, boolean_value
+        FROM structured_nodes
+        WHERE document_id = ?
+        ORDER BY node_id
+        """,
+        (document["id"],),
+    ).fetchall()
+    if not rows:
+        return None
+
+    nodes = {int(row["node_id"]): row for row in rows}
+    children: dict[int, list[sqlite3.Row]] = {}
+    for row in rows:
+        parent = row["parent_node_id"]
+        if parent is not None:
+            children.setdefault(int(parent), []).append(row)
+    for values in children.values():
+        values.sort(key=lambda row: int(row["ordinal"]))
+
+    def build(node_id: int) -> object | None:
+        row = nodes[node_id]
+        value_type = str(row["value_type"])
+        child_rows = children.get(node_id, [])
+        if value_type == "object":
+            return {
+                str(child["member_name"]): build(int(child["node_id"]))
+                for child in child_rows
+            }
+        if value_type == "array":
+            return [build(int(child["node_id"])) for child in child_rows]
+        if value_type == "string":
+            return str(row["text_value"] or "")
+        if value_type == "number":
+            number = str(row["number_value"] or "0")
+            try:
+                return json.loads(number)
+            except json.JSONDecodeError:
+                return number
+        if value_type == "boolean":
+            return bool(row["boolean_value"])
+        return None
+
+    return build(0)
+
+
+def text_parts(
+    connection: sqlite3.Connection,
+    item_id: int,
+) -> list[dict[str, object]]:
+    parts = []
+    rows = connection.execute(
+        """
+        SELECT id, collection_name, ordinal, part_type, text
+        FROM item_text_parts WHERE item_id = ?
+        ORDER BY collection_name, ordinal
+        """,
+        (item_id,),
+    ).fetchall()
+    for row in rows:
+        citations = [
+            dict(citation)
+            for citation in connection.execute(
+                """
+                SELECT citation_type, start_offset, end_offset, title, url,
+                       excerpt
+                FROM item_citations WHERE text_part_id = ? ORDER BY ordinal
+                """,
+                (row["id"],),
+            ).fetchall()
+        ]
+        part = {
+            "collection": row["collection_name"],
+            "ordinal": row["ordinal"],
+            "type": row["part_type"],
+            "text": row["text"],
+        }
+        if citations:
+            part["citations"] = citations
+        parts.append(part)
+    return parts
+
+
+def semantic_item(
+    connection: sqlite3.Connection,
+    row: sqlite3.Row,
+) -> dict[str, object]:
+    item_id = int(row["id"])
+    kind = str(row["kind"])
+    item: dict[str, object] = {
+        "id": item_id,
+        "sequence": row["sequence"],
+        "kind": kind,
+        "provider_item_id": row["provider_item_id"],
+        "provider_status": row["provider_status"],
+        "is_error": bool(row["is_error"]),
+    }
+    if kind == "message":
+        message = connection.execute(
+            "SELECT role, phase FROM message_items WHERE item_id = ?",
+            (item_id,),
+        ).fetchone()
+        if message is not None:
+            item.update({"role": message["role"], "phase": message["phase"]})
+        item["parts"] = text_parts(connection, item_id)
+    elif kind == "reasoning":
+        reasoning = connection.execute(
+            """
+            SELECT encrypted_content, provider_format, provider_signature
+            FROM reasoning_items WHERE item_id = ?
+            """,
+            (item_id,),
+        ).fetchone()
+        if reasoning is not None:
+            item.update(dict(reasoning))
+        item["parts"] = text_parts(connection, item_id)
+    elif kind == "function_call":
+        call = connection.execute(
+            """
+            SELECT provider_call_id, tool_name, tool_namespace
+            FROM function_calls WHERE item_id = ?
+            """,
+            (item_id,),
+        ).fetchone()
+        if call is not None:
+            item.update(dict(call))
+        item["arguments"] = structured_value(connection, item_id, "arguments")
+        execution = connection.execute(
+            """
+            SELECT state, started_at_ms, completed_at_ms, error_code,
+                   error_message
+            FROM tool_executions WHERE function_call_item_id = ?
+            """,
+            (item_id,),
+        ).fetchone()
+        if execution is not None:
+            item["execution"] = dict(execution)
+    elif kind == "function_call_output":
+        output = connection.execute(
+            """
+            SELECT function_call_item_id, execution_state, started_at_ms,
+                   completed_at_ms, output_format, text_output, error_code,
+                   error_message
+            FROM function_outputs WHERE item_id = ?
+            """,
+            (item_id,),
+        ).fetchone()
+        if output is not None:
+            item.update(dict(output))
+            if output["output_format"] == "structured":
+                item["output"] = structured_value(connection, item_id, "output")
+            else:
+                item["output"] = output["text_output"]
+    elif kind == "openrouter:web_search":
+        search = connection.execute(
+            "SELECT action_type, query FROM web_searches WHERE item_id = ?",
+            (item_id,),
+        ).fetchone()
+        if search is not None:
+            item.update(dict(search))
+        item["sources"] = [
+            dict(source)
+            for source in connection.execute(
+                """
+                SELECT source_type, url FROM web_search_sources
+                WHERE web_search_item_id = ? ORDER BY ordinal
+                """,
+                (item_id,),
+            ).fetchall()
+        ]
+    elif kind == "openrouter:web_fetch":
+        fetch = connection.execute(
+            """
+            SELECT url, title, content, http_status
+            FROM web_fetches WHERE item_id = ?
+            """,
+            (item_id,),
+        ).fetchone()
+        if fetch is not None:
+            item.update(dict(fetch))
+    return item
+
+
+def message_text(
+    connection: sqlite3.Connection,
+    session_id: int,
+    role: str,
+    descending: bool,
+) -> str:
+    direction = "DESC" if descending else "ASC"
+    item = connection.execute(
+        f"""
+        SELECT i.id FROM conversation_items i
+        JOIN message_items m ON m.item_id = i.id
+        WHERE i.session_id = ? AND m.role = ?
+        ORDER BY i.sequence {direction} LIMIT 1
+        """,
+        (session_id, role),
+    ).fetchone()
+    if item is None:
+        return ""
+    rows = connection.execute(
+        """
+        SELECT text FROM item_text_parts
+        WHERE item_id = ? AND collection_name = 'content'
+        ORDER BY ordinal
+        """,
+        (item["id"],),
+    ).fetchall()
+    return "\n".join(str(row["text"]) for row in rows)
+
+
 def export_output(session_db: Path, output_file: Path) -> None:
-    """Export ordered raw API responses without requests or headers."""
+    """Export a readable snapshot reconstructed from semantic records."""
     connection = sqlite3.connect(session_db)
     connection.row_factory = sqlite3.Row
     try:
         session = connection.execute(
             """
-            SELECT id, model, prompt, response, http_status, created_at
+            SELECT id, model_id, created_at_ms
             FROM sessions ORDER BY id DESC LIMIT 1
             """
         ).fetchone()
-        calls = connection.execute(
+        if session is None:
+            raise RuntimeError(f"No session found in {session_db}")
+        session_id = int(session["id"])
+        prompt = message_text(connection, session_id, "user", False)
+        answer = message_text(connection, session_id, "assistant", True)
+        attempts = connection.execute(
             """
-            SELECT id, prompt_group_key, request_kind, round_index,
-                   attempt_index, state, is_error, http_status,
-                   response_model, response_id, response_status,
-                   response_raw_json
-            FROM response_api_calls ORDER BY id
-            """
+            SELECT a.id, t.prompt_group_key, r.request_kind, r.round_index,
+                   a.attempt_index, a.state, a.http_status,
+                   ar.provider_model_id, ar.provider_response_id,
+                   ar.provider_status, ar.incomplete_reason, ar.error_type,
+                   ar.error_code, ar.error_message, ar.error_parameter,
+                   ar.parse_error, u.input_tokens, u.cached_input_tokens,
+                   u.output_tokens, u.reasoning_tokens, u.total_tokens,
+                   u.cost_nano_usd
+            FROM http_attempts a
+            JOIN model_requests r ON r.id = a.request_id
+            JOIN turns t ON t.id = r.turn_id
+            LEFT JOIN api_results ar ON ar.attempt_id = a.id
+            LEFT JOIN api_usage u ON u.attempt_id = a.id
+            WHERE t.session_id = ? ORDER BY a.id
+            """,
+            (session_id,),
         ).fetchall()
+        exported_attempts = []
+        for attempt in attempts:
+            items = connection.execute(
+                """
+                SELECT id, sequence, kind, provider_item_id, provider_status,
+                       is_error
+                FROM conversation_items
+                WHERE source_attempt_id = ? ORDER BY source_item_index
+                """,
+                (attempt["id"],),
+            ).fetchall()
+            exported_attempts.append(
+                {
+                    "attempt_id": attempt["id"],
+                    "prompt_group_key": attempt["prompt_group_key"],
+                    "request_kind": attempt["request_kind"],
+                    "round_index": attempt["round_index"],
+                    "attempt_index": attempt["attempt_index"],
+                    "state": attempt["state"],
+                    "is_error": (
+                        attempt["state"] != "completed"
+                        or int(attempt["http_status"] or 0) >= 400
+                        or attempt["error_message"] is not None
+                        or attempt["parse_error"] is not None
+                    ),
+                    "http_status": attempt["http_status"],
+                    "result": {
+                        "model": attempt["provider_model_id"],
+                        "id": attempt["provider_response_id"],
+                        "status": attempt["provider_status"],
+                        "incomplete_reason": attempt["incomplete_reason"],
+                        "error_type": attempt["error_type"],
+                        "error_code": attempt["error_code"],
+                        "error_message": attempt["error_message"],
+                        "error_parameter": attempt["error_parameter"],
+                        "parse_error": attempt["parse_error"],
+                    },
+                    "usage": {
+                        "input_tokens": attempt["input_tokens"],
+                        "cached_input_tokens": attempt["cached_input_tokens"],
+                        "output_tokens": attempt["output_tokens"],
+                        "reasoning_tokens": attempt["reasoning_tokens"],
+                        "total_tokens": attempt["total_tokens"],
+                        "cost_nano_usd": attempt["cost_nano_usd"],
+                    },
+                    "items": [semantic_item(connection, item) for item in items],
+                }
+            )
+        latest_status = attempts[-1]["http_status"] if attempts else 0
     finally:
         connection.close()
 
-    if session is None:
-        raise RuntimeError(f"No session found in {session_db}")
-
-    responses = []
-    for call in calls:
-        raw = call["response_raw_json"]
-        parsed = None
-        raw_text = None
-        if raw is not None:
-            try:
-                parsed = json.loads(raw)
-            except json.JSONDecodeError:
-                raw_text = raw
-        entry = {
-            "call_id": call["id"],
-            "prompt_group_key": call["prompt_group_key"],
-            "request_kind": call["request_kind"],
-            "round_index": call["round_index"],
-            "attempt_index": call["attempt_index"],
-            "state": call["state"],
-            "is_error": bool(call["is_error"]),
-            "http_status": call["http_status"],
-            "response_model": call["response_model"],
-            "response_id": call["response_id"],
-            "response_status": call["response_status"],
-            "raw_response": parsed,
-        }
-        if raw_text is not None:
-            entry["raw_response_text"] = raw_text
-        responses.append(entry)
-
     output = {
-        "format_version": 1,
+        "format_version": 2,
+        "storage": "semantic",
         "session": {
             "id": session["id"],
-            "model": session["model"],
-            "prompt": session["prompt"],
-            "http_status": session["http_status"],
-            "created_at": session["created_at"],
-            "final_answer": session["response"],
+            "model": session["model_id"],
+            "prompt": prompt,
+            "http_status": latest_status,
+            "created_at": dt.datetime.fromtimestamp(
+                int(session["created_at_ms"]) / 1000,
+                tz=dt.timezone.utc,
+            ).isoformat(),
+            "final_answer": answer,
         },
-        "responses": responses,
+        "attempts": exported_attempts,
     }
     output_file.write_text(
         json.dumps(output, indent=2, ensure_ascii=False) + "\n",
@@ -175,8 +440,13 @@ def registered_database_paths(session_db: Path) -> set[Path]:
     try:
         rows = connection.execute(
             """
-            SELECT path FROM discovered_databases
-            WHERE user_decision = 'allowed' AND is_valid_sqlite = 1
+            SELECT l.path
+            FROM databases d
+            JOIN database_locations l
+              ON l.database_id = d.id AND l.active = 1
+            JOIN database_permissions p ON p.database_id = d.id
+            WHERE p.decision = 'allowed'
+              AND l.validation_state = 'valid'
             """
         ).fetchall()
     finally:

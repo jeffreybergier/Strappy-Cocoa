@@ -351,9 +351,14 @@ static int hill_load_next_call(hill_event_context *context,
                                hill_call_summary *summary)
 {
   static const char *sql =
-    "SELECT id,request_kind,round_index,attempt_index,state,http_status,"
-    "total_seconds FROM response_api_calls "
-    "WHERE session_id = ? AND id > ? ORDER BY id LIMIT 1;";
+    "SELECT a.id, "
+    "CASE WHEN a.attempt_index > 0 THEN 'retry' ELSE r.request_kind END, "
+    "r.round_index, a.attempt_index, a.state, a.http_status, "
+    "a.total_us / 1000000.0 "
+    "FROM http_attempts a "
+    "JOIN model_requests r ON r.id = a.request_id "
+    "JOIN turns t ON t.id = r.turn_id "
+    "WHERE t.session_id = ? AND a.id > ? ORDER BY a.id LIMIT 1;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
   const unsigned char *request_kind;

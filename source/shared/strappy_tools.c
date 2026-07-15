@@ -3120,6 +3120,12 @@ static int strappy_tools_ensure_helper_info_schema(sqlite3 *db,
     "CREATE INDEX IF NOT EXISTS helper_database_info_status_idx "
     "ON helper_database_info(database_catalog_id, status, kind, updated_at);";
 
+  if (db == NULL) {
+    strappy_set_error(error_out, "Memory database is missing.");
+    return 0;
+  }
+  return 1;
+
   if ((db == NULL) ||
       !strappy_tools_catalog_exec(db,
                                   user_info_sql,
@@ -3240,10 +3246,10 @@ static int strappy_tools_add_user_info_row(cJSON *array,
 static char *strappy_tools_read_user_info(sqlite3 *db, char **error_out)
 {
   static const char *sql =
-    "SELECT id, value, created_at "
-    "FROM helper_user_info "
-    "WHERE status = 'active' AND kind = 'fact' "
-    "ORDER BY created_at DESC, id DESC "
+    "SELECT id, value, "
+    "strftime('%Y-%m-%dT%H:%M:%fZ', created_at_ms / 1000.0, 'unixepoch') "
+    "FROM user_facts WHERE kind = 'fact' "
+    "ORDER BY created_at_ms DESC, id DESC "
     "LIMIT ?1;";
   sqlite3_stmt *stmt;
   cJSON *facts;
@@ -3314,10 +3320,12 @@ static char *strappy_tools_remember_user_info(
   char **error_out)
 {
   static const char *sql =
-    "INSERT INTO helper_user_info "
-    "(kind, subject, predicate, value, status) "
-    "VALUES ('fact', 'user', 'fact', ?, 'active');";
+    "INSERT INTO user_facts "
+    "(kind, subject, predicate, value, confidence_basis_points, "
+     "created_at_ms, updated_at_ms) "
+    "VALUES ('fact', 'user', 'fact', ?, 7500, ?, ?);";
   sqlite3_stmt *stmt;
+  sqlite3_int64 now_ms;
   int rc;
 
   if ((db == NULL) || (arguments == NULL)) {
@@ -3335,11 +3343,14 @@ static char *strappy_tools_remember_user_info(
     return NULL;
   }
 
-  if (sqlite3_bind_text(stmt,
-                        1,
-                        arguments->fact,
-                        -1,
-                        SQLITE_TRANSIENT) != SQLITE_OK) {
+  now_ms = (sqlite3_int64)time(NULL) * 1000;
+  if ((sqlite3_bind_text(stmt,
+                         1,
+                         arguments->fact,
+                         -1,
+                         SQLITE_TRANSIENT) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 2, now_ms) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 3, now_ms) != SQLITE_OK)) {
     sqlite3_finalize(stmt);
     if ((error_out != NULL) && (*error_out == NULL)) {
       strappy_set_formatted_error(error_out,
@@ -3378,11 +3389,9 @@ static char *strappy_tools_forget_info_row(sqlite3 *db,
   }
 
   sql = strappy_tools_build_identifier_sql(
-    "UPDATE ",
+    "DELETE FROM ",
     table_name,
-    " SET status = 'forgotten', "
-    "updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now')) "
-    "WHERE id = ? AND status = 'active';");
+    " WHERE id = ?;");
   if (sql == NULL) {
     strappy_set_error(error_out, "Could not allocate forget memory SQL.");
     return NULL;
@@ -3467,12 +3476,10 @@ static int strappy_tools_read_database_hints(
   char **error_out)
 {
   static const char *sql =
-    "SELECT id, content, created_at "
-    "FROM helper_database_info "
-    "WHERE status = 'active' AND kind = 'hint' "
-    "AND (database_catalog_id = ?1 OR database_assistant_id = ?2) "
-    "ORDER BY created_at DESC, id DESC "
-    "LIMIT ?3;";
+    "SELECT id, content, "
+    "strftime('%Y-%m-%dT%H:%M:%fZ', created_at_ms / 1000.0, 'unixepoch') "
+    "FROM database_hints WHERE kind = 'hint' AND database_id = ?1 "
+    "ORDER BY created_at_ms DESC, id DESC LIMIT ?2;";
   sqlite3_stmt *stmt;
   int rc;
   int count;
@@ -3498,13 +3505,8 @@ static int strappy_tools_read_database_hints(
   if ((sqlite3_bind_int64(stmt,
                           1,
                           (sqlite3_int64)record->catalog_id) != SQLITE_OK) ||
-      (sqlite3_bind_text(stmt,
-                         2,
-                         record->assistant_database_id,
-                         -1,
-                         SQLITE_TRANSIENT) != SQLITE_OK) ||
       (sqlite3_bind_int(stmt,
-                        3,
+                        2,
                         STRAPPY_DATABASE_CONTEXT_HINT_LIMIT + 1) != SQLITE_OK)) {
     strappy_set_formatted_error(error_out,
                                 "Could not bind database hint read: %s",
@@ -3765,11 +3767,13 @@ static char *strappy_tools_remember_database_info(
   char **error_out)
 {
   static const char *sql =
-    "INSERT INTO helper_database_info "
-    "(database_catalog_id, database_assistant_id, database_size, "
-    "database_modified_at, kind, title, content, status) "
-    "VALUES (?, ?, ?, ?, 'hint', 'Database hint', ?, 'active');";
+    "INSERT INTO database_hints "
+    "(database_id, kind, title, content, confidence_basis_points, "
+     "observed_size_bytes, observed_modified_at_s, created_at_ms, "
+     "updated_at_ms) "
+    "VALUES (?, 'hint', 'Database hint', ?, 7500, ?, ?, ?, ?);";
   sqlite3_stmt *stmt;
+  sqlite3_int64 now_ms;
   int rc;
 
   if ((db == NULL) || (record == NULL) || (arguments == NULL)) {
@@ -3788,21 +3792,19 @@ static char *strappy_tools_remember_database_info(
     return NULL;
   }
 
+  now_ms = (sqlite3_int64)time(NULL) * 1000;
   if ((sqlite3_bind_int64(stmt, 1, (sqlite3_int64)record->catalog_id) !=
        SQLITE_OK) ||
       (sqlite3_bind_text(stmt,
                          2,
-                         record->assistant_database_id,
+                         arguments->hint,
                          -1,
                          SQLITE_TRANSIENT) != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)record->size) != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)record->modified_at) !=
        SQLITE_OK) ||
-      (sqlite3_bind_text(stmt,
-                         5,
-                         arguments->hint,
-                         -1,
-                         SQLITE_TRANSIENT) != SQLITE_OK)) {
+      (sqlite3_bind_int64(stmt, 5, now_ms) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 6, now_ms) != SQLITE_OK)) {
     sqlite3_finalize(stmt);
     if ((error_out != NULL) && (*error_out == NULL)) {
       strappy_set_formatted_error(
@@ -5662,7 +5664,7 @@ static char *strappy_tools_execute_memory_user_fact_forget(
   }
 
   json = strappy_tools_forget_info_row(db,
-                                       "helper_user_info",
+                                       "user_facts",
                                        arguments.id,
                                        error_out);
   sqlite3_close(db);
@@ -5881,7 +5883,7 @@ static char *strappy_tools_execute_memory_database_hint_forget(
   }
 
   json = strappy_tools_forget_info_row(db,
-                                       "helper_database_info",
+                                       "database_hints",
                                        arguments.id,
                                        error_out);
   sqlite3_close(db);

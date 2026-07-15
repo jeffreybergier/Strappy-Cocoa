@@ -70,9 +70,11 @@ House style for Strappy source:
    `source/shared/XPFoundation.{h,m}`; AppKit/UIKit shims live in `XPAppKit` /
    `XPUIKit`. Call sites must use the XP method and must not call newer SDK
    selectors directly.
-11. SQLite JSON columns are opaque on read. Do not use cJSON to parse values
-   loaded from the database. Stored custom metadata JSON should move unchanged
-   from SQLite into the webview, where page JavaScript can parse it for display.
+11. SQLite stores semantic fields, not serialized JSON documents. Normalize
+    provider objects and arrays into typed subtype tables or
+    `structured_documents` / `structured_nodes`, and reconstruct temporary
+    cJSON values only when the runtime or webview compatibility API requires
+    them. Do not add JSON, raw payload, or HTTP-header columns.
 12. Webview HTML, CSS, and JavaScript strings are generated in C. Keep that
     rendering logic in `strappy_webview.{h,c}` or another C module, not in
     Objective-C view controllers.
@@ -111,9 +113,15 @@ House style for Strappy source:
     prompt and requires a non-empty string name. Do not store secrets,
     credentials, sensitive identifiers, long copied content, or private row
     contents in memory.
-16. Active assistant history uses the Responses API ledger: every HTTP attempt
-    has one `response_api_calls` row, and every typed input/output item has one
-    ordered `response_api_items` row with its exact raw JSON retained. At a
+16. Active assistant history uses the normalized Responses API ledger: each
+    logical round has one `model_requests` row, each transport attempt has one
+    `http_attempts` row, and each input/output item has one ordered
+    `conversation_items` row plus exactly one applicable typed subtype. Store
+    scalar result and usage metadata in `api_results` and `api_usage`; store
+    objects and arrays as `structured_documents` / `structured_nodes`. Never
+    persist request bodies, response bodies, headers, or raw JSON. Reconstruct
+    provider-shaped JSON transiently only at an API or compatibility boundary.
+    At a
     candidate final answer, collect every applicable missing-tool rule from
     `GuidanceAudit.json` into one ordered bulleted `developer` message, honoring
     each rule's optional `when` conditions. Include a tool-conditioned rule
@@ -148,8 +156,9 @@ House style for Strappy source:
     recovery, tool, and assistant item uses the normal database and timeline
     paths. If no audit item is unresolved, do not add an audit turn.
 17. OpenRouter model catalog and selection state live in shared SQLite storage.
-    `strappy_db` owns `openrouter_models`, `openrouter_model_settings`, the
-    default model app setting, and `sessions.model`; `StrappySession` owns the
+    `strappy_db` owns `models`, `model_prices`, `model_features`,
+    `model_preferences`, `app_preferences.default_model_id`, and
+    `sessions.model_id`; `StrappySession` owns the
     Objective-C bridge. `APIMODEL` is not a user configuration key. Load
     endpoint/token from `.env`, process environment, or Keychain, then resolve
     the default or per-session model through the catalog and call
@@ -191,7 +200,7 @@ infrastructure:
 2. OpenRouter model catalog persistence with searchable/sortable browsing,
    default model selection, allowed-model whitelisting, and per-session model
    selection
-3. C based API JSON parsing with cJSON; SQLite JSON columns stay opaque on read
+3. C based transient API JSON parsing with cJSON and normalized SQLite storage
 4. C based networking with libcurl
 5. C based storage with sqlite
 6. Web based chat interface for showing the response from the model

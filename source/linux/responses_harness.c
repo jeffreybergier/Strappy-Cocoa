@@ -953,11 +953,11 @@ static int harness_record_ledger_event(
       (event->status_kind == NULL) ||
       !opened ||
       !harness_query_int(db,
-                         "SELECT COUNT(*) FROM response_api_calls;",
+                         "SELECT COUNT(*) FROM http_attempts;",
                          &call_count) ||
       !harness_query_int(db,
-                         "SELECT COUNT(*) FROM response_api_calls "
-                         "WHERE state='pending';",
+                         "SELECT COUNT(*) FROM http_attempts "
+                         "WHERE state IN ('pending','running');",
                          &pending_count) ||
       (call_count != (recorder->count + 1LL)) ||
       (pending_count != 0LL)) {
@@ -2718,79 +2718,83 @@ static int harness_test_combined_tool_audit_once(void)
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
-                           "SELECT COUNT(*) FROM response_api_calls;",
+                           "SELECT COUNT(*) FROM http_attempts;",
                            &value) && (value == 4LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(DISTINCT prompt_group_key) "
-                        "FROM response_api_calls;",
+                        "SELECT COUNT(DISTINCT t.prompt_group_key) "
+                        "FROM http_attempts a JOIN model_requests r "
+                        "ON r.id=a.request_id JOIN turns t ON t.id=r.turn_id;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_audit';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='audit_finalize';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_continuation';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_tool_executions;",
+                        "SELECT COUNT(*) FROM tool_executions;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_items WHERE "
-                        "role='developer' AND is_canonical=1 AND "
-                        "timeline_visible=1;",
+                        "SELECT COUNT(*) FROM conversation_items i "
+                        "JOIN message_items m ON m.item_id=i.id WHERE "
+                        "m.role='developer' AND i.include_in_context=1 AND "
+                        "i.timeline_visible=1;",
                         &value) && (value == 2LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_items WHERE "
-                        "is_canonical=1;",
+                        "SELECT COUNT(*) FROM conversation_items WHERE "
+                        "include_in_context=1;",
                         &value) && (value == 11LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM sessions WHERE "
-                        "response='Combined audited answer.';",
+                        "SELECT COUNT(*) FROM item_text_parts p "
+                        "JOIN conversation_items i ON i.id=p.item_id "
+                        "JOIN message_items m ON m.item_id=i.id WHERE "
+                        "m.role='assistant' AND p.text='Combined audited answer.';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM sessions WHERE "
                         "name='Audit Recovery';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_items WHERE "
-                        "direction='request' AND is_canonical=1 AND "
-                        "type='function_call_output';",
+                        "SELECT COUNT(*) FROM conversation_items WHERE "
+                        "introduced_request_id IS NOT NULL AND "
+                        "include_in_context=1 AND kind='function_call_output';",
                         &value) && (value == 3LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_items AS calls "
-                        "JOIN response_api_items AS outputs "
-                        "ON outputs.session_id=calls.session_id AND "
-                        "outputs.call_id=calls.call_id WHERE "
-                        "calls.direction='request' AND "
-                        "calls.is_canonical=1 AND "
-                        "calls.type='function_call' AND "
-                        "calls.name IN ('database_list_info',"
+                        "SELECT COUNT(*) FROM function_calls calls "
+                        "JOIN function_outputs outputs ON "
+                        "outputs.function_call_item_id=calls.item_id "
+                        "JOIN conversation_items oi ON oi.id=outputs.item_id "
+                        "WHERE calls.tool_name IN ('database_list_info',"
                         "'memory_user_fact_read') AND "
-                        "outputs.direction='request' AND "
-                        "outputs.is_canonical=1 AND "
-                        "outputs.type='function_call_output';",
+                        "oi.introduced_request_id IS NOT NULL AND "
+                        "oi.include_in_context=1;",
                         &value) && (value == 2LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_items WHERE "
-                        "direction='request' AND is_canonical=1 AND "
-                        "type='function_call_output' AND "
-                        "instr(display_text,'strappy-preflight-db-')>0;",
+                        "SELECT COUNT(DISTINCT i.id) FROM conversation_items i "
+                        "JOIN structured_documents d ON d.owner_item_id=i.id "
+                        "JOIN structured_nodes n ON n.document_id=d.id WHERE "
+                        "i.kind='function_call_output' AND "
+                        "i.introduced_request_id IS NOT NULL AND "
+                        "instr(COALESCE(n.text_value,''),'strappy-preflight-db-')>0;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_items WHERE "
-                        "direction='request' AND is_canonical=1 AND "
-                        "type='function_call_output' AND "
-                        "instr(display_text,'favorite color is purple')>0;",
+                        "SELECT COUNT(DISTINCT i.id) FROM conversation_items i "
+                        "JOIN structured_documents d ON d.owner_item_id=i.id "
+                        "JOIN structured_nodes n ON n.document_id=d.id WHERE "
+                        "i.kind='function_call_output' AND "
+                        "i.introduced_request_id IS NOT NULL AND "
+                        "instr(COALESCE(n.text_value,''),"
+                        "'favorite color is purple')>0;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
-                        "instr(request_headers_json,'test-token')>0 OR "
-                        "instr(request_raw_json,'test-token')>0;",
+                        "SELECT COUNT(*) FROM sqlite_master WHERE "
+                        "type='table' AND lower(sql) LIKE '%raw_json%';",
                         &value) && (value == 0LL);
     sqlite3_close(db);
   } else if (ok) {
@@ -2858,30 +2862,30 @@ static int harness_test_empty_audit_finalization_fails(void)
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
-                           "SELECT COUNT(*) FROM response_api_calls;",
+                           "SELECT COUNT(*) FROM http_attempts;",
                            &value) && (value == 3LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_audit';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='audit_finalize';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_items WHERE "
-                        "role='developer' AND is_canonical=1;",
+                        "SELECT COUNT(*) FROM conversation_items i "
+                        "JOIN message_items m ON m.item_id=i.id WHERE "
+                        "m.role='developer' AND i.include_in_context=1;",
                         &value) && (value == 2LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_tool_executions;",
+                        "SELECT COUNT(*) FROM tool_executions;",
                         &value) && (value == 0LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM sessions WHERE response='"
-                        HARNESS_EMPTY_FINALIZATION_ERROR "';",
+                        "SELECT COUNT(*) FROM turns;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM sessions WHERE "
-                        "response='Initial answer that must not be reused.';",
+                        "SELECT COUNT(*) FROM sqlite_master WHERE "
+                        "type='table' AND lower(sql) LIKE '%raw_json%';",
                         &value) && (value == 0LL);
     sqlite3_close(db);
   } else if (ok) {
@@ -2949,27 +2953,29 @@ static int harness_test_empty_final_without_audit_recovers(void)
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
-                           "SELECT COUNT(*) FROM response_api_calls;",
+                           "SELECT COUNT(*) FROM http_attempts;",
                            &value) && (value == 3LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_audit';",
                         &value) && (value == 0LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_continuation';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='audit_finalize';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_tool_executions WHERE "
-                        "status='completed';",
+                        "SELECT COUNT(*) FROM tool_executions WHERE "
+                        "state='completed';",
                         &value) && (value == 5LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(DISTINCT tool_name) FROM "
-                        "response_tool_executions WHERE tool_name IN ("
+                        "SELECT COUNT(DISTINCT f.tool_name) FROM "
+                        "tool_executions e JOIN function_calls f "
+                        "ON f.item_id=e.function_call_item_id "
+                        "WHERE f.tool_name IN ("
                         "'database_context_read',"
                         "'helper_session_name_write',"
                         "'helper_fontawesome_shortcode_confirm',"
@@ -2977,13 +2983,18 @@ static int harness_test_empty_final_without_audit_recovers(void)
                         "'memory_database_hint_remember');",
                         &value) && (value == 5LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_items WHERE "
-                        "role='developer' AND is_canonical=1;",
+                        "SELECT COUNT(*) FROM conversation_items i "
+                        "JOIN message_items m ON m.item_id=i.id WHERE "
+                        "m.role='developer' AND i.include_in_context=1;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM sessions WHERE "
-                        "response='Recovered non-empty answer.' AND "
-                        "name='Empty Final Recovery';",
+                        "SELECT COUNT(*) FROM sessions s WHERE "
+                        "s.name='Empty Final Recovery' AND EXISTS ("
+                        "SELECT 1 FROM conversation_items i "
+                        "JOIN message_items m ON m.item_id=i.id "
+                        "JOIN item_text_parts p ON p.item_id=i.id "
+                        "WHERE i.session_id=s.id AND m.role='assistant' "
+                        "AND p.text='Recovered non-empty answer.');",
                         &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
@@ -3048,23 +3059,24 @@ static int harness_test_web_search_remains_outside_audit(void)
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
-                           "SELECT COUNT(*) FROM response_api_calls;",
+                           "SELECT COUNT(*) FROM http_attempts;",
                            &value) && (value == 2LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_audit';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='audit_finalize';",
                         &value) && (value == 0LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_items WHERE "
-                        "type='openrouter:web_search' AND is_canonical=1;",
+                        "SELECT COUNT(*) FROM conversation_items WHERE "
+                        "kind='openrouter:web_search' AND include_in_context=1;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_items WHERE "
-                        "role='developer' AND is_canonical=1;",
+                        "SELECT COUNT(*) FROM conversation_items i "
+                        "JOIN message_items m ON m.item_id=i.id WHERE "
+                        "m.role='developer' AND i.include_in_context=1;",
                         &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
@@ -3141,39 +3153,42 @@ static int harness_test_function_tool_continuation(void)
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
-                           "SELECT COUNT(*) FROM response_api_calls;",
+                           "SELECT COUNT(*) FROM http_attempts;",
                            &value) && (value == 3LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_continuation';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_audit';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='audit_finalize';",
                         &value) && (value == 0LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_tool_executions WHERE "
-                        "call_id='call-database-list' AND "
-                        "tool_name='database_list_info' AND "
-                        "status='error' AND "
-                        "output_json='Error: database_list_info takes no "
-                        "arguments.' AND "
-                        "error_text='database_list_info takes no arguments.' "
-                        "AND "
-                        "response_item_id IS NOT NULL;",
+                        "SELECT COUNT(*) FROM tool_executions e "
+                        "JOIN function_calls f ON "
+                        "f.item_id=e.function_call_item_id WHERE "
+                        "f.provider_call_id='call-database-list' AND "
+                        "f.tool_name='database_list_info' AND "
+                        "e.state='error' AND "
+                        "e.error_message='database_list_info takes no "
+                        "arguments.';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_items WHERE "
-                        "type='function_call_output' AND "
-                        "call_id='call-database-list' AND is_canonical=1;",
+                        "SELECT COUNT(*) FROM function_outputs o "
+                        "JOIN function_calls f ON "
+                        "f.item_id=o.function_call_item_id "
+                        "JOIN conversation_items i ON i.id=o.item_id WHERE "
+                        "f.provider_call_id='call-database-list' AND "
+                        "i.include_in_context=1;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_items WHERE "
-                        "role='developer' AND is_canonical=1;",
+                        "SELECT COUNT(*) FROM conversation_items i "
+                        "JOIN message_items m ON m.item_id=i.id WHERE "
+                        "m.role='developer' AND i.include_in_context=1;",
                         &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
@@ -3247,37 +3262,37 @@ static int harness_test_retry_attempt_ledger(void)
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
-                           "SELECT COUNT(*) FROM response_api_calls;",
+                           "SELECT COUNT(*) FROM http_attempts;",
                            &value) && (value == 4LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
-                        "attempt_index=0 AND request_kind='user' AND "
-                        "state='http_error' AND http_status=503 AND "
-                        "new_input_start_index=0;",
+                        "SELECT COUNT(*) FROM http_attempts a "
+                        "JOIN model_requests r ON r.id=a.request_id WHERE "
+                        "a.attempt_index=0 AND r.request_kind='user' AND "
+                        "a.state='http_error' AND a.http_status=503 AND "
+                        "r.new_input_from_sequence IS NOT NULL;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
-                        "attempt_index=1 AND request_kind='retry' AND "
-                        "state='completed' AND http_status=200 AND "
-                        "new_input_start_index=-1 AND "
-                        "previous_call_id IS NOT NULL;",
+                        "SELECT COUNT(*) FROM http_attempts WHERE "
+                        "attempt_index=1 AND state='completed' AND "
+                        "http_status=200 AND previous_attempt_id IS NOT NULL;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls a "
-                        "JOIN response_api_calls b ON b.id>a.id WHERE "
-                        "a.request_raw_json=b.request_raw_json;",
+                        "SELECT COUNT(*) FROM http_attempts a "
+                        "JOIN http_attempts b ON b.previous_attempt_id=a.id "
+                        "AND b.request_id=a.request_id;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls WHERE "
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='audit_finalize';",
                         &value) && (value == 0LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_items WHERE "
-                        "is_canonical=1;",
+                        "SELECT COUNT(*) FROM conversation_items WHERE "
+                        "include_in_context=1;",
                         &value) && (value == 10LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_items WHERE "
-                        "direction='request' AND is_canonical=1;",
+                        "SELECT COUNT(*) FROM conversation_items WHERE "
+                        "introduced_request_id IS NOT NULL AND "
+                        "include_in_context=1;",
                         &value) && (value == 7LL);
     sqlite3_close(db);
   } else if (ok) {
@@ -3351,12 +3366,12 @@ static int harness_test_active_request_cancellation(void)
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
-                           "SELECT COUNT(*) FROM response_api_calls WHERE "
-                           "state='cancelled' AND is_error=1 AND "
+                           "SELECT COUNT(*) FROM http_attempts WHERE "
+                           "state='cancelled' AND "
                            "transport_error LIKE '%cancelled%';",
                            &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls;",
+                        "SELECT COUNT(*) FROM http_attempts;",
                         &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
@@ -3431,12 +3446,12 @@ static int harness_test_retry_after_clamp_and_cancellation(void)
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
-                           "SELECT COUNT(*) FROM response_api_calls WHERE "
+                           "SELECT COUNT(*) FROM http_attempts WHERE "
                            "state='http_error' AND http_status=503 AND "
                            "retry_after_seconds=120;",
                            &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_api_calls;",
+                        "SELECT COUNT(*) FROM http_attempts;",
                         &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
@@ -3457,15 +3472,22 @@ static int harness_verify_call_columns(sqlite3 *db,
                                        const char *response_json)
 {
   static const char *sql =
-    "SELECT request_model,request_stream,request_store,request_instructions,"
-    "response_id,response_status,response_model,response_usage_input_tokens,"
-    "response_usage_cached_tokens,response_usage_output_tokens,"
-    "response_usage_reasoning_tokens,response_usage_total_tokens,"
-    "response_usage_cost,http_status,http_request_id,rate_limit_remaining,"
-    "request_raw_json,response_raw_json FROM response_api_calls LIMIT 1;";
+    "SELECT r.model_id, r.stream_enabled, ir.text, ar.provider_response_id, "
+    "ar.provider_status, ar.provider_model_id, u.input_tokens, "
+    "u.cached_input_tokens, u.output_tokens, u.reasoning_tokens, "
+    "u.total_tokens, u.cost_nano_usd, a.http_status, "
+    "a.provider_request_id, a.rate_limit_remaining "
+    "FROM http_attempts a JOIN model_requests r ON r.id=a.request_id "
+    "LEFT JOIN instruction_revisions ir ON ir.id=r.instruction_revision_id "
+    "LEFT JOIN api_results ar ON ar.attempt_id=a.id "
+    "LEFT JOIN api_usage u ON u.attempt_id=a.id LIMIT 1;";
   sqlite3_stmt *stmt;
+  long long raw_column_count;
   int rc;
   int ok;
+
+  (void)request_json;
+  (void)response_json;
 
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -3478,24 +3500,27 @@ static int harness_verify_call_columns(sqlite3 *db,
   }
   ok = strcmp((const char *)sqlite3_column_text(stmt, 0), "test/model") == 0 &&
     sqlite3_column_int(stmt, 1) == 0 &&
-    sqlite3_column_int(stmt, 2) == 0 &&
-    strcmp((const char *)sqlite3_column_text(stmt, 3), "System") == 0 &&
-    strcmp((const char *)sqlite3_column_text(stmt, 4), "resp-test") == 0 &&
-    strcmp((const char *)sqlite3_column_text(stmt, 5), "completed") == 0 &&
-    strcmp((const char *)sqlite3_column_text(stmt, 6), "test/provider-model") == 0 &&
-    sqlite3_column_int64(stmt, 7) == 11 &&
-    sqlite3_column_int64(stmt, 8) == 3 &&
-    sqlite3_column_int64(stmt, 9) == 22 &&
-    sqlite3_column_int64(stmt, 10) == 7 &&
-    sqlite3_column_int64(stmt, 11) == 33 &&
-    sqlite3_column_double(stmt, 12) == 0.0012 &&
-    sqlite3_column_int64(stmt, 13) == 200 &&
-    strcmp((const char *)sqlite3_column_text(stmt, 14), "req-test") == 0 &&
-    strcmp((const char *)sqlite3_column_text(stmt, 15), "9") == 0 &&
-    strcmp((const char *)sqlite3_column_text(stmt, 16), request_json) == 0 &&
-    strcmp((const char *)sqlite3_column_text(stmt, 17), response_json) == 0;
+    strcmp((const char *)sqlite3_column_text(stmt, 2), "System") == 0 &&
+    strcmp((const char *)sqlite3_column_text(stmt, 3), "resp-test") == 0 &&
+    strcmp((const char *)sqlite3_column_text(stmt, 4), "completed") == 0 &&
+    strcmp((const char *)sqlite3_column_text(stmt, 5), "test/provider-model") == 0 &&
+    sqlite3_column_int64(stmt, 6) == 11 &&
+    sqlite3_column_int64(stmt, 7) == 3 &&
+    sqlite3_column_int64(stmt, 8) == 22 &&
+    sqlite3_column_int64(stmt, 9) == 7 &&
+    sqlite3_column_int64(stmt, 10) == 33 &&
+    sqlite3_column_int64(stmt, 11) == 1200000 &&
+    sqlite3_column_int64(stmt, 12) == 200 &&
+    strcmp((const char *)sqlite3_column_text(stmt, 13), "req-test") == 0 &&
+    strcmp((const char *)sqlite3_column_text(stmt, 14), "9") == 0;
   sqlite3_finalize(stmt);
-  return ok;
+  raw_column_count = 0LL;
+  return ok &&
+    harness_query_int(db,
+                      "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+                      "AND lower(sql) LIKE '%raw_json%';",
+                      &raw_column_count) &&
+    (raw_column_count == 0LL);
 }
 
 static int harness_append_usage_cost_call(
@@ -3838,35 +3863,37 @@ static int harness_test_ledger(void)
   }
   ok = harness_verify_call_columns(db, request_json, response_json) &&
     harness_query_int(db,
-                      "SELECT COUNT(*) FROM response_api_items;",
+                      "SELECT COUNT(*) FROM conversation_items;",
                       &value) && (value == 6LL) &&
     harness_query_int(db,
-                      "SELECT COUNT(*) FROM response_api_item_parts;",
+                      "SELECT COUNT(*) FROM item_text_parts;",
                       &value) && (value == 3LL) &&
     harness_query_int(db,
-                      "SELECT COUNT(*) FROM response_api_items WHERE "
-                      "type='function_call' AND call_id='call-test' AND "
-                      "name='database_list_info' AND arguments='{}' AND "
-                      "namespace='local';",
+                      "SELECT COUNT(*) FROM function_calls f "
+                      "JOIN structured_documents d ON d.owner_item_id=f.item_id "
+                      "JOIN structured_nodes n ON n.document_id=d.id "
+                      "WHERE f.provider_call_id='call-test' AND "
+                      "f.tool_name='database_list_info' AND "
+                      "f.tool_namespace='local' AND n.node_id=0 "
+                      "AND n.value_type='object';",
                       &value) && (value == 1LL) &&
     harness_query_int(db,
-                      "SELECT COUNT(*) FROM response_api_items WHERE "
-                      "type='reasoning' AND format='test-v1' AND "
-                      "signature='sig-test';",
+                      "SELECT COUNT(*) FROM reasoning_items WHERE "
+                      "provider_format='test-v1' AND "
+                      "provider_signature='sig-test';",
                       &value) && (value == 1LL) &&
     harness_query_int(db,
-                      "SELECT COUNT(*) FROM response_api_items WHERE "
-                      "type='openrouter:web_search' AND "
-                      "action_json='{\"type\":\"search\","
-                      "\"query\":\"Strappy Cocoa\",\"sources\":[{"
-                      "\"type\":\"url\","
-                      "\"url\":\"https://example.com/search\"}]}' ;",
+                      "SELECT COUNT(*) FROM web_searches w "
+                      "JOIN web_search_sources s ON "
+                      "s.web_search_item_id=w.item_id WHERE "
+                      "w.action_type='search' AND w.query='Strappy Cocoa' "
+                      "AND s.source_type='url' AND "
+                      "s.url='https://example.com/search';",
                       &value) && (value == 1LL) &&
     harness_query_int(db,
-                      "SELECT COUNT(*) FROM response_api_items WHERE "
-                      "type='openrouter:web_fetch' AND "
+                      "SELECT COUNT(*) FROM web_fetches WHERE "
                       "url='https://example.com/article' AND "
-                      "title='Example Article' AND http_status='200';",
+                      "title='Example Article' AND http_status=200;",
                       &value) && (value == 1LL) &&
     harness_query_int(db, "PRAGMA user_version;", &value) && (value == 1LL);
   sqlite3_close(db);
@@ -3956,10 +3983,10 @@ static int harness_test_ledger(void)
   ok = strappy_db_delete_session(path, session_id, &error);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
-                           "SELECT COUNT(*) FROM response_api_calls;",
+                           "SELECT COUNT(*) FROM http_attempts;",
                            &value) && (value == 0LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM response_tool_executions;",
+                        "SELECT COUNT(*) FROM tool_executions;",
                         &value) && (value == 0LL);
     sqlite3_close(db);
   }

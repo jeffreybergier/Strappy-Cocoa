@@ -30,8 +30,8 @@ minimum baseline:
 Before round zero, the application supplies fresh `database_list_info` and
 `memory_user_fact_read` results as application-seeded, matched
 `function_call` / `function_call_output` input pairs. Their call IDs are
-created by the application, and their request-direction ledger rows are not
-counted as model tool calls or response tool executions. The audit file checks
+created by the application, and those typed conversation items are not counted
+as model tool calls or tool executions. The audit file checks
 `database_query`, web search, conditional session naming, optional durable user
 facts, and query-conditioned database hints in array order. Session naming
 applies only when the session began untitled, and web search is omitted when it
@@ -145,17 +145,18 @@ make -C source/linux/hill_climbing run CONFIRM_LIVE=yes \
 ```
 
 Every run writes an ignored timestamped directory under `runs/` containing the
-raw per-model ledgers, final answers, `report.json`, and `report.md`. Each model
-directory also contains:
+per-model semantic ledgers, final answers, `report.json`, and `report.md`. Each
+model directory also contains:
 
 - `answer.md`: Strappy's extracted final answer;
-- `output.json`: every raw Responses API response object in call order, plus
-  the final answer selected from the session;
-- `strappy.sqlite`: the complete queryable request, response, item, and tool
-  ledger.
+- `output.json`: a readable snapshot reconstructed from normalized attempts,
+  results, usage, typed response items, and tool records in call order;
+- `strappy.sqlite`: the complete queryable semantic request, response, item,
+  catalog, memory, and tool ledger.
 
-`output.json` intentionally excludes request payloads and authorization
-headers.
+Strappy does not persist wire request bodies, wire response bodies, HTTP
+headers, or raw JSON. The exported JSON is generated after the run from typed
+columns and structured-node trees; it is not a copy of the provider payload.
 
 ## Scoring and iteration
 
