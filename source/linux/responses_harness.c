@@ -1372,6 +1372,22 @@ static int harness_request_base_is_valid(cJSON *root,
   return 1;
 }
 
+static int harness_disabled_web_search_request_is_valid(cJSON *root)
+{
+  cJSON *tools;
+  cJSON *provider;
+  cJSON *require_parameters;
+
+  tools = cJSON_GetObjectItem(root, "tools");
+  provider = cJSON_GetObjectItem(root, "provider");
+  require_parameters = cJSON_IsObject(provider) ?
+    cJSON_GetObjectItem(provider, "require_parameters") : NULL;
+  return cJSON_IsArray(tools) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+    (require_parameters == NULL);
+}
+
 static int harness_audit_request_is_valid(cJSON *root,
                                           const char *session_key,
                                           const char *prompt_group,
@@ -2150,6 +2166,7 @@ static int harness_run_function_tool_server(int listener_fd)
                                   "Run a local function",
                                   &session_key,
                                   &prompt_group) &&
+    harness_disabled_web_search_request_is_valid(root) &&
     harness_send_json_response(client_fd, 200L, tool_response);
   cJSON_Delete(root);
   close(client_fd);
@@ -3097,6 +3114,10 @@ static int harness_test_web_search_remains_outside_audit(void)
                            &value) && (value == 2LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
+                        "web_search_enabled=1;",
+                        &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_audit';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
@@ -3189,6 +3210,10 @@ static int harness_test_function_tool_continuation(void)
     ok = harness_query_int(db,
                            "SELECT COUNT(*) FROM http_attempts;",
                            &value) && (value == 3LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests WHERE "
+                        "web_search_enabled=1;",
+                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_continuation';",

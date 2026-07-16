@@ -1679,11 +1679,6 @@ static char *strappy_responses_build_request_json(
       allow_tool_calls ? "auto" : "none") &&
     strappy_responses_buffer_append_string(&buffer, "\",\"tools\":") &&
     strappy_responses_buffer_append_string(&buffer, tools_json);
-  if (ok && !config->web_search_enabled) {
-    ok = strappy_responses_buffer_append_string(
-      &buffer,
-      ",\"provider\":{\"require_parameters\":true}");
-  }
   ok = ok && strappy_responses_buffer_append_string(&buffer, "}");
   if (!ok) {
     strappy_responses_buffer_destroy(&buffer);

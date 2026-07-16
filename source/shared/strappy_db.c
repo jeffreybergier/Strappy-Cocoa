@@ -2,6 +2,7 @@
 
 #include "strappy_config.h"
 #include "strappy_core.h"
+#include "strappy_tools.h"
 
 #include <cJSON.h>
 #include <sqlite3.h>
@@ -11958,7 +11959,9 @@ static int strappy_db_semantic_request_has_web_search(cJSON *tools)
 
     type = cJSON_IsObject(tool) ? cJSON_GetObjectItem(tool, "type") : NULL;
     if (cJSON_IsString(type) && (type->valuestring != NULL) &&
-        ((strcmp(type->valuestring, "web_search") == 0) ||
+        ((strcmp(type->valuestring,
+                 STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) ||
+         (strcmp(type->valuestring, "web_search") == 0) ||
          (strcmp(type->valuestring, "web_search_preview") == 0))) {
       return 1;
     }
