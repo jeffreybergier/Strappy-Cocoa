@@ -13,7 +13,7 @@
 "Tool" = "Tool";
 "Tool Call" = "Tool Call";
 "Tool Result" = "Tool Result";
-"API Call" = "API Call";
+"Response Status" = "Response Status";
 "API Error" = "API Error";
 "Response Item" = "Response Item";
 "Request" = "Request";
@@ -174,7 +174,9 @@
 "Prompt request is already running." = "Prompt request is already running.";
 "Prompts" = "Prompts";
 "Refresh" = "Refresh";
-"Request Metadata" = "Request Metadata";
+"Response Metadata" = "Response Metadata";
+"Waiting for response..." = "Waiting for response...";
+"No HTTP response" = "No HTTP response";
 "Retry" = "Retry";
 "Save" = "Save";
 "Scan path is empty." = "Scan path is empty.";

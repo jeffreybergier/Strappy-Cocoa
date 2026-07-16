@@ -76,12 +76,16 @@ static int harness_check_localized_labels(void)
        harness_expect_equal(labels->harness, "Harness") &&
        harness_expect_equal(labels->developer, "Developer") &&
        harness_expect_equal(labels->thinking, "Thinking") &&
-       harness_expect_equal(labels->request_metadata, "Request Metadata") &&
+       harness_expect_equal(labels->response_metadata, "Response Metadata") &&
+       harness_expect_equal(labels->waiting_for_response,
+                            "Waiting for response...") &&
+       harness_expect_equal(labels->no_http_response,
+                            "No HTTP response") &&
        harness_expect_equal(labels->tool, "Tool") &&
        harness_expect_equal(labels->tool_call, "Tool Call") &&
        harness_expect_equal(labels->tool_result, "Tool Result") &&
        harness_expect_equal(labels->retry, "Retry") &&
-       harness_expect_equal(labels->api_call, "API Call") &&
+       harness_expect_equal(labels->response_status, "Response Status") &&
        harness_expect_equal(labels->api_error, "API Error") &&
        harness_expect_equal(labels->response_item, "Response Item") &&
        harness_expect_equal(labels->request, "Request") &&
@@ -251,11 +255,22 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function decorateAPIExchanges") &&
        harness_expect_contains(page_html, "function toggleAPIExchange") &&
        harness_expect_contains(page_html,
-                               "h.className='api-exchange-turn-header "
-                               "disclosure-title'") &&
+                               "h.className='api-exchange-turn-header';"
+                               "if(!active){h.className+=' disclosure-title'") &&
        harness_expect_contains(page_html,
                                "h.onclick=function(){return "
                                "toggleAPIExchange(a);};") &&
+       harness_expect_contains(page_html,
+                               "function toggleResponseStatus(a)") &&
+       harness_expect_contains(page_html,
+                               "function responseStatusSummary(row)") &&
+       harness_expect_contains(page_html,
+                               "function responseAttemptSummary(row)") &&
+       harness_expect_contains(page_html,
+                               "function ensureResponseAttemptLabel(row)") &&
+       harness_expect_contains(page_html,
+                               "role.onclick=function(){return "
+                               "toggleResponseStatus(a);};") &&
        harness_expect_not_contains(page_html,
                                    "a.onclick=function(){return "
                                    "toggleAPIExchange(this);") &&
@@ -284,8 +299,10 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                ".tool-column-disclosure,"
                                ".prompt-group-disclosure,.tool-disclosure,"
-                               ".reasoning-disclosure,.metadata-disclosure,"
-                               ".api-reasoning-disclosure{display:inline-block;"
+                               ".reasoning-disclosure,"
+                               ".api-reasoning-disclosure,"
+                               ".response-metadata-disclosure{"
+                               "display:inline-block;"
                                "box-sizing:border-box;width:12px;"
                                "margin-right:4px;font-size:12px;line-height:1;"
                                "vertical-align:baseline;text-align:center;}") &&
@@ -294,12 +311,24 @@ static int harness_check_page_scripts(void)
                                "box-sizing:border-box;width:16px;"
                                "margin-right:4px;font-size:14px;line-height:1;"
                                "vertical-align:baseline;text-align:center;}") &&
+       harness_expect_contains(page_html,
+                               ".response-status-disclosure{display:inline-block;"
+                               "box-sizing:border-box;width:12px;"
+                               "margin-right:4px;font-size:12px;line-height:1;"
+                               "vertical-align:baseline;text-align:center;}") &&
        harness_expect_not_contains(page_html,
                                    ".disclosure-title .fa-angle-right") &&
        harness_expect_contains(page_html,
                                "line-height:1;vertical-align:-.08em;}") &&
+       harness_expect_not_contains(page_html,
+                                   ".request-metadata-toggle{") &&
+       harness_expect_not_contains(page_html,
+                                   ".api-attempt-details-toggle{") &&
        harness_expect_contains(page_html,
-                               ".request-metadata-toggle{color:#4e5961;"
+                               ".response-status-toggle{color:#4e5961;"
+                               "text-decoration:none;}") &&
+       harness_expect_contains(page_html,
+                               ".response-metadata-toggle{color:#4e5961;"
                                "text-decoration:none;}") &&
        harness_expect_contains(page_html,
                                ".tool-column-toggle{color:#4e5961;"
@@ -313,13 +342,10 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                ".reasoning-label{font-size:12px;font-weight:bold;"
                                "line-height:1.3;color:#30363b;margin:0 0 8px;}") &&
-       harness_expect_contains(page_html,
-                               ".request-metadata-title{font-family:inherit;"
-                               "font-size:12px;line-height:1.3;font-weight:bold;"
-                               "color:#30363b;margin:0 0 8px;white-space:nowrap;"
-                               "overflow:hidden;text-overflow:ellipsis;}") &&
        harness_expect_not_contains(page_html,
-                                   ".request-metadata-summary{") &&
+                                   ".api-attempt-details-title{") &&
+       harness_expect_not_contains(page_html,
+                                   "API Attempt Details") &&
        harness_expect_contains(page_html,
                                ".tool-card-summary{vertical-align:baseline;}") &&
        harness_expect_contains(page_html,
@@ -333,17 +359,15 @@ static int harness_check_page_scripts(void)
                                "color:#30363b;margin:0 -12px;"
                                "padding:8px 12px;") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-item .role{margin:0 -10px;"
-                               "padding:5px 10px;}") &&
+                               ".api-exchange-item>.role,"
+                               ".api-exchange-status>"
+                               ".response-status-section>.role{"
+                               "display:block;box-sizing:border-box;width:auto;"
+                               "margin:0 -10px;padding:3px 10px;"
+                               "background:#dfe4e8;") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-metadata>.role{margin:0 -10px;"
-                               "padding:5px 10px;}") &&
-       harness_expect_not_contains(page_html,
-                                   ".api-exchange-metadata.api_call>.role") &&
-       harness_expect_not_contains(page_html,
-                                   ".api-exchange-metadata.api_call>.bubble"
-                                   "{display:none;}") &&
-       harness_expect_contains(page_html, ".api-exchange-metadata{") &&
+                               ".api-exchange-item>.bubble{margin:0 -10px;}") &&
+       harness_expect_contains(page_html, ".api-exchange-status{") &&
        harness_expect_not_contains(page_html, ".api-exchange-section-toggle{") &&
        harness_expect_not_contains(page_html,
                                    ".api-exchange-section-collapsed-row{") &&
@@ -359,7 +383,7 @@ static int harness_check_page_scripts(void)
                                ".tool-card-open .tool-card-body{display:block;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row{position:relative;border-top:0;"
-                               "background:#b2bbc2;color:#30363b;"
+                               "background:#dfe4e8;color:#30363b;"
                                "padding:0 10px;}") &&
        harness_expect_not_contains(page_html, "border-left:5px solid") &&
        harness_expect_contains(page_html,
@@ -378,12 +402,20 @@ static int harness_check_page_scripts(void)
                                ".api-exchange-end{margin-bottom:0;"
                                "border-bottom:0;}") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-row>.request-metadata{"
-                               "border-top:0;border-bottom:0;}") &&
+                               ".response-metadata-label{display:block;"
+                               "box-sizing:border-box;width:100%;"
+                               "font-size:12px;"
+                               "font-weight:bold;line-height:1.3;") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-metadata>.request-metadata{"
-                               "margin:0 -10px;padding:8px 10px;"
-                               "border-bottom:0;}") &&
+                               ".response-metadata-collapsed>"
+                               ".response-metadata-body{display:none;}") &&
+       harness_expect_contains(page_html,
+                               ".response-status-collapsed>"
+                               ".response-status-section>.bubble,"
+                               ".response-status-collapsed>.meta{display:none;}") &&
+       harness_expect_not_contains(page_html,
+                                   ".response-status-collapsed>"
+                                   ".response-metadata") &&
        harness_expect_not_contains(page_html,
                                    "function apiExchangeColorClass") &&
        harness_expect_not_contains(page_html, "api-exchange-color-") &&
@@ -395,19 +427,86 @@ static int harness_check_page_scripts(void)
                                "padding:4px 10px;font-size:12px;"
                                "line-height:1.2;font-weight:bold;"
                                "color:#30363b;background:#c1c8ce;}") &&
+       harness_expect_not_contains(page_html,
+                                   ".api-exchange-section-label{"
+                                   "margin:0 -10px;padding:6px") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-row>.role{background:#c1c8ce;}") &&
+                               ".api-exchange-item>.reasoning,"
+                               ".api-exchange-item>.tool-column{"
+                               "margin:0 -10px;padding:3px 10px 4px;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-item>.reasoning."
+                               "reasoning-collapsed,"
+                               ".api-exchange-item>.tool-column."
+                               "tool-column-collapsed{padding-bottom:3px;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-item.api_reasoning>.bubble{"
+                               "padding:3px 10px;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-item.api-reasoning-group-end{"
+                               "padding-bottom:4px;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-item.api-reasoning-group-end."
+                               "api-reasoning-collapsed{padding-bottom:0;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-item.api_function_call>.bubble,"
+                               ".api-exchange-item.api_function_output>.bubble,"
+                               ".api-exchange-item.api_server_tool>.bubble{"
+                               "padding:0 10px;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-item .tool-card-toggle{"
+                               "padding-top:3px;padding-bottom:3px;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-item .tool-card-body{"
+                               "margin-bottom:0;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-item.api_server_tool>"
+                               ".bubble.tool-card-open{padding-bottom:4px;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-status{padding-top:0;"
+                               "padding-bottom:0;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-status>"
+                               ".response-status-section{box-sizing:border-box;"
+                               "margin:0;padding:0 0 4px;"
+                               "background:#dfe4e8;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-status."
+                               "response-status-collapsed>"
+                               ".response-status-section{padding-bottom:0;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-status>"
+                               ".response-status-section>.bubble{"
+                               "margin:2px 0 0;") &&
+       harness_expect_contains(page_html,
+                               ".response-metadata{max-width:none;"
+                               "box-sizing:border-box;border:0;"
+                               "background:#dfe4e8;color:#30363b;"
+                               "padding:0 0 4px;") &&
+       harness_expect_contains(page_html,
+                               ".response-metadata-collapsed{"
+                               "padding-bottom:0;}") &&
+       harness_expect_contains(page_html,
+                               ".response-metadata-body{white-space:pre-wrap;"
+                               "border:1px solid #959fa7;background:#dfe4e8;"
+                               "padding:4px 6px;margin:2px 0 0;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-row>.role,"
+                               ".api-exchange-row>"
+                               ".response-status-section>.role{"
+                               "background:#dfe4e8;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row.api_reasoning>.role{"
                                "background:#dfe4e8;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row>.bubble,"
                                ".api-exchange-row>.reasoning,"
-                               ".api-exchange-row>.request-metadata{"
+                               ".api-exchange-row>.response-status-section,"
+                               ".api-exchange-row>.response-metadata{"
                                "background:#dfe4e8;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row>.tool-column{"
-                               "background:#c1c8ce;}") &&
+                               "background:#dfe4e8;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row .tool-card-body,"
                                ".api-exchange-row .tool-table-wrap,"
@@ -462,7 +561,12 @@ static int harness_check_page_scripts(void)
        harness_expect_not_contains(page_html,
                                    ".assistant .role{display:none;}") &&
        harness_expect_contains(page_html,
-                               "var strappyAPIExchangeCollapsed={};") &&
+                               "var strappyAPIRoundCollapsed={};"
+                               "var strappyAPIRoundSettled={};") &&
+       harness_expect_contains(page_html,
+                               "var strappyResponseStatusCollapsed={};") &&
+       harness_expect_contains(page_html,
+                               "var strappyAPIReasoningCollapsed={};") &&
        harness_expect_not_contains(page_html,
                                    "strappyAPIExchangeSectionCollapsed") &&
        harness_expect_contains(page_html,
@@ -470,19 +574,67 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "function rowIsAPIExchangeConversation") &&
        harness_expect_contains(page_html,
-                               "function apiExchangeCollapsed") &&
+                               "function apiRoundCollapsed") &&
+       harness_expect_contains(page_html,
+                               "if(promptGroupIsProcessing(promptKey))"
+                               "return 0;") &&
+       harness_expect_contains(page_html,
+                               "typeof strappyAPIRoundCollapsed[id]=="
+                               "'undefined'?(apiRoundEndedInError(rows,id)?"
+                               "0:1):") &&
        harness_expect_contains(page_html,
                                "function rowIsAPIExchangeError(row)") &&
        harness_expect_contains(page_html,
                                "function apiExchangeRowsHaveError(rows)") &&
        harness_expect_contains(page_html,
-                               "?(hasError?0:1):") &&
+                               "function apiRoundEndedInError(rows,id)") &&
        harness_expect_contains(page_html,
-                               "function setAPIExchangesCollapsedForPrompt") &&
+                               "if(apiRoundId(rows[i])==id&&"
+                               "rowIsResponseStatus(rows[i]))"
+                               "last=rows[i];") &&
        harness_expect_contains(page_html,
-                               "function settleAPIExchangesForPrompt(group)") &&
+                               "return last&&rowIsAPIExchangeError(last)?"
+                               "1:0;") &&
        harness_expect_contains(page_html,
-                               "exchanges[key].hasError?0:1;") &&
+                               "function promptGroupIsProcessing(group)") &&
+       harness_expect_contains(page_html,
+                               "function beginAPIRoundsForPrompt(group)") &&
+       harness_expect_contains(page_html,
+                               "function collapseAPIRoundsForPrompt(group)") &&
+       harness_expect_contains(page_html,
+                               "id=apiRoundId(rows[i]);") &&
+       harness_expect_contains(page_html,
+                               "group===''||strappyAPIRoundSettled[group]") &&
+       harness_expect_contains(page_html,
+                               "strappyAPIRoundCollapsed[id]="
+                               "apiRoundEndedInError(rows,id)?0:1;") &&
+       harness_expect_contains(page_html,
+                               "collapsed=apiRoundCollapsed(g.id,g.promptKey,"
+                               "g.rows);") &&
+       harness_expect_not_contains(page_html,
+                                   "function responseStatusIsSuccessful") &&
+       harness_expect_contains(page_html,
+                               "function responseStatusCollapsed(row,"
+                               "exchangeHasError)") &&
+       harness_expect_contains(page_html,
+                               "typeof strappyResponseStatusCollapsed[id]=="
+                               "'undefined'?(exchangeHasError?0:1):") &&
+       harness_expect_contains(page_html,
+                               "function decorateResponseStatusRow(row,"
+                               "exchangeHasError)") &&
+       harness_expect_contains(page_html,
+                               "active=promptGroupIsProcessing("
+                               "promptGroupKey(row))") &&
+       harness_expect_contains(page_html,
+                               "if(resolved&&!active)") &&
+       harness_expect_contains(page_html,
+                               "setRowClass(row,'response-status-collapsed',"
+                               "collapsed);") &&
+       harness_expect_contains(page_html,
+                               "function toggleResponseMetadata(a)") &&
+       harness_expect_contains(page_html,
+                               "function setResponseMetadataCollapsed("
+                               "box,collapsed)") &&
        harness_expect_contains(page_html,
                                "current=a.getAttribute('aria-expanded')=="
                                "'false'?1:0;") &&
@@ -495,6 +647,37 @@ static int harness_check_page_scripts(void)
                                "setRowClass(row,'api-exchange-collapsed-"
                                "conversation',collapsed&&conversation);") &&
        harness_expect_contains(page_html,
+                               "function apiExchangeSectionLabel(row,"
+                               "direction)") &&
+       harness_expect_contains(page_html,
+                               "ensureAPIExchangeSectionLabel("
+                               "g.requestRows[0],'request',0)") &&
+       harness_expect_contains(page_html,
+                               "if(responseRows.length)"
+                               "ensureResponseAttemptLabel(responseRows[0])") &&
+       harness_expect_contains(page_html,
+                               "else if(statusRow)"
+                               "ensureResponseAttemptLabel(statusRow)") &&
+       harness_expect_contains(page_html,
+                               "function moveResponseStatusToAttemptEnd("
+                               "statusRow,responseRows)") &&
+       harness_expect_contains(page_html,
+                               "last=responseRows[responseRows.length-1]") &&
+       harness_expect_contains(page_html,
+                               "parent.insertBefore(statusRow,next)") &&
+       harness_expect_contains(page_html,
+                               "moveResponseStatusesToAttemptEnds(g)") &&
+       harness_expect_contains(page_html,
+                               "row.insertBefore(n,before)") &&
+       harness_expect_contains(page_html,
+                               "function decorateAPIReasoningGroup(rows,"
+                               "active)") &&
+       harness_expect_contains(page_html,
+                               "api-reasoning-group-secondary") &&
+       harness_expect_contains(page_html,
+                               "setRowClass(row,'api-reasoning-group-end',"
+                               "i===reasoning.length-1)") &&
+       harness_expect_contains(page_html,
                                ".api-exchange-collapsed-conversation>"
                                ".api-exchange-section-label{display:none;}") &&
        harness_expect_not_contains(page_html,
@@ -503,9 +686,11 @@ static int harness_check_page_scripts(void)
                                    "function apiToolGroupCollapsed") &&
        harness_expect_contains(page_html,
                                "var kind=isAPIToolCallRow(row)?'calls':"
-                               "'outputs'") &&
+                               "'outputs';return id!==''") &&
        harness_expect_contains(page_html,
                                "'api-call-'+id+'-'+kind") &&
+       harness_expect_contains(page_html,
+                               "'api-round-'+round+'-'+direction+'-'+kind") &&
        harness_expect_contains(page_html,
                                "groups[key]={rows:[]}") &&
        harness_expect_contains(page_html,
@@ -515,9 +700,27 @@ static int harness_check_page_scripts(void)
        harness_expect_not_contains(page_html,
                                    "role.style.display='block'") &&
        harness_expect_contains(page_html,
-                               "function rowIsAPIExchangeMetadata") &&
+                               "function rowIsResponseStatus") &&
        harness_expect_contains(page_html,
                                "function apiExchangeCumulativeUsageCost") &&
+       harness_expect_not_contains(page_html,
+                                   "function formatAPIExchangeHTTPStatus") &&
+       harness_expect_contains(page_html,
+                               "function formatAPIExchangeAttemptState(value)") &&
+       harness_expect_contains(page_html,
+                               "function responseAttemptSummary(row)") &&
+       harness_expect_contains(page_html,
+                               "function responseStatusSummary(row)") &&
+       harness_expect_contains(page_html,
+                               "if(!responseStatusResolved(row))return "
+                               "label+': '") &&
+       harness_expect_contains(page_html,
+                               "label+=': '+(http!==''?'HTTP '+http") &&
+       harness_expect_contains(page_html,
+                               "http!==''?'HTTP '+http") &&
+       harness_expect_contains(page_html,
+                               "if(state!=='')label+=' \\u00b7 '+"
+                               "formatAPIExchangeAttemptState(state)") &&
        harness_expect_contains(page_html,
                                "function formatCumulativeUsageCost(value){"
                                "return '$'+(value!==''?value:'-');}") &&
@@ -525,10 +728,16 @@ static int harness_check_page_scripts(void)
                                    "(value!==''?value:'-')+' total'") &&
        harness_expect_contains(page_html,
                                "titleText=roundLabel+' '+roundNumber;") &&
+       harness_expect_not_contains(page_html,
+                                   "parseInt(attemptNumber,10)") &&
        harness_expect_contains(page_html,
-                               "if(parseInt(attemptNumber,10)>1)"
-                               "titleText+=' \\u00b7 '+attemptLabel+' '+"
-                               "attemptNumber;") &&
+                               "return label+' \\u00b7 '+attemptLabel+' '+"
+                               "attempt;") &&
+       harness_expect_not_contains(page_html,
+                                   "formatAPIExchangeHTTPStatus(httpStatus)") &&
+       harness_expect_not_contains(page_html,
+                                   "formatAPIExchangeAttemptState("
+                                   "attemptState)") &&
        harness_expect_contains(page_html,
                                "titleText+=' \\u00b7 '+"
                                "formatCumulativeUsageCost("
@@ -536,6 +745,7 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(
          page_html,
          "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed,"
+         "active,"
          "apiExchangeCumulativeUsageCost(g.rows));") &&
        harness_expect_contains(page_html,
                                "setNodeText(title,titleText);") &&
@@ -626,6 +836,12 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                ".processing-status-active .api-reasoning-toggle{"
                                "display:none;}") &&
+       harness_expect_not_contains(page_html,
+                                   ".processing-status-active "
+                                   ".api-exchange-toggle") &&
+       harness_expect_not_contains(page_html,
+                                   ".processing-status-active "
+                                   ".api-exchange-turn-header{") &&
        harness_expect_contains(page_html,
                                ".processing-status-active .tool-disclosure{"
                                "display:none;}") &&
@@ -640,12 +856,16 @@ static int harness_check_page_scripts(void)
                                ".row.tool{display:none;}") &&
        harness_expect_contains(page_html, ".processing-status{position:fixed") &&
        harness_expect_contains(page_html,
-                               ".bubble,.reasoning,.tool-column,.request-metadata{"
+                               ".bubble,.reasoning,.tool-column,.response-metadata{"
                                "box-shadow:none;}") &&
-       harness_expect_contains(page_html, ".request-metadata-error") &&
+       harness_expect_contains(page_html, ".response-metadata-error") &&
        harness_expect_contains(page_html, "function metadataFinishStatus") &&
        harness_expect_contains(page_html, "native_finish_reason") &&
-       harness_expect_contains(page_html, "request-metadata-error") &&
+       harness_expect_contains(page_html, "function renderResponseMetadata") &&
+       harness_expect_contains(page_html, "function formatResponseMetadata") &&
+       harness_expect_not_contains(page_html,
+                                   "addMetaLine(lines,'HTTP status',"
+                                   "root.http_status)") &&
        harness_expect_contains(page_html,
                                "addMetaLine(lines,'Cost',usage.cost);") &&
        harness_expect_contains(page_html,
@@ -654,12 +874,17 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "addMetaLine(lines,'Output tokens',"
                                "usage.output_tokens);") &&
-       harness_expect_not_contains(page_html, "formatMetadataSummary") &&
+       harness_expect_not_contains(page_html, "function toggleMetadata") &&
        harness_expect_not_contains(page_html, "ERROR '+detail+' | '") &&
        harness_expect_contains(page_html, "function setProcessingStatus") &&
        harness_expect_contains(page_html, "function clearProcessingStatus") &&
        harness_expect_contains(page_html, "function clearProcessingStatusNode") &&
        harness_expect_contains(page_html, "function initProcessingStatusFromRenderState") &&
+       harness_expect_not_contains(page_html,
+                                   "setTimeout(initProcessingStatusFromRenderState") &&
+       harness_expect_contains(page_html,
+                               "<script>initProcessingStatusFromRenderState();"
+                               "renderMessageDecorations(document);") &&
        harness_expect_contains(page_html,
                                "var strappyProcessingPromptGroupKey='';") &&
        harness_expect_contains(page_html,
@@ -675,30 +900,32 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "syncProcessingInteractionState(0,group)") &&
        harness_expect_contains(page_html,
-                               "setAPIExchangesCollapsedForPrompt(group,0);") &&
-       harness_expect_contains(page_html,
-                               "settleAPIExchangesForPrompt("
+                               "collapseAPIRoundsForPrompt("
                                "strappyProcessingPromptGroupKey);") &&
+       harness_expect_contains(page_html,
+                               "if(group!==strappyProcessingPromptGroupKey)"
+                               "beginAPIRoundsForPrompt(group);") &&
        harness_expect_contains(page_html,
                                "strappyProcessingPromptGroupKey=group;"
                                "syncProcessingInteractionState(1,group);"
                                "decorateAPIExchanges(document);"
                                "decorateAPIToolGroups(document);") &&
        harness_expect_contains(page_html,
-                               "settleAPIExchangesForPrompt(group);"
+                               "collapseAPIRoundsForPrompt(group);"
                                "strappyProcessingStatus=null;"
                                "syncProcessingInteractionState(0,group);"
                                "strappyProcessingStatusDirty=1;"
                                "decorateAPIExchanges(document);"
                                "decorateAPIToolGroups(document);") &&
-       harness_expect_not_contains(page_html,
-                                   "setAPIExchangesCollapsedForPrompt(group,1)") &&
-       harness_expect_contains(page_html,
-                               "function toggleMetadata(a){"
-                               "if(processingInteractionsLocked())return false;") &&
        harness_expect_contains(page_html,
                                "function toggleAPIExchange(a){"
-                               "if(processingInteractionsLocked())return false;") &&
+                               "var id=a&&a.getAttribute?") &&
+       harness_expect_contains(page_html,
+                               "if(id===''||promptGroupIsProcessing(group))"
+                               "return false;") &&
+       harness_expect_contains(page_html,
+                               "if(resolved&&!active){a=document.createElement"
+                               "('a');a.className='response-status-toggle'") &&
        harness_expect_not_contains(page_html,
                                    "function toggleAPIToolGroup(a)") &&
        harness_expect_contains(page_html,
@@ -1380,7 +1607,7 @@ static int harness_check_harness_message(void)
   return ok;
 }
 
-static int harness_check_harness_assistant_metadata(void)
+static int harness_check_assistant_ignores_attempt_metadata(void)
 {
   strappy_webview_message message;
   char *message_html;
@@ -1402,12 +1629,9 @@ static int harness_check_harness_assistant_metadata(void)
   }
 
   ok = harness_expect_contains(message_html, "data-actor=\"harness\"") &&
-       harness_expect_contains(message_html, "request-metadata") &&
-       harness_expect_contains(message_html,
-                               "request-metadata-title disclosure-title\" "
-                               "onclick=\"return toggleMetadata(this)\"") &&
-       harness_expect_not_contains(message_html,
-                                   "request-metadata-summary") &&
+       harness_expect_not_contains(message_html, "api-attempt-details") &&
+       harness_expect_not_contains(message_html, "response-metadata") &&
+       harness_expect_not_contains(message_html, "request-metadata") &&
        harness_expect_contains(message_html, "Harness thinking") &&
        harness_expect_contains(message_html, "Learning Summary Complete");
 
@@ -1439,7 +1663,7 @@ static int harness_check_error_message_state(void)
   ok = harness_expect_contains(message_html,
                                "class=\"row assistant state-error\"") &&
        harness_expect_not_contains(message_html, "streaming-active") &&
-       harness_expect_contains(message_html, "request-metadata");
+       harness_expect_not_contains(message_html, "response-metadata");
 
   strappy_webview_free(message_html);
   return ok;
@@ -1450,55 +1674,137 @@ static int harness_check_api_exchange_status_states(void)
   strappy_webview_message message;
   char *error_html;
   char *success_html;
+  char *transport_html;
   int ok;
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-call-success";
+  message.round_id = 10LL;
   message.api_call_id = 20LL;
   message.round_number = 1L;
   message.attempt_number = 1L;
   message.http_status = 200L;
+  message.attempt_state = "completed";
+  message.request_method = "POST";
+  message.request_endpoint = "/responses";
   message.role = "api_call";
   message.kind = "response_api_call";
-  message.text = "POST /responses\ncompleted / HTTP 200";
+  message.text = "Model: example/success\nStarted: 2026-07-16";
   message.metadata_json =
-    "{\"id\":\"resp-success\",\"status\":\"completed\"}";
+    "{\"id\":\"resp-success\",\"status\":\"completed\","
+    "\"http_status\":200}";
   success_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-call-error";
+  message.round_id = 11LL;
   message.api_call_id = 21LL;
   message.round_number = 2L;
   message.attempt_number = 1L;
   message.http_status = 400L;
+  message.attempt_state = "http_error";
+  message.request_method = "POST";
+  message.request_endpoint = "/responses";
   message.role = "api_error";
   message.kind = "response_api_call";
-  message.text =
-    "POST /responses\nhttp_error / HTTP 400\nServer tool request failed";
+  message.text = "Model: example/error\nStarted: 2026-07-16";
   message.metadata_json =
-    "{\"error\":{\"code\":400,"
+    "{\"status\":\"http_error\",\"http_status\":400,"
+    "\"error\":{\"code\":400,"
     "\"message\":\"Server tool request failed\"}}";
   message.is_error = 1;
   error_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
 
+  memset(&message, 0, sizeof(message));
+  message.element_id = "response-call-transport-error";
+  message.round_id = 12LL;
+  message.api_call_id = 22LL;
+  message.round_number = 3L;
+  message.attempt_number = 1L;
+  message.attempt_state = "transport_error";
+  message.request_method = "POST";
+  message.request_endpoint = "/responses";
+  message.role = "api_error";
+  message.kind = "response_api_call";
+  message.text = "Request: POST /responses\nTransport error: Timed out";
+  message.metadata_json = "";
+  message.is_error = 1;
+  transport_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+
   ok = (success_html != NULL) && (error_html != NULL) &&
+       (transport_html != NULL) &&
        harness_expect_contains(success_html,
                                "class=\"row api_call\"") &&
        harness_expect_contains(success_html,
-                               "<div class=\"role\">API Call</div>") &&
+                               "<div class=\"response-status-section\">"
+                               "<div class=\"role\">Response Status</div>"
+                               "<div class=\"bubble\">") &&
        harness_expect_contains(success_html,
-                               "completed / HTTP 200") &&
+                               "<div class=\"role\">Response Status</div>") &&
+       harness_expect_not_contains(success_html,
+                                   "completed / HTTP 200") &&
+       harness_expect_contains(success_html,
+                               "data-attempt-state=\"completed\"") &&
+       harness_expect_contains(success_html,
+                               "data-http-status=\"200\"") &&
+       harness_expect_contains(success_html,
+                               "data-response-status-label="
+                               "\"Response Status\"") &&
+       harness_expect_contains(success_html,
+                               "data-request-method=\"POST\"") &&
+       harness_expect_contains(success_html,
+                               "data-request-endpoint=\"/responses\"") &&
+       harness_expect_contains(success_html,
+                               "data-waiting-for-response-label="
+                               "\"Waiting for response...\"") &&
+       harness_expect_contains(success_html,
+                               "data-no-http-response-label="
+                               "\"No HTTP response\"") &&
+       harness_expect_contains(success_html,
+                               "class=\"response-metadata "
+                               "response-metadata-collapsed\"") &&
+       harness_expect_contains(success_html,
+                               "</div></div><div class=\"response-metadata "
+                               "response-metadata-collapsed\"") &&
+       harness_expect_contains(success_html,
+                               "class=\"response-metadata-label "
+                               "disclosure-title\" onclick=\"return "
+                               "toggleResponseMetadata(this)\"") &&
+       harness_expect_contains(success_html,
+                               "class=\"response-metadata-toggle\" "
+                               "href=\"#\" aria-expanded=\"false\"") &&
+       harness_expect_contains(success_html,
+                               "class=\"response-metadata-disclosure\">") &&
+       harness_expect_contains(success_html,
+                               "fa-angle-right") &&
+       harness_expect_contains(success_html,
+                               "</span></a>Response Metadata</div>") &&
+       harness_expect_contains(success_html,
+                               "class=\"response-metadata-body\"></div>") &&
+       harness_expect_not_contains(success_html,
+                                   "api-call-details-title") &&
+       harness_expect_not_contains(success_html,
+                                   "API Attempt Details") &&
        harness_expect_not_contains(success_html, "state-error") &&
        harness_expect_contains(error_html,
                                "class=\"row api_error state-error\"") &&
        harness_expect_contains(error_html,
-                               "<div class=\"role\">API Error</div>") &&
+                               "<div class=\"role\">Response Status</div>") &&
+       harness_expect_not_contains(error_html,
+                                   "<div class=\"meta status\">HTTP 400</div>") &&
        harness_expect_contains(error_html,
-                               "Server tool request failed") &&
+                               "data-attempt-state=\"http_error\"") &&
        harness_expect_contains(error_html,
-                               "<div class=\"meta status\">HTTP 400</div>") &&
-       harness_expect_contains(error_html, "request-metadata");
+                               "data-http-status=\"400\"") &&
+       harness_expect_contains(error_html,
+                               "data-response-status-label="
+                               "\"Response Status\"") &&
+       harness_expect_contains(error_html, "response-metadata") &&
+       harness_expect_contains(transport_html,
+                               "data-attempt-state=\"transport_error\"") &&
+       harness_expect_not_contains(transport_html, "response-metadata");
 
+  strappy_webview_free(transport_html);
   strappy_webview_free(error_html);
   strappy_webview_free(success_html);
   return ok;
@@ -1522,14 +1828,19 @@ static int harness_check_responses_items(void)
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-call-1";
+  message.round_id = 3LL;
   message.api_call_id = 1LL;
   message.round_number = 3L;
   message.attempt_number = 2L;
+  message.http_status = 200L;
+  message.attempt_state = "completed";
+  message.request_method = "POST";
+  message.request_endpoint = "/responses";
   message.cumulative_usage_cost = 0.02392002;
   message.has_cumulative_usage_cost = 1;
   message.role = "api_call";
   message.kind = "response_api_call";
-  message.text = "POST /responses\ncompleted / HTTP 200";
+  message.text = "Model: example/model\nStarted: 2026-07-16";
   message.metadata_json =
     "{\"id\":\"resp-test\",\"status\":\"completed\","
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":8}}";
@@ -1537,6 +1848,7 @@ static int harness_check_responses_items(void)
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-reasoning-1";
+  message.round_id = 3LL;
   message.api_call_id = 1LL;
   message.round_number = 3L;
   message.attempt_number = 2L;
@@ -1549,6 +1861,7 @@ static int harness_check_responses_items(void)
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-function-1";
+  message.round_id = 3LL;
   message.api_call_id = 1LL;
   message.direction = "response";
   message.role = "api_function_call";
@@ -1562,7 +1875,8 @@ static int harness_check_responses_items(void)
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-output-1";
-  message.api_call_id = 2LL;
+  message.round_id = 4LL;
+  message.round_number = 4L;
   message.direction = "request";
   message.role = "api_function_output";
   message.kind = "function_call_output";
@@ -1575,6 +1889,7 @@ static int harness_check_responses_items(void)
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-web-search-1";
+  message.round_id = 4LL;
   message.api_call_id = 2LL;
   message.direction = "response";
   message.role = "api_item";
@@ -1589,6 +1904,7 @@ static int harness_check_responses_items(void)
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-web-fetch-1";
+  message.round_id = 4LL;
   message.api_call_id = 2LL;
   message.direction = "response";
   message.role = "api_item";
@@ -1602,7 +1918,7 @@ static int harness_check_responses_items(void)
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-developer-1";
-  message.api_call_id = 2LL;
+  message.round_id = 4LL;
   message.direction = "request";
   message.role = "developer";
   message.kind = "message";
@@ -1614,15 +1930,24 @@ static int harness_check_responses_items(void)
        (search_html != NULL) && (fetch_html != NULL) &&
        (developer_html != NULL) &&
        harness_expect_contains(call_html, "class=\"row api_call\"") &&
+       harness_expect_contains(call_html, "data-round-id=\"3\"") &&
        harness_expect_contains(call_html, "data-api-call-id=\"1\"") &&
        harness_expect_contains(call_html, "data-round-number=\"3\"") &&
        harness_expect_contains(call_html, "data-round-label=\"Round\"") &&
        harness_expect_contains(call_html, "data-attempt-number=\"2\"") &&
        harness_expect_contains(call_html, "data-attempt-label=\"Attempt\"") &&
+       harness_expect_contains(call_html, "data-request-method=\"POST\"") &&
+       harness_expect_contains(call_html,
+                               "data-request-endpoint=\"/responses\"") &&
        harness_expect_contains(call_html,
                                "data-cumulative-usage-cost=\"0.02392002\"") &&
-       harness_expect_contains(call_html, "<div class=\"role\">API Call</div>") &&
-       harness_expect_contains(call_html, "request-metadata") &&
+       harness_expect_contains(call_html,
+                               "<div class=\"role\">Response Status</div>") &&
+       harness_expect_contains(call_html, "response-metadata") &&
+       harness_expect_contains(call_html,
+                               "data-attempt-state=\"completed\"") &&
+       harness_expect_contains(call_html,
+                               "data-http-status=\"200\"") &&
        harness_expect_contains(reasoning_html,
                                "class=\"row api_reasoning "
                                "api-reasoning-collapsed\"") &&
@@ -1630,6 +1955,8 @@ static int harness_check_responses_items(void)
                                "data-direction=\"response\"") &&
        harness_expect_contains(reasoning_html,
                                "data-direction-label=\"Response\"") &&
+       harness_expect_contains(reasoning_html,
+                               "data-thinking-label=\"Thinking\"") &&
        harness_expect_contains(reasoning_html,
                                "<div class=\"role disclosure-title\" "
                                "onclick=\"return toggleAPIReasoning(this)\">") &&
@@ -1678,7 +2005,9 @@ static int harness_check_responses_items(void)
        harness_expect_contains(output_html,
                                "class=\"row api_function_output\"") &&
        harness_expect_contains(output_html,
-                               "data-api-call-id=\"2\"") &&
+                               "data-round-id=\"4\"") &&
+       harness_expect_not_contains(output_html,
+                                   "data-api-call-id=") &&
        harness_expect_contains(output_html,
                                "data-direction=\"request\"") &&
        harness_expect_contains(output_html,
@@ -1786,7 +2115,7 @@ int main(void)
   if (!harness_check_harness_message()) {
     return 1;
   }
-  if (!harness_check_harness_assistant_metadata()) {
+  if (!harness_check_assistant_ignores_attempt_metadata()) {
     return 1;
   }
   if (!harness_check_error_message_state()) {

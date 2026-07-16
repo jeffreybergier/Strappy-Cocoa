@@ -3243,6 +3243,15 @@ static int harness_test_function_tool_continuation(void)
   return ok;
 }
 
+static int harness_verify_timeline_hierarchy(
+  const strappy_session_message_record_list *timeline,
+  int require_retry);
+static int harness_timeline_attempt_metadata_matches(
+  const strappy_session_message_record_list *timeline,
+  const char *state,
+  int expect_metadata,
+  const char *expected_text);
+
 static int harness_test_retry_attempt_ledger(void)
 {
   char path[] = "/tmp/strappy-responses-retry-XXXXXX";
@@ -3250,6 +3259,7 @@ static int harness_test_retry_attempt_ledger(void)
   char *error;
   char *result;
   sqlite3 *db;
+  strappy_session_message_record_list timeline;
   long long session_id;
   long long value;
   harness_ledger_event_recorder events;
@@ -3265,6 +3275,7 @@ static int harness_test_retry_attempt_ledger(void)
   close(fd);
   error = NULL;
   session_id = 0LL;
+  strappy_session_message_record_list_init(&timeline);
   if (!harness_create_session_database(path, &session_id, &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_RETRY,
                             endpoint,
@@ -3273,6 +3284,7 @@ static int harness_test_retry_attempt_ledger(void)
     fprintf(stderr,
             "Could not prepare retry integration test: %s\n",
             (error != NULL) ? error : "server setup failed");
+    strappy_session_message_record_list_destroy(&timeline);
     free(error);
     unlink(path);
     return 0;
@@ -3337,11 +3349,23 @@ static int harness_test_retry_attempt_ledger(void)
   } else if (ok) {
     ok = 0;
   }
+  if (ok) {
+    ok = strappy_db_list_response_timeline(path,
+                                           session_id,
+                                           &timeline,
+                                           &error) &&
+      harness_verify_timeline_hierarchy(&timeline, 1) &&
+      harness_timeline_attempt_metadata_matches(&timeline,
+                                                "http_error",
+                                                1,
+                                                "Provider is busy.");
+  }
   if (!ok) {
     fprintf(stderr,
             "Retry attempt ledger failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
+  strappy_session_message_record_list_destroy(&timeline);
   free(error);
   unlink(path);
   return ok;
@@ -3354,6 +3378,7 @@ static int harness_test_active_request_cancellation(void)
   char *error;
   char *result;
   sqlite3 *db;
+  strappy_session_message_record_list timeline;
   long long session_id;
   long long value;
   harness_ledger_event_recorder events;
@@ -3369,6 +3394,7 @@ static int harness_test_active_request_cancellation(void)
   close(fd);
   error = NULL;
   session_id = 0LL;
+  strappy_session_message_record_list_init(&timeline);
   if (!harness_create_session_database(path, &session_id, &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_SLOW,
                             endpoint,
@@ -3377,6 +3403,7 @@ static int harness_test_active_request_cancellation(void)
     fprintf(stderr,
             "Could not prepare cancellation integration test: %s\n",
             (error != NULL) ? error : "server setup failed");
+    strappy_session_message_record_list_destroy(&timeline);
     free(error);
     unlink(path);
     return 0;
@@ -3416,11 +3443,22 @@ static int harness_test_active_request_cancellation(void)
   } else if (ok) {
     ok = 0;
   }
+  if (ok) {
+    ok = strappy_db_list_response_timeline(path,
+                                           session_id,
+                                           &timeline,
+                                           &error) &&
+      harness_timeline_attempt_metadata_matches(&timeline,
+                                                "cancelled",
+                                                0,
+                                                NULL);
+  }
   if (!ok) {
     fprintf(stderr,
             "Active Responses cancellation failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
+  strappy_session_message_record_list_destroy(&timeline);
   free(error);
   unlink(path);
   return ok;
@@ -3560,6 +3598,103 @@ static int harness_verify_call_columns(sqlite3 *db,
                       "AND lower(sql) LIKE '%raw_json%';",
                       &raw_column_count) &&
     (raw_column_count == 0LL);
+}
+
+static int harness_verify_timeline_hierarchy(
+  const strappy_session_message_record_list *timeline,
+  int require_retry)
+{
+  long long model_request_id;
+  long long attempt_id;
+  long attempt_index;
+  int saw_attempt;
+  int saw_retry;
+  size_t index;
+
+  if (timeline == NULL) {
+    return 0;
+  }
+  model_request_id = 0LL;
+  attempt_id = 0LL;
+  attempt_index = -1L;
+  saw_attempt = 0;
+  saw_retry = 0;
+  for (index = 0U; index < timeline->count; index++) {
+    const strappy_session_message_record *record;
+
+    record = &timeline->records[index];
+    if (record->model_request_id != model_request_id) {
+      if ((model_request_id > 0LL) &&
+          (record->model_request_id <= model_request_id)) {
+        return 0;
+      }
+      model_request_id = record->model_request_id;
+      attempt_id = 0LL;
+      attempt_index = -1L;
+      saw_attempt = 0;
+    }
+    if ((record->direction != NULL) &&
+        (strcmp(record->direction, "request") == 0)) {
+      if (saw_attempt || (record->http_attempt_id != 0LL) ||
+          (record->attempt_index != -1L)) {
+        return 0;
+      }
+    } else if ((record->kind != NULL) &&
+               (strcmp(record->kind, "response_api_call") == 0)) {
+      if ((record->http_attempt_id <= 0LL) ||
+          (record->attempt_index < attempt_index)) {
+        return 0;
+      }
+      if (record->attempt_index > 0L) {
+        saw_retry = 1;
+      }
+      saw_attempt = 1;
+      attempt_id = record->http_attempt_id;
+      attempt_index = record->attempt_index;
+    } else if ((record->direction != NULL) &&
+               (strcmp(record->direction, "response") == 0)) {
+      if (!saw_attempt || (record->http_attempt_id != attempt_id) ||
+          (record->attempt_index != attempt_index)) {
+        return 0;
+      }
+    } else {
+      return 0;
+    }
+  }
+  return !require_retry || saw_retry;
+}
+
+static int harness_timeline_attempt_metadata_matches(
+  const strappy_session_message_record_list *timeline,
+  const char *state,
+  int expect_metadata,
+  const char *expected_text)
+{
+  size_t index;
+
+  if ((timeline == NULL) || (state == NULL)) {
+    return 0;
+  }
+  for (index = 0U; index < timeline->count; index++) {
+    const strappy_session_message_record *record;
+    int has_metadata;
+
+    record = &timeline->records[index];
+    if ((record->kind == NULL) ||
+        (strcmp(record->kind, "response_api_call") != 0) ||
+        (record->attempt_state == NULL) ||
+        (strcmp(record->attempt_state, state) != 0)) {
+      continue;
+    }
+    has_metadata = (record->metadata_json != NULL) &&
+      (record->metadata_json[0] != '\0');
+    if (has_metadata != (expect_metadata ? 1 : 0)) {
+      return 0;
+    }
+    return (expected_text == NULL) ||
+      (has_metadata && (strstr(record->metadata_json, expected_text) != NULL));
+  }
+  return 0;
 }
 
 static int harness_append_usage_cost_call(
@@ -3731,12 +3866,19 @@ static int harness_test_cumulative_session_usage_cost(void)
                                       &error) &&
     (timeline.count == 5U) &&
     timeline.records[0].has_cumulative_usage_cost &&
+    (strcmp(timeline.records[0].attempt_state, "completed") == 0) &&
     harness_double_matches(timeline.records[0].cumulative_usage_cost, 0.001) &&
     timeline.records[1].has_cumulative_usage_cost &&
     timeline.records[1].is_error &&
-    harness_double_matches(timeline.records[1].cumulative_usage_cost, 0.0035) &&
+    (strcmp(timeline.records[1].attempt_state, "response_error") == 0) &&
+    harness_double_matches(timeline.records[1].cumulative_usage_cost, 0.0075) &&
     (timeline.records[2].round_index == 1L) &&
     (timeline.records[2].attempt_index == 1L) &&
+    (timeline.records[2].model_request_id ==
+     timeline.records[1].model_request_id) &&
+    (timeline.records[2].http_attempt_id !=
+     timeline.records[1].http_attempt_id) &&
+    (strcmp(timeline.records[2].attempt_state, "completed") == 0) &&
     harness_double_matches(timeline.records[2].cumulative_usage_cost, 0.0075) &&
     (strcmp(timeline.records[3].prompt_group_key, "group-two") == 0) &&
     (timeline.records[3].round_index == 0L) &&
@@ -3958,47 +4100,89 @@ static int harness_test_ledger(void)
                                          session_id,
                                          &timeline,
                                          &error) &&
+    harness_verify_timeline_hierarchy(&timeline, 0) &&
     (timeline.count == 7U) &&
     (strcmp(timeline.records[0].role, "user") == 0) &&
     (strcmp(timeline.records[0].direction, "request") == 0) &&
     (timeline.records[0].round_index == 0L) &&
-    (timeline.records[0].attempt_index == 0L) &&
-    (strcmp(timeline.records[1].role, "api_reasoning") == 0) &&
-    (strcmp(timeline.records[1].direction, "response") == 0) &&
-    (strcmp(timeline.records[2].role, "api_function_call") == 0) &&
+    (timeline.records[0].attempt_index == -1L) &&
+    (timeline.records[0].model_request_id > 0LL) &&
+    (timeline.records[0].http_attempt_id == 0LL) &&
+    (strcmp(timeline.records[1].role, "api_call") == 0) &&
+    (timeline.records[1].direction == NULL) &&
+    (timeline.records[1].model_request_id ==
+     timeline.records[0].model_request_id) &&
+    (timeline.records[1].http_attempt_id == call_id) &&
+    (timeline.records[1].round_index == 0L) &&
+    (timeline.records[1].attempt_index == 0L) &&
+    (strcmp(timeline.records[1].attempt_state, "completed") == 0) &&
+    (strcmp(timeline.records[1].request_method, "POST") == 0) &&
+    (strcmp(timeline.records[1].request_endpoint,
+            "https://openrouter.ai/api/v1/responses") == 0) &&
+    (strstr(timeline.records[1].metadata_json,
+            "\"id\":\"resp-test\"") != NULL) &&
+    (strstr(timeline.records[1].metadata_json, "\"usage\"") != NULL) &&
+    (strstr(timeline.records[1].metadata_json, "http_status") == NULL) &&
+    (strstr(timeline.records[1].content, "Model: test/model") != NULL) &&
+    (strstr(timeline.records[1].content,
+            "Request: POST https://openrouter.ai/api/v1/responses") != NULL) &&
+    (strstr(timeline.records[1].content, "HTTP 200") == NULL) &&
+    (strstr(timeline.records[1].content, "completed") == NULL) &&
+    (strcmp(timeline.records[2].role, "api_reasoning") == 0) &&
     (strcmp(timeline.records[2].direction, "response") == 0) &&
-    (strcmp(timeline.records[3].role, "api_item") == 0) &&
-    (strcmp(timeline.records[3].kind,
+    (timeline.records[2].http_attempt_id == call_id) &&
+    (strcmp(timeline.records[3].role, "api_function_call") == 0) &&
+    (strcmp(timeline.records[3].direction, "response") == 0) &&
+    (strcmp(timeline.records[4].role, "api_item") == 0) &&
+    (strcmp(timeline.records[4].kind,
             STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) &&
-    (strcmp(timeline.records[3].response_item_action_json,
+    (strcmp(timeline.records[4].response_item_action_json,
             "{\"type\":\"search\",\"query\":\"Strappy Cocoa\","
             "\"sources\":[{\"type\":\"url\","
             "\"url\":\"https://example.com/search\"}]}") == 0) &&
-    (strcmp(timeline.records[4].role, "api_item") == 0) &&
-    (strcmp(timeline.records[4].kind,
+    (strcmp(timeline.records[5].role, "api_item") == 0) &&
+    (strcmp(timeline.records[5].kind,
             STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0) &&
-    (strcmp(timeline.records[4].response_item_url,
+    (strcmp(timeline.records[5].response_item_url,
             "https://example.com/article") == 0) &&
-    (strcmp(timeline.records[4].response_item_title,
+    (strcmp(timeline.records[5].response_item_title,
             "Example Article") == 0) &&
-    (strcmp(timeline.records[4].response_item_status, "completed") == 0) &&
-    (strcmp(timeline.records[4].response_item_http_status, "200") == 0) &&
-    (strstr(timeline.records[4].response_item_title,
+    (strcmp(timeline.records[5].response_item_status, "completed") == 0) &&
+    (strcmp(timeline.records[5].response_item_http_status, "200") == 0) &&
+    (strstr(timeline.records[5].response_item_title,
             "Fetched page body") == NULL) &&
-    (strcmp(timeline.records[5].role, "api_call") == 0) &&
-    (timeline.records[5].direction == NULL) &&
-    (timeline.records[5].round_index == 0L) &&
-    (timeline.records[5].attempt_index == 0L) &&
     (strcmp(timeline.records[6].role, "assistant") == 0) &&
     (strcmp(timeline.records[6].direction, "response") == 0) &&
     (strcmp(timeline.records[6].content, "Done") == 0);
-  strappy_session_message_record_list_destroy(&timeline);
   if (!ok) {
+    size_t timeline_index;
+
+    for (timeline_index = 0U;
+         timeline_index < timeline.count;
+         timeline_index++) {
+      fprintf(stderr,
+              "timeline[%lu] role=%s direction=%s turn=%lld request=%lld "
+              "attempt=%lld round=%ld attempt_index=%ld state=%s\n",
+              (unsigned long)timeline_index,
+              (timeline.records[timeline_index].role != NULL) ?
+                timeline.records[timeline_index].role : "(null)",
+              (timeline.records[timeline_index].direction != NULL) ?
+                timeline.records[timeline_index].direction : "(null)",
+              timeline.records[timeline_index].turn_id,
+              timeline.records[timeline_index].model_request_id,
+              timeline.records[timeline_index].http_attempt_id,
+              timeline.records[timeline_index].round_index,
+              timeline.records[timeline_index].attempt_index,
+              (timeline.records[timeline_index].attempt_state != NULL) ?
+                timeline.records[timeline_index].attempt_state : "(null)");
+    }
     fprintf(stderr, "Responses timeline failed: %s\n", error);
+    strappy_session_message_record_list_destroy(&timeline);
     free(error);
     unlink(path);
     return 0;
   }
+  strappy_session_message_record_list_destroy(&timeline);
 
   memset(&execution, 0, sizeof(execution));
   execution.session_id = session_id;

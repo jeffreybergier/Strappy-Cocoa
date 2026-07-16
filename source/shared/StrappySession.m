@@ -537,6 +537,8 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   NSNumber *messageId;
   NSNumber *sessionId;
   NSNumber *turnId;
+  NSNumber *modelRequestId;
+  NSNumber *httpAttemptId;
   NSNumber *httpStatus;
   NSNumber *includeInContext;
   NSNumber *isError;
@@ -569,7 +571,10 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   NSString *responseItemTitle;
   NSString *responseItemStatus;
   NSString *responseItemHTTPStatus;
+  NSString *requestMethod;
+  NSString *requestEndpoint;
   NSString *createdAt;
+  NSString *attemptState;
 
   if (record == NULL) {
     return nil;
@@ -578,6 +583,8 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   messageId = [NSNumber numberWithLongLong:record->message_id];
   sessionId = [NSNumber numberWithLongLong:record->session_id];
   turnId = [NSNumber numberWithLongLong:record->turn_id];
+  modelRequestId = [NSNumber numberWithLongLong:record->model_request_id];
+  httpAttemptId = [NSNumber numberWithLongLong:record->http_attempt_id];
   roundIndex = [NSNumber numberWithLong:record->round_index];
   attemptIndex = [NSNumber numberWithLong:record->attempt_index];
   cumulativeUsageCost =
@@ -620,12 +627,19 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     record->response_item_status];
   responseItemHTTPStatus = [StrappySession stringFromCStringOrEmpty:
     record->response_item_http_status];
+  requestMethod = [StrappySession stringFromCStringOrEmpty:
+    record->request_method];
+  requestEndpoint = [StrappySession stringFromCStringOrEmpty:
+    record->request_endpoint];
   createdAt = [StrappySession stringFromCStringOrEmpty:record->created_at];
+  attemptState = [StrappySession stringFromCStringOrEmpty:record->attempt_state];
 
   return [NSDictionary dictionaryWithObjectsAndKeys:
     messageId, @"id",
     sessionId, @"session_id",
     turnId, @"turn_id",
+    modelRequestId, @"model_request_id",
+    httpAttemptId, @"http_attempt_id",
     roundIndex, @"round_index",
     attemptIndex, @"attempt_index",
     cumulativeUsageCost, @"cumulative_usage_cost",
@@ -655,9 +669,12 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     responseItemTitle, @"response_item_title",
     responseItemStatus, @"response_item_status",
     responseItemHTTPStatus, @"response_item_http_status",
+    requestMethod, @"request_method",
+    requestEndpoint, @"request_endpoint",
     includeInContext, @"include_in_context",
     isError, @"is_error",
     httpStatus, @"http_status",
+    attemptState, @"attempt_state",
     createdAt, @"created_at",
     nil];
 }

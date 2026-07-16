@@ -318,10 +318,12 @@ static void strappy_session_webview_message_from_record(
   }
 
   message->message_id = record->message_id;
-  message->api_call_id = record->turn_id;
+  message->round_id = record->model_request_id;
+  message->api_call_id = record->http_attempt_id;
   message->round_number = record->round_index + 1L;
   message->attempt_number = record->attempt_index + 1L;
   message->http_status = record->http_status;
+  message->attempt_state = record->attempt_state;
   message->cumulative_usage_cost = record->cumulative_usage_cost;
   message->has_cumulative_usage_cost = record->has_cumulative_usage_cost;
   message->role = record->role;
@@ -340,6 +342,8 @@ static void strappy_session_webview_message_from_record(
   message->response_item_title = record->response_item_title;
   message->response_item_status = record->response_item_status;
   message->response_item_http_status = record->response_item_http_status;
+  message->request_method = record->request_method;
+  message->request_endpoint = record->request_endpoint;
   message->text = record->content;
   message->reasoning = record->reasoning;
   message->metadata_json = record->metadata_json;

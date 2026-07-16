@@ -13,12 +13,14 @@ typedef struct strappy_webview_labels {
   const char *harness;
   const char *developer;
   const char *thinking;
-  const char *request_metadata;
+  const char *response_metadata;
+  const char *waiting_for_response;
+  const char *no_http_response;
   const char *tool;
   const char *tool_call;
   const char *tool_result;
   const char *retry;
-  const char *api_call;
+  const char *response_status;
   const char *api_error;
   const char *response_item;
   const char *request;
@@ -29,10 +31,12 @@ typedef struct strappy_webview_labels {
 
 typedef struct strappy_webview_message {
   long long message_id;
+  long long round_id;
   long long api_call_id;
   long round_number;
   long attempt_number;
   long http_status;
+  const char *attempt_state;
   double cumulative_usage_cost;
   int has_cumulative_usage_cost;
   const char *element_id;
@@ -52,6 +56,8 @@ typedef struct strappy_webview_message {
   const char *response_item_title;
   const char *response_item_status;
   const char *response_item_http_status;
+  const char *request_method;
+  const char *request_endpoint;
   const char *text;
   const char *reasoning;
   const char *metadata_json;

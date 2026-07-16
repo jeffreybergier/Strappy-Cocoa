@@ -337,6 +337,8 @@ void strappy_session_message_record_init(strappy_session_message_record *record)
   record->message_id = 0;
   record->session_id = 0;
   record->turn_id = 0;
+  record->model_request_id = 0;
+  record->http_attempt_id = 0;
   record->round_index = 0L;
   record->attempt_index = 0L;
   record->cumulative_usage_cost = 0.0;
@@ -366,7 +368,10 @@ void strappy_session_message_record_init(strappy_session_message_record *record)
   record->response_item_title = NULL;
   record->response_item_status = NULL;
   record->response_item_http_status = NULL;
+  record->request_method = NULL;
+  record->request_endpoint = NULL;
   record->created_at = NULL;
+  record->attempt_state = NULL;
   record->include_in_context = 0;
   record->is_error = 0;
   record->http_status = 0L;
@@ -403,7 +408,10 @@ void strappy_session_message_record_destroy(strappy_session_message_record *reco
   free(record->response_item_title);
   free(record->response_item_status);
   free(record->response_item_http_status);
+  free(record->request_method);
+  free(record->request_endpoint);
   free(record->created_at);
+  free(record->attempt_state);
   strappy_session_message_record_init(record);
 }
 
@@ -14863,12 +14871,10 @@ static char *strappy_db_semantic_attempt_metadata(sqlite3 *db,
                                                   char **error_out)
 {
   static const char *sql =
-    "SELECT a.http_status, a.state, a.transport_error, a.curl_code, "
-    "a.provider_request_id, a.provider_generation_id, "
-    "r.provider_response_id, r.provider_model_id, r.provider_status, "
+    "SELECT r.provider_response_id, r.provider_model_id, r.provider_status, "
     "r.provider_created_at_s, r.provider_completed_at_s, "
     "r.incomplete_reason, r.error_type, r.error_code, r.error_message, "
-    "r.error_parameter, r.parse_error, u.input_tokens, "
+    "r.error_parameter, u.input_tokens, "
     "u.cached_input_tokens, u.output_tokens, u.reasoning_tokens, "
     "u.total_tokens, u.cost_nano_usd, u.upstream_cost_nano_usd, "
     "u.upstream_input_cost_nano_usd, u.upstream_output_cost_nano_usd, "
@@ -14883,6 +14889,7 @@ static char *strappy_db_semantic_attempt_metadata(sqlite3 *db,
   cJSON *details;
   const unsigned char *text;
   char *serialized;
+  int has_metadata;
   int rc;
 
   stmt = NULL;
@@ -14902,157 +14909,147 @@ static char *strappy_db_semantic_attempt_metadata(sqlite3 *db,
     strappy_set_error(error_out, "Could not allocate Responses metadata.");
     return NULL;
   }
-  cJSON_AddNumberToObject(root,
-                         "http_status",
-                         (double)sqlite3_column_int64(stmt, 0));
-  text = sqlite3_column_text(stmt, 8);
-  if (text == NULL) {
-    text = sqlite3_column_text(stmt, 1);
-  }
+  has_metadata = 0;
+  text = sqlite3_column_text(stmt, 2);
   if (text != NULL) {
     cJSON_AddStringToObject(root, "status", (const char *)text);
+    has_metadata = 1;
   }
-  text = sqlite3_column_text(stmt, 6);
+  text = sqlite3_column_text(stmt, 0);
   if (text != NULL) {
     cJSON_AddStringToObject(root, "id", (const char *)text);
+    has_metadata = 1;
   }
-  text = sqlite3_column_text(stmt, 7);
+  text = sqlite3_column_text(stmt, 1);
   if (text != NULL) {
     cJSON_AddStringToObject(root, "model", (const char *)text);
+    has_metadata = 1;
   }
-  if (sqlite3_column_type(stmt, 9) != SQLITE_NULL) {
+  if (sqlite3_column_type(stmt, 3) != SQLITE_NULL) {
     cJSON_AddNumberToObject(root,
                            "created_at",
-                           (double)sqlite3_column_int64(stmt, 9));
+                           (double)sqlite3_column_int64(stmt, 3));
+    has_metadata = 1;
   }
-  if (sqlite3_column_type(stmt, 10) != SQLITE_NULL) {
+  if (sqlite3_column_type(stmt, 4) != SQLITE_NULL) {
     cJSON_AddNumberToObject(root,
                            "completed_at",
-                           (double)sqlite3_column_int64(stmt, 10));
+                           (double)sqlite3_column_int64(stmt, 4));
+    has_metadata = 1;
   }
-  text = sqlite3_column_text(stmt, 11);
+  text = sqlite3_column_text(stmt, 5);
   if (text != NULL) {
     incomplete = cJSON_CreateObject();
     if (incomplete != NULL) {
       cJSON_AddStringToObject(incomplete, "reason", (const char *)text);
       cJSON_AddItemToObject(root, "incomplete_details", incomplete);
+      has_metadata = 1;
     }
   }
-  if ((sqlite3_column_text(stmt, 2) != NULL) ||
-      (sqlite3_column_text(stmt, 12) != NULL) ||
-      (sqlite3_column_text(stmt, 13) != NULL) ||
-      (sqlite3_column_text(stmt, 14) != NULL) ||
-      (sqlite3_column_text(stmt, 16) != NULL)) {
+  if ((sqlite3_column_text(stmt, 6) != NULL) ||
+      (sqlite3_column_text(stmt, 7) != NULL) ||
+      (sqlite3_column_text(stmt, 8) != NULL) ||
+      (sqlite3_column_text(stmt, 9) != NULL)) {
     error = cJSON_CreateObject();
     if (error != NULL) {
-      text = sqlite3_column_text(stmt, 12);
+      text = sqlite3_column_text(stmt, 6);
       if (text != NULL) {
         cJSON_AddStringToObject(error, "type", (const char *)text);
       }
-      text = sqlite3_column_text(stmt, 13);
+      text = sqlite3_column_text(stmt, 7);
       if (text != NULL) {
         cJSON_AddStringToObject(error, "code", (const char *)text);
-      } else if (sqlite3_column_int64(stmt, 3) != 0) {
-        cJSON_AddNumberToObject(error,
-                               "code",
-                               (double)sqlite3_column_int64(stmt, 3));
       }
-      text = sqlite3_column_text(stmt, 14);
-      if (text == NULL) {
-        text = sqlite3_column_text(stmt, 16);
-      }
-      if (text == NULL) {
-        text = sqlite3_column_text(stmt, 2);
-      }
+      text = sqlite3_column_text(stmt, 8);
       if (text != NULL) {
         cJSON_AddStringToObject(error, "message", (const char *)text);
       }
-      text = sqlite3_column_text(stmt, 15);
+      text = sqlite3_column_text(stmt, 9);
       if (text != NULL) {
         cJSON_AddStringToObject(error, "param", (const char *)text);
       }
       cJSON_AddItemToObject(root, "error", error);
+      has_metadata = 1;
     }
   }
-  if (sqlite3_column_type(stmt, 17) != SQLITE_NULL) {
+  if (sqlite3_column_type(stmt, 10) != SQLITE_NULL) {
     usage = cJSON_CreateObject();
     if (usage != NULL) {
       cJSON_AddNumberToObject(usage,
                              "input_tokens",
-                             (double)sqlite3_column_int64(stmt, 17));
+                             (double)sqlite3_column_int64(stmt, 10));
       cJSON_AddNumberToObject(usage,
                              "output_tokens",
-                             (double)sqlite3_column_int64(stmt, 19));
+                             (double)sqlite3_column_int64(stmt, 12));
       cJSON_AddNumberToObject(usage,
                              "total_tokens",
-                             (double)sqlite3_column_int64(stmt, 21));
-      if (sqlite3_column_int64(stmt, 18) != 0) {
+                             (double)sqlite3_column_int64(stmt, 14));
+      if (sqlite3_column_int64(stmt, 11) != 0) {
         details = cJSON_CreateObject();
         if (details != NULL) {
           cJSON_AddNumberToObject(details,
                                  "cached_tokens",
-                                 (double)sqlite3_column_int64(stmt, 18));
+                                 (double)sqlite3_column_int64(stmt, 11));
           cJSON_AddItemToObject(usage, "input_tokens_details", details);
         }
       }
-      if (sqlite3_column_int64(stmt, 20) != 0) {
+      if (sqlite3_column_int64(stmt, 13) != 0) {
         details = cJSON_CreateObject();
         if (details != NULL) {
           cJSON_AddNumberToObject(details,
                                  "reasoning_tokens",
-                                 (double)sqlite3_column_int64(stmt, 20));
+                                 (double)sqlite3_column_int64(stmt, 13));
           cJSON_AddItemToObject(usage, "output_tokens_details", details);
         }
       }
-      if (sqlite3_column_type(stmt, 22) != SQLITE_NULL) {
+      if (sqlite3_column_type(stmt, 15) != SQLITE_NULL) {
         cJSON_AddNumberToObject(
           usage,
           "cost",
-          (double)sqlite3_column_int64(stmt, 22) / 1000000000.0);
+          (double)sqlite3_column_int64(stmt, 15) / 1000000000.0);
       }
-      if ((sqlite3_column_type(stmt, 23) != SQLITE_NULL) ||
-          (sqlite3_column_type(stmt, 24) != SQLITE_NULL) ||
-          (sqlite3_column_type(stmt, 25) != SQLITE_NULL)) {
+      if ((sqlite3_column_type(stmt, 16) != SQLITE_NULL) ||
+          (sqlite3_column_type(stmt, 17) != SQLITE_NULL) ||
+          (sqlite3_column_type(stmt, 18) != SQLITE_NULL)) {
         details = cJSON_CreateObject();
         if (details != NULL) {
-          if (sqlite3_column_type(stmt, 23) != SQLITE_NULL) {
+          if (sqlite3_column_type(stmt, 16) != SQLITE_NULL) {
             cJSON_AddNumberToObject(
               details,
               "upstream_inference_cost",
-              (double)sqlite3_column_int64(stmt, 23) / 1000000000.0);
+              (double)sqlite3_column_int64(stmt, 16) / 1000000000.0);
           }
-          if (sqlite3_column_type(stmt, 24) != SQLITE_NULL) {
+          if (sqlite3_column_type(stmt, 17) != SQLITE_NULL) {
             cJSON_AddNumberToObject(
               details,
               "upstream_inference_input_cost",
-              (double)sqlite3_column_int64(stmt, 24) / 1000000000.0);
+              (double)sqlite3_column_int64(stmt, 17) / 1000000000.0);
           }
-          if (sqlite3_column_type(stmt, 25) != SQLITE_NULL) {
+          if (sqlite3_column_type(stmt, 18) != SQLITE_NULL) {
             cJSON_AddNumberToObject(
               details,
               "upstream_inference_output_cost",
-              (double)sqlite3_column_int64(stmt, 25) / 1000000000.0);
+              (double)sqlite3_column_int64(stmt, 18) / 1000000000.0);
           }
           cJSON_AddItemToObject(usage, "cost_details", details);
         }
       }
       cJSON_AddBoolToObject(usage,
                             "is_byok",
-                            sqlite3_column_int(stmt, 26) ? 1 : 0);
+                            sqlite3_column_int(stmt, 19) ? 1 : 0);
       cJSON_AddItemToObject(root, "usage", usage);
+      has_metadata = 1;
     }
   }
-  if (sqlite3_column_text(stmt, 4) != NULL) {
-    cJSON_AddStringToObject(root,
-                           "request_id",
-                           (const char *)sqlite3_column_text(stmt, 4));
-  }
-  if (sqlite3_column_text(stmt, 5) != NULL) {
-    cJSON_AddStringToObject(root,
-                           "generation_id",
-                           (const char *)sqlite3_column_text(stmt, 5));
-  }
   sqlite3_finalize(stmt);
+  if (!has_metadata) {
+    cJSON_Delete(root);
+    serialized = strappy_string_duplicate("");
+    if (serialized == NULL) {
+      strappy_set_error(error_out, "Could not allocate Responses metadata.");
+    }
+    return serialized;
+  }
   serialized = cJSON_PrintUnformatted(root);
   cJSON_Delete(root);
   if (serialized == NULL) {
@@ -15066,73 +15063,58 @@ static char *strappy_db_semantic_attempt_display_text(sqlite3_stmt *stmt)
   strappy_db_sql_buffer buffer;
   const unsigned char *method;
   const unsigned char *endpoint;
-  const unsigned char *state;
-  const unsigned char *provider_status;
-  const unsigned char *model;
+  const unsigned char *request_model;
+  const unsigned char *started_at;
   const unsigned char *transport_error;
   const unsigned char *error_message;
   const unsigned char *incomplete_reason;
-  long round_index;
-  long attempt_index;
-  long http_status;
   char line[512];
   int written;
 
   memset(&buffer, 0, sizeof(buffer));
-  method = sqlite3_column_text(stmt, 19);
-  endpoint = sqlite3_column_text(stmt, 20);
-  state = sqlite3_column_text(stmt, 9);
-  provider_status = sqlite3_column_text(stmt, 21);
-  model = sqlite3_column_text(stmt, 11);
-  transport_error = sqlite3_column_text(stmt, 22);
-  error_message = sqlite3_column_text(stmt, 23);
-  incomplete_reason = sqlite3_column_text(stmt, 24);
-  round_index = (long)sqlite3_column_int64(stmt, 7);
-  attempt_index = (long)sqlite3_column_int64(stmt, 8);
-  http_status = (long)sqlite3_column_int64(stmt, 10);
+  method = sqlite3_column_text(stmt, 21);
+  endpoint = sqlite3_column_text(stmt, 22);
+  request_model = sqlite3_column_text(stmt, 27);
+  started_at = sqlite3_column_text(stmt, 14);
+  transport_error = sqlite3_column_text(stmt, 24);
+  error_message = sqlite3_column_text(stmt, 25);
+  incomplete_reason = sqlite3_column_text(stmt, 26);
   written = snprintf(line,
                      sizeof(line),
-                     "%s %s\nRound %ld, attempt %ld\n%s",
+                     "Request: %s %s",
                      (method != NULL) ? (const char *)method : "POST",
-                     (endpoint != NULL) ? (const char *)endpoint : "/responses",
-                     round_index + 1L,
-                     attempt_index + 1L,
-                     (state != NULL) ? (const char *)state : "pending");
+                     (endpoint != NULL) ? (const char *)endpoint : "/responses");
   if ((written < 0) || ((size_t)written >= sizeof(line)) ||
       !strappy_db_sql_buffer_append(&buffer, line)) {
     strappy_db_sql_buffer_destroy(&buffer);
     return NULL;
   }
-  if ((provider_status != NULL) &&
-      (!strappy_db_sql_buffer_append(&buffer, " / ") ||
-       !strappy_db_sql_buffer_append(&buffer,
-                                     (const char *)provider_status))) {
-    strappy_db_sql_buffer_destroy(&buffer);
-    return NULL;
-  }
-  if (http_status > 0L) {
-    written = snprintf(line, sizeof(line), " / HTTP %ld", http_status);
+  if (request_model != NULL) {
+    written = snprintf(line,
+                       sizeof(line),
+                       "\nModel: %s",
+                       (const char *)request_model);
     if ((written < 0) || ((size_t)written >= sizeof(line)) ||
         !strappy_db_sql_buffer_append(&buffer, line)) {
       strappy_db_sql_buffer_destroy(&buffer);
       return NULL;
     }
   }
-  if ((model != NULL) &&
-      (!strappy_db_sql_buffer_append(&buffer, "\n") ||
-       !strappy_db_sql_buffer_append(&buffer, (const char *)model))) {
+  if ((started_at != NULL) &&
+      (!strappy_db_sql_buffer_append(&buffer, "\nStarted: ") ||
+       !strappy_db_sql_buffer_append(&buffer, (const char *)started_at))) {
     strappy_db_sql_buffer_destroy(&buffer);
     return NULL;
   }
   if ((transport_error != NULL) &&
-      (!strappy_db_sql_buffer_append(&buffer, "\n") ||
+      (!strappy_db_sql_buffer_append(&buffer, "\nTransport error: ") ||
        !strappy_db_sql_buffer_append(&buffer,
                                      (const char *)transport_error))) {
     strappy_db_sql_buffer_destroy(&buffer);
     return NULL;
   }
   if ((error_message != NULL) &&
-      (!strappy_db_sql_buffer_append(&buffer, "\n") ||
+      (!strappy_db_sql_buffer_append(&buffer, "\nError: ") ||
        !strappy_db_sql_buffer_append(&buffer,
                                      (const char *)error_message))) {
     strappy_db_sql_buffer_destroy(&buffer);
@@ -15174,6 +15156,46 @@ static int strappy_db_semantic_timeline_append(
   return 1;
 }
 
+static void strappy_db_semantic_finalize_timeline_costs(
+  strappy_session_message_record_list *list)
+{
+  size_t group_start;
+  double cumulative_cost;
+  int has_cumulative_cost;
+
+  if (list == NULL) {
+    return;
+  }
+  group_start = 0U;
+  cumulative_cost = 0.0;
+  has_cumulative_cost = 0;
+  while (group_start < list->count) {
+    long long model_request_id;
+    size_t group_end;
+    size_t index;
+
+    model_request_id = list->records[group_start].model_request_id;
+    group_end = group_start;
+    while ((group_end < list->count) &&
+           (list->records[group_end].model_request_id == model_request_id)) {
+      if ((list->records[group_end].kind != NULL) &&
+          (strcmp(list->records[group_end].kind,
+                  "response_api_call") == 0) &&
+          list->records[group_end].has_cumulative_usage_cost) {
+        cumulative_cost +=
+          list->records[group_end].cumulative_usage_cost;
+        has_cumulative_cost = 1;
+      }
+      group_end++;
+    }
+    for (index = group_start; index < group_end; index++) {
+      list->records[index].cumulative_usage_cost = cumulative_cost;
+      list->records[index].has_cumulative_usage_cost = has_cumulative_cost;
+    }
+    group_start = group_end;
+  }
+}
+
 static int strappy_db_semantic_populate_timeline_item(
   sqlite3 *db,
   sqlite3_stmt *stmt,
@@ -15185,21 +15207,21 @@ static int strappy_db_semantic_populate_timeline_item(
   const char *role;
 
   item = strappy_db_semantic_load_item(
-    db, (long long)sqlite3_column_int64(stmt, 3), error_out);
+    db, (long long)sqlite3_column_int64(stmt, 5), error_out);
   if (item == NULL) {
     return 0;
   }
   role = strappy_db_response_item_display_role(
-    item, (const char *)sqlite3_column_text(stmt, 4));
+    item, (const char *)sqlite3_column_text(stmt, 6));
   record->kind = strappy_string_duplicate(
     strappy_db_semantic_json_string(item, "type"));
   record->render_role = strappy_string_duplicate(role);
   record->role = strappy_string_duplicate(role);
   record->content = strappy_db_response_item_display_text(item);
   record->message_json = cJSON_PrintUnformatted(item);
-  record->direction = strappy_db_column_string(stmt, 4);
+  record->direction = strappy_db_column_string(stmt, 6);
   record->message_key = strappy_db_response_timeline_key(
-    "response-item", (long long)sqlite3_column_int64(stmt, 3));
+    "response-item", (long long)sqlite3_column_int64(stmt, 5));
   record->is_error = record->is_error ||
     strappy_db_response_item_is_error(item);
   value = cJSON_GetObjectItem(item, "call_id");
@@ -15278,61 +15300,58 @@ static int strappy_db_semantic_list_response_timeline(
   char **error_out)
 {
   static const char *sql =
-    "SELECT 0 AS entry_type, a.id AS row_id, a.id AS call_id, "
-    "NULL AS item_id, NULL AS direction, t.prompt_group_key, "
-    "r.request_kind, r.round_index, a.attempt_index, a.state, "
-    "a.http_status, COALESCE(ar.provider_model_id, r.model_id), "
+    "SELECT 0 AS entry_type, a.id AS row_id, t.id AS turn_id, "
+    "r.id AS request_id, a.id AS attempt_id, NULL AS item_id, "
+    "NULL AS direction, t.prompt_group_key, r.request_kind, "
+    "r.round_index, a.attempt_index, a.state, a.http_status, "
+    "COALESCE(ar.provider_model_id, r.model_id), "
     "strftime('%Y-%m-%dT%H:%M:%fZ', a.started_at_ms / 1000.0, 'unixepoch'), "
     "CASE WHEN a.state <> 'completed' OR a.http_status >= 400 "
       "OR ar.error_message IS NOT NULL OR ar.parse_error IS NOT NULL "
-      "THEN 1 ELSE 0 END, 0, u.cost_nano_usd, 2, -1, "
+      "THEN 1 ELSE 0 END, 0, u.cost_nano_usd, "
+    "1 AS group_phase, 0 AS attempt_phase, -1 AS item_index, "
     "a.method, a.endpoint, ar.provider_status, a.transport_error, "
-    "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason "
+    "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason, "
+    "r.model_id "
     "FROM http_attempts a JOIN model_requests r ON r.id = a.request_id "
     "JOIN turns t ON t.id = r.turn_id "
     "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
     "LEFT JOIN api_usage u ON u.attempt_id = a.id "
     "WHERE t.session_id = ? AND a.state NOT IN ('pending','running') "
     "UNION ALL "
-    "SELECT 1, i.id, a.id, i.id, 'request', t.prompt_group_key, "
-    "r.request_kind, r.round_index, a.attempt_index, a.state, "
-    "a.http_status, COALESCE(ar.provider_model_id, r.model_id), "
+    "SELECT 1, i.id, t.id, r.id, NULL, i.id, 'request', "
+    "t.prompt_group_key, r.request_kind, r.round_index, -1, NULL, 0, "
+    "r.model_id, "
     "strftime('%Y-%m-%dT%H:%M:%fZ', i.created_at_ms / 1000.0, 'unixepoch'), "
-    "i.is_error, i.include_in_context, u.cost_nano_usd, "
-    "CASE WHEN i.kind = 'message' THEN 0 ELSE 1 END, i.source_item_index, "
-    "a.method, a.endpoint, ar.provider_status, a.transport_error, "
-    "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason "
+    "i.is_error, i.include_in_context, NULL, "
+    "0, 0, i.source_item_index, NULL, NULL, NULL, NULL, NULL, NULL, "
+    "r.model_id "
     "FROM conversation_items i "
     "JOIN model_requests r ON r.id = i.introduced_request_id "
     "JOIN turns t ON t.id = r.turn_id "
-    "JOIN http_attempts a ON a.request_id = r.id AND a.attempt_index = 0 "
-    "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
-    "LEFT JOIN api_usage u ON u.attempt_id = a.id "
     "WHERE i.session_id = ? AND i.timeline_visible = 1 "
-    "AND a.state NOT IN ('pending','running') "
+    "AND EXISTS (SELECT 1 FROM http_attempts ax WHERE ax.request_id = r.id "
+      "AND ax.state NOT IN ('pending','running')) "
     "UNION ALL "
-    "SELECT 1, i.id, a.id, i.id, 'response', t.prompt_group_key, "
-    "r.request_kind, r.round_index, a.attempt_index, a.state, "
+    "SELECT 1, i.id, t.id, r.id, a.id, i.id, 'response', "
+    "t.prompt_group_key, r.request_kind, r.round_index, a.attempt_index, a.state, "
     "a.http_status, COALESCE(ar.provider_model_id, r.model_id), "
     "strftime('%Y-%m-%dT%H:%M:%fZ', i.created_at_ms / 1000.0, 'unixepoch'), "
-    "i.is_error, i.include_in_context, u.cost_nano_usd, "
-    "CASE WHEN i.kind = 'message' THEN 3 ELSE 1 END, i.source_item_index, "
+    "i.is_error, i.include_in_context, NULL, "
+    "1, 1, i.source_item_index, "
     "a.method, a.endpoint, ar.provider_status, a.transport_error, "
-    "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason "
+    "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason, "
+    "r.model_id "
     "FROM conversation_items i "
     "JOIN http_attempts a ON a.id = i.source_attempt_id "
     "JOIN model_requests r ON r.id = a.request_id "
     "JOIN turns t ON t.id = r.turn_id "
     "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
-    "LEFT JOIN api_usage u ON u.attempt_id = a.id "
     "WHERE i.session_id = ? AND i.timeline_visible = 1 "
     "AND a.state NOT IN ('pending','running') "
-    "ORDER BY call_id, 17, entry_type, 18;";
+    "ORDER BY request_id, 19, attempt_index, 20, entry_type, 21;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
-  long long cumulative_call_id;
-  double cumulative_usage_cost;
-  int has_cumulative_usage_cost;
   int rc;
 
   if (list == NULL) {
@@ -15364,12 +15383,9 @@ static int strappy_db_semantic_list_response_timeline(
     sqlite3_close(db);
     return 0;
   }
-  cumulative_call_id = 0LL;
-  cumulative_usage_cost = 0.0;
-  has_cumulative_usage_cost = 0;
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
     strappy_session_message_record *record;
-    long long call_id;
+    long long attempt_id;
     long long row_id;
     int entry_type;
 
@@ -15381,31 +15397,34 @@ static int strappy_db_semantic_list_response_timeline(
     }
     entry_type = sqlite3_column_int(stmt, 0);
     row_id = (long long)sqlite3_column_int64(stmt, 1);
-    call_id = (long long)sqlite3_column_int64(stmt, 2);
-    if (call_id != cumulative_call_id) {
-      cumulative_call_id = call_id;
-      if (sqlite3_column_type(stmt, 15) != SQLITE_NULL) {
-        cumulative_usage_cost +=
-          (double)sqlite3_column_int64(stmt, 15) / 1000000000.0;
-        has_cumulative_usage_cost = 1;
-      }
-    }
+    attempt_id = (sqlite3_column_type(stmt, 4) != SQLITE_NULL) ?
+      (long long)sqlite3_column_int64(stmt, 4) : 0LL;
     record->message_id = (entry_type == 0) ?
-      (call_id * 2LL) : ((row_id * 2LL) + 1LL);
+      (attempt_id * 2LL) : ((row_id * 2LL) + 1LL);
     record->session_id = session_id;
-    record->turn_id = call_id;
-    record->round_index = (long)sqlite3_column_int64(stmt, 7);
-    record->attempt_index = (long)sqlite3_column_int64(stmt, 8);
-    record->cumulative_usage_cost = cumulative_usage_cost;
-    record->has_cumulative_usage_cost = has_cumulative_usage_cost;
-    record->turn_key = strappy_db_column_string(stmt, 5);
-    record->prompt_group_key = strappy_db_column_string(stmt, 5);
-    record->model = strappy_db_column_string(stmt, 11);
-    record->created_at = strappy_db_column_string(stmt, 12);
-    record->http_status = (long)sqlite3_column_int64(stmt, 10);
-    record->is_error = sqlite3_column_int(stmt, 13) ? 1 : 0;
-    record->include_in_context = sqlite3_column_int(stmt, 14) ? 1 : 0;
+    record->turn_id = (long long)sqlite3_column_int64(stmt, 2);
+    record->model_request_id = (long long)sqlite3_column_int64(stmt, 3);
+    record->http_attempt_id = attempt_id;
+    record->round_index = (long)sqlite3_column_int64(stmt, 9);
+    record->attempt_index = (sqlite3_column_type(stmt, 10) != SQLITE_NULL) ?
+      (long)sqlite3_column_int64(stmt, 10) : 0L;
+    if ((entry_type == 0) &&
+        (sqlite3_column_type(stmt, 17) != SQLITE_NULL)) {
+      record->cumulative_usage_cost =
+        (double)sqlite3_column_int64(stmt, 17) / 1000000000.0;
+      record->has_cumulative_usage_cost = 1;
+    }
+    record->turn_key = strappy_db_column_string(stmt, 7);
+    record->prompt_group_key = strappy_db_column_string(stmt, 7);
+    record->model = strappy_db_column_string(stmt, 13);
+    record->created_at = strappy_db_column_string(stmt, 14);
+    record->http_status = (long)sqlite3_column_int64(stmt, 12);
+    record->attempt_state = strappy_db_column_string(stmt, 11);
+    record->is_error = sqlite3_column_int(stmt, 15) ? 1 : 0;
+    record->include_in_context = sqlite3_column_int(stmt, 16) ? 1 : 0;
     if (entry_type == 0) {
+      record->request_method = strappy_db_column_string(stmt, 21);
+      record->request_endpoint = strappy_db_column_string(stmt, 22);
       record->actor = strappy_string_duplicate("api");
       record->kind = strappy_string_duplicate("response_api_call");
       record->render_role = strappy_string_duplicate(
@@ -15414,11 +15433,11 @@ static int strappy_db_semantic_list_response_timeline(
         record->is_error ? "api_error" : "api_call");
       record->content = strappy_db_semantic_attempt_display_text(stmt);
       record->metadata_json = strappy_db_semantic_attempt_metadata(
-        db, call_id, error_out);
+        db, attempt_id, error_out);
       record->message_json = (record->metadata_json != NULL) ?
         strappy_string_duplicate(record->metadata_json) : NULL;
       record->message_key =
-        strappy_db_response_timeline_key("response-call", call_id);
+        strappy_db_response_timeline_key("response-call", attempt_id);
     } else if (!strappy_db_semantic_populate_timeline_item(db,
                                                            stmt,
                                                            record,
@@ -15433,6 +15452,10 @@ static int strappy_db_semantic_list_response_timeline(
         (record->actor == NULL) || (record->kind == NULL) ||
         (record->render_role == NULL) || (record->role == NULL) ||
         (record->content == NULL) || (record->message_key == NULL) ||
+        ((record->http_attempt_id > 0LL) &&
+         (record->attempt_state == NULL)) ||
+        ((entry_type == 0) && ((record->request_method == NULL) ||
+                              (record->request_endpoint == NULL))) ||
         ((entry_type != 0) && (record->direction == NULL)) ||
         (record->created_at == NULL) ||
         ((entry_type == 0) && ((record->metadata_json == NULL) ||
@@ -15454,6 +15477,7 @@ static int strappy_db_semantic_list_response_timeline(
     strappy_set_error(error_out, "Could not read semantic Responses timeline.");
     return 0;
   }
+  strappy_db_semantic_finalize_timeline_costs(list);
   return 1;
 }
 

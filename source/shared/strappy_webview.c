@@ -27,12 +27,14 @@ typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_HARNESS,
   STRAPPY_WEBVIEW_LABEL_DEVELOPER,
   STRAPPY_WEBVIEW_LABEL_THINKING,
-  STRAPPY_WEBVIEW_LABEL_REQUEST_METADATA,
+  STRAPPY_WEBVIEW_LABEL_RESPONSE_METADATA,
+  STRAPPY_WEBVIEW_LABEL_WAITING_FOR_RESPONSE,
+  STRAPPY_WEBVIEW_LABEL_NO_HTTP_RESPONSE,
   STRAPPY_WEBVIEW_LABEL_TOOL,
   STRAPPY_WEBVIEW_LABEL_TOOL_CALL,
   STRAPPY_WEBVIEW_LABEL_TOOL_RESULT,
   STRAPPY_WEBVIEW_LABEL_RETRY,
-  STRAPPY_WEBVIEW_LABEL_API_CALL,
+  STRAPPY_WEBVIEW_LABEL_RESPONSE_STATUS,
   STRAPPY_WEBVIEW_LABEL_API_ERROR,
   STRAPPY_WEBVIEW_LABEL_RESPONSE_ITEM,
   STRAPPY_WEBVIEW_LABEL_REQUEST,
@@ -49,12 +51,14 @@ static const char * const g_strappy_webview_label_keys[
   "Harness",
   "Developer",
   "Thinking",
-  "Request Metadata",
+  "Response Metadata",
+  "Waiting for response...",
+  "No HTTP response",
   "Tool",
   "Tool Call",
   "Tool Result",
   "Retry",
-  "API Call",
+  "Response Status",
   "API Error",
   "Response Item",
   "Request",
@@ -80,12 +84,16 @@ static void strappy_webview_assign_localized_labels(
   labels->harness = values[STRAPPY_WEBVIEW_LABEL_HARNESS];
   labels->developer = values[STRAPPY_WEBVIEW_LABEL_DEVELOPER];
   labels->thinking = values[STRAPPY_WEBVIEW_LABEL_THINKING];
-  labels->request_metadata = values[STRAPPY_WEBVIEW_LABEL_REQUEST_METADATA];
+  labels->response_metadata = values[STRAPPY_WEBVIEW_LABEL_RESPONSE_METADATA];
+  labels->waiting_for_response =
+    values[STRAPPY_WEBVIEW_LABEL_WAITING_FOR_RESPONSE];
+  labels->no_http_response =
+    values[STRAPPY_WEBVIEW_LABEL_NO_HTTP_RESPONSE];
   labels->tool = values[STRAPPY_WEBVIEW_LABEL_TOOL];
   labels->tool_call = values[STRAPPY_WEBVIEW_LABEL_TOOL_CALL];
   labels->tool_result = values[STRAPPY_WEBVIEW_LABEL_TOOL_RESULT];
   labels->retry = values[STRAPPY_WEBVIEW_LABEL_RETRY];
-  labels->api_call = values[STRAPPY_WEBVIEW_LABEL_API_CALL];
+  labels->response_status = values[STRAPPY_WEBVIEW_LABEL_RESPONSE_STATUS];
   labels->api_error = values[STRAPPY_WEBVIEW_LABEL_API_ERROR];
   labels->response_item = values[STRAPPY_WEBVIEW_LABEL_RESPONSE_ITEM];
   labels->request = values[STRAPPY_WEBVIEW_LABEL_REQUEST];
@@ -587,15 +595,37 @@ static const char *strappy_webview_thinking_label(
   return "Thinking";
 }
 
-static const char *strappy_webview_request_metadata_label(
+static const char *strappy_webview_response_metadata_label(
   const strappy_webview_labels *labels)
 {
   if ((labels != NULL) &&
-      (labels->request_metadata != NULL) &&
-      (labels->request_metadata[0] != '\0')) {
-    return labels->request_metadata;
+      (labels->response_metadata != NULL) &&
+      (labels->response_metadata[0] != '\0')) {
+    return labels->response_metadata;
   }
-  return "Request Metadata";
+  return "Response Metadata";
+}
+
+static const char *strappy_webview_waiting_for_response_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->waiting_for_response != NULL) &&
+      (labels->waiting_for_response[0] != '\0')) {
+    return labels->waiting_for_response;
+  }
+  return "Waiting for response...";
+}
+
+static const char *strappy_webview_no_http_response_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->no_http_response != NULL) &&
+      (labels->no_http_response[0] != '\0')) {
+    return labels->no_http_response;
+  }
+  return "No HTTP response";
 }
 
 static const char *strappy_webview_retry_label(
@@ -640,24 +670,14 @@ static const char *strappy_webview_tool_result_label(
   return "Tool Result";
 }
 
-static const char *strappy_webview_api_call_label(
+static const char *strappy_webview_response_status_label(
   const strappy_webview_labels *labels)
 {
-  if ((labels != NULL) && (labels->api_call != NULL) &&
-      (labels->api_call[0] != '\0')) {
-    return labels->api_call;
+  if ((labels != NULL) && (labels->response_status != NULL) &&
+      (labels->response_status[0] != '\0')) {
+    return labels->response_status;
   }
-  return "API Call";
-}
-
-static const char *strappy_webview_api_error_label(
-  const strappy_webview_labels *labels)
-{
-  if ((labels != NULL) && (labels->api_error != NULL) &&
-      (labels->api_error[0] != '\0')) {
-    return labels->api_error;
-  }
-  return "API Error";
+  return "Response Status";
 }
 
 static const char *strappy_webview_response_item_label(
@@ -790,10 +810,10 @@ static const char *strappy_webview_role_label(
     return strappy_webview_developer_label(labels);
   }
   if (strappy_webview_is_api_call_role(role)) {
-    return strappy_webview_api_call_label(labels);
+    return strappy_webview_response_status_label(labels);
   }
   if (strappy_webview_is_api_error_role(role)) {
-    return strappy_webview_api_error_label(labels);
+    return strappy_webview_response_status_label(labels);
   }
   if (strappy_webview_is_api_reasoning_role(role)) {
     return strappy_webview_thinking_label(labels);
@@ -954,14 +974,13 @@ static int strappy_webview_append_reasoning_html(
   return 1;
 }
 
-static int strappy_webview_append_metadata_html(
+static int strappy_webview_append_response_metadata_html(
   strappy_webview_buffer *buffer,
   const char *role,
   const char *metadata_json,
   const strappy_webview_labels *labels)
 {
-  if ((!strappy_webview_is_assistant_role(role) &&
-       !strappy_webview_is_api_call_role(role) &&
+  if ((!strappy_webview_is_api_call_role(role) &&
        !strappy_webview_is_api_error_role(role)) ||
       (metadata_json == NULL) ||
       (metadata_json[0] == '\0')) {
@@ -970,27 +989,26 @@ static int strappy_webview_append_metadata_html(
 
   return strappy_webview_buffer_append_cstring(
            buffer,
-           "<div class=\"request-metadata request-metadata-collapsed\" "
+           "<div class=\"response-metadata response-metadata-collapsed\" "
            "data-metadata=\"") &&
          strappy_webview_append_html_escaped(buffer, metadata_json) &&
          strappy_webview_buffer_append_cstring(
            buffer,
-           "\"><div class=\"request-metadata-title disclosure-title\" "
-           "onclick=\"return toggleMetadata(this)\">"
-           "<a class=\"request-metadata-toggle\" href=\"#\" "
-           "aria-expanded=\"false\">"
-           "<span class=\"metadata-disclosure\">") &&
+           "\"><div class=\"response-metadata-label disclosure-title\" "
+           "onclick=\"return toggleResponseMetadata(this)\">"
+           "<a class=\"response-metadata-toggle\" href=\"#\" "
+           "aria-expanded=\"false\"><span "
+           "class=\"response-metadata-disclosure\">") &&
          strappy_webview_buffer_append_cstring(
            buffer,
            strappy_webview_disclosure_icon_html(1)) &&
          strappy_webview_buffer_append_cstring(buffer, "</span></a>") &&
          strappy_webview_append_html_escaped(
            buffer,
-           strappy_webview_request_metadata_label(labels)) &&
+           strappy_webview_response_metadata_label(labels)) &&
          strappy_webview_buffer_append_cstring(
            buffer,
-           "</div>"
-           "<div class=\"request-metadata-body\"></div></div>");
+           "</div><div class=\"response-metadata-body\"></div></div>");
 }
 
 static int strappy_webview_append_tool_column_html(
@@ -1104,7 +1122,7 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "color:#30363b;}",
     ".processing-status-retrying{border-color:#68727a;background:#a3adb5;",
     "color:#30363b;}",
-    ".bubble,.reasoning,.tool-column,.request-metadata{box-shadow:none;}",
+    ".bubble,.reasoning,.tool-column,.response-metadata{box-shadow:none;}",
     ".tool-column{max-width:none;box-sizing:border-box;",
     "margin:0 -12px 10px;border:0;border-top:1px solid #959fa7;",
     "border-bottom:1px solid #959fa7;background:#c1c8ce;",
@@ -1121,11 +1139,15 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "line-height:1.3;color:#606970;}",
     ".tool-column-toggle{color:#4e5961;text-decoration:none;}",
     ".tool-column-disclosure,.prompt-group-disclosure,.tool-disclosure,",
-    ".reasoning-disclosure,.metadata-disclosure,.api-reasoning-disclosure{",
+    ".reasoning-disclosure,.api-reasoning-disclosure,",
+    ".response-metadata-disclosure{",
     "display:inline-block;box-sizing:border-box;width:12px;margin-right:4px;",
     "font-size:12px;line-height:1;vertical-align:baseline;text-align:center;}",
     ".api-exchange-disclosure{display:inline-block;box-sizing:border-box;",
     "width:16px;margin-right:4px;font-size:14px;line-height:1;",
+    "vertical-align:baseline;text-align:center;}",
+    ".response-status-disclosure{display:inline-block;box-sizing:border-box;",
+    "width:12px;margin-right:4px;font-size:12px;line-height:1;",
     "vertical-align:baseline;text-align:center;}",
     ".disclosure-title{cursor:pointer;-webkit-tap-highlight-color:rgba(0,0,0,.08);}",
     ".processing-status-active .disclosure-title{cursor:default;",
@@ -1133,8 +1155,6 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".processing-status-active .tool-column-toggle,",
     ".processing-status-active .prompt-group-toggle,",
     ".processing-status-active .reasoning-toggle,",
-    ".processing-status-active .request-metadata-toggle,",
-    ".processing-status-active .api-exchange-toggle,",
     ".processing-status-active .api-reasoning-toggle{display:none;}",
     ".processing-status-active .tool-disclosure{display:none;}",
     ".processing-status-active .tool-card-toggle{pointer-events:none;",
@@ -1157,7 +1177,7 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".prompt-group-collapsed-anchor .bubble,",
     ".prompt-group-collapsed-anchor .reasoning,",
     ".prompt-group-collapsed-anchor .tool-column,",
-    ".prompt-group-collapsed-anchor .request-metadata,",
+    ".prompt-group-collapsed-anchor .response-metadata,",
     ".prompt-group-collapsed-anchor .meta{display:none;}",
     ".bubble{display:block;max-width:none;box-sizing:border-box;",
     "border:0;border-top:1px solid #959fa7;border-bottom:1px solid #959fa7;",
@@ -1174,8 +1194,11 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "white-space:pre-wrap;}",
     ".tool_call .bubble,.tool .bubble{background:#dfe4e8;",
     "border-color:#959fa7;color:#30363b;}",
-    ".api_call,.api_error{background:#b2bbc2;}",
+    ".api_call,.api_error{background:#dfe4e8;}",
     ".api_call .role,.api_error .role{color:#30363b;}",
+    ".response-status-toggle{color:#4e5961;text-decoration:none;}",
+    ".response-status-summary{vertical-align:baseline;}",
+    ".response-metadata-toggle{color:#4e5961;text-decoration:none;}",
     ".api_call .bubble,.api_error .bubble{font-size:12px;line-height:1.35;",
     "white-space:pre-wrap;color:#30363b;background:#dfe4e8;",
     "border-top-color:#959fa7;border-bottom-color:#959fa7;}",
@@ -1293,22 +1316,21 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".reasoning-body{white-space:normal;}",
     ".api-reasoning-toggle{color:#4e5961;text-decoration:none;}",
     ".api-reasoning-collapsed>.bubble{display:none;}",
-    ".request-metadata{max-width:none;box-sizing:border-box;",
-    "border:0;border-top:1px solid #959fa7;border-bottom:1px solid #959fa7;",
-    "background:#dfe4e8;color:#30363b;padding:8px 12px;",
-    "margin:10px -12px 0;line-height:1.3;",
+    ".response-metadata{max-width:none;box-sizing:border-box;",
+    "border:0;background:#dfe4e8;color:#30363b;padding:0 0 4px;",
+    "margin:0;line-height:1.3;",
     "white-space:pre-wrap;word-wrap:break-word;}",
-    ".request-metadata-error,.request-metadata-warning{",
-    "border-top-color:#959fa7;border-bottom-color:#959fa7;",
+    ".response-metadata-error,.response-metadata-warning{",
     "background:#dfe4e8;color:#30363b;}",
-    ".request-metadata-error .request-metadata-title,",
-    ".request-metadata-warning .request-metadata-title{color:#30363b;}",
-    ".request-metadata-title{font-family:inherit;font-size:12px;",
-    "line-height:1.3;font-weight:bold;color:#30363b;margin:0 0 8px;",
-    "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
-    ".request-metadata-toggle{color:#4e5961;text-decoration:none;}",
-    ".request-metadata-collapsed .request-metadata-body{display:none;}",
-    ".request-metadata-body{white-space:pre-wrap;}",
+    ".response-metadata-label{display:block;box-sizing:border-box;width:100%;",
+    "font-size:12px;",
+    "font-weight:bold;line-height:1.3;color:#30363b;",
+    "padding:3px 0;background:#dfe4e8;white-space:nowrap;",
+    "overflow:hidden;text-overflow:ellipsis;}",
+    ".response-metadata-collapsed{padding-bottom:0;}",
+    ".response-metadata-collapsed>.response-metadata-body{display:none;}",
+    ".response-metadata-body{white-space:pre-wrap;border:1px solid #959fa7;",
+    "background:#dfe4e8;padding:4px 6px;margin:2px 0 0;}",
     ".user .role,.user .meta{text-align:left;}",
     ".user .role{background:#c1c8ce;color:#30363b;margin:0 -12px;",
     "padding:8px 12px;border-top:1px solid #959fa7;}",
@@ -1329,7 +1351,7 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".state-error .status{color:#30363b;font-weight:bold;}",
     ".status a{color:#4e5961;text-decoration:none;}",
     ".api-exchange-row{position:relative;border-top:0;",
-    "background:#b2bbc2;color:#30363b;",
+    "background:#dfe4e8;color:#30363b;",
     "padding:0 10px;}",
     ".api-exchange-row:before{content:'';position:absolute;left:0;right:0;",
     "top:0;height:1px;background:#68727a;pointer-events:none;",
@@ -1342,33 +1364,56 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "color:#30363b;font-size:12px;font-weight:bold;line-height:1.3;}",
     ".api-exchange-toggle{color:#4e5961;text-decoration:none;}",
     ".api-exchange-turn-title{vertical-align:baseline;}",
-    ".api-exchange-item,.api-exchange-metadata{background:#b2bbc2;}",
-    ".api-exchange-item .role{margin:0 -10px;padding:5px 10px;}",
-    ".api-exchange-item .bubble{margin:0 -10px;}",
-    ".api-exchange-item .reasoning,.api-exchange-item .tool-column{",
-    "margin-bottom:0;}",
+    ".api-exchange-item,.api-exchange-status{background:#dfe4e8;}",
+    ".api-exchange-item>.role,",
+    ".api-exchange-status>.response-status-section>.role{",
+    "display:block;box-sizing:border-box;width:auto;margin:0 -10px;",
+    "padding:3px 10px;background:#dfe4e8;",
+    "font-weight:bold;white-space:nowrap;overflow:hidden;",
+    "text-overflow:ellipsis;}",
+    ".api-exchange-item>.bubble{margin:0 -10px;}",
+    ".api-exchange-item>.reasoning,.api-exchange-item>.tool-column{",
+    "margin:0 -10px;padding:3px 10px 4px;}",
+    ".api-exchange-item>.reasoning.reasoning-collapsed,",
+    ".api-exchange-item>.tool-column.tool-column-collapsed{padding-bottom:3px;}",
+    ".api-exchange-item>.reasoning .reasoning-label,",
+    ".api-exchange-item>.tool-column .tool-rail-title{margin-bottom:3px;}",
     ".api-exchange-item.user .bubble,.api-exchange-item.harness .bubble,",
     ".api-exchange-item.developer .bubble{padding:3px 10px 5px;}",
-    ".api-exchange-item.api_function_call .bubble,",
-    ".api-exchange-item.api_function_output .bubble{padding-left:10px;",
-    "padding-right:10px;}",
-    ".api-exchange-metadata>.role{margin:0 -10px;",
-    "padding:5px 10px;}",
-    ".api-exchange-metadata>.bubble{margin:0 -10px;}",
-    ".api-exchange-metadata>.request-metadata{margin:0 -10px;",
-    "padding:8px 10px;border-bottom:0;}",
-    ".api-exchange-metadata .request-metadata-title{margin-bottom:5px;}",
-    ".api-exchange-metadata .request-metadata-collapsed ",
-    ".request-metadata-title{margin-bottom:0;}",
+    ".api-exchange-item.api_reasoning>.bubble{padding:3px 10px;}",
+    ".api-exchange-item.api-reasoning-group-end{padding-bottom:4px;}",
+    ".api-exchange-item.api-reasoning-group-end.api-reasoning-collapsed{",
+    "padding-bottom:0;}",
+    ".api-exchange-item.api_function_call>.bubble,",
+    ".api-exchange-item.api_function_output>.bubble,",
+    ".api-exchange-item.api_server_tool>.bubble{padding:0 10px;}",
+    ".api-exchange-item.api_function_call>.bubble.tool-card-open,",
+    ".api-exchange-item.api_function_output>.bubble.tool-card-open,",
+    ".api-exchange-item.api_server_tool>.bubble.tool-card-open{",
+    "padding-bottom:4px;}",
+    ".api-exchange-item .tool-card-toggle{padding-top:3px;",
+    "padding-bottom:3px;}",
+    ".api-exchange-item .tool-card-body{margin-bottom:0;}",
+    ".api-exchange-status{padding-top:0;padding-bottom:0;}",
+    ".api-exchange-status>.response-status-section{box-sizing:border-box;",
+    "margin:0;padding:0 0 4px;background:#dfe4e8;}",
+    ".api-exchange-status.response-status-collapsed>",
+    ".response-status-section{padding-bottom:0;}",
+    ".api-exchange-status>.response-status-section>.bubble{",
+    "margin:2px 0 0;padding:4px 6px;",
+    "border:1px solid #959fa7;}",
+    ".api-exchange-status>.response-metadata{margin:0;}",
     ".api-exchange-section-label{margin:0 -10px;padding:4px 10px;",
     "font-size:12px;line-height:1.2;font-weight:bold;color:#30363b;",
     "background:#c1c8ce;}",
     ".api-exchange-row,.api-exchange-row *{color:#30363b;}",
-    ".api-exchange-row>.role{background:#c1c8ce;}",
+    ".api-exchange-row>.role,",
+    ".api-exchange-row>.response-status-section>.role{background:#dfe4e8;}",
     ".api-exchange-row.api_reasoning>.role{background:#dfe4e8;}",
     ".api-exchange-row>.bubble,.api-exchange-row>.reasoning,",
-    ".api-exchange-row>.request-metadata{background:#dfe4e8;}",
-    ".api-exchange-row>.tool-column{background:#c1c8ce;}",
+    ".api-exchange-row>.response-status-section,",
+    ".api-exchange-row>.response-metadata{background:#dfe4e8;}",
+    ".api-exchange-row>.tool-column{background:#dfe4e8;}",
     ".api-exchange-row .tool-card-toggle{background:#dfe4e8;}",
     ".api-exchange-row .tool-card-body,",
     ".api-exchange-row .tool-table-wrap,.api-exchange-row .tool-pill,",
@@ -1376,29 +1421,34 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "border-color:#959fa7;}",
     ".api-exchange-row>.role,.api-exchange-row>.bubble,",
     ".api-exchange-row>.reasoning,.api-exchange-row>.tool-column,",
-    ".api-exchange-row>.request-metadata{border-top:0;border-bottom:0;}",
+    ".api-exchange-row>.response-metadata{border-top:0;border-bottom:0;}",
+    ".api-exchange-row.api-exchange-status>.response-status-section>.bubble{",
+    "border:1px solid #959fa7;}",
     ".api-exchange-row .meta,.api-exchange-row .status,",
     ".api-exchange-row .tool-subtle{color:#606970;}",
     ".api-exchange-row .tool-column-toggle,",
     ".api-exchange-row .prompt-group-toggle,",
     ".api-exchange-row .reasoning-toggle,",
-    ".api-exchange-row .request-metadata-toggle,",
     ".api-exchange-row .api-exchange-toggle,",
+    ".api-exchange-row .response-status-toggle,",
     ".api-exchange-row .api-reasoning-toggle,",
     ".api-exchange-row .tool-toggle,",
     ".api-exchange-row .tool-output-toggle,",
     ".api-exchange-row .status a{color:#4e5961;}",
-    ".api-exchange-metadata.api_error>.bubble,",
-    ".api-exchange-row .request-metadata-error,",
-    ".api-exchange-row .request-metadata-warning{background:#dfe4e8;",
+    ".api-exchange-status.api_error>.response-status-section>.bubble,",
+    ".api-exchange-row .response-metadata-error,",
+    ".api-exchange-row .response-metadata-warning{background:#dfe4e8;",
     "color:#30363b;border-color:#959fa7;}",
-    ".api-exchange-metadata.api_error>.role,",
-    ".api-exchange-metadata.api_error>.bubble *,",
-    ".api-exchange-row .request-metadata-error *,",
-    ".api-exchange-row .request-metadata-warning *,",
+    ".api-exchange-status.api_error>.response-status-section>.role,",
+    ".api-exchange-status.api_error>.response-status-section>.bubble *,",
+    ".api-exchange-row .response-metadata-error *,",
+    ".api-exchange-row .response-metadata-warning *,",
     ".api-exchange-row.state-error>.status,",
     ".api-exchange-row.state-error>.status *{color:#30363b;}",
     ".api-exchange-row.state-error>.status{font-weight:bold;}",
+    ".response-status-collapsed>.response-status-section>.bubble,",
+    ".response-status-collapsed>.meta{display:none;}",
+    ".api-reasoning-group-secondary>.role{display:none;}",
     ".api-exchange-row.user>.bubble,",
     ".api-exchange-row.harness>.bubble,",
     ".api-exchange-row.developer>.bubble,",
@@ -1415,9 +1465,10 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".api-exchange-row.assistant>.bubble a{color:#2468a8;}",
     ".api-exchange-collapsed-anchor>.role,",
     ".api-exchange-collapsed-anchor>.bubble,",
+    ".api-exchange-collapsed-anchor>.response-status-section,",
     ".api-exchange-collapsed-anchor>.reasoning,",
     ".api-exchange-collapsed-anchor>.tool-column,",
-    ".api-exchange-collapsed-anchor>.request-metadata,",
+    ".api-exchange-collapsed-anchor>.response-metadata,",
     ".api-exchange-collapsed-anchor>.meta,",
     ".api-exchange-collapsed-anchor>.api-exchange-section-label{display:none;}",
     ".api-exchange-collapsed-conversation>.api-exchange-section-label{display:none;}",
@@ -1637,20 +1688,21 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "group=processingPromptGroup(s);if(group==='')group=strappyProcessingPromptGroupKey;",
     "if(strappyProcessingPromptGroupKey!==''&&group!==strappyProcessingPromptGroupKey){",
     "setProcessingThinkingCollapsed(strappyProcessingPromptGroupKey,1);",
-    "settleAPIExchangesForPrompt(strappyProcessingPromptGroupKey);}",
-    "setAPIExchangesCollapsedForPrompt(group,0);",
+    "collapseAPIRoundsForPrompt(strappyProcessingPromptGroupKey);}",
+    "if(group!==strappyProcessingPromptGroupKey)beginAPIRoundsForPrompt(group);",
     "strappyProcessingPromptGroupKey=group;syncProcessingInteractionState(1,group);",
     "decorateAPIExchanges(document);decorateAPIToolGroups(document);",
     "strappyProcessingStatusDirty=1;strappyProcessingNextTick=0;",
     "if(strappyAutoScrollEnabled)strappyUpdateShouldScroll=1;scheduleWebViewUpdate(0);}",
     "function clearProcessingStatus(){var group=strappyProcessingPromptGroupKey;",
-    "settleAPIExchangesForPrompt(group);",
+    "collapseAPIRoundsForPrompt(group);",
     "strappyProcessingStatus=null;syncProcessingInteractionState(0,group);strappyProcessingStatusDirty=1;",
     "decorateAPIExchanges(document);decorateAPIToolGroups(document);",
     "if(strappyAutoScrollEnabled)strappyUpdateShouldScroll=1;",
     "strappyProcessingNextTick=0;scheduleWebViewUpdate(0);}",
     "function clearProcessingStatusNode(){var n=byId('processing-status');",
     "if(n&&n.parentNode)n.parentNode.removeChild(n);",
+    "collapseAPIRoundsForPrompt(strappyProcessingPromptGroupKey);",
     "syncProcessingInteractionState(0,strappyProcessingPromptGroupKey);",
     "strappyProcessingPromptGroupKey='';}",
     "function initProcessingStatusFromRenderState(){var n=document.getElementsByTagName('*');var i,raw,s;",
@@ -1682,7 +1734,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(isObj(root)&&(metadataValueIsWarning(root.finish_reason)||metadataValueIsWarning(root.native_finish_reason)))return 'warning';",
     "if(isObj(gen)&&(metadataValueIsWarning(gen.finish_reason)||metadataValueIsWarning(gen.native_finish_reason)))return 'warning';",
     "return 'ok';}",
-    "function formatMetadata(root){var lines=[];var usage;var gen;",
+    "function formatResponseMetadata(root){var lines=[];var usage;var gen;",
     "if(!isObj(root))return jsonText(root);",
     "addMetaLine(lines,'Response ID',firstMetadataValue(root.id,root.response_id));",
     "addMetaLine(lines,'Model',root.model);",
@@ -1695,7 +1747,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "addMetaLine(lines,'Finish status',metadataFinishStatus(root));",
     "addMetaLine(lines,'Service tier',root.service_tier);",
     "addMetaLine(lines,'System fingerprint',root.system_fingerprint);",
-    "addMetaLine(lines,'HTTP status',root.http_status);",
     "usage=root.usage;if(isObj(usage)){",
     "addMetaLine(lines,'Cost',usage.cost);",
     "addMetaLine(lines,'Input tokens',usage.input_tokens);",
@@ -1744,95 +1795,154 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(jsonText(arguments[i])!=='')return arguments[i];}return '';}",
     "function parseMetadata(raw){if(typeof JSON!='undefined'&&JSON.parse)",
     "return JSON.parse(raw);return eval('('+raw+')');}",
-    "function renderMetadata(root){root=root||document;var n=root.getElementsByTagName('*');",
-    "for(var i=0;i<n.length;i++){if(!hasClass(n[i],'request-metadata'))continue;",
-    "var raw=n[i].getAttribute('data-metadata');var body=firstByClass(n[i],'request-metadata-body');",
+    "function renderResponseMetadata(root){root=root||document;var n=root.getElementsByTagName('*');",
+    "for(var i=0;i<n.length;i++){if(!hasClass(n[i],'response-metadata'))continue;",
+    "var raw=n[i].getAttribute('data-metadata');var body=firstByClass(n[i],'response-metadata-body');",
     "var parsed;",
-    "if(!raw||!body)continue;try{parsed=parseMetadata(raw);setClass(n[i],'request-metadata-error',metadataFinishStatus(parsed)=='error');",
-    "setClass(n[i],'request-metadata-warning',metadataFinishStatus(parsed)=='warning');setNodeText(body,formatMetadata(parsed));}",
+    "if(!raw||!body)continue;try{parsed=parseMetadata(raw);setClass(n[i],'response-metadata-error',metadataFinishStatus(parsed)=='error');",
+    "setClass(n[i],'response-metadata-warning',metadataFinishStatus(parsed)=='warning');setNodeText(body,formatResponseMetadata(parsed));}",
     "catch(e){setNodeText(body,raw);}}}",
-    "function toggleMetadata(a){if(processingInteractionsLocked())return false;",
-    "var p=a;while(p&&!hasClass(p,'request-metadata'))p=p.parentNode;",
-    "if(!p)return false;var d=firstByClass(p,'metadata-disclosure');var t=firstByClass(p,'request-metadata-toggle');",
-    "if(hasClass(p,'request-metadata-collapsed')){",
-    "p.className=p.className.replace(/\\srequest-metadata-collapsed/g,'');if(d)d.innerHTML=disclosureIconHTML(0);",
-    "if(t)t.setAttribute('aria-expanded','true');}",
-    "else{p.className+=' request-metadata-collapsed';if(d)d.innerHTML=disclosureIconHTML(1);",
-    "if(t)t.setAttribute('aria-expanded','false');}return false;}",
-    "var strappyAPIExchangeCollapsed={};",
+    "var strappyAPIRoundCollapsed={};var strappyAPIRoundSettled={};",
+    "var strappyResponseStatusCollapsed={};var strappyAPIReasoningCollapsed={};",
+    "function apiRoundId(row){return row&&row.getAttribute?row.getAttribute('data-round-id')||'':'';}",
     "function apiExchangeId(row){return row&&row.getAttribute?row.getAttribute('data-api-call-id')||'':'';}",
     "function apiExchangeDirection(row){return row&&row.getAttribute?row.getAttribute('data-direction')||'':'';}",
     "function apiExchangeKind(row){return row&&row.getAttribute?row.getAttribute('data-kind')||'':'';}",
     "function apiExchangeCumulativeUsageCost(rows){var i,value;for(i=0;i<rows.length;i++){",
     "value=rows[i].getAttribute?rows[i].getAttribute('data-cumulative-usage-cost')||'':'';if(value!=='')return value;}return '';}",
     "function formatCumulativeUsageCost(value){return '$'+(value!==''?value:'-');}",
-    "function rowIsAPIExchangeMetadata(row){return apiExchangeKind(row)=='response_api_call'||hasClass(row,'api_call')||hasClass(row,'api_error');}",
+    "function formatAPIExchangeAttemptState(value){var words=jsonText(value).replace(/_/g,' ').split(' ');var i;",
+    "if(!words.length||words[0]==='')return 'Unknown state';for(i=0;i<words.length;i++){",
+    "if(words[i]!=='')words[i]=words[i].charAt(0).toUpperCase()+words[i].substring(1);}return words.join(' ');}",
+    "function rowIsResponseStatus(row){return apiExchangeKind(row)=='response_api_call'||hasClass(row,'api_call')||hasClass(row,'api_error');}",
     "function rowIsAPIExchangeItem(row){var d=apiExchangeDirection(row);return d=='request'||d=='response';}",
     "function rowIsAPIExchangeAnswer(row){return hasClass(row,'assistant')&&apiExchangeDirection(row)=='response';}",
     "function rowIsAPIExchangeConversation(row){return hasClass(row,'user')||hasClass(row,'harness')||",
     "hasClass(row,'developer')||hasClass(row,'assistant');}",
     "function rowIsAPIExchangeError(row){return hasClass(row,'api_error')||hasClass(row,'state-error');}",
     "function apiExchangeRowsHaveError(rows){var i;for(i=0;i<rows.length;i++){if(rowIsAPIExchangeError(rows[i]))return 1;}return 0;}",
-    "function apiExchangeCollapsed(id,promptKey,hasError){if(promptKey!==''&&promptKey===strappyProcessingPromptGroupKey&&processingInteractionsLocked())return 0;",
-    "return typeof strappyAPIExchangeCollapsed[id]=='undefined'?(hasError?0:1):(strappyAPIExchangeCollapsed[id]?1:0);}",
-    "function setAPIExchangesCollapsedForPrompt(group,collapsed){var rows=messageRows();var seen={};var i,id;",
-    "if(group==='')return;for(i=0;i<rows.length;i++){if(promptGroupKey(rows[i])!==group)continue;",
-    "id=apiExchangeId(rows[i]);if(id===''||seen['$'+id])continue;seen['$'+id]=1;",
-    "strappyAPIExchangeCollapsed[id]=collapsed?1:0;}}",
-    "function settleAPIExchangesForPrompt(group){var rows=messageRows();var exchanges={};var keys=[];var i,id,key;",
-    "if(group==='')return;for(i=0;i<rows.length;i++){if(promptGroupKey(rows[i])!==group)continue;id=apiExchangeId(rows[i]);",
-    "if(id==='')continue;key='$'+id;if(!exchanges[key]){exchanges[key]={id:id,hasError:0};keys[keys.length]=key;}",
-    "if(rowIsAPIExchangeError(rows[i]))exchanges[key].hasError=1;}",
-    "for(i=0;i<keys.length;i++){key=keys[i];strappyAPIExchangeCollapsed[exchanges[key].id]=exchanges[key].hasError?0:1;}}",
+    "function apiRoundEndedInError(rows,id){var i,last=null;for(i=0;i<rows.length;i++){",
+    "if(apiRoundId(rows[i])==id&&rowIsResponseStatus(rows[i]))last=rows[i];}",
+    "return last&&rowIsAPIExchangeError(last)?1:0;}",
+    "function promptGroupIsProcessing(group){return group!==''&&group===strappyProcessingPromptGroupKey&&processingInteractionsLocked();}",
+    "function beginAPIRoundsForPrompt(group){if(group!=='')strappyAPIRoundSettled[group]=0;}",
+    "function collapseAPIRoundsForPrompt(group){var rows,seen,i,id;if(group===''||strappyAPIRoundSettled[group])return;",
+    "rows=messageRows();seen={};for(i=0;i<rows.length;i++){if(promptGroupKey(rows[i])!==group)continue;id=apiRoundId(rows[i]);",
+    "if(id===''||seen['$'+id])continue;seen['$'+id]=1;",
+    "strappyAPIRoundCollapsed[id]=apiRoundEndedInError(rows,id)?0:1;}strappyAPIRoundSettled[group]=1;}",
+    "function apiRoundCollapsed(id,promptKey,rows){if(promptGroupIsProcessing(promptKey))return 0;",
+    "return typeof strappyAPIRoundCollapsed[id]=='undefined'?(apiRoundEndedInError(rows,id)?0:1):(strappyAPIRoundCollapsed[id]?1:0);}",
+    "function responseStatusState(row){return row&&row.getAttribute?row.getAttribute('data-attempt-state')||'':'';}",
+    "function responseStatusHTTPStatus(row){return row&&row.getAttribute?row.getAttribute('data-http-status')||'':'';}",
+    "function responseStatusResolved(row){var state=responseStatusState(row);return state!==''&&state!='pending'&&state!='running';}",
+    "function responseStatusCollapsed(row,exchangeHasError){var id=apiExchangeId(row);if(!responseStatusResolved(row))return 0;",
+    "return typeof strappyResponseStatusCollapsed[id]=='undefined'?(exchangeHasError?0:1):(strappyResponseStatusCollapsed[id]?1:0);}",
+    "function responseAttemptSummary(row){var label=apiExchangeSectionLabel(row,'response');",
+    "var attempt=row.getAttribute('data-attempt-number')||'1';var attemptLabel=row.getAttribute('data-attempt-label')||'Attempt';",
+    "return label+' \\u00b7 '+attemptLabel+' '+attempt;}",
+    "function responseStatusSummary(row){var label=row.getAttribute('data-response-status-label')||'Response Status';",
+    "var state=responseStatusState(row);var http=responseStatusHTTPStatus(row);if(!responseStatusResolved(row))return label+': '+",
+    "(row.getAttribute('data-waiting-for-response-label')||'Waiting for response...');",
+    "label+=': '+(http!==''?'HTTP '+http:(row.getAttribute('data-no-http-response-label')||'No HTTP response'));",
+    "if(state!=='')label+=' \\u00b7 '+formatAPIExchangeAttemptState(state);return label;}",
+    "function decorateResponseStatusRow(row,exchangeHasError){var role,a,d,summary,collapsed,active,resolved,id;if(!row)return;",
+    "role=firstByClass(row,'role');if(!role)return;collapsed=responseStatusCollapsed(row,exchangeHasError);active=promptGroupIsProcessing(promptGroupKey(row));",
+    "resolved=responseStatusResolved(row);id=apiExchangeId(row);role.onclick=null;setClass(role,'disclosure-title',0);role.innerHTML='';",
+    "if(resolved&&!active){a=document.createElement('a');a.className='response-status-toggle';a.href='#';a.setAttribute('data-api-call-id',id);",
+    "a.setAttribute('aria-expanded',collapsed?'false':'true');d=document.createElement('span');d.className='response-status-disclosure';",
+    "d.innerHTML=disclosureIconHTML(collapsed);a.appendChild(d);role.appendChild(a);setClass(role,'disclosure-title',1);",
+    "role.onclick=function(){return toggleResponseStatus(a);};}summary=document.createElement('span');summary.className='response-status-summary';",
+    "setNodeText(summary,responseStatusSummary(row));role.appendChild(summary);setRowClass(row,'response-status-collapsed',collapsed);}",
     "function removeAPIExchangeDecoration(row){var names=['api-exchange-row','api-exchange-start','api-exchange-end',",
-    "'api-exchange-turn-anchor','api-exchange-metadata','api-exchange-item','api-exchange-request','api-exchange-response',",
+    "'api-exchange-turn-anchor','api-exchange-status','api-exchange-item','api-exchange-request','api-exchange-response',",
     "'api-exchange-answer','api-exchange-section-start','api-exchange-collapsed-anchor','api-exchange-collapsed-row',",
-    "'api-exchange-collapsed-conversation'];",
+    "'api-exchange-collapsed-conversation','api-exchange-attempt-start','api-exchange-attempt-end',",
+    "'api-reasoning-group-anchor','api-reasoning-group-secondary','api-reasoning-group-end'];",
     "var i,n;for(i=0;i<names.length;i++)setRowClass(row,names[i],0);",
-    "n=firstByClass(row,'api-exchange-section-label');if(n&&n.parentNode)n.parentNode.removeChild(n);}",
+    "while((n=firstByClass(row,'api-exchange-section-label'))&&n.parentNode===row)row.removeChild(n);}",
     "function removeAPIExchangeTurnHeader(row){var n=firstByClass(row,'api-exchange-turn-header');",
     "if(n&&n.parentNode)n.parentNode.removeChild(n);}",
-    "function ensureAPIExchangeTurnHeader(row,id,collapsed,cumulativeUsageCost){var h,a,d,title,titleText,roundNumber,attemptNumber,roundLabel,attemptLabel;",
-    "if(!row)return;roundNumber=row.getAttribute('data-round-number')||'1';attemptNumber=row.getAttribute('data-attempt-number')||'1';",
-    "roundLabel=row.getAttribute('data-round-label')||'Round';attemptLabel=row.getAttribute('data-attempt-label')||'Attempt';",
-    "h=document.createElement('div');h.className='api-exchange-turn-header disclosure-title';a=document.createElement('a');",
-    "a.className='api-exchange-toggle';a.href='#';a.setAttribute('data-api-call-id',id);",
-    "a.setAttribute('aria-expanded',collapsed?'false':'true');",
-    "d=document.createElement('span');d.className='api-exchange-disclosure';d.innerHTML=disclosureIconHTML(collapsed);",
-    "a.appendChild(d);h.appendChild(a);title=document.createElement('span');title.className='api-exchange-turn-title';",
-    "titleText=roundLabel+' '+roundNumber;if(parseInt(attemptNumber,10)>1)",
-    "titleText+=' \\u00b7 '+attemptLabel+' '+attemptNumber;titleText+=' \\u00b7 '+formatCumulativeUsageCost(cumulativeUsageCost);",
+    "function ensureAPIExchangeTurnHeader(row,id,collapsed,active,cumulativeUsageCost){var h,a,d,title,titleText,roundNumber,roundLabel;",
+    "if(!row)return;roundNumber=row.getAttribute('data-round-number')||'1';roundLabel=row.getAttribute('data-round-label')||'Round';",
+    "h=document.createElement('div');h.className='api-exchange-turn-header';if(!active){h.className+=' disclosure-title';a=document.createElement('a');",
+    "a.className='api-exchange-toggle';a.href='#';a.setAttribute('data-round-id',id);a.setAttribute('data-prompt-group-key',promptGroupKey(row));",
+    "a.setAttribute('aria-expanded',collapsed?'false':'true');d=document.createElement('span');d.className='api-exchange-disclosure';",
+    "d.innerHTML=disclosureIconHTML(collapsed);a.appendChild(d);h.appendChild(a);h.onclick=function(){return toggleAPIExchange(a);};}",
+    "title=document.createElement('span');title.className='api-exchange-turn-title';titleText=roundLabel+' '+roundNumber;",
+    "titleText+=' \\u00b7 '+formatCumulativeUsageCost(cumulativeUsageCost);",
     "setNodeText(title,titleText);h.appendChild(title);",
-    "h.onclick=function(){return toggleAPIExchange(a);};",
     "row.insertBefore(h,row.firstChild);}",
-    "function ensureAPIExchangeSectionLabel(row){var label=row.getAttribute?row.getAttribute('data-direction-label')||'':'';var n;",
-    "if(label==='')return;n=document.createElement('div');n.className='api-exchange-section-label';setNodeText(n,label);",
-    "row.insertBefore(n,row.firstChild);}",
-    "function decorateAPIExchanges(root){var rows=messageRows();var groups={};var keys=[];var i,j,row,id,key,g,anchor,collapsed,last,d,previous;",
-    "var answer,conversation,hasError;",
+    "function apiExchangeSectionLabel(row,direction){var attr='data-'+direction+'-label';var fallback=direction=='request'?'Request':'Response';",
+    "return row&&row.getAttribute?(row.getAttribute(attr)||fallback):fallback;}",
+    "function ensureAPIExchangeSectionLabel(row,direction,empty){var n;if(!row)return;n=document.createElement('div');",
+    "n.className='api-exchange-section-label api-exchange-section-'+direction+(empty?' api-exchange-empty-section':'');",
+    "setNodeText(n,apiExchangeSectionLabel(row,direction));row.insertBefore(n,row.firstChild);",
+    "setRowClass(row,'api-exchange-section-start',1);}",
+    "function ensureResponseAttemptLabel(row){var n,requestLabel,before;if(!row)return;n=document.createElement('div');",
+    "n.className='api-exchange-section-label api-exchange-section-response';setNodeText(n,responseAttemptSummary(row));",
+    "requestLabel=firstByClass(row,'api-exchange-section-request');before=requestLabel?requestLabel.nextSibling:row.firstChild;",
+    "if(before)row.insertBefore(n,before);else row.appendChild(n);setRowClass(row,'api-exchange-section-start',1);}",
+    "function indexAPIExchangeGroup(g){var j,row,d,id,attemptKey,attempt;g.requestRows=[];g.attempts={};g.attemptKeys=[];",
+    "for(j=0;j<g.rows.length;j++){row=g.rows[j];d=apiExchangeDirection(row);id=apiExchangeId(row);",
+    "if(d=='request')g.requestRows[g.requestRows.length]=row;if(id==='')continue;attemptKey='$'+id;if(!g.attempts[attemptKey]){",
+    "g.attempts[attemptKey]={id:id,rows:[],responseRows:[],statusRow:null};g.attemptKeys[g.attemptKeys.length]=attemptKey;}",
+    "attempt=g.attempts[attemptKey];attempt.rows[attempt.rows.length]=row;if(rowIsResponseStatus(row))attempt.statusRow=row;",
+    "if(d=='response')attempt.responseRows[attempt.responseRows.length]=row;}}",
+    "function moveResponseStatusToAttemptEnd(statusRow,responseRows){var parent,last,next;if(!statusRow||!responseRows.length)return;",
+    "parent=statusRow.parentNode;last=responseRows[responseRows.length-1];if(!parent||last.parentNode!==parent||last===statusRow)return;",
+    "next=last.nextSibling;if(next===statusRow)return;if(next)parent.insertBefore(statusRow,next);else parent.appendChild(statusRow);}",
+    "function refreshAPIExchangeGroupRows(g){var rows=messageRows();var out=[];var i,row;for(i=0;i<rows.length;i++){row=rows[i];",
+    "if(apiRoundId(row)==g.id&&(rowIsResponseStatus(row)||rowIsAPIExchangeItem(row)))out[out.length]=row;}g.rows=out;}",
+    "function moveResponseStatusesToAttemptEnds(g){var keys=g.attemptKeys;var i,attempt;for(i=0;i<keys.length;i++){",
+    "attempt=g.attempts[keys[i]];moveResponseStatusToAttemptEnd(attempt.statusRow,attempt.responseRows);}refreshAPIExchangeGroupRows(g);",
+    "indexAPIExchangeGroup(g);}",
+    "function apiReasoningGroupCollapsed(id,active){if(active)return 0;return typeof strappyAPIReasoningCollapsed[id]=='undefined'?1:(strappyAPIReasoningCollapsed[id]?1:0);}",
+    "function decorateAPIReasoningGroup(rows,active){var reasoning=[],i,row,role,a,d,summary,id,collapsed;",
+    "for(i=0;i<rows.length;i++){if(hasClass(rows[i],'api_reasoning'))reasoning[reasoning.length]=rows[i];}if(!reasoning.length)return;",
+    "id=apiExchangeId(reasoning[0]);collapsed=apiReasoningGroupCollapsed(id,active);for(i=0;i<reasoning.length;i++){row=reasoning[i];",
+    "setRowClass(row,'api-reasoning-group-anchor',i===0);setRowClass(row,'api-reasoning-group-secondary',i>0);",
+    "setRowClass(row,'api-reasoning-group-end',i===reasoning.length-1);",
+    "setRowClass(row,'api-reasoning-collapsed',collapsed);role=firstByClass(row,'role');if(!role)continue;role.onclick=null;",
+    "role.style.display=i>0?'none':'';setClass(role,'disclosure-title',0);if(i>0)continue;role.innerHTML='';",
+    "if(!active){a=document.createElement('a');a.className='api-reasoning-toggle';a.href='#';a.setAttribute('data-api-call-id',id);",
+    "a.setAttribute('aria-expanded',collapsed?'false':'true');d=document.createElement('span');d.className='api-reasoning-disclosure';",
+    "d.innerHTML=disclosureIconHTML(collapsed);a.appendChild(d);role.appendChild(a);setClass(role,'disclosure-title',1);",
+    "role.onclick=function(){return toggleAPIReasoning(a);};}summary=document.createElement('span');",
+    "summary.className='api-reasoning-summary';setNodeText(summary,row.getAttribute('data-thinking-label')||'Thinking');role.appendChild(summary);}}",
+    "function decorateAPIExchanges(root){var rows=messageRows();var groups={};var keys=[];var i,j,row,id,roundId,key,g,anchor,collapsed,last,d;",
+    "var answer,conversation,active,attempt,attemptKeys,attemptRows,statusRow,responseRows,attemptStartRow;",
     "for(i=0;i<rows.length;i++){removeAPIExchangeDecoration(rows[i]);removeAPIExchangeTurnHeader(rows[i]);",
-    "id=apiExchangeId(rows[i]);if(id===''||(!rowIsAPIExchangeMetadata(rows[i])&&!rowIsAPIExchangeItem(rows[i])))continue;",
-    "key='$'+id;if(!groups[key]){groups[key]={id:id,promptKey:promptGroupKey(rows[i]),rows:[]};keys[keys.length]=key;}",
+    "roundId=apiRoundId(rows[i]);if(roundId===''||(!rowIsResponseStatus(rows[i])&&!rowIsAPIExchangeItem(rows[i])))continue;",
+    "key='$'+roundId;if(!groups[key]){groups[key]={id:roundId,promptKey:promptGroupKey(rows[i]),rows:[],requestRows:[],attempts:{},attemptKeys:[]};keys[keys.length]=key;}",
     "groups[key].rows[groups[key].rows.length]=rows[i];}",
-    "for(i=0;i<keys.length;i++){g=groups[keys[i]];anchor=g.rows[0];hasError=apiExchangeRowsHaveError(g.rows);",
-    "collapsed=apiExchangeCollapsed(g.id,g.promptKey,hasError);previous='';last=g.rows[g.rows.length-1];",
+    "for(i=0;i<keys.length;i++){g=groups[keys[i]];indexAPIExchangeGroup(g);moveResponseStatusesToAttemptEnds(g);",
+    "anchor=g.rows[0];active=promptGroupIsProcessing(g.promptKey);collapsed=apiRoundCollapsed(g.id,g.promptKey,g.rows);last=g.rows[g.rows.length-1];",
     "if(collapsed){last=anchor;for(j=0;j<g.rows.length;j++){if(rowIsAPIExchangeConversation(g.rows[j]))last=g.rows[j];}}",
     "for(j=0;j<g.rows.length;j++){row=g.rows[j];d=apiExchangeDirection(row);answer=rowIsAPIExchangeAnswer(row);",
     "conversation=rowIsAPIExchangeConversation(row);",
     "setRowClass(row,'api-exchange-row',1);",
     "setRowClass(row,'api-exchange-start',j===0);setRowClass(row,'api-exchange-end',row===last);",
-    "setRowClass(row,'api-exchange-turn-anchor',row===anchor);setRowClass(row,'api-exchange-metadata',rowIsAPIExchangeMetadata(row));",
+    "setRowClass(row,'api-exchange-turn-anchor',row===anchor);setRowClass(row,'api-exchange-status',rowIsResponseStatus(row));",
     "setRowClass(row,'api-exchange-item',rowIsAPIExchangeItem(row));",
     "setRowClass(row,'api-exchange-request',d=='request');setRowClass(row,'api-exchange-response',d=='response');",
     "setRowClass(row,'api-exchange-answer',answer);",
     "setRowClass(row,'api-exchange-collapsed-conversation',collapsed&&conversation);",
     "setRowClass(row,'api-exchange-collapsed-anchor',collapsed&&row===anchor&&!conversation);",
-    "setRowClass(row,'api-exchange-collapsed-row',collapsed&&row!==anchor&&!conversation);",
-    "if(d!==''&&d!==previous){setRowClass(row,'api-exchange-section-start',1);ensureAPIExchangeSectionLabel(row);previous=d;}}",
-    "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed,apiExchangeCumulativeUsageCost(g.rows));}}",
-    "function toggleAPIExchange(a){if(processingInteractionsLocked())return false;",
-    "var id=a&&a.getAttribute?a.getAttribute('data-api-call-id'):'';var current;if(id==='')return false;",
-    "current=a.getAttribute('aria-expanded')=='false'?1:0;strappyAPIExchangeCollapsed[id]=current?0:1;",
+    "setRowClass(row,'api-exchange-collapsed-row',collapsed&&row!==anchor&&!conversation);}",
+    "if(g.requestRows.length)ensureAPIExchangeSectionLabel(g.requestRows[0],'request',0);else ensureAPIExchangeSectionLabel(anchor,'request',1);",
+    "attemptKeys=g.attemptKeys;for(j=0;j<attemptKeys.length;j++){attempt=g.attempts[attemptKeys[j]];attemptRows=attempt.rows;statusRow=attempt.statusRow;responseRows=attempt.responseRows;",
+    "attemptStartRow=responseRows.length?responseRows[0]:statusRow;if(attemptStartRow)setRowClass(attemptStartRow,'api-exchange-attempt-start',1);",
+    "if(statusRow)decorateResponseStatusRow(statusRow,apiExchangeRowsHaveError(attemptRows));",
+    "if(attemptRows.length)setRowClass(attemptRows[attemptRows.length-1],'api-exchange-attempt-end',1);",
+    "if(responseRows.length)ensureResponseAttemptLabel(responseRows[0]);else if(statusRow)ensureResponseAttemptLabel(statusRow);",
+    "decorateAPIReasoningGroup(attemptRows,active);}",
+    "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed,active,apiExchangeCumulativeUsageCost(g.rows));}}",
+    "function toggleAPIExchange(a){var id=a&&a.getAttribute?a.getAttribute('data-round-id'):'';var group=a&&a.getAttribute?a.getAttribute('data-prompt-group-key'):'';var current;",
+    "if(id===''||promptGroupIsProcessing(group))return false;current=a.getAttribute('aria-expanded')=='false'?1:0;strappyAPIRoundCollapsed[id]=current?0:1;",
+    "decorateAPIExchanges(document);decorateAPIToolGroups(document);decoratePromptGroups(document);return false;}",
+    "function toggleResponseStatus(a){var id=a&&a.getAttribute?a.getAttribute('data-api-call-id'):'';var row=a;var current;",
+    "while(row&&!rowIsResponseStatus(row))row=row.parentNode;if(id===''||!row||promptGroupIsProcessing(promptGroupKey(row)))return false;",
+    "current=a.getAttribute('aria-expanded')=='false'?1:0;strappyResponseStatusCollapsed[id]=current?0:1;",
     "decorateAPIExchanges(document);decorateAPIToolGroups(document);decoratePromptGroups(document);return false;}",
     "var strappyPromptGroupCollapsed={};",
     "function promptGroupKey(row){return row&&row.getAttribute?row.getAttribute('data-prompt-group-key')||'':'';}",
@@ -1879,6 +1989,11 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function setMessagePromptGroup(id,key,actor){var r=byId(id);if(!r)return;",
     "if(key&&r.setAttribute)r.setAttribute('data-prompt-group-key',key);",
     "if(actor&&r.setAttribute)r.setAttribute('data-actor',actor);renderMessageDecorations(document);}",
+    "function setResponseMetadataCollapsed(box,collapsed){var d=firstByClass(box,'response-metadata-disclosure');",
+    "var a=firstByClass(box,'response-metadata-toggle');setClass(box,'response-metadata-collapsed',collapsed);",
+    "if(d)d.innerHTML=disclosureIconHTML(collapsed);if(a)a.setAttribute('aria-expanded',collapsed?'false':'true');}",
+    "function toggleResponseMetadata(a){var box=a;while(box&&!hasClass(box,'response-metadata'))box=box.parentNode;",
+    "if(!box)return false;setResponseMetadataCollapsed(box,hasClass(box,'response-metadata-collapsed')?0:1);return false;}",
     "function toggleReasoning(a){if(processingInteractionsLocked())return false;",
     "var p=a;while(p&&!hasClass(p,'reasoning'))p=p.parentNode;",
     "if(!p)return false;setReasoningCollapsed(p,hasClass(p,'reasoning-collapsed')?0:1);return false;}",
@@ -1891,13 +2006,14 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function setMessageReasoningCollapsed(id,collapsed){var r=byId(id);var box,body;",
     "if(!r)return;box=firstByClass(r,'reasoning');body=firstByClass(r,'reasoning-body');",
     "if(!box||!body||nodeText(body)==='')return;setReasoningCollapsed(box,collapsed);}",
-    "function setAPIReasoningCollapsed(row,collapsed){var d=firstByClass(row,'api-reasoning-disclosure');",
-    "var a=firstByClass(row,'api-reasoning-toggle');if(collapsed){setRowClass(row,'api-reasoning-collapsed',1);",
-    "if(d)d.innerHTML=disclosureIconHTML(1);if(a)a.setAttribute('aria-expanded','false');}",
-    "else{setRowClass(row,'api-reasoning-collapsed',0);if(d)d.innerHTML=disclosureIconHTML(0);",
-    "if(a)a.setAttribute('aria-expanded','true');}}",
-    "function toggleAPIReasoning(a){if(processingInteractionsLocked())return false;",
-    "var row=a;while(row&&!hasClass(row,'api_reasoning'))row=row.parentNode;",
+    "function setAPIReasoningCollapsed(row,collapsed){var id=apiExchangeId(row);var rows=messageRows();var i,r,d,a;",
+    "if(id!=='')strappyAPIReasoningCollapsed[id]=collapsed?1:0;for(i=0;i<rows.length;i++){r=rows[i];",
+    "if(!hasClass(r,'api_reasoning')||(id!==''&&apiExchangeId(r)!==id)||(id===''&&r!==row))continue;",
+    "setRowClass(r,'api-reasoning-collapsed',collapsed);if(!hasClass(r,'api-reasoning-group-anchor')&&id!=='')continue;",
+    "d=firstByClass(r,'api-reasoning-disclosure');a=firstByClass(r,'api-reasoning-toggle');",
+    "if(d)d.innerHTML=disclosureIconHTML(collapsed);if(a)a.setAttribute('aria-expanded',collapsed?'false':'true');}}",
+    "function toggleAPIReasoning(a){if(processingInteractionsLocked())return false;var id=a&&a.getAttribute?a.getAttribute('data-api-call-id'):'';",
+    "var rows=messageRows();var i,row=null;for(i=0;i<rows.length;i++){if(hasClass(rows[i],'api_reasoning')&&(id===''||apiExchangeId(rows[i])==id)){row=rows[i];break;}}",
     "if(!row)return false;setAPIReasoningCollapsed(row,hasClass(row,'api-reasoning-collapsed')?0:1);return false;}",
     "function setToolColumnCollapsed(box,collapsed){var d=firstByClass(box,'tool-column-disclosure');",
     "var a=firstByClass(box,'tool-column-toggle');",
@@ -2140,8 +2256,9 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "setToolCardSummary(summary,apiToolLabel(row)+': '+title,error);",
     "if(bubble){if(error&&!hasClass(bubble,'tool-error'))bubble.className+=' tool-error';",
     "if(!error)bubble.className=bubble.className.replace(/\\stool-error/g,'');}}}}",
-    "function apiToolGroupKey(row){var id=apiExchangeId(row);var kind=isAPIToolCallRow(row)?'calls':'outputs';",
-    "return id!==''?'api-call-'+id+'-'+kind:(promptGroupKey(row)||'api-tools')+'-'+kind;}",
+    "function apiToolGroupKey(row){var id=apiExchangeId(row);var round=apiRoundId(row);var direction=apiExchangeDirection(row)||'item';",
+    "var kind=isAPIToolCallRow(row)?'calls':'outputs';return id!==''?'api-call-'+id+'-'+kind:",
+    "(round!==''?'api-round-'+round+'-'+direction+'-'+kind:(promptGroupKey(row)||'api-tools')+'-'+kind);}",
     "function removeAPIToolGroupDecoration(row){var role;setRowClass(row,'api-tool-group-row',0);",
     "setRowClass(row,'api-tool-group-anchor',0);setRowClass(row,'api-tool-group-secondary',0);",
     "role=firstByClass(row,'role');if(!role)return;role.style.display='';",
@@ -2223,7 +2340,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "for(i=0;i<targets.length;i++)renderToolCardsForTarget(targets[i],grouped[targets[i]]);scrollToolRailBottom();}",
     "function renderToolNode(row){toolRowRaw(row);rebuildToolCards();}",
     "function renderTools(root){renderAPIToolRows();renderAPIServerToolRows();moveToolRows(root);rebuildToolCards();}",
-    "function renderMessageDecorations(root){renderMarkdown(root);renderMetadata(root);renderTools(root);decorateAPIExchanges(root);decorateAPIToolGroups(root);decoratePromptGroups(root);",
+    "function renderMessageDecorations(root){renderMarkdown(root);renderResponseMetadata(root);renderTools(root);decorateAPIExchanges(root);decorateAPIToolGroups(root);decoratePromptGroups(root);",
     "if(processingInteractionsLocked())syncProcessingInteractionState(1,strappyProcessingPromptGroupKey);}",
     "var strappyBatchDepth=0;var strappyNeedsRender=0;var strappyBatchShouldScroll=0;",
     "var strappyUpdateInterval=300;var strappyStatusInterval=1000;",
@@ -2364,7 +2481,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "b._strappyRawText+=t;renderAfterMutation(document);scrollBottom();}",
     "function removeMessage(id){flushTextQueues();var r=byId(id);",
     "if(r&&r.parentNode)r.parentNode.removeChild(r);renderAfterMutation(document);}",
-    "setTimeout(initProcessingStatusFromRenderState,0);",
     "</script>",
     NULL
   };
@@ -2523,6 +2639,8 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   const char *status_to_render;
   char *owned_status_html;
   char http_status_text[64];
+  char http_status_value[64];
+  char round_id_text[64];
   char api_call_id_text[64];
   char round_number_text[64];
   char attempt_number_text[64];
@@ -2537,6 +2655,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   int hide_empty_answer_bubble;
   int suppress_status_meta;
   int render_api_tool_card;
+  int render_response_status_section;
   int ok;
 
   role = ((message != NULL) && (message->role != NULL) &&
@@ -2560,32 +2679,46 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   } else if (strcmp(direction, "response") == 0) {
     direction_label = strappy_webview_response_label(labels);
   }
+  round_id_text[0] = '\0';
   api_call_id_text[0] = '\0';
   round_number_text[0] = '\0';
   attempt_number_text[0] = '\0';
+  http_status_value[0] = '\0';
   cumulative_usage_cost_text[0] = '\0';
-  if ((message != NULL) && (message->api_call_id > 0LL)) {
-    snprintf(api_call_id_text,
-             sizeof(api_call_id_text),
+  if ((message != NULL) && (message->round_id > 0LL)) {
+    snprintf(round_id_text,
+             sizeof(round_id_text),
              "%lld",
-             message->api_call_id);
+             message->round_id);
     if (message->round_number > 0L) {
       snprintf(round_number_text,
                sizeof(round_number_text),
                "%ld",
                message->round_number);
     }
+    if (message->has_cumulative_usage_cost &&
+        !strappy_webview_format_usage_cost(message->cumulative_usage_cost,
+                                          cumulative_usage_cost_text,
+                                          sizeof(cumulative_usage_cost_text))) {
+      return NULL;
+    }
+  }
+  if ((message != NULL) && (message->api_call_id > 0LL)) {
+    snprintf(api_call_id_text,
+             sizeof(api_call_id_text),
+             "%lld",
+             message->api_call_id);
     if (message->attempt_number > 0L) {
       snprintf(attempt_number_text,
                sizeof(attempt_number_text),
                "%ld",
                message->attempt_number);
     }
-    if (message->has_cumulative_usage_cost &&
-        !strappy_webview_format_usage_cost(message->cumulative_usage_cost,
-                                          cumulative_usage_cost_text,
-                                          sizeof(cumulative_usage_cost_text))) {
-      return NULL;
+    if (message->http_status > 0L) {
+      snprintf(http_status_value,
+               sizeof(http_status_value),
+               "%ld",
+               message->http_status);
     }
   }
   status_to_render = strappy_webview_string_or_empty(status_html);
@@ -2613,15 +2746,20 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     strappy_webview_is_assistant_role(role) &&
     (text[0] == '\0');
   suppress_status_meta =
-    render_streaming &&
-    (state != NULL) &&
-    (strcmp(state, "pending") == 0);
+    (strappy_webview_is_api_call_role(role) ||
+     strappy_webview_is_api_error_role(role)) ||
+    (render_streaming &&
+     (state != NULL) &&
+     (strcmp(state, "pending") == 0));
   render_api_tool_card =
     strappy_webview_is_api_function_call_role(role) ||
     strappy_webview_is_api_function_output_role(role);
+  render_response_status_section =
+    strappy_webview_is_api_call_role(role) ||
+    strappy_webview_is_api_error_role(role);
   render_created_at =
     (created_at[0] != '\0') &&
-    ((message == NULL) || (message->api_call_id <= 0LL)) &&
+    ((message == NULL) || (message->round_id <= 0LL)) &&
     !render_streaming &&
     !strappy_webview_is_user_role(role) &&
     !strappy_webview_is_harness_role(role) &&
@@ -2688,6 +2826,9 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                              (message != NULL) ?
                                                message->target_message_key : NULL) &&
        strappy_webview_append_data_attribute(&buffer,
+                                             "round-id",
+                                             round_id_text) &&
+       strappy_webview_append_data_attribute(&buffer,
                                              "api-call-id",
                                              api_call_id_text) &&
        strappy_webview_append_data_attribute(&buffer,
@@ -2695,12 +2836,33 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                              round_number_text) &&
        strappy_webview_append_data_attribute(&buffer,
                                              "round-label",
-                                             (api_call_id_text[0] != '\0') ?
+                                             (round_id_text[0] != '\0') ?
                                                strappy_webview_round_label(labels) :
                                                NULL) &&
        strappy_webview_append_data_attribute(&buffer,
                                              "attempt-number",
                                              attempt_number_text) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "attempt-state",
+         (message != NULL) ? message->attempt_state : NULL) &&
+       strappy_webview_append_data_attribute(&buffer,
+                                             "http-status",
+                                             http_status_value) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "response-status-label",
+         (strappy_webview_is_api_call_role(role) ||
+          strappy_webview_is_api_error_role(role)) ?
+           strappy_webview_response_status_label(labels) : NULL) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "request-method",
+         (message != NULL) ? message->request_method : NULL) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "request-endpoint",
+         (message != NULL) ? message->request_endpoint : NULL) &&
        strappy_webview_append_data_attribute(&buffer,
                                              "attempt-label",
                                              (api_call_id_text[0] != '\0') ?
@@ -2716,6 +2878,26 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
        strappy_webview_append_data_attribute(&buffer,
                                              "direction-label",
                                              direction_label) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "request-label",
+         (round_id_text[0] != '\0') ?
+           strappy_webview_request_label(labels) : NULL) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "response-label",
+         (round_id_text[0] != '\0') ?
+           strappy_webview_response_label(labels) : NULL) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "waiting-for-response-label",
+         (api_call_id_text[0] != '\0') ?
+           strappy_webview_waiting_for_response_label(labels) : NULL) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "no-http-response-label",
+         (api_call_id_text[0] != '\0') ?
+           strappy_webview_no_http_response_label(labels) : NULL) &&
        strappy_webview_append_data_attribute(
          &buffer,
          "tool-label",
@@ -2761,14 +2943,23 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                              "render-state",
                                              (message != NULL) ?
                                                message->render_state_json : NULL);
-  if (ok && render_streaming && strappy_webview_is_assistant_role(role)) {
+  if (ok && ((render_streaming && strappy_webview_is_assistant_role(role)) ||
+             strappy_webview_is_api_reasoning_role(role))) {
     ok = strappy_webview_append_data_attribute(
            &buffer,
            "thinking-label",
            strappy_webview_thinking_label(labels));
   }
+  if (ok) {
+    ok = strappy_webview_buffer_append_cstring(&buffer, ">");
+  }
+  if (ok && render_response_status_section) {
+    ok = strappy_webview_buffer_append_cstring(
+      &buffer,
+      "<div class=\"response-status-section\">");
+  }
   if (ok && !render_api_tool_card) {
-    ok = strappy_webview_buffer_append_cstring(&buffer, "><div class=\"role");
+    ok = strappy_webview_buffer_append_cstring(&buffer, "<div class=\"role");
     if (ok && strappy_webview_is_api_reasoning_role(role)) {
       ok = strappy_webview_buffer_append_cstring(
         &buffer,
@@ -2789,8 +2980,6 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
            &buffer,
            strappy_webview_role_label(role, labels)) &&
          strappy_webview_buffer_append_cstring(&buffer, "</div>");
-  } else if (ok) {
-    ok = strappy_webview_buffer_append_cstring(&buffer, ">");
   }
 
   if (ok && strappy_webview_is_assistant_role(role)) {
@@ -2860,9 +3049,16 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   } else {
     ok = ok && strappy_webview_append_html_escaped(&buffer, text);
   }
-  ok = ok &&
-       strappy_webview_buffer_append_cstring(&buffer, "</div>") &&
-       strappy_webview_append_metadata_html(&buffer, role, metadata_json, labels);
+  ok = ok && strappy_webview_buffer_append_cstring(&buffer, "</div>");
+  if (ok && render_response_status_section) {
+    ok = strappy_webview_buffer_append_cstring(&buffer, "</div>");
+  }
+  if (ok) {
+    ok = strappy_webview_append_response_metadata_html(&buffer,
+                                                       role,
+                                                       metadata_json,
+                                                       labels);
+  }
 
   if (ok && (status_to_render[0] != '\0') &&
       !render_bubble_status && !suppress_status_meta) {
@@ -3123,7 +3319,8 @@ char *strappy_webview_messages_page_html(
        strappy_webview_buffer_append_cstring(
          &buffer,
          "</div></div><div id=\"tool-sources\" class=\"tool-source-bin\"></div>"
-         "</div></div><script>renderMessageDecorations(document);"
+         "</div></div><script>initProcessingStatusFromRenderState();"
+         "renderMessageDecorations(document);"
          "</script></body></html>");
 
   if (!ok) {

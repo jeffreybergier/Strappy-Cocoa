@@ -28,6 +28,8 @@ typedef struct strappy_session_message_record {
   long long message_id;
   long long session_id;
   long long turn_id;
+  long long model_request_id;
+  long long http_attempt_id;
   long round_index;
   long attempt_index;
   double cumulative_usage_cost;
@@ -57,7 +59,10 @@ typedef struct strappy_session_message_record {
   char *response_item_title;
   char *response_item_status;
   char *response_item_http_status;
+  char *request_method;
+  char *request_endpoint;
   char *created_at;
+  char *attempt_state;
   int include_in_context;
   int is_error;
   long http_status;

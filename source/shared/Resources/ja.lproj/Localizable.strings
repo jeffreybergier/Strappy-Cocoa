@@ -13,7 +13,7 @@
 "Tool" = "ツール";
 "Tool Call" = "ツール呼び出し";
 "Tool Result" = "ツール結果";
-"API Call" = "API 呼び出し";
+"Response Status" = "レスポンス状態";
 "API Error" = "API エラー";
 "Response Item" = "レスポンス項目";
 "Request" = "リクエスト";
@@ -174,7 +174,9 @@
 "Prompt request is already running." = "プロンプトリクエストはすでに実行中です。";
 "Prompts" = "プロンプト";
 "Refresh" = "更新";
-"Request Metadata" = "リクエストメタデータ";
+"Response Metadata" = "レスポンスメタデータ";
+"Waiting for response..." = "レスポンスを待機中...";
+"No HTTP response" = "HTTP レスポンスなし";
 "Retry" = "再試行";
 "Save" = "保存";
 "Scan path is empty." = "スキャンパスが空です。";
