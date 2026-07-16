@@ -29,6 +29,7 @@ typedef struct strappy_file_scanner_record {
 typedef struct strappy_file_scanner_record_list {
   strappy_file_scanner_record *records;
   size_t count;
+  long long scan_run_id;
 } strappy_file_scanner_record_list;
 
 typedef struct strappy_file_scanner_progress {
@@ -90,7 +91,7 @@ int strappy_file_scanner_save_discovered_database_batch(
   const strappy_file_scanner_record_list *list,
   const char *scan_root,
   char **error_out);
-/* Requires record_batch_callback; clears scan_root before writing batches. */
+/* Requires record_batch_callback; owns one catalog scan run across all batches. */
 int strappy_file_scanner_scan_and_save_discovered_databases(
   const char *db_path,
   const strappy_file_scanner_options *options,

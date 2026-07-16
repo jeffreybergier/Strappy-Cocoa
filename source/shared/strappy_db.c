@@ -5299,9 +5299,14 @@ static int strappy_db_catalog_save_one(sqlite3 *db,
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?);";
   static const char *update_location_sql =
     "UPDATE database_locations SET database_id = ?, scan_root_id = ?, "
-    "last_scan_run_id = ?, device = ?, inode = ?, size_bytes = ?, "
+    "last_scan_run_id = COALESCE(?, last_scan_run_id), device = ?, inode = ?, "
+    "size_bytes = ?, "
     "modified_at_s = ?, validation_state = ?, validation_error = ?, active = 1, "
     "last_seen_at_ms = ?, last_scanned_at_ms = ? WHERE path = ?;";
+  static const char *count_scan_record_sql =
+    "UPDATE scan_runs SET candidate_count = candidate_count + 1, "
+    "database_count = database_count + ? "
+    "WHERE id = ? AND scan_root_id = ? AND state = 'running';";
   sqlite3_stmt *stmt;
   char *stable_key;
   char *assistant_id;
@@ -5570,7 +5575,189 @@ static int strappy_db_catalog_save_one(sqlite3 *db,
     return 0;
   }
   sqlite3_finalize(stmt);
+  if (scan_run_id > 0LL) {
+    stmt = NULL;
+    rc = sqlite3_prepare_v2(db, count_scan_record_sql, -1, &stmt, NULL);
+    if ((rc != SQLITE_OK) ||
+        (sqlite3_bind_int(stmt, 1, record->is_valid_sqlite ? 1 : 0) !=
+         SQLITE_OK) ||
+        (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)scan_run_id) !=
+         SQLITE_OK) ||
+        (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)scan_root_id) !=
+         SQLITE_OK) ||
+        (sqlite3_step(stmt) != SQLITE_DONE) ||
+        (sqlite3_changes(db) != 1)) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not count scan record: %s",
+                                  sqlite3_errmsg(db));
+      sqlite3_finalize(stmt);
+      free(stable_key);
+      return 0;
+    }
+    sqlite3_finalize(stmt);
+  }
   free(stable_key);
+  return 1;
+}
+
+static int strappy_db_catalog_begin_scan(sqlite3 *db,
+                                         const char *scan_root,
+                                         long long now_ms,
+                                         long long *scan_run_id_out,
+                                         char **error_out)
+{
+  static const char *cancel_running_sql =
+    "UPDATE scan_runs SET state = 'cancelled', completed_at_ms = ?, "
+    "error_message = COALESCE(error_message, 'Superseded by a newer scan.') "
+    "WHERE scan_root_id = ? AND state = 'running';";
+  static const char *insert_run_sql =
+    "INSERT INTO scan_runs (scan_root_id, state, started_at_ms) "
+    "VALUES (?, 'running', ?);";
+  static const char *deactivate_sql =
+    "UPDATE database_locations SET active = 0 WHERE scan_root_id = ?;";
+  static const char *start_root_sql =
+    "UPDATE scan_roots SET last_started_at_ms = ? WHERE id = ?;";
+  sqlite3_stmt *stmt;
+  long long root_id;
+  int rc;
+
+  if ((db == NULL) || (scan_root == NULL) || (scan_root[0] == '\0') ||
+      (scan_run_id_out == NULL)) {
+    strappy_set_error(error_out, "Database scan start is incomplete.");
+    return 0;
+  }
+  *scan_run_id_out = 0LL;
+  root_id = 0LL;
+  if (!strappy_db_catalog_scan_root_id(db,
+                                      scan_root,
+                                      now_ms,
+                                      &root_id,
+                                      error_out)) {
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, cancel_running_sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)now_ms) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)root_id) != SQLITE_OK) ||
+      (sqlite3_step(stmt) != SQLITE_DONE)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not cancel stale scan run: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, insert_run_sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)root_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)now_ms) != SQLITE_OK) ||
+      (sqlite3_step(stmt) != SQLITE_DONE)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not begin scan run: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  *scan_run_id_out = (long long)sqlite3_last_insert_rowid(db);
+  sqlite3_finalize(stmt);
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, deactivate_sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)root_id) != SQLITE_OK) ||
+      (sqlite3_step(stmt) != SQLITE_DONE)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not reset scan locations: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, start_root_sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)now_ms) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)root_id) != SQLITE_OK) ||
+      (sqlite3_step(stmt) != SQLITE_DONE) ||
+      (sqlite3_changes(db) != 1)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not start scan root: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+static int strappy_db_catalog_finish_scan(sqlite3 *db,
+                                          long long scan_run_id,
+                                          const char *state,
+                                          const char *error_message,
+                                          long long now_ms,
+                                          char **error_out)
+{
+  static const char *finish_run_sql =
+    "UPDATE scan_runs SET state = ?, completed_at_ms = ?, error_message = ? "
+    "WHERE id = ? AND state = 'running';";
+  static const char *finish_root_sql =
+    "UPDATE scan_roots SET last_completed_at_ms = ? WHERE id = "
+    "(SELECT scan_root_id FROM scan_runs WHERE id = ?);";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if ((db == NULL) || (scan_run_id <= 0LL) || (state == NULL) ||
+      ((strcmp(state, "completed") != 0) &&
+       (strcmp(state, "error") != 0) &&
+       (strcmp(state, "cancelled") != 0))) {
+    strappy_set_error(error_out, "Database scan finish is incomplete.");
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, finish_run_sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_text(stmt, 1, state, -1, SQLITE_TRANSIENT) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)now_ms) != SQLITE_OK) ||
+      !strappy_db_bind_optional_text(db,
+                                     stmt,
+                                     3,
+                                     error_message,
+                                     "Could not bind scan error",
+                                     error_out) ||
+      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)scan_run_id) != SQLITE_OK) ||
+      (sqlite3_step(stmt) != SQLITE_DONE) ||
+      (sqlite3_changes(db) != 1)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not finish scan run: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+
+  if (strcmp(state, "completed") != 0) {
+    return 1;
+  }
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, finish_root_sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)now_ms) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)scan_run_id) != SQLITE_OK) ||
+      (sqlite3_step(stmt) != SQLITE_DONE) ||
+      (sqlite3_changes(db) != 1)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not finish scan root: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
   return 1;
 }
 
@@ -5579,74 +5766,27 @@ static int strappy_db_catalog_save(sqlite3 *db,
                                    size_t count,
                                    int replace_root,
                                    const char *scan_root,
+                                   long long scan_run_id,
                                    char **error_out)
 {
-  static const char *insert_run_sql =
-    "INSERT INTO scan_runs "
-    "(scan_root_id, state, started_at_ms, candidate_count) "
-    "VALUES (?, 'running', ?, ?);";
-  static const char *deactivate_sql =
-    "UPDATE database_locations SET active = 0 "
-    "WHERE scan_root_id = ?;";
-  static const char *finish_run_sql =
-    "UPDATE scan_runs SET state = 'completed', completed_at_ms = ?, "
-    "database_count = ? WHERE id = ?;";
-  static const char *finish_root_sql =
-    "UPDATE scan_roots SET last_started_at_ms = ?, last_completed_at_ms = ? "
-    "WHERE id = ?;";
-  sqlite3_stmt *stmt;
   long long now_ms;
-  long long root_id;
   long long run_id;
   size_t index;
-  int rc;
   int ok;
 
   now_ms = strappy_db_now_ms();
-  root_id = 0LL;
-  run_id = 0LL;
-  if (replace_root &&
-      !strappy_db_catalog_scan_root_id(db,
-                                      scan_root,
-                                      now_ms,
-                                      &root_id,
-                                      error_out)) {
-    return 0;
-  }
+  run_id = scan_run_id;
   if (!strappy_db_exec(db, "BEGIN IMMEDIATE;", "Could not begin catalog write",
                        error_out)) {
     return 0;
   }
   ok = 1;
   if (replace_root) {
-    stmt = NULL;
-    rc = sqlite3_prepare_v2(db, insert_run_sql, -1, &stmt, NULL);
-    if ((rc != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)root_id) != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)now_ms) != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)count) != SQLITE_OK) ||
-        (sqlite3_step(stmt) != SQLITE_DONE)) {
-      strappy_set_formatted_error(error_out,
-                                  "Could not begin scan run: %s",
-                                  sqlite3_errmsg(db));
-      ok = 0;
-    } else {
-      run_id = (long long)sqlite3_last_insert_rowid(db);
-    }
-    sqlite3_finalize(stmt);
-    if (ok) {
-      stmt = NULL;
-      rc = sqlite3_prepare_v2(db, deactivate_sql, -1, &stmt, NULL);
-      if ((rc != SQLITE_OK) ||
-          (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)root_id) != SQLITE_OK) ||
-          (sqlite3_step(stmt) != SQLITE_DONE)) {
-        strappy_set_formatted_error(error_out,
-                                    "Could not reset scan locations: %s",
-                                    sqlite3_errmsg(db));
-        ok = 0;
-      }
-      sqlite3_finalize(stmt);
-    }
+    ok = strappy_db_catalog_begin_scan(db,
+                                       scan_root,
+                                       now_ms,
+                                       &run_id,
+                                       error_out);
   }
   for (index = 0U; ok && (index < count); index++) {
     ok = strappy_db_catalog_save_one(db,
@@ -5656,39 +5796,18 @@ static int strappy_db_catalog_save(sqlite3 *db,
                                      error_out);
   }
   if (ok && replace_root) {
-    stmt = NULL;
-    rc = sqlite3_prepare_v2(db, finish_run_sql, -1, &stmt, NULL);
-    if ((rc != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)now_ms) != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)count) != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)run_id) != SQLITE_OK) ||
-        (sqlite3_step(stmt) != SQLITE_DONE)) {
-      strappy_set_formatted_error(error_out,
-                                  "Could not finish scan run: %s",
-                                  sqlite3_errmsg(db));
-      ok = 0;
-    }
-    sqlite3_finalize(stmt);
-  }
-  if (ok && replace_root) {
-    stmt = NULL;
-    rc = sqlite3_prepare_v2(db, finish_root_sql, -1, &stmt, NULL);
-    if ((rc != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)now_ms) != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)now_ms) != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)root_id) != SQLITE_OK) ||
-        (sqlite3_step(stmt) != SQLITE_DONE)) {
-      strappy_set_formatted_error(error_out,
-                                  "Could not finish scan root: %s",
-                                  sqlite3_errmsg(db));
-      ok = 0;
-    }
-    sqlite3_finalize(stmt);
+    ok = strappy_db_catalog_finish_scan(db,
+                                        run_id,
+                                        "completed",
+                                        NULL,
+                                        now_ms,
+                                        error_out);
   }
   if (ok) {
     ok = strappy_db_exec(db, "COMMIT;", "Could not commit catalog write",
                          error_out);
-  } else {
+  }
+  if (!ok) {
     (void)strappy_db_exec(db, "ROLLBACK;", "Could not roll back catalog write",
                           NULL);
   }
@@ -5701,6 +5820,7 @@ static int strappy_db_semantic_save_discovered_databases(
   size_t count,
   int replace_root,
   const char *scan_root,
+  long long scan_run_id,
   char **error_out)
 {
   sqlite3 *db;
@@ -5714,6 +5834,11 @@ static int strappy_db_semantic_save_discovered_databases(
     strappy_set_error(error_out, "Replacement scan root is empty.");
     return 0;
   }
+  if (replace_root && (scan_run_id > 0LL)) {
+    strappy_set_error(error_out,
+                      "Replacement scan cannot reuse an existing scan run.");
+    return 0;
+  }
   if (!strappy_db_open(db_path, &db, error_out)) {
     return 0;
   }
@@ -5723,6 +5848,7 @@ static int strappy_db_semantic_save_discovered_databases(
                                count,
                                replace_root,
                                scan_root,
+                               scan_run_id,
                                error_out);
   sqlite3_close(db);
   return ok;
@@ -5823,6 +5949,120 @@ int strappy_db_initialize(const char *db_path, char **error_out)
   return ok;
 }
 
+int strappy_db_begin_discovered_database_scan(
+  const char *db_path,
+  const char *scan_root,
+  long long *scan_run_id_out,
+  char **error_out)
+{
+  sqlite3 *db;
+  int ok;
+
+  if (scan_run_id_out == NULL) {
+    strappy_set_error(error_out, "Database scan run output is missing.");
+    return 0;
+  }
+  *scan_run_id_out = 0LL;
+  if ((scan_root == NULL) || (scan_root[0] == '\0')) {
+    strappy_set_error(error_out, "Database scan root is empty.");
+    return 0;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_semantic_schema(db, error_out) ||
+      !strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin database scan",
+                       error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+  ok = strappy_db_catalog_begin_scan(db,
+                                     scan_root,
+                                     strappy_db_now_ms(),
+                                     scan_run_id_out,
+                                     error_out);
+  if (ok) {
+    ok = strappy_db_exec(db,
+                         "COMMIT;",
+                         "Could not commit database scan start",
+                         error_out);
+  }
+  if (!ok) {
+    (void)strappy_db_exec(db,
+                          "ROLLBACK;",
+                          "Could not roll back database scan start",
+                          NULL);
+    *scan_run_id_out = 0LL;
+  }
+  sqlite3_close(db);
+  return ok;
+}
+
+int strappy_db_finish_discovered_database_scan(
+  const char *db_path,
+  long long scan_run_id,
+  const char *state,
+  const char *error_message,
+  char **error_out)
+{
+  sqlite3 *db;
+  int ok;
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_semantic_schema(db, error_out) ||
+      !strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin database scan finish",
+                       error_out)) {
+    sqlite3_close(db);
+    return 0;
+  }
+  ok = strappy_db_catalog_finish_scan(db,
+                                      scan_run_id,
+                                      state,
+                                      error_message,
+                                      strappy_db_now_ms(),
+                                      error_out);
+  if (ok) {
+    ok = strappy_db_exec(db,
+                         "COMMIT;",
+                         "Could not commit database scan finish",
+                         error_out);
+  }
+  if (!ok) {
+    (void)strappy_db_exec(db,
+                          "ROLLBACK;",
+                          "Could not roll back database scan finish",
+                          NULL);
+  }
+  sqlite3_close(db);
+  return ok;
+}
+
+int strappy_db_save_discovered_databases_for_scan_run(
+  const char *db_path,
+  const strappy_discovered_database_input *records,
+  size_t count,
+  long long scan_run_id,
+  char **error_out)
+{
+  if (scan_run_id <= 0LL) {
+    strappy_set_error(error_out, "Database scan run is missing.");
+    return 0;
+  }
+  return strappy_db_semantic_save_discovered_databases(db_path,
+                                                       records,
+                                                       count,
+                                                       0,
+                                                       NULL,
+                                                       scan_run_id,
+                                                       error_out);
+}
+
 int strappy_db_save_discovered_databases(
   const char *db_path,
   const strappy_discovered_database_input *records,
@@ -5834,6 +6074,7 @@ int strappy_db_save_discovered_databases(
                                                        count,
                                                        0,
                                                        NULL,
+                                                       0LL,
                                                        error_out);
 
   sqlite3 *db;
@@ -6017,6 +6258,7 @@ int strappy_db_replace_discovered_databases_for_scan_root(
                                                        count,
                                                        1,
                                                        scan_root,
+                                                       0LL,
                                                        error_out);
 
   sqlite3 *db;
@@ -11232,8 +11474,16 @@ static int strappy_db_semantic_insert_item(sqlite3 *db,
     "SELECT item_id FROM function_calls WHERE provider_call_id = ?;";
   static const char *output_sql =
     "INSERT INTO function_outputs "
-    "(item_id, function_call_item_id, execution_state, output_format, text_output) "
-    "VALUES (?, ?, 'completed', ?, ?);";
+    "(item_id, function_call_item_id, execution_state, started_at_ms, "
+     "completed_at_ms, output_format, text_output, error_code, error_message) "
+    "SELECT ?, f.item_id, COALESCE(e.state, 'completed'), e.started_at_ms, "
+     "e.completed_at_ms, ?, ?, e.error_code, e.error_message "
+    "FROM function_calls f LEFT JOIN tool_executions e "
+     "ON e.function_call_item_id = f.item_id WHERE f.item_id = ?;";
+  static const char *mark_output_error_sql =
+    "UPDATE conversation_items SET is_error = 1 WHERE id = ? AND EXISTS ("
+    "SELECT 1 FROM function_outputs o WHERE o.item_id = ? "
+    "AND o.execution_state IN ('error','cancelled'));";
   static const char *search_sql =
     "INSERT INTO web_searches (item_id, action_type, query) VALUES (?, ?, ?);";
   static const char *source_sql =
@@ -11486,13 +11736,27 @@ static int strappy_db_semantic_insert_item(sqlite3 *db,
     rc = sqlite3_prepare_v2(db, output_sql, -1, &stmt, NULL);
     if ((rc != SQLITE_OK) ||
         (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)item_id) != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)call_item_id) != SQLITE_OK) ||
-        (sqlite3_bind_text(stmt, 3, output_format, -1,
+        (sqlite3_bind_text(stmt, 2, output_format, -1,
                            SQLITE_TRANSIENT) != SQLITE_OK) ||
-        !strappy_db_bind_nullable_text_value(stmt, 4, output_text) ||
+        !strappy_db_bind_nullable_text_value(stmt, 3, output_text) ||
+        (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)call_item_id) != SQLITE_OK) ||
         (sqlite3_step(stmt) != SQLITE_DONE)) {
       strappy_set_formatted_error(error_out,
                                   "Could not save function output item: %s",
+                                  sqlite3_errmsg(db));
+      sqlite3_finalize(stmt);
+      cJSON_Delete(document);
+      return 0;
+    }
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+    rc = sqlite3_prepare_v2(db, mark_output_error_sql, -1, &stmt, NULL);
+    if ((rc != SQLITE_OK) ||
+        (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)item_id) != SQLITE_OK) ||
+        (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)item_id) != SQLITE_OK) ||
+        (sqlite3_step(stmt) != SQLITE_DONE)) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not classify function output item: %s",
                                   sqlite3_errmsg(db));
       sqlite3_finalize(stmt);
       cJSON_Delete(document);

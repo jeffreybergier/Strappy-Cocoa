@@ -2169,12 +2169,13 @@ static int strappy_responses_execute_tool_calls(
     call = &analysis->tool_calls[index];
     tool_error = NULL;
     started_at_ms = strappy_responses_now_ms();
-    output = strappy_tools_execute(session_db_path,
-                                   session_id,
-                                   resource_dir,
-                                   call->name,
-                                   call->arguments,
-                                   &tool_error);
+    output = strappy_tools_execute_for_function_call(session_db_path,
+                                                     session_id,
+                                                     resource_dir,
+                                                     call->call_id,
+                                                     call->name,
+                                                     call->arguments,
+                                                     &tool_error);
     completed_at_ms = strappy_responses_now_ms();
     tool_succeeded = (output != NULL) ? 1 : 0;
     if (output == NULL) {

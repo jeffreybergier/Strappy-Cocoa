@@ -52,6 +52,14 @@ char *strappy_tools_execute(const char *session_db_path,
                             const char *tool_name,
                             const char *arguments_json,
                             char **error_out);
+char *strappy_tools_execute_for_function_call(
+  const char *session_db_path,
+  long long active_session_id,
+  const char *resource_dir,
+  const char *provider_call_id,
+  const char *tool_name,
+  const char *arguments_json,
+  char **error_out);
 
 #ifdef __cplusplus
 }

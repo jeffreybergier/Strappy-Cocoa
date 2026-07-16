@@ -1919,12 +1919,15 @@ static int harness_run_empty_final_without_audit_server(int listener_fd)
     "\"status\":\"completed\"},{"
     "\"type\":\"function_call\",\"id\":\"fc-empty-user-fact\","
     "\"call_id\":\"call-empty-user-fact\","
-    "\"name\":\"memory_user_fact_remember\",\"arguments\":\"{}\","
+    "\"name\":\"memory_user_fact_remember\","
+    "\"arguments\":\"{\\\"fact\\\":\\\"Provenance fact.\\\"}\","
     "\"status\":\"completed\"},{"
     "\"type\":\"function_call\",\"id\":\"fc-empty-database-hint\","
     "\"call_id\":\"call-empty-database-hint\","
     "\"name\":\"memory_database_hint_remember\","
-    "\"arguments\":\"{}\",\"status\":\"completed\"}],"
+    "\"arguments\":\"{\\\"database_id\\\":\\\"db_1\\\","
+    "\\\"hint\\\":\\\"Provenance hint.\\\"}\","
+    "\"status\":\"completed\"}],"
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":10,"
     "\"total_tokens\":14}}";
   static const char *reasoning_only_response =
@@ -2904,6 +2907,7 @@ static int harness_test_empty_audit_finalization_fails(void)
 static int harness_test_empty_final_without_audit_recovers(void)
 {
   char path[] = "/tmp/strappy-responses-empty-no-audit-XXXXXX";
+  char database_path[] = "/tmp/strappy-provenance-db-XXXXXX";
   char endpoint[128];
   char *error;
   char *result;
@@ -2912,6 +2916,7 @@ static int harness_test_empty_final_without_audit_recovers(void)
   long long value;
   pid_t server_pid;
   int fd;
+  int database_fd;
   int server_ok;
   int ok;
 
@@ -2921,9 +2926,18 @@ static int harness_test_empty_final_without_audit_recovers(void)
       "Could not create empty-final-without-audit harness database.");
   }
   close(fd);
+  database_fd = mkstemp(database_path);
+  if (database_fd < 0) {
+    unlink(path);
+    return harness_fail("Could not create provenance fixture database.");
+  }
+  close(database_fd);
   error = NULL;
   session_id = 0LL;
   if (!harness_create_session_database(path, &session_id, &error) ||
+      !harness_create_approved_preflight_database(path,
+                                                   database_path,
+                                                   &error) ||
       !harness_start_server(
         HARNESS_RESPONSES_SERVER_EMPTY_FINAL_WITHOUT_AUDIT,
         endpoint,
@@ -2933,6 +2947,7 @@ static int harness_test_empty_final_without_audit_recovers(void)
             "Could not prepare empty-final-without-audit test: %s\n",
             (error != NULL) ? error : "server setup failed");
     free(error);
+    unlink(database_path);
     unlink(path);
     return 0;
   }
@@ -2995,6 +3010,24 @@ static int harness_test_empty_final_without_audit_recovers(void)
                         "JOIN item_text_parts p ON p.item_id=i.id "
                         "WHERE i.session_id=s.id AND m.role='assistant' "
                         "AND p.text='Recovered non-empty answer.');",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM user_facts u "
+                        "JOIN function_calls f ON f.item_id=u.source_item_id "
+                        "JOIN conversation_items i ON i.id=f.item_id WHERE "
+                        "u.value='Provenance fact.' AND "
+                        "f.provider_call_id='call-empty-user-fact' AND "
+                        "f.tool_name='memory_user_fact_remember' AND "
+                        "i.session_id=(SELECT id FROM sessions LIMIT 1);",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM database_hints h "
+                        "JOIN function_calls f ON f.item_id=h.source_item_id "
+                        "JOIN conversation_items i ON i.id=f.item_id WHERE "
+                        "h.content='Provenance hint.' AND "
+                        "f.provider_call_id='call-empty-database-hint' AND "
+                        "f.tool_name='memory_database_hint_remember' AND "
+                        "i.session_id=(SELECT id FROM sessions LIMIT 1);",
                         &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
@@ -3006,6 +3039,7 @@ static int harness_test_empty_final_without_audit_recovers(void)
             (error != NULL) ? error : "request or ledger mismatch");
   }
   free(error);
+  unlink(database_path);
   unlink(path);
   return ok;
 }
@@ -3183,6 +3217,11 @@ static int harness_test_function_tool_continuation(void)
                         "f.item_id=o.function_call_item_id "
                         "JOIN conversation_items i ON i.id=o.item_id WHERE "
                         "f.provider_call_id='call-database-list' AND "
+                        "o.execution_state='error' AND "
+                        "o.started_at_ms IS NOT NULL AND "
+                        "o.completed_at_ms >= o.started_at_ms AND "
+                        "o.error_message='database_list_info takes no "
+                        "arguments.' AND i.is_error=1 AND "
                         "i.include_in_context=1;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,

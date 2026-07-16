@@ -287,6 +287,23 @@ int strappy_db_save_discovered_databases(
   const strappy_discovered_database_input *records,
   size_t count,
   char **error_out);
+int strappy_db_save_discovered_databases_for_scan_run(
+  const char *db_path,
+  const strappy_discovered_database_input *records,
+  size_t count,
+  long long scan_run_id,
+  char **error_out);
+int strappy_db_begin_discovered_database_scan(
+  const char *db_path,
+  const char *scan_root,
+  long long *scan_run_id_out,
+  char **error_out);
+int strappy_db_finish_discovered_database_scan(
+  const char *db_path,
+  long long scan_run_id,
+  const char *state,
+  const char *error_message,
+  char **error_out);
 int strappy_db_replace_discovered_databases_for_scan_root(
   const char *db_path,
   const strappy_discovered_database_input *records,

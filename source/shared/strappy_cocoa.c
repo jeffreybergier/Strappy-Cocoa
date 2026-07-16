@@ -22,6 +22,45 @@ static int strappy_cocoa_string_has_value(const char *value)
   return ((value != NULL) && (value[0] != '\0')) ? 1 : 0;
 }
 
+static int strappy_cocoa_ascii_tolower(int character)
+{
+  if ((character >= 'A') && (character <= 'Z')) {
+    return character + ('a' - 'A');
+  }
+  return character;
+}
+
+static char *strappy_cocoa_copy_bundle_fallback_name(const char *bundle_path,
+                                                     char **error_out)
+{
+  const char *name;
+  size_t length;
+  char *result;
+
+  if (!strappy_cocoa_string_has_value(bundle_path)) {
+    strappy_set_error(error_out, "Bundle path is empty.");
+    return NULL;
+  }
+  name = strrchr(bundle_path, '/');
+  name = (name != NULL) ? name + 1 : bundle_path;
+  length = strlen(name);
+  if ((length >= 4U) &&
+      (strappy_cocoa_ascii_tolower((unsigned char)name[length - 4U]) == '.') &&
+      (strappy_cocoa_ascii_tolower((unsigned char)name[length - 3U]) == 'a') &&
+      (strappy_cocoa_ascii_tolower((unsigned char)name[length - 2U]) == 'p') &&
+      (strappy_cocoa_ascii_tolower((unsigned char)name[length - 1U]) == 'p')) {
+    length -= 4U;
+  }
+  result = (char *)malloc(length + 1U);
+  if (result == NULL) {
+    strappy_set_error(error_out, "Could not allocate bundle name.");
+    return NULL;
+  }
+  memcpy(result, name, length);
+  result[length] = '\0';
+  return result;
+}
+
 int strappy_cocoa_parse_timestamp_unit(const char *value,
                                        strappy_cocoa_timestamp_unit *unit_out,
                                        char **error_out)
@@ -864,6 +903,98 @@ char *strappy_cocoa_copy_localized_string(const char *key,
   return result;
 }
 
+int strappy_cocoa_copy_bundle_info(const char *bundle_path,
+                                   char **name_out,
+                                   char **bundle_identifier_out,
+                                   char **error_out)
+{
+  CFBundleRef bundle;
+  CFStringRef bundle_identifier;
+  CFTypeRef bundle_name;
+  CFURLRef bundle_url;
+  char *identifier;
+  char *name;
+
+  if ((name_out == NULL) || (bundle_identifier_out == NULL)) {
+    strappy_set_error(error_out, "Bundle info output is missing.");
+    return 0;
+  }
+  *name_out = NULL;
+  *bundle_identifier_out = NULL;
+  if (!strappy_cocoa_string_has_value(bundle_path)) {
+    strappy_set_error(error_out, "Bundle path is empty.");
+    return 0;
+  }
+
+  name = NULL;
+  identifier = NULL;
+  bundle_url = CFURLCreateFromFileSystemRepresentation(
+    kCFAllocatorDefault,
+    (const UInt8 *)bundle_path,
+    (CFIndex)strlen(bundle_path),
+    1);
+  bundle = (bundle_url != NULL) ?
+    CFBundleCreate(kCFAllocatorDefault, bundle_url) : NULL;
+  if (bundle_url != NULL) {
+    CFRelease(bundle_url);
+  }
+  if (bundle != NULL) {
+    bundle_name = CFBundleGetValueForInfoDictionaryKey(
+      bundle,
+      CFSTR("CFBundleDisplayName"));
+    if ((bundle_name == NULL) ||
+        (CFGetTypeID(bundle_name) != CFStringGetTypeID()) ||
+        (CFStringGetLength((CFStringRef)bundle_name) == 0)) {
+      bundle_name = CFBundleGetValueForInfoDictionaryKey(
+        bundle,
+        CFSTR("CFBundleName"));
+    }
+    if ((bundle_name != NULL) &&
+        (CFGetTypeID(bundle_name) == CFStringGetTypeID()) &&
+        (CFStringGetLength((CFStringRef)bundle_name) > 0)) {
+      name = strappy_cocoa_copy_cf_string_utf8((CFStringRef)bundle_name,
+                                               error_out);
+      if (name == NULL) {
+        CFRelease(bundle);
+        return 0;
+      }
+    }
+
+    bundle_identifier = CFBundleGetIdentifier(bundle);
+    if ((bundle_identifier == NULL) ||
+        (CFStringGetLength(bundle_identifier) == 0)) {
+      bundle_name = CFBundleGetValueForInfoDictionaryKey(
+        bundle,
+        CFSTR("CFBundleIdentifier"));
+      bundle_identifier = ((bundle_name != NULL) &&
+                           (CFGetTypeID(bundle_name) == CFStringGetTypeID())) ?
+        (CFStringRef)bundle_name : NULL;
+    }
+    if ((bundle_identifier != NULL) &&
+        (CFStringGetLength(bundle_identifier) > 0)) {
+      identifier = strappy_cocoa_copy_cf_string_utf8(bundle_identifier,
+                                                     error_out);
+      if (identifier == NULL) {
+        free(name);
+        CFRelease(bundle);
+        return 0;
+      }
+    }
+    CFRelease(bundle);
+  }
+
+  if (name == NULL) {
+    name = strappy_cocoa_copy_bundle_fallback_name(bundle_path, error_out);
+    if (name == NULL) {
+      free(identifier);
+      return 0;
+    }
+  }
+  *name_out = name;
+  *bundle_identifier_out = identifier;
+  return 1;
+}
+
 static char *strappy_cocoa_copy_base_iso8601_timestamp(
   long long unix_seconds,
   char **error_out)
@@ -947,6 +1078,20 @@ char *strappy_cocoa_copy_localized_string(const char *key,
     strappy_set_error(error_out, "Could not allocate localized string.");
   }
   return result;
+}
+
+int strappy_cocoa_copy_bundle_info(const char *bundle_path,
+                                   char **name_out,
+                                   char **bundle_identifier_out,
+                                   char **error_out)
+{
+  if ((name_out == NULL) || (bundle_identifier_out == NULL)) {
+    strappy_set_error(error_out, "Bundle info output is missing.");
+    return 0;
+  }
+  *name_out = strappy_cocoa_copy_bundle_fallback_name(bundle_path, error_out);
+  *bundle_identifier_out = NULL;
+  return (*name_out != NULL) ? 1 : 0;
 }
 
 static char *strappy_cocoa_copy_base_iso8601_timestamp(

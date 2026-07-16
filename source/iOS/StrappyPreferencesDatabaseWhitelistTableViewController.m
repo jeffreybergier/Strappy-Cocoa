@@ -405,6 +405,7 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 - (void)hiddenModeButtonPressed:(id)sender;
 - (void)updateHiddenModeButton;
 - (void)databaseCatalogScanDidStart:(NSNotification *)notification;
+- (void)databaseCatalogDidChange:(NSNotification *)notification;
 - (void)databaseCatalogScanDidFinish:(NSNotification *)notification;
 @end
 
@@ -423,6 +424,11 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
     addObserver:self
        selector:@selector(databaseCatalogScanDidStart:)
            name:FileScannerDatabaseCatalogScanDidStartNotification
+         object:nil];
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(databaseCatalogDidChange:)
+           name:FileScannerDatabaseCatalogDidChangeNotification
          object:nil];
   [[NSNotificationCenter defaultCenter]
     addObserver:self
@@ -769,6 +775,18 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   (void)notification;
   [self setStatusMessage:nil];
   [self setScanning:YES];
+}
+
+- (void)databaseCatalogDidChange:(NSNotification *)notification
+{
+  NSArray *rows;
+
+  rows = [[notification userInfo] objectForKey:@"rows"];
+  if (![rows isKindOfClass:[NSArray class]]) {
+    return;
+  }
+  [self setAllRows:[self sortedRows:rows]];
+  [self applyRows];
 }
 
 - (void)databaseCatalogScanDidFinish:(NSNotification *)notification

@@ -545,6 +545,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   matchingSearchText:(NSString *)searchText;
 - (void)applyDatabaseRows;
 - (void)loadCatalogedDatabases;
+- (void)databaseCatalogDidChange:(NSNotification *)notification;
 - (void)setScanning:(BOOL)scanning;
 - (void)databaseSearchChanged:(id)sender;
 - (void)databaseSearchTextDidChange:(NSNotification *)notification;
@@ -609,6 +610,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
       addObserver:self
          selector:@selector(modelCatalogDidChange:)
              name:StrappySessionModelCatalogDidChangeNotification
+           object:nil];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(databaseCatalogDidChange:)
+             name:FileScannerDatabaseCatalogDidChangeNotification
            object:nil];
     [self buildContentView];
     [self loadSystemPrompt];
@@ -1422,6 +1428,22 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   NSBeep();
+}
+
+- (void)databaseCatalogDidChange:(NSNotification *)notification
+{
+  NSArray *rows;
+  NSArray *selectedPaths;
+
+  rows = [[notification userInfo] objectForKey:@"rows"];
+  if (![rows isKindOfClass:[NSArray class]]) {
+    return;
+  }
+  selectedPaths = [self selectedDatabaseTableRowPaths];
+  [allDatabaseRows_ release];
+  allDatabaseRows_ = [rows copy];
+  [self applyDatabaseRows];
+  [self selectDatabaseTableRowsWithPaths:selectedPaths];
 }
 
 - (void)setScanning:(BOOL)scanning

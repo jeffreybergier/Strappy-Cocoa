@@ -3203,6 +3203,63 @@ static int strappy_tools_open_helper_info_database(const char *session_db_path,
   return 1;
 }
 
+static int strappy_tools_resolve_source_item_id(sqlite3 *db,
+                                                long long session_id,
+                                                const char *provider_call_id,
+                                                long long *source_item_id_out,
+                                                char **error_out)
+{
+  static const char *sql =
+    "SELECT f.item_id FROM function_calls f "
+    "JOIN conversation_items i ON i.id = f.item_id "
+    "WHERE f.provider_call_id = ? AND i.session_id = ?;";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if ((db == NULL) || (source_item_id_out == NULL)) {
+    strappy_set_error(error_out, "Memory provenance request is incomplete.");
+    return 0;
+  }
+  *source_item_id_out = 0LL;
+  if ((provider_call_id == NULL) || (provider_call_id[0] == '\0')) {
+    return 1;
+  }
+  if (session_id <= 0LL) {
+    strappy_set_error(error_out,
+                      "Memory provenance requires an active session.");
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_text(stmt, 1, provider_call_id, -1,
+                         SQLITE_TRANSIENT) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) != SQLITE_OK)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare memory provenance: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_ROW) {
+    if (rc == SQLITE_DONE) {
+      strappy_set_error(error_out,
+                        "Memory provenance function call was not found.");
+    } else {
+      strappy_set_formatted_error(error_out,
+                                  "Could not read memory provenance: %s",
+                                  sqlite3_errmsg(db));
+    }
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  *source_item_id_out = (long long)sqlite3_column_int64(stmt, 0);
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
 static int strappy_tools_add_user_info_row(cJSON *array,
                                            sqlite3_stmt *stmt,
                                            char **error_out)
@@ -3317,13 +3374,14 @@ static char *strappy_tools_read_user_info(sqlite3 *db, char **error_out)
 static char *strappy_tools_remember_user_info(
   sqlite3 *db,
   const strappy_memory_user_fact_remember_arguments *arguments,
+  long long source_item_id,
   char **error_out)
 {
   static const char *sql =
     "INSERT INTO user_facts "
     "(kind, subject, predicate, value, confidence_basis_points, "
-     "created_at_ms, updated_at_ms) "
-    "VALUES ('fact', 'user', 'fact', ?, 7500, ?, ?);";
+     "source_item_id, created_at_ms, updated_at_ms) "
+    "VALUES ('fact', 'user', 'fact', ?, 7500, ?, ?, ?);";
   sqlite3_stmt *stmt;
   sqlite3_int64 now_ms;
   int rc;
@@ -3349,8 +3407,12 @@ static char *strappy_tools_remember_user_info(
                          arguments->fact,
                          -1,
                          SQLITE_TRANSIENT) != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 2, now_ms) != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 3, now_ms) != SQLITE_OK)) {
+      ((source_item_id > 0LL) ?
+         (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)source_item_id) !=
+          SQLITE_OK) :
+         (sqlite3_bind_null(stmt, 2) != SQLITE_OK)) ||
+      (sqlite3_bind_int64(stmt, 3, now_ms) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 4, now_ms) != SQLITE_OK)) {
     sqlite3_finalize(stmt);
     if ((error_out != NULL) && (*error_out == NULL)) {
       strappy_set_formatted_error(error_out,
@@ -3764,14 +3826,15 @@ static char *strappy_tools_remember_database_info(
   sqlite3 *db,
   const strappy_discovered_database_record *record,
   const strappy_memory_database_hint_remember_arguments *arguments,
+  long long source_item_id,
   char **error_out)
 {
   static const char *sql =
     "INSERT INTO database_hints "
     "(database_id, kind, title, content, confidence_basis_points, "
-     "observed_size_bytes, observed_modified_at_s, created_at_ms, "
-     "updated_at_ms) "
-    "VALUES (?, 'hint', 'Database hint', ?, 7500, ?, ?, ?, ?);";
+     "observed_size_bytes, observed_modified_at_s, source_item_id, "
+     "created_at_ms, updated_at_ms) "
+    "VALUES (?, 'hint', 'Database hint', ?, 7500, ?, ?, ?, ?, ?);";
   sqlite3_stmt *stmt;
   sqlite3_int64 now_ms;
   int rc;
@@ -3803,8 +3866,12 @@ static char *strappy_tools_remember_database_info(
       (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)record->size) != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)record->modified_at) !=
        SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 5, now_ms) != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 6, now_ms) != SQLITE_OK)) {
+      ((source_item_id > 0LL) ?
+         (sqlite3_bind_int64(stmt, 5, (sqlite3_int64)source_item_id) !=
+          SQLITE_OK) :
+         (sqlite3_bind_null(stmt, 5) != SQLITE_OK)) ||
+      (sqlite3_bind_int64(stmt, 6, now_ms) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 7, now_ms) != SQLITE_OK)) {
     sqlite3_finalize(stmt);
     if ((error_out != NULL) && (*error_out == NULL)) {
       strappy_set_formatted_error(
@@ -5607,12 +5674,15 @@ static char *strappy_tools_execute_memory_user_fact_read(
 
 static char *strappy_tools_execute_memory_user_fact_remember(
   const char *session_db_path,
+  long long active_session_id,
+  const char *provider_call_id,
   const char *arguments_json,
   char **error_out)
 {
   strappy_memory_user_fact_remember_arguments arguments;
   sqlite3 *db;
   char *json;
+  long long source_item_id;
 
   strappy_memory_user_fact_remember_arguments_init(&arguments);
   if (!strappy_tools_parse_memory_user_fact_remember_arguments(arguments_json,
@@ -5634,7 +5704,20 @@ static char *strappy_tools_execute_memory_user_fact_remember(
     return NULL;
   }
 
-  json = strappy_tools_remember_user_info(db, &arguments, error_out);
+  source_item_id = 0LL;
+  if (!strappy_tools_resolve_source_item_id(db,
+                                            active_session_id,
+                                            provider_call_id,
+                                            &source_item_id,
+                                            error_out)) {
+    sqlite3_close(db);
+    strappy_memory_user_fact_remember_arguments_destroy(&arguments);
+    return NULL;
+  }
+  json = strappy_tools_remember_user_info(db,
+                                          &arguments,
+                                          source_item_id,
+                                          error_out);
   sqlite3_close(db);
   strappy_memory_user_fact_remember_arguments_destroy(&arguments);
   return json;
@@ -5784,7 +5867,9 @@ static char *strappy_tools_execute_database_context_read(
 
 static char *strappy_tools_execute_memory_database_hint_remember(
   const char *session_db_path,
+  long long active_session_id,
   const char *resource_dir,
+  const char *provider_call_id,
   const char *arguments_json,
   char **error_out)
 {
@@ -5793,6 +5878,7 @@ static char *strappy_tools_execute_memory_database_hint_remember(
   const strappy_discovered_database_record *record;
   sqlite3 *db;
   char *json;
+  long long source_item_id;
   int matched_unavailable;
 
   strappy_memory_database_hint_remember_arguments_init(&arguments);
@@ -5849,9 +5935,21 @@ static char *strappy_tools_execute_memory_database_hint_remember(
     return NULL;
   }
 
+  source_item_id = 0LL;
+  if (!strappy_tools_resolve_source_item_id(db,
+                                            active_session_id,
+                                            provider_call_id,
+                                            &source_item_id,
+                                            error_out)) {
+    sqlite3_close(db);
+    strappy_discovered_database_record_list_destroy(&list);
+    strappy_memory_database_hint_remember_arguments_destroy(&arguments);
+    return NULL;
+  }
   json = strappy_tools_remember_database_info(db,
                                               record,
                                               &arguments,
+                                              source_item_id,
                                               error_out);
   sqlite3_close(db);
   strappy_discovered_database_record_list_destroy(&list);
@@ -5978,12 +6076,13 @@ static char *strappy_tools_execute_database_list_info(
   return json;
 }
 
-char *strappy_tools_execute(const char *session_db_path,
-                            long long active_session_id,
-                            const char *resource_dir,
-                            const char *tool_name,
-                            const char *arguments_json,
-                            char **error_out)
+static char *strappy_tools_execute_internal(const char *session_db_path,
+                                            long long active_session_id,
+                                            const char *resource_dir,
+                                            const char *provider_call_id,
+                                            const char *tool_name,
+                                            const char *arguments_json,
+                                            char **error_out)
 {
   if ((tool_name == NULL) || (tool_name[0] == '\0')) {
     strappy_set_error(error_out, "Tool name is empty.");
@@ -6021,6 +6120,8 @@ char *strappy_tools_execute(const char *session_db_path,
 
   if (strcmp(tool_name, STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) == 0) {
     return strappy_tools_execute_memory_user_fact_remember(session_db_path,
+                                                           active_session_id,
+                                                           provider_call_id,
                                                            arguments_json,
                                                            error_out);
   }
@@ -6046,7 +6147,9 @@ char *strappy_tools_execute(const char *session_db_path,
 
   if (strcmp(tool_name, STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) == 0) {
     return strappy_tools_execute_memory_database_hint_remember(session_db_path,
+                                                               active_session_id,
                                                                resource_dir,
+                                                               provider_call_id,
                                                                arguments_json,
                                                                error_out);
   }
@@ -6072,4 +6175,42 @@ char *strappy_tools_execute(const char *session_db_path,
 
   strappy_set_formatted_error(error_out, "Tool is not registered: %s", tool_name);
   return NULL;
+}
+
+char *strappy_tools_execute(const char *session_db_path,
+                            long long active_session_id,
+                            const char *resource_dir,
+                            const char *tool_name,
+                            const char *arguments_json,
+                            char **error_out)
+{
+  return strappy_tools_execute_internal(session_db_path,
+                                        active_session_id,
+                                        resource_dir,
+                                        NULL,
+                                        tool_name,
+                                        arguments_json,
+                                        error_out);
+}
+
+char *strappy_tools_execute_for_function_call(
+  const char *session_db_path,
+  long long active_session_id,
+  const char *resource_dir,
+  const char *provider_call_id,
+  const char *tool_name,
+  const char *arguments_json,
+  char **error_out)
+{
+  if ((provider_call_id == NULL) || (provider_call_id[0] == '\0')) {
+    strappy_set_error(error_out, "Tool function call id is empty.");
+    return NULL;
+  }
+  return strappy_tools_execute_internal(session_db_path,
+                                        active_session_id,
+                                        resource_dir,
+                                        provider_call_id,
+                                        tool_name,
+                                        arguments_json,
+                                        error_out);
 }

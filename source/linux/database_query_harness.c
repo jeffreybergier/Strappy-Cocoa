@@ -565,14 +565,16 @@ static int harness_run_fresh_catalog_schema_tests(
          harness_expect_catalog_sql_ok(
            context->catalog_path,
            "SELECT id, kind, subject, predicate, value, "
-           "confidence_basis_points, created_at_ms, updated_at_ms "
+           "confidence_basis_points, source_item_id, created_at_ms, "
+           "updated_at_ms "
            "FROM user_facts LIMIT 0;",
            "user_facts columns") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
            "SELECT id, database_id, kind, title, content, "
            "confidence_basis_points, observed_size_bytes, "
-           "observed_modified_at_s FROM database_hints LIMIT 0;",
+           "observed_modified_at_s, source_item_id FROM database_hints "
+           "LIMIT 0;",
            "database_hints columns") &&
          harness_expect_catalog_integer(
            context->catalog_path,
@@ -2780,6 +2782,8 @@ static int harness_run_empty_database_list_info_tests(
 typedef struct harness_scanner_batch_context {
   const char *catalog_path;
   const char *scan_root;
+  long long scan_run_id;
+  size_t callback_count;
 } harness_scanner_batch_context;
 
 static int harness_save_scanner_batch(strappy_file_scanner_record_list *list,
@@ -2787,18 +2791,30 @@ static int harness_save_scanner_batch(strappy_file_scanner_record_list *list,
                                       char **error_out)
 {
   harness_scanner_batch_context *context;
+  int ok;
 
   context = (harness_scanner_batch_context *)user_data;
-  if ((context == NULL) || (context->catalog_path == NULL)) {
+  if ((context == NULL) || (context->catalog_path == NULL) ||
+      (list == NULL) || (list->scan_run_id <= 0LL)) {
     strappy_set_error(error_out, "Harness scanner batch context is missing.");
     return 0;
   }
+  if (context->scan_run_id == 0LL) {
+    context->scan_run_id = list->scan_run_id;
+  } else if (context->scan_run_id != list->scan_run_id) {
+    strappy_set_error(error_out, "Scanner batches did not share one scan run.");
+    return 0;
+  }
 
-  return strappy_file_scanner_save_discovered_database_batch(
+  ok = strappy_file_scanner_save_discovered_database_batch(
     context->catalog_path,
     list,
     context->scan_root,
     error_out);
+  if (ok) {
+    context->callback_count++;
+  }
+  return ok;
 }
 
 static int harness_run_discovered_database_replacement_tests(
@@ -3168,6 +3184,7 @@ static int harness_run_file_scanner_batch_catalog_tests(
   char scan_root[1200];
   char documents_dir[1200];
   char first_path[1200];
+  char second_path[1200];
   char stale_path[1200];
   strappy_discovered_database_input stale_input;
   strappy_discovered_database_record_list catalog_list;
@@ -3177,6 +3194,7 @@ static int harness_run_file_scanner_batch_catalog_tests(
   char *error;
   size_t index;
   int found_first;
+  int found_second;
   int found_stale;
   int ok;
 
@@ -3200,6 +3218,10 @@ static int harness_run_file_scanner_batch_catalog_tests(
                          sizeof(first_path),
                          documents_dir,
                          "first.sqlite") ||
+      !harness_join_path(second_path,
+                         sizeof(second_path),
+                         documents_dir,
+                         "second.sqlite") ||
       !harness_join_path(stale_path,
                          sizeof(stale_path),
                          documents_dir,
@@ -3210,13 +3232,16 @@ static int harness_run_file_scanner_batch_catalog_tests(
 
   harness_unlink_sqlite_files(catalog_path);
   harness_unlink_sqlite_files(first_path);
+  harness_unlink_sqlite_files(second_path);
   harness_unlink_sqlite_files(stale_path);
 
   if (!harness_ensure_directory(scan_root, "mkdir batch scan root") ||
       !harness_ensure_directory(documents_dir, "mkdir batch Documents") ||
-      !harness_create_user_database(first_path)) {
+      !harness_create_user_database(first_path) ||
+      !harness_create_user_database(second_path)) {
     harness_unlink_sqlite_files(catalog_path);
     harness_unlink_sqlite_files(first_path);
+    harness_unlink_sqlite_files(second_path);
     return 0;
   }
 
@@ -3235,6 +3260,7 @@ static int harness_run_file_scanner_batch_catalog_tests(
     strappy_file_scanner_record_list_destroy(&scan_list);
     harness_unlink_sqlite_files(catalog_path);
     harness_unlink_sqlite_files(first_path);
+    harness_unlink_sqlite_files(second_path);
     return 0;
   }
   free(error);
@@ -3260,11 +3286,14 @@ static int harness_run_file_scanner_batch_catalog_tests(
     strappy_file_scanner_record_list_destroy(&scan_list);
     harness_unlink_sqlite_files(catalog_path);
     harness_unlink_sqlite_files(first_path);
+    harness_unlink_sqlite_files(second_path);
     return 0;
   }
 
   batch_context.catalog_path = catalog_path;
   batch_context.scan_root = scan_root;
+  batch_context.scan_run_id = 0LL;
+  batch_context.callback_count = 0U;
   options.record_batch_size = 1U;
   options.record_batch_callback = harness_save_scanner_batch;
   options.record_batch_user_data = &batch_context;
@@ -3279,13 +3308,17 @@ static int harness_run_file_scanner_batch_catalog_tests(
     strappy_file_scanner_record_list_destroy(&scan_list);
     harness_unlink_sqlite_files(catalog_path);
     harness_unlink_sqlite_files(first_path);
+    harness_unlink_sqlite_files(second_path);
     return 0;
   }
-  if ((scan_list.records != NULL) || (scan_list.count != 0U)) {
+  if ((batch_context.callback_count != 2U) ||
+      (scan_list.records != NULL) || (scan_list.count != 0U) ||
+      (scan_list.scan_run_id != 0LL)) {
     fprintf(stderr, "Batch catalog scanner left unflushed records.\n");
     strappy_file_scanner_record_list_destroy(&scan_list);
     harness_unlink_sqlite_files(catalog_path);
     harness_unlink_sqlite_files(first_path);
+    harness_unlink_sqlite_files(second_path);
     return 0;
   }
 
@@ -3297,10 +3330,12 @@ static int harness_run_file_scanner_batch_catalog_tests(
     strappy_file_scanner_record_list_destroy(&scan_list);
     harness_unlink_sqlite_files(catalog_path);
     harness_unlink_sqlite_files(first_path);
+    harness_unlink_sqlite_files(second_path);
     return 0;
   }
 
   found_first = 0;
+  found_second = 0;
   found_stale = 0;
   for (index = 0U; index < catalog_list.count; index++) {
     if ((catalog_list.records[index].path != NULL) &&
@@ -3308,12 +3343,38 @@ static int harness_run_file_scanner_batch_catalog_tests(
       found_first = 1;
     }
     if ((catalog_list.records[index].path != NULL) &&
+        (strcmp(catalog_list.records[index].path, second_path) == 0)) {
+      found_second = 1;
+    }
+    if ((catalog_list.records[index].path != NULL) &&
         (strcmp(catalog_list.records[index].path, stale_path) == 0)) {
       found_stale = 1;
     }
   }
 
-  ok = (found_first && !found_stale) ? 1 : 0;
+  ok = (found_first && found_second && !found_stale) &&
+    harness_expect_catalog_integer(
+      catalog_path,
+      "SELECT COUNT(*) FROM scan_runs WHERE "
+      "id = (SELECT MAX(id) FROM scan_runs) AND state = 'completed' "
+      "AND candidate_count = 2 AND database_count = 2 "
+      "AND completed_at_ms >= started_at_ms;",
+      1LL,
+      "completed batch scan run") &&
+    harness_expect_catalog_integer(
+      catalog_path,
+      "SELECT COUNT(*) FROM database_locations WHERE active = 1 AND "
+      "last_scan_run_id = (SELECT MAX(id) FROM scan_runs);",
+      2LL,
+      "batch scan location provenance") &&
+    harness_expect_catalog_integer(
+      catalog_path,
+      "SELECT COUNT(*) FROM scan_roots WHERE id = ("
+      "SELECT scan_root_id FROM scan_runs ORDER BY id DESC LIMIT 1) "
+      "AND last_started_at_ms IS NOT NULL "
+      "AND last_completed_at_ms >= last_started_at_ms;",
+      1LL,
+      "completed batch scan root timestamps");
   if (!ok) {
     fprintf(stderr, "Batch catalog scanner did not replace stale rows correctly.\n");
   }
@@ -3322,6 +3383,7 @@ static int harness_run_file_scanner_batch_catalog_tests(
   strappy_file_scanner_record_list_destroy(&scan_list);
   harness_unlink_sqlite_files(catalog_path);
   harness_unlink_sqlite_files(first_path);
+  harness_unlink_sqlite_files(second_path);
   harness_unlink_sqlite_files(stale_path);
   rmdir(documents_dir);
   rmdir(scan_root);
@@ -3598,6 +3660,24 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
     }
     if ((scan_list.records[index].path != NULL) &&
         (strcmp(scan_list.records[index].path, apple_index_path) == 0)) {
+      if ((scan_list.records[index].app_group_key == NULL) ||
+          (strncmp(scan_list.records[index].app_group_key,
+                   "app-path:",
+                   strlen("app-path:")) != 0) ||
+          (strcmp(scan_list.records[index].app_group_key +
+                    strlen("app-path:"),
+                  apple_bundle_dir) != 0) ||
+          (scan_list.records[index].app_name == NULL) ||
+          (strcmp(scan_list.records[index].app_name, "Apple") != 0) ||
+          (scan_list.records[index].app_bundle_path == NULL) ||
+          (strcmp(scan_list.records[index].app_bundle_path,
+                  apple_bundle_dir) != 0) ||
+          (scan_list.records[index].app_source == NULL) ||
+          (strcmp(scan_list.records[index].app_source,
+                  "bundle_plist") != 0)) {
+        fprintf(stderr, "C scanner did not infer Apple bundle metadata.\n");
+        goto cleanup;
+      }
       if (!strappy_file_scanner_record_set_app_metadata(
             &scan_list.records[index],
             "bundle:com.apple.TestApp",
@@ -3624,6 +3704,25 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
     }
     if ((scan_list.records[index].path != NULL) &&
         (strcmp(scan_list.records[index].path, third_party_index_path) == 0)) {
+      if ((scan_list.records[index].app_group_key == NULL) ||
+          (strncmp(scan_list.records[index].app_group_key,
+                   "app-path:",
+                   strlen("app-path:")) != 0) ||
+          (strcmp(scan_list.records[index].app_group_key +
+                    strlen("app-path:"),
+                  third_party_bundle_dir) != 0) ||
+          (scan_list.records[index].app_name == NULL) ||
+          (strcmp(scan_list.records[index].app_name, "ThirdParty") != 0) ||
+          (scan_list.records[index].app_bundle_path == NULL) ||
+          (strcmp(scan_list.records[index].app_bundle_path,
+                  third_party_bundle_dir) != 0) ||
+          (scan_list.records[index].app_source == NULL) ||
+          (strcmp(scan_list.records[index].app_source,
+                  "bundle_plist") != 0)) {
+        fprintf(stderr,
+                "C scanner did not infer third-party bundle metadata.\n");
+        goto cleanup;
+      }
       if (!strappy_file_scanner_record_set_app_metadata(
             &scan_list.records[index],
             "bundle:com.example.TestApp",
