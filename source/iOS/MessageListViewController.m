@@ -1089,11 +1089,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   if ([sessionSummary isKindOfClass:[NSDictionary class]]) {
     [self setStatusText:nil];
     [self updateTitleFromSession];
-    if ([[self delegate] respondsToSelector:
-          @selector(messageListViewController:didUpdateSession:)]) {
-      [[self delegate] messageListViewController:self
-                                didUpdateSession:sessionSummary];
-    }
   } else {
     errorMessage = [result objectForKey:@"error"];
     if (![errorMessage isKindOfClass:[NSString class]] ||

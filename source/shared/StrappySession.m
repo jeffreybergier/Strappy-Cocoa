@@ -18,6 +18,11 @@ NSString * const StrappySessionModelCatalogRefreshDidFinishNotification =
   @"StrappySessionModelCatalogRefreshDidFinishNotification";
 NSString * const StrappySessionModelCatalogDidChangeNotification =
   @"StrappySessionModelCatalogDidChangeNotification";
+NSString * const StrappySessionChangeKindKey = @"change_kind";
+NSString * const StrappySessionChangeKindActivity = @"activity";
+NSString * const StrappySessionChangeKindModel = @"model";
+NSString * const StrappySessionChangeKindStreaming = @"streaming";
+NSString * const StrappySessionChangeKindWebSearch = @"web_search";
 
 static NSMutableDictionary *StrappySessionInFlightSessions = nil;
 static BOOL StrappySessionModelCatalogRefreshInFlight = NO;
@@ -500,7 +505,9 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   NSString *prompt;
   NSString *response;
   NSString *model;
+  NSString *modelName;
   NSString *createdAt;
+  NSString *lastActivityAt;
 
   if (record == NULL) {
     return nil;
@@ -516,7 +523,10 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   prompt = [StrappySession stringFromCStringOrEmpty:record->prompt];
   response = [StrappySession stringFromCStringOrEmpty:record->response];
   model = [StrappySession stringFromCStringOrEmpty:record->model];
+  modelName = [StrappySession stringFromCStringOrEmpty:record->model_name];
   createdAt = [StrappySession stringFromCStringOrEmpty:record->created_at];
+  lastActivityAt =
+    [StrappySession stringFromCStringOrEmpty:record->last_activity_at];
 
   return [NSDictionary dictionaryWithObjectsAndKeys:
     sessionId, @"id",
@@ -524,10 +534,15 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     prompt, @"prompt",
     response, @"response",
     model, @"model",
+    modelName, @"model_name",
     httpStatus, @"http_status",
     webSearchEnabled, @"web_search_enabled",
     streamingEnabled, @"streaming_enabled",
     createdAt, @"created_at",
+    lastActivityAt, @"last_message_at",
+    lastActivityAt, @"last_activity_at",
+    [NSNumber numberWithLongLong:record->last_activity_at_ms],
+    @"last_activity_at_ms",
     nil];
 }
 
@@ -802,96 +817,6 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     [NSNumber numberWithBool:(record->selected ? YES : NO)], @"selected",
     [NSNumber numberWithBool:(record->allowed ? YES : NO)], @"allowed",
     nil];
-}
-
-+ (NSDictionary *)enrichedSummaryFromSession:(NSDictionary *)session
-                                    messages:(NSArray *)messages
-{
-  NSMutableDictionary *summary;
-  NSDictionary *lastMessage;
-  NSString *lastText;
-  NSString *lastRole;
-  NSString *lastCreatedAt;
-  NSNumber *httpStatus;
-  NSUInteger index;
-  NSUInteger assistantCount;
-  NSUInteger userCount;
-  BOOL hasError;
-
-  if (![session isKindOfClass:[NSDictionary class]]) {
-    return nil;
-  }
-
-  summary = [NSMutableDictionary dictionaryWithDictionary:session];
-  lastMessage = nil;
-  assistantCount = 0U;
-  userCount = 0U;
-  hasError = NO;
-
-  httpStatus = [session objectForKey:@"http_status"];
-  if ([httpStatus isKindOfClass:[NSNumber class]] &&
-      ([httpStatus longValue] >= 400L)) {
-    hasError = YES;
-  }
-
-  for (index = 0U; index < [messages count]; index++) {
-    NSDictionary *message;
-    NSString *role;
-    NSNumber *messageStatus;
-
-    message = [messages objectAtIndex:index];
-    if (![message isKindOfClass:[NSDictionary class]]) {
-      continue;
-    }
-
-    role = [message objectForKey:@"role"];
-    if ([role isEqualToString:@"assistant"]) {
-      assistantCount++;
-    } else if ([role isEqualToString:@"user"]) {
-      userCount++;
-    }
-
-    messageStatus = [message objectForKey:@"http_status"];
-    if ([messageStatus isKindOfClass:[NSNumber class]] &&
-        ([messageStatus longValue] >= 400L)) {
-      hasError = YES;
-    }
-
-    lastMessage = message;
-  }
-
-  if (lastMessage != nil) {
-    lastText = [lastMessage objectForKey:@"text"];
-    lastRole = [lastMessage objectForKey:@"role"];
-    lastCreatedAt = [lastMessage objectForKey:@"created_at"];
-  } else {
-    lastText = [session objectForKey:@"prompt"];
-    lastRole = @"user";
-    lastCreatedAt = [session objectForKey:@"created_at"];
-  }
-
-  if (![lastText isKindOfClass:[NSString class]]) {
-    lastText = @"";
-  }
-  if (![lastRole isKindOfClass:[NSString class]]) {
-    lastRole = @"assistant";
-  }
-  if (![lastCreatedAt isKindOfClass:[NSString class]]) {
-    lastCreatedAt = @"";
-  }
-
-  [summary setObject:lastText forKey:@"last_message_text"];
-  [summary setObject:lastRole forKey:@"last_message_role"];
-  [summary setObject:lastCreatedAt forKey:@"last_message_at"];
-  [summary setObject:[NSNumber XP_numberWithUnsignedInteger:[messages count]]
-              forKey:@"message_count"];
-  [summary setObject:[NSNumber XP_numberWithUnsignedInteger:userCount]
-              forKey:@"user_message_count"];
-  [summary setObject:[NSNumber XP_numberWithUnsignedInteger:assistantCount]
-              forKey:@"assistant_message_count"];
-  [summary setObject:(hasError ? @"error" : @"ready") forKey:@"state"];
-
-  return summary;
 }
 
 + (NSError *)errorFromCString:(char *)message
@@ -1515,29 +1440,61 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     NSDictionary *session =
       [StrappySession dictionaryFromSessionRecord:&list.records[index]];
     if (session != nil) {
-      NSError *messagesError;
-      NSArray *messages;
-      NSDictionary *summary;
-
-      messagesError = nil;
-      messages = [StrappySession messagesForSessionIdentifier:[session objectForKey:@"id"]
-                                                        error:&messagesError];
-      if (messages == nil) {
-        messages = [NSArray array];
-      }
-
-      summary = [StrappySession enrichedSummaryFromSession:session
-                                                  messages:messages];
-      if (summary != nil) {
-        [sessions addObject:summary];
-      } else {
-        [sessions addObject:session];
-      }
+      [sessions addObject:session];
     }
   }
 
   strappy_session_record_list_destroy(&list);
   return sessions;
+}
+
++ (NSDictionary *)sessionListSummaryForSessionIdentifier:
+    (NSNumber *)sessionIdentifier error:(NSError **)error
+{
+  NSString *databasePath;
+  strappy_session_record record;
+  char *strappyError;
+  long long sessionId;
+  NSDictionary *session;
+
+  sessionId = [sessionIdentifier isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier longLongValue] : 0LL;
+  if (sessionId <= 0) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:
+          NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return nil;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+
+  strappy_session_record_init(&record);
+  strappyError = NULL;
+  if (!strappy_session_load_list_record([databasePath UTF8String],
+                                        sessionId,
+                                        &record,
+                                        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    strappy_session_record_destroy(&record);
+    return nil;
+  }
+
+  session = [StrappySession dictionaryFromSessionRecord:&record];
+  strappy_session_record_destroy(&record);
+  return session;
 }
 
 + (NSDictionary *)sessionSummaryForSessionIdentifier:(NSNumber *)sessionIdentifier
@@ -1548,8 +1505,6 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   char *strappyError;
   long long sessionId;
   NSDictionary *session;
-  NSArray *messages;
-  NSDictionary *summary;
 
   if (sessionIdentifier == nil) {
     if (error != nil) {
@@ -1603,15 +1558,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     return nil;
   }
 
-  messages = [StrappySession messagesForSessionIdentifier:sessionIdentifier
-                                                    error:error];
-  if (messages == nil) {
-    return nil;
-  }
-
-  summary = [StrappySession enrichedSummaryFromSession:session
-                                              messages:messages];
-  return summary;
+  return session;
 }
 
 + (NSArray *)messagesForSessionIdentifier:(NSNumber *)sessionIdentifier
@@ -1934,8 +1881,11 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   [[NSNotificationCenter defaultCenter]
     postNotificationName:StrappySessionDidUpdateNotification
                   object:self
-                userInfo:[NSDictionary dictionaryWithObject:notificationSession
-                                                     forKey:@"session"]];
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  notificationSession, @"session",
+                  StrappySessionChangeKindWebSearch,
+                  StrappySessionChangeKindKey,
+                  nil]];
   [notificationSession release];
   return YES;
 }
@@ -2004,8 +1954,11 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   [[NSNotificationCenter defaultCenter]
     postNotificationName:StrappySessionDidUpdateNotification
                   object:self
-                userInfo:[NSDictionary dictionaryWithObject:notificationSession
-                                                     forKey:@"session"]];
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  notificationSession, @"session",
+                  StrappySessionChangeKindStreaming,
+                  StrappySessionChangeKindKey,
+                  nil]];
   [notificationSession release];
   return YES;
 }
@@ -2134,8 +2087,11 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   [[NSNotificationCenter defaultCenter]
     postNotificationName:StrappySessionDidUpdateNotification
                   object:self
-                userInfo:[NSDictionary dictionaryWithObject:notificationSession
-                                                     forKey:@"session"]];
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  notificationSession, @"session",
+                  StrappySessionChangeKindModel,
+                  StrappySessionChangeKindKey,
+                  nil]];
   [notificationSession release];
   return YES;
 }
@@ -2377,6 +2333,8 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   [StrappySession unregisterInFlightSession:self];
 
   if (summary != nil) {
+    [userInfo setObject:StrappySessionChangeKindActivity
+                 forKey:StrappySessionChangeKindKey];
     [[NSNotificationCenter defaultCenter]
       postNotificationName:StrappySessionDidUpdateNotification
                     object:self

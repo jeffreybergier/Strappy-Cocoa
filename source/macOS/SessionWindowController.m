@@ -244,9 +244,15 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
 
 - (void)strappySessionDidUpdate:(NSNotification *)notification
 {
+  NSString *changeKind;
   NSDictionary *session;
   NSNumber *identifier;
 
+  changeKind = [[notification userInfo] objectForKey:StrappySessionChangeKindKey];
+  if ([changeKind isEqualToString:StrappySessionChangeKindWebSearch] ||
+      [changeKind isEqualToString:StrappySessionChangeKindStreaming]) {
+    return;
+  }
   session = [[notification userInfo] objectForKey:@"session"];
   if (![session isKindOfClass:[NSDictionary class]]) {
     return;

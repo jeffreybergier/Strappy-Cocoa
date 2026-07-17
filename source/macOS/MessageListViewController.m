@@ -682,11 +682,7 @@ static BOOL StrappyEnsureDirectory(NSString *path)
   [self updateSendingStateFromSession];
 
   session = [result objectForKey:@"session"];
-  if ([session isKindOfClass:[NSDictionary class]]) {
-    if (delegate_ != nil) {
-      [delegate_ messageListViewController:self didUpdateSession:session];
-    }
-  } else {
+  if (![session isKindOfClass:[NSDictionary class]]) {
     errorMessage = [result objectForKey:@"error"];
     if (![errorMessage isKindOfClass:[NSString class]] ||
         ([errorMessage length] == 0U)) {

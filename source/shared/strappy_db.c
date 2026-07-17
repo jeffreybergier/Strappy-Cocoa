@@ -5,10 +5,14 @@
 #include "strappy_tools.h"
 
 #include <cJSON.h>
+#include <limits.h>
+#include <pthread.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <time.h>
 
 #define STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_KEY \
@@ -22,6 +26,12 @@
   "AND EXISTS (SELECT 1 FROM models dm " \
   "WHERE dm.id = p.default_model_id))," \
   "'" STRAPPY_CONFIG_DEFAULT_API_MODEL "')"
+#define STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL \
+  "COALESCE(s.model_id, " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL ")"
+#define STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL \
+  "COALESCE((SELECT i.created_at_ms FROM conversation_items i " \
+  "WHERE i.session_id = s.id ORDER BY i.sequence DESC LIMIT 1), " \
+  "s.created_at_ms)"
 #define STRAPPY_DB_INSERT_BUILTIN_DEFAULT_MODEL_SQL \
   "INSERT OR IGNORE INTO models " \
   "(id, name, description, catalog_active, last_seen_at_ms) VALUES ('" \
@@ -284,7 +294,10 @@ void strappy_session_record_init(strappy_session_record *record)
   record->prompt = NULL;
   record->response = NULL;
   record->model = NULL;
+  record->model_name = NULL;
   record->created_at = NULL;
+  record->last_activity_at = NULL;
+  record->last_activity_at_ms = 0LL;
   record->web_search_enabled = 1;
   record->streaming_enabled = 0;
   record->http_status = 0L;
@@ -300,7 +313,9 @@ void strappy_session_record_destroy(strappy_session_record *record)
   free(record->name);
   free(record->response);
   free(record->model);
+  free(record->model_name);
   free(record->created_at);
+  free(record->last_activity_at);
   strappy_session_record_init(record);
 }
 
@@ -656,12 +671,81 @@ void strappy_openrouter_model_record_list_destroy(
   strappy_openrouter_model_record_list_init(list);
 }
 
+static pthread_mutex_t strappy_db_connection_mutex =
+  PTHREAD_MUTEX_INITIALIZER;
+static sqlite3 *strappy_db_connection = NULL;
+static char *strappy_db_connection_path = NULL;
+static dev_t strappy_db_connection_device = (dev_t)0;
+static ino_t strappy_db_connection_inode = (ino_t)0;
+static int strappy_db_connection_has_identity = 0;
+static int strappy_db_connection_schema_ready = 0;
+static int strappy_db_connection_shutdown_registered = 0;
+
+static void strappy_db_close_connection_locked(void)
+{
+  sqlite3_stmt *stmt;
+
+  if (strappy_db_connection == NULL) {
+    return;
+  }
+  while ((stmt = sqlite3_next_stmt(strappy_db_connection, NULL)) != NULL) {
+    sqlite3_finalize(stmt);
+  }
+  if (!sqlite3_get_autocommit(strappy_db_connection)) {
+    sqlite3_exec(strappy_db_connection, "ROLLBACK;", NULL, NULL, NULL);
+  }
+  sqlite3_exec(strappy_db_connection,
+               "PRAGMA wal_checkpoint(PASSIVE);",
+               NULL,
+               NULL,
+               NULL);
+  sqlite3_close(strappy_db_connection);
+  strappy_db_connection = NULL;
+  free(strappy_db_connection_path);
+  strappy_db_connection_path = NULL;
+  strappy_db_connection_device = (dev_t)0;
+  strappy_db_connection_inode = (ino_t)0;
+  strappy_db_connection_has_identity = 0;
+  strappy_db_connection_schema_ready = 0;
+}
+
+static void strappy_db_shutdown_connection(void)
+{
+  if (pthread_mutex_lock(&strappy_db_connection_mutex) != 0) {
+    return;
+  }
+  strappy_db_close_connection_locked();
+  pthread_mutex_unlock(&strappy_db_connection_mutex);
+}
+
+static void strappy_db_release(sqlite3 *db)
+{
+  sqlite3_stmt *stmt;
+
+  if (db != strappy_db_connection) {
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    return;
+  }
+  while ((stmt = sqlite3_next_stmt(db, NULL)) != NULL) {
+    sqlite3_finalize(stmt);
+  }
+  if (!sqlite3_get_autocommit(db)) {
+    sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+  }
+  pthread_mutex_unlock(&strappy_db_connection_mutex);
+}
+
 static int strappy_db_open(const char *db_path,
                            sqlite3 **db_out,
                            char **error_out)
 {
+  struct stat path_stat;
   sqlite3 *db;
+  char *path_copy;
   int flags;
+  int path_has_identity;
   int rc;
 
   if (db_out == NULL) {
@@ -674,12 +758,31 @@ static int strappy_db_open(const char *db_path,
     strappy_set_error(error_out, "Session database path is not configured.");
     return 0;
   }
+  if (pthread_mutex_lock(&strappy_db_connection_mutex) != 0) {
+    strappy_set_error(error_out, "Could not lock the session database.");
+    return 0;
+  }
 
+  path_has_identity = (stat(db_path, &path_stat) == 0) ? 1 : 0;
+  if ((strappy_db_connection != NULL) &&
+      (strappy_db_connection_path != NULL) &&
+      (strcmp(strappy_db_connection_path, db_path) == 0) &&
+      (((path_has_identity && strappy_db_connection_has_identity) &&
+        (path_stat.st_dev == strappy_db_connection_device) &&
+        (path_stat.st_ino == strappy_db_connection_inode)) ||
+       (!path_has_identity && !strappy_db_connection_has_identity &&
+        (db_path[0] == ':')))) {
+    *db_out = strappy_db_connection;
+    return 1;
+  }
+
+  strappy_db_close_connection_locked();
   db = NULL;
   flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX;
   rc = sqlite3_open_v2(db_path, &db, flags, NULL);
   if (rc != SQLITE_OK) {
     const char *message = "unknown sqlite error";
+
     if (db != NULL) {
       message = sqlite3_errmsg(db);
     }
@@ -689,13 +792,36 @@ static int strappy_db_open(const char *db_path,
     if (db != NULL) {
       sqlite3_close(db);
     }
+    pthread_mutex_unlock(&strappy_db_connection_mutex);
     return 0;
   }
 
   sqlite3_busy_timeout(db, 5000);
   if (!strappy_db_enable_write_ahead_log(db, error_out)) {
     sqlite3_close(db);
+    pthread_mutex_unlock(&strappy_db_connection_mutex);
     return 0;
+  }
+  path_copy = strappy_string_duplicate(db_path);
+  if (path_copy == NULL) {
+    strappy_set_error(error_out, "Could not remember session database path.");
+    sqlite3_close(db);
+    pthread_mutex_unlock(&strappy_db_connection_mutex);
+    return 0;
+  }
+
+  strappy_db_connection = db;
+  strappy_db_connection_path = path_copy;
+  strappy_db_connection_schema_ready = 0;
+  if (stat(db_path, &path_stat) == 0) {
+    strappy_db_connection_device = path_stat.st_dev;
+    strappy_db_connection_inode = path_stat.st_ino;
+    strappy_db_connection_has_identity = 1;
+  }
+  if (!strappy_db_connection_shutdown_registered) {
+    if (atexit(strappy_db_shutdown_connection) == 0) {
+      strappy_db_connection_shutdown_registered = 1;
+    }
   }
 
   *db_out = db;
@@ -1667,7 +1793,17 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
 
 static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
 {
-  return strappy_db_ensure_semantic_schema(db, error_out);
+  int ok;
+
+  if ((db == strappy_db_connection) &&
+      strappy_db_connection_schema_ready) {
+    return 1;
+  }
+  ok = strappy_db_ensure_semantic_schema(db, error_out);
+  if (ok && (db == strappy_db_connection)) {
+    strappy_db_connection_schema_ready = 1;
+  }
+  return ok;
 
   static const char *sessions_sql =
     "CREATE TABLE IF NOT EXISTS sessions ("
@@ -2104,7 +2240,9 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   char *prompt;
   char *response;
   char *model;
+  char *model_name;
   char *created_at;
+  char *last_activity_at;
 
   if ((record == NULL) || (stmt == NULL)) {
     strappy_set_error(error_out, "Session row request is incomplete.");
@@ -2113,23 +2251,29 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
 
   strappy_session_record_destroy(record);
   record->session_id = (long long)sqlite3_column_int64(stmt, 0);
-  record->http_status = (long)sqlite3_column_int64(stmt, 5);
-  record->web_search_enabled = sqlite3_column_int(stmt, 7) ? 1 : 0;
-  record->streaming_enabled = sqlite3_column_int(stmt, 8) ? 1 : 0;
+  record->http_status = (long)sqlite3_column_int64(stmt, 6);
+  record->last_activity_at_ms = (long long)sqlite3_column_int64(stmt, 9);
+  record->web_search_enabled = sqlite3_column_int(stmt, 10) ? 1 : 0;
+  record->streaming_enabled = sqlite3_column_int(stmt, 11) ? 1 : 0;
 
   name = strappy_db_column_string(stmt, 1);
   prompt = strappy_db_column_string(stmt, 2);
   response = strappy_db_column_string(stmt, 3);
   model = strappy_db_column_string(stmt, 4);
-  created_at = strappy_db_column_string(stmt, 6);
+  model_name = strappy_db_column_string(stmt, 5);
+  created_at = strappy_db_column_string(stmt, 7);
+  last_activity_at = strappy_db_column_string(stmt, 8);
 
   if ((name == NULL) || (prompt == NULL) || (response == NULL) ||
-      (created_at == NULL)) {
+      (model == NULL) || (model_name == NULL) || (created_at == NULL) ||
+      (last_activity_at == NULL)) {
     free(name);
     free(prompt);
     free(response);
     free(model);
+    free(model_name);
     free(created_at);
+    free(last_activity_at);
     strappy_set_error(error_out, "Could not allocate session row.");
     return 0;
   }
@@ -2138,7 +2282,9 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   record->prompt = prompt;
   record->response = response;
   record->model = model;
+  record->model_name = model_name;
   record->created_at = created_at;
+  record->last_activity_at = last_activity_at;
   return 1;
 }
 
@@ -5851,7 +5997,7 @@ static int strappy_db_semantic_save_discovered_databases(
   if (!strappy_db_open(db_path, &db, error_out)) {
     return 0;
   }
-  ok = strappy_db_ensure_semantic_schema(db, error_out) &&
+  ok = strappy_db_ensure_schema(db, error_out) &&
        strappy_db_catalog_save(db,
                                records,
                                count,
@@ -5859,7 +6005,7 @@ static int strappy_db_semantic_save_discovered_databases(
                                scan_root,
                                scan_run_id,
                                error_out);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return ok;
 }
 
@@ -5898,8 +6044,8 @@ static int strappy_db_semantic_update_database_permission(
   if (!strappy_db_open(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_semantic_schema(db, error_out)) {
-    sqlite3_close(db);
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
     return 0;
   }
   sql = update_hidden ? hidden_sql : decision_sql;
@@ -5910,7 +6056,7 @@ static int strappy_db_semantic_update_database_permission(
     strappy_set_formatted_error(error_out,
                                 "Could not prepare database permission update: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   if (update_hidden) {
@@ -5928,7 +6074,7 @@ static int strappy_db_semantic_update_database_permission(
                                 "Could not update database permission: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   if (sqlite3_changes(db) < 1) {
@@ -5936,11 +6082,11 @@ static int strappy_db_semantic_update_database_permission(
                       update_hidden ? "Discovered database was not found." :
                       "Discovered database was not found or is not valid SQLite.");
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -5954,7 +6100,7 @@ int strappy_db_initialize(const char *db_path, char **error_out)
   }
 
   ok = strappy_db_ensure_schema(db, error_out);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return ok;
 }
 
@@ -5979,12 +6125,12 @@ int strappy_db_begin_discovered_database_scan(
   if (!strappy_db_open(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_semantic_schema(db, error_out) ||
+  if (!strappy_db_ensure_schema(db, error_out) ||
       !strappy_db_exec(db,
                        "BEGIN IMMEDIATE;",
                        "Could not begin database scan",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   ok = strappy_db_catalog_begin_scan(db,
@@ -6005,7 +6151,7 @@ int strappy_db_begin_discovered_database_scan(
                           NULL);
     *scan_run_id_out = 0LL;
   }
-  sqlite3_close(db);
+  strappy_db_release(db);
   return ok;
 }
 
@@ -6022,12 +6168,12 @@ int strappy_db_finish_discovered_database_scan(
   if (!strappy_db_open(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_semantic_schema(db, error_out) ||
+  if (!strappy_db_ensure_schema(db, error_out) ||
       !strappy_db_exec(db,
                        "BEGIN IMMEDIATE;",
                        "Could not begin database scan finish",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   ok = strappy_db_catalog_finish_scan(db,
@@ -6048,7 +6194,7 @@ int strappy_db_finish_discovered_database_scan(
                           "Could not roll back database scan finish",
                           NULL);
   }
-  sqlite3_close(db);
+  strappy_db_release(db);
   return ok;
 }
 
@@ -6099,7 +6245,7 @@ int strappy_db_save_discovered_databases(
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6107,7 +6253,7 @@ int strappy_db_save_discovered_databases(
                        "BEGIN IMMEDIATE;",
                        "Could not begin discovered database save",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6119,7 +6265,7 @@ int strappy_db_save_discovered_databases(
                       "ROLLBACK;",
                       "Could not roll back discovered database save",
                       NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       return 0;
     }
   }
@@ -6132,11 +6278,11 @@ int strappy_db_save_discovered_databases(
                     "ROLLBACK;",
                     "Could not roll back discovered database save",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -6283,7 +6429,7 @@ int strappy_db_replace_discovered_databases_for_scan_root(
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6291,7 +6437,7 @@ int strappy_db_replace_discovered_databases_for_scan_root(
                        "BEGIN IMMEDIATE;",
                        "Could not begin discovered database replacement",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6300,7 +6446,7 @@ int strappy_db_replace_discovered_databases_for_scan_root(
                     "ROLLBACK;",
                     "Could not roll back discovered database replacement",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6310,7 +6456,7 @@ int strappy_db_replace_discovered_databases_for_scan_root(
                       "ROLLBACK;",
                       "Could not roll back discovered database replacement",
                       NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       return 0;
     }
   }
@@ -6322,7 +6468,7 @@ int strappy_db_replace_discovered_databases_for_scan_root(
                     "ROLLBACK;",
                     "Could not roll back discovered database replacement",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6334,7 +6480,7 @@ int strappy_db_replace_discovered_databases_for_scan_root(
                       "ROLLBACK;",
                       "Could not roll back discovered database replacement",
                       NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       return 0;
     }
   }
@@ -6347,11 +6493,11 @@ int strappy_db_replace_discovered_databases_for_scan_root(
                     "ROLLBACK;",
                     "Could not roll back discovered database replacement",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -6392,7 +6538,7 @@ int strappy_db_list_discovered_databases(
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6402,7 +6548,7 @@ int strappy_db_list_discovered_databases(
     strappy_set_formatted_error(error_out,
                                 "Could not prepare discovered database list: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6412,7 +6558,7 @@ int strappy_db_list_discovered_databases(
     if (list->count >= (((size_t)-1) / sizeof(strappy_discovered_database_record))) {
       strappy_set_error(error_out, "Discovered database list is too large.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_discovered_database_record_list_destroy(list);
       return 0;
     }
@@ -6423,7 +6569,7 @@ int strappy_db_list_discovered_databases(
     if (next_records == NULL) {
       strappy_set_error(error_out, "Could not allocate discovered database list.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_discovered_database_record_list_destroy(list);
       return 0;
     }
@@ -6435,7 +6581,7 @@ int strappy_db_list_discovered_databases(
           stmt,
           error_out)) {
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_discovered_database_record_list_destroy(list);
       return 0;
     }
@@ -6448,13 +6594,13 @@ int strappy_db_list_discovered_databases(
                                 "Could not read discovered database list: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     strappy_discovered_database_record_list_destroy(list);
     return 0;
   }
 
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -6505,7 +6651,7 @@ int strappy_db_update_discovered_database_decision(
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6513,7 +6659,7 @@ int strappy_db_update_discovered_database_decision(
                        "BEGIN IMMEDIATE;",
                        "Could not begin discovered database decision update",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6528,7 +6674,7 @@ int strappy_db_update_discovered_database_decision(
                     "ROLLBACK;",
                     "Could not roll back discovered database decision update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6545,7 +6691,7 @@ int strappy_db_update_discovered_database_decision(
                     "ROLLBACK;",
                     "Could not roll back discovered database decision update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6560,7 +6706,7 @@ int strappy_db_update_discovered_database_decision(
                     "ROLLBACK;",
                     "Could not roll back discovered database decision update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   } else {
     strappy_set_formatted_error(error_out,
@@ -6571,7 +6717,7 @@ int strappy_db_update_discovered_database_decision(
                     "ROLLBACK;",
                     "Could not roll back discovered database decision update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   sqlite3_finalize(stmt);
@@ -6582,7 +6728,7 @@ int strappy_db_update_discovered_database_decision(
                     "ROLLBACK;",
                     "Could not roll back discovered database decision update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6592,7 +6738,7 @@ int strappy_db_update_discovered_database_decision(
                     "ROLLBACK;",
                     "Could not roll back discovered database decision update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6607,7 +6753,7 @@ int strappy_db_update_discovered_database_decision(
                     "ROLLBACK;",
                     "Could not roll back discovered database decision update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6625,7 +6771,7 @@ int strappy_db_update_discovered_database_decision(
                     "ROLLBACK;",
                     "Could not roll back discovered database decision update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6640,7 +6786,7 @@ int strappy_db_update_discovered_database_decision(
                     "ROLLBACK;",
                     "Could not roll back discovered database decision update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   if (sqlite3_changes(db) < 1) {
@@ -6651,7 +6797,7 @@ int strappy_db_update_discovered_database_decision(
                     "ROLLBACK;",
                     "Could not roll back discovered database decision update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   sqlite3_finalize(stmt);
@@ -6667,7 +6813,7 @@ int strappy_db_update_discovered_database_decision(
                     "ROLLBACK;",
                     "Could not roll back discovered database decision update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6685,7 +6831,7 @@ int strappy_db_update_discovered_database_decision(
                     "ROLLBACK;",
                     "Could not roll back discovered database decision update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6700,7 +6846,7 @@ int strappy_db_update_discovered_database_decision(
                     "ROLLBACK;",
                     "Could not roll back discovered database decision update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   sqlite3_finalize(stmt);
@@ -6714,12 +6860,12 @@ int strappy_db_update_discovered_database_decision(
                     "Could not roll back discovered database decision update",
                     NULL);
     free(path);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   free(path);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -6754,7 +6900,7 @@ int strappy_db_update_discovered_database_hidden(const char *db_path,
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6762,7 +6908,7 @@ int strappy_db_update_discovered_database_hidden(const char *db_path,
                        "BEGIN IMMEDIATE;",
                        "Could not begin discovered database hidden update",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6777,7 +6923,7 @@ int strappy_db_update_discovered_database_hidden(const char *db_path,
                     "ROLLBACK;",
                     "Could not roll back discovered database hidden update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6791,7 +6937,7 @@ int strappy_db_update_discovered_database_hidden(const char *db_path,
                     "ROLLBACK;",
                     "Could not roll back discovered database hidden update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6805,7 +6951,7 @@ int strappy_db_update_discovered_database_hidden(const char *db_path,
                     "ROLLBACK;",
                     "Could not roll back discovered database hidden update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   } else {
     strappy_set_formatted_error(error_out,
@@ -6816,7 +6962,7 @@ int strappy_db_update_discovered_database_hidden(const char *db_path,
                     "ROLLBACK;",
                     "Could not roll back discovered database hidden update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   sqlite3_finalize(stmt);
@@ -6827,7 +6973,7 @@ int strappy_db_update_discovered_database_hidden(const char *db_path,
                     "ROLLBACK;",
                     "Could not roll back discovered database hidden update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6840,7 +6986,7 @@ int strappy_db_update_discovered_database_hidden(const char *db_path,
                     "ROLLBACK;",
                     "Could not roll back discovered database hidden update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6853,7 +6999,7 @@ int strappy_db_update_discovered_database_hidden(const char *db_path,
                     "ROLLBACK;",
                     "Could not roll back discovered database hidden update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6866,12 +7012,12 @@ int strappy_db_update_discovered_database_hidden(const char *db_path,
                     "Could not roll back discovered database hidden update",
                     NULL);
     free(path);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   free(path);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -6932,12 +7078,12 @@ int strappy_db_save_exchange_with_id(const char *db_path,
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_exec(db, "BEGIN IMMEDIATE;", "Could not begin session insert", error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6948,7 +7094,7 @@ int strappy_db_save_exchange_with_id(const char *db_path,
                                 "Could not prepare session insert: %s",
                                 sqlite3_errmsg(db));
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6978,7 +7124,7 @@ int strappy_db_save_exchange_with_id(const char *db_path,
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -6989,7 +7135,7 @@ int strappy_db_save_exchange_with_id(const char *db_path,
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7010,7 +7156,7 @@ int strappy_db_save_exchange_with_id(const char *db_path,
     input.include_in_context = 1;
     if (!strappy_db_insert_message(db, session_id, &input, error_out)) {
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       return 0;
     }
 
@@ -7030,14 +7176,14 @@ int strappy_db_save_exchange_with_id(const char *db_path,
     input.include_in_context = 1;
     if (!strappy_db_insert_message(db, session_id, &input, error_out)) {
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       return 0;
     }
   }
 
   if (!strappy_db_exec(db, "COMMIT;", "Could not commit session insert", error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7045,7 +7191,7 @@ int strappy_db_save_exchange_with_id(const char *db_path,
     *session_id_out = session_id;
   }
 
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -7167,7 +7313,7 @@ int strappy_db_create_session(const char *db_path,
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7175,7 +7321,7 @@ int strappy_db_create_session(const char *db_path,
   if (!strappy_db_copy_default_openrouter_model(db,
                                                 &default_model_id,
                                                 error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7186,7 +7332,7 @@ int strappy_db_create_session(const char *db_path,
                                 "Could not prepare session insert: %s",
                                 sqlite3_errmsg(db));
     free(default_model_id);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7203,7 +7349,7 @@ int strappy_db_create_session(const char *db_path,
                                 sqlite3_errmsg(db));
     free(default_model_id);
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7214,7 +7360,7 @@ int strappy_db_create_session(const char *db_path,
                                 sqlite3_errmsg(db));
     free(default_model_id);
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7224,7 +7370,7 @@ int strappy_db_create_session(const char *db_path,
 
   free(default_model_id);
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -7291,12 +7437,12 @@ int strappy_db_delete_session(const char *db_path,
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_session_exists(db, session_id, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7310,18 +7456,18 @@ int strappy_db_delete_session(const char *db_path,
                                 "Could not delete session: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 
   if (!strappy_db_exec(db,
                        "BEGIN IMMEDIATE;",
                        "Could not begin session delete",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7359,7 +7505,7 @@ int strappy_db_delete_session(const char *db_path,
         "Could not delete Responses calls",
         error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session delete", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7372,7 +7518,7 @@ int strappy_db_delete_session(const char *db_path,
         "Could not delete session messages",
         error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session delete", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7385,7 +7531,7 @@ int strappy_db_delete_session(const char *db_path,
         "Could not delete session turns",
         error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session delete", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7398,7 +7544,7 @@ int strappy_db_delete_session(const char *db_path,
         "Could not delete session",
         error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session delete", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7407,11 +7553,11 @@ int strappy_db_delete_session(const char *db_path,
                        "Could not commit session delete",
                        error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session delete", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -7439,12 +7585,12 @@ int strappy_db_update_session_name(const char *db_path,
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_session_exists(db, session_id, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7454,7 +7600,7 @@ int strappy_db_update_session_name(const char *db_path,
     strappy_set_formatted_error(error_out,
                                 "Could not prepare session name update: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7464,7 +7610,7 @@ int strappy_db_update_session_name(const char *db_path,
                                 "Could not bind session name update: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7474,12 +7620,12 @@ int strappy_db_update_session_name(const char *db_path,
                                 "Could not update session name: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -7502,12 +7648,12 @@ int strappy_db_update_session_streaming_enabled(const char *db_path,
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_session_exists(db, session_id, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7517,7 +7663,7 @@ int strappy_db_update_session_streaming_enabled(const char *db_path,
     strappy_set_formatted_error(error_out,
                                 "Could not prepare session streaming update: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7527,7 +7673,7 @@ int strappy_db_update_session_streaming_enabled(const char *db_path,
                                 "Could not bind session streaming update: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7537,12 +7683,12 @@ int strappy_db_update_session_streaming_enabled(const char *db_path,
                                 "Could not update session streaming setting: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -7582,12 +7728,12 @@ int strappy_db_save_message_sequence_with_id(
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_exec(db, "BEGIN IMMEDIATE;", "Could not begin session insert", error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7598,7 +7744,7 @@ int strappy_db_save_message_sequence_with_id(
                                 "Could not prepare session insert: %s",
                                 sqlite3_errmsg(db));
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7628,7 +7774,7 @@ int strappy_db_save_message_sequence_with_id(
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7639,7 +7785,7 @@ int strappy_db_save_message_sequence_with_id(
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7652,13 +7798,13 @@ int strappy_db_save_message_sequence_with_id(
                                           message_count,
                                           error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_exec(db, "COMMIT;", "Could not commit session insert", error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session insert", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7666,7 +7812,7 @@ int strappy_db_save_message_sequence_with_id(
     *session_id_out = session_id;
   }
 
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -7689,12 +7835,12 @@ int strappy_db_update_session_web_search_enabled(const char *db_path,
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_session_exists(db, session_id, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7704,7 +7850,7 @@ int strappy_db_update_session_web_search_enabled(const char *db_path,
     strappy_set_formatted_error(error_out,
                                 "Could not prepare session web search update: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7714,7 +7860,7 @@ int strappy_db_update_session_web_search_enabled(const char *db_path,
                                 "Could not bind session web search update: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7724,12 +7870,12 @@ int strappy_db_update_session_web_search_enabled(const char *db_path,
                                 "Could not update session web search setting: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -7738,26 +7884,17 @@ int strappy_db_list_sessions(const char *db_path,
                              char **error_out)
 {
   static const char *sql =
-    "SELECT s.id, s.name, "
-    "COALESCE((SELECT p.text FROM conversation_items i "
-      "JOIN message_items m ON m.item_id = i.id "
-      "JOIN item_text_parts p ON p.item_id = i.id "
-      "WHERE i.session_id = s.id AND m.role = 'user' "
-      "ORDER BY i.sequence DESC, p.ordinal LIMIT 1), ''), "
-    "COALESCE((SELECT p.text FROM conversation_items i "
-      "JOIN message_items m ON m.item_id = i.id "
-      "JOIN item_text_parts p ON p.item_id = i.id "
-      "WHERE i.session_id = s.id AND m.role = 'assistant' "
-      "AND i.include_in_context = 1 "
-      "ORDER BY i.sequence DESC, p.ordinal LIMIT 1), ''), "
-    "COALESCE(s.model_id, " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL "), "
-    "COALESCE((SELECT a.http_status FROM http_attempts a "
-      "JOIN model_requests r ON r.id = a.request_id "
-      "JOIN turns t ON t.id = r.turn_id "
-      "WHERE t.session_id = s.id ORDER BY a.id DESC LIMIT 1), 0), "
+    "SELECT s.id, s.name, '', '', "
+    STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL ", "
+    "COALESCE(m.name, " STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL "), 0, "
     "strftime('%Y-%m-%dT%H:%M:%fZ', s.created_at_ms / 1000.0, 'unixepoch'), "
+    "strftime('%Y-%m-%dT%H:%M:%fZ', "
+      STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " / 1000.0, 'unixepoch'), "
+    STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
     "s.web_search_enabled, s.streaming_enabled "
-    "FROM sessions s ORDER BY s.updated_at_ms DESC, s.id DESC;";
+    "FROM sessions s LEFT JOIN models m ON m.id = "
+      STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " "
+    "ORDER BY " STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " DESC, s.id DESC;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;
@@ -7773,7 +7910,7 @@ int strappy_db_list_sessions(const char *db_path,
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7783,7 +7920,7 @@ int strappy_db_list_sessions(const char *db_path,
     strappy_set_formatted_error(error_out,
                                 "Could not prepare session list: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7793,7 +7930,7 @@ int strappy_db_list_sessions(const char *db_path,
     if (list->count >= (((size_t)-1) / sizeof(strappy_session_record))) {
       strappy_set_error(error_out, "Session list is too large.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_session_record_list_destroy(list);
       return 0;
     }
@@ -7804,7 +7941,7 @@ int strappy_db_list_sessions(const char *db_path,
     if (next_records == NULL) {
       strappy_set_error(error_out, "Could not allocate session list.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_session_record_list_destroy(list);
       return 0;
     }
@@ -7815,7 +7952,7 @@ int strappy_db_list_sessions(const char *db_path,
                                                  stmt,
                                                  error_out)) {
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_session_record_list_destroy(list);
       return 0;
     }
@@ -7828,13 +7965,13 @@ int strappy_db_list_sessions(const char *db_path,
                                 "Could not read session list: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     strappy_session_record_list_destroy(list);
     return 0;
   }
 
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -7856,14 +7993,19 @@ int strappy_db_load_session(const char *db_path,
       "WHERE i.session_id = s.id AND m.role = 'assistant' "
       "AND i.include_in_context = 1 "
       "ORDER BY i.sequence DESC, p.ordinal LIMIT 1), ''), "
-    "COALESCE(s.model_id, " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL "), "
+    STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL ", "
+    "COALESCE(m.name, " STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL "), "
     "COALESCE((SELECT a.http_status FROM http_attempts a "
       "JOIN model_requests r ON r.id = a.request_id "
       "JOIN turns t ON t.id = r.turn_id "
       "WHERE t.session_id = s.id ORDER BY a.id DESC LIMIT 1), 0), "
     "strftime('%Y-%m-%dT%H:%M:%fZ', s.created_at_ms / 1000.0, 'unixepoch'), "
+    "strftime('%Y-%m-%dT%H:%M:%fZ', "
+      STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " / 1000.0, 'unixepoch'), "
+    STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
     "s.web_search_enabled, s.streaming_enabled "
-    "FROM sessions s WHERE s.id = ?;";
+    "FROM sessions s LEFT JOIN models m ON m.id = "
+      STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " WHERE s.id = ?;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;
@@ -7885,7 +8027,7 @@ int strappy_db_load_session(const char *db_path,
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7895,7 +8037,7 @@ int strappy_db_load_session(const char *db_path,
     strappy_set_formatted_error(error_out,
                                 "Could not prepare session load: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7905,7 +8047,7 @@ int strappy_db_load_session(const char *db_path,
                                 "Could not bind session load: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7913,7 +8055,7 @@ int strappy_db_load_session(const char *db_path,
   if (rc == SQLITE_DONE) {
     strappy_set_error(error_out, "Session was not found.");
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   if (rc != SQLITE_ROW) {
@@ -7921,18 +8063,104 @@ int strappy_db_load_session(const char *db_path,
                                 "Could not read session: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   ok = strappy_db_assign_record_from_statement(record, stmt, error_out);
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   if (!ok) {
     strappy_session_record_destroy(record);
     return 0;
   }
 
+  return 1;
+}
+
+int strappy_db_load_session_list_record(const char *db_path,
+                                        long long session_id,
+                                        strappy_session_record *record,
+                                        char **error_out)
+{
+  static const char *sql =
+    "SELECT s.id, s.name, '', '', "
+    STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL ", "
+    "COALESCE(m.name, " STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL "), 0, "
+    "strftime('%Y-%m-%dT%H:%M:%fZ', s.created_at_ms / 1000.0, 'unixepoch'), "
+    "strftime('%Y-%m-%dT%H:%M:%fZ', "
+      STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " / 1000.0, 'unixepoch'), "
+    STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
+    "s.web_search_enabled, s.streaming_enabled "
+    "FROM sessions s LEFT JOIN models m ON m.id = "
+      STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " WHERE s.id = ?;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+  int ok;
+
+  if (record == NULL) {
+    strappy_set_error(error_out,
+                      "strappy_db_load_session_list_record received no output.");
+    return 0;
+  }
+  strappy_session_record_init(record);
+
+  if (session_id <= 0) {
+    strappy_set_error(error_out, "Session id is not valid.");
+    return 0;
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare session list row load: %s",
+                                sqlite3_errmsg(db));
+    strappy_db_release(db);
+    return 0;
+  }
+  rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind session list row load: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_DONE) {
+    strappy_set_error(error_out, "Session was not found.");
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  if (rc != SQLITE_ROW) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read session list row: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+
+  ok = strappy_db_assign_record_from_statement(record, stmt, error_out);
+  sqlite3_finalize(stmt);
+  strappy_db_release(db);
+  if (!ok) {
+    strappy_session_record_destroy(record);
+    return 0;
+  }
   return 1;
 }
 
@@ -7967,17 +8195,17 @@ int strappy_db_append_exchange_to_session(const char *db_path,
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_session_exists(db, session_id, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_exec(db, "BEGIN IMMEDIATE;", "Could not begin session append", error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -7995,7 +8223,7 @@ int strappy_db_append_exchange_to_session(const char *db_path,
     input.include_in_context = 1;
     if (!strappy_db_insert_message(db, session_id, &input, error_out)) {
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       return 0;
     }
 
@@ -8015,7 +8243,7 @@ int strappy_db_append_exchange_to_session(const char *db_path,
     input.include_in_context = 1;
     if (!strappy_db_insert_message(db, session_id, &input, error_out)) {
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       return 0;
     }
   }
@@ -8027,7 +8255,7 @@ int strappy_db_append_exchange_to_session(const char *db_path,
                                 "Could not prepare session update: %s",
                                 sqlite3_errmsg(db));
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8054,7 +8282,7 @@ int strappy_db_append_exchange_to_session(const char *db_path,
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8065,7 +8293,7 @@ int strappy_db_append_exchange_to_session(const char *db_path,
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8073,11 +8301,11 @@ int strappy_db_append_exchange_to_session(const char *db_path,
 
   if (!strappy_db_exec(db, "COMMIT;", "Could not commit session append", error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -8105,17 +8333,17 @@ int strappy_db_append_message_sequence_to_session(
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_session_exists(db, session_id, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_exec(db, "BEGIN IMMEDIATE;", "Could not begin session append", error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8125,7 +8353,7 @@ int strappy_db_append_message_sequence_to_session(
                                           message_count,
                                           error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8137,17 +8365,17 @@ int strappy_db_append_message_sequence_to_session(
                                          http_status,
                                          error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_exec(db, "COMMIT;", "Could not commit session append", error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session append", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -8169,33 +8397,33 @@ int strappy_db_upsert_session_message(
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_session_exists(db, session_id, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_exec(db, "BEGIN IMMEDIATE;", "Could not begin session message upsert", error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_upsert_message(db, session_id, message, error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session message upsert", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_exec(db, "COMMIT;", "Could not commit session message upsert", error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back session message upsert", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -8219,17 +8447,17 @@ int strappy_db_append_session_message_content(
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_session_exists(db, session_id, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_exec(db, "BEGIN IMMEDIATE;", "Could not begin streamed message append", error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8240,17 +8468,17 @@ int strappy_db_append_session_message_content(
                                          reasoning_delta,
                                          error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back streamed message append", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_exec(db, "COMMIT;", "Could not commit streamed message append", error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back streamed message append", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -8272,17 +8500,17 @@ int strappy_db_move_session_message_content_to_reasoning(
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_session_exists(db, session_id, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_exec(db, "BEGIN IMMEDIATE;", "Could not begin streamed message move", error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8291,17 +8519,17 @@ int strappy_db_move_session_message_content_to_reasoning(
                                                     message,
                                                     error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back streamed message move", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_exec(db, "COMMIT;", "Could not commit streamed message move", error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back streamed message move", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -8325,12 +8553,12 @@ int strappy_db_update_session_message_render_state(
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_session_exists(db, session_id, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8338,7 +8566,7 @@ int strappy_db_update_session_message_render_state(
                        "BEGIN IMMEDIATE;",
                        "Could not begin message render state update",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8351,7 +8579,7 @@ int strappy_db_update_session_message_render_state(
                     "ROLLBACK;",
                     "Could not roll back message render state update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8363,11 +8591,11 @@ int strappy_db_update_session_message_render_state(
                     "ROLLBACK;",
                     "Could not roll back message render state update",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -8432,13 +8660,13 @@ static int strappy_db_list_session_messages_with_filter(
 
   if (!strappy_db_ensure_schema(db, error_out)) {
     free(sql);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_session_exists(db, session_id, error_out)) {
     free(sql);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8449,7 +8677,7 @@ static int strappy_db_list_session_messages_with_filter(
     strappy_set_formatted_error(error_out,
                                 "Could not prepare session message list: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8459,7 +8687,7 @@ static int strappy_db_list_session_messages_with_filter(
                                 "Could not bind session message list: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8469,7 +8697,7 @@ static int strappy_db_list_session_messages_with_filter(
     if (list->count >= (((size_t)-1) / sizeof(strappy_session_message_record))) {
       strappy_set_error(error_out, "Session message list is too large.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_session_message_record_list_destroy(list);
       return 0;
     }
@@ -8480,7 +8708,7 @@ static int strappy_db_list_session_messages_with_filter(
     if (next_records == NULL) {
       strappy_set_error(error_out, "Could not allocate session message list.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_session_message_record_list_destroy(list);
       return 0;
     }
@@ -8491,7 +8719,7 @@ static int strappy_db_list_session_messages_with_filter(
                                                   stmt,
                                                   error_out)) {
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_session_message_record_list_destroy(list);
       return 0;
     }
@@ -8504,13 +8732,13 @@ static int strappy_db_list_session_messages_with_filter(
                                 "Could not read session message list: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     strappy_session_message_record_list_destroy(list);
     return 0;
   }
 
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -8605,13 +8833,13 @@ int strappy_db_load_session_message_by_key(
 
   if (!strappy_db_ensure_schema(db, error_out)) {
     free(sql);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   if (!strappy_db_session_exists(db, session_id, error_out)) {
     free(sql);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8622,7 +8850,7 @@ int strappy_db_load_session_message_by_key(
     strappy_set_formatted_error(error_out,
                                 "Could not prepare session message lookup: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8635,7 +8863,7 @@ int strappy_db_load_session_message_by_key(
                                 "Could not bind session message lookup: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -8643,11 +8871,11 @@ int strappy_db_load_session_message_by_key(
   if (rc == SQLITE_ROW) {
     if (!strappy_db_assign_message_from_statement(record, stmt, error_out)) {
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       return 0;
     }
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 1;
   }
 
@@ -8659,7 +8887,7 @@ int strappy_db_load_session_message_by_key(
                                 sqlite3_errmsg(db));
   }
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 0;
 }
 
@@ -9082,10 +9310,10 @@ static int strappy_db_semantic_save_models(const char *db_path,
     cJSON_Delete(root);
     return 0;
   }
-  if (!strappy_db_ensure_semantic_schema(db, error_out) ||
+  if (!strappy_db_ensure_schema(db, error_out) ||
       !strappy_db_exec(db, "BEGIN IMMEDIATE;", "Could not begin model refresh",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     cJSON_Delete(root);
     return 0;
   }
@@ -9123,7 +9351,7 @@ static int strappy_db_semantic_save_models(const char *db_path,
     (void)strappy_db_exec(db, "ROLLBACK;", "Could not roll back model refresh",
                           NULL);
   }
-  sqlite3_close(db);
+  strappy_db_release(db);
   cJSON_Delete(root);
   return ok;
 }
@@ -9167,7 +9395,7 @@ int strappy_db_save_openrouter_models_json(const char *db_path,
   }
 
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     cJSON_Delete(root);
     return 0;
   }
@@ -9176,7 +9404,7 @@ int strappy_db_save_openrouter_models_json(const char *db_path,
                        "BEGIN IMMEDIATE;",
                        "Could not begin OpenRouter model catalog save",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     cJSON_Delete(root);
     return 0;
   }
@@ -9205,7 +9433,7 @@ int strappy_db_save_openrouter_models_json(const char *db_path,
                     "ROLLBACK;",
                     "Could not roll back OpenRouter model catalog save",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     cJSON_Delete(root);
     return 0;
   }
@@ -9220,7 +9448,7 @@ int strappy_db_save_openrouter_models_json(const char *db_path,
                       "ROLLBACK;",
                       "Could not roll back OpenRouter model catalog save",
                       NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       cJSON_Delete(root);
       return 0;
     }
@@ -9234,7 +9462,7 @@ int strappy_db_save_openrouter_models_json(const char *db_path,
                     "ROLLBACK;",
                     "Could not roll back OpenRouter model catalog save",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     cJSON_Delete(root);
     return 0;
   }
@@ -9247,12 +9475,12 @@ int strappy_db_save_openrouter_models_json(const char *db_path,
                     "ROLLBACK;",
                     "Could not roll back OpenRouter model catalog save",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     cJSON_Delete(root);
     return 0;
   }
 
-  sqlite3_close(db);
+  strappy_db_release(db);
   cJSON_Delete(root);
   return 1;
 }
@@ -9387,10 +9615,10 @@ static int strappy_db_semantic_list_models(
     strappy_db_sql_buffer_destroy(&query);
     return 0;
   }
-  if (!strappy_db_ensure_semantic_schema(db, error_out)) {
+  if (!strappy_db_ensure_schema(db, error_out)) {
     free(pattern);
     strappy_db_sql_buffer_destroy(&query);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   stmt = NULL;
@@ -9401,7 +9629,7 @@ static int strappy_db_semantic_list_models(
                                 "Could not prepare model catalog list: %s",
                                 sqlite3_errmsg(db));
     free(pattern);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   if ((pattern != NULL) &&
@@ -9411,7 +9639,7 @@ static int strappy_db_semantic_list_models(
                                 sqlite3_errmsg(db));
     free(pattern);
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   free(pattern);
@@ -9422,7 +9650,7 @@ static int strappy_db_semantic_list_models(
                         sizeof(strappy_openrouter_model_record))) {
       strappy_set_error(error_out, "OpenRouter model list is too large.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_openrouter_model_record_list_destroy(list);
       return 0;
     }
@@ -9432,7 +9660,7 @@ static int strappy_db_semantic_list_models(
     if (records == NULL) {
       strappy_set_error(error_out, "Could not allocate model catalog list.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_openrouter_model_record_list_destroy(list);
       return 0;
     }
@@ -9441,7 +9669,7 @@ static int strappy_db_semantic_list_models(
     if (!strappy_db_assign_openrouter_model_from_statement(
           &list->records[list->count], stmt, error_out)) {
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_openrouter_model_record_list_destroy(list);
       return 0;
     }
@@ -9452,12 +9680,12 @@ static int strappy_db_semantic_list_models(
                                 "Could not read model catalog list: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     strappy_openrouter_model_record_list_destroy(list);
     return 0;
   }
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -9577,7 +9805,7 @@ int strappy_db_list_openrouter_models_matching(
 
   if (!strappy_db_ensure_schema(db, error_out)) {
     free(search_pattern);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -9588,7 +9816,7 @@ int strappy_db_list_openrouter_models_matching(
                                 "Could not prepare OpenRouter model list: %s",
                                 sqlite3_errmsg(db));
     free(search_pattern);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -9600,7 +9828,7 @@ int strappy_db_list_openrouter_models_matching(
                                   sqlite3_errmsg(db));
       free(search_pattern);
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       return 0;
     }
     free(search_pattern);
@@ -9614,7 +9842,7 @@ int strappy_db_list_openrouter_models_matching(
                         sizeof(strappy_openrouter_model_record))) {
       strappy_set_error(error_out, "OpenRouter model list is too large.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_openrouter_model_record_list_destroy(list);
       return 0;
     }
@@ -9625,7 +9853,7 @@ int strappy_db_list_openrouter_models_matching(
     if (next_records == NULL) {
       strappy_set_error(error_out, "Could not allocate OpenRouter model list.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_openrouter_model_record_list_destroy(list);
       return 0;
     }
@@ -9637,7 +9865,7 @@ int strappy_db_list_openrouter_models_matching(
           stmt,
           error_out)) {
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_openrouter_model_record_list_destroy(list);
       return 0;
     }
@@ -9650,13 +9878,13 @@ int strappy_db_list_openrouter_models_matching(
                                 "Could not read OpenRouter model list: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     strappy_openrouter_model_record_list_destroy(list);
     return 0;
   }
 
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -10013,7 +10241,7 @@ int strappy_db_set_openrouter_model_allowed(const char *db_path,
     return 0;
   }
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -10021,7 +10249,7 @@ int strappy_db_set_openrouter_model_allowed(const char *db_path,
                                                      model_id,
                                                      allowed,
                                                      error_out);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return ok;
 }
 
@@ -10036,11 +10264,11 @@ int strappy_db_set_default_openrouter_model(const char *db_path,
     return 0;
   }
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   if (!strappy_db_model_exists(db, model_id, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -10056,7 +10284,7 @@ int strappy_db_set_default_openrouter_model(const char *db_path,
                                                        error_out);
   }
 
-  sqlite3_close(db);
+  strappy_db_release(db);
   return ok;
 }
 
@@ -10071,12 +10299,12 @@ int strappy_db_get_default_openrouter_model(const char *db_path,
     return 0;
   }
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   ok = strappy_db_copy_default_openrouter_model(db, model_id_out, error_out);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return ok;
 }
 
@@ -10118,17 +10346,17 @@ int strappy_db_update_session_model(const char *db_path,
     return 0;
   }
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   if (!strappy_db_session_exists(db, session_id, error_out) ||
       !strappy_db_model_exists(db, model_id, error_out) ||
       !strappy_db_model_is_effectively_allowed(db, model_id, &allowed, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   if (!allowed) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     strappy_set_error(error_out, "OpenRouter model is not allowed.");
     return 0;
   }
@@ -10139,7 +10367,7 @@ int strappy_db_update_session_model(const char *db_path,
     strappy_set_formatted_error(error_out,
                                 "Could not prepare session model update: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   rc = sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT);
@@ -10151,7 +10379,7 @@ int strappy_db_update_session_model(const char *db_path,
                                 "Could not bind session model update: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   rc = sqlite3_step(stmt);
@@ -10160,12 +10388,12 @@ int strappy_db_update_session_model(const char *db_path,
                                 "Could not update session model: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -10199,7 +10427,7 @@ int strappy_db_get_session_model(const char *db_path,
     return 0;
   }
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -10209,7 +10437,7 @@ int strappy_db_get_session_model(const char *db_path,
     strappy_set_formatted_error(error_out,
                                 "Could not prepare session model lookup: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
@@ -10218,7 +10446,7 @@ int strappy_db_get_session_model(const char *db_path,
                                 "Could not bind session model lookup: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -10231,13 +10459,13 @@ int strappy_db_get_session_model(const char *db_path,
     }
     if (*model_id_out == NULL) {
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_set_error(error_out, "Could not allocate session model id.");
       return 0;
     }
   } else if (rc == SQLITE_DONE) {
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     strappy_set_error(error_out, "Session was not found.");
     return 0;
   } else {
@@ -10245,12 +10473,12 @@ int strappy_db_get_session_model(const char *db_path,
                                 "Could not read session model lookup: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -11134,6 +11362,7 @@ static int strappy_db_semantic_turn(sqlite3 *db,
 
 static int strappy_db_semantic_insert_structured_node(
   sqlite3 *db,
+  sqlite3_stmt *stmt,
   long long document_id,
   long long node_id,
   long long parent_node_id,
@@ -11143,12 +11372,6 @@ static int strappy_db_semantic_insert_structured_node(
   long long *next_node_id_io,
   char **error_out)
 {
-  static const char *sql =
-    "INSERT INTO structured_nodes "
-    "(document_id, node_id, parent_node_id, ordinal, member_name, value_type, "
-     "text_value, number_value, boolean_value) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);";
-  sqlite3_stmt *stmt;
   cJSON *child;
   const char *value_type;
   const char *text_value;
@@ -11181,11 +11404,11 @@ static int strappy_db_semantic_insert_structured_node(
     return 0;
   }
 
-  stmt = NULL;
-  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-  if (rc != SQLITE_OK) {
+  rc = sqlite3_reset(stmt);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_clear_bindings(stmt) != SQLITE_OK)) {
     strappy_set_formatted_error(error_out,
-                                "Could not prepare structured value insert: %s",
+                                "Could not reset structured value insert: %s",
                                 sqlite3_errmsg(db));
     return 0;
   }
@@ -11207,10 +11430,15 @@ static int strappy_db_semantic_insert_structured_node(
     strappy_set_formatted_error(error_out,
                                 "Could not save structured value: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_finalize(stmt);
+    sqlite3_reset(stmt);
     return 0;
   }
-  sqlite3_finalize(stmt);
+  if (sqlite3_reset(stmt) != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not reset structured value insert: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
 
   child_ordinal = 0L;
   for (child = value->child; child != NULL; child = child->next) {
@@ -11220,6 +11448,7 @@ static int strappy_db_semantic_insert_structured_node(
     child_node_id = (*next_node_id_io)++;
     child_name = cJSON_IsObject(value) ? child->string : NULL;
     if (!strappy_db_semantic_insert_structured_node(db,
+                                                    stmt,
                                                     document_id,
                                                     child_node_id,
                                                     node_id,
@@ -11243,7 +11472,13 @@ static int strappy_db_semantic_insert_document(sqlite3 *db,
 {
   static const char *sql =
     "INSERT INTO structured_documents (owner_item_id, purpose) VALUES (?, ?);";
+  static const char *node_sql =
+    "INSERT INTO structured_nodes "
+    "(document_id, node_id, parent_node_id, ordinal, member_name, value_type, "
+     "text_value, number_value, boolean_value) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);";
   sqlite3_stmt *stmt;
+  sqlite3_stmt *node_stmt;
   long long document_id;
   long long next_node_id;
   int rc;
@@ -11262,16 +11497,27 @@ static int strappy_db_semantic_insert_document(sqlite3 *db,
   }
   document_id = (long long)sqlite3_last_insert_rowid(db);
   sqlite3_finalize(stmt);
+  node_stmt = NULL;
+  rc = sqlite3_prepare_v2(db, node_sql, -1, &node_stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare structured value insert: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
   next_node_id = 1LL;
-  return strappy_db_semantic_insert_structured_node(db,
-                                                    document_id,
-                                                    0LL,
-                                                    -1LL,
-                                                    0L,
-                                                    NULL,
-                                                    root,
-                                                    &next_node_id,
-                                                    error_out);
+  rc = strappy_db_semantic_insert_structured_node(db,
+                                                  node_stmt,
+                                                  document_id,
+                                                  0LL,
+                                                  -1LL,
+                                                  0L,
+                                                  NULL,
+                                                  root,
+                                                  &next_node_id,
+                                                  error_out);
+  sqlite3_finalize(node_stmt);
+  return rc;
 }
 
 static int strappy_db_semantic_insert_citations(sqlite3 *db,
@@ -12058,7 +12304,7 @@ static int strappy_db_semantic_begin_response_call(
                        "BEGIN IMMEDIATE;",
                        "Could not begin Responses call",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     cJSON_Delete(root);
     return 0;
   }
@@ -12078,7 +12324,7 @@ static int strappy_db_semantic_begin_response_call(
                                                  &turn_id,
                                                  error_out)) {
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       cJSON_Delete(root);
       return 0;
     }
@@ -12104,7 +12350,7 @@ static int strappy_db_semantic_begin_response_call(
                                   &turn_id,
                                   error_out)) {
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       cJSON_Delete(root);
       return 0;
     }
@@ -12116,7 +12362,7 @@ static int strappy_db_semantic_begin_response_call(
                                                  &call_id,
                                                  error_out)) {
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       cJSON_Delete(root);
       return 0;
     }
@@ -12130,7 +12376,7 @@ static int strappy_db_semantic_begin_response_call(
                                               &toolset_revision_id,
                                               error_out)) {
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       cJSON_Delete(root);
       return 0;
     }
@@ -12146,7 +12392,7 @@ static int strappy_db_semantic_begin_response_call(
                                   sqlite3_errmsg(db));
       sqlite3_finalize(stmt);
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       cJSON_Delete(root);
       return 0;
     }
@@ -12200,7 +12446,7 @@ static int strappy_db_semantic_begin_response_call(
                                   sqlite3_errmsg(db));
       sqlite3_finalize(stmt);
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       cJSON_Delete(root);
       return 0;
     }
@@ -12227,7 +12473,7 @@ static int strappy_db_semantic_begin_response_call(
                                              NULL,
                                              error_out)) {
           strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-          sqlite3_close(db);
+          strappy_db_release(db);
           cJSON_Delete(root);
           return 0;
         }
@@ -12247,7 +12493,7 @@ static int strappy_db_semantic_begin_response_call(
                                                 NULL,
                                                 error_out)) {
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       cJSON_Delete(root);
       return 0;
     }
@@ -12269,7 +12515,7 @@ static int strappy_db_semantic_begin_response_call(
                                   sqlite3_errmsg(db));
       sqlite3_finalize(stmt);
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       cJSON_Delete(root);
       return 0;
     }
@@ -12299,7 +12545,7 @@ static int strappy_db_semantic_begin_response_call(
                                   sqlite3_errmsg(db));
       sqlite3_finalize(stmt);
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       cJSON_Delete(root);
       return 0;
     }
@@ -12327,7 +12573,7 @@ static int strappy_db_semantic_begin_response_call(
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     cJSON_Delete(root);
     return 0;
   }
@@ -12345,7 +12591,7 @@ static int strappy_db_semantic_begin_response_call(
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     cJSON_Delete(root);
     return 0;
   }
@@ -12356,10 +12602,10 @@ static int strappy_db_semantic_begin_response_call(
                        "Could not commit Responses call",
                        error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
-  sqlite3_close(db);
+  strappy_db_release(db);
   if (call_id_out != NULL) {
     *call_id_out = call_id;
   }
@@ -12410,14 +12656,14 @@ int strappy_db_begin_response_call(
   }
   if (!strappy_db_ensure_schema(db, error_out) ||
       !strappy_db_session_exists(db, input->session_id, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   if (!strappy_db_exec(db,
                        "BEGIN IMMEDIATE;",
                        "Could not begin Responses call",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -12442,7 +12688,7 @@ int strappy_db_begin_response_call(
   if (!ok) {
     strappy_db_sql_buffer_destroy(&sql);
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     strappy_set_error(error_out,
                       "Could not allocate Responses call insert.");
     return 0;
@@ -12458,7 +12704,7 @@ int strappy_db_begin_response_call(
     strappy_set_formatted_error(error_out,
                                 "Could not prepare Responses call insert: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -12530,7 +12776,7 @@ int strappy_db_begin_response_call(
     strappy_set_formatted_error(error_out,
                                 "Could not bind Responses call insert: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -12542,7 +12788,7 @@ int strappy_db_begin_response_call(
     strappy_set_formatted_error(error_out,
                                 "Could not save Responses call: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   call_id = (long long)sqlite3_last_insert_rowid(db);
@@ -12574,7 +12820,7 @@ int strappy_db_begin_response_call(
                         "ROLLBACK;",
                         "Could not roll back Responses call",
                         NULL);
-        sqlite3_close(db);
+        strappy_db_release(db);
         return 0;
       }
       item_index++;
@@ -12597,7 +12843,7 @@ int strappy_db_begin_response_call(
                       "ROLLBACK;",
                       "Could not roll back Responses call",
                       NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       return 0;
     }
   }
@@ -12608,10 +12854,10 @@ int strappy_db_begin_response_call(
                        "Could not commit Responses call",
                        error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
-  sqlite3_close(db);
+  strappy_db_release(db);
   if (call_id_out != NULL) {
     *call_id_out = call_id;
   }
@@ -12889,7 +13135,7 @@ static int strappy_db_semantic_finish_response_call(
                        "BEGIN IMMEDIATE;",
                        "Could not begin Responses call result",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     cJSON_Delete(root);
     return 0;
   }
@@ -12954,7 +13200,7 @@ static int strappy_db_semantic_finish_response_call(
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses result", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     cJSON_Delete(root);
     return 0;
   }
@@ -13011,7 +13257,7 @@ static int strappy_db_semantic_finish_response_call(
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses result", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     cJSON_Delete(root);
     return 0;
   }
@@ -13076,7 +13322,7 @@ static int strappy_db_semantic_finish_response_call(
                                   sqlite3_errmsg(db));
       sqlite3_finalize(stmt);
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses result", NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       cJSON_Delete(root);
       return 0;
     }
@@ -13102,7 +13348,7 @@ static int strappy_db_semantic_finish_response_call(
                                            NULL,
                                            error_out)) {
         strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses result", NULL);
-        sqlite3_close(db);
+        strappy_db_release(db);
         cJSON_Delete(root);
         return 0;
       }
@@ -13126,7 +13372,7 @@ static int strappy_db_semantic_finish_response_call(
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses result", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     cJSON_Delete(root);
     return 0;
   }
@@ -13143,7 +13389,7 @@ static int strappy_db_semantic_finish_response_call(
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses result", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     cJSON_Delete(root);
     return 0;
   }
@@ -13154,10 +13400,10 @@ static int strappy_db_semantic_finish_response_call(
                        "Could not commit Responses call result",
                        error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses result", NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -13196,14 +13442,14 @@ int strappy_db_finish_response_call(
                                            input->call_id,
                                            &session_id,
                                            error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   if (!strappy_db_exec(db,
                        "BEGIN IMMEDIATE;",
                        "Could not begin Responses call result",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -13238,7 +13484,7 @@ int strappy_db_finish_response_call(
                     "ROLLBACK;",
                     "Could not roll back Responses call result",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     strappy_set_error(error_out,
                       "Could not allocate Responses call update.");
     return 0;
@@ -13257,7 +13503,7 @@ int strappy_db_finish_response_call(
     strappy_set_formatted_error(error_out,
                                 "Could not prepare Responses call update: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -13381,7 +13627,7 @@ int strappy_db_finish_response_call(
     strappy_set_formatted_error(error_out,
                                 "Could not bind Responses call update: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   rc = sqlite3_step(stmt);
@@ -13395,7 +13641,7 @@ int strappy_db_finish_response_call(
     strappy_set_formatted_error(error_out,
                                 "Could not update Responses call: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -13420,7 +13666,7 @@ int strappy_db_finish_response_call(
                         "ROLLBACK;",
                         "Could not roll back Responses call result",
                         NULL);
-        sqlite3_close(db);
+        strappy_db_release(db);
         return 0;
       }
       item_index++;
@@ -13436,57 +13682,85 @@ int strappy_db_finish_response_call(
                     "ROLLBACK;",
                     "Could not roll back Responses call result",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
-static cJSON *strappy_db_semantic_load_structured_node(sqlite3 *db,
-                                                       long long document_id,
-                                                       long long node_id,
-                                                       char **error_out)
+typedef struct strappy_db_structured_load_context {
+  sqlite3 *db;
+  sqlite3_stmt *node_stmt;
+  sqlite3_stmt *children_stmt;
+  long long document_id;
+} strappy_db_structured_load_context;
+
+typedef struct strappy_db_structured_child {
+  long long node_id;
+  char *member_name;
+} strappy_db_structured_child;
+
+static void strappy_db_semantic_destroy_structured_children(
+  strappy_db_structured_child *children,
+  size_t child_count)
 {
-  static const char *node_sql =
-    "SELECT value_type, text_value, number_value, boolean_value "
-    "FROM structured_nodes WHERE document_id = ? AND node_id = ?;";
-  static const char *children_sql =
-    "SELECT node_id, member_name FROM structured_nodes "
-    "WHERE document_id = ? AND parent_node_id = ? ORDER BY ordinal;";
-  sqlite3_stmt *stmt;
+  size_t index;
+
+  for (index = 0U; index < child_count; index++) {
+    free(children[index].member_name);
+  }
+  free(children);
+}
+
+static cJSON *strappy_db_semantic_load_structured_node(
+  strappy_db_structured_load_context *context,
+  long long node_id,
+  char **error_out)
+{
+  strappy_db_structured_child *children;
+  size_t child_count;
   cJSON *value;
   char *value_type;
   char *text_value;
   char *number_value;
   int boolean_value;
+  int is_container;
+  int is_object;
   int rc;
+  size_t index;
 
-  stmt = NULL;
-  rc = sqlite3_prepare_v2(db, node_sql, -1, &stmt, NULL);
-  if ((rc != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)document_id) != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)node_id) != SQLITE_OK) ||
-      (sqlite3_step(stmt) != SQLITE_ROW)) {
+  if ((sqlite3_reset(context->node_stmt) != SQLITE_OK) ||
+      (sqlite3_clear_bindings(context->node_stmt) != SQLITE_OK) ||
+      (sqlite3_bind_int64(context->node_stmt,
+                          1,
+                          (sqlite3_int64)context->document_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(context->node_stmt,
+                          2,
+                          (sqlite3_int64)node_id) != SQLITE_OK) ||
+      (sqlite3_step(context->node_stmt) != SQLITE_ROW)) {
     strappy_set_formatted_error(error_out,
                                 "Could not read structured value: %s",
-                                sqlite3_errmsg(db));
-    sqlite3_finalize(stmt);
+                                sqlite3_errmsg(context->db));
+    sqlite3_reset(context->node_stmt);
     return NULL;
   }
-  value_type = strappy_db_column_string(stmt, 0);
-  text_value = strappy_db_column_string(stmt, 1);
-  number_value = strappy_db_column_string(stmt, 2);
-  boolean_value = sqlite3_column_type(stmt, 3) == SQLITE_NULL ?
-    0 : sqlite3_column_int(stmt, 3);
-  sqlite3_finalize(stmt);
+  value_type = strappy_db_column_string(context->node_stmt, 0);
+  text_value = strappy_db_column_string(context->node_stmt, 1);
+  number_value = strappy_db_column_string(context->node_stmt, 2);
+  boolean_value = sqlite3_column_type(context->node_stmt, 3) == SQLITE_NULL ?
+    0 : sqlite3_column_int(context->node_stmt, 3);
+  sqlite3_reset(context->node_stmt);
   if (value_type == NULL) {
     free(text_value);
     free(number_value);
     strappy_set_error(error_out, "Structured value type is missing.");
     return NULL;
   }
-  if (strcmp(value_type, "object") == 0) {
+
+  is_object = (strcmp(value_type, "object") == 0) ? 1 : 0;
+  is_container = is_object || (strcmp(value_type, "array") == 0);
+  if (is_object) {
     value = cJSON_CreateObject();
   } else if (strcmp(value_type, "array") == 0) {
     value = cJSON_CreateArray();
@@ -13500,75 +13774,93 @@ static cJSON *strappy_db_semantic_load_structured_node(sqlite3 *db,
   } else {
     value = cJSON_CreateNull();
   }
+  free(value_type);
   free(text_value);
   free(number_value);
   if (value == NULL) {
-    free(value_type);
     strappy_set_error(error_out, "Could not allocate structured value.");
     return NULL;
   }
-  if ((strcmp(value_type, "object") != 0) &&
-      (strcmp(value_type, "array") != 0)) {
-    free(value_type);
+  if (!is_container) {
     return value;
   }
 
-  stmt = NULL;
-  rc = sqlite3_prepare_v2(db, children_sql, -1, &stmt, NULL);
-  if ((rc != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)document_id) != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)node_id) != SQLITE_OK)) {
+  children = NULL;
+  child_count = 0U;
+  if ((sqlite3_reset(context->children_stmt) != SQLITE_OK) ||
+      (sqlite3_clear_bindings(context->children_stmt) != SQLITE_OK) ||
+      (sqlite3_bind_int64(context->children_stmt,
+                          1,
+                          (sqlite3_int64)context->document_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(context->children_stmt,
+                          2,
+                          (sqlite3_int64)node_id) != SQLITE_OK)) {
     strappy_set_formatted_error(error_out,
                                 "Could not prepare structured children: %s",
-                                sqlite3_errmsg(db));
-    sqlite3_finalize(stmt);
+                                sqlite3_errmsg(context->db));
     cJSON_Delete(value);
-    free(value_type);
     return NULL;
   }
-  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-    long long child_id;
-    char *member_name;
-    cJSON *child;
+  while ((rc = sqlite3_step(context->children_stmt)) == SQLITE_ROW) {
+    strappy_db_structured_child *next_children;
 
-    child_id = (long long)sqlite3_column_int64(stmt, 0);
-    member_name = strappy_db_column_string(stmt, 1);
-    child = strappy_db_semantic_load_structured_node(db,
-                                                     document_id,
-                                                     child_id,
-                                                     error_out);
-    if (child == NULL) {
-      free(member_name);
-      sqlite3_finalize(stmt);
+    if (child_count >= (((size_t)-1) / sizeof(*children))) {
+      strappy_set_error(error_out, "Structured value has too many children.");
+      sqlite3_reset(context->children_stmt);
+      strappy_db_semantic_destroy_structured_children(children, child_count);
       cJSON_Delete(value);
-      free(value_type);
       return NULL;
     }
-    if (strcmp(value_type, "object") == 0) {
-      if (member_name == NULL) {
-        cJSON_Delete(child);
-        sqlite3_finalize(stmt);
-        cJSON_Delete(value);
-        free(value_type);
-        strappy_set_error(error_out,
-                          "Structured object member name is missing.");
-        return NULL;
-      }
-      cJSON_AddItemToObject(value, member_name, child);
+    next_children = (strappy_db_structured_child *)realloc(
+      children, (child_count + 1U) * sizeof(*children));
+    if (next_children == NULL) {
+      strappy_set_error(error_out, "Could not allocate structured children.");
+      sqlite3_reset(context->children_stmt);
+      strappy_db_semantic_destroy_structured_children(children, child_count);
+      cJSON_Delete(value);
+      return NULL;
+    }
+    children = next_children;
+    children[child_count].node_id =
+      (long long)sqlite3_column_int64(context->children_stmt, 0);
+    children[child_count].member_name =
+      strappy_db_column_string(context->children_stmt, 1);
+    child_count++;
+  }
+  sqlite3_reset(context->children_stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read structured children: %s",
+                                sqlite3_errmsg(context->db));
+    strappy_db_semantic_destroy_structured_children(children, child_count);
+    cJSON_Delete(value);
+    return NULL;
+  }
+
+  for (index = 0U; index < child_count; index++) {
+    cJSON *child;
+
+    if (is_object && (children[index].member_name == NULL)) {
+      strappy_set_error(error_out,
+                        "Structured object member name is missing.");
+      strappy_db_semantic_destroy_structured_children(children, child_count);
+      cJSON_Delete(value);
+      return NULL;
+    }
+    child = strappy_db_semantic_load_structured_node(
+      context, children[index].node_id, error_out);
+    if (child == NULL) {
+      strappy_db_semantic_destroy_structured_children(children, child_count);
+      cJSON_Delete(value);
+      return NULL;
+    }
+    if (is_object) {
+      cJSON_AddItemToObject(value, children[index].member_name, child);
     } else {
       cJSON_AddItemToArray(value, child);
     }
-    free(member_name);
   }
-  sqlite3_finalize(stmt);
-  free(value_type);
-  if (rc != SQLITE_DONE) {
-    cJSON_Delete(value);
-    strappy_set_formatted_error(error_out,
-                                "Could not read structured children: %s",
-                                sqlite3_errmsg(db));
-    return NULL;
-  }
+  strappy_db_semantic_destroy_structured_children(children, child_count);
   return value;
 }
 
@@ -13580,7 +13872,15 @@ static cJSON *strappy_db_semantic_load_document(sqlite3 *db,
   static const char *sql =
     "SELECT id FROM structured_documents "
     "WHERE owner_item_id = ? AND purpose = ?;";
+  static const char *node_sql =
+    "SELECT value_type, text_value, number_value, boolean_value "
+    "FROM structured_nodes WHERE document_id = ? AND node_id = ?;";
+  static const char *children_sql =
+    "SELECT node_id, member_name FROM structured_nodes "
+    "WHERE document_id = ? AND parent_node_id = ? ORDER BY ordinal;";
+  strappy_db_structured_load_context context;
   sqlite3_stmt *stmt;
+  cJSON *root;
   long long document_id;
   int rc;
 
@@ -13610,10 +13910,30 @@ static cJSON *strappy_db_semantic_load_document(sqlite3 *db,
   }
   document_id = (long long)sqlite3_column_int64(stmt, 0);
   sqlite3_finalize(stmt);
-  return strappy_db_semantic_load_structured_node(db,
-                                                  document_id,
-                                                  0LL,
-                                                  error_out);
+  context.db = db;
+  context.node_stmt = NULL;
+  context.children_stmt = NULL;
+  context.document_id = document_id;
+  rc = sqlite3_prepare_v2(db, node_sql, -1, &context.node_stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_prepare_v2(db,
+                            children_sql,
+                            -1,
+                            &context.children_stmt,
+                            NULL);
+  }
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare structured value load: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(context.node_stmt);
+    sqlite3_finalize(context.children_stmt);
+    return NULL;
+  }
+  root = strappy_db_semantic_load_structured_node(&context, 0LL, error_out);
+  sqlite3_finalize(context.node_stmt);
+  sqlite3_finalize(context.children_stmt);
+  return root;
 }
 
 static cJSON *strappy_db_semantic_load_annotations(sqlite3 *db,
@@ -14248,7 +14568,7 @@ static int strappy_db_semantic_list_canonical_response_items(
     return 0;
   }
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   stmt = NULL;
@@ -14260,7 +14580,7 @@ static int strappy_db_semantic_list_canonical_response_items(
       "Could not prepare canonical Responses item query: %s",
       sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
@@ -14273,7 +14593,7 @@ static int strappy_db_semantic_list_canonical_response_items(
     item = strappy_db_semantic_load_item(db, item_id, error_out);
     if (item == NULL) {
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_response_item_raw_record_list_destroy(list);
       return 0;
     }
@@ -14283,7 +14603,7 @@ static int strappy_db_semantic_list_canonical_response_items(
       strappy_set_error(error_out,
                         "Canonical Responses item list is too large.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_response_item_raw_record_list_destroy(list);
       return 0;
     }
@@ -14295,7 +14615,7 @@ static int strappy_db_semantic_list_canonical_response_items(
       strappy_set_error(error_out,
                         "Could not allocate canonical Responses item list.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_response_item_raw_record_list_destroy(list);
       return 0;
     }
@@ -14308,14 +14628,14 @@ static int strappy_db_semantic_list_canonical_response_items(
       strappy_set_error(error_out,
                         "Could not serialize canonical Responses item.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_response_item_raw_record_list_destroy(list);
       return 0;
     }
     list->count++;
   }
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   if (rc != SQLITE_DONE) {
     strappy_response_item_raw_record_list_destroy(list);
     strappy_set_error(error_out, "Could not list canonical Responses items.");
@@ -14356,7 +14676,7 @@ int strappy_db_list_canonical_response_items(
     return 0;
   }
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -14367,7 +14687,7 @@ int strappy_db_list_canonical_response_items(
       error_out,
       "Could not prepare canonical Responses item query: %s",
       sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
@@ -14377,7 +14697,7 @@ int strappy_db_list_canonical_response_items(
       "Could not bind canonical Responses item query: %s",
       sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -14390,7 +14710,7 @@ int strappy_db_list_canonical_response_items(
       strappy_set_error(error_out,
                         "Canonical Responses item list is too large.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_response_item_raw_record_list_destroy(list);
       return 0;
     }
@@ -14401,7 +14721,7 @@ int strappy_db_list_canonical_response_items(
       strappy_set_error(error_out,
                         "Could not allocate canonical Responses item list.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_response_item_raw_record_list_destroy(list);
       return 0;
     }
@@ -14413,7 +14733,7 @@ int strappy_db_list_canonical_response_items(
       strappy_set_error(error_out,
                         "Could not allocate canonical Responses item JSON.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_response_item_raw_record_list_destroy(list);
       return 0;
     }
@@ -14424,13 +14744,13 @@ int strappy_db_list_canonical_response_items(
                                 "Could not list canonical Responses items: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     strappy_response_item_raw_record_list_destroy(list);
     return 0;
   }
 
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -14469,7 +14789,7 @@ static int strappy_db_semantic_save_response_tool_execution(
     return 0;
   }
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   stmt = NULL;
@@ -14499,17 +14819,17 @@ static int strappy_db_semantic_save_response_tool_execution(
                                 "Could not save Responses tool execution: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   sqlite3_finalize(stmt);
   if (sqlite3_changes(db) != 1) {
     strappy_set_error(error_out,
                       "Responses tool execution did not match its function call.");
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -14549,7 +14869,7 @@ int strappy_db_save_response_tool_execution(
     return 0;
   }
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -14560,7 +14880,7 @@ int strappy_db_save_response_tool_execution(
       error_out,
       "Could not prepare Responses tool execution insert: %s",
       sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   ok = sqlite3_bind_int64(stmt,
@@ -14612,7 +14932,7 @@ int strappy_db_save_response_tool_execution(
       "Could not bind Responses tool execution insert: %s",
       sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   rc = sqlite3_step(stmt);
@@ -14621,10 +14941,10 @@ int strappy_db_save_response_tool_execution(
     strappy_set_formatted_error(error_out,
                                 "Could not save Responses tool execution: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }
 
@@ -14651,14 +14971,14 @@ int strappy_db_update_response_session_summary(
     return 0;
   }
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   if (!strappy_db_exec(db,
                        "BEGIN IMMEDIATE;",
                        "Could not begin Responses session finalization",
                        error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   now_ms = strappy_db_now_ms();
@@ -14684,7 +15004,7 @@ int strappy_db_update_response_session_summary(
                       "ROLLBACK;",
                       "Could not roll back Responses session finalization",
                       NULL);
-      sqlite3_close(db);
+      strappy_db_release(db);
       return 0;
     }
     sqlite3_finalize(stmt);
@@ -14713,7 +15033,7 @@ int strappy_db_update_response_session_summary(
                     "ROLLBACK;",
                     "Could not roll back Responses session finalization",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   sqlite3_finalize(stmt);
@@ -14741,7 +15061,7 @@ int strappy_db_update_response_session_summary(
                     "ROLLBACK;",
                     "Could not roll back Responses session finalization",
                     NULL);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   sqlite3_finalize(stmt);
@@ -14755,7 +15075,7 @@ int strappy_db_update_response_session_summary(
                     "Could not roll back Responses session finalization",
                     NULL);
   }
-  sqlite3_close(db);
+  strappy_db_release(db);
   return ok;
 }
 
@@ -15199,6 +15519,74 @@ static void strappy_db_semantic_finalize_timeline_costs(
   }
 }
 
+static int strappy_db_semantic_finalize_ranged_timeline_costs(
+  sqlite3 *db,
+  long long session_id,
+  strappy_session_message_record_list *list,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT SUM(u.cost_nano_usd) FROM api_usage u "
+    "JOIN http_attempts a ON a.id = u.attempt_id "
+    "JOIN model_requests r ON r.id = a.request_id "
+    "JOIN turns t ON t.id = r.turn_id "
+    "WHERE t.session_id = ? AND r.id <= ? "
+    "AND a.state NOT IN ('pending','running');";
+  sqlite3_stmt *stmt;
+  size_t group_start;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare ranged timeline cost: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+  group_start = 0U;
+  while (group_start < list->count) {
+    long long model_request_id;
+    double cumulative_cost;
+    int has_cumulative_cost;
+    size_t group_end;
+    size_t index;
+
+    model_request_id = list->records[group_start].model_request_id;
+    if ((sqlite3_reset(stmt) != SQLITE_OK) ||
+        (sqlite3_clear_bindings(stmt) != SQLITE_OK) ||
+        (sqlite3_bind_int64(stmt,
+                            1,
+                            (sqlite3_int64)session_id) != SQLITE_OK) ||
+        (sqlite3_bind_int64(stmt,
+                            2,
+                            (sqlite3_int64)model_request_id) != SQLITE_OK) ||
+        (sqlite3_step(stmt) != SQLITE_ROW)) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not read ranged timeline cost: %s",
+                                  sqlite3_errmsg(db));
+      sqlite3_finalize(stmt);
+      return 0;
+    }
+    has_cumulative_cost =
+      (sqlite3_column_type(stmt, 0) != SQLITE_NULL) ? 1 : 0;
+    cumulative_cost = has_cumulative_cost ?
+      ((double)sqlite3_column_int64(stmt, 0) / 1000000000.0) : 0.0;
+    group_end = group_start;
+    while ((group_end < list->count) &&
+           (list->records[group_end].model_request_id == model_request_id)) {
+      group_end++;
+    }
+    for (index = group_start; index < group_end; index++) {
+      list->records[index].cumulative_usage_cost = cumulative_cost;
+      list->records[index].has_cumulative_usage_cost = has_cumulative_cost;
+    }
+    group_start = group_end;
+  }
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
 static int strappy_db_semantic_populate_timeline_item(
   sqlite3 *db,
   sqlite3_stmt *stmt,
@@ -15299,9 +15687,28 @@ static int strappy_db_semantic_populate_timeline_item(
 static int strappy_db_semantic_list_response_timeline(
   const char *db_path,
   long long session_id,
+  size_t start_index,
   strappy_session_message_record_list *list,
+  size_t *total_count_out,
   char **error_out)
 {
+  static const char *count_sql =
+    "SELECT "
+    "(SELECT COUNT(*) FROM http_attempts a "
+      "JOIN model_requests r ON r.id = a.request_id "
+      "JOIN turns t ON t.id = r.turn_id "
+      "WHERE t.session_id = ? AND a.state NOT IN ('pending','running')) + "
+    "(SELECT COUNT(*) FROM conversation_items i "
+      "JOIN model_requests r ON r.id = i.introduced_request_id "
+      "JOIN turns t ON t.id = r.turn_id "
+      "WHERE i.session_id = ? AND i.timeline_visible = 1 "
+      "AND EXISTS (SELECT 1 FROM http_attempts ax "
+        "WHERE ax.request_id = r.id "
+        "AND ax.state NOT IN ('pending','running'))) + "
+    "(SELECT COUNT(*) FROM conversation_items i "
+      "JOIN http_attempts a ON a.id = i.source_attempt_id "
+      "WHERE i.session_id = ? AND i.timeline_visible = 1 "
+      "AND a.state NOT IN ('pending','running'));";
   static const char *sql =
     "SELECT 0 AS entry_type, a.id AS row_id, t.id AS turn_id, "
     "r.id AS request_id, a.id AS attempt_id, NULL AS item_id, "
@@ -15352,11 +15759,17 @@ static int strappy_db_semantic_list_response_timeline(
     "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
     "WHERE i.session_id = ? AND i.timeline_visible = 1 "
     "AND a.state NOT IN ('pending','running') "
-    "ORDER BY request_id, 19, attempt_index, 20, entry_type, 21;";
+    "ORDER BY request_id, 19, attempt_index, 20, entry_type, 21 "
+    "LIMIT -1 OFFSET ?;";
   sqlite3 *db;
+  sqlite3_stmt *count_stmt;
   sqlite3_stmt *stmt;
+  sqlite3_int64 total_count;
   int rc;
 
+  if (total_count_out != NULL) {
+    *total_count_out = 0U;
+  }
   if (list == NULL) {
     strappy_set_error(error_out, "Responses timeline has no output.");
     return 0;
@@ -15366,24 +15779,76 @@ static int strappy_db_semantic_list_response_timeline(
     strappy_set_error(error_out, "Session id is not valid.");
     return 0;
   }
+  if (start_index > (size_t)LLONG_MAX) {
+    strappy_set_error(error_out, "Responses timeline range is too large.");
+    return 0;
+  }
   if (!strappy_db_open(db_path, &db, error_out)) {
     return 0;
   }
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
+  }
+  count_stmt = NULL;
+  rc = sqlite3_prepare_v2(db, count_sql, -1, &count_stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(count_stmt, 1,
+                          (sqlite3_int64)session_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(count_stmt, 2,
+                          (sqlite3_int64)session_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(count_stmt, 3,
+                          (sqlite3_int64)session_id) != SQLITE_OK)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not count semantic Responses timeline: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(count_stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  rc = sqlite3_step(count_stmt);
+  if (rc != SQLITE_ROW) {
+    strappy_set_formatted_error(error_out,
+                                "Could not count semantic Responses timeline: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(count_stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  total_count = sqlite3_column_int64(count_stmt, 0);
+  sqlite3_finalize(count_stmt);
+  if ((total_count < 0) ||
+      ((unsigned long long)total_count > (unsigned long long)((size_t)-1))) {
+    strappy_set_error(error_out, "Responses timeline is too large.");
+    strappy_db_release(db);
+    return 0;
+  }
+  if (total_count_out != NULL) {
+    *total_count_out = (size_t)total_count;
+  }
+  if (start_index > (size_t)total_count) {
+    strappy_set_error(error_out,
+                      "Responses timeline range exceeds stored messages.");
+    strappy_db_release(db);
+    return 0;
+  }
+  if (start_index == (size_t)total_count) {
+    strappy_db_release(db);
+    return 1;
   }
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   if ((rc != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)session_id) != SQLITE_OK)) {
+      (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)session_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 4,
+                          (sqlite3_int64)start_index) != SQLITE_OK)) {
     strappy_set_formatted_error(error_out,
                                 "Could not prepare semantic Responses timeline: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
@@ -15394,7 +15859,7 @@ static int strappy_db_semantic_list_response_timeline(
 
     if (!strappy_db_semantic_timeline_append(list, &record, error_out)) {
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_session_message_record_list_destroy(list);
       return 0;
     }
@@ -15447,7 +15912,7 @@ static int strappy_db_semantic_list_response_timeline(
                                                            error_out)) {
       strappy_session_message_record_destroy(record);
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_session_message_record_list_destroy(list);
       return 0;
     }
@@ -15467,21 +15932,47 @@ static int strappy_db_semantic_list_response_timeline(
       strappy_set_error(error_out,
                         "Could not allocate semantic Responses timeline row.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_session_message_record_list_destroy(list);
       return 0;
     }
     list->count++;
   }
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
   if (rc != SQLITE_DONE) {
+    strappy_db_release(db);
     strappy_session_message_record_list_destroy(list);
     strappy_set_error(error_out, "Could not read semantic Responses timeline.");
     return 0;
   }
-  strappy_db_semantic_finalize_timeline_costs(list);
+  if (start_index == 0U) {
+    strappy_db_semantic_finalize_timeline_costs(list);
+  } else if (!strappy_db_semantic_finalize_ranged_timeline_costs(db,
+                                                                 session_id,
+                                                                 list,
+                                                                 error_out)) {
+    strappy_db_release(db);
+    strappy_session_message_record_list_destroy(list);
+    return 0;
+  }
+  strappy_db_release(db);
   return 1;
+}
+
+int strappy_db_list_response_timeline_range(
+  const char *db_path,
+  long long session_id,
+  size_t start_index,
+  strappy_session_message_record_list *list,
+  size_t *total_count_out,
+  char **error_out)
+{
+  return strappy_db_semantic_list_response_timeline(db_path,
+                                                    session_id,
+                                                    start_index,
+                                                    list,
+                                                    total_count_out,
+                                                    error_out);
 }
 
 int strappy_db_list_response_timeline(
@@ -15529,10 +16020,12 @@ int strappy_db_list_response_timeline(
   int has_cumulative_usage_cost;
   int rc;
 
-  return strappy_db_semantic_list_response_timeline(db_path,
-                                                    session_id,
-                                                    list,
-                                                    error_out);
+  return strappy_db_list_response_timeline_range(db_path,
+                                                 session_id,
+                                                 0U,
+                                                 list,
+                                                 NULL,
+                                                 error_out);
 
   if (list == NULL) {
     strappy_set_error(error_out, "Responses timeline has no output.");
@@ -15547,7 +16040,7 @@ int strappy_db_list_response_timeline(
     return 0;
   }
   if (!strappy_db_ensure_schema(db, error_out)) {
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -15557,7 +16050,7 @@ int strappy_db_list_response_timeline(
     strappy_set_formatted_error(error_out,
                                 "Could not prepare Responses timeline: %s",
                                 sqlite3_errmsg(db));
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
   rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
@@ -15569,7 +16062,7 @@ int strappy_db_list_response_timeline(
                                 "Could not bind Responses timeline: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     return 0;
   }
 
@@ -15587,7 +16080,7 @@ int strappy_db_list_response_timeline(
                         sizeof(strappy_session_message_record))) {
       strappy_set_error(error_out, "Responses timeline is too large.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_session_message_record_list_destroy(list);
       return 0;
     }
@@ -15598,7 +16091,7 @@ int strappy_db_list_response_timeline(
       strappy_set_error(error_out,
                         "Could not allocate Responses timeline.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_session_message_record_list_destroy(list);
       return 0;
     }
@@ -15689,7 +16182,7 @@ int strappy_db_list_response_timeline(
       strappy_set_error(error_out,
                         "Could not allocate Responses timeline row.");
       sqlite3_finalize(stmt);
-      sqlite3_close(db);
+      strappy_db_release(db);
       strappy_session_message_record_list_destroy(list);
       return 0;
     }
@@ -15700,12 +16193,12 @@ int strappy_db_list_response_timeline(
                                 "Could not read Responses timeline: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    strappy_db_release(db);
     strappy_session_message_record_list_destroy(list);
     return 0;
   }
 
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
+  strappy_db_release(db);
   return 1;
 }

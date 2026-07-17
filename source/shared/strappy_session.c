@@ -129,6 +129,17 @@ int strappy_session_load_record(const char *db_path,
   return strappy_db_load_session(db_path, session_id, record, error_out);
 }
 
+int strappy_session_load_list_record(const char *db_path,
+                                     long long session_id,
+                                     strappy_session_record *record,
+                                     char **error_out)
+{
+  return strappy_db_load_session_list_record(db_path,
+                                             session_id,
+                                             record,
+                                             error_out);
+}
+
 int strappy_session_delete(const char *db_path,
                            long long session_id,
                            char **error_out)
@@ -146,6 +157,22 @@ int strappy_session_list_message_records(
                                           session_id,
                                           list,
                                           error_out);
+}
+
+int strappy_session_list_message_records_from_index(
+  const char *db_path,
+  long long session_id,
+  size_t start_index,
+  strappy_session_message_record_list *list,
+  size_t *total_count_out,
+  char **error_out)
+{
+  return strappy_db_list_response_timeline_range(db_path,
+                                                 session_id,
+                                                 start_index,
+                                                 list,
+                                                 total_count_out,
+                                                 error_out);
 }
 
 int strappy_session_load_message_record_by_key(
@@ -488,30 +515,31 @@ char *strappy_session_webview_append_messages_js_for_session(
   strappy_session_message_record_list list;
   char *messages_html;
   char *script;
+  size_t total_count;
 
   if (message_count_out != NULL) {
     *message_count_out = 0U;
   }
 
   strappy_session_message_record_list_init(&list);
-  if (!strappy_session_list_message_records(db_path,
-                                            session_id,
-                                            &list,
-                                            error_out)) {
+  total_count = 0U;
+  if (!strappy_session_list_message_records_from_index(db_path,
+                                                       session_id,
+                                                       start_index,
+                                                       &list,
+                                                       &total_count,
+                                                       error_out)) {
+    if (message_count_out != NULL) {
+      *message_count_out = total_count;
+    }
     strappy_session_message_record_list_destroy(&list);
     return NULL;
   }
 
   if (message_count_out != NULL) {
-    *message_count_out = list.count;
+    *message_count_out = total_count;
   }
-  if (start_index > list.count) {
-    strappy_set_error(error_out,
-                      "Rendered WebView message count exceeds stored messages.");
-    strappy_session_message_record_list_destroy(&list);
-    return NULL;
-  }
-  if (start_index == list.count) {
+  if (list.count == 0U) {
     strappy_session_message_record_list_destroy(&list);
     script = strappy_string_duplicate("");
     if (script == NULL) {
@@ -522,7 +550,7 @@ char *strappy_session_webview_append_messages_js_for_session(
 
   messages_html = strappy_session_webview_messages_html_for_record_range(
     &list,
-    start_index,
+    0U,
     list.count,
     error_out);
   strappy_session_message_record_list_destroy(&list);

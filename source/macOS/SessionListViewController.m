@@ -56,7 +56,7 @@ static NSDictionary *StrappyEmptySessionRow(void)
 {
   return [NSDictionary dictionaryWithObjectsAndKeys:
     kStrappySessionRowTypeEmpty, kStrappySessionRowTypeKey,
-    NSLocalizedString(@"No conversations yet", nil), @"prompt",
+    NSLocalizedString(@"No conversations yet", nil), @"name",
     NSLocalizedString(@"Create a conversation to begin.", nil), @"last_message_text",
     nil];
 }
@@ -80,19 +80,12 @@ static NSDictionary *StrappySessionDisplayRow(NSDictionary *session)
 static NSString *StrappySessionPromptPreview(NSDictionary *session)
 {
   NSString *name;
-  NSString *prompt;
 
   name = [session objectForKey:@"name"];
   if ([name isKindOfClass:[NSString class]] && ([name length] > 0U)) {
     return name;
   }
-
-  prompt = [session objectForKey:@"prompt"];
-  if (![prompt isKindOfClass:[NSString class]] || ([prompt length] == 0U)) {
-    return NSLocalizedString(@"Untitled Session", nil);
-  }
-
-  return prompt;
+  return NSLocalizedString(@"Untitled Session", nil);
 }
 
 static NSString *StrappyDisplayTimestamp(NSString *timestamp)
@@ -285,6 +278,7 @@ static void StrappyDrawTintedImage(NSImage *image,
 {
   NSString *title;
   NSString *timestamp;
+  NSString *modelName;
   NSString *type;
   BOOL selected;
   BOOL promptInFlight;
@@ -309,6 +303,15 @@ static void StrappyDrawTintedImage(NSImage *image,
   timestamp = @"";
   if ([type isEqualToString:kStrappySessionRowTypeSession]) {
     timestamp = StrappyDisplayTimestamp([row objectForKey:@"last_message_at"]);
+    modelName = [row objectForKey:@"model_name"];
+    if (![modelName isKindOfClass:[NSString class]]) {
+      modelName = @"";
+    }
+    if (([timestamp length] > 0U) && ([modelName length] > 0U)) {
+      timestamp = [NSString stringWithFormat:@"%@, %@", timestamp, modelName];
+    } else if ([timestamp length] == 0U) {
+      timestamp = modelName;
+    }
   }
 
   titleAttrs = StrappyTextAttributes([NSFont systemFontOfSize:13.0],
@@ -389,7 +392,9 @@ static void StrappyDrawTintedImage(NSImage *image,
 - (void)rebuildToolbarSegmentIcons;
 - (void)updateToolbarSegments;
 - (NSDictionary *)selectedSessionRow;
+- (NSInteger)rowForSessionIdentifier:(NSNumber *)sessionIdentifier;
 - (void)sessionPromptActivityDidChange:(NSNotification *)notification;
+- (void)modelCatalogDidChange:(NSNotification *)notification;
 - (void)toolbarDidMoveToWindow:(id)sender;
 - (void)toolbarSegmentClicked:(id)sender;
 - (void)layoutSidebarViews;
@@ -482,6 +487,11 @@ static void StrappyDrawTintedImage(NSImage *image,
     addObserver:self
        selector:@selector(sessionPromptActivityDidChange:)
            name:StrappySessionPromptDidFinishNotification
+         object:nil];
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(modelCatalogDidChange:)
+           name:StrappySessionModelCatalogDidChangeNotification
          object:nil];
 }
 
@@ -658,7 +668,33 @@ static void StrappyDrawTintedImage(NSImage *image,
     return;
   }
 
-  [self reloadSessionIdentifier:identifier select:NO];
+  {
+    NSInteger row;
+    NSMutableArray *mutableRows;
+    NSMutableDictionary *displayRow;
+
+    row = [self rowForSessionIdentifier:identifier];
+    if (row < 0) {
+      return;
+    }
+    mutableRows = [[rows_ mutableCopy] autorelease];
+    displayRow = [NSMutableDictionary dictionaryWithDictionary:
+      [mutableRows objectAtIndex:(NSUInteger)row]];
+    [displayRow setObject:[NSNumber numberWithBool:
+      [StrappySession isPromptInFlightForSessionIdentifier:identifier]]
+                   forKey:kStrappySessionPromptInFlightKey];
+    [mutableRows replaceObjectAtIndex:(NSUInteger)row withObject:displayRow];
+    [rows_ release];
+    rows_ = [mutableRows copy];
+    [tableView_ reloadData];
+    [self updateToolbarSegments];
+  }
+}
+
+- (void)modelCatalogDidChange:(NSNotification *)notification
+{
+  (void)notification;
+  [self reloadData];
 }
 
 - (void)notifySelectedSession
@@ -705,20 +741,6 @@ static void StrappyDrawTintedImage(NSImage *image,
   }
 
   return -1;
-}
-
-- (NSUInteger)firstSessionInsertIndexForRows:(NSArray *)rows
-{
-  NSUInteger index;
-
-  for (index = 0U; index < [rows count]; index++) {
-    NSDictionary *row = [rows objectAtIndex:index];
-    if ([[row objectForKey:kStrappySessionRowTypeKey]
-          isEqualToString:kStrappySessionRowTypeSection]) {
-      return index + 1U;
-    }
-  }
-  return [rows count];
 }
 
 - (void)reloadData
@@ -768,11 +790,11 @@ static void StrappyDrawTintedImage(NSImage *image,
 {
   NSError *error;
   NSDictionary *summary;
-  NSMutableArray *mutableRows;
-  NSDictionary *displayRow;
-  NSInteger row;
+  NSMutableArray *summaries;
+  NSMutableArray *displayRows;
+  NSArray *sortDescriptors;
   NSUInteger index;
-  NSUInteger insertIndex;
+  BOOL replaced;
 
   if (select) {
     [selectedSessionId_ release];
@@ -785,50 +807,54 @@ static void StrappyDrawTintedImage(NSImage *image,
   }
 
   error = nil;
-  summary = [StrappySession sessionSummaryForSessionIdentifier:sessionIdentifier
-                                                        error:&error];
+  summary =
+    [StrappySession sessionListSummaryForSessionIdentifier:sessionIdentifier
+                                                     error:&error];
   if (summary == nil) {
     [self reloadData];
     return;
   }
 
-  mutableRows = [[rows_ mutableCopy] autorelease];
-  displayRow = StrappySessionDisplayRow(summary);
-  row = [self rowForSessionIdentifier:sessionIdentifier];
-  if (row >= 0) {
-    [mutableRows replaceObjectAtIndex:(NSUInteger)row withObject:displayRow];
-  } else {
-    for (index = 0U; index < [mutableRows count]; index++) {
-      NSDictionary *candidate = [mutableRows objectAtIndex:index];
-      if ([[candidate objectForKey:kStrappySessionRowTypeKey]
-            isEqualToString:kStrappySessionRowTypeEmpty]) {
-        [mutableRows removeObjectAtIndex:index];
-        break;
-      }
-    }
+  summaries = [NSMutableArray array];
+  replaced = NO;
+  for (index = 0U; index < [rows_ count]; index++) {
+    NSDictionary *candidate;
+    NSNumber *candidateId;
 
-    insertIndex = [self firstSessionInsertIndexForRows:mutableRows];
-    while (insertIndex < [mutableRows count]) {
-      NSDictionary *candidate;
-      NSNumber *candidateId;
-
-      candidate = [mutableRows objectAtIndex:insertIndex];
-      if (![[candidate objectForKey:kStrappySessionRowTypeKey]
-             isEqualToString:kStrappySessionRowTypeSession]) {
-        break;
-      }
-      candidateId = [candidate objectForKey:@"id"];
-      if (![candidateId isKindOfClass:[NSNumber class]] ||
-          ([candidateId longLongValue] < [sessionIdentifier longLongValue])) {
-        break;
-      }
-      insertIndex++;
+    candidate = [rows_ objectAtIndex:index];
+    if (![[candidate objectForKey:kStrappySessionRowTypeKey]
+           isEqualToString:kStrappySessionRowTypeSession]) {
+      continue;
     }
-    [mutableRows insertObject:displayRow atIndex:insertIndex];
+    candidateId = [candidate objectForKey:@"id"];
+    if ([candidateId isEqualToNumber:sessionIdentifier]) {
+      [summaries addObject:summary];
+      replaced = YES;
+    } else {
+      [summaries addObject:candidate];
+    }
+  }
+  if (!replaced) {
+    [summaries addObject:summary];
+  }
+  sortDescriptors = [NSArray arrayWithObjects:
+    [[[NSSortDescriptor alloc] initWithKey:@"last_activity_at_ms"
+                                 ascending:NO] autorelease],
+    [[[NSSortDescriptor alloc] initWithKey:@"id"
+                                 ascending:NO] autorelease],
+    nil];
+  [summaries sortUsingDescriptors:sortDescriptors];
+
+  displayRows = [NSMutableArray arrayWithCapacity:[summaries count] + 1U];
+  [displayRows addObject:
+    StrappySectionRow(NSLocalizedString(@"Conversations", nil))];
+  for (index = 0U; index < [summaries count]; index++) {
+    [displayRows addObject:
+      StrappySessionDisplayRow([summaries objectAtIndex:index])];
   }
 
   [rows_ release];
-  rows_ = [mutableRows copy];
+  rows_ = [displayRows copy];
   [tableView_ reloadData];
   [self selectSessionIdentifier:selectedSessionId_];
   [self updateToolbarSegments];
@@ -1203,10 +1229,18 @@ static void StrappyDrawTintedImage(NSImage *image,
 - (void)contextCopyLastMessage:(id)sender
 {
   NSDictionary *rowData;
+  NSNumber *identifier;
+  StrappySession *session;
+  NSArray *messages;
+  NSDictionary *message;
   NSString *text;
 
   rowData = [sender representedObject];
-  text = [rowData objectForKey:@"last_message_text"];
+  identifier = [rowData objectForKey:@"id"];
+  session = [StrappySession sessionWithIdentifier:identifier];
+  messages = [session messagesWithError:nil];
+  message = ([messages count] > 0U) ? [messages lastObject] : nil;
+  text = [message objectForKey:@"text"];
   [self copyStringToPasteboard:text];
 }
 

@@ -3806,10 +3806,12 @@ static int harness_test_cumulative_session_usage_cost(void)
     "\"model\":\"test/model\",\"output\":[],"
     "\"usage\":{\"cost\":0.0005}}";
   char path[] = "/tmp/strappy-cumulative-cost-XXXXXX";
+  strappy_session_message_record_list ranged_timeline;
   strappy_session_message_record_list timeline;
   char *error;
   long long session_id;
   long long previous_call_id;
+  size_t total_count;
   int fd;
   int ok;
 
@@ -3824,6 +3826,7 @@ static int harness_test_cumulative_session_usage_cost(void)
   session_id = 0LL;
   previous_call_id = 0LL;
   strappy_session_message_record_list_init(&timeline);
+  strappy_session_message_record_list_init(&ranged_timeline);
   ok = strappy_db_create_session(path, &session_id, &error) &&
     harness_append_usage_cost_call(path,
                                    session_id,
@@ -3910,11 +3913,30 @@ static int harness_test_cumulative_session_usage_cost(void)
     harness_double_matches(timeline.records[3].cumulative_usage_cost, 0.0075) &&
     harness_double_matches(timeline.records[4].cumulative_usage_cost, 0.008);
 
+  total_count = 0U;
+  if (ok) {
+    ok = strappy_db_list_response_timeline_range(path,
+                                                 session_id,
+                                                 2U,
+                                                 &ranged_timeline,
+                                                 &total_count,
+                                                 &error) &&
+      (total_count == 5U) &&
+      (ranged_timeline.count == 3U) &&
+      harness_double_matches(
+        ranged_timeline.records[0].cumulative_usage_cost, 0.0075) &&
+      harness_double_matches(
+        ranged_timeline.records[1].cumulative_usage_cost, 0.0075) &&
+      harness_double_matches(
+        ranged_timeline.records[2].cumulative_usage_cost, 0.008);
+  }
+
   if (!ok) {
     fprintf(stderr,
             "Cumulative session usage cost failed: %s\n",
             (error != NULL) ? error : "timeline total mismatch");
   }
+  strappy_session_message_record_list_destroy(&ranged_timeline);
   strappy_session_message_record_list_destroy(&timeline);
   free(error);
   unlink(path);
@@ -4270,6 +4292,7 @@ static int harness_test_session_webview_rendering(void)
   const char *path = "/tmp/strappy_session_webview_harness.sqlite";
   strappy_response_call_begin_input begin;
   strappy_response_call_finish_input finish;
+  strappy_session_message_record_list range;
   const char *first_position;
   const char *second_position;
   char *append_script;
@@ -4280,6 +4303,7 @@ static int harness_test_session_webview_rendering(void)
   long long call_id;
   long long session_id;
   size_t message_count;
+  size_t total_count;
   int ok;
 
   unlink(path);
@@ -4291,6 +4315,8 @@ static int harness_test_session_webview_rendering(void)
   page_html = NULL;
   session_id = 0LL;
   message_count = 0U;
+  total_count = 0U;
+  strappy_session_message_record_list_init(&range);
   ok = strappy_webview_configure_localized_labels(&error) &&
        strappy_db_create_session(path, &session_id, &error);
   if (!ok) {
@@ -4338,6 +4364,23 @@ static int harness_test_session_webview_rendering(void)
     fprintf(stderr,
             "Could not finish the session WebView fixture call: %s\n",
             (error != NULL) ? error : "unknown error");
+    goto cleanup;
+  }
+
+  ok = strappy_db_list_response_timeline_range(path,
+                                                session_id,
+                                                2U,
+                                                &range,
+                                                &total_count,
+                                                &error);
+  ok = ok && (total_count == 3U) && (range.count == 1U) &&
+       (range.records[0].content != NULL) &&
+       (strcmp(range.records[0].content, second_text) == 0);
+  strappy_session_message_record_list_destroy(&range);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not read the ranged Responses timeline: %s\n",
+            (error != NULL) ? error : "unexpected output");
     goto cleanup;
   }
 
@@ -4413,6 +4456,7 @@ static int harness_test_session_webview_rendering(void)
   }
 
 cleanup:
+  strappy_session_message_record_list_destroy(&range);
   strappy_session_free_string(page_html);
   strappy_session_free_string(append_script);
   strappy_session_free_string(empty_script);

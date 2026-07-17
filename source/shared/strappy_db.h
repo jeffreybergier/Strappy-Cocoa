@@ -13,7 +13,10 @@ typedef struct strappy_session_record {
   char *prompt;
   char *response;
   char *model;
+  char *model_name;
   char *created_at;
+  char *last_activity_at;
+  long long last_activity_at_ms;
   int web_search_enabled;
   int streaming_enabled;
   long http_status;
@@ -369,6 +372,10 @@ int strappy_db_load_session(const char *db_path,
                             long long session_id,
                             strappy_session_record *record,
                             char **error_out);
+int strappy_db_load_session_list_record(const char *db_path,
+                                        long long session_id,
+                                        strappy_session_record *record,
+                                        char **error_out);
 int strappy_db_delete_session(const char *db_path,
                               long long session_id,
                               char **error_out);
@@ -470,6 +477,13 @@ int strappy_db_list_response_timeline(
   const char *db_path,
   long long session_id,
   strappy_session_message_record_list *list,
+  char **error_out);
+int strappy_db_list_response_timeline_range(
+  const char *db_path,
+  long long session_id,
+  size_t start_index,
+  strappy_session_message_record_list *list,
+  size_t *total_count_out,
   char **error_out);
 int strappy_db_save_openrouter_models_json(const char *db_path,
                                            const char *json,

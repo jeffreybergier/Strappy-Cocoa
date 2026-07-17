@@ -54,6 +54,10 @@ int strappy_session_load_record(const char *db_path,
                                 long long session_id,
                                 strappy_session_record *record,
                                 char **error_out);
+int strappy_session_load_list_record(const char *db_path,
+                                     long long session_id,
+                                     strappy_session_record *record,
+                                     char **error_out);
 int strappy_session_delete(const char *db_path,
                            long long session_id,
                            char **error_out);
@@ -61,6 +65,13 @@ int strappy_session_list_message_records(
   const char *db_path,
   long long session_id,
   strappy_session_message_record_list *list,
+  char **error_out);
+int strappy_session_list_message_records_from_index(
+  const char *db_path,
+  long long session_id,
+  size_t start_index,
+  strappy_session_message_record_list *list,
+  size_t *total_count_out,
   char **error_out);
 int strappy_session_load_message_record_by_key(
   const char *db_path,

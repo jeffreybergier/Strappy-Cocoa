@@ -12,19 +12,12 @@ static NSString * const kStrappySessionCellIdentifier = @"StrappySessionCell";
 static NSString *StrappySessionPromptPreview(NSDictionary *session)
 {
   NSString *name;
-  NSString *prompt;
 
   name = [session objectForKey:@"name"];
   if ([name isKindOfClass:[NSString class]] && ([name length] > 0U)) {
     return name;
   }
-
-  prompt = [session objectForKey:@"prompt"];
-  if (![prompt isKindOfClass:[NSString class]] || ([prompt length] == 0U)) {
-    return NSLocalizedString(@"Untitled Session", nil);
-  }
-
-  return prompt;
+  return NSLocalizedString(@"Untitled Session", nil);
 }
 
 static NSString *StrappySessionDisplayTimestamp(NSString *timestamp)
@@ -67,12 +60,23 @@ static BOOL StrappySessionPromptIsInFlight(NSDictionary *session)
 
 static NSString *StrappySessionSubtitle(NSDictionary *session)
 {
+  NSString *modelName;
   NSString *timestamp;
 
+  modelName = [session objectForKey:@"model_name"];
+  if (![modelName isKindOfClass:[NSString class]]) {
+    modelName = @"";
+  }
   timestamp =
     StrappySessionDisplayTimestamp([session objectForKey:@"last_message_at"]);
+  if (([timestamp length] > 0U) && ([modelName length] > 0U)) {
+    return [NSString stringWithFormat:@"%@, %@", timestamp, modelName];
+  }
   if ([timestamp length] > 0U) {
     return timestamp;
+  }
+  if ([modelName length] > 0U) {
+    return modelName;
   }
   return NSLocalizedString(@"No messages yet", nil);
 }
@@ -86,6 +90,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 @property (nonatomic, assign) BOOL creatingSession;
 - (void)strappySessionDidUpdate:(NSNotification *)notification;
 - (void)sessionPromptActivityDidChange:(NSNotification *)notification;
+- (void)modelCatalogDidChange:(NSNotification *)notification;
 - (NSIndexPath *)indexPathForSessionIdentifier:(NSNumber *)sessionIdentifier;
 - (NSDictionary *)sessionAtIndexPath:(NSIndexPath *)indexPath;
 - (BOOL)canDeleteSession:(NSDictionary *)session;
@@ -133,6 +138,11 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
     addObserver:self
        selector:@selector(strappySessionDidUpdate:)
            name:StrappySessionDidUpdateNotification
+         object:nil];
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(modelCatalogDidChange:)
+           name:StrappySessionModelCatalogDidChangeNotification
          object:nil];
   [[NSNotificationCenter defaultCenter]
     addObserver:self
@@ -202,10 +212,55 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 - (void)reloadSessionIdentifier:(NSNumber *)sessionIdentifier
                          select:(BOOL)select
 {
+  NSError *error;
+  NSDictionary *summary;
+  NSMutableArray *mutableSessions;
+  NSArray *sortDescriptors;
+  NSIndexPath *oldIndexPath;
+  NSIndexPath *newIndexPath;
+
   if (select) {
-    self.selectedSessionId = sessionIdentifier;
+    [self setSelectedSessionId:sessionIdentifier];
   }
-  [self reloadData];
+
+  if (![sessionIdentifier isKindOfClass:[NSNumber class]]) {
+    [self reloadData];
+    return;
+  }
+
+  oldIndexPath = [self indexPathForSessionIdentifier:sessionIdentifier];
+  error = nil;
+  summary =
+    [StrappySession sessionListSummaryForSessionIdentifier:sessionIdentifier
+                                                     error:&error];
+  if (summary == nil) {
+    [self reloadData];
+    return;
+  }
+
+  mutableSessions = [NSMutableArray arrayWithArray:[self sessions]];
+  if (oldIndexPath != nil) {
+    [mutableSessions replaceObjectAtIndex:(NSUInteger)[oldIndexPath row]
+                               withObject:summary];
+  } else {
+    [mutableSessions addObject:summary];
+  }
+  sortDescriptors = [NSArray arrayWithObjects:
+    [NSSortDescriptor sortDescriptorWithKey:@"last_activity_at_ms"
+                                  ascending:NO],
+    [NSSortDescriptor sortDescriptorWithKey:@"id"
+                                  ascending:NO],
+    nil];
+  [self setSessions:[mutableSessions sortedArrayUsingDescriptors:sortDescriptors]];
+  newIndexPath = [self indexPathForSessionIdentifier:sessionIdentifier];
+  if ((oldIndexPath != nil) && [oldIndexPath isEqual:newIndexPath]) {
+    [[self tableView] reloadRowsAtIndexPaths:
+      [NSArray arrayWithObject:newIndexPath]
+                              withRowAnimation:UITableViewRowAnimationNone];
+  } else {
+    [[self tableView] reloadData];
+  }
+  [self selectSessionIdentifier:[self selectedSessionId]];
   if (select) {
     [self notifySelectedSession];
   }
@@ -285,9 +340,15 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 
 - (void)strappySessionDidUpdate:(NSNotification *)notification
 {
+  NSString *changeKind;
   NSDictionary *session;
   NSNumber *identifier;
 
+  changeKind = [[notification userInfo] objectForKey:StrappySessionChangeKindKey];
+  if ([changeKind isEqualToString:StrappySessionChangeKindWebSearch] ||
+      [changeKind isEqualToString:StrappySessionChangeKindStreaming]) {
+    return;
+  }
   session = [[notification userInfo] objectForKey:@"session"];
   if (![session isKindOfClass:[NSDictionary class]]) {
     [self reloadData];
@@ -315,7 +376,22 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
       identifier = [summary objectForKey:@"id"];
     }
   }
-  [self reloadSessionIdentifier:identifier select:NO];
+  if ([identifier isKindOfClass:[NSNumber class]]) {
+    NSIndexPath *indexPath;
+
+    indexPath = [self indexPathForSessionIdentifier:identifier];
+    if (indexPath != nil) {
+      [[self tableView]
+        reloadRowsAtIndexPaths:[NSArray arrayWithObject:indexPath]
+              withRowAnimation:UITableViewRowAnimationNone];
+    }
+  }
+}
+
+- (void)modelCatalogDidChange:(NSNotification *)notification
+{
+  (void)notification;
+  [self reloadData];
 }
 
 - (NSDictionary *)sessionAtIndexPath:(NSIndexPath *)indexPath

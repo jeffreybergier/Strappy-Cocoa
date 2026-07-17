@@ -5878,11 +5878,13 @@ static int harness_run_openrouter_model_catalog_tests(
     "]"
     "}";
   strappy_openrouter_model_record_list list;
+  strappy_session_record session_list_record;
   char *default_model;
   char *selected_model;
   char *session_model;
   char *error;
   long long session_id;
+  long long initial_activity_at_ms;
   size_t index;
   int found_builtin_default;
   int found_gemma;
@@ -6281,6 +6283,37 @@ static int harness_run_openrouter_model_catalog_tests(
     return 0;
   }
 
+  strappy_session_record_init(&session_list_record);
+  error = NULL;
+  if (!strappy_db_load_session_list_record(context->catalog_path,
+                                           session_id,
+                                           &session_list_record,
+                                           &error)) {
+    fprintf(stderr,
+            "Could not load lightweight session row: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_record_destroy(&session_list_record);
+    return 0;
+  }
+  initial_activity_at_ms = session_list_record.last_activity_at_ms;
+  ok = (session_list_record.prompt != NULL) &&
+       (strcmp(session_list_record.prompt, "") == 0) &&
+       (session_list_record.response != NULL) &&
+       (strcmp(session_list_record.response, "") == 0) &&
+       (session_list_record.model != NULL) &&
+       (strcmp(session_list_record.model, "openai/gpt-4.1-mini") == 0) &&
+       (session_list_record.model_name != NULL) &&
+       (strcmp(session_list_record.model_name, "GPT 4.1 Mini") == 0) &&
+       (session_list_record.last_activity_at != NULL) &&
+       (session_list_record.last_activity_at[0] != '\0') &&
+       (initial_activity_at_ms > 0LL);
+  strappy_session_record_destroy(&session_list_record);
+  if (!ok) {
+    fprintf(stderr, "Lightweight session row did not have the expected metadata.\n");
+    return 0;
+  }
+
   error = NULL;
   if (!strappy_db_update_session_model(context->catalog_path,
                                        session_id,
@@ -6309,6 +6342,31 @@ static int harness_run_openrouter_model_catalog_tests(
   strappy_free_string(session_model);
   if (!ok) {
     fprintf(stderr, "Session OpenRouter model did not persist.\n");
+    return 0;
+  }
+
+  strappy_session_record_init(&session_list_record);
+  error = NULL;
+  if (!strappy_db_load_session_list_record(context->catalog_path,
+                                           session_id,
+                                           &session_list_record,
+                                           &error)) {
+    fprintf(stderr,
+            "Could not reload lightweight session row: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_record_destroy(&session_list_record);
+    return 0;
+  }
+  ok = (session_list_record.model != NULL) &&
+       (strcmp(session_list_record.model, "google/gemma-4-31b-it") == 0) &&
+       (session_list_record.model_name != NULL) &&
+       (strcmp(session_list_record.model_name, "Gemma 4 31B IT") == 0) &&
+       (session_list_record.last_activity_at_ms == initial_activity_at_ms);
+  strappy_session_record_destroy(&session_list_record);
+  if (!ok) {
+    fprintf(stderr,
+            "Model selection changed session activity or display metadata.\n");
     return 0;
   }
 

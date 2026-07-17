@@ -7,6 +7,11 @@ extern NSString * const StrappySessionStreamEventNotification;
 extern NSString * const StrappySessionModelCatalogRefreshDidStartNotification;
 extern NSString * const StrappySessionModelCatalogRefreshDidFinishNotification;
 extern NSString * const StrappySessionModelCatalogDidChangeNotification;
+extern NSString * const StrappySessionChangeKindKey;
+extern NSString * const StrappySessionChangeKindActivity;
+extern NSString * const StrappySessionChangeKindModel;
+extern NSString * const StrappySessionChangeKindStreaming;
+extern NSString * const StrappySessionChangeKindWebSearch;
 
 @interface StrappySession : NSObject {
  @private
@@ -31,6 +36,8 @@ extern NSString * const StrappySessionModelCatalogDidChangeNotification;
 + (BOOL)isPromptInFlightForSessionIdentifier:(NSNumber *)sessionIdentifier;
 + (BOOL)isModelCatalogRefreshInFlight;
 + (NSArray *)sessionSummariesWithError:(NSError **)error;
++ (NSDictionary *)sessionListSummaryForSessionIdentifier:
+    (NSNumber *)sessionIdentifier error:(NSError **)error;
 + (NSDictionary *)sessionSummaryForSessionIdentifier:(NSNumber *)sessionIdentifier
                                                error:(NSError **)error;
 + (NSArray *)openRouterModelCatalogMatchingSearchText:(NSString *)searchText
