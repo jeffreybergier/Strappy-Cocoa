@@ -242,6 +242,9 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function toolObjectArrayTable") &&
        harness_expect_contains(page_html, "function toolOutputHasError") &&
        harness_expect_contains(page_html, "function renderAPIToolRows") &&
+       harness_expect_contains(page_html,
+                               "error=hasClass(row,'state-error')||"
+                               "toolOutputHasError(raw)") &&
        harness_expect_contains(page_html, "function apiToolLabel(row)") &&
        harness_expect_contains(page_html,
                                "setToolCardSummary(summary,apiToolLabel(row)+"
@@ -513,6 +516,41 @@ static int harness_check_page_scripts(void)
                                ".api-exchange-row .tool-pill,"
                                ".api-exchange-row .tool-raw{"
                                "background:#dfe4e8;border-color:#959fa7;}") &&
+       harness_expect_contains(page_html,
+                               ".state-error .bubble{"
+                               "border-top-color:#959fa7;"
+                               "border-bottom-color:#959fa7;"
+                               "background:#dfe4e8;}") &&
+       harness_expect_contains(page_html,
+                               ".tool-column-error>.tool-rail-title,"
+                               ".tool-error>.tool-card-toggle{"
+                               "background:#d99;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-item>.tool-error>"
+                               ".tool-card-toggle{width:auto;"
+                               "margin-left:-10px;margin-right:-10px;"
+                               "padding-left:10px;padding-right:10px;}") &&
+       harness_expect_contains(page_html,
+                               ".tool-column-error>.tool-rail-title,"
+                               ".tool-column .tool-error>"
+                               ".tool-card-toggle{width:auto;"
+                               "margin-left:-12px;margin-right:-12px;"
+                               "padding-left:12px;padding-right:12px;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-status.api_error>"
+                               ".response-status-section>.role,"
+                               ".api-exchange-status.state-error>"
+                               ".response-status-section>.role{"
+                               "background:#d99;}") &&
+       harness_expect_not_contains(page_html,
+                                   ".response-status-section{"
+                                   "background:#d99") &&
+       harness_expect_not_contains(page_html,
+                                   ".response-status-section>.bubble{"
+                                   "background:#d99") &&
+       harness_expect_not_contains(page_html,
+                                   ".tool-card-body{background:#d99") &&
+       harness_expect_not_contains(page_html, "#fff7f7") &&
        harness_expect_not_contains(page_html, "#4f7f9e") &&
        harness_expect_not_contains(page_html, "#7b6995") &&
        harness_expect_not_contains(page_html, "#4e8375") &&
@@ -763,7 +801,9 @@ static int harness_check_page_scripts(void)
                                "decoratePromptGroups(root)") &&
        harness_expect_contains(page_html,
                                ".api-tool-card .tool-card-body") &&
-       harness_expect_contains(page_html, "c.error=toolOutputHasError(raw)") &&
+       harness_expect_contains(page_html,
+                               "c.error=hasClass(row,'state-error')||"
+                               "toolOutputHasError(raw)") &&
        harness_expect_contains(
          page_html,
          "var strappyToolDisplayRegistry={\"database_query\":") &&
@@ -834,8 +874,9 @@ static int harness_check_page_scripts(void)
                                    ".processing-status-active "
                                    ".api-tool-group-toggle") &&
        harness_expect_contains(page_html,
-                               ".processing-status-active .api-reasoning-toggle{"
-                               "display:none;}") &&
+                               ".processing-status-active .api-reasoning-toggle,"
+                               ".processing-status-active "
+                               ".response-metadata-toggle{display:none;}") &&
        harness_expect_not_contains(page_html,
                                    ".processing-status-active "
                                    ".api-exchange-toggle") &&
@@ -930,6 +971,9 @@ static int harness_check_page_scripts(void)
                                    "function toggleAPIToolGroup(a)") &&
        harness_expect_contains(page_html,
                                "function togglePromptGroup(a){"
+                               "if(processingInteractionsLocked())return false;") &&
+       harness_expect_contains(page_html,
+                               "function toggleResponseMetadata(a){"
                                "if(processingInteractionsLocked())return false;") &&
        harness_expect_contains(page_html,
                                "function toggleReasoning(a){"
@@ -1818,6 +1862,7 @@ static int harness_check_responses_items(void)
   char *reasoning_html;
   char *function_html;
   char *output_html;
+  char *error_output_html;
   char *search_html;
   char *fetch_html;
   char *developer_html;
@@ -1888,6 +1933,20 @@ static int harness_check_responses_items(void)
   output_html = strappy_webview_message_html(&message, &labels, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
+  message.element_id = "response-output-error-1";
+  message.round_id = 4LL;
+  message.round_number = 4L;
+  message.direction = "request";
+  message.role = "api_function_output";
+  message.kind = "function_call_output";
+  message.tool_call_id = "call-database-query-error";
+  message.result_json = "Error: Tool failed.";
+  message.text = "Error: Tool failed.";
+  message.is_error = 1;
+  error_output_html =
+    strappy_webview_message_html(&message, &labels, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
   message.element_id = "response-web-search-1";
   message.round_id = 4LL;
   message.api_call_id = 2LL;
@@ -1927,6 +1986,7 @@ static int harness_check_responses_items(void)
 
   ok = (call_html != NULL) && (reasoning_html != NULL) &&
        (function_html != NULL) && (output_html != NULL) &&
+       (error_output_html != NULL) &&
        (search_html != NULL) && (fetch_html != NULL) &&
        (developer_html != NULL) &&
        harness_expect_contains(call_html, "class=\"row api_call\"") &&
@@ -2037,6 +2097,12 @@ static int harness_check_responses_items(void)
                                "class=\"tool-card-body\"") &&
        harness_expect_not_contains(output_html,
                                    "tool-card-open") &&
+       harness_expect_contains(error_output_html,
+                               "class=\"row api_function_output state-error\"") &&
+       harness_expect_contains(error_output_html,
+                               "data-result-json=\"Error: Tool failed.\"") &&
+       harness_expect_contains(error_output_html,
+                               "class=\"bubble api-tool-card tool-card\"") &&
        harness_expect_contains(search_html,
                                "class=\"row api_item\"") &&
        harness_expect_contains(search_html,
@@ -2069,6 +2135,7 @@ static int harness_check_responses_items(void)
   strappy_webview_free(developer_html);
   strappy_webview_free(fetch_html);
   strappy_webview_free(search_html);
+  strappy_webview_free(error_output_html);
   strappy_webview_free(output_html);
   strappy_webview_free(function_html);
   strappy_webview_free(reasoning_html);
