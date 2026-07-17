@@ -127,9 +127,14 @@ House style for Strappy source:
     each rule's optional `when` conditions. Include a tool-conditioned rule
     prospectively when its prerequisite is another unresolved audit item, so it
     can still apply if that prerequisite tool is called while resolving the
-    combined audit. Web search is not a missing-tool audit rule. Database
-    inventory is an application-seeded preflight tool output rather than a
-    missing-tool rule. The audit always checks `database_context_read`,
+    combined audit. Web search is not a missing-tool audit rule. When
+    `openrouter:web_search` or `openrouter:web_fetch` activity has occurred,
+    scan the candidate answer for a non-image inline Markdown HTTP or HTTPS
+    link with a non-empty title and URL. If a linked source reference is
+    missing, place the `web_reference.if_missing` content rule before the
+    missing-tool bullets in the same combined audit message. Database inventory
+    is an application-seeded preflight tool output rather than a missing-tool
+    rule. The audit always checks `database_context_read`,
     `helper_session_name_write`, `helper_fontawesome_shortcode_confirm`,
     `memory_user_fact_remember`, and `memory_database_hint_remember`. The
     database-context and memory tools are report-or-act tools whose fully empty,

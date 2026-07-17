@@ -690,6 +690,8 @@ static int harness_run_audit_resource_tests(void)
   cJSON *audit_header;
   cJSON *audit_footer;
   cJSON *empty_answer;
+  cJSON *web_reference;
+  cJSON *web_reference_message;
   cJSON *database_context_rule;
   cJSON *session_name_rule;
   cJSON *fontawesome_confirm_rule;
@@ -713,6 +715,10 @@ static int harness_run_audit_resource_tests(void)
     cJSON_GetObjectItem(root, "audit_footer") : NULL;
   empty_answer = cJSON_IsObject(root) ?
     cJSON_GetObjectItem(root, "empty_answer") : NULL;
+  web_reference = cJSON_IsObject(root) ?
+    cJSON_GetObjectItem(root, "web_reference") : NULL;
+  web_reference_message = cJSON_IsObject(web_reference) ?
+    cJSON_GetObjectItem(web_reference, "if_missing") : NULL;
   rules = cJSON_IsObject(root) ?
     cJSON_GetObjectItem(root, "tool_usage_priority") : NULL;
   database_context_rule = cJSON_GetArrayItem(rules, 0);
@@ -759,6 +765,19 @@ static int harness_run_audit_resource_tests(void)
     (strcmp(empty_answer->valuestring,
             "Your answer was empty. Please answer the user's original "
             "question.") == 0) &&
+    cJSON_IsObject(web_reference) &&
+    cJSON_IsString(web_reference_message) &&
+    (web_reference_message->valuestring != NULL) &&
+    (strstr(web_reference_message->valuestring,
+            "web search or web fetch") != NULL) &&
+    (strstr(web_reference_message->valuestring,
+            "linked source reference") != NULL) &&
+    (strstr(web_reference_message->valuestring,
+            "inline Markdown link") != NULL) &&
+    (strstr(web_reference_message->valuestring,
+            "[Link title](http://example.com)") != NULL) &&
+    (strstr(web_reference_message->valuestring,
+            "user can verify the researched information") != NULL) &&
     rules_avoid_finalization &&
     cJSON_IsArray(rules) && (cJSON_GetArraySize(rules) == 5) &&
     harness_json_string_equals(database_context_rule,
@@ -827,7 +846,9 @@ static int harness_run_audit_resource_tests(void)
             "guesses, or one-off query results") != NULL);
   cJSON_Delete(root);
   if (!ok) {
-    fprintf(stderr, "Audit guidance order or memory safeguards are invalid.\n");
+    fprintf(stderr,
+            "Audit guidance order, web references, or memory safeguards "
+            "are invalid.\n");
   }
   return ok;
 }

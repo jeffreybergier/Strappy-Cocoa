@@ -2,6 +2,9 @@
   "audit_header": "You have been audited due to your failure to follow instructions:",
   "audit_footer": "After fixing all of the issues above, YOU MUST FINISH with a standalone answer to the user's original question with all fixes in place. Answer the user directly, and do not mention the audit or tool activity.",
   "empty_answer": "Your answer was empty. Please answer the user's original question.",
+  "web_reference": {
+    "if_missing": "web_reference: You used web search or web fetch, but your answer did not include a linked source reference. Add at least one linked source reference as an inline Markdown link, such as [Link title](http://example.com), so the user can verify the researched information."
+  },
   "tool_usage_priority": [
     {
       "tool_name": "database_context_read",

@@ -70,7 +70,9 @@ typedef struct strappy_responses_audit {
   char *audit_header;
   char *audit_footer;
   char *empty_answer;
+  char *web_reference_if_missing;
   int session_name_empty;
+  int web_reference_required;
   int message_sent;
 } strappy_responses_audit;
 
@@ -125,7 +127,9 @@ static void strappy_responses_audit_init(strappy_responses_audit *audit)
   audit->audit_header = NULL;
   audit->audit_footer = NULL;
   audit->empty_answer = NULL;
+  audit->web_reference_if_missing = NULL;
   audit->session_name_empty = 0;
+  audit->web_reference_required = 0;
   audit->message_sent = 0;
 }
 
@@ -145,6 +149,7 @@ static void strappy_responses_audit_destroy(strappy_responses_audit *audit)
   free(audit->audit_header);
   free(audit->audit_footer);
   free(audit->empty_answer);
+  free(audit->web_reference_if_missing);
   strappy_responses_audit_init(audit);
 }
 
@@ -268,6 +273,8 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
   cJSON *audit_header;
   cJSON *audit_footer;
   cJSON *empty_answer;
+  cJSON *web_reference;
+  cJSON *web_reference_if_missing;
   cJSON *item;
 
   if (audit == NULL) {
@@ -299,6 +306,9 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
   audit_header = cJSON_GetObjectItem(root, "audit_header");
   audit_footer = cJSON_GetObjectItem(root, "audit_footer");
   empty_answer = cJSON_GetObjectItem(root, "empty_answer");
+  web_reference = cJSON_GetObjectItem(root, "web_reference");
+  web_reference_if_missing = cJSON_IsObject(web_reference) ?
+    cJSON_GetObjectItem(web_reference, "if_missing") : NULL;
   if (!cJSON_IsArray(rules) || !cJSON_IsString(audit_header) ||
       (audit_header->valuestring == NULL) ||
       (audit_header->valuestring[0] == '\0') ||
@@ -307,12 +317,16 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
       (audit_footer->valuestring[0] == '\0') ||
       !cJSON_IsString(empty_answer) ||
       (empty_answer->valuestring == NULL) ||
-      (empty_answer->valuestring[0] == '\0')) {
+      (empty_answer->valuestring[0] == '\0') ||
+      !cJSON_IsObject(web_reference) ||
+      !cJSON_IsString(web_reference_if_missing) ||
+      (web_reference_if_missing->valuestring == NULL) ||
+      (web_reference_if_missing->valuestring[0] == '\0')) {
     cJSON_Delete(root);
     strappy_set_formatted_error(
       error_out,
-      "Audit guidance is missing tool_usage_priority, audit_header, or "
-      "audit_footer, or empty_answer: %s",
+      "Audit guidance is missing tool_usage_priority, audit_header, "
+      "audit_footer, empty_answer, or web_reference: %s",
       path);
     free(path);
     return 0;
@@ -323,8 +337,11 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
     strappy_string_duplicate(audit_footer->valuestring);
   audit->empty_answer =
     strappy_string_duplicate(empty_answer->valuestring);
+  audit->web_reference_if_missing =
+    strappy_string_duplicate(web_reference_if_missing->valuestring);
   if ((audit->audit_header == NULL) || (audit->audit_footer == NULL) ||
-      (audit->empty_answer == NULL)) {
+      (audit->empty_answer == NULL) ||
+      (audit->web_reference_if_missing == NULL)) {
     cJSON_Delete(root);
     strappy_set_error(error_out,
                       "Could not allocate combined audit guidance.");
@@ -428,6 +445,10 @@ static void strappy_responses_audit_record_tool(
   if ((audit == NULL) || (tool_name == NULL) || (tool_name[0] == '\0')) {
     return;
   }
+  if ((strcmp(tool_name, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) ||
+      (strcmp(tool_name, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0)) {
+    audit->web_reference_required = 1;
+  }
   for (index = 0U; index < audit->count; index++) {
     if (strcmp(audit->rules[index].tool_name, tool_name) == 0) {
       audit->rules[index].called = 1;
@@ -437,6 +458,70 @@ static void strappy_responses_audit_record_tool(
       audit->rules[index].when_tool_called_seen = 1;
     }
   }
+}
+
+static int strappy_responses_text_has_http_markdown_link(const char *text)
+{
+  static const char http_scheme[] = "http://";
+  static const char https_scheme[] = "https://";
+  const unsigned char *begin;
+  const unsigned char *cursor;
+  const unsigned char *url_start;
+  size_t scheme_length;
+  int title_has_text;
+
+  if (text == NULL) {
+    return 0;
+  }
+  begin = (const unsigned char *)text;
+  cursor = begin;
+  /* Match [title](http://url) or [title](https://url), excluding images. */
+  while (*cursor != '\0') {
+    if ((*cursor != '[') ||
+        ((cursor > begin) && (cursor[-1] == '!'))) {
+      cursor++;
+      continue;
+    }
+
+    cursor++;
+    title_has_text = 0;
+    while ((*cursor != '\0') && (*cursor != ']') &&
+           (*cursor != '\r') && (*cursor != '\n')) {
+      if (!isspace((int)*cursor)) {
+        title_has_text = 1;
+      }
+      cursor++;
+    }
+    if ((*cursor != ']') || !title_has_text || (cursor[1] != '(')) {
+      if (*cursor != '\0') {
+        cursor++;
+      }
+      continue;
+    }
+    if (strncmp((const char *)cursor + 2,
+                https_scheme,
+                sizeof(https_scheme) - 1U) == 0) {
+      scheme_length = sizeof(https_scheme) - 1U;
+    } else if (strncmp((const char *)cursor + 2,
+                       http_scheme,
+                       sizeof(http_scheme) - 1U) == 0) {
+      scheme_length = sizeof(http_scheme) - 1U;
+    } else {
+      cursor++;
+      continue;
+    }
+
+    cursor += 2U + scheme_length;
+    url_start = cursor;
+    while ((*cursor != '\0') && (*cursor != ')') &&
+           !isspace((int)*cursor) && !iscntrl((int)*cursor)) {
+      cursor++;
+    }
+    if ((cursor > url_start) && (*cursor == ')')) {
+      return 1;
+    }
+  }
+  return 0;
 }
 
 static int strappy_responses_audit_rule_can_be_selected(
@@ -471,6 +556,7 @@ static int strappy_responses_audit_selection_contains_tool(
 
 static int strappy_responses_audit_build_message(
   strappy_responses_audit *audit,
+  const char *response_text,
   char **message_out,
   char **error_out)
 {
@@ -481,26 +567,30 @@ static int strappy_responses_audit_build_message(
   size_t selected_count;
   int changed;
   int ok;
+  int web_reference_missing;
 
   if (message_out == NULL) {
     strappy_set_error(error_out, "Audit message destination is missing.");
     return 0;
   }
   *message_out = NULL;
-  if ((audit == NULL) || audit->message_sent || (audit->count == 0U)) {
+  if ((audit == NULL) || audit->message_sent) {
     return 1;
   }
   if (audit->count > (((size_t)-1) / sizeof(int))) {
     strappy_set_error(error_out, "Audit guidance selection is too large.");
     return 0;
   }
-  selected = (int *)calloc(audit->count, sizeof(int));
-  if (selected == NULL) {
+  selected = (audit->count > 0U) ?
+    (int *)calloc(audit->count, sizeof(int)) : NULL;
+  if ((audit->count > 0U) && (selected == NULL)) {
     strappy_set_error(error_out, "Could not allocate audit guidance selection.");
     return 0;
   }
 
-  selected_count = 0U;
+  web_reference_missing = audit->web_reference_required &&
+    !strappy_responses_text_has_http_markdown_link(response_text);
+  selected_count = web_reference_missing ? 1U : 0U;
   for (index = 0U; index < audit->count; index++) {
     strappy_responses_audit_rule *rule;
 
@@ -543,6 +633,13 @@ static int strappy_responses_audit_build_message(
   ok = strappy_responses_buffer_append_string(&buffer,
                                               audit->audit_header);
   listed_count = 0U;
+  if (ok && web_reference_missing) {
+    ok = strappy_responses_buffer_append_string(&buffer, "\n\n- ") &&
+      strappy_responses_buffer_append_string(
+        &buffer,
+        audit->web_reference_if_missing);
+    listed_count++;
+  }
   for (index = 0U; ok && (index < audit->count); index++) {
     if (!selected[index]) {
       continue;
@@ -2731,6 +2828,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
 
       audit_message = NULL;
       if (!strappy_responses_audit_build_message(&runtime.audit,
+                                                 analysis.response_text,
                                                  &audit_message,
                                                  error_out)) {
         strappy_responses_analysis_destroy(&analysis);

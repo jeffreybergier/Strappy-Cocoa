@@ -53,6 +53,13 @@
   "is nothing new to remember. NEVER remember user data, secrets, sensitive " \
   "information, guesses, or one-off query results."
 
+#define HARNESS_WEB_REFERENCE_AUDIT_MESSAGE \
+  "web_reference: You used web search or web fetch, but your answer did not " \
+  "include a linked source reference. Add at least one linked source " \
+  "reference as an inline Markdown link, such as " \
+  "[Link title](http://example.com), so the user can verify the researched " \
+  "information."
+
 #define HARNESS_AUDIT_HEADER \
   "You have been audited due to your failure to follow instructions:"
 
@@ -69,6 +76,15 @@
 
 #define HARNESS_COMBINED_AUDIT_MESSAGE \
   HARNESS_AUDIT_HEADER "\n\n- " HARNESS_DATABASE_CONTEXT_AUDIT_MESSAGE \
+  "\n- " HARNESS_SESSION_NAME_AUDIT_MESSAGE \
+  "\n- " HARNESS_FONTAWESOME_CONFIRM_AUDIT_MESSAGE \
+  "\n- " HARNESS_USER_FACT_AUDIT_MESSAGE \
+  "\n- " HARNESS_DATABASE_HINT_AUDIT_MESSAGE \
+  "\n\n" HARNESS_AUDIT_FOOTER
+
+#define HARNESS_COMBINED_WEB_REFERENCE_AUDIT_MESSAGE \
+  HARNESS_AUDIT_HEADER "\n\n- " HARNESS_WEB_REFERENCE_AUDIT_MESSAGE \
+  "\n- " HARNESS_DATABASE_CONTEXT_AUDIT_MESSAGE \
   "\n- " HARNESS_SESSION_NAME_AUDIT_MESSAGE \
   "\n- " HARNESS_FONTAWESOME_CONFIRM_AUDIT_MESSAGE \
   "\n- " HARNESS_USER_FACT_AUDIT_MESSAGE \
@@ -980,7 +996,8 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_RETRY_AFTER = 5,
   HARNESS_RESPONSES_SERVER_SLOW = 6,
   HARNESS_RESPONSES_SERVER_EMPTY_AUDIT_FINALIZATION = 7,
-  HARNESS_RESPONSES_SERVER_EMPTY_FINAL_WITHOUT_AUDIT = 8
+  HARNESS_RESPONSES_SERVER_EMPTY_FINAL_WITHOUT_AUDIT = 8,
+  HARNESS_RESPONSES_SERVER_WEB_REFERENCE_VALID = 9
 } harness_responses_server_scenario;
 
 static int harness_send_all(int socket_fd,
@@ -1320,6 +1337,7 @@ static int harness_request_base_is_valid(cJSON *root,
 {
   cJSON *stream;
   cJSON *store;
+  cJSON *instructions;
   cJSON *session_key;
   cJSON *metadata;
   cJSON *prompt_group;
@@ -1332,6 +1350,7 @@ static int harness_request_base_is_valid(cJSON *root,
 
   stream = cJSON_GetObjectItem(root, "stream");
   store = cJSON_GetObjectItem(root, "store");
+  instructions = cJSON_GetObjectItem(root, "instructions");
   session_key = cJSON_GetObjectItem(root, "session_id");
   metadata = cJSON_GetObjectItem(root, "metadata");
   prompt_group = cJSON_GetObjectItem(metadata, "strappy_prompt_group_key");
@@ -1342,6 +1361,21 @@ static int harness_request_base_is_valid(cJSON *root,
   input_count = cJSON_IsArray(input) ? cJSON_GetArraySize(input) : 0;
   text = harness_message_text(cJSON_GetArrayItem(input, 0));
   if (!cJSON_IsFalse(stream) || !cJSON_IsFalse(store) ||
+      !cJSON_IsString(instructions) ||
+      (instructions->valuestring == NULL) ||
+      (strstr(instructions->valuestring,
+              "## Required Web Source References") == NULL) ||
+      (strstr(instructions->valuestring,
+              "If you use web search or web fetch") == NULL) ||
+      (strstr(instructions->valuestring,
+              "user can verify the researched") == NULL) ||
+      (strstr(instructions->valuestring,
+              "linked source reference") == NULL) ||
+      (strstr(instructions->valuestring,
+              "Format the source reference as an inline Markdown link") ==
+        NULL) ||
+      (strstr(instructions->valuestring,
+              "[Link title](http://example.com)") == NULL) ||
       !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
       !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
       !cJSON_IsArray(input) || (input_count != 5) ||
@@ -2049,7 +2083,9 @@ static int harness_run_server_tool_server(int listener_fd)
     "{\"type\":\"message\",\"id\":\"msg-server-tool\","
     "\"role\":\"assistant\",\"status\":\"completed\","
     "\"content\":[{\"type\":\"output_text\","
-    "\"text\":\"Server tool final answer.\",\"annotations\":[]}]}],"
+    "\"text\":\"Plain https://example.com, [FTP](ftp://example.com), "
+    "![Image](https://example.com/image.png), and [Empty](https://) are not "
+    "references.\",\"annotations\":[]}]}],"
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":4,"
     "\"total_tokens\":8}}";
   static const char *second_response =
@@ -2058,7 +2094,8 @@ static int harness_run_server_tool_server(int listener_fd)
     "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
     "\"id\":\"msg-server-tool-audited\",\"role\":\"assistant\","
     "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
-    "\"text\":\"Server tool combined audited answer.\","
+    "\"text\":\"Server tool combined audited answer with "
+    "[Example source](https://example.com/article).\","
     "\"annotations\":[]}]}],"
     "\"usage\":{\"input_tokens\":8,\"output_tokens\":5,"
     "\"total_tokens\":13}}";
@@ -2080,6 +2117,85 @@ static int harness_run_server_tool_server(int listener_fd)
   ok = cJSON_IsObject(root) &&
     harness_request_base_is_valid(root,
                                   "Use a server tool",
+                                  &session_key,
+                                  &prompt_group) &&
+    harness_send_json_response(client_fd, 200L, first_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_audit_request_is_valid(root,
+                                   session_key,
+                                   prompt_group,
+                                   "1",
+                                   HARNESS_COMBINED_WEB_REFERENCE_AUDIT_MESSAGE,
+                                   "auto") &&
+    harness_send_json_response(client_fd, 200L, second_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  free(session_key);
+  free(prompt_group);
+  return ok;
+}
+
+static int harness_run_valid_web_reference_server(int listener_fd)
+{
+  static const char *first_response =
+    "{\"id\":\"resp-web-reference-valid\",\"object\":\"response\","
+    "\"created_at\":1700000004,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{"
+    "\"type\":\"openrouter:web_fetch\",\"id\":\"wf-reference-valid\","
+    "\"status\":\"completed\",\"url\":\"http://example.com/article\","
+    "\"title\":\"Example Article\",\"content\":\"Fetched page body\","
+    "\"httpStatus\":200},{\"type\":\"message\","
+    "\"id\":\"msg-web-reference-valid\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Read [Example source](http://example.com/article).\","
+    "\"annotations\":[]}]}],\"usage\":{\"input_tokens\":4,"
+    "\"output_tokens\":5,\"total_tokens\":9}}";
+  static const char *second_response =
+    "{\"id\":\"resp-web-reference-valid-audited\","
+    "\"object\":\"response\",\"created_at\":1700000005,"
+    "\"model\":\"test/model\",\"status\":\"completed\","
+    "\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-web-reference-valid-audited\","
+    "\"role\":\"assistant\",\"status\":\"completed\","
+    "\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Cited audited answer with "
+    "[Example source](http://example.com/article).\","
+    "\"annotations\":[]}]}],\"usage\":{\"input_tokens\":9,"
+    "\"output_tokens\":6,\"total_tokens\":15}}";
+  char *body;
+  char *session_key;
+  char *prompt_group;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  session_key = NULL;
+  prompt_group = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_request_base_is_valid(root,
+                                  "Use a cited server tool",
                                   &session_key,
                                   &prompt_group) &&
     harness_send_json_response(client_fd, 200L, first_response);
@@ -2493,6 +2609,9 @@ static int harness_start_server(harness_responses_server_scenario scenario,
       ok = harness_run_audit_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_SERVER_TOOL) {
       ok = harness_run_server_tool_server(listener_fd);
+    } else if (scenario ==
+               HARNESS_RESPONSES_SERVER_WEB_REFERENCE_VALID) {
+      ok = harness_run_valid_web_reference_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_FUNCTION_TOOL) {
       ok = harness_run_function_tool_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_RETRY_AFTER) {
@@ -3061,7 +3180,7 @@ static int harness_test_empty_final_without_audit_recovers(void)
   return ok;
 }
 
-static int harness_test_web_search_remains_outside_audit(void)
+static int harness_test_web_search_requires_markdown_reference(void)
 {
   char path[] = "/tmp/strappy-responses-server-tool-XXXXXX";
   char endpoint[128];
@@ -3106,7 +3225,10 @@ static int harness_test_web_search_remains_outside_audit(void)
     &error);
   server_ok = harness_wait_for_server(server_pid, result == NULL);
   ok = (result != NULL) &&
-    (strcmp(result, "Server tool combined audited answer.") == 0) && server_ok;
+    (strcmp(result,
+            "Server tool combined audited answer with "
+            "[Example source](https://example.com/article).") == 0) &&
+    server_ok;
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
@@ -3132,6 +3254,12 @@ static int harness_test_web_search_remains_outside_audit(void)
                         "SELECT COUNT(*) FROM conversation_items i "
                         "JOIN message_items m ON m.item_id=i.id WHERE "
                         "m.role='developer' AND i.include_in_context=1;",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM item_text_parts p "
+                        "JOIN message_items m ON m.item_id=p.item_id WHERE "
+                        "m.role='developer' AND "
+                        "instr(p.text,'web_reference:')>0;",
                         &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
@@ -3139,7 +3267,89 @@ static int harness_test_web_search_remains_outside_audit(void)
   }
   if (!ok) {
     fprintf(stderr,
-            "Web-search audit exclusion failed: %s\n",
+            "Web-search reference audit failed: %s\n",
+            (error != NULL) ? error : "request or ledger mismatch");
+  }
+  free(error);
+  unlink(path);
+  return ok;
+}
+
+static int harness_test_valid_web_reference_avoids_content_audit(void)
+{
+  char path[] = "/tmp/strappy-responses-web-reference-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *result;
+  sqlite3 *db;
+  long long session_id;
+  long long value;
+  pid_t server_pid;
+  int fd;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create web-reference harness database.");
+  }
+  close(fd);
+  error = NULL;
+  session_id = 0LL;
+  if (!harness_create_session_database(path, &session_id, &error) ||
+      !harness_start_server(HARNESS_RESPONSES_SERVER_WEB_REFERENCE_VALID,
+                            endpoint,
+                            sizeof(endpoint),
+                            &server_pid)) {
+    fprintf(stderr,
+            "Could not prepare valid web-reference integration test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  result = strappy_responses_send_prompt_for_session_and_store(
+    "Use a cited server tool",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources/PromptSystem.txt",
+    path,
+    session_id,
+    &error);
+  server_ok = harness_wait_for_server(server_pid, result == NULL);
+  ok = (result != NULL) &&
+    (strcmp(result,
+            "Cited audited answer with "
+            "[Example source](http://example.com/article).") == 0) &&
+    server_ok;
+  free(result);
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM http_attempts;",
+                           &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests WHERE "
+                        "request_kind='tool_audit';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM conversation_items WHERE "
+                        "kind='openrouter:web_fetch' AND include_in_context=1;",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM item_text_parts p "
+                        "JOIN message_items m ON m.item_id=p.item_id WHERE "
+                        "m.role='developer' AND "
+                        "instr(p.text,'web_reference:')>0;",
+                        &value) && (value == 0LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Valid web-reference audit suppression failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
   free(error);
@@ -4474,7 +4684,8 @@ int main(void)
       harness_test_combined_tool_audit_once() &&
       harness_test_empty_audit_finalization_fails() &&
       harness_test_empty_final_without_audit_recovers() &&
-      harness_test_web_search_remains_outside_audit() &&
+      harness_test_web_search_requires_markdown_reference() &&
+      harness_test_valid_web_reference_avoids_content_audit() &&
       harness_test_function_tool_continuation() &&
       harness_test_retry_attempt_ledger() &&
       harness_test_active_request_cancellation() &&
