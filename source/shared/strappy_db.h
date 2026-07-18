@@ -116,6 +116,24 @@ typedef struct strappy_response_call_begin_input {
   const char *request_json;
 } strappy_response_call_begin_input;
 
+typedef struct strappy_answer_quality_check_input {
+  const char *check_key;
+  const char *check_kind;
+  const char *label;
+  const char *status;
+  const char *tool_name;
+  const char *detail;
+  long long evidence_item_id;
+} strappy_answer_quality_check_input;
+
+typedef struct strappy_answer_quality_audit_input {
+  const char *outcome;
+  const char *guidance_version;
+  long long evaluated_at_ms;
+  const strappy_answer_quality_check_input *checks;
+  size_t check_count;
+} strappy_answer_quality_audit_input;
+
 typedef struct strappy_response_call_finish_input {
   long long call_id;
   const char *state;
@@ -148,6 +166,7 @@ typedef struct strappy_response_call_finish_input {
   const char *rate_limit_reset_tokens;
   const char *response_headers;
   const char *response_json;
+  const strappy_answer_quality_audit_input *answer_quality_audit;
 } strappy_response_call_finish_input;
 
 typedef struct strappy_response_item_raw_record {

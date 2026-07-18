@@ -91,7 +91,11 @@ static int harness_check_localized_labels(void)
        harness_expect_equal(labels->request, "Request") &&
        harness_expect_equal(labels->response, "Response") &&
        harness_expect_equal(labels->round, "Round") &&
-       harness_expect_equal(labels->attempt, "Attempt");
+       harness_expect_equal(labels->attempt, "Attempt") &&
+       harness_expect_equal(labels->answer_quality, "Answer Quality") &&
+       harness_expect_equal(labels->passed, "Passed") &&
+       harness_expect_equal(labels->failed, "Failed") &&
+       harness_expect_equal(labels->not_applicable, "Not Applicable");
   strappy_webview_free(error);
   return ok;
 }
@@ -454,7 +458,8 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                ".api-exchange-item.api_function_call>.bubble,"
                                ".api-exchange-item.api_function_output>.bubble,"
-                               ".api-exchange-item.api_server_tool>.bubble{"
+                               ".api-exchange-item.api_server_tool>.bubble,"
+                               ".api-exchange-item.answer_quality>.bubble{"
                                "padding:0 10px;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-item .tool-card-toggle{"
@@ -464,7 +469,33 @@ static int harness_check_page_scripts(void)
                                "margin-bottom:0;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-item.api_server_tool>"
+                               ".bubble.tool-card-open,"
+                               ".api-exchange-item.answer_quality>"
                                ".bubble.tool-card-open{padding-bottom:4px;}") &&
+       harness_expect_contains(page_html,
+                               "function renderAnswerQualityRows()") &&
+       harness_expect_contains(page_html,
+                               "function answerQualityStatusIconHTML(status)") &&
+       harness_expect_contains(page_html,
+                               "faIconHTML('solid','check','')") &&
+       harness_expect_contains(page_html,
+                               "faIconHTML('solid','xmark','')") &&
+       harness_expect_contains(page_html,
+                               "\"xmark\":'F00D'") &&
+       harness_expect_contains(page_html,
+                               "faIconHTML('solid','minus','')") &&
+       harness_expect_contains(page_html,
+                               ".answer-quality-check-status{flex:0 0 12px;"
+                               "width:12px;margin-right:8px;") &&
+       harness_expect_contains(page_html,
+                               "class=\"answer-quality-check-status\" "
+                               "role=\"img\" aria-label=\"") &&
+       harness_expect_contains(page_html,
+                               "statusIcon+'</span>'+'<span class=\"answer-"
+                               "quality-check-label\"") &&
+       harness_expect_contains(page_html,
+                               ".answer-quality-check-failed "
+                               ".answer-quality-check-status{color:#8a1111;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-status{padding-top:0;"
                                "padding-bottom:0;}") &&
@@ -623,13 +654,13 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "function rowIsAPIExchangeError(row)") &&
        harness_expect_contains(page_html,
-                               "function apiExchangeRowsHaveError(rows)") &&
-       harness_expect_contains(page_html,
                                "function apiRoundEndedInError(rows,id)") &&
        harness_expect_contains(page_html,
-                               "if(apiRoundId(rows[i])==id&&"
-                               "rowIsResponseStatus(rows[i]))"
-                               "last=rows[i];") &&
+                               "if(apiRoundId(row)!=id)continue;") &&
+       harness_expect_contains(page_html,
+                               "if(rowIsFailedAnswerQuality(row))return 1;") &&
+       harness_expect_contains(page_html,
+                               "if(rowIsResponseStatus(row))last=row;") &&
        harness_expect_contains(page_html,
                                "return last&&rowIsAPIExchangeError(last)?"
                                "1:0;") &&
@@ -647,19 +678,33 @@ static int harness_check_page_scripts(void)
                                "strappyAPIRoundCollapsed[id]="
                                "apiRoundEndedInError(rows,id)?0:1;") &&
        harness_expect_contains(page_html,
+                               "function rowIsFailedAnswerQuality(row)") &&
+       harness_expect_contains(page_html,
+                               "hasClass(row,'answer_quality')&&"
+                               "rowIsAPIExchangeError(row)") &&
+       harness_expect_contains(page_html,
+                               "if(rowIsFailedAnswerQuality(row))return 1") &&
+       harness_expect_contains(page_html,
                                "collapsed=apiRoundCollapsed(g.id,g.promptKey,"
                                "g.rows);") &&
        harness_expect_not_contains(page_html,
                                    "function responseStatusIsSuccessful") &&
        harness_expect_contains(page_html,
-                               "function responseStatusCollapsed(row,"
-                               "exchangeHasError)") &&
+                               "function responseStatusCollapsed(row)") &&
        harness_expect_contains(page_html,
                                "typeof strappyResponseStatusCollapsed[id]=="
-                               "'undefined'?(exchangeHasError?0:1):") &&
+                               "'undefined'?(rowIsAPIExchangeError(row)?"
+                               "0:1):") &&
        harness_expect_contains(page_html,
-                               "function decorateResponseStatusRow(row,"
-                               "exchangeHasError)") &&
+                               "function decorateResponseStatusRow(row)") &&
+       harness_expect_contains(page_html,
+                               "collapsed=responseStatusCollapsed(row)") &&
+       harness_expect_contains(page_html,
+                               "decorateResponseStatusRow(statusRow);") &&
+       harness_expect_not_contains(page_html,
+                                   "apiExchangeRowsHaveError") &&
+       harness_expect_not_contains(page_html,
+                                   "exchangeHasError") &&
        harness_expect_contains(page_html,
                                "active=promptGroupIsProcessing("
                                "promptGroupKey(row))") &&
@@ -697,14 +742,18 @@ static int harness_check_page_scripts(void)
                                "else if(statusRow)"
                                "ensureResponseAttemptLabel(statusRow)") &&
        harness_expect_contains(page_html,
-                               "function moveResponseStatusToAttemptEnd("
+                               "function moveResponseStatusBeforeAnswer("
                                "statusRow,responseRows)") &&
        harness_expect_contains(page_html,
+                               "if(rowIsAPIExchangeAnswer(responseRows[i]))") &&
+       harness_expect_contains(page_html,
+                               "parent.insertBefore(statusRow,answer)") &&
+       harness_expect_contains(page_html,
+                               "moveResponseStatusesBeforeAnswers(g)") &&
+       harness_expect_contains(page_html,
                                "last=responseRows[responseRows.length-1]") &&
-       harness_expect_contains(page_html,
-                               "parent.insertBefore(statusRow,next)") &&
-       harness_expect_contains(page_html,
-                               "moveResponseStatusesToAttemptEnds(g)") &&
+       harness_expect_not_contains(page_html,
+                                   "moveResponseStatusesToAttemptEnds") &&
        harness_expect_contains(page_html,
                                "row.insertBefore(n,before)") &&
        harness_expect_contains(page_html,
@@ -822,7 +871,9 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "renderAPIToolRows();"
                                "renderAPIServerToolRows()") &&
-       harness_expect_contains(page_html, ".api_server_tool .bubble{") &&
+       harness_expect_contains(page_html,
+                               ".api_server_tool .bubble,"
+                               ".answer_quality .bubble{") &&
        harness_expect_not_contains(page_html, "response-item-content") &&
        harness_expect_contains(page_html, "calls[id].args") &&
        harness_expect_contains(page_html,
@@ -1866,10 +1917,15 @@ static int harness_check_responses_items(void)
   char *search_html;
   char *fetch_html;
   char *developer_html;
+  char *quality_html;
   int ok;
 
   memset(&labels, 0, sizeof(labels));
   labels.tool = "Localized Tool";
+  labels.answer_quality = "Localized Answer Quality";
+  labels.passed = "Localized Passed";
+  labels.failed = "Localized Failed";
+  labels.not_applicable = "Localized Not Applicable";
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-call-1";
@@ -1984,11 +2040,28 @@ static int harness_check_responses_items(void)
   message.text = "Audit the available tools.";
   developer_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
 
+  memset(&message, 0, sizeof(message));
+  message.element_id = "answer-quality-1";
+  message.round_id = 4LL;
+  message.api_call_id = 2LL;
+  message.direction = "response";
+  message.role = "answer_quality";
+  message.kind = "answer_quality";
+  message.text = "Answer Quality";
+  message.metadata_json =
+    "{\"outcome\":\"failed\",\"checks\":["
+    "{\"key\":\"database_context_read\","
+    "\"label\":\"Database context checked\",\"status\":\"failed\"},"
+    "{\"key\":\"web_reference\",\"label\":\"Source link included\","
+    "\"status\":\"not_applicable\"}]}";
+  message.is_error = 1;
+  quality_html = strappy_webview_message_html(&message, &labels, NULL, NULL);
+
   ok = (call_html != NULL) && (reasoning_html != NULL) &&
        (function_html != NULL) && (output_html != NULL) &&
        (error_output_html != NULL) &&
        (search_html != NULL) && (fetch_html != NULL) &&
-       (developer_html != NULL) &&
+       (developer_html != NULL) && (quality_html != NULL) &&
        harness_expect_contains(call_html, "class=\"row api_call\"") &&
        harness_expect_contains(call_html, "data-round-id=\"3\"") &&
        harness_expect_contains(call_html, "data-api-call-id=\"1\"") &&
@@ -2130,8 +2203,35 @@ static int harness_check_responses_items(void)
        harness_expect_contains(developer_html,
                                "class=\"row developer\"") &&
        harness_expect_contains(developer_html,
-                               "<div class=\"role\">Developer</div>");
+                               "<div class=\"role\">Developer</div>") &&
+       harness_expect_contains(quality_html,
+                               "id=\"answer-quality-1\" class=\"row "
+                               "answer_quality state-error\"") &&
+       harness_expect_contains(quality_html,
+                               "data-kind=\"answer_quality\"") &&
+       harness_expect_contains(quality_html,
+                               "data-direction=\"response\"") &&
+       harness_expect_contains(quality_html,
+                               "data-answer-quality-json=\"{&quot;outcome&quot;:"
+                               "&quot;failed&quot;") &&
+       harness_expect_contains(quality_html,
+                               "data-answer-quality-label=\"Localized Answer "
+                               "Quality\"") &&
+       harness_expect_contains(quality_html,
+                               "data-passed-label=\"Localized Passed\"") &&
+       harness_expect_contains(quality_html,
+                               "class=\"bubble api-tool-card tool-card "
+                               "tool-error tool-card-open\"") &&
+       harness_expect_contains(quality_html,
+                               "aria-expanded=\"true\"") &&
+       harness_expect_contains(quality_html, "fa-angle-down") &&
+       harness_expect_contains(quality_html,
+                               "class=\"tool-card-summary\">Localized Answer "
+                               "Quality</span>") &&
+       harness_expect_not_contains(quality_html,
+                                   "<div class=\"role\">");
 
+  strappy_webview_free(quality_html);
   strappy_webview_free(developer_html);
   strappy_webview_free(fetch_html);
   strappy_webview_free(search_html);

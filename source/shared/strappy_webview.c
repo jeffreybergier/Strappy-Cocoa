@@ -41,6 +41,10 @@ typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_RESPONSE,
   STRAPPY_WEBVIEW_LABEL_ROUND,
   STRAPPY_WEBVIEW_LABEL_ATTEMPT,
+  STRAPPY_WEBVIEW_LABEL_ANSWER_QUALITY,
+  STRAPPY_WEBVIEW_LABEL_PASSED,
+  STRAPPY_WEBVIEW_LABEL_FAILED,
+  STRAPPY_WEBVIEW_LABEL_NOT_APPLICABLE,
   STRAPPY_WEBVIEW_LABEL_COUNT
 } strappy_webview_label_index;
 
@@ -64,7 +68,11 @@ static const char * const g_strappy_webview_label_keys[
   "Request",
   "Response",
   "Round",
-  "Attempt"
+  "Attempt",
+  "Answer Quality",
+  "Passed",
+  "Failed",
+  "Not Applicable"
 };
 
 static char *g_strappy_webview_localized_label_values[
@@ -100,6 +108,10 @@ static void strappy_webview_assign_localized_labels(
   labels->response = values[STRAPPY_WEBVIEW_LABEL_RESPONSE];
   labels->round = values[STRAPPY_WEBVIEW_LABEL_ROUND];
   labels->attempt = values[STRAPPY_WEBVIEW_LABEL_ATTEMPT];
+  labels->answer_quality = values[STRAPPY_WEBVIEW_LABEL_ANSWER_QUALITY];
+  labels->passed = values[STRAPPY_WEBVIEW_LABEL_PASSED];
+  labels->failed = values[STRAPPY_WEBVIEW_LABEL_FAILED];
+  labels->not_applicable = values[STRAPPY_WEBVIEW_LABEL_NOT_APPLICABLE];
 }
 
 int strappy_webview_configure_localized_labels(char **error_out)
@@ -730,6 +742,46 @@ static const char *strappy_webview_attempt_label(
   return "Attempt";
 }
 
+static const char *strappy_webview_answer_quality_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->answer_quality != NULL) &&
+      (labels->answer_quality[0] != '\0')) {
+    return labels->answer_quality;
+  }
+  return "Answer Quality";
+}
+
+static const char *strappy_webview_passed_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->passed != NULL) &&
+      (labels->passed[0] != '\0')) {
+    return labels->passed;
+  }
+  return "Passed";
+}
+
+static const char *strappy_webview_failed_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->failed != NULL) &&
+      (labels->failed[0] != '\0')) {
+    return labels->failed;
+  }
+  return "Failed";
+}
+
+static const char *strappy_webview_not_applicable_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->not_applicable != NULL) &&
+      (labels->not_applicable[0] != '\0')) {
+    return labels->not_applicable;
+  }
+  return "Not Applicable";
+}
+
 static int strappy_webview_is_assistant_role(const char *role)
 {
   return (role != NULL) && (strcmp(role, "assistant") == 0);
@@ -790,6 +842,11 @@ static int strappy_webview_is_api_item_role(const char *role)
   return (role != NULL) && (strcmp(role, "api_item") == 0);
 }
 
+static int strappy_webview_is_answer_quality_role(const char *role)
+{
+  return (role != NULL) && (strcmp(role, "answer_quality") == 0);
+}
+
 static const char *strappy_webview_role_label(
   const char *role,
   const strappy_webview_labels *labels)
@@ -826,6 +883,9 @@ static const char *strappy_webview_role_label(
   }
   if (strappy_webview_is_api_item_role(role)) {
     return strappy_webview_response_item_label(labels);
+  }
+  if (strappy_webview_is_answer_quality_role(role)) {
+    return strappy_webview_answer_quality_label(labels);
   }
   return strappy_webview_you_label(labels);
 }
@@ -1205,12 +1265,12 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "border-top-color:#959fa7;border-bottom-color:#959fa7;}",
     ".api_reasoning .role,.api_function_call .role,",
     ".api_function_output .role,.api_item .role,",
-    ".api_server_tool .role{color:#30363b;}",
+    ".api_server_tool .role,.answer_quality .role{color:#30363b;}",
     ".api_reasoning .bubble,.api_item .bubble{background:#dfe4e8;",
     "color:#30363b;border-top-color:#959fa7;",
     "border-bottom-color:#959fa7;}",
     ".api_function_call .bubble,.api_function_output .bubble,",
-    ".api_server_tool .bubble{",
+    ".api_server_tool .bubble,.answer_quality .bubble{",
     "background:#dfe4e8;color:#30363b;border-top-color:#959fa7;",
     "border-bottom-color:#959fa7;",
     "white-space:normal;font-size:12px;padding:4px 12px;}",
@@ -1260,6 +1320,16 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "border:1px solid #959fa7;background:#dfe4e8;padding:6px;",
     "margin:4px 0 8px;}",
     ".tool-card-open .tool-card-body{display:block;}",
+    ".answer-quality-check{padding:6px 0;border-top:1px solid #959fa7;}",
+    ".answer-quality-check:first-child{padding-top:0;border-top:0;}",
+    ".answer-quality-check:last-child{padding-bottom:0;}",
+    ".answer-quality-check-line{display:flex;align-items:baseline;}",
+    ".answer-quality-check-label{flex:1;font-weight:bold;}",
+    ".answer-quality-check-status{flex:0 0 12px;width:12px;",
+    "margin-right:8px;text-align:center;white-space:nowrap;",
+    "font-weight:bold;}",
+    ".answer-quality-check-failed .answer-quality-check-status{color:#8a1111;}",
+    ".answer-quality-check-detail{margin:3px 0 0 20px;color:#606970;}",
     ".tool-input-title{font-weight:bold;",
     "color:#606970;margin:8px 0 4px;}",
     ".tool-input-title:first-child{margin-top:0;}",
@@ -1387,10 +1457,12 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "padding-bottom:0;}",
     ".api-exchange-item.api_function_call>.bubble,",
     ".api-exchange-item.api_function_output>.bubble,",
-    ".api-exchange-item.api_server_tool>.bubble{padding:0 10px;}",
+    ".api-exchange-item.api_server_tool>.bubble,",
+    ".api-exchange-item.answer_quality>.bubble{padding:0 10px;}",
     ".api-exchange-item.api_function_call>.bubble.tool-card-open,",
     ".api-exchange-item.api_function_output>.bubble.tool-card-open,",
-    ".api-exchange-item.api_server_tool>.bubble.tool-card-open{",
+    ".api-exchange-item.api_server_tool>.bubble.tool-card-open,",
+    ".api-exchange-item.answer_quality>.bubble.tool-card-open{",
     "padding-bottom:4px;}",
     ".api-exchange-item .tool-card-toggle{padding-top:3px;",
     "padding-bottom:3px;}",
@@ -1833,9 +1905,9 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function rowIsAPIExchangeConversation(row){return hasClass(row,'user')||hasClass(row,'harness')||",
     "hasClass(row,'developer')||hasClass(row,'assistant');}",
     "function rowIsAPIExchangeError(row){return hasClass(row,'api_error')||hasClass(row,'state-error');}",
-    "function apiExchangeRowsHaveError(rows){var i;for(i=0;i<rows.length;i++){if(rowIsAPIExchangeError(rows[i]))return 1;}return 0;}",
-    "function apiRoundEndedInError(rows,id){var i,last=null;for(i=0;i<rows.length;i++){",
-    "if(apiRoundId(rows[i])==id&&rowIsResponseStatus(rows[i]))last=rows[i];}",
+    "function rowIsFailedAnswerQuality(row){return hasClass(row,'answer_quality')&&rowIsAPIExchangeError(row);}",
+    "function apiRoundEndedInError(rows,id){var i,row,last=null;for(i=0;i<rows.length;i++){row=rows[i];if(apiRoundId(row)!=id)continue;",
+    "if(rowIsFailedAnswerQuality(row))return 1;if(rowIsResponseStatus(row))last=row;}",
     "return last&&rowIsAPIExchangeError(last)?1:0;}",
     "function promptGroupIsProcessing(group){return group!==''&&group===strappyProcessingPromptGroupKey&&processingInteractionsLocked();}",
     "function beginAPIRoundsForPrompt(group){if(group!=='')strappyAPIRoundSettled[group]=0;}",
@@ -1848,8 +1920,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function responseStatusState(row){return row&&row.getAttribute?row.getAttribute('data-attempt-state')||'':'';}",
     "function responseStatusHTTPStatus(row){return row&&row.getAttribute?row.getAttribute('data-http-status')||'':'';}",
     "function responseStatusResolved(row){var state=responseStatusState(row);return state!==''&&state!='pending'&&state!='running';}",
-    "function responseStatusCollapsed(row,exchangeHasError){var id=apiExchangeId(row);if(!responseStatusResolved(row))return 0;",
-    "return typeof strappyResponseStatusCollapsed[id]=='undefined'?(exchangeHasError?0:1):(strappyResponseStatusCollapsed[id]?1:0);}",
+    "function responseStatusCollapsed(row){var id=apiExchangeId(row);if(!responseStatusResolved(row))return 0;",
+    "return typeof strappyResponseStatusCollapsed[id]=='undefined'?(rowIsAPIExchangeError(row)?0:1):(strappyResponseStatusCollapsed[id]?1:0);}",
     "function responseAttemptSummary(row){var label=apiExchangeSectionLabel(row,'response');",
     "var attempt=row.getAttribute('data-attempt-number')||'1';var attemptLabel=row.getAttribute('data-attempt-label')||'Attempt';",
     "return label+' \\u00b7 '+attemptLabel+' '+attempt;}",
@@ -1858,8 +1930,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "(row.getAttribute('data-waiting-for-response-label')||'Waiting for response...');",
     "label+=': '+(http!==''?'HTTP '+http:(row.getAttribute('data-no-http-response-label')||'No HTTP response'));",
     "if(state!=='')label+=' \\u00b7 '+formatAPIExchangeAttemptState(state);return label;}",
-    "function decorateResponseStatusRow(row,exchangeHasError){var role,a,d,summary,collapsed,active,resolved,id;if(!row)return;",
-    "role=firstByClass(row,'role');if(!role)return;collapsed=responseStatusCollapsed(row,exchangeHasError);active=promptGroupIsProcessing(promptGroupKey(row));",
+    "function decorateResponseStatusRow(row){var role,a,d,summary,collapsed,active,resolved,id;if(!row)return;",
+    "role=firstByClass(row,'role');if(!role)return;collapsed=responseStatusCollapsed(row);active=promptGroupIsProcessing(promptGroupKey(row));",
     "resolved=responseStatusResolved(row);id=apiExchangeId(row);role.onclick=null;setClass(role,'disclosure-title',0);role.innerHTML='';",
     "if(resolved&&!active){a=document.createElement('a');a.className='response-status-toggle';a.href='#';a.setAttribute('data-api-call-id',id);",
     "a.setAttribute('aria-expanded',collapsed?'false':'true');d=document.createElement('span');d.className='response-status-disclosure';",
@@ -1901,13 +1973,15 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "g.attempts[attemptKey]={id:id,rows:[],responseRows:[],statusRow:null};g.attemptKeys[g.attemptKeys.length]=attemptKey;}",
     "attempt=g.attempts[attemptKey];attempt.rows[attempt.rows.length]=row;if(rowIsResponseStatus(row))attempt.statusRow=row;",
     "if(d=='response')attempt.responseRows[attempt.responseRows.length]=row;}}",
-    "function moveResponseStatusToAttemptEnd(statusRow,responseRows){var parent,last,next;if(!statusRow||!responseRows.length)return;",
-    "parent=statusRow.parentNode;last=responseRows[responseRows.length-1];if(!parent||last.parentNode!==parent||last===statusRow)return;",
+    "function moveResponseStatusBeforeAnswer(statusRow,responseRows){var parent,answer,last,next,i;if(!statusRow||!responseRows.length)return;",
+    "parent=statusRow.parentNode;answer=null;for(i=0;i<responseRows.length;i++){if(rowIsAPIExchangeAnswer(responseRows[i])){answer=responseRows[i];break;}}",
+    "if(answer){if(!parent||answer.parentNode!==parent||answer===statusRow||answer.previousSibling===statusRow)return;parent.insertBefore(statusRow,answer);return;}",
+    "last=responseRows[responseRows.length-1];if(!parent||last.parentNode!==parent||last===statusRow)return;",
     "next=last.nextSibling;if(next===statusRow)return;if(next)parent.insertBefore(statusRow,next);else parent.appendChild(statusRow);}",
     "function refreshAPIExchangeGroupRows(g){var rows=messageRows();var out=[];var i,row;for(i=0;i<rows.length;i++){row=rows[i];",
     "if(apiRoundId(row)==g.id&&(rowIsResponseStatus(row)||rowIsAPIExchangeItem(row)))out[out.length]=row;}g.rows=out;}",
-    "function moveResponseStatusesToAttemptEnds(g){var keys=g.attemptKeys;var i,attempt;for(i=0;i<keys.length;i++){",
-    "attempt=g.attempts[keys[i]];moveResponseStatusToAttemptEnd(attempt.statusRow,attempt.responseRows);}refreshAPIExchangeGroupRows(g);",
+    "function moveResponseStatusesBeforeAnswers(g){var keys=g.attemptKeys;var i,attempt;for(i=0;i<keys.length;i++){",
+    "attempt=g.attempts[keys[i]];moveResponseStatusBeforeAnswer(attempt.statusRow,attempt.responseRows);}refreshAPIExchangeGroupRows(g);",
     "indexAPIExchangeGroup(g);}",
     "function apiReasoningGroupCollapsed(id,active){if(active)return 0;return typeof strappyAPIReasoningCollapsed[id]=='undefined'?1:(strappyAPIReasoningCollapsed[id]?1:0);}",
     "function decorateAPIReasoningGroup(rows,active){var reasoning=[],i,row,role,a,d,summary,id,collapsed;",
@@ -1928,7 +2002,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "roundId=apiRoundId(rows[i]);if(roundId===''||(!rowIsResponseStatus(rows[i])&&!rowIsAPIExchangeItem(rows[i])))continue;",
     "key='$'+roundId;if(!groups[key]){groups[key]={id:roundId,promptKey:promptGroupKey(rows[i]),rows:[],requestRows:[],attempts:{},attemptKeys:[]};keys[keys.length]=key;}",
     "groups[key].rows[groups[key].rows.length]=rows[i];}",
-    "for(i=0;i<keys.length;i++){g=groups[keys[i]];indexAPIExchangeGroup(g);moveResponseStatusesToAttemptEnds(g);",
+    "for(i=0;i<keys.length;i++){g=groups[keys[i]];indexAPIExchangeGroup(g);moveResponseStatusesBeforeAnswers(g);",
     "anchor=g.rows[0];active=promptGroupIsProcessing(g.promptKey);collapsed=apiRoundCollapsed(g.id,g.promptKey,g.rows);last=g.rows[g.rows.length-1];",
     "if(collapsed){last=anchor;for(j=0;j<g.rows.length;j++){if(rowIsAPIExchangeConversation(g.rows[j]))last=g.rows[j];}}",
     "for(j=0;j<g.rows.length;j++){row=g.rows[j];d=apiExchangeDirection(row);answer=rowIsAPIExchangeAnswer(row);",
@@ -1945,7 +2019,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(g.requestRows.length)ensureAPIExchangeSectionLabel(g.requestRows[0],'request',0);else ensureAPIExchangeSectionLabel(anchor,'request',1);",
     "attemptKeys=g.attemptKeys;for(j=0;j<attemptKeys.length;j++){attempt=g.attempts[attemptKeys[j]];attemptRows=attempt.rows;statusRow=attempt.statusRow;responseRows=attempt.responseRows;",
     "attemptStartRow=responseRows.length?responseRows[0]:statusRow;if(attemptStartRow)setRowClass(attemptStartRow,'api-exchange-attempt-start',1);",
-    "if(statusRow)decorateResponseStatusRow(statusRow,apiExchangeRowsHaveError(attemptRows));",
+    "if(statusRow)decorateResponseStatusRow(statusRow);",
     "if(attemptRows.length)setRowClass(attemptRows[attemptRows.length-1],'api-exchange-attempt-end',1);",
     "if(responseRows.length)ensureResponseAttemptLabel(responseRows[0]);else if(statusRow)ensureResponseAttemptLabel(statusRow);",
     "decorateAPIReasoningGroup(attemptRows,active);}",
@@ -2353,7 +2427,34 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "for(i=0;i<targets.length;i++)renderToolCardsForTarget(targets[i],grouped[targets[i]]);scrollToolRailBottom();}",
     "function renderToolNode(row){toolRowRaw(row);rebuildToolCards();}",
     "function renderTools(root){renderAPIToolRows();renderAPIServerToolRows();moveToolRows(root);rebuildToolCards();}",
-    "function renderMessageDecorations(root){renderMarkdown(root);renderResponseMetadata(root);renderTools(root);decorateAPIExchanges(root);decorateAPIToolGroups(root);decoratePromptGroups(root);",
+    "function answerQualityRows(){var m=byId('messages');var out=[];var n,i;if(!m)return out;",
+    "n=m.getElementsByTagName('*');for(i=0;i<n.length;i++){if(hasClass(n[i],'row')&&hasClass(n[i],'answer_quality'))out[out.length]=n[i];}return out;}",
+    "function answerQualityAttr(row,name,fallback){var v=row&&row.getAttribute?row.getAttribute('data-'+name)||'':'';return v!==''?v:fallback;}",
+    "function answerQualityStatusIconHTML(status){if(status=='passed')return faIconHTML('solid','check','');",
+    "if(status=='failed'||status=='error')return faIconHTML('solid','xmark','');return faIconHTML('solid','minus','');}",
+    "function renderAnswerQualityRows(){var rows=answerQualityRows();var i,j,row,data,checks,check,status,label,detail,",
+    "passed,failed,skipped,error,bubble,body,summary,h,summaryText,statusText,statusIcon;",
+    "for(i=0;i<rows.length;i++){row=rows[i];data=parseJSONSafe(answerQualityAttr(row,'answer-quality-json',''));",
+    "checks=isObj(data)&&isArr(data.checks)?data.checks:[];passed=0;failed=0;skipped=0;h=[];",
+    "for(j=0;j<checks.length;j++){check=checks[j]||{};status=jsonText(check.status);",
+    "if(status=='passed')passed++;else if(status=='failed'||status=='error')failed++;else skipped++;",
+    "label=jsonText(check.label||check.key||'Check');detail=jsonText(check.detail);",
+    "statusText=status=='passed'?answerQualityAttr(row,'passed-label','Passed'):",
+    "((status=='failed'||status=='error')?answerQualityAttr(row,'failed-label','Failed'):answerQualityAttr(row,'not-applicable-label','Not Applicable'));",
+    "statusIcon=answerQualityStatusIconHTML(status);",
+    "h[h.length]='<div class=\"answer-quality-check'+((status=='failed'||status=='error')?' answer-quality-check-failed':'')+'\">'",
+    "+'<div class=\"answer-quality-check-line\"><span class=\"answer-quality-check-status\" role=\"img\" aria-label=\"'+escHTML(statusText)+'\">'+statusIcon+'</span>'",
+    "+'<span class=\"answer-quality-check-label\">'+escHTML(label)+'</span></div>'",
+    "+(detail!==''?'<div class=\"answer-quality-check-detail\">'+escHTML(detail)+'</div>':'')+'</div>';}",
+    "error=(isObj(data)&&jsonText(data.outcome)!='passed')||failed>0;",
+    "bubble=firstByClass(row,'bubble');body=bubble?firstByClass(bubble,'tool-card-body'):null;summary=bubble?firstByClass(bubble,'tool-card-summary'):null;",
+    "summaryText=answerQualityAttr(row,'answer-quality-label','Answer Quality');",
+    "if(checks.length){summaryText+=' - '+passed+' '+answerQualityAttr(row,'passed-label','Passed');",
+    "if(failed)summaryText+=' / '+failed+' '+answerQualityAttr(row,'failed-label','Failed');",
+    "if(skipped)summaryText+=' / '+skipped+' '+answerQualityAttr(row,'not-applicable-label','Not Applicable');}",
+    "setToolCardSummary(summary,summaryText,error);if(body)body.innerHTML=h.join('');",
+    "setClass(bubble,'tool-error',error);setClass(row,'state-error',error);}}",
+    "function renderMessageDecorations(root){renderMarkdown(root);renderResponseMetadata(root);renderTools(root);renderAnswerQualityRows();decorateAPIExchanges(root);decorateAPIToolGroups(root);decoratePromptGroups(root);",
     "if(processingInteractionsLocked())syncProcessingInteractionState(1,strappyProcessingPromptGroupKey);}",
     "var strappyBatchDepth=0;var strappyNeedsRender=0;var strappyBatchShouldScroll=0;",
     "var strappyUpdateInterval=300;var strappyStatusInterval=1000;",
@@ -2669,6 +2770,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   int suppress_status_meta;
   int render_api_tool_card;
   int render_response_status_section;
+  int answer_quality_expanded;
   int ok;
 
   role = ((message != NULL) && (message->role != NULL) &&
@@ -2766,10 +2868,14 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
      (strcmp(state, "pending") == 0));
   render_api_tool_card =
     strappy_webview_is_api_function_call_role(role) ||
-    strappy_webview_is_api_function_output_role(role);
+    strappy_webview_is_api_function_output_role(role) ||
+    strappy_webview_is_answer_quality_role(role);
   render_response_status_section =
     strappy_webview_is_api_call_role(role) ||
     strappy_webview_is_api_error_role(role);
+  answer_quality_expanded =
+    strappy_webview_is_answer_quality_role(role) &&
+    (message != NULL) && message->is_error;
   render_created_at =
     (created_at[0] != '\0') &&
     ((message == NULL) || (message->round_id <= 0LL)) &&
@@ -2956,6 +3062,28 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                              "render-state",
                                              (message != NULL) ?
                                                message->render_state_json : NULL);
+  if (ok && strappy_webview_is_answer_quality_role(role)) {
+    ok = strappy_webview_append_data_attribute(
+           &buffer,
+           "answer-quality-json",
+           metadata_json) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "answer-quality-label",
+           strappy_webview_answer_quality_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "passed-label",
+           strappy_webview_passed_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "failed-label",
+           strappy_webview_failed_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "not-applicable-label",
+           strappy_webview_not_applicable_label(labels));
+  }
   if (ok && ((render_streaming && strappy_webview_is_assistant_role(role)) ||
              strappy_webview_is_api_reasoning_role(role))) {
     ok = strappy_webview_append_data_attribute(
@@ -3013,6 +3141,11 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     ok = strappy_webview_buffer_append_cstring(
       &buffer,
       " api-tool-card tool-card");
+    if (ok && answer_quality_expanded) {
+      ok = strappy_webview_buffer_append_cstring(
+        &buffer,
+        " tool-error tool-card-open");
+    }
   }
   if (ok && render_bubble_status) {
     ok = strappy_webview_buffer_append_cstring(&buffer, " bubble-status");
@@ -3035,24 +3168,36 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     ok = strappy_webview_buffer_append_cstring(
            &buffer,
            "<a class=\"tool-card-toggle disclosure-title\" href=\"#\" "
-           "aria-expanded=\"false\" "
+           "aria-expanded=\"") &&
+         strappy_webview_buffer_append_cstring(
+           &buffer,
+           answer_quality_expanded ? "true" : "false") &&
+         strappy_webview_buffer_append_cstring(
+           &buffer,
+           "\" "
            "onclick=\"return toggleToolCard(this)\">"
            "<span class=\"tool-disclosure\">") &&
          strappy_webview_buffer_append_cstring(
            &buffer,
-           strappy_webview_disclosure_icon_html(1)) &&
+           strappy_webview_disclosure_icon_html(
+             answer_quality_expanded ? 0 : 1)) &&
          strappy_webview_buffer_append_cstring(
            &buffer,
            "</span>"
            "<span class=\"tool-card-summary\">") &&
          strappy_webview_append_html_escaped(
            &buffer,
-           strappy_webview_tool_label(labels)) &&
-         strappy_webview_buffer_append_cstring(&buffer, ": ") &&
-         strappy_webview_append_html_escaped(
-           &buffer,
-           (tool_name[0] != '\0') ? tool_name :
-             strappy_webview_role_label(role, labels)) &&
+           strappy_webview_is_answer_quality_role(role) ?
+             strappy_webview_answer_quality_label(labels) :
+             strappy_webview_tool_label(labels));
+    if (ok && !strappy_webview_is_answer_quality_role(role)) {
+      ok = strappy_webview_buffer_append_cstring(&buffer, ": ") &&
+           strappy_webview_append_html_escaped(
+             &buffer,
+             (tool_name[0] != '\0') ? tool_name :
+               strappy_webview_role_label(role, labels));
+    }
+    ok = ok &&
          strappy_webview_buffer_append_cstring(
            &buffer,
            "</span></a><div class=\"tool-card-body\">"

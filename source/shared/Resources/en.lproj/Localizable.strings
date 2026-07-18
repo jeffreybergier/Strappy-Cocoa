@@ -20,6 +20,10 @@
 "Response" = "Response";
 "Round" = "Round";
 "Attempt" = "Attempt";
+"Answer Quality" = "Answer Quality";
+"Passed" = "Passed";
+"Failed" = "Failed";
+"Not Applicable" = "Not Applicable";
 "Options" = "Options";
 "Prompt Options" = "Prompt Options";
 "Send" = "Send";

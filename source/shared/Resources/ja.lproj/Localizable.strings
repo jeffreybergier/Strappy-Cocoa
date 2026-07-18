@@ -20,6 +20,10 @@
 "Response" = "レスポンス";
 "Round" = "ラウンド";
 "Attempt" = "試行";
+"Answer Quality" = "回答の品質";
+"Passed" = "合格";
+"Failed" = "不合格";
+"Not Applicable" = "対象外";
 "Options" = "オプション";
 "Prompt Options" = "プロンプトオプション";
 "Send" = "送信";

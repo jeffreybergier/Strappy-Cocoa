@@ -544,6 +544,17 @@ static int harness_run_fresh_catalog_schema_tests(
            "function_calls columns") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
+           "SELECT id, response_attempt_id, outcome, guidance_version, "
+           "evaluated_at_ms FROM answer_quality_audits LIMIT 0;",
+           "answer_quality_audits columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT audit_id, ordinal, check_key, check_kind, label, status, "
+           "tool_name, detail, evidence_item_id "
+           "FROM answer_quality_checks LIMIT 0;",
+           "answer_quality_checks columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
            "SELECT document_id, node_id, parent_node_id, ordinal, "
            "member_name, value_type, text_value, number_value, boolean_value "
            "FROM structured_nodes LIMIT 0;",
@@ -687,10 +698,14 @@ static int harness_run_audit_resource_tests(void)
 {
   cJSON *root;
   cJSON *rules;
+  cJSON *version;
+  cJSON *automatic_remediation_enabled;
   cJSON *audit_header;
   cJSON *audit_footer;
   cJSON *empty_answer;
   cJSON *web_reference;
+  cJSON *web_reference_check_key;
+  cJSON *web_reference_label;
   cJSON *web_reference_message;
   cJSON *database_context_rule;
   cJSON *session_name_rule;
@@ -709,6 +724,10 @@ static int harness_run_audit_resource_tests(void)
   int ok;
 
   root = harness_read_json_resource(HARNESS_AUDIT_GUIDANCE_RESOURCE);
+  version = cJSON_IsObject(root) ?
+    cJSON_GetObjectItem(root, "version") : NULL;
+  automatic_remediation_enabled = cJSON_IsObject(root) ?
+    cJSON_GetObjectItem(root, "automatic_remediation_enabled") : NULL;
   audit_header = cJSON_IsObject(root) ?
     cJSON_GetObjectItem(root, "audit_header") : NULL;
   audit_footer = cJSON_IsObject(root) ?
@@ -717,6 +736,10 @@ static int harness_run_audit_resource_tests(void)
     cJSON_GetObjectItem(root, "empty_answer") : NULL;
   web_reference = cJSON_IsObject(root) ?
     cJSON_GetObjectItem(root, "web_reference") : NULL;
+  web_reference_check_key = cJSON_IsObject(web_reference) ?
+    cJSON_GetObjectItem(web_reference, "check_key") : NULL;
+  web_reference_label = cJSON_IsObject(web_reference) ?
+    cJSON_GetObjectItem(web_reference, "label") : NULL;
   web_reference_message = cJSON_IsObject(web_reference) ?
     cJSON_GetObjectItem(web_reference, "if_missing") : NULL;
   rules = cJSON_IsObject(root) ?
@@ -744,12 +767,17 @@ static int harness_run_audit_resource_tests(void)
     message = cJSON_IsObject(rule) ?
       cJSON_GetObjectItem(rule, "if_not_called") : NULL;
     if (!cJSON_IsString(message) || (message->valuestring == NULL) ||
+        !cJSON_IsString(cJSON_GetObjectItem(rule, "check_key")) ||
+        !cJSON_IsString(cJSON_GetObjectItem(rule, "label")) ||
         (strstr(message->valuestring, "final") != NULL)) {
       rules_avoid_finalization = 0;
     }
   }
 
-  ok = cJSON_IsString(audit_header) &&
+  ok = cJSON_IsString(version) && (version->valuestring != NULL) &&
+    (strcmp(version->valuestring, "1") == 0) &&
+    cJSON_IsFalse(automatic_remediation_enabled) &&
+    cJSON_IsString(audit_header) &&
     (audit_header->valuestring != NULL) &&
     (strstr(audit_header->valuestring,
             "audited due to your failure to follow instructions") != NULL) &&
@@ -766,6 +794,13 @@ static int harness_run_audit_resource_tests(void)
             "Your answer was empty. Please answer the user's original "
             "question.") == 0) &&
     cJSON_IsObject(web_reference) &&
+    cJSON_IsString(web_reference_check_key) &&
+    (web_reference_check_key->valuestring != NULL) &&
+    (strcmp(web_reference_check_key->valuestring, "web_reference") == 0) &&
+    cJSON_IsString(web_reference_label) &&
+    (web_reference_label->valuestring != NULL) &&
+    (strcmp(web_reference_label->valuestring,
+            "Source link included") == 0) &&
     cJSON_IsString(web_reference_message) &&
     (web_reference_message->valuestring != NULL) &&
     (strstr(web_reference_message->valuestring,
@@ -781,6 +816,9 @@ static int harness_run_audit_resource_tests(void)
     rules_avoid_finalization &&
     cJSON_IsArray(rules) && (cJSON_GetArraySize(rules) == 5) &&
     harness_json_string_equals(database_context_rule,
+                               "check_key",
+                               "database_context_read") &&
+    harness_json_string_equals(database_context_rule,
                                "tool_name",
                                STRAPPY_TOOL_DATABASE_CONTEXT_READ) &&
     (cJSON_GetObjectItem(database_context_rule, "when") == NULL) &&
@@ -790,6 +828,9 @@ static int harness_run_audit_resource_tests(void)
     (strstr(database_context_message->valuestring,
             "no database context was needed") != NULL) &&
     harness_json_string_equals(session_name_rule,
+                               "check_key",
+                               "helper_session_name_write") &&
+    harness_json_string_equals(session_name_rule,
                                "tool_name",
                                STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) &&
     (cJSON_GetObjectItem(session_name_rule, "when") == NULL) &&
@@ -798,6 +839,10 @@ static int harness_run_audit_resource_tests(void)
     (strstr(session_name_message->valuestring, "ALWAYS call") != NULL) &&
     (strstr(session_name_message->valuestring,
             "latest prompt") != NULL) &&
+    harness_json_string_equals(
+      fontawesome_confirm_rule,
+      "check_key",
+      "helper_fontawesome_shortcode_confirm") &&
     harness_json_string_equals(
       fontawesome_confirm_rule,
       "tool_name",
@@ -818,6 +863,9 @@ static int harness_run_audit_resource_tests(void)
     (strstr(fontawesome_confirm_message->valuestring,
             "NEVER use unicode emoji") != NULL) &&
     harness_json_string_equals(user_fact_rule,
+                               "check_key",
+                               "memory_user_fact_remember") &&
+    harness_json_string_equals(user_fact_rule,
                                "tool_name",
                                STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) &&
     (cJSON_GetObjectItem(user_fact_rule, "when") == NULL) &&
@@ -828,6 +876,9 @@ static int harness_run_audit_resource_tests(void)
             "nothing new to remember") != NULL) &&
     (strstr(user_fact_message->valuestring,
             "NEVER remember secrets or sensitive information") != NULL) &&
+    harness_json_string_equals(database_hint_rule,
+                               "check_key",
+                               "memory_database_hint_remember") &&
     harness_json_string_equals(database_hint_rule,
                                "tool_name",
                                STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&

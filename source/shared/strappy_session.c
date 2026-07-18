@@ -353,6 +353,10 @@ static void strappy_session_webview_message_from_record(
   message->attempt_state = record->attempt_state;
   message->cumulative_usage_cost = record->cumulative_usage_cost;
   message->has_cumulative_usage_cost = record->has_cumulative_usage_cost;
+  if ((record->render_role != NULL) &&
+      (strcmp(record->render_role, "answer_quality") == 0)) {
+    message->element_id = record->message_key;
+  }
   message->role = record->role;
   message->kind = record->kind;
   message->actor = record->actor;

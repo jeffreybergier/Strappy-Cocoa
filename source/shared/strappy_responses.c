@@ -56,6 +56,8 @@ typedef struct strappy_responses_analysis {
 } strappy_responses_analysis;
 
 typedef struct strappy_responses_audit_rule {
+  char *check_key;
+  char *label;
   char *tool_name;
   char *if_not_called;
   char *when_tool_called;
@@ -67,10 +69,14 @@ typedef struct strappy_responses_audit_rule {
 typedef struct strappy_responses_audit {
   strappy_responses_audit_rule *rules;
   size_t count;
+  char *guidance_version;
   char *audit_header;
   char *audit_footer;
   char *empty_answer;
+  char *web_reference_check_key;
+  char *web_reference_label;
   char *web_reference_if_missing;
+  int automatic_remediation_enabled;
   int session_name_empty;
   int web_reference_required;
   int message_sent;
@@ -124,10 +130,14 @@ static void strappy_responses_audit_init(strappy_responses_audit *audit)
   }
   audit->rules = NULL;
   audit->count = 0U;
+  audit->guidance_version = NULL;
   audit->audit_header = NULL;
   audit->audit_footer = NULL;
   audit->empty_answer = NULL;
+  audit->web_reference_check_key = NULL;
+  audit->web_reference_label = NULL;
   audit->web_reference_if_missing = NULL;
+  audit->automatic_remediation_enabled = 0;
   audit->session_name_empty = 0;
   audit->web_reference_required = 0;
   audit->message_sent = 0;
@@ -141,14 +151,19 @@ static void strappy_responses_audit_destroy(strappy_responses_audit *audit)
     return;
   }
   for (index = 0U; index < audit->count; index++) {
+    free(audit->rules[index].check_key);
+    free(audit->rules[index].label);
     free(audit->rules[index].tool_name);
     free(audit->rules[index].if_not_called);
     free(audit->rules[index].when_tool_called);
   }
   free(audit->rules);
+  free(audit->guidance_version);
   free(audit->audit_header);
   free(audit->audit_footer);
   free(audit->empty_answer);
+  free(audit->web_reference_check_key);
+  free(audit->web_reference_label);
   free(audit->web_reference_if_missing);
   strappy_responses_audit_init(audit);
 }
@@ -261,6 +276,27 @@ static int strappy_responses_audit_has_rule(
   return 0;
 }
 
+static int strappy_responses_audit_has_check_key(
+  const strappy_responses_audit *audit,
+  const char *check_key)
+{
+  size_t index;
+
+  if ((audit == NULL) || (check_key == NULL)) {
+    return 0;
+  }
+  if ((audit->web_reference_check_key != NULL) &&
+      (strcmp(audit->web_reference_check_key, check_key) == 0)) {
+    return 1;
+  }
+  for (index = 0U; index < audit->count; index++) {
+    if (strcmp(audit->rules[index].check_key, check_key) == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static int strappy_responses_audit_load(strappy_responses_audit *audit,
                                         const char *resource_dir,
                                         int session_name_empty,
@@ -270,10 +306,14 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
   char *text;
   cJSON *root;
   cJSON *rules;
+  cJSON *guidance_version;
+  cJSON *automatic_remediation_enabled;
   cJSON *audit_header;
   cJSON *audit_footer;
   cJSON *empty_answer;
   cJSON *web_reference;
+  cJSON *web_reference_check_key;
+  cJSON *web_reference_label;
   cJSON *web_reference_if_missing;
   cJSON *item;
 
@@ -303,13 +343,26 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
     return 0;
   }
   rules = cJSON_GetObjectItem(root, "tool_usage_priority");
+  guidance_version = cJSON_GetObjectItem(root, "version");
+  automatic_remediation_enabled = cJSON_GetObjectItem(
+    root,
+    "automatic_remediation_enabled");
   audit_header = cJSON_GetObjectItem(root, "audit_header");
   audit_footer = cJSON_GetObjectItem(root, "audit_footer");
   empty_answer = cJSON_GetObjectItem(root, "empty_answer");
   web_reference = cJSON_GetObjectItem(root, "web_reference");
+  web_reference_check_key = cJSON_IsObject(web_reference) ?
+    cJSON_GetObjectItem(web_reference, "check_key") : NULL;
+  web_reference_label = cJSON_IsObject(web_reference) ?
+    cJSON_GetObjectItem(web_reference, "label") : NULL;
   web_reference_if_missing = cJSON_IsObject(web_reference) ?
     cJSON_GetObjectItem(web_reference, "if_missing") : NULL;
-  if (!cJSON_IsArray(rules) || !cJSON_IsString(audit_header) ||
+  if (!cJSON_IsArray(rules) ||
+      !cJSON_IsString(guidance_version) ||
+      (guidance_version->valuestring == NULL) ||
+      (guidance_version->valuestring[0] == '\0') ||
+      !cJSON_IsBool(automatic_remediation_enabled) ||
+      !cJSON_IsString(audit_header) ||
       (audit_header->valuestring == NULL) ||
       (audit_header->valuestring[0] == '\0') ||
       !cJSON_IsString(audit_footer) ||
@@ -319,28 +372,46 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
       (empty_answer->valuestring == NULL) ||
       (empty_answer->valuestring[0] == '\0') ||
       !cJSON_IsObject(web_reference) ||
+      !cJSON_IsString(web_reference_check_key) ||
+      (web_reference_check_key->valuestring == NULL) ||
+      (web_reference_check_key->valuestring[0] == '\0') ||
+      !cJSON_IsString(web_reference_label) ||
+      (web_reference_label->valuestring == NULL) ||
+      (web_reference_label->valuestring[0] == '\0') ||
       !cJSON_IsString(web_reference_if_missing) ||
       (web_reference_if_missing->valuestring == NULL) ||
       (web_reference_if_missing->valuestring[0] == '\0')) {
     cJSON_Delete(root);
     strappy_set_formatted_error(
       error_out,
-      "Audit guidance is missing tool_usage_priority, audit_header, "
-      "audit_footer, empty_answer, or web_reference: %s",
+      "Audit guidance is missing version, automatic_remediation_enabled, "
+      "tool_usage_priority, audit_header, audit_footer, empty_answer, or "
+      "web_reference check metadata: %s",
       path);
     free(path);
     return 0;
   }
+  audit->guidance_version =
+    strappy_string_duplicate(guidance_version->valuestring);
   audit->audit_header =
     strappy_string_duplicate(audit_header->valuestring);
   audit->audit_footer =
     strappy_string_duplicate(audit_footer->valuestring);
   audit->empty_answer =
     strappy_string_duplicate(empty_answer->valuestring);
+  audit->web_reference_check_key =
+    strappy_string_duplicate(web_reference_check_key->valuestring);
+  audit->web_reference_label =
+    strappy_string_duplicate(web_reference_label->valuestring);
   audit->web_reference_if_missing =
     strappy_string_duplicate(web_reference_if_missing->valuestring);
-  if ((audit->audit_header == NULL) || (audit->audit_footer == NULL) ||
+  audit->automatic_remediation_enabled =
+    cJSON_IsTrue(automatic_remediation_enabled) ? 1 : 0;
+  if ((audit->guidance_version == NULL) ||
+      (audit->audit_header == NULL) || (audit->audit_footer == NULL) ||
       (audit->empty_answer == NULL) ||
+      (audit->web_reference_check_key == NULL) ||
+      (audit->web_reference_label == NULL) ||
       (audit->web_reference_if_missing == NULL)) {
     cJSON_Delete(root);
     strappy_set_error(error_out,
@@ -350,6 +421,8 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
     return 0;
   }
   for (item = rules->child; item != NULL; item = item->next) {
+    cJSON *check_key;
+    cJSON *label;
     cJSON *tool_name;
     cJSON *if_not_called;
     cJSON *when;
@@ -358,6 +431,10 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
     strappy_responses_audit_rule *next;
     strappy_responses_audit_rule *rule;
 
+    check_key = cJSON_IsObject(item) ?
+      cJSON_GetObjectItem(item, "check_key") : NULL;
+    label = cJSON_IsObject(item) ?
+      cJSON_GetObjectItem(item, "label") : NULL;
     tool_name = cJSON_IsObject(item) ?
       cJSON_GetObjectItem(item, "tool_name") : NULL;
     if_not_called = cJSON_IsObject(item) ?
@@ -367,7 +444,13 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
       cJSON_GetObjectItem(when, "tool_called") : NULL;
     when_session_name_empty = cJSON_IsObject(when) ?
       cJSON_GetObjectItem(when, "session_name_empty") : NULL;
-    if ((tool_name == NULL) ||
+    if (!cJSON_IsString(check_key) ||
+        (check_key->valuestring == NULL) ||
+        (check_key->valuestring[0] == '\0') ||
+        !cJSON_IsString(label) ||
+        (label->valuestring == NULL) ||
+        (label->valuestring[0] == '\0') ||
+        (tool_name == NULL) ||
         !cJSON_IsString(tool_name) ||
         (tool_name->valuestring == NULL) ||
         (tool_name->valuestring[0] == '\0') ||
@@ -384,6 +467,8 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
          !cJSON_IsTrue(when_session_name_empty)) ||
         ((when != NULL) && (when_tool_called == NULL) &&
          (when_session_name_empty == NULL)) ||
+        strappy_responses_audit_has_check_key(audit,
+                                              check_key->valuestring) ||
         strappy_responses_audit_has_rule(audit,
                                          tool_name->valuestring) ||
         (audit->count >= (((size_t)-1) /
@@ -409,6 +494,8 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
     audit->rules = next;
     rule = &audit->rules[audit->count];
     memset(rule, 0, sizeof(*rule));
+    rule->check_key = strappy_string_duplicate(check_key->valuestring);
+    rule->label = strappy_string_duplicate(label->valuestring);
     rule->tool_name = strappy_string_duplicate(tool_name->valuestring);
     rule->if_not_called =
       strappy_string_duplicate(if_not_called->valuestring);
@@ -416,9 +503,12 @@ static int strappy_responses_audit_load(strappy_responses_audit *audit,
       strappy_string_duplicate(when_tool_called->valuestring) : NULL;
     rule->when_session_name_empty =
       (when_session_name_empty != NULL) ? 1 : 0;
-    if ((rule->tool_name == NULL) || (rule->if_not_called == NULL) ||
+    if ((rule->check_key == NULL) || (rule->label == NULL) ||
+        (rule->tool_name == NULL) || (rule->if_not_called == NULL) ||
         ((when_tool_called != NULL) &&
          (rule->when_tool_called == NULL))) {
+      free(rule->check_key);
+      free(rule->label);
       free(rule->tool_name);
       free(rule->if_not_called);
       free(rule->when_tool_called);
@@ -522,6 +612,113 @@ static int strappy_responses_text_has_http_markdown_link(const char *text)
     }
   }
   return 0;
+}
+
+static void strappy_responses_answer_quality_destroy(
+  strappy_answer_quality_audit_input *result)
+{
+  if (result == NULL) {
+    return;
+  }
+  free((void *)result->checks);
+  memset(result, 0, sizeof(*result));
+}
+
+static int strappy_responses_audit_rule_is_applicable(
+  const strappy_responses_audit *audit,
+  const strappy_responses_audit_rule *rule)
+{
+  if ((audit == NULL) || (rule == NULL)) {
+    return 0;
+  }
+  if (rule->when_session_name_empty && !audit->session_name_empty) {
+    return 0;
+  }
+  if ((rule->when_tool_called != NULL) &&
+      !rule->when_tool_called_seen) {
+    return 0;
+  }
+  return 1;
+}
+
+static int strappy_responses_audit_evaluate(
+  const strappy_responses_audit *audit,
+  const char *response_text,
+  strappy_answer_quality_audit_input *result,
+  char **error_out)
+{
+  strappy_answer_quality_check_input *checks;
+  size_t index;
+  size_t check_count;
+  int failed;
+
+  if ((audit == NULL) || (result == NULL)) {
+    strappy_set_error(error_out, "Answer quality evaluation is incomplete.");
+    return 0;
+  }
+  memset(result, 0, sizeof(*result));
+  if (audit->count >= ((size_t)-1)) {
+    strappy_set_error(error_out, "Answer quality evaluation is too large.");
+    return 0;
+  }
+  check_count = audit->count + 1U;
+  if (check_count > (((size_t)-1) /
+                     sizeof(strappy_answer_quality_check_input))) {
+    strappy_set_error(error_out, "Answer quality evaluation is too large.");
+    return 0;
+  }
+  checks = (strappy_answer_quality_check_input *)calloc(
+    check_count,
+    sizeof(strappy_answer_quality_check_input));
+  if (checks == NULL) {
+    strappy_set_error(error_out,
+                      "Could not allocate answer quality checks.");
+    return 0;
+  }
+
+  failed = 0;
+  checks[0].check_key = audit->web_reference_check_key;
+  checks[0].check_kind = "answer_content";
+  checks[0].label = audit->web_reference_label;
+  if (!audit->web_reference_required) {
+    checks[0].status = "not_applicable";
+    checks[0].detail = "No web search or web fetch was used.";
+  } else if (strappy_responses_text_has_http_markdown_link(response_text)) {
+    checks[0].status = "passed";
+  } else {
+    checks[0].status = "failed";
+    checks[0].detail =
+      "A linked HTTP source reference was required but not found.";
+    failed = 1;
+  }
+
+  for (index = 0U; index < audit->count; index++) {
+    const strappy_responses_audit_rule *rule;
+    strappy_answer_quality_check_input *check;
+
+    rule = &audit->rules[index];
+    check = &checks[index + 1U];
+    check->check_key = rule->check_key;
+    check->check_kind = "required_tool";
+    check->label = rule->label;
+    check->tool_name = rule->tool_name;
+    if (!strappy_responses_audit_rule_is_applicable(audit, rule)) {
+      check->status = "not_applicable";
+      check->detail = "This check did not apply to the answer.";
+    } else if (rule->called) {
+      check->status = "passed";
+    } else {
+      check->status = "failed";
+      check->detail = "The required tool was not called.";
+      failed = 1;
+    }
+  }
+
+  result->outcome = failed ? "failed" : "passed";
+  result->guidance_version = audit->guidance_version;
+  result->checks = checks;
+  result->check_count = check_count;
+  return 1;
 }
 
 static int strappy_responses_audit_rule_can_be_selected(
@@ -1794,6 +1991,8 @@ typedef struct strappy_responses_runtime {
   char *request_url;
 } strappy_responses_runtime;
 
+static int strappy_responses_text_has_non_whitespace(const char *text);
+
 static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
 {
   if (runtime == NULL) {
@@ -2045,6 +2244,7 @@ static int strappy_responses_finish_call(
   const strappy_responses_analysis *analysis,
   int client_ok,
   int output_is_canonical,
+  const strappy_answer_quality_audit_input *answer_quality_audit,
   char **error_out)
 {
   strappy_response_call_finish_input input;
@@ -2054,6 +2254,7 @@ static int strappy_responses_finish_call(
   input.state = strappy_responses_call_state(http, analysis, client_ok);
   input.is_error = (strcmp(input.state, "completed") != 0) ? 1 : 0;
   input.output_is_canonical = output_is_canonical;
+  input.answer_quality_audit = answer_quality_audit;
   if (http != NULL) {
     input.http_status = http->http_status;
     input.retry_after_seconds = http->retry_after_seconds;
@@ -2319,7 +2520,7 @@ static int strappy_responses_execute_tool_calls(
 }
 
 static int strappy_responses_send_round(
-  const strappy_responses_runtime *runtime,
+  strappy_responses_runtime *runtime,
   const char *session_db_path,
   long long session_id,
   const char *prompt_group_key,
@@ -2365,6 +2566,11 @@ static int strappy_responses_send_round(
     int should_retry;
     int response_ok;
     int output_is_canonical;
+    strappy_answer_quality_audit_input answer_quality;
+    const strappy_answer_quality_audit_input *answer_quality_to_store;
+
+    memset(&answer_quality, 0, sizeof(answer_quality));
+    answer_quality_to_store = NULL;
 
     memset(&begin, 0, sizeof(begin));
     begin.session_id = session_id;
@@ -2413,6 +2619,7 @@ static int strappy_responses_send_round(
                                         &analysis,
                                         0,
                                         0,
+                                        NULL,
                                         NULL)) {
         strappy_responses_call_did_finish(session_id,
                                           call_id,
@@ -2435,17 +2642,51 @@ static int strappy_responses_send_round(
       strappy_responses_should_retry(&http, &analysis);
     output_is_canonical = !should_retry &&
       strappy_responses_output_is_canonical(&http, &analysis);
+    response_ok = client_ok &&
+      strappy_responses_http_is_success(&http, &analysis);
+    if (output_is_canonical && response_ok) {
+      size_t activity_index;
+
+      for (activity_index = 0U;
+           activity_index < analysis.tool_activity_count;
+           activity_index++) {
+        strappy_responses_audit_record_tool(
+          &runtime->audit,
+          analysis.tool_activity_names[activity_index]);
+      }
+      if ((analysis.tool_call_count == 0U) &&
+          strappy_responses_text_has_non_whitespace(
+            analysis.response_text)) {
+        if (!strappy_responses_audit_evaluate(&runtime->audit,
+                                              analysis.response_text,
+                                              &answer_quality,
+                                              error_out)) {
+          *http_out = http;
+          *analysis_out = analysis;
+          return 0;
+        }
+        answer_quality.evaluated_at_ms = strappy_responses_now_ms();
+        if (!runtime->audit.automatic_remediation_enabled ||
+            runtime->audit.message_sent ||
+            (strcmp(answer_quality.outcome, "passed") == 0)) {
+          answer_quality_to_store = &answer_quality;
+        }
+      }
+    }
     if (!strappy_responses_finish_call(session_db_path,
                                        call_id,
                                        &http,
                                        &analysis,
                                        client_ok,
                                        output_is_canonical,
+                                       answer_quality_to_store,
                                        error_out)) {
+      strappy_responses_answer_quality_destroy(&answer_quality);
       *http_out = http;
       *analysis_out = analysis;
       return 0;
     }
+    strappy_responses_answer_quality_destroy(&answer_quality);
     strappy_responses_call_did_finish(session_id,
                                       call_id,
                                       prompt_group_key,
@@ -2513,7 +2754,6 @@ static int strappy_responses_send_round(
       continue;
     }
 
-    response_ok = strappy_responses_http_is_success(&http, &analysis);
     if (!response_ok) {
       failure = strappy_responses_failure_message(&http, &analysis);
       if (failure != NULL) {
@@ -2781,18 +3021,6 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
       break;
     }
 
-    {
-      size_t activity_index;
-
-      for (activity_index = 0U;
-           activity_index < analysis.tool_activity_count;
-           activity_index++) {
-        strappy_responses_audit_record_tool(
-          &runtime.audit,
-          analysis.tool_activity_names[activity_index]);
-      }
-    }
-
     if (analysis.tool_call_count > 0U) {
       strappy_responses_emit_processing_status(callback,
                                                callback_data,
@@ -2822,7 +3050,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
       continue;
     }
 
-    {
+    if (runtime.audit.automatic_remediation_enabled) {
       char *audit_message;
       char *audit_item;
 

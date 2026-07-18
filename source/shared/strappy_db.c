@@ -1601,6 +1601,36 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "FOREIGN KEY(item_id) REFERENCES conversation_items(id) ON DELETE CASCADE"
     ");";
 
+  static const char schema_answer_quality_sql[] =
+    "CREATE TABLE IF NOT EXISTS answer_quality_audits ("
+    "id INTEGER PRIMARY KEY,"
+    "response_attempt_id INTEGER NOT NULL UNIQUE,"
+    "outcome TEXT NOT NULL CHECK(outcome IN ('passed','failed','error')),"
+    "guidance_version TEXT,"
+    "evaluated_at_ms INTEGER NOT NULL,"
+    "FOREIGN KEY(response_attempt_id) REFERENCES http_attempts(id) "
+      "ON DELETE CASCADE"
+    ");"
+    "CREATE TABLE IF NOT EXISTS answer_quality_checks ("
+    "audit_id INTEGER NOT NULL,"
+    "ordinal INTEGER NOT NULL CHECK(ordinal >= 0),"
+    "check_key TEXT NOT NULL,"
+    "check_kind TEXT NOT NULL CHECK(check_kind IN "
+      "('required_tool','answer_content')),"
+    "label TEXT NOT NULL,"
+    "status TEXT NOT NULL CHECK(status IN "
+      "('passed','failed','not_applicable','error')),"
+    "tool_name TEXT,"
+    "detail TEXT,"
+    "evidence_item_id INTEGER,"
+    "PRIMARY KEY(audit_id, ordinal),"
+    "UNIQUE(audit_id, check_key),"
+    "FOREIGN KEY(audit_id) REFERENCES answer_quality_audits(id) "
+      "ON DELETE CASCADE,"
+    "FOREIGN KEY(evidence_item_id) REFERENCES conversation_items(id) "
+      "ON DELETE SET NULL"
+    ");";
+
   static const char schema_structured_sql[] =
     "CREATE TABLE IF NOT EXISTS structured_documents ("
     "id INTEGER PRIMARY KEY,"
@@ -1755,6 +1785,7 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     schema_attempts_sql,
     schema_conversation_sql,
     schema_tool_items_sql,
+    schema_answer_quality_sql,
     schema_structured_sql,
     schema_catalog_sql,
     schema_memory_sql
@@ -13046,6 +13077,113 @@ static int strappy_db_semantic_attempt_context(sqlite3 *db,
   return 1;
 }
 
+static int strappy_db_semantic_insert_answer_quality(
+  sqlite3 *db,
+  long long attempt_id,
+  const strappy_answer_quality_audit_input *audit,
+  char **error_out)
+{
+  static const char *insert_audit_sql =
+    "INSERT INTO answer_quality_audits "
+    "(response_attempt_id, outcome, guidance_version, evaluated_at_ms) "
+    "VALUES (?, ?, ?, ?);";
+  static const char *insert_check_sql =
+    "INSERT INTO answer_quality_checks "
+    "(audit_id, ordinal, check_key, check_kind, label, status, tool_name, "
+     "detail, evidence_item_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);";
+  sqlite3_stmt *stmt;
+  sqlite3_int64 audit_id;
+  size_t index;
+  int rc;
+  int ok;
+
+  if (audit == NULL) {
+    return 1;
+  }
+  if ((audit->outcome == NULL) || (audit->outcome[0] == '\0') ||
+      (audit->evaluated_at_ms <= 0LL) || (audit->checks == NULL) ||
+      (audit->check_count == 0U) ||
+      (audit->check_count > (size_t)LLONG_MAX)) {
+    strappy_set_error(error_out, "Answer quality result is incomplete.");
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, insert_audit_sql, -1, &stmt, NULL);
+  ok = (rc == SQLITE_OK) &&
+       (sqlite3_bind_int64(stmt, 1,
+                           (sqlite3_int64)attempt_id) == SQLITE_OK) &&
+       (sqlite3_bind_text(stmt, 2, audit->outcome, -1,
+                          SQLITE_TRANSIENT) == SQLITE_OK) &&
+       strappy_db_bind_nullable_text_value(stmt,
+                                           3,
+                                           audit->guidance_version) &&
+       (sqlite3_bind_int64(stmt, 4,
+                           (sqlite3_int64)audit->evaluated_at_ms) == SQLITE_OK);
+  if (!ok || (sqlite3_step(stmt) != SQLITE_DONE)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save answer quality audit: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+  audit_id = sqlite3_last_insert_rowid(db);
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, insert_check_sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare answer quality checks: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  for (index = 0U; index < audit->check_count; index++) {
+    const strappy_answer_quality_check_input *check;
+
+    check = &audit->checks[index];
+    if ((check->check_key == NULL) || (check->check_key[0] == '\0') ||
+        (check->check_kind == NULL) || (check->check_kind[0] == '\0') ||
+        (check->label == NULL) || (check->label[0] == '\0') ||
+        (check->status == NULL) || (check->status[0] == '\0')) {
+      strappy_set_error(error_out, "Answer quality check is incomplete.");
+      sqlite3_finalize(stmt);
+      return 0;
+    }
+    ok = (sqlite3_reset(stmt) == SQLITE_OK) &&
+         (sqlite3_clear_bindings(stmt) == SQLITE_OK) &&
+         (sqlite3_bind_int64(stmt, 1, audit_id) == SQLITE_OK) &&
+         (sqlite3_bind_int64(stmt, 2,
+                             (sqlite3_int64)index) == SQLITE_OK) &&
+         (sqlite3_bind_text(stmt, 3, check->check_key, -1,
+                            SQLITE_TRANSIENT) == SQLITE_OK) &&
+         (sqlite3_bind_text(stmt, 4, check->check_kind, -1,
+                            SQLITE_TRANSIENT) == SQLITE_OK) &&
+         (sqlite3_bind_text(stmt, 5, check->label, -1,
+                            SQLITE_TRANSIENT) == SQLITE_OK) &&
+         (sqlite3_bind_text(stmt, 6, check->status, -1,
+                            SQLITE_TRANSIENT) == SQLITE_OK) &&
+         strappy_db_bind_nullable_text_value(stmt, 7, check->tool_name) &&
+         strappy_db_bind_nullable_text_value(stmt, 8, check->detail) &&
+         ((check->evidence_item_id > 0LL) ?
+            (sqlite3_bind_int64(
+               stmt,
+               9,
+               (sqlite3_int64)check->evidence_item_id) == SQLITE_OK) :
+            (sqlite3_bind_null(stmt, 9) == SQLITE_OK));
+    if (!ok || (sqlite3_step(stmt) != SQLITE_DONE)) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not save answer quality check: %s",
+                                  sqlite3_errmsg(db));
+      sqlite3_finalize(stmt);
+      return 0;
+    }
+  }
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
 static int strappy_db_semantic_finish_response_call(
   const char *db_path,
   const strappy_response_call_finish_input *input,
@@ -13354,6 +13492,20 @@ static int strappy_db_semantic_finish_response_call(
       }
       item_index++;
     }
+  }
+
+  if (!strappy_db_semantic_insert_answer_quality(
+        db,
+        input->call_id,
+        input->answer_quality_audit,
+        error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back Responses result",
+                    NULL);
+    strappy_db_release(db);
+    cJSON_Delete(root);
+    return 0;
   }
 
   request_state = (strcmp(attempt_state, "completed") == 0) ? "completed" :
@@ -15381,6 +15533,123 @@ static char *strappy_db_semantic_attempt_metadata(sqlite3 *db,
   return serialized;
 }
 
+static char *strappy_db_semantic_answer_quality_metadata(
+  sqlite3 *db,
+  long long audit_id,
+  char **error_out)
+{
+  static const char *audit_sql =
+    "SELECT outcome, guidance_version FROM answer_quality_audits "
+    "WHERE id = ?;";
+  static const char *checks_sql =
+    "SELECT check_key, check_kind, label, status, tool_name, detail "
+    "FROM answer_quality_checks WHERE audit_id = ? ORDER BY ordinal;";
+  sqlite3_stmt *stmt;
+  cJSON *root;
+  cJSON *checks;
+  char *serialized;
+  const unsigned char *text;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, audit_sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)audit_id) != SQLITE_OK) ||
+      (sqlite3_step(stmt) != SQLITE_ROW)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read answer quality audit: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return NULL;
+  }
+  root = cJSON_CreateObject();
+  checks = cJSON_CreateArray();
+  if ((root == NULL) || (checks == NULL)) {
+    cJSON_Delete(root);
+    cJSON_Delete(checks);
+    sqlite3_finalize(stmt);
+    strappy_set_error(error_out,
+                      "Could not allocate answer quality metadata.");
+    return NULL;
+  }
+  text = sqlite3_column_text(stmt, 0);
+  cJSON_AddStringToObject(root,
+                         "outcome",
+                         (text != NULL) ? (const char *)text : "error");
+  text = sqlite3_column_text(stmt, 1);
+  if (text != NULL) {
+    cJSON_AddStringToObject(root,
+                           "guidance_version",
+                           (const char *)text);
+  }
+  cJSON_AddItemToObject(root, "checks", checks);
+  sqlite3_finalize(stmt);
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, checks_sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)audit_id) != SQLITE_OK)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read answer quality checks: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    cJSON_Delete(root);
+    return NULL;
+  }
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    cJSON *check;
+
+    check = cJSON_CreateObject();
+    if (check == NULL) {
+      sqlite3_finalize(stmt);
+      cJSON_Delete(root);
+      strappy_set_error(error_out,
+                        "Could not allocate answer quality check metadata.");
+      return NULL;
+    }
+    text = sqlite3_column_text(stmt, 0);
+    cJSON_AddStringToObject(check,
+                           "key",
+                           (text != NULL) ? (const char *)text : "");
+    text = sqlite3_column_text(stmt, 1);
+    cJSON_AddStringToObject(check,
+                           "kind",
+                           (text != NULL) ? (const char *)text : "");
+    text = sqlite3_column_text(stmt, 2);
+    cJSON_AddStringToObject(check,
+                           "label",
+                           (text != NULL) ? (const char *)text : "");
+    text = sqlite3_column_text(stmt, 3);
+    cJSON_AddStringToObject(check,
+                           "status",
+                           (text != NULL) ? (const char *)text : "error");
+    text = sqlite3_column_text(stmt, 4);
+    if (text != NULL) {
+      cJSON_AddStringToObject(check, "tool_name", (const char *)text);
+    }
+    text = sqlite3_column_text(stmt, 5);
+    if (text != NULL) {
+      cJSON_AddStringToObject(check, "detail", (const char *)text);
+    }
+    cJSON_AddItemToArray(checks, check);
+  }
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    cJSON_Delete(root);
+    strappy_set_formatted_error(error_out,
+                                "Could not read answer quality checks: %s",
+                                sqlite3_errmsg(db));
+    return NULL;
+  }
+  serialized = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  if (serialized == NULL) {
+    strappy_set_error(error_out,
+                      "Could not serialize answer quality metadata.");
+  }
+  return serialized;
+}
+
 static char *strappy_db_semantic_attempt_display_text(sqlite3_stmt *stmt)
 {
   strappy_db_sql_buffer buffer;
@@ -15708,6 +15977,12 @@ static int strappy_db_semantic_list_response_timeline(
     "(SELECT COUNT(*) FROM conversation_items i "
       "JOIN http_attempts a ON a.id = i.source_attempt_id "
       "WHERE i.session_id = ? AND i.timeline_visible = 1 "
+      "AND a.state NOT IN ('pending','running')) + "
+    "(SELECT COUNT(*) FROM answer_quality_audits q "
+      "JOIN http_attempts a ON a.id = q.response_attempt_id "
+      "JOIN model_requests r ON r.id = a.request_id "
+      "JOIN turns t ON t.id = r.turn_id "
+      "WHERE t.session_id = ? "
       "AND a.state NOT IN ('pending','running'));";
   static const char *sql =
     "SELECT 0 AS entry_type, a.id AS row_id, t.id AS turn_id, "
@@ -15729,7 +16004,7 @@ static int strappy_db_semantic_list_response_timeline(
     "LEFT JOIN api_usage u ON u.attempt_id = a.id "
     "WHERE t.session_id = ? AND a.state NOT IN ('pending','running') "
     "UNION ALL "
-    "SELECT 1, i.id, t.id, r.id, NULL, i.id, 'request', "
+    "SELECT 2, i.id, t.id, r.id, NULL, i.id, 'request', "
     "t.prompt_group_key, r.request_kind, r.round_index, -1, NULL, 0, "
     "r.model_id, "
     "strftime('%Y-%m-%dT%H:%M:%fZ', i.created_at_ms / 1000.0, 'unixepoch'), "
@@ -15743,7 +16018,31 @@ static int strappy_db_semantic_list_response_timeline(
     "AND EXISTS (SELECT 1 FROM http_attempts ax WHERE ax.request_id = r.id "
       "AND ax.state NOT IN ('pending','running')) "
     "UNION ALL "
-    "SELECT 1, i.id, t.id, r.id, a.id, i.id, 'response', "
+    "SELECT 1, q.id, t.id, r.id, a.id, "
+    "(SELECT ci.id FROM conversation_items ci "
+      "JOIN message_items mi ON mi.item_id = ci.id "
+      "WHERE ci.source_attempt_id = a.id AND mi.role = 'assistant' "
+      "ORDER BY ci.source_item_index LIMIT 1), 'response', "
+    "t.prompt_group_key, r.request_kind, r.round_index, a.attempt_index, "
+    "a.state, a.http_status, COALESCE(ar.provider_model_id, r.model_id), "
+    "strftime('%Y-%m-%dT%H:%M:%fZ', q.evaluated_at_ms / 1000.0, 'unixepoch'), "
+    "CASE WHEN q.outcome = 'passed' THEN 0 ELSE 1 END, 0, NULL, "
+    "1, 1, COALESCE((SELECT MIN(ci.source_item_index) "
+      "FROM conversation_items ci "
+      "JOIN message_items mi ON mi.item_id = ci.id "
+      "WHERE ci.source_attempt_id = a.id AND mi.role = 'assistant'), "
+      "2147483647), "
+    "a.method, a.endpoint, ar.provider_status, a.transport_error, "
+    "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason, "
+    "r.model_id "
+    "FROM answer_quality_audits q "
+    "JOIN http_attempts a ON a.id = q.response_attempt_id "
+    "JOIN model_requests r ON r.id = a.request_id "
+    "JOIN turns t ON t.id = r.turn_id "
+    "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
+    "WHERE t.session_id = ? AND a.state NOT IN ('pending','running') "
+    "UNION ALL "
+    "SELECT 2, i.id, t.id, r.id, a.id, i.id, 'response', "
     "t.prompt_group_key, r.request_kind, r.round_index, a.attempt_index, a.state, "
     "a.http_status, COALESCE(ar.provider_model_id, r.model_id), "
     "strftime('%Y-%m-%dT%H:%M:%fZ', i.created_at_ms / 1000.0, 'unixepoch'), "
@@ -15759,7 +16058,7 @@ static int strappy_db_semantic_list_response_timeline(
     "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
     "WHERE i.session_id = ? AND i.timeline_visible = 1 "
     "AND a.state NOT IN ('pending','running') "
-    "ORDER BY request_id, 19, attempt_index, 20, entry_type, 21 "
+    "ORDER BY request_id, 19, attempt_index, 20, 21, entry_type "
     "LIMIT -1 OFFSET ?;";
   sqlite3 *db;
   sqlite3_stmt *count_stmt;
@@ -15798,6 +16097,8 @@ static int strappy_db_semantic_list_response_timeline(
       (sqlite3_bind_int64(count_stmt, 2,
                           (sqlite3_int64)session_id) != SQLITE_OK) ||
       (sqlite3_bind_int64(count_stmt, 3,
+                          (sqlite3_int64)session_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(count_stmt, 4,
                           (sqlite3_int64)session_id) != SQLITE_OK)) {
     strappy_set_formatted_error(error_out,
                                 "Could not count semantic Responses timeline: %s",
@@ -15843,6 +16144,8 @@ static int strappy_db_semantic_list_response_timeline(
       (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)session_id) != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 4,
+                          (sqlite3_int64)session_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 5,
                           (sqlite3_int64)start_index) != SQLITE_OK)) {
     strappy_set_formatted_error(error_out,
                                 "Could not prepare semantic Responses timeline: %s",
@@ -15868,7 +16171,8 @@ static int strappy_db_semantic_list_response_timeline(
     attempt_id = (sqlite3_column_type(stmt, 4) != SQLITE_NULL) ?
       (long long)sqlite3_column_int64(stmt, 4) : 0LL;
     record->message_id = (entry_type == 0) ?
-      (attempt_id * 2LL) : ((row_id * 2LL) + 1LL);
+      (attempt_id * 2LL) :
+      ((entry_type == 1) ? 0LL : ((row_id * 2LL) + 1LL));
     record->session_id = session_id;
     record->turn_id = (long long)sqlite3_column_int64(stmt, 2);
     record->model_request_id = (long long)sqlite3_column_int64(stmt, 3);
@@ -15906,6 +16210,27 @@ static int strappy_db_semantic_list_response_timeline(
         strappy_string_duplicate(record->metadata_json) : NULL;
       record->message_key =
         strappy_db_response_timeline_key("response-call", attempt_id);
+    } else if (entry_type == 1) {
+      long long target_item_id;
+
+      target_item_id = (sqlite3_column_type(stmt, 5) != SQLITE_NULL) ?
+        (long long)sqlite3_column_int64(stmt, 5) : 0LL;
+      record->actor = strappy_string_duplicate("audit");
+      record->kind = strappy_string_duplicate("answer_quality");
+      record->render_role = strappy_string_duplicate("answer_quality");
+      record->role = strappy_string_duplicate("answer_quality");
+      record->content = strappy_string_duplicate("Answer Quality");
+      record->direction = strappy_db_column_string(stmt, 6);
+      record->metadata_json =
+        strappy_db_semantic_answer_quality_metadata(db, row_id, error_out);
+      record->message_json = (record->metadata_json != NULL) ?
+        strappy_string_duplicate(record->metadata_json) : NULL;
+      record->message_key =
+        strappy_db_response_timeline_key("answer-quality", row_id);
+      if (target_item_id > 0LL) {
+        record->target_message_key =
+          strappy_db_response_timeline_key("response-item", target_item_id);
+      }
     } else if (!strappy_db_semantic_populate_timeline_item(db,
                                                            stmt,
                                                            record,
@@ -15927,6 +16252,8 @@ static int strappy_db_semantic_list_response_timeline(
         ((entry_type != 0) && (record->direction == NULL)) ||
         (record->created_at == NULL) ||
         ((entry_type == 0) && ((record->metadata_json == NULL) ||
+                              (record->message_json == NULL))) ||
+        ((entry_type == 1) && ((record->metadata_json == NULL) ||
                               (record->message_json == NULL)))) {
       strappy_session_message_record_destroy(record);
       strappy_set_error(error_out,

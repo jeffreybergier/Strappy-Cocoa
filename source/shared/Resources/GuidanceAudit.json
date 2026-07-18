@@ -1,28 +1,42 @@
 {
+  "version": "1",
+  "automatic_remediation_enabled": false,
   "audit_header": "You have been audited due to your failure to follow instructions:",
   "audit_footer": "After fixing all of the issues above, YOU MUST FINISH with a standalone answer to the user's original question with all fixes in place. Answer the user directly, and do not mention the audit or tool activity.",
   "empty_answer": "Your answer was empty. Please answer the user's original question.",
   "web_reference": {
+    "check_key": "web_reference",
+    "label": "Source link included",
     "if_missing": "web_reference: You used web search or web fetch, but your answer did not include a linked source reference. Add at least one linked source reference as an inline Markdown link, such as [Link title](http://example.com), so the user can verify the researched information."
   },
   "tool_usage_priority": [
     {
+      "check_key": "database_context_read",
+      "label": "Database context checked",
       "tool_name": "database_context_read",
       "if_not_called": "database_context_read: ALWAYS call this tool now. Read relevant approved database context before querying personal data. Otherwise call with no arguments to report that no database context was needed."
     },
     {
+      "check_key": "helper_session_name_write",
+      "label": "Session named",
       "tool_name": "helper_session_name_write",
       "if_not_called": "helper_session_name_write: ALWAYS call this tool now. Update the session with a short, descriptive name for the user's latest prompt."
     },
     {
+      "check_key": "helper_fontawesome_shortcode_confirm",
+      "label": "Font Awesome shortcode confirmed",
       "tool_name": "helper_fontawesome_shortcode_confirm",
       "if_not_called": "helper_fontawesome_shortcode_confirm: ALWAYS call this tool now. Confirm at least one Font Awesome version 7 Free Markdown shortcode, such as [fa:heart], to use in your answer. shortcodes must be a non-empty array; null and empty arrays are invalid. NEVER use unicode emoji in your answer."
     },
     {
+      "check_key": "memory_user_fact_remember",
+      "label": "User memory considered",
       "tool_name": "memory_user_fact_remember",
       "if_not_called": "memory_user_fact_remember: ALWAYS call this tool now. Save any useful durable fact learned about the user for future prompts. Otherwise call with no arguments to report that there is nothing new to remember. NEVER remember secrets or sensitive information."
     },
     {
+      "check_key": "memory_database_hint_remember",
+      "label": "Database memory considered",
       "tool_name": "memory_database_hint_remember",
       "if_not_called": "memory_database_hint_remember: ALWAYS call this tool now. Save any durable query, schema, or access information learned about an approved database for future prompts. Otherwise call with no arguments to report that there is nothing new to remember. NEVER remember user data, secrets, sensitive information, guesses, or one-off query results."
     }

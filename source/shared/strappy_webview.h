@@ -27,6 +27,10 @@ typedef struct strappy_webview_labels {
   const char *response;
   const char *round;
   const char *attempt;
+  const char *answer_quality;
+  const char *passed;
+  const char *failed;
+  const char *not_applicable;
 } strappy_webview_labels;
 
 typedef struct strappy_webview_message {
