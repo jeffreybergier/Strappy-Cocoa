@@ -68,6 +68,7 @@ static NSString *StrappySessionStringFromCString(char *value)
     (const strappy_openrouter_model_record *)record;
 + (NSDictionary *)dictionaryFromAssistantSetRecord:
     (const strappy_assistant_set_record *)record;
++ (NSString *)guidanceResourceDirectoryWithError:(NSError **)error;
 + (void)refreshOpenRouterModelCatalogInBackground:(id)ignored;
 + (void)openRouterModelCatalogRefreshDidFinish:(NSDictionary *)result;
 - (void)updateCachedSummary:(NSDictionary *)summary;
@@ -454,27 +455,19 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   (void)[StrappySession assistantSetCatalog];
 }
 
-+ (NSString *)systemPromptTemplatePathWithError:(NSError **)error
++ (NSString *)guidanceResourceDirectoryWithError:(NSError **)error
 {
-  NSString *resourceName;
-  NSString *resourceType;
-  NSString *path;
+  NSString *resourcePath;
 
-  resourceName =
-    [NSString stringWithUTF8String:
-      strappy_session_prompt_template_resource_name()];
-  resourceType =
-    [NSString stringWithUTF8String:
-      strappy_session_prompt_template_resource_type()];
-  path = [[NSBundle mainBundle] pathForResource:resourceName
-                                         ofType:resourceType];
-  if ([path isKindOfClass:[NSString class]] && ([path length] > 0U)) {
-    return path;
+  resourcePath = [[NSBundle mainBundle] resourcePath];
+  if ([resourcePath isKindOfClass:[NSString class]] &&
+      ([resourcePath length] > 0U)) {
+    return resourcePath;
   }
 
   if (error != nil) {
     NSDictionary *userInfo =
-      [NSDictionary dictionaryWithObject:NSLocalizedString(@"System prompt template is missing from the app bundle.", nil)
+      [NSDictionary dictionaryWithObject:NSLocalizedString(@"Prompt guidance resources are missing from the app bundle.", nil)
                                   forKey:NSLocalizedDescriptionKey];
     *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
                                  code:7
@@ -877,6 +870,62 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
                          userInfo:userInfo];
 }
 
++ (NSString *)systemPromptForAssistantSetIdentifier:(NSString *)identifier
+                                  webSearchEnabled:(BOOL)webSearchEnabled
+                                             error:(NSError **)error
+{
+  NSString *resourcePath;
+  strappy_assistant_set_profile profile;
+  char *prompt;
+  char *strappyError;
+  NSString *result;
+
+  resourcePath = [StrappySession guidanceResourceDirectoryWithError:error];
+  if (resourcePath == nil) {
+    return nil;
+  }
+  strappy_assistant_set_profile_init(&profile);
+  strappyError = NULL;
+  if (!strappy_assistant_sets_load_profile(
+        [resourcePath fileSystemRepresentation],
+        StrappySessionOptionalCString(identifier),
+        &profile,
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    strappy_assistant_set_profile_destroy(&profile);
+    return nil;
+  }
+  prompt = strappy_prompt_build([resourcePath fileSystemRepresentation],
+                                &profile,
+                                webSearchEnabled ? 1 : 0,
+                                &strappyError);
+  strappy_assistant_set_profile_destroy(&profile);
+  if (prompt == NULL) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return nil;
+  }
+  result = [NSString stringWithUTF8String:prompt];
+  free(prompt);
+  strappy_session_free_string(strappyError);
+  if ((result == nil) && (error != nil)) {
+    NSDictionary *userInfo;
+
+    userInfo = [NSDictionary dictionaryWithObject:
+      NSLocalizedString(@"Generated system prompt is not valid UTF-8.", nil)
+                                           forKey:NSLocalizedDescriptionKey];
+    *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                 code:7
+                             userInfo:userInfo];
+  }
+  return result;
+}
+
 + (BOOL)ensureSessionsDirectoryForDatabasePath:(NSString *)databasePath
                                          error:(NSError **)error
 {
@@ -1137,7 +1186,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   for (index = 0U; index < list.count; index++) {
     NSDictionary *set;
     strappy_assistant_set_profile profile;
-    char *prompt;
+    int webSearchEnabled;
 
     strappy_assistant_set_profile_init(&profile);
     strappyError = NULL;
@@ -1159,32 +1208,33 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
                          message];
       return nil;
     }
-    strappyError = NULL;
-    prompt = strappy_prompt_render_resource(
-      [resourcePath fileSystemRepresentation],
-      profile.prompt_resource,
-      &strappyError);
-    if ((prompt == NULL) || (prompt[0] == '\0')) {
-      NSString *promptName;
-      NSString *message;
+    for (webSearchEnabled = 0; webSearchEnabled <= 1; webSearchEnabled++) {
+      char *prompt;
 
-      promptName = [StrappySession stringFromCStringOrEmpty:
-        profile.prompt_resource];
-      message = (strappyError != NULL) ?
-        [NSString stringWithUTF8String:strappyError] :
-        [NSString stringWithFormat:@"Assistant prompt is empty: %@",
-                                   promptName];
+      strappyError = NULL;
+      prompt = strappy_prompt_build(
+        [resourcePath fileSystemRepresentation],
+        &profile,
+        webSearchEnabled,
+        &strappyError);
+      if ((prompt == NULL) || (prompt[0] == '\0')) {
+        NSString *message;
+
+        message = (strappyError != NULL) ?
+          [NSString stringWithUTF8String:strappyError] :
+          @"Generated assistant prompt is empty.";
+        free(prompt);
+        strappy_session_free_string(strappyError);
+        strappy_assistant_set_profile_destroy(&profile);
+        strappy_assistant_set_record_list_destroy(&list);
+        [NSException raise:NSInternalInconsistencyException
+                    format:@"Required assistant resources are invalid: %@",
+                           message];
+        return nil;
+      }
       free(prompt);
       strappy_session_free_string(strappyError);
-      strappy_assistant_set_profile_destroy(&profile);
-      strappy_assistant_set_record_list_destroy(&list);
-      [NSException raise:NSInternalInconsistencyException
-                  format:@"Required assistant resources are invalid: %@",
-                         message];
-      return nil;
     }
-    free(prompt);
-    strappy_session_free_string(strappyError);
     strappy_assistant_set_profile_destroy(&profile);
 
     set = [StrappySession dictionaryFromAssistantSetRecord:&list.records[index]];
@@ -2346,7 +2396,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
                          error:(NSError **)error
 {
   NSString *databasePath;
-  NSString *systemPromptTemplatePath;
+  NSString *guidanceResourceDirectory;
   NSString *apiEndpoint;
   NSString *apiToken;
   char *strappyError;
@@ -2385,8 +2435,9 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     return nil;
   }
 
-  systemPromptTemplatePath = [StrappySession systemPromptTemplatePathWithError:error];
-  if (systemPromptTemplatePath == nil) {
+  guidanceResourceDirectory =
+    [StrappySession guidanceResourceDirectoryWithError:error];
+  if (guidanceResourceDirectory == nil) {
     return nil;
   }
 
@@ -2407,7 +2458,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
         [prompt UTF8String],
         StrappySessionOptionalCString(apiEndpoint),
         StrappySessionOptionalCString(apiToken),
-        [systemPromptTemplatePath fileSystemRepresentation],
+        [guidanceResourceDirectory fileSystemRepresentation],
         [databasePath UTF8String],
         sessionId,
         StrappySessionHandleResponsesEvent,

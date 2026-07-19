@@ -1251,18 +1251,17 @@ static int harness_request_base_is_valid(cJSON *root,
       !cJSON_IsString(instructions) ||
       (instructions->valuestring == NULL) ||
       (strstr(instructions->valuestring,
-              "## Required Web Source References") == NULL) ||
+              "# Tools available") == NULL) ||
       (strstr(instructions->valuestring,
-              "If you use web search or web fetch") == NULL) ||
+              "# Audit checks for this round") == NULL) ||
       (strstr(instructions->valuestring,
-              "user can verify the researched") == NULL) ||
+              "The report is informational and never causes an automatic retry") == NULL) ||
       (strstr(instructions->valuestring,
-              "linked source reference") == NULL) ||
+              "`web_reference`") == NULL) ||
       (strstr(instructions->valuestring,
-              "Format the source reference as an inline Markdown link") ==
-        NULL) ||
+              "titled inline Markdown HTTP or HTTPS link") == NULL) ||
       (strstr(instructions->valuestring,
-              "[Link title](http://example.com)") == NULL) ||
+              "# Assistant contract") == NULL) ||
       !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
       !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
       !cJSON_IsArray(input) || (input_count != 5) ||
@@ -1350,11 +1349,11 @@ static int harness_world_knowledge_request_is_valid(
       !cJSON_IsString(instructions) ||
       (instructions->valuestring == NULL) ||
       (strstr(instructions->valuestring,
-              "world-knowledge AI Strap-on Harness") == NULL) ||
+              "You are an expert world-knowledge assistant.") == NULL) ||
       (strstr(instructions->valuestring,
               "personal databases in this assistant set") == NULL) ||
       (strstr(instructions->valuestring,
-              "personal AI Strap-on Harness") != NULL) ||
+              "You are an expert personal assistant.") != NULL) ||
       !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
       !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
       !cJSON_IsArray(input) || (cJSON_GetArraySize(input) != 3) ||
@@ -2500,7 +2499,7 @@ static int harness_test_answer_quality_report(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystemDatabase.txt",
+    "../shared/Resources",
     path,
     session_id,
     harness_record_ledger_event,
@@ -2709,7 +2708,7 @@ static int harness_test_world_knowledge_assistant_set(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystemDatabase.txt",
+    "../shared/Resources",
     path,
     session_id,
     &error);
@@ -2818,7 +2817,7 @@ static int harness_test_empty_answer_quality_report(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystemDatabase.txt",
+    "../shared/Resources",
     path,
     session_id,
     &error);
@@ -2954,7 +2953,7 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystemDatabase.txt",
+    "../shared/Resources",
     path,
     session_id,
     &error);
@@ -3095,7 +3094,7 @@ static int harness_test_web_search_requires_markdown_reference(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystemDatabase.txt",
+    "../shared/Resources",
     path,
     session_id,
     &error);
@@ -3181,7 +3180,7 @@ static int harness_test_valid_web_reference_passes_content_check(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystemDatabase.txt",
+    "../shared/Resources",
     path,
     session_id,
     &error);
@@ -3272,7 +3271,7 @@ static int harness_test_function_tool_continuation(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystemDatabase.txt",
+    "../shared/Resources",
     path,
     session_id,
     harness_record_ledger_event,
@@ -3402,7 +3401,7 @@ static int harness_test_retry_attempt_ledger(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystemDatabase.txt",
+    "../shared/Resources",
     path,
     session_id,
     harness_record_ledger_event,
@@ -3523,7 +3522,7 @@ static int harness_test_active_request_cancellation(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystemDatabase.txt",
+    "../shared/Resources",
     path,
     session_id,
     harness_record_ledger_event,
@@ -3613,7 +3612,7 @@ static int harness_test_retry_after_clamp_and_cancellation(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystemDatabase.txt",
+    "../shared/Resources",
     path,
     session_id,
     harness_record_ledger_event,

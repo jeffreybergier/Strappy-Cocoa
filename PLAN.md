@@ -151,8 +151,9 @@ Deliverables:
   `strappy://database-manage`; WebView/native bridge interception that opens
   `PreferencesWindowController` remains open.
 - [x] Runtime prompt, assistant-set, tool, and database guidance resources:
-  `AssistantSets.json`, the set-specific prompt files, `GuidanceTools.json`, and
-  `GuidanceDatabase.json`,
+  `AssistantSets.json`, `PromptInvariant.txt`, `GuidanceTools.json`, and
+  `GuidanceDatabase.json`, with system prompts assembled from the effective
+  tool descriptions, audit policy, assistant goal, and invariant contract,
   synchronized with the stable tool names and stricter current guidance that
   supplies `database_list_info` as a typed preflight tool output, requires
   `database_context_read` before querying, uses explicit timestamp units, and

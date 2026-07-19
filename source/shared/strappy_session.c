@@ -3,7 +3,6 @@
 #include "strappy_assistant_sets.h"
 #include "strappy_core.h"
 #include "strappy_model_catalog.h"
-#include "strappy_prompt.h"
 #include "strappy_responses.h"
 #include "strappy_tools.h"
 
@@ -13,16 +12,6 @@
 void strappy_session_free_string(char *value)
 {
   strappy_free_string(value);
-}
-
-const char *strappy_session_prompt_template_resource_name(void)
-{
-  return STRAPPY_PROMPT_TEMPLATE_RESOURCE_NAME;
-}
-
-const char *strappy_session_prompt_template_resource_type(void)
-{
-  return STRAPPY_PROMPT_TEMPLATE_RESOURCE_TYPE;
 }
 
 int strappy_session_configure_process(const char *ca_cert_path,
@@ -291,7 +280,7 @@ int strappy_session_send_prompt_with_events_and_load(
   const char *prompt,
   const char *api_endpoint,
   const char *api_token,
-  const char *system_prompt_template_path,
+  const char *guidance_resource_dir,
   const char *db_path,
   long long session_id,
   strappy_responses_event_callback callback,
@@ -306,7 +295,7 @@ int strappy_session_send_prompt_with_events_and_load(
     NULL,
     api_endpoint,
     api_token,
-    system_prompt_template_path,
+    guidance_resource_dir,
     db_path,
     session_id,
     callback,

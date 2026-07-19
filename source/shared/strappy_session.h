@@ -11,8 +11,6 @@ extern "C" {
 #endif
 
 void strappy_session_free_string(char *value);
-const char *strappy_session_prompt_template_resource_name(void);
-const char *strappy_session_prompt_template_resource_type(void);
 
 int strappy_session_configure_process(const char *ca_cert_path,
                                       const char *font_dir,
@@ -110,7 +108,7 @@ int strappy_session_send_prompt_with_events_and_load(
   const char *prompt,
   const char *api_endpoint,
   const char *api_token,
-  const char *system_prompt_template_path,
+  const char *guidance_resource_dir,
   const char *db_path,
   long long session_id,
   strappy_responses_event_callback callback,

@@ -13,10 +13,8 @@ SOURCES = main.m AppDelegate.m XPAppKit.m PreferencesWindowController.m \
 INFO_PLIST = Info.plist
 
 SHARED_DIR = ../shared
-SYSTEM_PROMPT_TEMPLATE = $(SHARED_DIR)/Resources/PromptSystemDatabase.txt
-ASSISTANT_SET_RESOURCES = $(SHARED_DIR)/Resources/AssistantSets.json \
-                     $(SHARED_DIR)/Resources/PromptSystemWorld.txt \
-                     $(SHARED_DIR)/Resources/PromptSystemCode.txt
+PROMPT_INVARIANT_RESOURCE = $(SHARED_DIR)/Resources/PromptInvariant.txt
+ASSISTANT_SET_RESOURCE = $(SHARED_DIR)/Resources/AssistantSets.json
 FONTAWESOME_GENERATOR = $(SHARED_DIR)/tools/generate_fontawesome_webview_map.py
 FONTAWESOME_FONT_DIR ?= /altivec/libs/cocoa/Resources/Fonts
 FONTAWESOME_ICONS_RESOURCE = $(SHARED_DIR)/Resources/FontAwesomeIcons.json
@@ -26,8 +24,8 @@ FONTAWESOME_FONT_FILES = \
                      $(FONTAWESOME_FONT_DIR)/FA7-Solid-900.otf \
                      $(FONTAWESOME_FONT_DIR)/FA7-Regular-400.otf \
                      $(FONTAWESOME_FONT_DIR)/FA7-Brands-400.otf
-GUIDANCE_RESOURCES = $(SYSTEM_PROMPT_TEMPLATE) \
-                     $(ASSISTANT_SET_RESOURCES) \
+GUIDANCE_RESOURCES = $(PROMPT_INVARIANT_RESOURCE) \
+                     $(ASSISTANT_SET_RESOURCE) \
                      $(SHARED_DIR)/Resources/GuidanceTools.json \
                      $(SHARED_DIR)/Resources/GuidanceDatabase.json \
                      $(FONTAWESOME_ICONS_RESOURCE)
@@ -38,7 +36,7 @@ ALTIVECCOCOA_LINKAGE = static
 SOURCE_DIRS = $(SHARED_DIR)
 vpath %.m $(SHARED_DIR)
 EXTRA_FLAGS = -I$(SHARED_DIR) -I$(ALTIVECCORE_DIR)/include
-EXTRA_SOURCES = XPFoundation.m XPKeychain.m StrappyKeychain.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_config.c strappy_client.c strappy_db.c strappy_model_catalog.c strappy_file_scanner.c strappy_session.c strappy_prompt.c strappy_assistant_sets.c strappy_tools.c strappy_responses.c strappy_webview.c
+EXTRA_SOURCES = XPFoundation.m XPKeychain.m StrappyKeychain.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_config.c strappy_client.c strappy_db.c strappy_model_catalog.c strappy_file_scanner.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_tools.c strappy_responses.c strappy_webview.c
 BUNDLE_FONT_DIRS = $(ALTIVECCOCOA_DIR)/Resources/Fonts
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
 EXTRA_BUNDLE_STEPS = @set -e; $(MAKE) -f Makefile $(FONTAWESOME_GENERATED); echo "  > copying prompt guidance resources"; for resource in $(GUIDANCE_RESOURCES); do cp "$$resource" "$@/Contents/Resources/"; done

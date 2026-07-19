@@ -6,6 +6,7 @@
 #include "strappy_core.h"
 #include "strappy_db.h"
 #include "strappy_prompt.h"
+#include "strappy_quality_policy.h"
 #include "strappy_tools.h"
 
 #include <cJSON.h>
@@ -23,16 +24,6 @@
 #define STRAPPY_RESPONSES_INITIAL_RETRY_DELAY_MS 500L
 #define STRAPPY_RESPONSES_MAX_RETRY_DELAY_MS 60000L
 #define STRAPPY_RESPONSES_MAX_AUDIT_RULES 16U
-
-static const char strappy_responses_audit_guidance_version[] = "4";
-static const char strappy_responses_answer_non_empty_check_key[] =
-  "answer_non_empty";
-static const char strappy_responses_answer_non_empty_label[] =
-  "Answer provided";
-static const char strappy_responses_web_reference_check_key[] =
-  "web_reference";
-static const char strappy_responses_web_reference_label[] =
-  "Source link included";
 
 typedef struct strappy_responses_buffer {
   char *data;
@@ -67,11 +58,7 @@ typedef struct strappy_responses_analysis {
 } strappy_responses_analysis;
 
 typedef struct strappy_responses_audit_rule {
-  const char *check_key;
-  const char *check_kind;
-  const char *label;
-  const char *tool_name;
-  int evaluation_kind;
+  const strappy_quality_check_definition *definition;
   int completed;
 } strappy_responses_audit_rule;
 
@@ -80,75 +67,6 @@ typedef struct strappy_responses_audit {
   size_t rule_count;
   int web_reference_required;
 } strappy_responses_audit;
-
-enum {
-  STRAPPY_RESPONSES_AUDIT_ANSWER_NON_EMPTY = 1,
-  STRAPPY_RESPONSES_AUDIT_WEB_REFERENCE,
-  STRAPPY_RESPONSES_AUDIT_REQUIRED_TOOL
-};
-
-static const strappy_responses_audit_rule strappy_responses_audit_rules[] = {
-  {
-    strappy_responses_answer_non_empty_check_key,
-    "answer_content",
-    strappy_responses_answer_non_empty_label,
-    NULL,
-    STRAPPY_RESPONSES_AUDIT_ANSWER_NON_EMPTY,
-    0
-  },
-  {
-    strappy_responses_web_reference_check_key,
-    "answer_content",
-    strappy_responses_web_reference_label,
-    NULL,
-    STRAPPY_RESPONSES_AUDIT_WEB_REFERENCE,
-    0
-  },
-  {
-    "database_context_read",
-    "required_tool",
-    "Database context checked",
-    STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-    STRAPPY_RESPONSES_AUDIT_REQUIRED_TOOL,
-    0
-  },
-  {
-    "helper_session_name_write",
-    "required_tool",
-    "Session named",
-    STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
-    STRAPPY_RESPONSES_AUDIT_REQUIRED_TOOL,
-    0
-  },
-  {
-    "helper_fontawesome_shortcode_confirm",
-    "required_tool",
-    "Font Awesome shortcode confirmed",
-    STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
-    STRAPPY_RESPONSES_AUDIT_REQUIRED_TOOL,
-    0
-  },
-  {
-    "memory_user_fact_remember",
-    "required_tool",
-    "User memory considered",
-    STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
-    STRAPPY_RESPONSES_AUDIT_REQUIRED_TOOL,
-    0
-  },
-  {
-    "memory_database_hint_remember",
-    "required_tool",
-    "Database memory considered",
-    STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
-    STRAPPY_RESPONSES_AUDIT_REQUIRED_TOOL,
-    0
-  }
-};
-
-static const size_t strappy_responses_audit_rule_count =
-  sizeof(strappy_responses_audit_rules) /
-  sizeof(strappy_responses_audit_rules[0]);
 
 static int strappy_responses_text_has_non_whitespace(const char *text);
 
@@ -218,43 +136,33 @@ static int strappy_responses_audit_init(
        profile_index < profile->quality_check_key_count;
        profile_index++) {
     const char *check_key;
-    size_t registry_index;
-    int found;
+    const strappy_quality_check_definition *definition;
 
     check_key = profile->quality_check_keys[profile_index];
-    found = 0;
-    for (registry_index = 0U;
-         registry_index < strappy_responses_audit_rule_count;
-         registry_index++) {
-      if (strcmp(strappy_responses_audit_rules[registry_index].check_key,
-                 check_key) == 0) {
-        if ((strappy_responses_audit_rules[registry_index].tool_name != NULL) &&
-            !strappy_assistant_set_profile_allows_tool(
-              profile,
-              strappy_responses_audit_rules[registry_index].tool_name)) {
-          strappy_set_formatted_error(
-            error_out,
-            "Answer-quality tool is not allowed by the assistant set: %s",
-            strappy_responses_audit_rules[registry_index].tool_name);
-          return 0;
-        }
-        if (audit->rule_count >= STRAPPY_RESPONSES_MAX_AUDIT_RULES) {
-          strappy_set_error(error_out,
-                            "Assistant-set quality policy is too large.");
-          return 0;
-        }
-        audit->rules[audit->rule_count++] =
-          strappy_responses_audit_rules[registry_index];
-        found = 1;
-        break;
-      }
-    }
-    if (!found) {
+    definition = strappy_quality_policy_find(check_key);
+    if (definition == NULL) {
       strappy_set_formatted_error(error_out,
                                   "Answer-quality check is not registered: %s",
                                   check_key);
       return 0;
     }
+    if ((definition->tool_name != NULL) &&
+        !strappy_assistant_set_profile_allows_tool(profile,
+                                                   definition->tool_name)) {
+      strappy_set_formatted_error(
+        error_out,
+        "Answer-quality tool is not allowed by the assistant set: %s",
+        definition->tool_name);
+      return 0;
+    }
+    if (audit->rule_count >= STRAPPY_RESPONSES_MAX_AUDIT_RULES) {
+      strappy_set_error(error_out,
+                        "Assistant-set quality policy is too large.");
+      return 0;
+    }
+    audit->rules[audit->rule_count].definition = definition;
+    audit->rules[audit->rule_count].completed = 0;
+    audit->rule_count++;
   }
   if (audit->rule_count == 0U) {
     strappy_set_error(error_out,
@@ -287,8 +195,8 @@ static void strappy_responses_audit_record_completed_tool(
     return;
   }
   for (index = 0U; index < audit->rule_count; index++) {
-    if ((audit->rules[index].tool_name != NULL) &&
-        (strcmp(audit->rules[index].tool_name, tool_name) == 0)) {
+    if ((audit->rules[index].definition->tool_name != NULL) &&
+        (strcmp(audit->rules[index].definition->tool_name, tool_name) == 0)) {
       audit->rules[index].completed = 1;
     }
   }
@@ -399,11 +307,12 @@ static int strappy_responses_audit_evaluate(
 
     rule = &audit->rules[index];
     check = &checks[index];
-    check->check_key = rule->check_key;
-    check->check_kind = rule->check_kind;
-    check->label = rule->label;
-    check->tool_name = rule->tool_name;
-    if (rule->evaluation_kind == STRAPPY_RESPONSES_AUDIT_ANSWER_NON_EMPTY) {
+    check->check_key = rule->definition->check_key;
+    check->check_kind = rule->definition->check_kind;
+    check->label = rule->definition->label;
+    check->tool_name = rule->definition->tool_name;
+    if (rule->definition->evaluation_kind ==
+        STRAPPY_QUALITY_CHECK_ANSWER_NON_EMPTY) {
       if (strappy_responses_text_has_non_whitespace(response_text)) {
         check->status = "passed";
       } else {
@@ -412,8 +321,8 @@ static int strappy_responses_audit_evaluate(
           "The response did not include a non-empty assistant answer.";
         failed = 1;
       }
-    } else if (rule->evaluation_kind ==
-               STRAPPY_RESPONSES_AUDIT_WEB_REFERENCE) {
+    } else if (rule->definition->evaluation_kind ==
+               STRAPPY_QUALITY_CHECK_WEB_REFERENCE) {
       if (!audit->web_reference_required) {
         check->status = "not_applicable";
         check->detail = "No web search or web fetch was used.";
@@ -425,8 +334,8 @@ static int strappy_responses_audit_evaluate(
           "A linked HTTP source reference was required but not found.";
         failed = 1;
       }
-    } else if (rule->evaluation_kind ==
-               STRAPPY_RESPONSES_AUDIT_REQUIRED_TOOL) {
+    } else if (rule->definition->evaluation_kind ==
+               STRAPPY_QUALITY_CHECK_REQUIRED_TOOL) {
       if (rule->completed) {
         check->status = "passed";
       } else {
@@ -443,7 +352,7 @@ static int strappy_responses_audit_evaluate(
   }
 
   result->outcome = failed ? "failed" : "passed";
-  result->guidance_version = strappy_responses_audit_guidance_version;
+  result->guidance_version = STRAPPY_QUALITY_POLICY_GUIDANCE_VERSION;
   result->checks = checks;
   result->check_count = audit->rule_count;
   return 1;
@@ -1669,18 +1578,18 @@ static int strappy_responses_prepare_runtime(
   const char *env_path,
   const char *fallback_api_endpoint,
   const char *fallback_api_token,
-  const char *system_prompt_template_path,
+  const char *guidance_resource_dir,
   const char *session_db_path,
   long long session_id,
   char **error_out)
 {
   strappy_session_record session;
-  char *resource_dir;
   char *model;
   char *assistant_set_id;
   int ok;
 
-  if ((runtime == NULL) || (system_prompt_template_path == NULL) ||
+  if ((runtime == NULL) || (guidance_resource_dir == NULL) ||
+      (guidance_resource_dir[0] == '\0') ||
       (session_db_path == NULL) || (session_id <= 0LL)) {
     strappy_set_error(error_out,
                       "Responses runtime configuration is incomplete.");
@@ -1688,7 +1597,6 @@ static int strappy_responses_prepare_runtime(
   }
   strappy_responses_runtime_init(runtime);
   strappy_session_record_init(&session);
-  resource_dir = NULL;
   model = NULL;
   assistant_set_id = NULL;
 
@@ -1730,20 +1638,13 @@ static int strappy_responses_prepare_runtime(
   }
   free(model);
 
-  resource_dir =
-    strappy_prompt_resource_directory_from_template_path(
-      system_prompt_template_path,
-      error_out);
-  if ((resource_dir == NULL) ||
-      !strappy_config_set_guidance_resource_dir(&runtime->config,
-                                                resource_dir,
+  if (!strappy_config_set_guidance_resource_dir(&runtime->config,
+                                                guidance_resource_dir,
                                                 error_out)) {
-    free(resource_dir);
     free(assistant_set_id);
     strappy_responses_runtime_destroy(runtime);
     return 0;
   }
-  free(resource_dir);
 
   if (!strappy_assistant_sets_load_profile(
         runtime->config.guidance_resource_dir,
@@ -1761,9 +1662,10 @@ static int strappy_responses_prepare_runtime(
   runtime->config.tool_allowlist_count = runtime->assistant_set.tool_name_count;
 
   runtime->system_prompt =
-    strappy_prompt_render_resource(runtime->config.guidance_resource_dir,
-                                   runtime->assistant_set.prompt_resource,
-                                   error_out);
+    strappy_prompt_build(runtime->config.guidance_resource_dir,
+                         &runtime->assistant_set,
+                         runtime->config.web_search_enabled,
+                         error_out);
   if (runtime->system_prompt == NULL) {
     strappy_responses_runtime_destroy(runtime);
     return 0;
@@ -2502,7 +2404,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   const char *env_path,
   const char *fallback_api_endpoint,
   const char *fallback_api_token,
-  const char *system_prompt_template_path,
+  const char *guidance_resource_dir,
   const char *session_db_path,
   long long session_id,
   strappy_responses_event_callback callback,
@@ -2542,7 +2444,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
                                          env_path,
                                          fallback_api_endpoint,
                                          fallback_api_token,
-                                         system_prompt_template_path,
+                                         guidance_resource_dir,
                                          session_db_path,
                                          session_id,
                                          error_out)) {
@@ -2783,7 +2685,7 @@ char *strappy_responses_send_prompt_for_session_and_store(
   const char *env_path,
   const char *fallback_api_endpoint,
   const char *fallback_api_token,
-  const char *system_prompt_template_path,
+  const char *guidance_resource_dir,
   const char *session_db_path,
   long long session_id,
   char **error_out)
@@ -2793,7 +2695,7 @@ char *strappy_responses_send_prompt_for_session_and_store(
     env_path,
     fallback_api_endpoint,
     fallback_api_token,
-    system_prompt_template_path,
+    guidance_resource_dir,
     session_db_path,
     session_id,
     NULL,

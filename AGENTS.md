@@ -17,8 +17,11 @@ analysis logs unless the user explicitly asks for them.
 Linux-only shared-core harnesses live under `source/linux`. They are fast
 developer smoke tests for portable C code and do not replace the required
 Altivec iOS/macOS clean builds. The current harness targets are
-`database_query_harness`, `webview_harness`, and `responses_harness`, run through
-`make -C source/linux clean test`.
+`database_query_harness`, `webview_harness`, `responses_harness`, and
+`prompt_generator_harness`, run through `make -C source/linux clean test`.
+Use `make -C source/linux prompts` to write all assistant-set prompts with web
+search enabled and disabled under `source/linux/build-linux/system-prompts`, or
+`make -C source/linux review-prompts` to print all six variants.
 `database_query_harness` also covers
 OpenRouter model catalog persistence, catalog search, default model selection,
 allowed-model whitelisting, per-session model selection, and stale
@@ -79,16 +82,19 @@ House style for Strappy source:
     rendering logic in `strappy_webview.{h,c}` or another C module, not in
     Objective-C view controllers.
 13. Prompt, assistant-set, tool, and database guidance are runtime resources
-    under `source/shared/Resources`: `AssistantSets.json`, the set-specific
-    prompt text files, `GuidanceTools.json`, and `GuidanceDatabase.json`.
-    `AssistantSets.json` owns each set's prompt resource, tool allowlist,
+    under `source/shared/Resources`: `AssistantSets.json`,
+    `PromptInvariant.txt`, `GuidanceTools.json`, and `GuidanceDatabase.json`.
+    System prompts are assembled programmatically from the selected tools and
+    their descriptions, the selected quality checks and their shared policy
+    guidance, the assistant-set goal, and the invariant personality/hard-rule
+    text. `AssistantSets.json` owns each set's goal, tool allowlist,
     preflight tools, answer-quality checks, and availability. Keep tool schemas
     in `GuidanceTools.json` in sync with the tool-name constants in
     `strappy_tools.h` and the executor in `strappy_tools.c`; do not duplicate
     prompt or tool guidance in Objective-C UI code. Strict assistant workflow
     rules, timestamp guidance, memory guidance, and database-specific
-    instructions belong in these resources, not in scattered C or Objective-C
-    strings.
+    instructions belong in these resources or the shared quality-policy table,
+    not in scattered C or Objective-C strings.
 14. Database tool flow is split by responsibility. `database_list_info` lists
     approved databases in a compact `databases` array containing
     assistant-visible IDs, inferred app names, paths, sizes, and modification

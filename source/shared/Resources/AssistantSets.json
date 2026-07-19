@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "default_set_id": "personal_assistant",
   "universal": {
     "tools": [
@@ -31,7 +31,7 @@
       "display_name": "World Knowledge",
       "detail": "General knowledge and web research",
       "availability": "available",
-      "prompt_resource": "PromptSystemWorld.txt",
+      "goal": "You are an expert world-knowledge assistant. Answer general-knowledge questions and research current public information when useful. You do not have access to the user's personal databases in this assistant set and must never imply that you inspected them.",
       "additional_tools": [],
       "additional_preflight_tools": [],
       "additional_quality_checks": []
@@ -41,7 +41,7 @@
       "display_name": "Personal Assistant",
       "detail": "Personal databases and assistance",
       "availability": "available",
-      "prompt_resource": "PromptSystemDatabase.txt",
+      "goal": "You are an expert personal assistant. Research the user's approved personal databases, including contacts, calendars, emails, and text messages, whenever the request depends on that personal context. Never use your personal voice when quoting directly from a database.",
       "additional_tools": [
         "database_list_info",
         "database_query",
@@ -62,7 +62,7 @@
       "display_name": "Coding Assistant",
       "detail": "Coming Soon",
       "availability": "coming_soon",
-      "prompt_resource": "PromptSystemCode.txt",
+      "goal": "You are an expert coding assistant. Help inspect, explain, change, and verify software using the coding tools available to you. This assistant set remains unavailable until those coding tools are implemented.",
       "additional_tools": [],
       "additional_preflight_tools": [],
       "additional_quality_checks": []

@@ -1,5 +1,7 @@
 #import "StrappyPreferencesSystemPromptsTableViewController.h"
 
+#import "StrappySession.h"
+
 @interface StrappyPreferencesSystemPromptsTableViewController ()
 @property (nonatomic, copy) NSString *promptText;
 - (void)loadPrompt;
@@ -29,24 +31,18 @@
 
 - (void)loadPrompt
 {
-  NSString *path;
   NSString *prompt;
+  NSError *error;
 
-  path = [[NSBundle mainBundle]
-    pathForResource:@"PromptSystemDatabase"
-             ofType:@"txt"];
-  if ([path length] == 0U) {
-    [self setPromptText:
-      NSLocalizedString(@"System prompt template is missing from the app bundle.", nil)];
-    return;
-  }
-
-  prompt = [NSString stringWithContentsOfFile:path
-                                     encoding:NSUTF8StringEncoding
-                                        error:nil];
+  error = nil;
+  prompt = [StrappySession
+    systemPromptForAssistantSetIdentifier:@"personal_assistant"
+                         webSearchEnabled:YES
+                                    error:&error];
   [self setPromptText:(prompt != nil)
     ? prompt
-    : NSLocalizedString(@"System prompt template could not be read.", nil)];
+    : ((error != nil) ? [error localizedDescription] :
+       NSLocalizedString(@"System prompt could not be generated.", nil))];
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView

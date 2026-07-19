@@ -15,7 +15,7 @@ DATABASE_MANIFEST ?= $(DEVICE_FIXTURE_DIR)/databases.json
 MEMBER_ROSTER ?= $(DEVICE_FIXTURE_DIR)/member_roster.json
 SYNC_FIXTURES := sync_device_fixtures.py
 ENV_FILE ?= ../../../.env
-SYSTEM_PROMPT ?= $(SHARED_DIR)/Resources/PromptSystemDatabase.txt
+RESOURCE_DIR ?= $(SHARED_DIR)/Resources
 
 CPPFLAGS += -I$(SHARED_DIR) -I$(CJSON_DIR)
 CFLAGS ?= -std=c99 -Wall -Wextra -Wconversion -Wsign-conversion -Wfloat-conversion
@@ -29,6 +29,8 @@ RUNNER_SOURCES = \
 	$(SHARED_DIR)/strappy_core.c \
 	$(SHARED_DIR)/strappy_db.c \
 	$(SHARED_DIR)/strappy_prompt.c \
+	$(SHARED_DIR)/strappy_quality_policy.c \
+	$(SHARED_DIR)/strappy_assistant_sets.c \
 	$(SHARED_DIR)/strappy_responses.c \
 	$(SHARED_DIR)/strappy_tools.c \
 	$(CJSON_DIR)/cJSON.c
@@ -77,7 +79,7 @@ run: build verify-fixture
 		--database-manifest "$(DATABASE_MANIFEST)" \
 		--member-roster "$(MEMBER_ROSTER)" \
 		--env-file "$(ENV_FILE)" \
-		--system-prompt "$(SYSTEM_PROMPT)" \
+		--resource-dir "$(RESOURCE_DIR)" \
 		$(if $(MODEL),--model "$(MODEL)",)
 
 # This copies every Strappy-approved database and its SQLite sidecars. It is

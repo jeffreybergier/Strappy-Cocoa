@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 #define STRAPPY_ASSISTANT_SETS_RESOURCE_NAME "AssistantSets.json"
+#define STRAPPY_ASSISTANT_SETS_SCHEMA_VERSION 2
 #define STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE "world_knowledge"
 #define STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT "personal_assistant"
 #define STRAPPY_ASSISTANT_SET_CODING_ASSISTANT "coding_assistant"
@@ -32,7 +33,7 @@ typedef struct strappy_assistant_set_profile {
   char *display_name;
   char *detail;
   char *availability;
-  char *prompt_resource;
+  char *goal;
   char **tool_names;
   size_t tool_name_count;
   char **preflight_tool_names;

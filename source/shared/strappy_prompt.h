@@ -1,21 +1,22 @@
 #ifndef STRAPPY_PROMPT_H
 #define STRAPPY_PROMPT_H
 
+#include "strappy_assistant_sets.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define STRAPPY_PROMPT_TEMPLATE_RESOURCE_NAME "PromptSystemDatabase"
-#define STRAPPY_PROMPT_TEMPLATE_RESOURCE_TYPE "txt"
+#define STRAPPY_PROMPT_INVARIANT_RESOURCE_NAME "PromptInvariant.txt"
 
-char *strappy_prompt_render_system_prompt(const char *template_path,
-                                          char **error_out);
+char *strappy_prompt_build(
+  const char *resource_dir,
+  const strappy_assistant_set_profile *profile,
+  int web_search_enabled,
+  char **error_out);
 char *strappy_prompt_render_resource(const char *resource_dir,
                                      const char *resource_name,
                                      char **error_out);
-char *strappy_prompt_resource_directory_from_template_path(
-  const char *template_path,
-  char **error_out);
 
 #ifdef __cplusplus
 }

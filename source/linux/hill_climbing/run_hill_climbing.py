@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--database-manifest", required=True, type=Path)
     parser.add_argument("--member-roster", required=True, type=Path)
     parser.add_argument("--env-file", required=True, type=Path)
-    parser.add_argument("--system-prompt", required=True, type=Path)
+    parser.add_argument("--resource-dir", required=True, type=Path)
     parser.add_argument(
         "--model",
         choices=[model for model, _ in MODELS],
@@ -473,7 +473,7 @@ def run_model(
     run_dir: Path,
     databases: list[Path],
     env_file: Path,
-    system_prompt: Path,
+    resource_dir: Path,
     prompt: str,
 ) -> dict[str, object]:
     model_dir = run_dir / slug
@@ -491,8 +491,8 @@ def run_model(
         str(session_db),
         "--env-file",
         str(env_file),
-        "--system-prompt",
-        str(system_prompt),
+        "--resource-dir",
+        str(resource_dir),
         "--answer-file",
         str(answer_file),
         "--prompt",
@@ -571,16 +571,26 @@ def main() -> int:
     database_manifest = args.database_manifest.resolve()
     member_roster_path = args.member_roster.resolve()
     env_file = args.env_file.resolve()
-    system_prompt = args.system_prompt.resolve()
+    resource_dir = args.resource_dir.resolve()
 
     required = (
         runner,
         database_manifest,
         member_roster_path,
         env_file,
-        system_prompt,
     )
     missing = [str(path) for path in required if not path.is_file()]
+    if not resource_dir.is_dir():
+        missing.append(str(resource_dir))
+    for name in (
+        "AssistantSets.json",
+        "PromptInvariant.txt",
+        "GuidanceTools.json",
+        "GuidanceDatabase.json",
+    ):
+        resource = resource_dir / name
+        if not resource.is_file():
+            missing.append(str(resource))
     if missing:
         print("Missing required file(s):", file=sys.stderr)
         for path in missing:
@@ -620,16 +630,16 @@ def main() -> int:
         "member_roster_sha256": sha256(member_roster_path),
         "member_roster": member_roster,
         "seeded_user_fact": SEEDED_USER_FACT,
-        "system_prompt": str(system_prompt),
-        "system_prompt_sha256": sha256(system_prompt),
+        "resource_dir": str(resource_dir),
         "resource_sha256": {
-            name: sha256(system_prompt.parent / name)
+            name: sha256(resource_dir / name)
             for name in (
-                "PromptSystemDatabase.txt",
+                "AssistantSets.json",
+                "PromptInvariant.txt",
                 "GuidanceTools.json",
                 "GuidanceDatabase.json",
             )
-            if (system_prompt.parent / name).is_file()
+            if (resource_dir / name).is_file()
         },
         "results": {},
     }
@@ -653,7 +663,7 @@ def main() -> int:
                 run_dir,
                 databases,
                 env_file,
-                system_prompt,
+                resource_dir,
                 args.prompt,
             ): (model, slug)
             for model, slug in selected

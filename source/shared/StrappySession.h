@@ -46,6 +46,9 @@ extern NSString * const StrappySessionChangeKindAssistantSet;
 + (NSArray *)openRouterModelCatalogWithError:(NSError **)error;
 + (NSArray *)allowedOpenRouterModelCatalogWithError:(NSError **)error;
 + (NSArray *)assistantSetCatalog;
++ (NSString *)systemPromptForAssistantSetIdentifier:(NSString *)identifier
+                                  webSearchEnabled:(BOOL)webSearchEnabled
+                                             error:(NSError **)error;
 + (NSString *)defaultOpenRouterModelIdentifierWithError:(NSError **)error;
 + (BOOL)setDefaultOpenRouterModelIdentifier:(NSString *)modelIdentifier
                                       error:(NSError **)error;

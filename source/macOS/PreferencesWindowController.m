@@ -869,23 +869,17 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)loadSystemPrompt
 {
-  NSString *path;
   NSString *prompt;
+  NSError *error;
 
-  path = [[NSBundle mainBundle]
-    pathForResource:@"PromptSystemDatabase"
-             ofType:@"txt"];
-  if ([path length] == 0U) {
-    [systemPromptTextView_ setString:
-      NSLocalizedString(@"System prompt template is missing from the app bundle.", nil)];
-    return;
-  }
-
-  prompt = [NSString stringWithContentsOfFile:path
-                                     encoding:NSUTF8StringEncoding
-                                        error:nil];
+  error = nil;
+  prompt = [StrappySession
+    systemPromptForAssistantSetIdentifier:@"personal_assistant"
+                         webSearchEnabled:YES
+                                    error:&error];
   if (prompt == nil) {
-    prompt = NSLocalizedString(@"System prompt template could not be read.", nil);
+    prompt = (error != nil) ? [error localizedDescription] :
+      NSLocalizedString(@"System prompt could not be generated.", nil);
   }
   [systemPromptTextView_ setString:prompt];
 }

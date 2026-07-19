@@ -24,7 +24,7 @@ typedef struct hill_options {
   const char *databases[HILL_MAX_DATABASES];
   size_t database_count;
   const char *env_file;
-  const char *system_prompt;
+  const char *resource_dir;
   const char *answer_file;
   const char *prompt;
   int prepare_only;
@@ -75,7 +75,7 @@ static void hill_usage(const char *program)
 {
   fprintf(stderr,
           "Usage: %s --model ID --session-db PATH --database PATH [...] "
-          "--env-file PATH --system-prompt PATH --answer-file PATH "
+          "--env-file PATH --resource-dir PATH --answer-file PATH "
           "--prompt TEXT [--prepare-only]\n",
           program);
 }
@@ -116,8 +116,8 @@ static int hill_parse_options(int argc, char **argv, hill_options *options)
       options->databases[options->database_count++] = value;
     } else if (strcmp(name, "--env-file") == 0) {
       options->env_file = value;
-    } else if (strcmp(name, "--system-prompt") == 0) {
-      options->system_prompt = value;
+    } else if (strcmp(name, "--resource-dir") == 0) {
+      options->resource_dir = value;
     } else if (strcmp(name, "--answer-file") == 0) {
       options->answer_file = value;
     } else if (strcmp(name, "--prompt") == 0) {
@@ -137,7 +137,7 @@ static int hill_parse_options(int argc, char **argv, hill_options *options)
     return 1;
   }
   return (options->env_file != NULL) &&
-    (options->system_prompt != NULL) &&
+    (options->resource_dir != NULL) &&
     (options->answer_file != NULL) &&
     (options->prompt != NULL);
 }
@@ -826,7 +826,7 @@ int main(int argc, char **argv)
     options.env_file,
     NULL,
     NULL,
-    options.system_prompt,
+    options.resource_dir,
     options.session_db,
     session_id,
     hill_event_callback,

@@ -17,6 +17,7 @@
 #define STRAPPY_TOOL_SERVER_TOOLS_KEY "server_tools"
 #define STRAPPY_TOOL_SERVER_FEATURE_KEY "feature"
 #define STRAPPY_TOOL_SERVER_FEATURE_WEB_SEARCH "web_search"
+#define STRAPPY_TOOL_DESCRIPTION_KEY "description"
 #define STRAPPY_TOOL_DISPLAY_METADATA_KEY "x-strappy-display"
 #define STRAPPY_TOOL_DISPLAY_LABEL_KEY "label"
 #define STRAPPY_TOOL_DISPLAY_PROMOTED_ARGUMENT_KEY "promoted_argument"
@@ -71,6 +72,11 @@ typedef struct strappy_server_tool_definition {
   const char *type;
   const char *feature;
 } strappy_server_tool_definition;
+
+typedef struct strappy_tools_text_buffer {
+  char *data;
+  size_t length;
+} strappy_tools_text_buffer;
 
 typedef struct strappy_database_query_arguments {
   char *database_id;
@@ -603,6 +609,24 @@ static const char *strappy_tools_tool_schema_name(cJSON *tool)
   return name->valuestring;
 }
 
+static const char *strappy_tools_tool_schema_description(cJSON *tool)
+{
+  cJSON *function;
+  cJSON *description;
+
+  function = cJSON_IsObject(tool) ?
+    cJSON_GetObjectItemCaseSensitive(tool, "function") : NULL;
+  description = cJSON_IsObject(function) ?
+    cJSON_GetObjectItemCaseSensitive(function,
+                                     STRAPPY_TOOL_DESCRIPTION_KEY) : NULL;
+  if ((description == NULL) || !cJSON_IsString(description) ||
+      (description->valuestring == NULL) ||
+      (description->valuestring[0] == '\0')) {
+    return NULL;
+  }
+  return description->valuestring;
+}
+
 static int strappy_tools_schema_list_contains(cJSON *tools,
                                               const char *tool_name)
 {
@@ -953,6 +977,7 @@ static int strappy_tools_validate_guidance_server_tools(cJSON *server_tools,
   for (tool = server_tools->child; tool != NULL; tool = tool->next) {
     const char *type;
     const strappy_server_tool_definition *definition;
+    cJSON *description;
     cJSON *feature;
     cJSON *field;
 
@@ -972,6 +997,7 @@ static int strappy_tools_validate_guidance_server_tools(cJSON *server_tools,
     for (field = tool->child; field != NULL; field = field->next) {
       if ((field->string == NULL) ||
           ((strcmp(field->string, "type") != 0) &&
+           (strcmp(field->string, STRAPPY_TOOL_DESCRIPTION_KEY) != 0) &&
            (strcmp(field->string, STRAPPY_TOOL_SERVER_FEATURE_KEY) != 0) &&
            (strcmp(field->string, STRAPPY_TOOL_DISPLAY_METADATA_KEY) != 0))) {
         strappy_set_formatted_error(
@@ -980,6 +1006,18 @@ static int strappy_tools_validate_guidance_server_tools(cJSON *server_tools,
           type);
         return 0;
       }
+    }
+    description = cJSON_GetObjectItemCaseSensitive(
+      tool,
+      STRAPPY_TOOL_DESCRIPTION_KEY);
+    if ((description == NULL) || !cJSON_IsString(description) ||
+        (description->valuestring == NULL) ||
+        (description->valuestring[0] == '\0')) {
+      strappy_set_formatted_error(
+        error_out,
+        "Tool guidance server tool %s is missing its description.",
+        type);
+      return 0;
     }
     feature = cJSON_GetObjectItemCaseSensitive(
       tool,
@@ -1055,6 +1093,7 @@ static int strappy_tools_validate_guidance_tools(cJSON *tools,
 
   for (tool = tools->child; tool != NULL; tool = tool->next) {
     const char *name;
+    const char *description;
 
     name = strappy_tools_tool_schema_name(tool);
     if (name == NULL) {
@@ -1065,6 +1104,14 @@ static int strappy_tools_validate_guidance_tools(cJSON *tools,
       strappy_set_formatted_error(error_out,
                                   "Tool guidance contains unsupported tool: %s",
                                   name);
+      return 0;
+    }
+    description = strappy_tools_tool_schema_description(tool);
+    if (description == NULL) {
+      strappy_set_formatted_error(
+        error_out,
+        "Tool guidance schema %s is missing its description.",
+        name);
       return 0;
     }
     if (!strappy_tools_validate_display_metadata(tool, name, error_out)) {
@@ -1151,6 +1198,37 @@ static int strappy_tools_name_is_allowed(const char *name,
   }
 
   return 0;
+}
+
+static int strappy_tools_server_schema_is_enabled(
+  cJSON *server_tool,
+  const char * const *allowed_names,
+  size_t allowed_name_count,
+  int web_search_enabled)
+{
+  const char *type;
+  cJSON *feature;
+
+  type = strappy_tools_server_schema_type(server_tool);
+  if (type == NULL) {
+    return 0;
+  }
+  if ((allowed_names != NULL) && (allowed_name_count > 0U) &&
+      !strappy_tools_name_is_allowed(type,
+                                     allowed_names,
+                                     allowed_name_count)) {
+    return 0;
+  }
+  feature = cJSON_GetObjectItemCaseSensitive(
+    server_tool,
+    STRAPPY_TOOL_SERVER_FEATURE_KEY);
+  if (cJSON_IsString(feature) && (feature->valuestring != NULL) &&
+      (strcmp(feature->valuestring,
+              STRAPPY_TOOL_SERVER_FEATURE_WEB_SEARCH) == 0) &&
+      !web_search_enabled) {
+    return 0;
+  }
+  return 1;
 }
 
 char *strappy_tools_request_json_filtered(const char *resource_dir,
@@ -1370,23 +1448,13 @@ static int strappy_tools_responses_append_server_tools(
        server_tool != NULL;
        server_tool = server_tool->next) {
     const char *type;
-    cJSON *feature;
     cJSON *response_tool;
 
     type = strappy_tools_server_schema_type(server_tool);
-    if ((allowed_names != NULL) && (allowed_name_count > 0U) &&
-        !strappy_tools_name_is_allowed(type,
-                                       allowed_names,
-                                       allowed_name_count)) {
-      continue;
-    }
-    feature = cJSON_GetObjectItemCaseSensitive(
-      server_tool,
-      STRAPPY_TOOL_SERVER_FEATURE_KEY);
-    if (cJSON_IsString(feature) && (feature->valuestring != NULL) &&
-        (strcmp(feature->valuestring,
-                STRAPPY_TOOL_SERVER_FEATURE_WEB_SEARCH) == 0) &&
-        !web_search_enabled) {
+    if (!strappy_tools_server_schema_is_enabled(server_tool,
+                                                allowed_names,
+                                                allowed_name_count,
+                                                web_search_enabled)) {
       continue;
     }
     response_tool = cJSON_CreateObject();
@@ -1559,6 +1627,152 @@ char *strappy_tools_responses_request_json(const char *resource_dir,
                                                        0U,
                                                        web_search_enabled,
                                                        error_out);
+}
+
+static void strappy_tools_text_buffer_destroy(
+  strappy_tools_text_buffer *buffer)
+{
+  if (buffer == NULL) {
+    return;
+  }
+  free(buffer->data);
+  buffer->data = NULL;
+  buffer->length = 0U;
+}
+
+static int strappy_tools_text_buffer_append(strappy_tools_text_buffer *buffer,
+                                            const char *text)
+{
+  size_t length;
+  char *next;
+
+  if ((buffer == NULL) || (text == NULL)) {
+    return 0;
+  }
+  length = strlen(text);
+  if (buffer->length > ((size_t)-1) - length - 1U) {
+    return 0;
+  }
+  next = (char *)realloc(buffer->data, buffer->length + length + 1U);
+  if (next == NULL) {
+    return 0;
+  }
+  buffer->data = next;
+  memcpy(buffer->data + buffer->length, text, length + 1U);
+  buffer->length += length;
+  return 1;
+}
+
+static int strappy_tools_prompt_append(
+  strappy_tools_text_buffer *buffer,
+  const char *name,
+  const char *description)
+{
+  return (name != NULL) && (description != NULL) &&
+    strappy_tools_text_buffer_append(buffer, "- `") &&
+    strappy_tools_text_buffer_append(buffer, name) &&
+    strappy_tools_text_buffer_append(buffer, "`: ") &&
+    strappy_tools_text_buffer_append(buffer, description) &&
+    strappy_tools_text_buffer_append(buffer, "\n");
+}
+
+char *strappy_tools_prompt_markdown_filtered(
+  const char *resource_dir,
+  const char * const *allowed_names,
+  size_t allowed_name_count,
+  int web_search_enabled,
+  char **error_out)
+{
+  cJSON *root;
+  cJSON *tools;
+  cJSON *server_tools;
+  cJSON *tool;
+  strappy_tools_text_buffer buffer;
+  size_t index;
+
+  buffer.data = NULL;
+  buffer.length = 0U;
+  if ((allowed_names == NULL) && (allowed_name_count > 0U)) {
+    strappy_set_error(error_out, "Prompt tool allowlist is incomplete.");
+    return NULL;
+  }
+  for (index = 0U; index < allowed_name_count; index++) {
+    if ((allowed_names[index] == NULL) ||
+        !strappy_tools_is_registered(allowed_names[index])) {
+      strappy_set_formatted_error(
+        error_out,
+        "Prompt tool is not registered: %s",
+        (allowed_names[index] != NULL) ? allowed_names[index] : "(null)");
+      return NULL;
+    }
+  }
+
+  root = strappy_tools_read_json_resource(resource_dir,
+                                          STRAPPY_TOOL_GUIDANCE_RESOURCE,
+                                          error_out);
+  if (root == NULL) {
+    return NULL;
+  }
+  if (!strappy_tools_validate_guidance_root(root, error_out)) {
+    cJSON_Delete(root);
+    return NULL;
+  }
+  tools = cJSON_GetObjectItemCaseSensitive(root, "tools");
+  server_tools = cJSON_GetObjectItemCaseSensitive(
+    root,
+    STRAPPY_TOOL_SERVER_TOOLS_KEY);
+
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    const char *name;
+
+    name = strappy_tools_tool_schema_name(tool);
+    if (((allowed_names == NULL) || (allowed_name_count == 0U) ||
+         strappy_tools_name_is_allowed(name,
+                                       allowed_names,
+                                       allowed_name_count)) &&
+        !strappy_tools_prompt_append(
+          &buffer,
+          name,
+          strappy_tools_tool_schema_description(tool))) {
+      strappy_tools_text_buffer_destroy(&buffer);
+      cJSON_Delete(root);
+      strappy_set_error(error_out,
+                        "Could not allocate prompt tool descriptions.");
+      return NULL;
+    }
+  }
+  for (tool = server_tools->child; tool != NULL; tool = tool->next) {
+    cJSON *description;
+
+    if (!strappy_tools_server_schema_is_enabled(tool,
+                                                allowed_names,
+                                                allowed_name_count,
+                                                web_search_enabled)) {
+      continue;
+    }
+    description = cJSON_GetObjectItemCaseSensitive(
+      tool,
+      STRAPPY_TOOL_DESCRIPTION_KEY);
+    if (!strappy_tools_prompt_append(
+          &buffer,
+          strappy_tools_server_schema_type(tool),
+          description->valuestring)) {
+      strappy_tools_text_buffer_destroy(&buffer);
+      cJSON_Delete(root);
+      strappy_set_error(error_out,
+                        "Could not allocate prompt tool descriptions.");
+      return NULL;
+    }
+  }
+  cJSON_Delete(root);
+  if (buffer.data == NULL) {
+    buffer.data = strappy_string_duplicate("None.\n");
+    if (buffer.data == NULL) {
+      strappy_set_error(error_out,
+                        "Could not allocate prompt tool descriptions.");
+    }
+  }
+  return buffer.data;
 }
 
 char *strappy_tools_tool_guidance_string(const char *resource_dir,

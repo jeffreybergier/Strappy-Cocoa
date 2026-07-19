@@ -5,6 +5,7 @@
   "server_tools": [
     {
       "type": "openrouter:web_search",
+      "description": "Search current public information on the web.",
       "feature": "web_search",
       "x-strappy-display": {
         "label": "Web Search",
@@ -16,6 +17,7 @@
     },
     {
       "type": "openrouter:web_fetch",
+      "description": "Fetch a public web page for detailed source information.",
       "feature": "web_search",
       "x-strappy-display": {
         "label": "Web Fetch",

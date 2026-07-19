@@ -85,7 +85,7 @@ void strappy_assistant_set_profile_destroy(
   free(profile->display_name);
   free(profile->detail);
   free(profile->availability);
-  free(profile->prompt_resource);
+  free(profile->goal);
   strappy_assistant_sets_destroy_strings(profile->tool_names,
                                          profile->tool_name_count);
   strappy_assistant_sets_destroy_strings(profile->preflight_tool_names,
@@ -142,6 +142,7 @@ static cJSON *strappy_assistant_sets_read_root(const char *resource_dir,
   size_t length;
   char *buffer;
   cJSON *root;
+  cJSON *schema_version;
 
   path = strappy_assistant_sets_resource_path(resource_dir, error_out);
   if (path == NULL) {
@@ -195,6 +196,17 @@ static cJSON *strappy_assistant_sets_read_root(const char *resource_dir,
                       "Assistant-set resource root must be an object.");
     return NULL;
   }
+  schema_version = cJSON_GetObjectItemCaseSensitive(root, "schema_version");
+  if (!cJSON_IsNumber(schema_version) ||
+      (schema_version->valuedouble !=
+       (double)STRAPPY_ASSISTANT_SETS_SCHEMA_VERSION)) {
+    cJSON_Delete(root);
+    strappy_set_formatted_error(
+      error_out,
+      "Assistant-set resource schema_version must be %d.",
+      STRAPPY_ASSISTANT_SETS_SCHEMA_VERSION);
+    return NULL;
+  }
   return root;
 }
 
@@ -234,13 +246,6 @@ static int strappy_assistant_sets_availability_is_valid(const char *value)
   return (value != NULL) &&
     ((strcmp(value, STRAPPY_ASSISTANT_SET_AVAILABILITY_AVAILABLE) == 0) ||
      (strcmp(value, STRAPPY_ASSISTANT_SET_AVAILABILITY_COMING_SOON) == 0));
-}
-
-static int strappy_assistant_sets_resource_name_is_safe(const char *value)
-{
-  return (value != NULL) && (value[0] != '\0') &&
-    (strchr(value, '/') == NULL) && (strchr(value, '\\') == NULL) &&
-    (strstr(value, "..") == NULL);
 }
 
 static int strappy_assistant_sets_append_unique(char ***values,
@@ -477,7 +482,7 @@ int strappy_assistant_sets_load_profile(
   const char *display_name;
   const char *detail;
   const char *availability;
-  const char *prompt_resource;
+  const char *goal;
   size_t index;
   int ok;
 
@@ -516,13 +521,10 @@ int strappy_assistant_sets_load_profile(
   availability = strappy_assistant_sets_required_string(set,
                                                         "availability",
                                                         error_out);
-  prompt_resource = strappy_assistant_sets_required_string(set,
-                                                           "prompt_resource",
-                                                           error_out);
+  goal = strappy_assistant_sets_required_string(set, "goal", error_out);
   if ((display_name == NULL) || (detail == NULL) || (availability == NULL) ||
-      (prompt_resource == NULL) ||
-      !strappy_assistant_sets_availability_is_valid(availability) ||
-      !strappy_assistant_sets_resource_name_is_safe(prompt_resource)) {
+      (goal == NULL) ||
+      !strappy_assistant_sets_availability_is_valid(availability)) {
     if ((error_out == NULL) || (*error_out == NULL)) {
       strappy_set_error(error_out, "Assistant-set profile is invalid.");
     }
@@ -542,8 +544,8 @@ int strappy_assistant_sets_load_profile(
     strappy_assistant_sets_copy_string(&profile->availability,
                                        availability,
                                        error_out) &&
-    strappy_assistant_sets_copy_string(&profile->prompt_resource,
-                                       prompt_resource,
+    strappy_assistant_sets_copy_string(&profile->goal,
+                                       goal,
                                        error_out) &&
     strappy_assistant_sets_append_array(universal,
                                         "tools",

@@ -41,6 +41,12 @@ char *strappy_tools_responses_request_json_filtered(
   size_t allowed_name_count,
   int web_search_enabled,
   char **error_out);
+char *strappy_tools_prompt_markdown_filtered(
+  const char *resource_dir,
+  const char * const *allowed_names,
+  size_t allowed_name_count,
+  int web_search_enabled,
+  char **error_out);
 char *strappy_tools_tool_guidance_string(const char *resource_dir,
                                          const char *section_name,
                                          const char *key,
