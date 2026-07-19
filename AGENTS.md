@@ -142,10 +142,13 @@ House style for Strappy source:
     `memory_user_fact_remember`. Personal Assistant additionally checks
     `database_context_read` and `memory_database_hint_remember`; World Knowledge
     never runs those database-specific checks. The database-context and memory
-    tools are report-or-act tools whose fully empty,
-    JSON-null, or quoted `"null"` arguments produce a successful no-op. The
-    session-name tool instead requires a non-empty string and updates the active
-    session name. The Font Awesome confirmation tool requires a non-empty
+    remember tools are action-only: `database_context_read` requires an approved
+    database id, `memory_user_fact_remember` requires a non-empty fact, and
+    `memory_database_hint_remember` requires both an approved database id and a
+    non-empty hint. They do not accept empty or null no-ops and may be skipped
+    when they are not applicable; their informational quality checks may then
+    fail. The session-name tool requires a non-empty string and updates the
+    active session name. The Font Awesome confirmation tool requires a non-empty
     `shortcodes` array and does not accept a null or empty-array no-op.
     `database_query` is not a quality rule and still requires both an approved
     database id and read-only SQL. User-fact and database-hint memory checks are

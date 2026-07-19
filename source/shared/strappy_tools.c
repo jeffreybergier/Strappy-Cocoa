@@ -1868,7 +1868,7 @@ static int strappy_tools_string_has_non_whitespace(const char *value)
   return 0;
 }
 
-static int strappy_tools_string_is_null_report_value(const char *value)
+static int strappy_tools_string_is_null_literal(const char *value)
 {
   const char *start;
   const char *end;
@@ -1928,54 +1928,6 @@ static cJSON *strappy_tools_parse_arguments_object(const char *tool_name,
     return NULL;
   }
 
-  return root;
-}
-
-static cJSON *strappy_tools_parse_report_arguments_object(
-  const char *tool_name,
-  const char *arguments_json,
-  char **error_out)
-{
-  cJSON *root;
-
-  if (!strappy_tools_string_has_value(arguments_json)) {
-    root = cJSON_CreateObject();
-    if (root == NULL) {
-      strappy_set_formatted_error(error_out,
-                                  "Could not allocate %s arguments.",
-                                  tool_name);
-    }
-    return root;
-  }
-
-  root = cJSON_Parse(arguments_json);
-  if (root == NULL) {
-    strappy_set_formatted_error(error_out,
-                                "%s arguments are not valid JSON.",
-                                tool_name);
-    return NULL;
-  }
-  if (cJSON_IsNull(root) ||
-      (cJSON_IsString(root) &&
-       ((root->valuestring == NULL) ||
-        !strappy_tools_string_has_non_whitespace(root->valuestring) ||
-        strappy_tools_string_is_null_report_value(root->valuestring)))) {
-    cJSON_Delete(root);
-    root = cJSON_CreateObject();
-    if (root == NULL) {
-      strappy_set_formatted_error(error_out,
-                                  "Could not allocate %s arguments.",
-                                  tool_name);
-    }
-    return root;
-  }
-  if (!cJSON_IsObject(root)) {
-    cJSON_Delete(root);
-    strappy_set_formatted_error(error_out,
-                                "%s arguments must be a JSON object or null.",
-                                tool_name);
-    return NULL;
-  }
   return root;
 }
 
@@ -2094,7 +2046,7 @@ static int strappy_tools_copy_string_argument(const char *tool_name,
   return 1;
 }
 
-static int strappy_tools_copy_nullable_report_string_argument(
+static int strappy_tools_copy_required_action_string_argument(
   const char *tool_name,
   cJSON *root,
   const char *name,
@@ -2102,31 +2054,29 @@ static int strappy_tools_copy_nullable_report_string_argument(
   char **value_out,
   char **error_out)
 {
-  cJSON *item;
-
   if (value_out == NULL) {
-    strappy_set_error(error_out, "Tool report string output is missing.");
+    strappy_set_error(error_out, "Tool action string output is missing.");
     return 0;
   }
   *value_out = NULL;
-  item = cJSON_GetObjectItemCaseSensitive(root, name);
-  if (cJSON_IsNull(item)) {
-    return 1;
-  }
   if (!strappy_tools_copy_string_argument(tool_name,
                                           root,
                                           name,
-                                          0,
+                                          1,
                                           max_bytes,
                                           value_out,
                                           error_out)) {
     return 0;
   }
-  if ((*value_out != NULL) &&
-      (!strappy_tools_string_has_non_whitespace(*value_out) ||
-       strappy_tools_string_is_null_report_value(*value_out))) {
+  if (!strappy_tools_string_has_non_whitespace(*value_out) ||
+      strappy_tools_string_is_null_literal(*value_out)) {
     free(*value_out);
     *value_out = NULL;
+    strappy_set_formatted_error(error_out,
+                                "%s %s must not be blank or null.",
+                                tool_name,
+                                name);
+    return 0;
   }
   return 1;
 }
@@ -2452,7 +2402,7 @@ static int strappy_tools_parse_memory_user_fact_remember_arguments(
   }
   strappy_memory_user_fact_remember_arguments_init(arguments);
 
-  root = strappy_tools_parse_report_arguments_object(
+  root = strappy_tools_parse_arguments_object(
     STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
     arguments_json,
     error_out);
@@ -2466,7 +2416,7 @@ static int strappy_tools_parse_memory_user_fact_remember_arguments(
          allowed_names,
          sizeof(allowed_names) / sizeof(allowed_names[0]),
          error_out) &&
-       strappy_tools_copy_nullable_report_string_argument(
+       strappy_tools_copy_required_action_string_argument(
          STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
          root,
          "fact",
@@ -2542,7 +2492,7 @@ static int strappy_tools_parse_database_context_read_arguments(
   }
   strappy_database_context_read_arguments_init(arguments);
 
-  root = strappy_tools_parse_report_arguments_object(
+  root = strappy_tools_parse_arguments_object(
     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
     arguments_json,
     error_out);
@@ -2556,7 +2506,7 @@ static int strappy_tools_parse_database_context_read_arguments(
          allowed_names,
          sizeof(allowed_names) / sizeof(allowed_names[0]),
          error_out) &&
-       strappy_tools_copy_nullable_report_string_argument(
+       strappy_tools_copy_required_action_string_argument(
          STRAPPY_TOOL_DATABASE_CONTEXT_READ,
          root,
          "database_id",
@@ -2750,7 +2700,7 @@ static int strappy_tools_parse_memory_database_hint_remember_arguments(
   }
   strappy_memory_database_hint_remember_arguments_init(arguments);
 
-  root = strappy_tools_parse_report_arguments_object(
+  root = strappy_tools_parse_arguments_object(
     STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
     arguments_json,
     error_out);
@@ -2764,14 +2714,14 @@ static int strappy_tools_parse_memory_database_hint_remember_arguments(
          allowed_names,
          sizeof(allowed_names) / sizeof(allowed_names[0]),
          error_out) &&
-       strappy_tools_copy_nullable_report_string_argument(
+       strappy_tools_copy_required_action_string_argument(
          STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
          root,
          "database_id",
          STRAPPY_HELPER_INFO_MAX_SHORT_BYTES,
          &arguments->database_id,
          error_out) &&
-       strappy_tools_copy_nullable_report_string_argument(
+       strappy_tools_copy_required_action_string_argument(
          STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
          root,
          "hint",
@@ -2781,13 +2731,6 @@ static int strappy_tools_parse_memory_database_hint_remember_arguments(
   cJSON_Delete(root);
   if (!ok) {
     strappy_memory_database_hint_remember_arguments_destroy(arguments);
-    return 0;
-  }
-  if ((arguments->hint != NULL) && (arguments->database_id == NULL)) {
-    strappy_memory_database_hint_remember_arguments_destroy(arguments);
-    strappy_set_error(
-      error_out,
-      "memory_database_hint_remember requires database_id when hint is provided.");
     return 0;
   }
   return 1;
@@ -3411,7 +3354,7 @@ static char *strappy_tools_remember_user_info(
   sqlite3_int64 now_ms;
   int rc;
 
-  if ((db == NULL) || (arguments == NULL)) {
+  if ((db == NULL) || (arguments == NULL) || (arguments->fact == NULL)) {
     strappy_set_error(error_out,
                       "memory_user_fact_remember request is incomplete.");
     return NULL;
@@ -3864,7 +3807,8 @@ static char *strappy_tools_remember_database_info(
   sqlite3_int64 now_ms;
   int rc;
 
-  if ((db == NULL) || (record == NULL) || (arguments == NULL)) {
+  if ((db == NULL) || (record == NULL) || (arguments == NULL) ||
+      (arguments->database_id == NULL) || (arguments->hint == NULL)) {
     strappy_set_error(error_out,
                       "memory_database_hint_remember request is incomplete.");
     return NULL;
@@ -5715,12 +5659,6 @@ static char *strappy_tools_execute_memory_user_fact_remember(
                                                                error_out)) {
     return NULL;
   }
-  if (arguments.fact == NULL) {
-    json = strappy_tools_build_empty_result(error_out);
-    strappy_memory_user_fact_remember_arguments_destroy(&arguments);
-    return json;
-  }
-
   db = NULL;
   if (!strappy_tools_open_helper_info_database(session_db_path,
                                                &db,
@@ -5839,12 +5777,6 @@ static char *strappy_tools_execute_database_context_read(
                                                                error_out)) {
     return NULL;
   }
-  if (arguments.database_id == NULL) {
-    json = strappy_tools_build_empty_result(error_out);
-    strappy_database_context_read_arguments_destroy(&arguments);
-    return json;
-  }
-
   strappy_discovered_database_record_list_init(&list);
   record = NULL;
   if (!strappy_db_list_discovered_databases(session_db_path,
@@ -5913,12 +5845,6 @@ static char *strappy_tools_execute_memory_database_hint_remember(
         error_out)) {
     return NULL;
   }
-  if (arguments.hint == NULL) {
-    json = strappy_tools_build_empty_result(error_out);
-    strappy_memory_database_hint_remember_arguments_destroy(&arguments);
-    return json;
-  }
-
   strappy_discovered_database_record_list_init(&list);
   if (!strappy_db_list_discovered_databases(session_db_path,
                                            &list,

@@ -224,18 +224,19 @@
       "type": "function",
       "function": {
         "name": "memory_user_fact_remember",
-        "description": "ALWAYS call this tool. Set fact to a useful durable user fact, or null if there is nothing new to remember. NEVER store secrets or sensitive information.",
+        "description": "Call this tool to save a useful durable user fact for future prompts. NEVER store secrets or sensitive information.",
         "parameters": {
           "type": "object",
           "properties": {
             "fact": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
             }
           },
-          "required": [],
+          "required": [
+            "fact"
+          ],
           "additionalProperties": false
         }
       },
@@ -292,21 +293,20 @@
       "type": "function",
       "function": {
         "name": "database_context_read",
-        "description": "ALWAYS call this tool before the final answer. Set database_id to the relevant approved database before database_query, or null when no database context is needed. Returns remembered hints, table names, view names, and guidance for exploring them.",
+        "description": "ALWAYS call this tool with the relevant approved database_id before database_query. Returns remembered hints, table names, view names, and guidance for exploring them.",
         "parameters": {
           "type": "object",
           "properties": {
             "database_id": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "description": "Approved database ID returned by database_list_info, or null when no database context is needed.",
+              "type": "string",
+              "description": "Approved database ID returned by database_list_info.",
               "minLength": 1,
               "maxLength": 128
             }
           },
-          "required": [],
+          "required": [
+            "database_id"
+          ],
           "additionalProperties": false
         }
       },
@@ -319,24 +319,25 @@
       "type": "function",
       "function": {
         "name": "memory_database_hint_remember",
-        "description": "ALWAYS call this tool. Set database_id to the approved database ID and hint to useful durable query, schema, or access information, or set both to null if there is nothing new to remember. NEVER store user data, secrets, sensitive information, guesses, or one-off query results.",
+        "description": "Call this tool to save useful durable query, schema, or access information for an approved database. NEVER store user data, secrets, sensitive information, guesses, or one-off query results.",
         "parameters": {
           "type": "object",
           "properties": {
             "database_id": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
             },
             "hint": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
             }
           },
-          "required": [],
+          "required": [
+            "database_id",
+            "hint"
+          ],
           "additionalProperties": false
         }
       },

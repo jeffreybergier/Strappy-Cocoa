@@ -11,7 +11,6 @@ You MUST ALWAYS call the following tools at least once BEFORE your final answer:
 
 - helper_session_name_write: ALWAYS call this tool BEFORE your final answer. Update the session with a short, descriptive name for the user's latest prompt.
 - helper_fontawesome_shortcode_confirm: ALWAYS call this tool BEFORE your final answer. Font Awesome shortcodes must use full Markdown syntax, such as [fa:heart], in a non-empty array; null and empty arrays are invalid.
-- memory_user_fact_remember: ALWAYS call this tool BEFORE your final answer. Save any useful durable fact learned about the user for future prompts. Otherwise call with no arguments to report that there is nothing new to remember. NEVER remember secrets or sensitive information.
 
 ## Required Web Source References
 

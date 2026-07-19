@@ -1663,16 +1663,15 @@ static int harness_database_context_schema_matches(cJSON *tools)
 
     return cJSON_IsObject(properties) &&
       (cJSON_GetArraySize(properties) == 1) &&
-      cJSON_IsArray(type) && (cJSON_GetArraySize(type) == 2) &&
-      harness_json_array_contains_string(type, "string") &&
-      harness_json_array_contains_string(type, "null") &&
+      cJSON_IsString(type) && (type->valuestring != NULL) &&
+      (strcmp(type->valuestring, "string") == 0) &&
       cJSON_IsString(description) && (description->valuestring != NULL) &&
       (strcmp(description->valuestring,
-              "Approved database ID returned by database_list_info, or null "
-              "when no database context is needed.") == 0) &&
+              "Approved database ID returned by database_list_info.") == 0) &&
       cJSON_IsNumber(min_length) && (min_length->valuedouble == 1.0) &&
       cJSON_IsNumber(max_length) && (max_length->valuedouble == 128.0) &&
-      cJSON_IsArray(required) && (cJSON_GetArraySize(required) == 0) &&
+      cJSON_IsArray(required) && (cJSON_GetArraySize(required) == 1) &&
+      harness_json_array_contains_string(required, "database_id") &&
       cJSON_IsFalse(additional_properties);
   }
 
@@ -1907,23 +1906,20 @@ static int harness_run_tool_registry_tests(void)
                 "Call this tool to retrieve durable facts stored about the "
                 "user.") != NULL) &&
         (strstr(tools_json,
-                "ALWAYS call this tool. Set fact to a useful durable user "
-                "fact, or null if there is nothing new to remember. NEVER "
-                "store secrets or sensitive information.") !=
+                "Call this tool to save a useful durable user fact for "
+                "future prompts. NEVER store secrets or sensitive "
+                "information.") !=
          NULL) &&
         (strstr(tools_json,
-                "ALWAYS call this tool. Set database_id to the approved "
-                "database ID and hint to useful durable query, schema, or "
-                "access information, or set both to null if there is nothing "
-                "new to remember. NEVER store user data, secrets, sensitive "
-                "information, guesses, or one-off query results.") !=
+                "Call this tool to save useful durable query, schema, or "
+                "access information for an approved database. NEVER store "
+                "user data, secrets, sensitive information, guesses, or "
+                "one-off query results.") !=
          NULL) &&
         (strstr(tools_json,
-                "ALWAYS call this tool before the final answer. Set "
-                "database_id to the relevant approved database before "
-                "database_query, or null when no database context is needed. "
-                "Returns remembered hints, table names, view names, and "
-                "guidance for exploring them.") !=
+                "ALWAYS call this tool with the relevant approved database_id "
+                "before database_query. Returns remembered hints, table "
+                "names, view names, and guidance for exploring them.") !=
          NULL) &&
         (strstr(tools_json,
                 "Call this tool to forget durable facts that are no longer "
@@ -4376,7 +4372,6 @@ static int harness_run_wide_schema_database_query_test(
 
 static int harness_run_helper_info_tests(const harness_context *context)
 {
-  static const char *noop_result = "{}";
   static const char *const base_tables[] = {
     "identifiers", "messages", "payloads"
   };
@@ -4388,41 +4383,46 @@ static int harness_run_helper_info_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_equals(context->catalog_path,
-                                    STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-                                    NULL,
-                                    noop_result) ||
-      !harness_expect_output_equals(context->catalog_path,
-                                    STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-                                    "",
-                                    noop_result) ||
-      !harness_expect_output_equals(context->catalog_path,
-                                    STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-                                    "null",
-                                    noop_result) ||
-      !harness_expect_output_equals(context->catalog_path,
-                                    STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-                                    "\" NULL \"",
-                                    noop_result) ||
-      !harness_expect_output_equals(context->catalog_path,
-                                    STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-                                    "{}",
-                                    noop_result) ||
-      !harness_expect_output_equals(
+  if (!harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        NULL,
+        "requires a non-empty database_id string") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        "",
+        "requires a non-empty database_id string") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        "null",
+        "arguments must be a JSON object") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        "\" NULL \"",
+        "arguments must be a JSON object") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        "{}",
+        "requires a non-empty database_id string") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_CONTEXT_READ,
         "{\"database_id\":null}",
-        noop_result) ||
-      !harness_expect_output_equals(
+        "database_id must be a string") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_CONTEXT_READ,
         "{\"database_id\":\"null\"}",
-        noop_result) ||
-      !harness_expect_output_equals(
+        "database_id must not be blank or null") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_CONTEXT_READ,
         "{\"database_id\":\"  \"}",
-        noop_result)) {
+        "database_id must not be blank or null")) {
     return 0;
   }
 
@@ -4441,41 +4441,46 @@ static int harness_run_helper_info_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_equals(
+  if (!harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
         NULL,
-        noop_result) ||
-      !harness_expect_output_equals(
+        "requires a non-empty fact string") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
         "null",
-        noop_result) ||
-      !harness_expect_output_equals(
+        "arguments must be a JSON object") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
         "\"null\"",
-        noop_result) ||
-      !harness_expect_output_equals(
+        "arguments must be a JSON object") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
         "{}",
-        noop_result) ||
-      !harness_expect_output_equals(
+        "requires a non-empty fact string") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
         "{\"fact\":null}",
-        noop_result) ||
-      !harness_expect_output_equals(
+        "fact must be a string") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
         "{\"fact\":\" NULL \"}",
-        noop_result) ||
-      !harness_expect_output_equals(
+        "fact must not be blank or null") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
         "{\"fact\":\"  \\n\\t\"}",
-        noop_result)) {
+        "fact must not be blank or null") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        "{\"fact\":\"\"}",
+        "requires a non-empty fact string")) {
     return 0;
   }
 
@@ -4536,46 +4541,56 @@ static int harness_run_helper_info_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_equals(
+  if (!harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
         NULL,
-        noop_result) ||
-      !harness_expect_output_equals(
+        "requires a non-empty database_id string") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
         "null",
-        noop_result) ||
-      !harness_expect_output_equals(
+        "arguments must be a JSON object") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
         "\"null\"",
-        noop_result) ||
-      !harness_expect_output_equals(
+        "arguments must be a JSON object") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
         "{}",
-        noop_result) ||
-      !harness_expect_output_equals(
+        "requires a non-empty database_id string") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
         "{\"database_id\":null,\"hint\":null}",
-        noop_result) ||
-      !harness_expect_output_equals(
+        "database_id must be a string") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
         "{\"database_id\":\"null\",\"hint\":\"null\"}",
-        noop_result) ||
-      !harness_expect_output_equals(
+        "database_id must not be blank or null") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
         "{\"database_id\":\"unused\",\"hint\":\" NULL \"}",
-        noop_result) ||
-      !harness_expect_output_equals(
+        "hint must not be blank or null") ||
+      !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
         "{\"database_id\":\"unused\",\"hint\":\"\"}",
-        noop_result)) {
+        "requires a non-empty hint string") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        "{\"database_id\":\"unused\"}",
+        "requires a non-empty hint string") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        "{\"database_id\":\"unused\",\"hint\":null}",
+        "hint must be a string")) {
     return 0;
   }
 
@@ -4583,12 +4598,12 @@ static int harness_run_helper_info_tests(const harness_context *context)
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
         "{\"database_id\":null,\"hint\":\"Useful\"}",
-        "requires database_id when hint is provided") ||
+        "database_id must be a string") ||
       !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
         "{\"database_id\":\"null\",\"hint\":\"Useful\"}",
-        "requires database_id when hint is provided")) {
+        "database_id must not be blank or null")) {
     return 0;
   }
 

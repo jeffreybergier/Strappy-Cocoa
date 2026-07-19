@@ -25,9 +25,8 @@
 #include "../shared/strappy_tools.h"
 
 #define HARNESS_MEMORY_USER_FACT_REMEMBER_DESCRIPTION \
-  "ALWAYS call this tool. Set fact to a useful durable user fact, or null if " \
-  "there is nothing new to remember. NEVER store secrets or sensitive " \
-  "information."
+  "Call this tool to save a useful durable user fact for future prompts. " \
+  "NEVER store secrets or sensitive information."
 
 #define HARNESS_MEMORY_USER_FACT_READ_DESCRIPTION \
   "Call this tool to retrieve durable facts stored about the user."
@@ -52,10 +51,9 @@
   "parameters are not allowed."
 
 #define HARNESS_DATABASE_CONTEXT_READ_DESCRIPTION \
-  "ALWAYS call this tool before the final answer. Set database_id to the " \
-  "relevant approved database before database_query, or null when no " \
-  "database context is needed. Returns remembered hints, table names, view " \
-  "names, and guidance for exploring them."
+  "ALWAYS call this tool with the relevant approved database_id before " \
+  "database_query. Returns remembered hints, table names, view names, and " \
+  "guidance for exploring them."
 
 #define HARNESS_SESSION_NAME_WRITE_DESCRIPTION \
   "ALWAYS call this tool before the final answer. Update the session with a " \
@@ -71,10 +69,9 @@
   "NEVER use unicode emoji."
 
 #define HARNESS_MEMORY_DATABASE_HINT_REMEMBER_DESCRIPTION \
-  "ALWAYS call this tool. Set database_id to the approved database ID and " \
-  "hint to useful durable query, schema, or access information, or set both " \
-  "to null if there is nothing new to remember. NEVER store user data, " \
-  "secrets, sensitive information, guesses, or one-off query results."
+  "Call this tool to save useful durable query, schema, or access information " \
+  "for an approved database. NEVER store user data, secrets, sensitive " \
+  "information, guesses, or one-off query results."
 
 #define HARNESS_DATETIME_FROM_ISO8601_DESCRIPTION \
   "ALWAYS call this tool when converting ISO 8601 datetimes to numeric " \
@@ -165,88 +162,7 @@ static int harness_tool_description_equals(cJSON *tools,
   return 0;
 }
 
-static int harness_schema_type_is_nullable(cJSON *property,
-                                           const char *expected_type)
-{
-  cJSON *type;
-  cJSON *item;
-  int saw_expected;
-  int saw_null;
-
-  if (expected_type == NULL) {
-    return 0;
-  }
-  type = cJSON_IsObject(property) ?
-    cJSON_GetObjectItem(property, "type") : NULL;
-  if (!cJSON_IsArray(type) || (cJSON_GetArraySize(type) != 2)) {
-    return 0;
-  }
-  saw_expected = 0;
-  saw_null = 0;
-  for (item = type->child; item != NULL; item = item->next) {
-    if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
-      return 0;
-    }
-    if (strcmp(item->valuestring, expected_type) == 0) {
-      saw_expected = 1;
-    } else if (strcmp(item->valuestring, "null") == 0) {
-      saw_null = 1;
-    } else {
-      return 0;
-    }
-  }
-  return saw_expected && saw_null;
-}
-
-static int harness_tool_has_optional_nullable_string_parameters(
-  cJSON *tools,
-  const char *expected_name,
-  const char *first_parameter,
-  const char *second_parameter)
-{
-  cJSON *tool;
-
-  if (!cJSON_IsArray(tools) || (expected_name == NULL) ||
-      (first_parameter == NULL)) {
-    return 0;
-  }
-  for (tool = tools->child; tool != NULL; tool = tool->next) {
-    cJSON *name;
-    cJSON *parameters;
-    cJSON *properties;
-    cJSON *required;
-    cJSON *additional_properties;
-    int expected_count;
-
-    name = cJSON_GetObjectItem(tool, "name");
-    if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
-        (strcmp(name->valuestring, expected_name) != 0)) {
-      continue;
-    }
-    parameters = cJSON_GetObjectItem(tool, "parameters");
-    properties = cJSON_IsObject(parameters) ?
-      cJSON_GetObjectItem(parameters, "properties") : NULL;
-    required = cJSON_IsObject(parameters) ?
-      cJSON_GetObjectItem(parameters, "required") : NULL;
-    additional_properties = cJSON_IsObject(parameters) ?
-      cJSON_GetObjectItem(parameters, "additionalProperties") : NULL;
-    expected_count = (second_parameter != NULL) ? 2 : 1;
-    if (!cJSON_IsObject(properties) ||
-        (cJSON_GetArraySize(properties) != expected_count) ||
-        !cJSON_IsArray(required) || (cJSON_GetArraySize(required) != 0) ||
-        !cJSON_IsFalse(additional_properties) ||
-        !harness_schema_type_is_nullable(
-          cJSON_GetObjectItem(properties, first_parameter), "string")) {
-      return 0;
-    }
-    return (second_parameter == NULL) ||
-      harness_schema_type_is_nullable(
-        cJSON_GetObjectItem(properties, second_parameter), "string");
-  }
-  return 0;
-}
-
-static int harness_database_context_parameters_are_optional_nullable(
+static int harness_database_context_parameters_match_contract(
   cJSON *tools)
 {
   cJSON *tool;
@@ -259,10 +175,12 @@ static int harness_database_context_parameters_are_optional_nullable(
     cJSON *parameters;
     cJSON *properties;
     cJSON *database_id;
+    cJSON *type;
     cJSON *description;
     cJSON *min_length;
     cJSON *max_length;
     cJSON *required;
+    cJSON *required_item;
     cJSON *additional_properties;
 
     name = cJSON_GetObjectItem(tool, "name");
@@ -275,6 +193,8 @@ static int harness_database_context_parameters_are_optional_nullable(
       cJSON_GetObjectItem(parameters, "properties") : NULL;
     database_id = cJSON_IsObject(properties) ?
       cJSON_GetObjectItem(properties, "database_id") : NULL;
+    type = cJSON_IsObject(database_id) ?
+      cJSON_GetObjectItem(database_id, "type") : NULL;
     description = cJSON_IsObject(database_id) ?
       cJSON_GetObjectItem(database_id, "description") : NULL;
     min_length = cJSON_IsObject(database_id) ?
@@ -283,18 +203,23 @@ static int harness_database_context_parameters_are_optional_nullable(
       cJSON_GetObjectItem(database_id, "maxLength") : NULL;
     required = cJSON_IsObject(parameters) ?
       cJSON_GetObjectItem(parameters, "required") : NULL;
+    required_item = cJSON_IsArray(required) ?
+      cJSON_GetArrayItem(required, 0) : NULL;
     additional_properties = cJSON_IsObject(parameters) ?
       cJSON_GetObjectItem(parameters, "additionalProperties") : NULL;
     return cJSON_IsObject(properties) &&
       (cJSON_GetArraySize(properties) == 1) &&
-      cJSON_IsArray(required) && (cJSON_GetArraySize(required) == 0) &&
+      cJSON_IsArray(required) && (cJSON_GetArraySize(required) == 1) &&
+      cJSON_IsString(required_item) &&
+      (required_item->valuestring != NULL) &&
+      (strcmp(required_item->valuestring, "database_id") == 0) &&
       (cJSON_GetObjectItem(parameters, "minProperties") == NULL) &&
       cJSON_IsFalse(additional_properties) &&
-      harness_schema_type_is_nullable(database_id, "string") &&
+      cJSON_IsString(type) && (type->valuestring != NULL) &&
+      (strcmp(type->valuestring, "string") == 0) &&
       cJSON_IsString(description) && (description->valuestring != NULL) &&
       (strcmp(description->valuestring,
-              "Approved database ID returned by database_list_info, or null "
-              "when no database context is needed.") == 0) &&
+              "Approved database ID returned by database_list_info.") == 0) &&
       cJSON_IsNumber(min_length) && (min_length->valuedouble == 1.0) &&
       cJSON_IsNumber(max_length) && (max_length->valuedouble == 128.0);
   }
@@ -724,16 +649,18 @@ static int harness_test_request_surfaces(void)
       STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
       "query") &&
     harness_fontawesome_parameter_constraints_match(tools) &&
-    harness_database_context_parameters_are_optional_nullable(tools) &&
-    harness_tool_has_optional_nullable_string_parameters(
+    harness_database_context_parameters_match_contract(tools) &&
+    harness_tool_has_required_string_parameter(
       tools,
       STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
-      "fact",
-      NULL) &&
-    harness_tool_has_optional_nullable_string_parameters(
+      "fact") &&
+    harness_tool_has_required_string_parameter(
       tools,
       STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
-      "database_id",
+      "database_id") &&
+    harness_tool_has_required_string_parameter(
+      tools,
+      STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
       "hint") &&
     harness_tools_hide_local_display_metadata(tools) &&
     harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
@@ -1798,7 +1725,8 @@ static int harness_run_empty_answer_after_tools_server(int listener_fd)
     "\"status\":\"completed\",\"output\":[{"
     "\"type\":\"function_call\",\"id\":\"fc-empty-context\","
     "\"call_id\":\"call-empty-context\","
-    "\"name\":\"database_context_read\",\"arguments\":\"{}\","
+    "\"name\":\"database_context_read\","
+    "\"arguments\":\"{\\\"database_id\\\":\\\"db_1\\\"}\","
     "\"status\":\"completed\"},{"
     "\"type\":\"function_call\",\"id\":\"fc-empty-session\","
     "\"call_id\":\"call-empty-session\","
