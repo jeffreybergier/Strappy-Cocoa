@@ -119,97 +119,317 @@ static int harness_prompt_has_named_bullet(const char *begin,
   return found;
 }
 
+static cJSON *harness_json_object(cJSON *parent, const char *key)
+{
+  cJSON *value;
+
+  value = cJSON_IsObject(parent) ?
+    cJSON_GetObjectItemCaseSensitive(parent, key) : NULL;
+  return cJSON_IsObject(value) ? value : NULL;
+}
+
+static const char *harness_json_string(cJSON *parent, const char *key)
+{
+  cJSON *value;
+
+  value = cJSON_IsObject(parent) ?
+    cJSON_GetObjectItemCaseSensitive(parent, key) : NULL;
+  return ((value != NULL) && cJSON_IsString(value) &&
+          (value->valuestring != NULL) &&
+          (value->valuestring[0] != '\0')) ? value->valuestring : NULL;
+}
+
+static const char *harness_json_text(cJSON *parent, const char *key)
+{
+  cJSON *value;
+
+  value = cJSON_IsObject(parent) ?
+    cJSON_GetObjectItemCaseSensitive(parent, key) : NULL;
+  return cJSON_IsString(value) && (value->valuestring != NULL) ?
+    value->valuestring : NULL;
+}
+
+static const char *harness_section_content_end(cJSON *section,
+                                               const char *content_start,
+                                               const char *section_end)
+{
+  const char *footer;
+  const char *match;
+
+  footer = harness_json_text(section, "footer");
+  if ((footer == NULL) || (content_start == NULL) || (section_end == NULL)) {
+    return NULL;
+  }
+  if (footer[0] == '\0') {
+    return section_end;
+  }
+  match = strstr(content_start, footer);
+  return ((match != NULL) && (match < section_end)) ? match : NULL;
+}
+
+static int harness_section_copy_surrounds_content(
+  cJSON *section,
+  const char *section_start,
+  const char *content_start,
+  const char *content_end,
+  const char *section_end)
+{
+  const char *instruction;
+  const char *footer;
+  const char *match;
+
+  instruction = harness_json_text(section, "instruction");
+  footer = harness_json_text(section, "footer");
+  if ((instruction == NULL) || (footer == NULL) ||
+      (section_start == NULL) || (content_start == NULL) ||
+      (content_end == NULL) || (section_end == NULL) ||
+      !(section_start < content_start) || !(content_start <= content_end) ||
+      !(content_end <= section_end)) {
+    return 0;
+  }
+  if (instruction[0] != '\0') {
+    match = strstr(section_start, instruction);
+    if ((match == NULL) || (match >= content_start)) {
+      return 0;
+    }
+  }
+  if (footer[0] != '\0') {
+    match = strstr(content_end, footer);
+    if ((match == NULL) || (match >= section_end)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static char *harness_uppercase_copy(const char *text)
+{
+  size_t index;
+  size_t length;
+  char *result;
+
+  if (text == NULL) {
+    return NULL;
+  }
+  length = strlen(text);
+  result = (char *)malloc(length + 1U);
+  if (result == NULL) {
+    return NULL;
+  }
+  for (index = 0U; index < length; index++) {
+    char value;
+
+    value = text[index];
+    result[index] = ((value >= 'a') && (value <= 'z')) ?
+      (char)(value - ('a' - 'A')) : value;
+  }
+  result[length] = '\0';
+  return result;
+}
+
 static int harness_prompt_has_quality_bullet(
   const char *begin,
   const char *end,
-  const strappy_quality_check_definition *definition)
+  const char *check_key,
+  cJSON *guidance)
 {
+  const char *requirement;
+  const char *instruction;
+  char *uppercase;
   size_t length;
   char *needle;
   int found;
 
-  length = strlen(definition->check_key) +
-    strlen(definition->prompt_guidance) + sizeof("- ``: \n");
+  requirement = harness_json_string(guidance, "requirement");
+  instruction = harness_json_string(guidance, "instruction");
+  uppercase = harness_uppercase_copy(requirement);
+  if ((check_key == NULL) || (instruction == NULL) || (uppercase == NULL)) {
+    free(uppercase);
+    return 0;
+  }
+  length = strlen(check_key) + strlen(uppercase) + strlen(instruction) +
+    sizeof("- ``: : \n");
   needle = (char *)malloc(length);
   if (needle == NULL) {
+    free(uppercase);
     return 0;
   }
   (void)snprintf(needle,
                  length,
-                 "- `%s`: %s\n",
-                 definition->check_key,
-                 definition->prompt_guidance);
+                 "- `%s`: %s: %s\n",
+                 check_key,
+                 uppercase,
+                 instruction);
   found = harness_region_contains(begin, end, needle);
+  free(uppercase);
   free(needle);
   return found;
+}
+
+static char *harness_heading_marker(size_t level, const char *heading)
+{
+  size_t index;
+  size_t length;
+  char *marker;
+
+  if ((level == 0U) || (heading == NULL)) {
+    return NULL;
+  }
+  length = level + 1U + strlen(heading) + 2U + 1U;
+  marker = (char *)malloc(length);
+  if (marker == NULL) {
+    return NULL;
+  }
+  for (index = 0U; index < level; index++) {
+    marker[index] = '#';
+  }
+  marker[level] = ' ';
+  memcpy(marker + level + 1U, heading, strlen(heading));
+  memcpy(marker + level + 1U + strlen(heading), "\n\n", 3U);
+  return marker;
 }
 
 static int harness_verify_prompt(
   const strappy_assistant_set_profile *profile,
   int web_search_enabled,
   const char *prompt,
-  const char *invariant,
+  cJSON *system_prompt,
   const char *tools_json)
 {
-  static const char tools_heading[] = "# Tools available\n";
-  static const char audit_heading[] = "# Audit checks for this round\n";
-  static const char contract_heading[] = "# Assistant contract\n";
-  static const char goal_heading[] = "## Goal\n\n";
-  static const char personality_heading[] =
-    "## Personality and HARD rules\n\n";
+  cJSON *sections;
+  cJSON *tools_section;
+  cJSON *audit_section;
+  cJSON *goal_section;
+  cJSON *invariant_prompt_section;
+  cJSON *audit_guidance;
+  char *tools_heading;
+  char *audit_heading;
+  char *goal_heading;
+  char *invariant_heading;
+  const char *prompt_end;
   const char *tools_start;
   const char *audit_start;
-  const char *contract_start;
   const char *goal_start;
-  const char *personality_start;
+  const char *invariant_start;
+  const char *tools_content_start;
+  const char *tools_content_end;
+  const char *audit_content_start;
+  const char *audit_content_end;
+  const char *goal_content_start;
+  const char *goal_content_end;
+  const char *invariant_content_start;
+  const char *invariant_content_end;
   cJSON *tools;
   cJSON *tool;
   size_t index;
+  size_t expected_quality_check_count;
   int has_web_search;
   int has_web_fetch;
+  int result;
 
+  sections = harness_json_object(system_prompt, "sections");
+  tools_section = harness_json_object(sections, "tools");
+  audit_section = harness_json_object(sections, "audit");
+  goal_section = harness_json_object(sections, "goal");
+  invariant_prompt_section = harness_json_object(sections, "invariant");
+  audit_guidance = harness_json_object(system_prompt, "audit_guidance");
+  tools_heading = harness_heading_marker(
+    1U,
+    harness_json_string(tools_section, "heading"));
+  audit_heading = harness_heading_marker(
+    1U,
+    harness_json_string(audit_section, "heading"));
+  goal_heading = harness_heading_marker(
+    1U,
+    harness_json_string(goal_section, "heading"));
+  invariant_heading = harness_heading_marker(
+    1U,
+    harness_json_string(invariant_prompt_section, "heading"));
+  if ((tools_heading == NULL) || (audit_heading == NULL) ||
+      (goal_heading == NULL) || (invariant_heading == NULL)) {
+    free(invariant_heading);
+    free(goal_heading);
+    free(audit_heading);
+    free(tools_heading);
+    return harness_fail("System prompt resource validation failed.");
+  }
+  result = 0;
+
+  prompt_end = prompt + strlen(prompt);
   tools_start = strstr(prompt, tools_heading);
   audit_start = strstr(prompt, audit_heading);
-  contract_start = strstr(prompt, contract_heading);
   goal_start = strstr(prompt, goal_heading);
-  personality_start = strstr(prompt, personality_heading);
+  invariant_start = strstr(prompt, invariant_heading);
   if ((tools_start == NULL) || (audit_start == NULL) ||
-      (contract_start == NULL) || (goal_start == NULL) ||
-      (personality_start == NULL) || !(tools_start < audit_start) ||
-      !(audit_start < contract_start) || !(contract_start < goal_start) ||
-      !(goal_start < personality_start) ||
+      (goal_start == NULL) || (invariant_start == NULL) ||
+      !(tools_start < audit_start) || !(audit_start < goal_start) ||
+      !(goal_start < invariant_start) ||
       (harness_count_occurrences(prompt, tools_heading) != 1U) ||
       (harness_count_occurrences(prompt, audit_heading) != 1U) ||
-      (harness_count_occurrences(prompt, contract_heading) != 1U) ||
-      !harness_region_contains(goal_start,
-                               personality_start,
-                               profile->goal) ||
-      (strcmp(personality_start + strlen(personality_heading),
-              invariant) != 0) ||
-      !harness_region_contains(
-        audit_start,
-        contract_start,
-        "The report is informational and never causes an automatic retry") ||
-      !harness_region_contains(
-        audit_start,
-        contract_start,
-        "Skip only an inapplicable CONDITIONAL action") ||
-      !harness_region_contains(
-        tools_start,
-        audit_start,
-        "Complete tool work in a compact sequence without progress updates")) {
-    return harness_fail("Generated prompt section contract is invalid.");
+      (harness_count_occurrences(prompt, goal_heading) != 1U) ||
+      (harness_count_occurrences(prompt, invariant_heading) != 1U)) {
+    (void)harness_fail("Generated prompt section contract is invalid.");
+    goto cleanup;
+  }
+
+  tools_content_start = strstr(tools_start, "\n- `");
+  audit_content_start = strstr(audit_start, "\n- `");
+  if (tools_content_start != NULL) {
+    tools_content_start++;
+  }
+  if (audit_content_start != NULL) {
+    audit_content_start++;
+  }
+  tools_content_end = harness_section_content_end(tools_section,
+                                                  tools_content_start,
+                                                  audit_start);
+  audit_content_end = harness_section_content_end(audit_section,
+                                                  audit_content_start,
+                                                  goal_start);
+  goal_content_start = strstr(goal_start, profile->goal);
+  goal_content_end = (goal_content_start != NULL) ?
+    goal_content_start + strlen(profile->goal) : NULL;
+  invariant_content_start = harness_section_content_end(
+    invariant_prompt_section,
+    invariant_start,
+    prompt_end);
+  invariant_content_end = invariant_content_start;
+  if ((tools_content_end == NULL) || (audit_content_end == NULL) ||
+      (goal_content_end == NULL) || (invariant_content_end == NULL) ||
+      !harness_section_copy_surrounds_content(tools_section,
+                                              tools_start,
+                                              tools_content_start,
+                                              tools_content_end,
+                                              audit_start) ||
+      !harness_section_copy_surrounds_content(audit_section,
+                                              audit_start,
+                                              audit_content_start,
+                                              audit_content_end,
+                                              goal_start) ||
+      !harness_section_copy_surrounds_content(goal_section,
+                                              goal_start,
+                                              goal_content_start,
+                                              goal_content_end,
+                                              invariant_start) ||
+      !harness_section_copy_surrounds_content(invariant_prompt_section,
+                                              invariant_start,
+                                              invariant_content_start,
+                                              invariant_content_end,
+                                              prompt_end)) {
+    (void)harness_fail("Generated prompt section copy is misplaced.");
+    goto cleanup;
   }
 
   tools = cJSON_Parse(tools_json);
   if (!cJSON_IsArray(tools) || (cJSON_GetArraySize(tools) <= 0) ||
-      (harness_count_line_prefixes(tools_start,
-                                   audit_start,
+      (harness_count_line_prefixes(tools_content_start,
+                                   tools_content_end,
                                    "- `") !=
        (size_t)cJSON_GetArraySize(tools))) {
     cJSON_Delete(tools);
-    return harness_fail(
+    (void)harness_fail(
       "Generated prompt tools do not match the Responses tool count.");
+    goto cleanup;
   }
   has_web_search = 0;
   has_web_fetch = 0;
@@ -218,10 +438,13 @@ static int harness_verify_prompt(
 
     name = harness_response_tool_name(tool);
     if ((name == NULL) ||
-        !harness_prompt_has_named_bullet(tools_start, audit_start, name)) {
+        !harness_prompt_has_named_bullet(tools_content_start,
+                                         tools_content_end,
+                                         name)) {
       cJSON_Delete(tools);
-      return harness_fail(
+      (void)harness_fail(
         "Generated prompt is missing a Responses API tool.");
+      goto cleanup;
     }
     if (strcmp(name, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) {
       has_web_search = 1;
@@ -232,39 +455,73 @@ static int harness_verify_prompt(
   cJSON_Delete(tools);
   if (web_search_enabled) {
     if (!has_web_search || !has_web_fetch) {
-      return harness_fail(
+      (void)harness_fail(
         "Web-enabled prompt is missing its server tools.");
+      goto cleanup;
     }
   } else if (has_web_search || has_web_fetch ||
-             harness_prompt_has_named_bullet(tools_start,
-                                             audit_start,
+             harness_prompt_has_named_bullet(tools_content_start,
+                                             tools_content_end,
                                              STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) ||
-             harness_prompt_has_named_bullet(tools_start,
-                                             audit_start,
+             harness_prompt_has_named_bullet(tools_content_start,
+                                             tools_content_end,
                                              STRAPPY_TOOL_OPENROUTER_WEB_FETCH)) {
-    return harness_fail(
+    (void)harness_fail(
       "Web-disabled prompt unexpectedly includes server tools.");
+    goto cleanup;
   }
 
-  if (harness_count_line_prefixes(audit_start,
-                                  contract_start,
-                                  "- `") !=
-      profile->quality_check_key_count) {
-    return harness_fail("Generated prompt audit count is invalid.");
-  }
+  expected_quality_check_count = 0U;
   for (index = 0U; index < profile->quality_check_key_count; index++) {
     const strappy_quality_check_definition *definition;
+    cJSON *check_guidance;
+    int has_quality_bullet;
 
     definition = strappy_quality_policy_find(
       profile->quality_check_keys[index]);
-    if ((definition == NULL) ||
-        !harness_prompt_has_quality_bullet(audit_start,
-                                           contract_start,
-                                           definition)) {
-      return harness_fail("Generated prompt audit guidance is invalid.");
+    check_guidance = cJSON_GetObjectItemCaseSensitive(
+      audit_guidance,
+      profile->quality_check_keys[index]);
+    if ((definition == NULL) || !cJSON_IsObject(check_guidance)) {
+      (void)harness_fail("Generated prompt audit guidance is invalid.");
+      goto cleanup;
+    }
+    has_quality_bullet = harness_prompt_has_quality_bullet(
+      audit_content_start,
+      audit_content_end,
+      profile->quality_check_keys[index],
+      check_guidance);
+    if (!web_search_enabled &&
+        (definition->evaluation_kind ==
+         STRAPPY_QUALITY_CHECK_WEB_REFERENCE)) {
+      if (has_quality_bullet) {
+        (void)harness_fail(
+          "Web-disabled prompt unexpectedly includes web audit guidance.");
+        goto cleanup;
+      }
+      continue;
+    }
+    expected_quality_check_count++;
+    if (!has_quality_bullet) {
+      (void)harness_fail("Generated prompt audit guidance is invalid.");
+      goto cleanup;
     }
   }
-  return 1;
+  if (harness_count_line_prefixes(audit_content_start,
+                                  audit_content_end,
+                                  "- `") !=
+      expected_quality_check_count) {
+    (void)harness_fail("Generated prompt audit count is invalid.");
+    goto cleanup;
+  }
+  result = 1;
+
+cleanup:
+  free(invariant_heading);
+  free(goal_heading);
+  free(audit_heading);
+  free(tools_heading);
+  return result;
 }
 
 static int harness_write_prompt(const char *output_dir,
@@ -311,7 +568,8 @@ int main(int argc, char **argv)
 {
   const char *resource_dir;
   const char *output_dir;
-  char *invariant;
+  char *system_prompt_text;
+  cJSON *system_prompt;
   char *error;
   size_t set_index;
   int check_only;
@@ -334,14 +592,18 @@ int main(int argc, char **argv)
   }
 
   error = NULL;
-  invariant = strappy_prompt_render_resource(
+  system_prompt_text = strappy_prompt_render_resource(
     resource_dir,
-    STRAPPY_PROMPT_INVARIANT_RESOURCE_NAME,
+    STRAPPY_SYSTEM_PROMPT_RESOURCE_NAME,
     &error);
-  if (invariant == NULL) {
+  system_prompt = (system_prompt_text != NULL) ?
+    cJSON_Parse(system_prompt_text) : NULL;
+  free(system_prompt_text);
+  if (!cJSON_IsObject(system_prompt)) {
     fprintf(stderr,
-            "Could not load invariant prompt: %s\n",
+            "Could not load system prompt resource: %s\n",
             (error != NULL) ? error : "unknown error");
+    cJSON_Delete(system_prompt);
     free(error);
     return 1;
   }
@@ -365,7 +627,7 @@ int main(int argc, char **argv)
               harness_assistant_set_ids[set_index],
               (error != NULL) ? error : "unknown error");
       free(error);
-      free(invariant);
+      cJSON_Delete(system_prompt);
       return 1;
     }
     without_web_prompt = NULL;
@@ -391,7 +653,7 @@ int main(int argc, char **argv)
           !harness_verify_prompt(&profile,
                                  web_search_enabled,
                                  prompt,
-                                 invariant,
+                                 system_prompt,
                                  tools_json)) {
         fprintf(stderr,
                 "Could not generate %s with web search %s: %s\n",
@@ -403,7 +665,7 @@ int main(int argc, char **argv)
         free(without_web_prompt);
         free(error);
         strappy_assistant_set_profile_destroy(&profile);
-        free(invariant);
+        cJSON_Delete(system_prompt);
         return 1;
       }
       free(tools_json);
@@ -416,7 +678,7 @@ int main(int argc, char **argv)
         if (without_web_prompt == NULL) {
           free(prompt);
           strappy_assistant_set_profile_destroy(&profile);
-          free(invariant);
+          cJSON_Delete(system_prompt);
           (void)harness_fail("Could not retain generated prompt.");
           return 1;
         }
@@ -424,7 +686,7 @@ int main(int argc, char **argv)
         free(prompt);
         free(without_web_prompt);
         strappy_assistant_set_profile_destroy(&profile);
-        free(invariant);
+        cJSON_Delete(system_prompt);
         (void)harness_fail(
           "Web-enabled and web-disabled prompts must differ.");
         return 1;
@@ -438,7 +700,7 @@ int main(int argc, char **argv)
           free(prompt);
           free(without_web_prompt);
           strappy_assistant_set_profile_destroy(&profile);
-          free(invariant);
+          cJSON_Delete(system_prompt);
           return 1;
         }
       } else if (!check_only) {
@@ -452,7 +714,7 @@ int main(int argc, char **argv)
     free(without_web_prompt);
     strappy_assistant_set_profile_destroy(&profile);
   }
-  free(invariant);
+  cJSON_Delete(system_prompt);
   if (check_only) {
     printf("Prompt generator harness passed (6 variants).\n");
   }

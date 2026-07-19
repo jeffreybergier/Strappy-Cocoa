@@ -1,6 +1,8 @@
 #ifndef STRAPPY_QUALITY_POLICY_H
 #define STRAPPY_QUALITY_POLICY_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -18,12 +20,14 @@ typedef struct strappy_quality_check_definition {
   const char *check_kind;
   const char *label;
   const char *tool_name;
-  const char *prompt_guidance;
   strappy_quality_check_evaluation_kind evaluation_kind;
 } strappy_quality_check_definition;
 
 const strappy_quality_check_definition *strappy_quality_policy_find(
   const char *check_key);
+size_t strappy_quality_policy_count(void);
+const strappy_quality_check_definition *strappy_quality_policy_at(
+  size_t index);
 
 #ifdef __cplusplus
 }

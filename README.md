@@ -26,8 +26,9 @@ from `/osxcross`.
 `source/shared/Resources/AssistantSets.json` defines the goal, tool allowlist,
 preflight calls, and answer-quality checks for each assistant set. The shared C
 prompt builder combines those selections with the matching descriptions from
-`GuidanceTools.json`, the code-owned audit policy, and the invariant personality
-and hard rules in `PromptInvariant.txt`:
+`GuidanceTools.json`, the code-owned audit behavior, and the structured section
+copy, audit guidance, invariant personality, and hard rules in
+`SystemPrompt.json`:
 
 - World Knowledge exposes only universal web, user-memory, date, Font Awesome,
   and session-name tools.

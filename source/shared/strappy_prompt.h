@@ -7,7 +7,8 @@
 extern "C" {
 #endif
 
-#define STRAPPY_PROMPT_INVARIANT_RESOURCE_NAME "PromptInvariant.txt"
+#define STRAPPY_SYSTEM_PROMPT_RESOURCE_NAME "SystemPrompt.json"
+#define STRAPPY_SYSTEM_PROMPT_SCHEMA_VERSION 2
 
 char *strappy_prompt_build(
   const char *resource_dir,

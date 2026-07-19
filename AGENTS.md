@@ -83,11 +83,13 @@ House style for Strappy source:
     Objective-C view controllers.
 13. Prompt, assistant-set, tool, and database guidance are runtime resources
     under `source/shared/Resources`: `AssistantSets.json`,
-    `PromptInvariant.txt`, `GuidanceTools.json`, and `GuidanceDatabase.json`.
+    `SystemPrompt.json`, `GuidanceTools.json`, and `GuidanceDatabase.json`.
     System prompts are assembled programmatically from the selected tools and
     their descriptions, the selected quality checks and their shared policy
     guidance, the assistant-set goal, and the invariant personality/hard-rule
-    text. `AssistantSets.json` owns each set's goal, tool allowlist,
+    text. `SystemPrompt.json` owns section copy, prompt-facing audit guidance,
+    invariant personality, and hard rules; executable audit evaluation remains
+    code-owned. `AssistantSets.json` owns each set's goal, tool allowlist,
     preflight tools, answer-quality checks, and availability. Keep tool schemas
     in `GuidanceTools.json` in sync with the tool-name constants in
     `strappy_tools.h` and the executor in `strappy_tools.c`; do not duplicate

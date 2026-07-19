@@ -17,7 +17,7 @@ resources are intentionally reduced to the minimum baseline:
 
 - `source/shared/Resources/AssistantSets.json` selects the Personal Assistant
   goal and policy while the shared prompt builder combines it with
-  `PromptInvariant.txt` and the effective tool descriptions;
+  `SystemPrompt.json` and the effective tool descriptions;
 - all Personal Assistant tool names and JSON argument schemas remain available;
 - tool-specific behavioral instructions live in their relevant tool
   descriptions instead of the system prompt;

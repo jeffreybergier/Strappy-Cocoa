@@ -20,6 +20,7 @@
 #include "../shared/strappy_client.h"
 #include "../shared/strappy_config.h"
 #include "../shared/strappy_db.h"
+#include "../shared/strappy_prompt.h"
 #include "../shared/strappy_responses.h"
 #include "../shared/strappy_session.h"
 #include "../shared/strappy_tools.h"
@@ -1084,6 +1085,82 @@ static const char *harness_message_text(cJSON *item)
     text->valuestring : NULL;
 }
 
+static const char *harness_object_string(cJSON *parent, const char *key)
+{
+  cJSON *value;
+
+  value = cJSON_IsObject(parent) ?
+    cJSON_GetObjectItemCaseSensitive(parent, key) : NULL;
+  return cJSON_IsString(value) && (value->valuestring != NULL) &&
+    (value->valuestring[0] != '\0') ? value->valuestring : NULL;
+}
+
+static const char *harness_object_text(cJSON *parent, const char *key)
+{
+  cJSON *value;
+
+  value = cJSON_IsObject(parent) ?
+    cJSON_GetObjectItemCaseSensitive(parent, key) : NULL;
+  return cJSON_IsString(value) && (value->valuestring != NULL) ?
+    value->valuestring : NULL;
+}
+
+static int harness_instructions_include_resource_sections(
+  const char *instructions)
+{
+  static const char *section_names[] = {
+    "tools",
+    "audit",
+    "goal",
+    "invariant"
+  };
+  char *resource_text;
+  char *error;
+  cJSON *root;
+  cJSON *sections;
+  size_t index;
+  int result;
+
+  if ((instructions == NULL) || (instructions[0] == '\0')) {
+    return 0;
+  }
+  error = NULL;
+  resource_text = strappy_prompt_render_resource(
+    "../shared/Resources",
+    STRAPPY_SYSTEM_PROMPT_RESOURCE_NAME,
+    &error);
+  free(error);
+  if (resource_text == NULL) {
+    return 0;
+  }
+  root = cJSON_Parse(resource_text);
+  free(resource_text);
+  sections = cJSON_IsObject(root) ?
+    cJSON_GetObjectItemCaseSensitive(root, "sections") : NULL;
+  result = cJSON_IsObject(sections);
+  for (index = 0U;
+       result && (index < (sizeof(section_names) / sizeof(section_names[0])));
+       index++) {
+    cJSON *section;
+    const char *heading;
+    const char *instruction;
+    const char *footer;
+
+    section = cJSON_GetObjectItemCaseSensitive(sections,
+                                               section_names[index]);
+    heading = harness_object_string(section, "heading");
+    instruction = harness_object_text(section, "instruction");
+    footer = harness_object_text(section, "footer");
+    result = (heading != NULL) && (instruction != NULL) &&
+      (footer != NULL) && (strstr(instructions, heading) != NULL) &&
+      ((instruction[0] == '\0') ||
+       (strstr(instructions, instruction) != NULL)) &&
+      ((footer[0] == '\0') || (strstr(instructions, footer) != NULL));
+  }
+  cJSON_Delete(root);
+  return result;
+}
+
 static int harness_string_has_prefix_and_suffix(const char *value,
                                                 const char *prefix,
                                                 const char *suffix)
@@ -1233,6 +1310,10 @@ static int harness_request_base_is_valid(cJSON *root,
   cJSON *first_tool;
   cJSON *function_wrapper;
   int input_count;
+  int has_web_search;
+  int has_web_fetch;
+  int has_web_reference_key;
+  int has_web_reference_instruction;
   const char *text;
 
   stream = cJSON_GetObjectItem(root, "stream");
@@ -1246,22 +1327,28 @@ static int harness_request_base_is_valid(cJSON *root,
   first_tool = cJSON_GetArrayItem(tools, 0);
   function_wrapper = cJSON_GetObjectItem(first_tool, "function");
   input_count = cJSON_IsArray(input) ? cJSON_GetArraySize(input) : 0;
+  has_web_search = harness_has_tool_type(
+    tools,
+    STRAPPY_TOOL_OPENROUTER_WEB_SEARCH);
+  has_web_fetch = harness_has_tool_type(
+    tools,
+    STRAPPY_TOOL_OPENROUTER_WEB_FETCH);
+  has_web_reference_key = cJSON_IsString(instructions) &&
+    (instructions->valuestring != NULL) &&
+    (strstr(instructions->valuestring, "`web_reference`") != NULL);
+  has_web_reference_instruction = cJSON_IsString(instructions) &&
+    (instructions->valuestring != NULL) &&
+    (strstr(instructions->valuestring,
+            "titled inline Markdown HTTP or HTTPS link") != NULL);
   text = harness_message_text(cJSON_GetArrayItem(input, 0));
   if (!cJSON_IsFalse(stream) || !cJSON_IsFalse(store) ||
       !cJSON_IsString(instructions) ||
       (instructions->valuestring == NULL) ||
-      (strstr(instructions->valuestring,
-              "# Tools available") == NULL) ||
-      (strstr(instructions->valuestring,
-              "# Audit checks for this round") == NULL) ||
-      (strstr(instructions->valuestring,
-              "The report is informational and never causes an automatic retry") == NULL) ||
-      (strstr(instructions->valuestring,
-              "`web_reference`") == NULL) ||
-      (strstr(instructions->valuestring,
-              "titled inline Markdown HTTP or HTTPS link") == NULL) ||
-      (strstr(instructions->valuestring,
-              "# Assistant contract") == NULL) ||
+      !harness_instructions_include_resource_sections(
+        instructions->valuestring) ||
+      (has_web_search != has_web_fetch) ||
+      (has_web_search != has_web_reference_key) ||
+      (has_web_search != has_web_reference_instruction) ||
       !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
       !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
       !cJSON_IsArray(input) || (input_count != 5) ||

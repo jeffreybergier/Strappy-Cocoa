@@ -13,7 +13,7 @@ SOURCES = main.m AppDelegate.m XPAppKit.m PreferencesWindowController.m \
 INFO_PLIST = Info.plist
 
 SHARED_DIR = ../shared
-PROMPT_INVARIANT_RESOURCE = $(SHARED_DIR)/Resources/PromptInvariant.txt
+SYSTEM_PROMPT_RESOURCE = $(SHARED_DIR)/Resources/SystemPrompt.json
 ASSISTANT_SET_RESOURCE = $(SHARED_DIR)/Resources/AssistantSets.json
 FONTAWESOME_GENERATOR = $(SHARED_DIR)/tools/generate_fontawesome_webview_map.py
 FONTAWESOME_FONT_DIR ?= /altivec/libs/cocoa/Resources/Fonts
@@ -24,7 +24,7 @@ FONTAWESOME_FONT_FILES = \
                      $(FONTAWESOME_FONT_DIR)/FA7-Solid-900.otf \
                      $(FONTAWESOME_FONT_DIR)/FA7-Regular-400.otf \
                      $(FONTAWESOME_FONT_DIR)/FA7-Brands-400.otf
-GUIDANCE_RESOURCES = $(PROMPT_INVARIANT_RESOURCE) \
+GUIDANCE_RESOURCES = $(SYSTEM_PROMPT_RESOURCE) \
                      $(ASSISTANT_SET_RESOURCE) \
                      $(SHARED_DIR)/Resources/GuidanceTools.json \
                      $(SHARED_DIR)/Resources/GuidanceDatabase.json \

@@ -12,9 +12,6 @@ strappy_quality_check_definitions[] = {
     "answer_content",
     "Answer provided",
     NULL,
-    "REQUIRED: Return a non-whitespace, self-contained final answer that "
-      "directly fulfills the user's request. Include the requested result "
-      "itself; never merely say that it is ready or was provided earlier.",
     STRAPPY_QUALITY_CHECK_ANSWER_NON_EMPTY
   },
   {
@@ -22,9 +19,6 @@ strappy_quality_check_definitions[] = {
     "answer_content",
     "Source link included",
     NULL,
-    "CONDITIONAL: If web search or web fetch activity occurs, your final "
-      "answer MUST include at least one titled inline Markdown HTTP or HTTPS "
-      "link to a source you used. Otherwise this check is not applicable.",
     STRAPPY_QUALITY_CHECK_WEB_REFERENCE
   },
   {
@@ -32,9 +26,6 @@ strappy_quality_check_definitions[] = {
     "required_tool",
     "Database context checked",
     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
-    "CONDITIONAL: When the request depends on approved personal data, you "
-      "MUST call database_context_read with a relevant approved database_id "
-      "before database_query. Otherwise skip it; never fabricate an id.",
     STRAPPY_QUALITY_CHECK_REQUIRED_TOOL
   },
   {
@@ -42,9 +33,6 @@ strappy_quality_check_definitions[] = {
     "required_tool",
     "Session named",
     STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
-    "REQUIRED: Before your final answer, helper_session_name_write MUST "
-      "complete successfully with a short descriptive name for the user's "
-      "latest prompt.",
     STRAPPY_QUALITY_CHECK_REQUIRED_TOOL
   },
   {
@@ -52,9 +40,6 @@ strappy_quality_check_definitions[] = {
     "required_tool",
     "Font Awesome shortcode confirmed",
     STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
-    "REQUIRED: Before your final answer, "
-      "helper_fontawesome_shortcode_confirm MUST complete successfully with "
-      "at least one valid shortcode, which you must use in the answer.",
     STRAPPY_QUALITY_CHECK_REQUIRED_TOOL
   },
   {
@@ -62,9 +47,6 @@ strappy_quality_check_definitions[] = {
     "required_tool",
     "User memory considered",
     STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
-    "CONDITIONAL: If this request reveals a real, useful, durable user fact, "
-      "store it with memory_user_fact_remember. Otherwise skip the tool; "
-      "never invent a fact or store sensitive information.",
     STRAPPY_QUALITY_CHECK_REQUIRED_TOOL
   },
   {
@@ -72,9 +54,6 @@ strappy_quality_check_definitions[] = {
     "required_tool",
     "Database memory considered",
     STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
-    "CONDITIONAL: If this request reveals a real, useful, durable database "
-      "hint, store it with memory_database_hint_remember. Otherwise skip the "
-      "tool; never store private row values, guesses, or one-off results.",
     STRAPPY_QUALITY_CHECK_REQUIRED_TOOL
   }
 };
@@ -100,4 +79,16 @@ const strappy_quality_check_definition *strappy_quality_policy_find(
     }
   }
   return NULL;
+}
+
+size_t strappy_quality_policy_count(void)
+{
+  return strappy_quality_check_definition_count;
+}
+
+const strappy_quality_check_definition *strappy_quality_policy_at(
+  size_t index)
+{
+  return (index < strappy_quality_check_definition_count) ?
+    &strappy_quality_check_definitions[index] : NULL;
 }

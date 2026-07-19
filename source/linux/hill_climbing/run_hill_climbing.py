@@ -584,7 +584,7 @@ def main() -> int:
         missing.append(str(resource_dir))
     for name in (
         "AssistantSets.json",
-        "PromptInvariant.txt",
+        "SystemPrompt.json",
         "GuidanceTools.json",
         "GuidanceDatabase.json",
     ):
@@ -635,7 +635,7 @@ def main() -> int:
             name: sha256(resource_dir / name)
             for name in (
                 "AssistantSets.json",
-                "PromptInvariant.txt",
+                "SystemPrompt.json",
                 "GuidanceTools.json",
                 "GuidanceDatabase.json",
             )
