@@ -15,7 +15,7 @@ DATABASE_MANIFEST ?= $(DEVICE_FIXTURE_DIR)/databases.json
 MEMBER_ROSTER ?= $(DEVICE_FIXTURE_DIR)/member_roster.json
 SYNC_FIXTURES := sync_device_fixtures.py
 ENV_FILE ?= ../../../.env
-SYSTEM_PROMPT ?= $(SHARED_DIR)/Resources/PromptSystem.txt
+SYSTEM_PROMPT ?= $(SHARED_DIR)/Resources/PromptSystemDatabase.txt
 
 CPPFLAGS += -I$(SHARED_DIR) -I$(CJSON_DIR)
 CFLAGS ?= -std=c99 -Wall -Wextra -Wconversion -Wsign-conversion -Wfloat-conversion

@@ -433,7 +433,7 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 
     errorMessage = [error localizedDescription];
     if ([errorMessage length] == 0U) {
-      errorMessage = NSLocalizedString(@"Could not update model setting.", nil);
+      errorMessage = NSLocalizedString(@"Your changes could not be saved.", nil);
     }
     [statusText_ release];
     statusText_ = [errorMessage retain];
@@ -459,7 +459,7 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 
     errorMessage = [error localizedDescription];
     if ([errorMessage length] == 0U) {
-      errorMessage = NSLocalizedString(@"Could not update streaming setting.", nil);
+      errorMessage = NSLocalizedString(@"Your changes could not be saved.", nil);
     }
     [statusText_ release];
     statusText_ = [errorMessage retain];

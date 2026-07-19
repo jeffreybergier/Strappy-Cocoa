@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "strappy_core.h"
+#include "strappy_assistant_sets.h"
 #include "strappy_config.h"
 #include "strappy_db.h"
 #include "strappy_file_scanner.h"
@@ -1982,6 +1983,179 @@ static int harness_run_tool_registry_tests(void)
   free(registry_json);
   free(filtered_json);
   free(tools_json);
+  return ok;
+}
+
+static int harness_responses_tools_contains(cJSON *tools,
+                                            const char *tool_name)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools) || (tool_name == NULL)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *type;
+    cJSON *name;
+
+    type = cJSON_GetObjectItemCaseSensitive(tool, "type");
+    name = cJSON_GetObjectItemCaseSensitive(tool, "name");
+    if (cJSON_IsString(type) && (type->valuestring != NULL) &&
+        (strcmp(type->valuestring, tool_name) == 0)) {
+      return 1;
+    }
+    if (cJSON_IsString(name) && (name->valuestring != NULL) &&
+        (strcmp(name->valuestring, tool_name) == 0)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int harness_run_assistant_set_tests(void)
+{
+  strappy_assistant_set_record_list list;
+  strappy_assistant_set_profile world;
+  strappy_assistant_set_profile personal;
+  strappy_assistant_set_profile coding;
+  strappy_assistant_set_profile invalid;
+  char *world_tools_json;
+  char *world_tools_without_web_json;
+  cJSON *world_tools;
+  cJSON *world_tools_without_web;
+  char *error;
+  int ok;
+
+  strappy_assistant_set_record_list_init(&list);
+  strappy_assistant_set_profile_init(&world);
+  strappy_assistant_set_profile_init(&personal);
+  strappy_assistant_set_profile_init(&coding);
+  strappy_assistant_set_profile_init(&invalid);
+  world_tools_json = NULL;
+  world_tools_without_web_json = NULL;
+  world_tools = NULL;
+  world_tools_without_web = NULL;
+  error = NULL;
+
+  ok = strappy_assistant_sets_list(HARNESS_RESOURCE_DIR, &list, &error) &&
+    (list.count == 3U) &&
+    (strcmp(list.records[0].identifier,
+            STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE) == 0) &&
+    (strcmp(list.records[1].identifier,
+            STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT) == 0) &&
+    (strcmp(list.records[2].identifier,
+            STRAPPY_ASSISTANT_SET_CODING_ASSISTANT) == 0) &&
+    (strcmp(list.records[2].availability,
+            STRAPPY_ASSISTANT_SET_AVAILABILITY_COMING_SOON) == 0) &&
+    strappy_assistant_sets_load_profile(
+      HARNESS_RESOURCE_DIR,
+      STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE,
+      &world,
+      &error) &&
+    strappy_assistant_set_profile_is_available(&world) &&
+    (world.tool_name_count == 10U) &&
+    (world.preflight_tool_name_count == 1U) &&
+    (world.quality_check_key_count == 5U) &&
+    strappy_assistant_set_profile_allows_tool(
+      &world,
+      STRAPPY_TOOL_MEMORY_USER_FACT_READ) &&
+    strappy_assistant_set_profile_allows_tool(
+      &world,
+      STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    !strappy_assistant_set_profile_allows_tool(
+      &world,
+      STRAPPY_TOOL_DATABASE_LIST_INFO) &&
+    !strappy_assistant_set_profile_has_quality_check(
+      &world,
+      STRAPPY_TOOL_DATABASE_CONTEXT_READ) &&
+    strappy_assistant_sets_load_profile(
+      HARNESS_RESOURCE_DIR,
+      STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT,
+      &personal,
+      &error) &&
+    strappy_assistant_set_profile_is_available(&personal) &&
+    (personal.tool_name_count == 15U) &&
+    (personal.preflight_tool_name_count == 2U) &&
+    (personal.quality_check_key_count == 7U) &&
+    strappy_assistant_set_profile_allows_tool(
+      &personal,
+      STRAPPY_TOOL_DATABASE_QUERY) &&
+    strappy_assistant_set_profile_has_quality_check(
+      &personal,
+      STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
+    strappy_assistant_sets_load_profile(
+      HARNESS_RESOURCE_DIR,
+      STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
+      &coding,
+      &error) &&
+    !strappy_assistant_set_profile_is_available(&coding);
+
+  if (ok) {
+    world_tools_json = strappy_tools_responses_request_json_filtered(
+      HARNESS_RESOURCE_DIR,
+      (const char * const *)world.tool_names,
+      world.tool_name_count,
+      1,
+      &error);
+    world_tools_without_web_json =
+      strappy_tools_responses_request_json_filtered(
+        HARNESS_RESOURCE_DIR,
+        (const char * const *)world.tool_names,
+        world.tool_name_count,
+        0,
+        &error);
+    world_tools = (world_tools_json != NULL) ?
+      cJSON_Parse(world_tools_json) : NULL;
+    world_tools_without_web = (world_tools_without_web_json != NULL) ?
+      cJSON_Parse(world_tools_without_web_json) : NULL;
+    ok = cJSON_IsArray(world_tools) &&
+      (cJSON_GetArraySize(world_tools) == 10) &&
+      harness_responses_tools_contains(
+        world_tools,
+        STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+      harness_responses_tools_contains(
+        world_tools,
+        STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+      harness_responses_tools_contains(
+        world_tools,
+        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) &&
+      !harness_responses_tools_contains(
+        world_tools,
+        STRAPPY_TOOL_DATABASE_LIST_INFO) &&
+      !harness_responses_tools_contains(
+        world_tools,
+        STRAPPY_TOOL_DATABASE_QUERY) &&
+      cJSON_IsArray(world_tools_without_web) &&
+      (cJSON_GetArraySize(world_tools_without_web) == 8) &&
+      !harness_responses_tools_contains(
+        world_tools_without_web,
+        STRAPPY_TOOL_OPENROUTER_WEB_SEARCH);
+  }
+  if (ok && strappy_assistant_sets_load_profile(HARNESS_RESOURCE_DIR,
+                                                "missing_set",
+                                                &invalid,
+                                                &error)) {
+    ok = 0;
+  }
+  if (ok && (error == NULL)) {
+    ok = 0;
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Assistant-set resources did not match expectations: %s\n",
+            (error != NULL) ? error : "unknown");
+  }
+
+  free(error);
+  free(world_tools_json);
+  free(world_tools_without_web_json);
+  cJSON_Delete(world_tools);
+  cJSON_Delete(world_tools_without_web);
+  strappy_assistant_set_profile_destroy(&invalid);
+  strappy_assistant_set_profile_destroy(&coding);
+  strappy_assistant_set_profile_destroy(&personal);
+  strappy_assistant_set_profile_destroy(&world);
+  strappy_assistant_set_record_list_destroy(&list);
   return ok;
 }
 
@@ -4758,6 +4932,10 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   long long session_id;
   char *error;
   char *output;
+  char *assistant_set_id;
+  sqlite3 *db;
+  char assistant_set_turn_sql[512];
+  int written;
   int ok;
 
   if (context == NULL) {
@@ -4796,6 +4974,9 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (strcmp(session.prompt, "") == 0) &&
        (session.response != NULL) &&
        (strcmp(session.response, "") == 0) &&
+       (session.assistant_set_id != NULL) &&
+       (strcmp(session.assistant_set_id,
+               STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT) == 0) &&
        (session.web_search_enabled == 1) &&
        (session.streaming_enabled == 0) &&
        (session.http_status == 0L);
@@ -4804,6 +4985,35 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
     fprintf(stderr, "Empty session row did not have the expected shape.\n");
     return 0;
   }
+
+  error = NULL;
+  if (!strappy_db_update_session_assistant_set(
+        context->catalog_path,
+        session_id,
+        STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE,
+        &error)) {
+    fprintf(stderr,
+            "Could not select World Knowledge on an empty session: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  assistant_set_id = NULL;
+  if (!strappy_db_get_session_assistant_set(context->catalog_path,
+                                            session_id,
+                                            &assistant_set_id,
+                                            &error) ||
+      (assistant_set_id == NULL) ||
+      (strcmp(assistant_set_id,
+              STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE) != 0)) {
+    fprintf(stderr,
+            "World Knowledge session selection was not stored: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(assistant_set_id);
+    strappy_free_string(error);
+    return 0;
+  }
+  free(assistant_set_id);
 
   error = NULL;
   ok = strappy_db_update_session_streaming_enabled(context->catalog_path,
@@ -4982,6 +5192,54 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
     fprintf(stderr, "Session name was not updated.\n");
     return 0;
   }
+
+  db = NULL;
+  written = snprintf(
+    assistant_set_turn_sql,
+    sizeof(assistant_set_turn_sql),
+    "INSERT INTO turns "
+    "(session_id, ordinal, prompt_group_key, state, created_at_ms) "
+    "VALUES (%lld, 0, 'assistant-set-switch-test', 'completed', 1);",
+    session_id);
+  if ((written <= 0) ||
+      ((size_t)written >= sizeof(assistant_set_turn_sql)) ||
+      (sqlite3_open(context->catalog_path, &db) != SQLITE_OK) ||
+      !harness_exec_sql(db, assistant_set_turn_sql)) {
+    fprintf(stderr, "Could not create assistant-set switch turn.\n");
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    return 0;
+  }
+  sqlite3_close(db);
+  error = NULL;
+  if (!strappy_db_update_session_assistant_set(
+        context->catalog_path,
+        session_id,
+        STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT,
+        &error)) {
+    fprintf(stderr,
+            "Could not change assistant set after the first turn: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  assistant_set_id = NULL;
+  if (!strappy_db_get_session_assistant_set(context->catalog_path,
+                                            session_id,
+                                            &assistant_set_id,
+                                            &error) ||
+      (assistant_set_id == NULL) ||
+      (strcmp(assistant_set_id,
+              STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT) != 0)) {
+    fprintf(stderr,
+            "Post-turn assistant-set change was not stored: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(assistant_set_id);
+    strappy_free_string(error);
+    return 0;
+  }
+  free(assistant_set_id);
 
   strappy_session_message_record_list_init(&messages);
   ok = strappy_db_list_session_messages(context->catalog_path,
@@ -6258,6 +6516,7 @@ int main(void)
 
   harness_context_init(&context);
   ok = harness_run_tool_registry_tests() &&
+       harness_run_assistant_set_tests() &&
        harness_run_helper_datetime_tests() &&
        harness_run_helper_fontawesome_tests() &&
        harness_make_temp_dir(&context) &&

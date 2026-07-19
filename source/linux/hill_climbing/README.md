@@ -12,11 +12,12 @@ The default evaluation prompt is:
 > Please list out the names, blood types, and personalities of the members of
 > my top 5 listened to KPOP bands
 
-The shared runtime resources themselves are intentionally reduced to the
-minimum baseline:
+Each isolated run uses the default Personal Assistant set. Its shared runtime
+resources are intentionally reduced to the minimum baseline:
 
-- `source/shared/Resources/PromptSystem.txt` is used directly;
-- all normal tool names and JSON argument schemas remain available;
+- `source/shared/Resources/AssistantSets.json` selects
+  `source/shared/Resources/PromptSystemDatabase.txt`;
+- all Personal Assistant tool names and JSON argument schemas remain available;
 - tool-specific behavioral instructions live in their relevant tool
   descriptions instead of the system prompt;
 - display metadata and unrelated parameter guidance are removed;
@@ -27,8 +28,9 @@ minimum baseline:
   model's isolated run and described only as `Database.`;
 - web search and web fetch remain available as unannotated server tools.
 
-Before round zero, the application supplies fresh `database_list_info` and
-`memory_user_fact_read` results as application-seeded, matched
+Before round zero, the Personal Assistant profile supplies fresh
+`memory_user_fact_read` and `database_list_info` results as application-seeded,
+matched
 `function_call` / `function_call_output` input pairs. Their call IDs are
 created by the application, and those typed conversation items are not counted
 as model tool calls or tool executions. The runtime quality policy checks

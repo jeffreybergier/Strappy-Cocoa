@@ -129,10 +129,15 @@ Deliverables:
   IDs, safe filename metadata, short descriptions, and availability state. It
   intentionally omits raw filesystem paths, schema, remembered hints, and query
   results.
-- [x] Round-zero application preflight executes `database_list_info` and
-  `memory_user_fact_read` for each user request and injects their fresh results
-  as application-seeded, matched `function_call` / `function_call_output`
-  input pairs without creating response tool-execution audit rows.
+- [x] Assistant-set profiles select the system prompt, tool allowlist,
+  round-zero preflight, and ordered answer-quality checks. World Knowledge uses
+  only universal tools and `memory_user_fact_read` preflight; Personal Assistant
+  additionally enables database tools and `database_list_info` preflight;
+  Coding Assistant is registered as unavailable/Coming Soon.
+- [x] Round-zero application preflight executes the tools selected by the
+  session's assistant set and injects their fresh results as application-seeded,
+  matched `function_call` / `function_call_output` input pairs without creating
+  response tool-execution audit rows.
 - [x] `database_context_read` returns selected database metadata, full
   description, simplified live schema, and remembered database hints; without a
   database ID it can search remembered hints only.
@@ -145,8 +150,9 @@ Deliverables:
 - [ ] `database_manage` app action link. The tool result now emits
   `strappy://database-manage`; WebView/native bridge interception that opens
   `PreferencesWindowController` remains open.
-- [x] Runtime prompt, tool, and database guidance resources:
-  `PromptSystem.txt`, `GuidanceTools.json`, and `GuidanceDatabase.json`,
+- [x] Runtime prompt, assistant-set, tool, and database guidance resources:
+  `AssistantSets.json`, the set-specific prompt files, `GuidanceTools.json`, and
+  `GuidanceDatabase.json`,
   synchronized with the stable tool names and stricter current guidance that
   supplies `database_list_info` as a typed preflight tool output, requires
   `database_context_read` before querying, uses explicit timestamp units, and

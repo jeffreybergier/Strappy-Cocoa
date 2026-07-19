@@ -1,6 +1,7 @@
 #import "StrappySession.h"
 
 #import "StrappyKeychain.h"
+#import "strappy_prompt.h"
 #import "strappy_session.h"
 #import "XPFoundation.h"
 
@@ -23,6 +24,7 @@ NSString * const StrappySessionChangeKindActivity = @"activity";
 NSString * const StrappySessionChangeKindModel = @"model";
 NSString * const StrappySessionChangeKindStreaming = @"streaming";
 NSString * const StrappySessionChangeKindWebSearch = @"web_search";
+NSString * const StrappySessionChangeKindAssistantSet = @"assistant_set";
 
 static NSMutableDictionary *StrappySessionInFlightSessions = nil;
 static BOOL StrappySessionModelCatalogRefreshInFlight = NO;
@@ -64,6 +66,8 @@ static NSString *StrappySessionStringFromCString(char *value)
     (const strappy_openrouter_model_record_list *)list;
 + (NSDictionary *)dictionaryFromOpenRouterModelRecord:
     (const strappy_openrouter_model_record *)record;
++ (NSDictionary *)dictionaryFromAssistantSetRecord:
+    (const strappy_assistant_set_record *)record;
 + (void)refreshOpenRouterModelCatalogInBackground:(id)ignored;
 + (void)openRouterModelCatalogRefreshDidFinish:(NSDictionary *)result;
 - (void)updateCachedSummary:(NSDictionary *)summary;
@@ -447,6 +451,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     [NSException raise:NSInvalidArgumentException
                 format:@"%@", (message ? message : @"Could not bootstrap Strappy.")];
   }
+  (void)[StrappySession assistantSetCatalog];
 }
 
 + (NSString *)systemPromptTemplatePathWithError:(NSError **)error
@@ -506,6 +511,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   NSString *response;
   NSString *model;
   NSString *modelName;
+  NSString *assistantSetIdentifier;
   NSString *createdAt;
   NSString *lastActivityAt;
 
@@ -524,6 +530,8 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   response = [StrappySession stringFromCStringOrEmpty:record->response];
   model = [StrappySession stringFromCStringOrEmpty:record->model];
   modelName = [StrappySession stringFromCStringOrEmpty:record->model_name];
+  assistantSetIdentifier =
+    [StrappySession stringFromCStringOrEmpty:record->assistant_set_id];
   createdAt = [StrappySession stringFromCStringOrEmpty:record->created_at];
   lastActivityAt =
     [StrappySession stringFromCStringOrEmpty:record->last_activity_at];
@@ -535,6 +543,7 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     response, @"response",
     model, @"model",
     modelName, @"model_name",
+    assistantSetIdentifier, @"assistant_set_id",
     httpStatus, @"http_status",
     webSearchEnabled, @"web_search_enabled",
     streamingEnabled, @"streaming_enabled",
@@ -543,6 +552,33 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     lastActivityAt, @"last_activity_at",
     [NSNumber numberWithLongLong:record->last_activity_at_ms],
     @"last_activity_at_ms",
+    nil];
+}
+
++ (NSDictionary *)dictionaryFromAssistantSetRecord:
+    (const strappy_assistant_set_record *)record
+{
+  NSString *identifier;
+  NSString *displayName;
+  NSString *detail;
+  NSString *availability;
+  BOOL available;
+
+  if (record == NULL) {
+    return nil;
+  }
+  identifier = [StrappySession stringFromCStringOrEmpty:record->identifier];
+  displayName = [StrappySession stringFromCStringOrEmpty:record->display_name];
+  detail = [StrappySession stringFromCStringOrEmpty:record->detail];
+  availability =
+    [StrappySession stringFromCStringOrEmpty:record->availability];
+  available = [availability isEqualToString:@"available"] ? YES : NO;
+  return [NSDictionary dictionaryWithObjectsAndKeys:
+    identifier, @"id",
+    NSLocalizedString(displayName, nil), @"name",
+    NSLocalizedString(detail, nil), @"detail",
+    availability, @"availability",
+    [NSNumber numberWithBool:available], @"available",
     nil];
 }
 
@@ -1061,6 +1097,103 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
   models = [StrappySession openRouterModelCatalogFromList:&list];
   strappy_openrouter_model_record_list_destroy(&list);
   return models;
+}
+
++ (NSArray *)assistantSetCatalog
+{
+  NSString *resourcePath;
+  strappy_assistant_set_record_list list;
+  NSMutableArray *sets;
+  char *strappyError;
+  size_t index;
+
+  resourcePath = [[NSBundle mainBundle] resourcePath];
+  if (![resourcePath isKindOfClass:[NSString class]] ||
+      ([resourcePath length] == 0U)) {
+    [NSException raise:NSInternalInconsistencyException
+                format:@"Required assistant resource directory is missing from the app bundle."];
+    return nil;
+  }
+
+  strappy_assistant_set_record_list_init(&list);
+  strappyError = NULL;
+  if (!strappy_session_list_assistant_sets(
+        [resourcePath fileSystemRepresentation],
+        &list,
+        &strappyError)) {
+    NSString *message;
+
+    message = (strappyError != NULL) ?
+      [NSString stringWithUTF8String:strappyError] :
+      @"Assistant manifest could not be loaded.";
+    strappy_session_free_string(strappyError);
+    strappy_assistant_set_record_list_destroy(&list);
+    [NSException raise:NSInternalInconsistencyException
+                format:@"Required assistant resources are invalid: %@",
+                       message];
+    return nil;
+  }
+  sets = [NSMutableArray arrayWithCapacity:list.count];
+  for (index = 0U; index < list.count; index++) {
+    NSDictionary *set;
+    strappy_assistant_set_profile profile;
+    char *prompt;
+
+    strappy_assistant_set_profile_init(&profile);
+    strappyError = NULL;
+    if (!strappy_assistant_sets_load_profile(
+          [resourcePath fileSystemRepresentation],
+          list.records[index].identifier,
+          &profile,
+          &strappyError)) {
+      NSString *message;
+
+      message = (strappyError != NULL) ?
+        [NSString stringWithUTF8String:strappyError] :
+        @"Assistant profile could not be loaded.";
+      strappy_session_free_string(strappyError);
+      strappy_assistant_set_profile_destroy(&profile);
+      strappy_assistant_set_record_list_destroy(&list);
+      [NSException raise:NSInternalInconsistencyException
+                  format:@"Required assistant resources are invalid: %@",
+                         message];
+      return nil;
+    }
+    strappyError = NULL;
+    prompt = strappy_prompt_render_resource(
+      [resourcePath fileSystemRepresentation],
+      profile.prompt_resource,
+      &strappyError);
+    if ((prompt == NULL) || (prompt[0] == '\0')) {
+      NSString *promptName;
+      NSString *message;
+
+      promptName = [StrappySession stringFromCStringOrEmpty:
+        profile.prompt_resource];
+      message = (strappyError != NULL) ?
+        [NSString stringWithUTF8String:strappyError] :
+        [NSString stringWithFormat:@"Assistant prompt is empty: %@",
+                                   promptName];
+      free(prompt);
+      strappy_session_free_string(strappyError);
+      strappy_assistant_set_profile_destroy(&profile);
+      strappy_assistant_set_record_list_destroy(&list);
+      [NSException raise:NSInternalInconsistencyException
+                  format:@"Required assistant resources are invalid: %@",
+                         message];
+      return nil;
+    }
+    free(prompt);
+    strappy_session_free_string(strappyError);
+    strappy_assistant_set_profile_destroy(&profile);
+
+    set = [StrappySession dictionaryFromAssistantSetRecord:&list.records[index]];
+    if (set != nil) {
+      [sets addObject:set];
+    }
+  }
+  strappy_assistant_set_record_list_destroy(&list);
+  return sets;
 }
 
 + (NSString *)defaultOpenRouterModelIdentifierWithError:(NSError **)error
@@ -1815,6 +1948,118 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     enabled = webSearchEnabled_;
   }
   return enabled;
+}
+
+- (NSString *)assistantSetIdentifier
+{
+  NSDictionary *summary;
+  NSString *identifier;
+
+  @synchronized(self) {
+    identifier = [cachedSummary_ objectForKey:@"assistant_set_id"];
+    identifier = [identifier isKindOfClass:[NSString class]] ?
+      [[identifier copy] autorelease] : nil;
+  }
+  if ([identifier length] == 0U) {
+    summary = [self summaryWithError:nil];
+    identifier = [summary objectForKey:@"assistant_set_id"];
+    if ([identifier isKindOfClass:[NSString class]]) {
+      identifier = [[identifier copy] autorelease];
+    }
+  }
+  return ([identifier length] > 0U) ? identifier : @"personal_assistant";
+}
+
+- (BOOL)setAssistantSetIdentifier:(NSString *)assistantSetIdentifier
+                            error:(NSError **)error
+{
+  NSString *databasePath;
+  NSString *resourcePath;
+  NSDictionary *notificationSession;
+  char *strappyError;
+  long long sessionId;
+
+  if (![assistantSetIdentifier isKindOfClass:[NSString class]] ||
+      ([assistantSetIdentifier length] == 0U)) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:
+          NSLocalizedString(@"Assistant is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:10
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  if (sessionId <= 0LL) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:
+          NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+  resourcePath = [[NSBundle mainBundle] resourcePath];
+  if (![resourcePath isKindOfClass:[NSString class]] ||
+      ([resourcePath length] == 0U)) {
+    [NSException raise:NSInternalInconsistencyException
+                format:@"Required assistant resource directory is missing from the app bundle."];
+    return NO;
+  }
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+  strappyError = NULL;
+  if (!strappy_session_update_assistant_set(
+        [databasePath UTF8String],
+        sessionId,
+        [resourcePath fileSystemRepresentation],
+        [assistantSetIdentifier UTF8String],
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return NO;
+  }
+
+  notificationSession = nil;
+  @synchronized(self) {
+    NSMutableDictionary *summary;
+
+    if (cachedSummary_ != nil) {
+      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
+      [summary setObject:assistantSetIdentifier forKey:@"assistant_set_id"];
+      [cachedSummary_ release];
+      cachedSummary_ = summary;
+      notificationSession = [cachedSummary_ retain];
+    } else {
+      notificationSession =
+        [[NSDictionary alloc] initWithObjectsAndKeys:
+          sessionIdentifier_, @"id",
+          assistantSetIdentifier, @"assistant_set_id",
+          nil];
+    }
+  }
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionDidUpdateNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  notificationSession, @"session",
+                  StrappySessionChangeKindAssistantSet,
+                  StrappySessionChangeKindKey,
+                  nil]];
+  [notificationSession release];
+  return YES;
 }
 
 - (BOOL)setWebSearchEnabled:(BOOL)enabled error:(NSError **)error

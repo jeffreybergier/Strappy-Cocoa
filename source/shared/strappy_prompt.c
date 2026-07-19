@@ -128,3 +128,46 @@ char *strappy_prompt_render_system_prompt(const char *template_path,
 {
   return strappy_prompt_read_file(template_path, error_out);
 }
+
+char *strappy_prompt_render_resource(const char *resource_dir,
+                                     const char *resource_name,
+                                     char **error_out)
+{
+  size_t directory_length;
+  size_t resource_length;
+  int needs_slash;
+  char *path;
+  char *result;
+
+  if ((resource_dir == NULL) || (resource_dir[0] == '\0') ||
+      (resource_name == NULL) || (resource_name[0] == '\0') ||
+      (strchr(resource_name, '/') != NULL) ||
+      (strchr(resource_name, '\\') != NULL) ||
+      (strstr(resource_name, "..") != NULL)) {
+    strappy_set_error(error_out, "System prompt resource is not configured.");
+    return NULL;
+  }
+  directory_length = strlen(resource_dir);
+  resource_length = strlen(resource_name);
+  needs_slash = (resource_dir[directory_length - 1U] == '/') ? 0 : 1;
+  if (directory_length > ((size_t)-1) - resource_length -
+      (size_t)needs_slash - 1U) {
+    strappy_set_error(error_out, "System prompt resource path is too large.");
+    return NULL;
+  }
+  path = (char *)malloc(directory_length + (size_t)needs_slash +
+                        resource_length + 1U);
+  if (path == NULL) {
+    strappy_set_error(error_out,
+                      "Could not allocate system prompt resource path.");
+    return NULL;
+  }
+  memcpy(path, resource_dir, directory_length);
+  if (needs_slash) {
+    path[directory_length++] = '/';
+  }
+  memcpy(path + directory_length, resource_name, resource_length + 1U);
+  result = strappy_prompt_read_file(path, error_out);
+  free(path);
+  return result;
+}

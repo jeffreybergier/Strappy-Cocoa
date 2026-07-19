@@ -206,6 +206,17 @@ int strappy_tools_is_helper(const char *tool_name)
           (definition->kind == STRAPPY_TOOL_KIND_HELPER)) ? 1 : 0;
 }
 
+int strappy_tools_is_registered(const char *tool_name)
+{
+  return (strappy_tools_find_definition(tool_name) != NULL) ||
+    (strappy_tools_find_server_definition(tool_name) != NULL);
+}
+
+int strappy_tools_is_server(const char *tool_name)
+{
+  return (strappy_tools_find_server_definition(tool_name) != NULL) ? 1 : 0;
+}
+
 static void strappy_database_query_arguments_init(
   strappy_database_query_arguments *arguments)
 {
@@ -1332,6 +1343,8 @@ static int strappy_tools_responses_copy_member(cJSON *target,
 static int strappy_tools_responses_append_server_tools(
   cJSON *tools,
   const char *resource_dir,
+  const char * const *allowed_names,
+  size_t allowed_name_count,
   int web_search_enabled,
   char **error_out)
 {
@@ -1361,6 +1374,12 @@ static int strappy_tools_responses_append_server_tools(
     cJSON *response_tool;
 
     type = strappy_tools_server_schema_type(server_tool);
+    if ((allowed_names != NULL) && (allowed_name_count > 0U) &&
+        !strappy_tools_name_is_allowed(type,
+                                       allowed_names,
+                                       allowed_name_count)) {
+      continue;
+    }
     feature = cJSON_GetObjectItemCaseSensitive(
       server_tool,
       STRAPPY_TOOL_SERVER_FEATURE_KEY);
@@ -1389,6 +1408,8 @@ static int strappy_tools_responses_append_server_tools(
 static char *strappy_tools_responses_json_from_chat_json(
   const char *chat_tools_json,
   const char *resource_dir,
+  const char * const *allowed_names,
+  size_t allowed_name_count,
   int web_search_enabled,
   char **error_out)
 {
@@ -1481,6 +1502,8 @@ static char *strappy_tools_responses_json_from_chat_json(
 
   if (!strappy_tools_responses_append_server_tools(responses_tools,
                                                    resource_dir,
+                                                   allowed_names,
+                                                   allowed_name_count,
                                                    web_search_enabled,
                                                    error_out)) {
     cJSON_Delete(responses_tools);
@@ -1519,6 +1542,8 @@ char *strappy_tools_responses_request_json_filtered(
   responses_tools_json =
     strappy_tools_responses_json_from_chat_json(chat_tools_json,
                                                 resource_dir,
+                                                allowed_names,
+                                                allowed_name_count,
                                                 web_search_enabled,
                                                 error_out);
   free(chat_tools_json);

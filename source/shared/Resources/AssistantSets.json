@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "default_set_id": "personal_assistant",
+  "universal": {
+    "tools": [
+      "openrouter:web_search",
+      "openrouter:web_fetch",
+      "helper_datetime_to_iso8601",
+      "helper_datetime_from_iso8601",
+      "helper_fontawesome_shortcode_search",
+      "helper_fontawesome_shortcode_confirm",
+      "memory_user_fact_read",
+      "memory_user_fact_remember",
+      "memory_user_fact_forget",
+      "helper_session_name_write"
+    ],
+    "preflight_tools": [
+      "memory_user_fact_read"
+    ],
+    "quality_checks": [
+      "answer_non_empty",
+      "web_reference",
+      "helper_session_name_write",
+      "helper_fontawesome_shortcode_confirm",
+      "memory_user_fact_remember"
+    ]
+  },
+  "sets": [
+    {
+      "id": "world_knowledge",
+      "display_name": "World Knowledge",
+      "detail": "General knowledge and web research",
+      "availability": "available",
+      "prompt_resource": "PromptSystemWorld.txt",
+      "additional_tools": [],
+      "additional_preflight_tools": [],
+      "additional_quality_checks": []
+    },
+    {
+      "id": "personal_assistant",
+      "display_name": "Personal Assistant",
+      "detail": "Personal databases and assistance",
+      "availability": "available",
+      "prompt_resource": "PromptSystemDatabase.txt",
+      "additional_tools": [
+        "database_list_info",
+        "database_query",
+        "database_context_read",
+        "memory_database_hint_remember",
+        "memory_database_hint_forget"
+      ],
+      "additional_preflight_tools": [
+        "database_list_info"
+      ],
+      "additional_quality_checks": [
+        "database_context_read",
+        "memory_database_hint_remember"
+      ]
+    },
+    {
+      "id": "coding_assistant",
+      "display_name": "Coding Assistant",
+      "detail": "Coming Soon",
+      "availability": "coming_soon",
+      "prompt_resource": "PromptSystemCode.txt",
+      "additional_tools": [],
+      "additional_preflight_tools": [],
+      "additional_quality_checks": []
+    }
+  ]
+}

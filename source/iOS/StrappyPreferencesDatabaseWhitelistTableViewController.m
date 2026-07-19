@@ -831,7 +831,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
                                             forCatalogIdentifier:catalogId
                                                            error:&error]) {
       [self showError:error
-                title:NSLocalizedString(@"Could not update database", nil)];
+                title:NSLocalizedString(@"Failed to Save Changes", nil)];
       return;
     }
     [self reloadRows];
@@ -856,7 +856,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
                                            forCatalogIdentifier:catalogId
                                                           error:&error]) {
     [self showError:error
-              title:NSLocalizedString(@"Could not update database", nil)];
+              title:NSLocalizedString(@"Failed to Save Changes", nil)];
     return;
   }
   [self reloadRows];

@@ -119,6 +119,25 @@ static int harness_has_tool_type(cJSON *tools, const char *expected)
   return 0;
 }
 
+static int harness_has_tool_name(cJSON *tools, const char *expected)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools) || (expected == NULL)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *name;
+
+    name = cJSON_GetObjectItem(tool, "name");
+    if (cJSON_IsString(name) && (name->valuestring != NULL) &&
+        (strcmp(name->valuestring, expected) == 0)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static int harness_tool_description_equals(cJSON *tools,
                                            const char *expected_name,
                                            const char *expected_description)
@@ -937,7 +956,8 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_SLOW = 6,
   HARNESS_RESPONSES_SERVER_EMPTY_ANSWER = 7,
   HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_AFTER_TOOLS = 8,
-  HARNESS_RESPONSES_SERVER_WEB_REFERENCE_VALID = 9
+  HARNESS_RESPONSES_SERVER_WEB_REFERENCE_VALID = 9,
+  HARNESS_RESPONSES_SERVER_WORLD_KNOWLEDGE = 10
 } harness_responses_server_scenario;
 
 static int harness_send_all(int socket_fd,
@@ -1221,27 +1241,27 @@ static int harness_preflight_output_matches(cJSON *item,
 static int harness_preflight_input_is_valid(cJSON *input,
                                             const char *prompt_group)
 {
-  cJSON *database_call;
   cJSON *memory_call;
+  cJSON *database_call;
 
-  database_call = cJSON_GetArrayItem(input, 1);
-  memory_call = cJSON_GetArrayItem(input, 2);
-  return harness_preflight_call_is_valid(database_call,
-                                         "database_list_info",
-                                         "fc_pf_db_",
-                                         "call_pf_db_",
-                                         prompt_group) &&
-    harness_preflight_call_is_valid(memory_call,
+  memory_call = cJSON_GetArrayItem(input, 1);
+  database_call = cJSON_GetArrayItem(input, 2);
+  return harness_preflight_call_is_valid(memory_call,
                                     "memory_user_fact_read",
-                                    "fc_pf_mem_",
-                                    "call_pf_mem_",
+                                    "fc_pf_0_",
+                                    "call_pf_0_",
+                                    prompt_group) &&
+    harness_preflight_call_is_valid(database_call,
+                                    "database_list_info",
+                                    "fc_pf_1_",
+                                    "call_pf_1_",
                                     prompt_group) &&
     harness_preflight_output_matches(cJSON_GetArrayItem(input, 3),
-                                     database_call,
-                                     0) &&
-    harness_preflight_output_matches(cJSON_GetArrayItem(input, 4),
                                      memory_call,
-                                     1);
+                                     1) &&
+    harness_preflight_output_matches(cJSON_GetArrayItem(input, 4),
+                                     database_call,
+                                     0);
 }
 
 static int harness_request_preflight_contains(cJSON *root,
@@ -1325,6 +1345,103 @@ static int harness_request_base_is_valid(cJSON *root,
       !cJSON_IsArray(tools) || !cJSON_IsObject(first_tool) ||
       !harness_tools_hide_local_display_metadata(tools) ||
       (function_wrapper != NULL)) {
+    return 0;
+  }
+  if (session_key_out != NULL) {
+    *session_key_out = strdup(session_key->valuestring);
+    if (*session_key_out == NULL) {
+      return 0;
+    }
+  }
+  if (prompt_group_out != NULL) {
+    *prompt_group_out = strdup(prompt_group->valuestring);
+    if (*prompt_group_out == NULL) {
+      free((session_key_out != NULL) ? *session_key_out : NULL);
+      if (session_key_out != NULL) {
+        *session_key_out = NULL;
+      }
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int harness_world_knowledge_tools_are_valid(cJSON *tools)
+{
+  return cJSON_IsArray(tools) && (cJSON_GetArraySize(tools) == 10) &&
+    harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) &&
+    harness_has_tool_name(
+      tools,
+      STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH) &&
+    harness_has_tool_name(
+      tools,
+      STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_USER_FACT_READ) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_USER_FACT_FORGET) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_LIST_INFO) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_QUERY) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_CONTEXT_READ) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET) &&
+    harness_tools_hide_local_display_metadata(tools);
+}
+
+static int harness_world_knowledge_request_is_valid(
+  cJSON *root,
+  const char *expected_prompt,
+  char **session_key_out,
+  char **prompt_group_out)
+{
+  cJSON *stream;
+  cJSON *store;
+  cJSON *instructions;
+  cJSON *session_key;
+  cJSON *metadata;
+  cJSON *prompt_group;
+  cJSON *input;
+  cJSON *memory_call;
+  cJSON *tools;
+  const char *text;
+
+  stream = cJSON_GetObjectItem(root, "stream");
+  store = cJSON_GetObjectItem(root, "store");
+  instructions = cJSON_GetObjectItem(root, "instructions");
+  session_key = cJSON_GetObjectItem(root, "session_id");
+  metadata = cJSON_GetObjectItem(root, "metadata");
+  prompt_group = cJSON_IsObject(metadata) ?
+    cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
+  input = cJSON_GetObjectItem(root, "input");
+  memory_call = cJSON_GetArrayItem(input, 1);
+  tools = cJSON_GetObjectItem(root, "tools");
+  text = harness_message_text(cJSON_GetArrayItem(input, 0));
+  if (!cJSON_IsFalse(stream) || !cJSON_IsFalse(store) ||
+      !cJSON_IsString(instructions) ||
+      (instructions->valuestring == NULL) ||
+      (strstr(instructions->valuestring,
+              "world-knowledge AI Strap-on Harness") == NULL) ||
+      (strstr(instructions->valuestring,
+              "personal databases in this assistant set") == NULL) ||
+      (strstr(instructions->valuestring,
+              "personal AI Strap-on Harness") != NULL) ||
+      !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
+      !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
+      !cJSON_IsArray(input) || (cJSON_GetArraySize(input) != 3) ||
+      !harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") ||
+      !harness_preflight_call_is_valid(memory_call,
+                                       STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                       "fc_pf_0_",
+                                       "call_pf_0_",
+                                       prompt_group->valuestring) ||
+      !harness_preflight_output_matches(cJSON_GetArrayItem(input, 2),
+                                        memory_call,
+                                        1) ||
+      (text == NULL) || (strcmp(text, expected_prompt) != 0) ||
+      !harness_world_knowledge_tools_are_valid(tools)) {
     return 0;
   }
   if (session_key_out != NULL) {
@@ -1592,6 +1709,48 @@ static int harness_run_answer_quality_server(int listener_fd)
   }
   free(session_key);
   free(prompt_group);
+  return ok;
+}
+
+static int harness_run_world_knowledge_server(int listener_fd)
+{
+  static const char *final_response =
+    "{\"id\":\"resp-world-final\",\"object\":\"response\","
+    "\"created_at\":1700000001,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-world-final\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"World answer.\",\"annotations\":[]}]}],"
+    "\"usage\":{\"input_tokens\":4,\"output_tokens\":4,"
+    "\"total_tokens\":8}}";
+  char *body;
+  char *session_key;
+  char *prompt_group;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  session_key = NULL;
+  prompt_group = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_world_knowledge_request_is_valid(root,
+                                             "Use world knowledge",
+                                             &session_key,
+                                             &prompt_group) &&
+    harness_send_json_response(client_fd, 200L, final_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  free(session_key);
+  free(prompt_group);
+  if (!ok) {
+    fprintf(stderr, "World Knowledge server rejected the request.\n");
+  }
   return ok;
 }
 
@@ -2125,6 +2284,8 @@ static int harness_start_server(harness_responses_server_scenario scenario,
     alarm(15U);
     if (scenario == HARNESS_RESPONSES_SERVER_ANSWER_QUALITY) {
       ok = harness_run_answer_quality_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_WORLD_KNOWLEDGE) {
+      ok = harness_run_world_knowledge_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_SERVER_TOOL) {
       ok = harness_run_server_tool_server(listener_fd);
     } else if (scenario ==
@@ -2411,7 +2572,7 @@ static int harness_test_answer_quality_report(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystem.txt",
+    "../shared/Resources/PromptSystemDatabase.txt",
     path,
     session_id,
     harness_record_ledger_event,
@@ -2462,7 +2623,7 @@ static int harness_test_answer_quality_report(void)
                         &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
-                        "outcome='failed' AND guidance_version='3';",
+                        "outcome='failed' AND guidance_version='4';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks;",
@@ -2476,17 +2637,17 @@ static int harness_test_answer_quality_report(void)
         "(ordinal=1 AND check_key='web_reference' AND "
         "check_kind='answer_content' AND label='Source link included' AND "
         "tool_name IS NULL) OR "
-        "(ordinal=2 AND check_key='database_context_read' AND "
+        "(ordinal=5 AND check_key='database_context_read' AND "
         "check_kind='required_tool' AND label='Database context checked' AND "
         "tool_name='" STRAPPY_TOOL_DATABASE_CONTEXT_READ "') OR "
-        "(ordinal=3 AND check_key='helper_session_name_write' AND "
+        "(ordinal=2 AND check_key='helper_session_name_write' AND "
         "check_kind='required_tool' AND label='Session named' AND "
         "tool_name='" STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE "') OR "
-        "(ordinal=4 AND check_key='helper_fontawesome_shortcode_confirm' AND "
+        "(ordinal=3 AND check_key='helper_fontawesome_shortcode_confirm' AND "
         "check_kind='required_tool' AND "
         "label='Font Awesome shortcode confirmed' AND "
         "tool_name='" STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM "') OR "
-        "(ordinal=5 AND check_key='memory_user_fact_remember' AND "
+        "(ordinal=4 AND check_key='memory_user_fact_remember' AND "
         "check_kind='required_tool' AND label='User memory considered' AND "
         "tool_name='" STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER "') OR "
         "(ordinal=6 AND check_key='memory_database_hint_remember' AND "
@@ -2552,6 +2713,140 @@ static int harness_test_answer_quality_report(void)
   return ok;
 }
 
+static int harness_test_world_knowledge_assistant_set(void)
+{
+  char path[] = "/tmp/strappy-responses-world-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *result;
+  char *assistant_set_id;
+  sqlite3 *db;
+  long long session_id;
+  long long value;
+  pid_t server_pid;
+  int fd;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create World Knowledge harness database.");
+  }
+  close(fd);
+  error = NULL;
+  result = NULL;
+  assistant_set_id = NULL;
+  session_id = 0LL;
+  if (!harness_create_session_database(path, &session_id, &error)) {
+    fprintf(stderr,
+            "Could not create World Knowledge session: %s\n",
+            (error != NULL) ? error : "database setup failed");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+  if (strappy_session_update_assistant_set(
+        path,
+        session_id,
+        "../shared/Resources",
+        STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
+        &error) || (error == NULL)) {
+    fprintf(stderr, "Unavailable Coding Assistant set was accepted.\n");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+  free(error);
+  error = NULL;
+  if (!strappy_session_update_assistant_set(
+        path,
+        session_id,
+        "../shared/Resources",
+        STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE,
+        &error) ||
+      !harness_start_server(HARNESS_RESPONSES_SERVER_WORLD_KNOWLEDGE,
+                            endpoint,
+                            sizeof(endpoint),
+                            &server_pid)) {
+    fprintf(stderr,
+            "Could not prepare World Knowledge integration test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  result = strappy_responses_send_prompt_for_session_and_store(
+    "Use world knowledge",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources/PromptSystemDatabase.txt",
+    path,
+    session_id,
+    &error);
+  server_ok = harness_wait_for_server(server_pid, result == NULL);
+  ok = (result != NULL) && (strcmp(result, "World answer.") == 0) &&
+    server_ok && (error == NULL);
+  free(result);
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM session_assistant_sets "
+                           "WHERE assistant_set_id='world_knowledge';",
+                           &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_audits WHERE "
+                        "outcome='failed' AND guidance_version='4';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_checks;",
+                        &value) && (value == 5LL) &&
+      harness_query_int(
+        db,
+        "SELECT COUNT(*) FROM answer_quality_checks WHERE check_key IN ("
+        "'answer_non_empty','web_reference','helper_session_name_write',"
+        "'helper_fontawesome_shortcode_confirm',"
+        "'memory_user_fact_remember');",
+        &value) && (value == 5LL) &&
+      harness_query_int(
+        db,
+        "SELECT COUNT(*) FROM answer_quality_checks WHERE check_key IN ("
+        "'database_context_read','memory_database_hint_remember');",
+        &value) && (value == 0LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM tool_executions;",
+                        &value) && (value == 0LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+  if (ok) {
+    ok = strappy_session_update_assistant_set(
+      path,
+      session_id,
+      "../shared/Resources",
+      STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT,
+      &error) &&
+      strappy_db_get_session_assistant_set(path,
+                                           session_id,
+                                           &assistant_set_id,
+                                           &error) &&
+      (assistant_set_id != NULL) &&
+      (strcmp(assistant_set_id,
+              STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT) == 0);
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "World Knowledge integration failed: %s\n",
+            (error != NULL) ? error :
+              "request, policy, audit, or set-switch mismatch");
+  }
+  free(assistant_set_id);
+  free(error);
+  unlink(path);
+  return ok;
+}
+
 static int harness_test_empty_answer_quality_report(void)
 {
   char path[] = "/tmp/strappy-responses-empty-answer-XXXXXX";
@@ -2595,7 +2890,7 @@ static int harness_test_empty_answer_quality_report(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystem.txt",
+    "../shared/Resources/PromptSystemDatabase.txt",
     path,
     session_id,
     &error);
@@ -2618,7 +2913,7 @@ static int harness_test_empty_answer_quality_report(void)
                         &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
-                        "outcome='failed' AND guidance_version='3';",
+                        "outcome='failed' AND guidance_version='4';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks;",
@@ -2731,7 +3026,7 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystem.txt",
+    "../shared/Resources/PromptSystemDatabase.txt",
     path,
     session_id,
     &error);
@@ -2776,7 +3071,7 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
                         &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
-                        "outcome='failed' AND guidance_version='3';",
+                        "outcome='failed' AND guidance_version='4';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
@@ -2872,7 +3167,7 @@ static int harness_test_web_search_requires_markdown_reference(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystem.txt",
+    "../shared/Resources/PromptSystemDatabase.txt",
     path,
     session_id,
     &error);
@@ -2958,7 +3253,7 @@ static int harness_test_valid_web_reference_passes_content_check(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystem.txt",
+    "../shared/Resources/PromptSystemDatabase.txt",
     path,
     session_id,
     &error);
@@ -3049,7 +3344,7 @@ static int harness_test_function_tool_continuation(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystem.txt",
+    "../shared/Resources/PromptSystemDatabase.txt",
     path,
     session_id,
     harness_record_ledger_event,
@@ -3179,7 +3474,7 @@ static int harness_test_retry_attempt_ledger(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystem.txt",
+    "../shared/Resources/PromptSystemDatabase.txt",
     path,
     session_id,
     harness_record_ledger_event,
@@ -3300,7 +3595,7 @@ static int harness_test_active_request_cancellation(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystem.txt",
+    "../shared/Resources/PromptSystemDatabase.txt",
     path,
     session_id,
     harness_record_ledger_event,
@@ -3390,7 +3685,7 @@ static int harness_test_retry_after_clamp_and_cancellation(void)
     "/dev/null",
     endpoint,
     "test-token",
-    "../shared/Resources/PromptSystem.txt",
+    "../shared/Resources/PromptSystemDatabase.txt",
     path,
     session_id,
     harness_record_ledger_event,
@@ -4329,6 +4624,7 @@ int main(void)
       harness_test_ledger() &&
       harness_test_cumulative_session_usage_cost() &&
       harness_test_answer_quality_report() &&
+      harness_test_world_knowledge_assistant_set() &&
       harness_test_empty_answer_quality_report() &&
       harness_test_empty_answer_after_tools_quality_report() &&
       harness_test_web_search_requires_markdown_reference() &&

@@ -1,5 +1,6 @@
 #include "strappy_db.h"
 
+#include "strappy_assistant_sets.h"
 #include "strappy_config.h"
 #include "strappy_core.h"
 #include "strappy_tools.h"
@@ -28,6 +29,9 @@
   "'" STRAPPY_CONFIG_DEFAULT_API_MODEL "')"
 #define STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL \
   "COALESCE(s.model_id, " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL ")"
+#define STRAPPY_DB_SESSION_ASSISTANT_SET_SQL \
+  "COALESCE((SELECT a.assistant_set_id FROM session_assistant_sets a " \
+  "WHERE a.session_id = s.id), '" STRAPPY_ASSISTANT_SET_DEFAULT "')"
 #define STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL \
   "COALESCE((SELECT i.created_at_ms FROM conversation_items i " \
   "WHERE i.session_id = s.id ORDER BY i.sequence DESC LIMIT 1), " \
@@ -295,6 +299,7 @@ void strappy_session_record_init(strappy_session_record *record)
   record->response = NULL;
   record->model = NULL;
   record->model_name = NULL;
+  record->assistant_set_id = NULL;
   record->created_at = NULL;
   record->last_activity_at = NULL;
   record->last_activity_at_ms = 0LL;
@@ -314,6 +319,7 @@ void strappy_session_record_destroy(strappy_session_record *record)
   free(record->response);
   free(record->model);
   free(record->model_name);
+  free(record->assistant_set_id);
   free(record->created_at);
   free(record->last_activity_at);
   strappy_session_record_init(record);
@@ -1315,6 +1321,12 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     ");"
     "CREATE INDEX IF NOT EXISTS sessions_updated_idx "
       "ON sessions(updated_at_ms DESC, id DESC);"
+    "CREATE TABLE IF NOT EXISTS session_assistant_sets ("
+    "session_id INTEGER PRIMARY KEY,"
+    "assistant_set_id TEXT NOT NULL CHECK(length(assistant_set_id) > 0),"
+    "updated_at_ms INTEGER NOT NULL,"
+    "FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE"
+    ");"
     "CREATE TABLE IF NOT EXISTS turns ("
     "id INTEGER PRIMARY KEY,"
     "session_id INTEGER NOT NULL,"
@@ -2272,6 +2284,7 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   char *response;
   char *model;
   char *model_name;
+  char *assistant_set_id;
   char *created_at;
   char *last_activity_at;
 
@@ -2292,17 +2305,19 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   response = strappy_db_column_string(stmt, 3);
   model = strappy_db_column_string(stmt, 4);
   model_name = strappy_db_column_string(stmt, 5);
+  assistant_set_id = strappy_db_column_string(stmt, 12);
   created_at = strappy_db_column_string(stmt, 7);
   last_activity_at = strappy_db_column_string(stmt, 8);
 
   if ((name == NULL) || (prompt == NULL) || (response == NULL) ||
       (model == NULL) || (model_name == NULL) || (created_at == NULL) ||
-      (last_activity_at == NULL)) {
+      (last_activity_at == NULL) || (assistant_set_id == NULL)) {
     free(name);
     free(prompt);
     free(response);
     free(model);
     free(model_name);
+    free(assistant_set_id);
     free(created_at);
     free(last_activity_at);
     strappy_set_error(error_out, "Could not allocate session row.");
@@ -2314,6 +2329,7 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   record->response = response;
   record->model = model;
   record->model_name = model_name;
+  record->assistant_set_id = assistant_set_id;
   record->created_at = created_at;
   record->last_activity_at = last_activity_at;
   return 1;
@@ -7910,6 +7926,206 @@ int strappy_db_update_session_web_search_enabled(const char *db_path,
   return 1;
 }
 
+static int strappy_db_copy_session_assistant_set(
+  sqlite3 *db,
+  long long session_id,
+  char **assistant_set_id_out,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT COALESCE((SELECT a.assistant_set_id "
+      "FROM session_assistant_sets a WHERE a.session_id = ?), '"
+      STRAPPY_ASSISTANT_SET_DEFAULT "') "
+    "WHERE EXISTS (SELECT 1 FROM sessions s WHERE s.id = ?);";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (assistant_set_id_out != NULL) {
+    *assistant_set_id_out = NULL;
+  }
+  if ((db == NULL) || (assistant_set_id_out == NULL) || (session_id <= 0LL)) {
+    strappy_set_error(error_out,
+                      "Session assistant-set request is incomplete.");
+    return 0;
+  }
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare session assistant-set read: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+  if ((sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) != SQLITE_OK)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind session assistant-set read: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_DONE) {
+    strappy_set_error(error_out, "Session was not found.");
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  if (rc != SQLITE_ROW) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read session assistant set: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  *assistant_set_id_out = strappy_db_column_string(stmt, 0);
+  sqlite3_finalize(stmt);
+  if (*assistant_set_id_out == NULL) {
+    strappy_set_error(error_out,
+                      "Could not allocate session assistant set.");
+    return 0;
+  }
+  return 1;
+}
+
+int strappy_db_get_session_assistant_set(const char *db_path,
+                                         long long session_id,
+                                         char **assistant_set_id_out,
+                                         char **error_out)
+{
+  sqlite3 *db;
+  int ok;
+
+  if (assistant_set_id_out != NULL) {
+    *assistant_set_id_out = NULL;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  ok = strappy_db_copy_session_assistant_set(db,
+                                             session_id,
+                                             assistant_set_id_out,
+                                             error_out);
+  strappy_db_release(db);
+  return ok;
+}
+
+int strappy_db_update_session_assistant_set(const char *db_path,
+                                            long long session_id,
+                                            const char *assistant_set_id,
+                                            char **error_out)
+{
+  static const char *insert_sql =
+    "INSERT OR REPLACE INTO session_assistant_sets "
+    "(session_id, assistant_set_id, updated_at_ms) VALUES (?, ?, ?);";
+  static const char *touch_sql =
+    "UPDATE sessions SET updated_at_ms = ? WHERE id = ?;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  char *current;
+  int rc;
+
+  if ((assistant_set_id == NULL) || (assistant_set_id[0] == '\0')) {
+    strappy_set_error(error_out, "Assistant set is not selected.");
+    return 0;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  if (!strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin assistant-set update",
+                       error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  current = NULL;
+  if (!strappy_db_copy_session_assistant_set(db,
+                                             session_id,
+                                             &current,
+                                             error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back assistant-set update", NULL);
+    strappy_db_release(db);
+    return 0;
+  }
+  if (strcmp(current, assistant_set_id) == 0) {
+    free(current);
+    if (!strappy_db_exec(db,
+                         "COMMIT;",
+                         "Could not commit assistant-set update",
+                         error_out)) {
+      strappy_db_exec(db, "ROLLBACK;", "Could not roll back assistant-set update", NULL);
+      strappy_db_release(db);
+      return 0;
+    }
+    strappy_db_release(db);
+    return 1;
+  }
+  free(current);
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, insert_sql, -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 2, assistant_set_id, -1, SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 3, (sqlite3_int64)strappy_db_now_ms());
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save session assistant set: %s",
+                                sqlite3_errmsg(db));
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back assistant-set update", NULL);
+    strappy_db_release(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, touch_sql, -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)strappy_db_now_ms());
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not touch session assistant set: %s",
+                                sqlite3_errmsg(db));
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back assistant-set update", NULL);
+    strappy_db_release(db);
+    return 0;
+  }
+  if (!strappy_db_exec(db,
+                       "COMMIT;",
+                       "Could not commit assistant-set update",
+                       error_out)) {
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back assistant-set update", NULL);
+    strappy_db_release(db);
+    return 0;
+  }
+  strappy_db_release(db);
+  return 1;
+}
+
 int strappy_db_list_sessions(const char *db_path,
                              strappy_session_record_list *list,
                              char **error_out)
@@ -7922,7 +8138,8 @@ int strappy_db_list_sessions(const char *db_path,
     "strftime('%Y-%m-%dT%H:%M:%fZ', "
       STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " / 1000.0, 'unixepoch'), "
     STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
-    "s.web_search_enabled, s.streaming_enabled "
+    "s.web_search_enabled, s.streaming_enabled, "
+    STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " "
     "ORDER BY " STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " DESC, s.id DESC;";
@@ -8034,7 +8251,8 @@ int strappy_db_load_session(const char *db_path,
     "strftime('%Y-%m-%dT%H:%M:%fZ', "
       STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " / 1000.0, 'unixepoch'), "
     STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
-    "s.web_search_enabled, s.streaming_enabled "
+    "s.web_search_enabled, s.streaming_enabled, "
+    STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " WHERE s.id = ?;";
   sqlite3 *db;
@@ -8122,7 +8340,8 @@ int strappy_db_load_session_list_record(const char *db_path,
     "strftime('%Y-%m-%dT%H:%M:%fZ', "
       STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " / 1000.0, 'unixepoch'), "
     STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
-    "s.web_search_enabled, s.streaming_enabled "
+    "s.web_search_enabled, s.streaming_enabled, "
+    STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " WHERE s.id = ?;";
   sqlite3 *db;

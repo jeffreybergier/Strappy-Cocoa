@@ -2,6 +2,7 @@
 #define STRAPPY_SESSION_H
 
 #include "strappy_client.h"
+#include "strappy_assistant_sets.h"
 #include "strappy_db.h"
 #include "strappy_webview.h"
 
@@ -87,6 +88,15 @@ int strappy_session_update_web_search_enabled(const char *db_path,
                                               long long session_id,
                                               int web_search_enabled,
                                               char **error_out);
+int strappy_session_list_assistant_sets(
+  const char *resource_dir,
+  strappy_assistant_set_record_list *list,
+  char **error_out);
+int strappy_session_update_assistant_set(const char *db_path,
+                                         long long session_id,
+                                         const char *resource_dir,
+                                         const char *assistant_set_id,
+                                         char **error_out);
 int strappy_session_get_model(const char *db_path,
                               long long session_id,
                               char **model_id_out,

@@ -33,6 +33,7 @@ DATABASE_QUERY_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_db.c \
 	$(SHARED_DIR)/strappy_file_scanner.c \
 	$(SHARED_DIR)/strappy_core.c \
+	$(SHARED_DIR)/strappy_assistant_sets.c \
 	$(CJSON_DIR)/cJSON.c
 
 WEBVIEW_HARNESS_SOURCES = \
@@ -50,6 +51,7 @@ RESPONSES_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_db.c \
 	$(SHARED_DIR)/strappy_model_catalog.c \
 	$(SHARED_DIR)/strappy_prompt.c \
+	$(SHARED_DIR)/strappy_assistant_sets.c \
 	$(SHARED_DIR)/strappy_responses.c \
 	$(SHARED_DIR)/strappy_session.c \
 	$(SHARED_DIR)/strappy_tools.c \

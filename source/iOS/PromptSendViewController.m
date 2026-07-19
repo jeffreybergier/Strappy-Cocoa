@@ -286,7 +286,8 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
 
 enum {
   kStrappyPromptOptionsSectionModels = 0,
-  kStrappyPromptOptionsSectionWebSearch,
+  kStrappyPromptOptionsSectionAssistantSet,
+  kStrappyPromptOptionsSectionAvailableTools,
   kStrappyPromptOptionsSectionCount
 };
 
@@ -320,6 +321,10 @@ enum {
 - (void)updateExpansion;
 - (void)updatePlaceholderVisibility;
 - (NSArray *)currentAllowedModels;
+- (NSArray *)currentAssistantSets;
+- (NSString *)currentSelectedAssistantSetIdentifier;
+- (BOOL)setSelectedAssistantSetIdentifierFromOptions:
+    (NSString *)assistantSetIdentifier;
 - (NSString *)currentSelectedModelIdentifier;
 - (BOOL)setSelectedModelIdentifierFromOptions:(NSString *)modelIdentifier;
 - (BOOL)setWebSearchEnabledFromOptions:(BOOL)enabled;
@@ -332,6 +337,8 @@ enum {
 
 @interface StrappyPromptOptionsTableViewController : UITableViewController
 @property (nonatomic, assign) PromptSendViewController *promptSendViewController;
+@property (nonatomic, copy) NSArray *assistantSets;
+@property (nonatomic, copy) NSString *selectedAssistantSetIdentifier;
 @property (nonatomic, copy) NSArray *models;
 @property (nonatomic, copy) NSString *selectedModelIdentifier;
 @property (nonatomic, strong) UISwitch *webSearchSwitch;
@@ -379,6 +386,14 @@ enum {
   PromptSendViewController *promptSendViewController;
 
   promptSendViewController = [self promptSendViewController];
+  [self setAssistantSets:
+    (promptSendViewController != nil)
+      ? [promptSendViewController currentAssistantSets]
+      : [NSArray array]];
+  [self setSelectedAssistantSetIdentifier:
+    (promptSendViewController != nil)
+      ? [promptSendViewController currentSelectedAssistantSetIdentifier]
+      : @""];
   [self setModels:
     (promptSendViewController != nil)
       ? [promptSendViewController currentAllowedModels]
@@ -429,10 +444,13 @@ enum {
  numberOfRowsInSection:(NSInteger)section
 {
   (void)tableView;
+  if (section == kStrappyPromptOptionsSectionAssistantSet) {
+    return (NSInteger)[[self assistantSets] count];
+  }
   if (section == kStrappyPromptOptionsSectionModels) {
     return (NSInteger)[[self models] count];
   }
-  if (section == kStrappyPromptOptionsSectionWebSearch) {
+  if (section == kStrappyPromptOptionsSectionAvailableTools) {
     return 1;
   }
   return 0;
@@ -442,11 +460,16 @@ enum {
 titleForHeaderInSection:(NSInteger)section
 {
   (void)tableView;
+  if (section == kStrappyPromptOptionsSectionAssistantSet) {
+    return ([[self assistantSets] count] > 0U)
+      ? NSLocalizedString(@"Assistant", nil)
+      : nil;
+  }
   if (section == kStrappyPromptOptionsSectionModels) {
     return ([[self models] count] > 0U) ? NSLocalizedString(@"Models", nil) : nil;
   }
-  if (section == kStrappyPromptOptionsSectionWebSearch) {
-    return NSLocalizedString(@"Web Search", nil);
+  if (section == kStrappyPromptOptionsSectionAvailableTools) {
+    return NSLocalizedString(@"Available Tools", nil);
   }
   return nil;
 }
@@ -456,14 +479,56 @@ titleForHeaderInSection:(NSInteger)section
 {
   UITableViewCell *cell;
 
-  if ([indexPath section] == kStrappyPromptOptionsSectionWebSearch) {
+  if ([indexPath section] == kStrappyPromptOptionsSectionAssistantSet) {
+    NSDictionary *assistantSet;
+    NSString *identifier;
+    NSString *name;
+    NSString *detail;
+    NSNumber *available;
+    BOOL enabled;
+
+    cell = [tableView dequeueReusableCellWithIdentifier:@"AssistantSetCell"];
+    if (cell == nil) {
+      cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
+                                    reuseIdentifier:@"AssistantSetCell"];
+      [[cell textLabel] setNumberOfLines:1];
+      [[cell detailTextLabel] setNumberOfLines:1];
+    }
+    assistantSet = [[self assistantSets]
+      objectAtIndex:(NSUInteger)[indexPath row]];
+    identifier = StrappyMessageModelStringForRow(assistantSet, @"id");
+    name = StrappyMessageModelStringForRow(assistantSet, @"name");
+    detail = StrappyMessageModelStringForRow(assistantSet, @"detail");
+    available = [assistantSet objectForKey:@"available"];
+    enabled = [available isKindOfClass:[NSNumber class]] &&
+      [available boolValue];
+    [[cell textLabel] setText:([name length] > 0U) ? name : identifier];
+    [[cell detailTextLabel] setText:detail];
+    [[cell textLabel] setTextColor:enabled ?
+      [UIColor blackColor] : [UIColor grayColor]];
+    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+    [cell setSelectionStyle:enabled ?
+      UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone];
+    [cell setAccessoryType:
+      [identifier isEqualToString:[self selectedAssistantSetIdentifier]]
+        ? UITableViewCellAccessoryCheckmark
+        : UITableViewCellAccessoryNone];
+    return cell;
+  }
+
+  if ([indexPath section] == kStrappyPromptOptionsSectionAvailableTools) {
     cell = [tableView dequeueReusableCellWithIdentifier:@"WebSearchCell"];
     if (cell == nil) {
-      cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
+      cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
                                     reuseIdentifier:@"WebSearchCell"];
       [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+      [[cell textLabel] setNumberOfLines:1];
+      [[cell detailTextLabel] setNumberOfLines:1];
     }
     [[cell textLabel] setText:NSLocalizedString(@"Search Web", nil)];
+    [[cell detailTextLabel] setText:NSLocalizedString(
+      @"Web Search incurs additional charges", nil)];
+    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
     [[self webSearchSwitch] setOn:[self webSearchEnabled] animated:NO];
     [cell setAccessoryView:[self webSearchSwitch]];
     return cell;
@@ -500,6 +565,19 @@ titleForHeaderInSection:(NSInteger)section
   willSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
   (void)tableView;
+  if ([indexPath section] == kStrappyPromptOptionsSectionAssistantSet) {
+    NSDictionary *assistantSet;
+    NSNumber *available;
+
+    if ((NSUInteger)[indexPath row] >= [[self assistantSets] count]) {
+      return nil;
+    }
+    assistantSet = [[self assistantSets]
+      objectAtIndex:(NSUInteger)[indexPath row]];
+    available = [assistantSet objectForKey:@"available"];
+    return ([available isKindOfClass:[NSNumber class]] &&
+            [available boolValue]) ? indexPath : nil;
+  }
   if ([indexPath section] != kStrappyPromptOptionsSectionModels) {
     return nil;
   }
@@ -513,6 +591,33 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   NSString *modelIdentifier;
 
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
+  if ([indexPath section] == kStrappyPromptOptionsSectionAssistantSet) {
+    NSDictionary *assistantSet;
+    NSString *assistantSetIdentifier;
+
+    if ((NSUInteger)[indexPath row] >= [[self assistantSets] count]) {
+      return;
+    }
+    assistantSet = [[self assistantSets]
+      objectAtIndex:(NSUInteger)[indexPath row]];
+    assistantSetIdentifier =
+      StrappyMessageModelStringForRow(assistantSet, @"id");
+    if ([assistantSetIdentifier length] == 0U) {
+      return;
+    }
+    if ([[self promptSendViewController]
+          setSelectedAssistantSetIdentifierFromOptions:
+            assistantSetIdentifier]) {
+      [self setSelectedAssistantSetIdentifier:assistantSetIdentifier];
+      [[self tableView] reloadSections:
+        [NSIndexSet indexSetWithIndex:
+          kStrappyPromptOptionsSectionAssistantSet]
+                    withRowAnimation:UITableViewRowAnimationNone];
+    } else {
+      [self reloadOptionsFromPrompt];
+    }
+    return;
+  }
   if (([indexPath section] != kStrappyPromptOptionsSectionModels) ||
       ([[self models] count] == 0U)) {
     return;
@@ -996,6 +1101,46 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     [filteredModels addObject:model];
   }
   return filteredModels;
+}
+
+- (NSArray *)currentAssistantSets
+{
+  NSArray *assistantSets;
+
+  assistantSets = nil;
+  if ([[self delegate] respondsToSelector:
+        @selector(assistantSetsForPromptSendViewController:)]) {
+    assistantSets =
+      [[self delegate] assistantSetsForPromptSendViewController:self];
+  }
+  return [assistantSets isKindOfClass:[NSArray class]] ?
+    assistantSets : [NSArray array];
+}
+
+- (NSString *)currentSelectedAssistantSetIdentifier
+{
+  NSString *identifier;
+
+  identifier = @"";
+  if ([[self delegate] respondsToSelector:
+        @selector(selectedAssistantSetIdentifierForPromptSendViewController:)]) {
+    identifier = [[self delegate]
+      selectedAssistantSetIdentifierForPromptSendViewController:self];
+  }
+  return [identifier isKindOfClass:[NSString class]] ? identifier : @"";
+}
+
+- (BOOL)setSelectedAssistantSetIdentifierFromOptions:
+    (NSString *)assistantSetIdentifier
+{
+  if (([assistantSetIdentifier length] == 0U) ||
+      ![[self delegate] respondsToSelector:
+        @selector(promptSendViewController:
+          setSelectedAssistantSetIdentifier:)]) {
+    return NO;
+  }
+  return [[self delegate] promptSendViewController:self
+                    setSelectedAssistantSetIdentifier:assistantSetIdentifier];
 }
 
 - (NSString *)currentSelectedModelIdentifier

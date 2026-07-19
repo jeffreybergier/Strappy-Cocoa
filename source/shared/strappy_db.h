@@ -14,6 +14,7 @@ typedef struct strappy_session_record {
   char *response;
   char *model;
   char *model_name;
+  char *assistant_set_id;
   char *created_at;
   char *last_activity_at;
   long long last_activity_at_ms;
@@ -384,6 +385,14 @@ int strappy_db_update_session_web_search_enabled(const char *db_path,
                                                  long long session_id,
                                                  int web_search_enabled,
                                                  char **error_out);
+int strappy_db_get_session_assistant_set(const char *db_path,
+                                         long long session_id,
+                                         char **assistant_set_id_out,
+                                         char **error_out);
+int strappy_db_update_session_assistant_set(const char *db_path,
+                                            long long session_id,
+                                            const char *assistant_set_id,
+                                            char **error_out);
 int strappy_db_list_sessions(const char *db_path,
                              strappy_session_record_list *list,
                              char **error_out);

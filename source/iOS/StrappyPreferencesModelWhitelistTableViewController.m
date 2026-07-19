@@ -687,7 +687,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   if (![StrappySession setDefaultOpenRouterModelIdentifier:modelIdentifier
                                                      error:&error]) {
     [self showError:error
-              title:NSLocalizedString(@"Could not set default model", nil)];
+              title:NSLocalizedString(@"Failed to Save Changes", nil)];
     return NO;
   }
 
@@ -725,7 +725,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
                               forModelIdentifier:modelIdentifier
                                            error:&error]) {
     [self showError:error
-              title:NSLocalizedString(@"Could not update model", nil)];
+              title:NSLocalizedString(@"Failed to Save Changes", nil)];
     return;
   }
   [self reloadRows];

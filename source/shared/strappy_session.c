@@ -1,5 +1,6 @@
 #include "strappy_session.h"
 
+#include "strappy_assistant_sets.h"
 #include "strappy_core.h"
 #include "strappy_model_catalog.h"
 #include "strappy_prompt.h"
@@ -209,6 +210,45 @@ int strappy_session_update_web_search_enabled(const char *db_path,
                                                      session_id,
                                                      web_search_enabled,
                                                      error_out);
+}
+
+int strappy_session_list_assistant_sets(
+  const char *resource_dir,
+  strappy_assistant_set_record_list *list,
+  char **error_out)
+{
+  return strappy_assistant_sets_list(resource_dir, list, error_out);
+}
+
+int strappy_session_update_assistant_set(const char *db_path,
+                                         long long session_id,
+                                         const char *resource_dir,
+                                         const char *assistant_set_id,
+                                         char **error_out)
+{
+  strappy_assistant_set_profile profile;
+  int ok;
+
+  strappy_assistant_set_profile_init(&profile);
+  if (!strappy_assistant_sets_load_profile(resource_dir,
+                                           assistant_set_id,
+                                           &profile,
+                                           error_out)) {
+    return 0;
+  }
+  if (!strappy_assistant_set_profile_is_available(&profile)) {
+    strappy_set_formatted_error(error_out,
+                                "Assistant set is not available: %s",
+                                assistant_set_id);
+    strappy_assistant_set_profile_destroy(&profile);
+    return 0;
+  }
+  ok = strappy_db_update_session_assistant_set(db_path,
+                                               session_id,
+                                               assistant_set_id,
+                                               error_out);
+  strappy_assistant_set_profile_destroy(&profile);
+  return ok;
 }
 
 int strappy_session_get_model(const char *db_path,

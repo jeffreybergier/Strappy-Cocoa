@@ -68,12 +68,12 @@ static void StrappyLogApplicationLifecycle(NSString *event,
 
   self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
 
-  @try {
-    NSString *cacert = [AltivecCore certPath];
+  {
+    NSString *cacert;
+
+    cacert = [AltivecCore certPath];
     NSParameterAssert(cacert);
     [StrappySession bootstrapProcessWithCACertPath:cacert];
-  } @catch (NSException *exception) {
-    NSLog(@"AppDelegate.didFinishLaunching bootstrap failed: %@", exception);
   }
 
   [AIFontAwesome registerBundledFonts];

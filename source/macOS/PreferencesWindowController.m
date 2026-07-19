@@ -872,7 +872,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   NSString *path;
   NSString *prompt;
 
-  path = [[NSBundle mainBundle] pathForResource:@"PromptSystem" ofType:@"txt"];
+  path = [[NSBundle mainBundle]
+    pathForResource:@"PromptSystemDatabase"
+             ofType:@"txt"];
   if ([path length] == 0U) {
     [systemPromptTextView_ setString:
       NSLocalizedString(@"System prompt template is missing from the app bundle.", nil)];

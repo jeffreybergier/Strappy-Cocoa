@@ -7,6 +7,12 @@
                   didSubmitPrompt:(NSString *)prompt;
 - (NSArray *)allowedModelsForPromptSendViewController:
     (PromptSendViewController *)controller;
+- (NSArray *)assistantSetsForPromptSendViewController:
+    (PromptSendViewController *)controller;
+- (NSString *)selectedAssistantSetIdentifierForPromptSendViewController:
+    (PromptSendViewController *)controller;
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
+  setSelectedAssistantSetIdentifier:(NSString *)assistantSetIdentifier;
 - (NSString *)selectedModelIdentifierForPromptSendViewController:
     (PromptSendViewController *)controller;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller

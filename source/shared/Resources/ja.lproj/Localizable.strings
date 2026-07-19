@@ -37,6 +37,17 @@
 "The required tool was not called." = "必須ツールが呼び出されませんでした。";
 "Options" = "オプション";
 "Prompt Options" = "プロンプトオプション";
+"Assistant" = "アシスタント";
+"Available Tools" = "利用可能なツール";
+"World Knowledge" = "世界知識";
+"General knowledge and web research" = "一般知識と Web リサーチ";
+"Personal Assistant" = "パーソナルアシスタント";
+"Personal databases and assistance" = "個人データベースとアシスタント機能";
+"Coding Assistant" = "コーディングアシスタント";
+"Coming Soon" = "近日公開";
+"Assistant is not selected." = "アシスタントが選択されていません。";
+"Failed to Save Changes" = "変更を保存できませんでした";
+"Your changes could not be saved." = "変更を保存できませんでした。";
 "Send" = "送信";
 "Send Prompt" = "プロンプトを送信";
 "Stream Responses" = "応答をストリーミング";
@@ -77,7 +88,6 @@
 "Model is not selected." = "モデルが選択されていません。";
 "Model refresh is already running." = "モデル更新はすでに実行中です。";
 "Model refresh failed." = "モデル更新に失敗しました。";
-"Could not update model setting." = "モデル設定を更新できませんでした。";
 "Database Search" = "データベース検索";
 "Database scan is already running." = "データベーススキャンはすでに実行中です。";
 "Database scan failed." = "データベーススキャンに失敗しました。";
@@ -143,8 +153,6 @@
 "Correct Spelling Automatically" = "スペルを自動的に修正";
 "Could Not Delete Chat" = "チャットを削除できませんでした";
 "Could not create session directory." = "セッションディレクトリを作成できませんでした。";
-"Could not update streaming setting." = "ストリーミング設定を更新できませんでした。";
-"Could not update database" = "データベースを更新できませんでした";
 "Data Detectors" = "データ検出";
 "Database" = "データベース";
 "Database cannot be used" = "データベースを使用できません";
@@ -225,11 +233,7 @@
 "Thinking" = "思考中";
 "%@ (Selected)" = "%@（選択中）";
 "An unknown error occurred." = "不明なエラーが発生しました。";
-"Model Not Changed" = "モデルは変更されませんでした";
-"Streaming Not Changed" = "ストリーミングは変更されませんでした";
 "This will permanently delete \"%@\" and all of its messages. This cannot be undone." = "「%@」とそのすべてのメッセージを完全に削除します。この操作は取り消せません。";
 "Transformations" = "変換";
 "Use Selection for Find" = "選択部分を検索に使用";
-"Could not update web search setting." = "Web 検索設定を更新できませんでした。";
-"Web Search" = "Web 検索";
-"Web Search Not Changed" = "Web 検索は変更されませんでした";
+"Web Search incurs additional charges" = "Web 検索には追加料金が発生します";

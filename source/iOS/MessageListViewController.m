@@ -750,6 +750,74 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   return [models isKindOfClass:[NSArray class]] ? models : [NSArray array];
 }
 
+- (NSArray *)availableAssistantSets
+{
+  NSArray *assistantSets;
+
+  assistantSets = [StrappySession assistantSetCatalog];
+  return [assistantSets isKindOfClass:[NSArray class]] ?
+    assistantSets : [NSArray array];
+}
+
+- (NSArray *)assistantSetsForPromptSendViewController:
+    (PromptSendViewController *)controller
+{
+  (void)controller;
+  return [self availableAssistantSets];
+}
+
+- (NSString *)selectedAssistantSetIdentifier
+{
+  NSString *identifier;
+
+  if ([self session] == nil) {
+    return @"";
+  }
+  identifier = [[self session] assistantSetIdentifier];
+  return [identifier isKindOfClass:[NSString class]] ? identifier : @"";
+}
+
+- (NSString *)selectedAssistantSetIdentifierForPromptSendViewController:
+    (PromptSendViewController *)controller
+{
+  (void)controller;
+  return [self selectedAssistantSetIdentifier];
+}
+
+- (BOOL)setSelectedAssistantSetIdentifier:(NSString *)assistantSetIdentifier
+{
+  BOOL changed;
+
+  changed = [self promptSendViewController:[self sendBar]
+            setSelectedAssistantSetIdentifier:assistantSetIdentifier];
+  return changed;
+}
+
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
+  setSelectedAssistantSetIdentifier:(NSString *)assistantSetIdentifier
+{
+  NSError *error;
+
+  (void)controller;
+  error = nil;
+  if (![[self session] setAssistantSetIdentifier:assistantSetIdentifier
+                                           error:&error]) {
+    NSString *message;
+
+    message = [error localizedDescription];
+    if ([message length] == 0U) {
+      message = NSLocalizedString(@"Your changes could not be saved.", nil);
+    }
+    [self setStatusText:message];
+    [self showMessage:message
+                title:NSLocalizedString(@"Failed to Save Changes", nil)];
+    return NO;
+  }
+  [self setStatusText:nil];
+  [[self sendBar] reloadOptionsMenu];
+  return YES;
+}
+
 - (NSArray *)allowedModelsForPromptSendViewController:
     (PromptSendViewController *)controller
 {
@@ -815,11 +883,11 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
     message = [error localizedDescription];
     if ([message length] == 0U) {
-      message = NSLocalizedString(@"Could not update model setting.", nil);
+      message = NSLocalizedString(@"Your changes could not be saved.", nil);
     }
     [self setStatusText:message];
     [self showMessage:message
-                title:NSLocalizedString(@"Model Not Changed", nil)];
+                title:NSLocalizedString(@"Failed to Save Changes", nil)];
     return NO;
   }
 
@@ -844,12 +912,12 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
     message = [error localizedDescription];
     if ([message length] == 0U) {
-      message = NSLocalizedString(@"Could not update web search setting.", nil);
+      message = NSLocalizedString(@"Your changes could not be saved.", nil);
     }
     [self setStatusText:message];
     [[self sendBar] setWebSearchEnabled:[[self session] webSearchEnabled]];
     [self showMessage:message
-                title:NSLocalizedString(@"Web Search Not Changed", nil)];
+                title:NSLocalizedString(@"Failed to Save Changes", nil)];
     return NO;
   }
 

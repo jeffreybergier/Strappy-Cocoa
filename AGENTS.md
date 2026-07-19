@@ -78,14 +78,17 @@ House style for Strappy source:
 12. Webview HTML, CSS, and JavaScript strings are generated in C. Keep that
     rendering logic in `strappy_webview.{h,c}` or another C module, not in
     Objective-C view controllers.
-13. Prompt, tool, and database guidance are runtime resources under
-    `source/shared/Resources`: `PromptSystem.txt`, `GuidanceTools.json`, and
-    `GuidanceDatabase.json`. Keep tool schemas in `GuidanceTools.json` in sync
-    with the tool-name constants in `strappy_tools.h` and the executor in
-    `strappy_tools.c`; do not duplicate prompt or tool guidance in
-    Objective-C UI code. Strict assistant workflow rules, timestamp guidance,
-    memory guidance, and database-specific instructions belong in these
-    resources, not in scattered C or Objective-C strings.
+13. Prompt, assistant-set, tool, and database guidance are runtime resources
+    under `source/shared/Resources`: `AssistantSets.json`, the set-specific
+    prompt text files, `GuidanceTools.json`, and `GuidanceDatabase.json`.
+    `AssistantSets.json` owns each set's prompt resource, tool allowlist,
+    preflight tools, answer-quality checks, and availability. Keep tool schemas
+    in `GuidanceTools.json` in sync with the tool-name constants in
+    `strappy_tools.h` and the executor in `strappy_tools.c`; do not duplicate
+    prompt or tool guidance in Objective-C UI code. Strict assistant workflow
+    rules, timestamp guidance, memory guidance, and database-specific
+    instructions belong in these resources, not in scattered C or Objective-C
+    strings.
 14. Database tool flow is split by responsibility. `database_list_info` lists
     approved databases in a compact `databases` array containing
     assistant-visible IDs, inferred app names, paths, sizes, and modification
@@ -98,12 +101,13 @@ House style for Strappy source:
     returns only ordered column-name and positional-row arrays plus a
     `rows_truncated` boolean. Exceptional text and BLOB cells carry their own
     compact metadata.
-    The Responses runtime executes `database_list_info` and
-    `memory_user_fact_read` before round zero of each user request and seeds
-    each result as a typed `function_call` plus matching
-    `function_call_output` input pair. These application-created,
-    request-direction items do not create response tool-execution rows or
-    count as model-generated calls for the tool audit.
+    The Responses runtime executes the selected assistant set's preflight tools
+    before round zero and seeds each result as a typed `function_call` plus
+    matching `function_call_output` input pair. World Knowledge preflights only
+    `memory_user_fact_read`; Personal Assistant additionally preflights
+    `database_list_info`. These application-created, request-direction items do
+    not create response tool-execution rows or count as model-generated calls
+    for the tool audit.
     Do not put full schema dumps or learned hint caches into
     `database_list_info`.
 15. Memory and session-title tools persist durable assistant state.
@@ -133,10 +137,12 @@ House style for Strappy source:
     activity has occurred, scan the answer for a non-image inline Markdown HTTP
     or HTTPS link with a non-empty title and URL. Database inventory is an
     application-seeded preflight tool output rather than a quality rule. The
-    report always checks `database_context_read`,
-    `helper_session_name_write`, `helper_fontawesome_shortcode_confirm`,
-    `memory_user_fact_remember`, and `memory_database_hint_remember`. The
-    database-context and memory tools are report-or-act tools whose fully empty,
+    report always uses the universal set checks for
+    `helper_session_name_write`, `helper_fontawesome_shortcode_confirm`, and
+    `memory_user_fact_remember`. Personal Assistant additionally checks
+    `database_context_read` and `memory_database_hint_remember`; World Knowledge
+    never runs those database-specific checks. The database-context and memory
+    tools are report-or-act tools whose fully empty,
     JSON-null, or quoted `"null"` arguments produce a successful no-op. The
     session-name tool instead requires a non-empty string and updates the active
     session name. The Font Awesome confirmation tool requires a non-empty
@@ -206,4 +212,6 @@ infrastructure:
 8. Tools that allow the Agent to discover the schema of a sqlite database found
 9. Tools that allow the Agent to answer questions the user asks from the personal context found in the sqlite databases
 10. Helper tools for timestamp conversion, remembered user facts, remembered database hints, and session naming
-11. Runtime prompt/tool/database guidance resources that steer database selection, SQL workflow, and memory behavior
+11. Runtime assistant-set, prompt, tool, and database guidance resources that
+    select capabilities and steer database selection, SQL workflow, and memory
+    behavior

@@ -625,7 +625,7 @@ def main() -> int:
         "resource_sha256": {
             name: sha256(system_prompt.parent / name)
             for name in (
-                "PromptSystem.txt",
+                "PromptSystemDatabase.txt",
                 "GuidanceTools.json",
                 "GuidanceDatabase.json",
             )

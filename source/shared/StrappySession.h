@@ -12,6 +12,7 @@ extern NSString * const StrappySessionChangeKindActivity;
 extern NSString * const StrappySessionChangeKindModel;
 extern NSString * const StrappySessionChangeKindStreaming;
 extern NSString * const StrappySessionChangeKindWebSearch;
+extern NSString * const StrappySessionChangeKindAssistantSet;
 
 @interface StrappySession : NSObject {
  @private
@@ -44,6 +45,7 @@ extern NSString * const StrappySessionChangeKindWebSearch;
                                                 error:(NSError **)error;
 + (NSArray *)openRouterModelCatalogWithError:(NSError **)error;
 + (NSArray *)allowedOpenRouterModelCatalogWithError:(NSError **)error;
++ (NSArray *)assistantSetCatalog;
 + (NSString *)defaultOpenRouterModelIdentifierWithError:(NSError **)error;
 + (BOOL)setDefaultOpenRouterModelIdentifier:(NSString *)modelIdentifier
                                       error:(NSError **)error;
@@ -72,6 +74,9 @@ extern NSString * const StrappySessionChangeKindWebSearch;
                                         error:(NSError **)error;
 - (BOOL)webSearchEnabled;
 - (BOOL)setWebSearchEnabled:(BOOL)enabled error:(NSError **)error;
+- (NSString *)assistantSetIdentifier;
+- (BOOL)setAssistantSetIdentifier:(NSString *)assistantSetIdentifier
+                            error:(NSError **)error;
 - (BOOL)streamingEnabled;
 - (BOOL)setStreamingEnabled:(BOOL)enabled error:(NSError **)error;
 - (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error;

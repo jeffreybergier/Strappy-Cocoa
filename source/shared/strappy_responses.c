@@ -1,5 +1,6 @@
 #include "strappy_responses.h"
 
+#include "strappy_assistant_sets.h"
 #include "strappy_client.h"
 #include "strappy_config.h"
 #include "strappy_core.h"
@@ -21,9 +22,9 @@
 #define STRAPPY_RESPONSES_MAX_ATTEMPTS 3L
 #define STRAPPY_RESPONSES_INITIAL_RETRY_DELAY_MS 500L
 #define STRAPPY_RESPONSES_MAX_RETRY_DELAY_MS 60000L
-#define STRAPPY_RESPONSES_AUDIT_RULE_COUNT 5U
+#define STRAPPY_RESPONSES_MAX_AUDIT_RULES 16U
 
-static const char strappy_responses_audit_guidance_version[] = "3";
+static const char strappy_responses_audit_guidance_version[] = "4";
 static const char strappy_responses_answer_non_empty_check_key[] =
   "answer_non_empty";
 static const char strappy_responses_answer_non_empty_label[] =
@@ -67,49 +68,87 @@ typedef struct strappy_responses_analysis {
 
 typedef struct strappy_responses_audit_rule {
   const char *check_key;
+  const char *check_kind;
   const char *label;
   const char *tool_name;
+  int evaluation_kind;
   int completed;
 } strappy_responses_audit_rule;
 
 typedef struct strappy_responses_audit {
-  strappy_responses_audit_rule rules[STRAPPY_RESPONSES_AUDIT_RULE_COUNT];
+  strappy_responses_audit_rule rules[STRAPPY_RESPONSES_MAX_AUDIT_RULES];
+  size_t rule_count;
   int web_reference_required;
 } strappy_responses_audit;
 
-static const strappy_responses_audit_rule strappy_responses_audit_rules[
-  STRAPPY_RESPONSES_AUDIT_RULE_COUNT] = {
+enum {
+  STRAPPY_RESPONSES_AUDIT_ANSWER_NON_EMPTY = 1,
+  STRAPPY_RESPONSES_AUDIT_WEB_REFERENCE,
+  STRAPPY_RESPONSES_AUDIT_REQUIRED_TOOL
+};
+
+static const strappy_responses_audit_rule strappy_responses_audit_rules[] = {
+  {
+    strappy_responses_answer_non_empty_check_key,
+    "answer_content",
+    strappy_responses_answer_non_empty_label,
+    NULL,
+    STRAPPY_RESPONSES_AUDIT_ANSWER_NON_EMPTY,
+    0
+  },
+  {
+    strappy_responses_web_reference_check_key,
+    "answer_content",
+    strappy_responses_web_reference_label,
+    NULL,
+    STRAPPY_RESPONSES_AUDIT_WEB_REFERENCE,
+    0
+  },
   {
     "database_context_read",
+    "required_tool",
     "Database context checked",
     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+    STRAPPY_RESPONSES_AUDIT_REQUIRED_TOOL,
     0
   },
   {
     "helper_session_name_write",
+    "required_tool",
     "Session named",
     STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+    STRAPPY_RESPONSES_AUDIT_REQUIRED_TOOL,
     0
   },
   {
     "helper_fontawesome_shortcode_confirm",
+    "required_tool",
     "Font Awesome shortcode confirmed",
     STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+    STRAPPY_RESPONSES_AUDIT_REQUIRED_TOOL,
     0
   },
   {
     "memory_user_fact_remember",
+    "required_tool",
     "User memory considered",
     STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+    STRAPPY_RESPONSES_AUDIT_REQUIRED_TOOL,
     0
   },
   {
     "memory_database_hint_remember",
+    "required_tool",
     "Database memory considered",
     STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+    STRAPPY_RESPONSES_AUDIT_REQUIRED_TOOL,
     0
   }
 };
+
+static const size_t strappy_responses_audit_rule_count =
+  sizeof(strappy_responses_audit_rules) /
+  sizeof(strappy_responses_audit_rules[0]);
 
 static int strappy_responses_text_has_non_whitespace(const char *text);
 
@@ -154,15 +193,75 @@ static int strappy_responses_buffer_append_string(
     strappy_responses_buffer_append(buffer, text, strlen(text));
 }
 
-static void strappy_responses_audit_init(strappy_responses_audit *audit)
+static void strappy_responses_audit_reset(strappy_responses_audit *audit)
 {
   if (audit == NULL) {
     return;
   }
-  memcpy(audit->rules,
-         strappy_responses_audit_rules,
-         sizeof(audit->rules));
-  audit->web_reference_required = 0;
+  memset(audit, 0, sizeof(*audit));
+}
+
+static int strappy_responses_audit_init(
+  strappy_responses_audit *audit,
+  const strappy_assistant_set_profile *profile,
+  char **error_out)
+{
+  size_t profile_index;
+
+  if ((audit == NULL) || (profile == NULL)) {
+    strappy_set_error(error_out,
+                      "Answer-quality assistant set is incomplete.");
+    return 0;
+  }
+  strappy_responses_audit_reset(audit);
+  for (profile_index = 0U;
+       profile_index < profile->quality_check_key_count;
+       profile_index++) {
+    const char *check_key;
+    size_t registry_index;
+    int found;
+
+    check_key = profile->quality_check_keys[profile_index];
+    found = 0;
+    for (registry_index = 0U;
+         registry_index < strappy_responses_audit_rule_count;
+         registry_index++) {
+      if (strcmp(strappy_responses_audit_rules[registry_index].check_key,
+                 check_key) == 0) {
+        if ((strappy_responses_audit_rules[registry_index].tool_name != NULL) &&
+            !strappy_assistant_set_profile_allows_tool(
+              profile,
+              strappy_responses_audit_rules[registry_index].tool_name)) {
+          strappy_set_formatted_error(
+            error_out,
+            "Answer-quality tool is not allowed by the assistant set: %s",
+            strappy_responses_audit_rules[registry_index].tool_name);
+          return 0;
+        }
+        if (audit->rule_count >= STRAPPY_RESPONSES_MAX_AUDIT_RULES) {
+          strappy_set_error(error_out,
+                            "Assistant-set quality policy is too large.");
+          return 0;
+        }
+        audit->rules[audit->rule_count++] =
+          strappy_responses_audit_rules[registry_index];
+        found = 1;
+        break;
+      }
+    }
+    if (!found) {
+      strappy_set_formatted_error(error_out,
+                                  "Answer-quality check is not registered: %s",
+                                  check_key);
+      return 0;
+    }
+  }
+  if (audit->rule_count == 0U) {
+    strappy_set_error(error_out,
+                      "Assistant-set quality policy is empty.");
+    return 0;
+  }
+  return 1;
 }
 
 static void strappy_responses_audit_record_activity(
@@ -187,8 +286,9 @@ static void strappy_responses_audit_record_completed_tool(
   if ((audit == NULL) || (tool_name == NULL) || (tool_name[0] == '\0')) {
     return;
   }
-  for (index = 0U; index < STRAPPY_RESPONSES_AUDIT_RULE_COUNT; index++) {
-    if (strcmp(audit->rules[index].tool_name, tool_name) == 0) {
+  for (index = 0U; index < audit->rule_count; index++) {
+    if ((audit->rules[index].tool_name != NULL) &&
+        (strcmp(audit->rules[index].tool_name, tool_name) == 0)) {
       audit->rules[index].completed = 1;
     }
   }
@@ -276,17 +376,15 @@ static int strappy_responses_audit_evaluate(
 {
   strappy_answer_quality_check_input *checks;
   size_t index;
-  size_t check_count;
   int failed;
 
-  if ((audit == NULL) || (result == NULL)) {
+  if ((audit == NULL) || (result == NULL) || (audit->rule_count == 0U)) {
     strappy_set_error(error_out, "Answer quality evaluation is incomplete.");
     return 0;
   }
   memset(result, 0, sizeof(*result));
-  check_count = STRAPPY_RESPONSES_AUDIT_RULE_COUNT + 2U;
   checks = (strappy_answer_quality_check_input *)calloc(
-    check_count,
+    audit->rule_count,
     sizeof(strappy_answer_quality_check_input));
   if (checks == NULL) {
     strappy_set_error(error_out,
@@ -295,56 +393,59 @@ static int strappy_responses_audit_evaluate(
   }
 
   failed = 0;
-  checks[0].check_key = strappy_responses_answer_non_empty_check_key;
-  checks[0].check_kind = "answer_content";
-  checks[0].label = strappy_responses_answer_non_empty_label;
-  if (strappy_responses_text_has_non_whitespace(response_text)) {
-    checks[0].status = "passed";
-  } else {
-    checks[0].status = "failed";
-    checks[0].detail =
-      "The response did not include a non-empty assistant answer.";
-    failed = 1;
-  }
-
-  checks[1].check_key = strappy_responses_web_reference_check_key;
-  checks[1].check_kind = "answer_content";
-  checks[1].label = strappy_responses_web_reference_label;
-  if (!audit->web_reference_required) {
-    checks[1].status = "not_applicable";
-    checks[1].detail = "No web search or web fetch was used.";
-  } else if (strappy_responses_text_has_http_markdown_link(response_text)) {
-    checks[1].status = "passed";
-  } else {
-    checks[1].status = "failed";
-    checks[1].detail =
-      "A linked HTTP source reference was required but not found.";
-    failed = 1;
-  }
-
-  for (index = 0U; index < STRAPPY_RESPONSES_AUDIT_RULE_COUNT; index++) {
+  for (index = 0U; index < audit->rule_count; index++) {
     const strappy_responses_audit_rule *rule;
     strappy_answer_quality_check_input *check;
 
     rule = &audit->rules[index];
-    check = &checks[index + 2U];
+    check = &checks[index];
     check->check_key = rule->check_key;
-    check->check_kind = "required_tool";
+    check->check_kind = rule->check_kind;
     check->label = rule->label;
     check->tool_name = rule->tool_name;
-    if (rule->completed) {
-      check->status = "passed";
+    if (rule->evaluation_kind == STRAPPY_RESPONSES_AUDIT_ANSWER_NON_EMPTY) {
+      if (strappy_responses_text_has_non_whitespace(response_text)) {
+        check->status = "passed";
+      } else {
+        check->status = "failed";
+        check->detail =
+          "The response did not include a non-empty assistant answer.";
+        failed = 1;
+      }
+    } else if (rule->evaluation_kind ==
+               STRAPPY_RESPONSES_AUDIT_WEB_REFERENCE) {
+      if (!audit->web_reference_required) {
+        check->status = "not_applicable";
+        check->detail = "No web search or web fetch was used.";
+      } else if (strappy_responses_text_has_http_markdown_link(response_text)) {
+        check->status = "passed";
+      } else {
+        check->status = "failed";
+        check->detail =
+          "A linked HTTP source reference was required but not found.";
+        failed = 1;
+      }
+    } else if (rule->evaluation_kind ==
+               STRAPPY_RESPONSES_AUDIT_REQUIRED_TOOL) {
+      if (rule->completed) {
+        check->status = "passed";
+      } else {
+        check->status = "failed";
+        check->detail = "The required tool did not complete successfully.";
+        failed = 1;
+      }
     } else {
-      check->status = "failed";
-      check->detail = "The required tool did not complete successfully.";
-      failed = 1;
+      free(checks);
+      strappy_set_error(error_out,
+                        "Answer-quality check has an invalid evaluator.");
+      return 0;
     }
   }
 
   result->outcome = failed ? "failed" : "passed";
   result->guidance_version = strappy_responses_audit_guidance_version;
   result->checks = checks;
-  result->check_count = check_count;
+  result->check_count = audit->rule_count;
   return 1;
 }
 
@@ -1155,110 +1256,119 @@ static int strappy_responses_append_preflight_items(
   long long session_id,
   const char *resource_dir,
   const char *prompt_group_key,
+  const strappy_assistant_set_profile *profile,
   char **error_out)
 {
-  char *database_call_id;
-  char *database_item_id;
-  char *database_result;
-  char *memory_call_id;
-  char *memory_item_id;
-  char *memory_result;
-  char *item_json;
+  char **call_ids;
+  char **item_ids;
+  char **results;
+  size_t index;
   int ok;
 
-  database_call_id = NULL;
-  database_item_id = NULL;
-  database_result = NULL;
-  memory_call_id = NULL;
-  memory_item_id = NULL;
-  memory_result = NULL;
-  ok = 0;
-
-  database_result = strappy_tools_execute(
-    session_db_path,
-    session_id,
-    resource_dir,
-    STRAPPY_TOOL_DATABASE_LIST_INFO,
-    "{}",
-    error_out);
-  if (database_result == NULL) {
-    goto cleanup;
+  if ((items == NULL) || (profile == NULL)) {
+    strappy_set_error(error_out,
+                      "Responses preflight assistant set is incomplete.");
+    return 0;
   }
-  memory_result = strappy_tools_execute(
-    session_db_path,
-    session_id,
-    resource_dir,
-    STRAPPY_TOOL_MEMORY_USER_FACT_READ,
-    "{}",
-    error_out);
-  if (memory_result == NULL) {
-    goto cleanup;
+  if (profile->preflight_tool_name_count == 0U) {
+    return 1;
   }
-
-  database_call_id = strappy_responses_preflight_identifier(
-    "call_pf_db_",
-    prompt_group_key,
-    error_out);
-  database_item_id = strappy_responses_preflight_identifier(
-    "fc_pf_db_",
-    prompt_group_key,
-    error_out);
-  memory_call_id = strappy_responses_preflight_identifier(
-    "call_pf_mem_",
-    prompt_group_key,
-    error_out);
-  memory_item_id = strappy_responses_preflight_identifier(
-    "fc_pf_mem_",
-    prompt_group_key,
-    error_out);
-  if ((database_call_id == NULL) || (database_item_id == NULL) ||
-      (memory_call_id == NULL) || (memory_item_id == NULL)) {
-    goto cleanup;
-  }
-
-  item_json = strappy_responses_function_call_item_json(
-    database_item_id,
-    database_call_id,
-    STRAPPY_TOOL_DATABASE_LIST_INFO,
-    "{}",
-    error_out);
-  if ((item_json == NULL) ||
-      !strappy_responses_owned_items_append(items, item_json, error_out)) {
-    goto cleanup;
-  }
-  item_json = strappy_responses_function_call_item_json(
-    memory_item_id,
-    memory_call_id,
-    STRAPPY_TOOL_MEMORY_USER_FACT_READ,
-    "{}",
-    error_out);
-  if ((item_json == NULL) ||
-      !strappy_responses_owned_items_append(items, item_json, error_out)) {
-    goto cleanup;
-  }
-  item_json = strappy_responses_function_output_item_json(database_call_id,
-                                                           database_result,
-                                                           error_out);
-  if ((item_json == NULL) ||
-      !strappy_responses_owned_items_append(items, item_json, error_out)) {
-    goto cleanup;
-  }
-  item_json = strappy_responses_function_output_item_json(memory_call_id,
-                                                           memory_result,
-                                                           error_out);
-  if ((item_json == NULL) ||
-      !strappy_responses_owned_items_append(items, item_json, error_out)) {
-    goto cleanup;
+  call_ids = (char **)calloc(profile->preflight_tool_name_count,
+                             sizeof(char *));
+  item_ids = (char **)calloc(profile->preflight_tool_name_count,
+                             sizeof(char *));
+  results = (char **)calloc(profile->preflight_tool_name_count,
+                            sizeof(char *));
+  if ((call_ids == NULL) || (item_ids == NULL) || (results == NULL)) {
+    free(call_ids);
+    free(item_ids);
+    free(results);
+    strappy_set_error(error_out,
+                      "Could not allocate Responses preflight items.");
+    return 0;
   }
   ok = 1;
+  for (index = 0U;
+       ok && (index < profile->preflight_tool_name_count);
+       index++) {
+    char call_prefix[64];
+    char item_prefix[64];
+    char *item_json;
+    int call_written;
+    int item_written;
 
-cleanup:
-  free(database_call_id);
-  free(database_item_id);
-  free(database_result);
-  free(memory_call_id);
-  free(memory_item_id);
-  free(memory_result);
+    call_written = snprintf(call_prefix,
+                            sizeof(call_prefix),
+                            "call_pf_%lu_",
+                            (unsigned long)index);
+    item_written = snprintf(item_prefix,
+                            sizeof(item_prefix),
+                            "fc_pf_%lu_",
+                            (unsigned long)index);
+    if ((call_written < 0) ||
+        ((size_t)call_written >= sizeof(call_prefix)) ||
+        (item_written < 0) ||
+        ((size_t)item_written >= sizeof(item_prefix))) {
+      strappy_set_error(error_out,
+                        "Responses preflight identifier is too large.");
+      ok = 0;
+      break;
+    }
+    results[index] = strappy_tools_execute(
+      session_db_path,
+      session_id,
+      resource_dir,
+      profile->preflight_tool_names[index],
+      "{}",
+      error_out);
+    call_ids[index] = strappy_responses_preflight_identifier(call_prefix,
+                                                             prompt_group_key,
+                                                             error_out);
+    item_ids[index] = strappy_responses_preflight_identifier(item_prefix,
+                                                             prompt_group_key,
+                                                             error_out);
+    if ((results[index] == NULL) || (call_ids[index] == NULL) ||
+        (item_ids[index] == NULL)) {
+      ok = 0;
+      break;
+    }
+    item_json = strappy_responses_function_call_item_json(
+      item_ids[index],
+      call_ids[index],
+      profile->preflight_tool_names[index],
+      "{}",
+      error_out);
+    if ((item_json == NULL) ||
+        !strappy_responses_owned_items_append(items,
+                                              item_json,
+                                              error_out)) {
+      ok = 0;
+    }
+  }
+  for (index = 0U;
+       ok && (index < profile->preflight_tool_name_count);
+       index++) {
+    char *item_json;
+
+    item_json = strappy_responses_function_output_item_json(call_ids[index],
+                                                            results[index],
+                                                            error_out);
+    if ((item_json == NULL) ||
+        !strappy_responses_owned_items_append(items,
+                                              item_json,
+                                              error_out)) {
+      ok = 0;
+    }
+  }
+
+  for (index = 0U; index < profile->preflight_tool_name_count; index++) {
+    free(call_ids[index]);
+    free(item_ids[index]);
+    free(results[index]);
+  }
+  free(call_ids);
+  free(item_ids);
+  free(results);
   return ok;
 }
 
@@ -1269,6 +1379,7 @@ static int strappy_responses_append_initial_items(
   long long session_id,
   const char *resource_dir,
   const char *prompt_group_key,
+  const strappy_assistant_set_profile *profile,
   char **error_out)
 {
   char *item_json;
@@ -1286,6 +1397,7 @@ static int strappy_responses_append_initial_items(
                                                    session_id,
                                                    resource_dir,
                                                    prompt_group_key,
+                                                   profile,
                                                    error_out);
 }
 
@@ -1468,6 +1580,7 @@ static char *strappy_responses_build_request_json(
 
 typedef struct strappy_responses_runtime {
   strappy_config config;
+  strappy_assistant_set_profile assistant_set;
   char *system_prompt;
   char *tools_json;
   strappy_responses_audit audit;
@@ -1480,9 +1593,10 @@ static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
     return;
   }
   strappy_config_init(&runtime->config);
+  strappy_assistant_set_profile_init(&runtime->assistant_set);
   runtime->system_prompt = NULL;
   runtime->tools_json = NULL;
-  strappy_responses_audit_init(&runtime->audit);
+  strappy_responses_audit_reset(&runtime->audit);
   runtime->request_url = NULL;
 }
 
@@ -1493,10 +1607,61 @@ static void strappy_responses_runtime_destroy(
     return;
   }
   strappy_config_destroy(&runtime->config);
+  strappy_assistant_set_profile_destroy(&runtime->assistant_set);
   free(runtime->system_prompt);
   free(runtime->tools_json);
   free(runtime->request_url);
   strappy_responses_runtime_init(runtime);
+}
+
+static int strappy_responses_validate_assistant_set(
+  strappy_responses_runtime *runtime,
+  char **error_out)
+{
+  size_t index;
+
+  if (runtime == NULL) {
+    strappy_set_error(error_out, "Responses assistant set is missing.");
+    return 0;
+  }
+  if (!strappy_assistant_set_profile_is_available(&runtime->assistant_set)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Assistant set is not available: %s",
+      (runtime->assistant_set.identifier != NULL) ?
+        runtime->assistant_set.identifier : "(unknown)");
+    return 0;
+  }
+  for (index = 0U;
+       index < runtime->assistant_set.tool_name_count;
+       index++) {
+    if (!strappy_tools_is_registered(runtime->assistant_set.tool_names[index])) {
+      strappy_set_formatted_error(
+        error_out,
+        "Assistant-set tool is not registered: %s",
+        runtime->assistant_set.tool_names[index]);
+      return 0;
+    }
+  }
+  for (index = 0U;
+       index < runtime->assistant_set.preflight_tool_name_count;
+       index++) {
+    const char *tool_name;
+
+    tool_name = runtime->assistant_set.preflight_tool_names[index];
+    if (!strappy_tools_is_registered(tool_name) ||
+        strappy_tools_is_server(tool_name) ||
+        !strappy_assistant_set_profile_allows_tool(&runtime->assistant_set,
+                                                   tool_name)) {
+      strappy_set_formatted_error(error_out,
+                                  "Assistant-set preflight tool is invalid: %s",
+                                  tool_name);
+      return 0;
+    }
+  }
+  return strappy_responses_audit_init(&runtime->audit,
+                                      &runtime->assistant_set,
+                                      error_out);
 }
 
 static int strappy_responses_prepare_runtime(
@@ -1512,6 +1677,7 @@ static int strappy_responses_prepare_runtime(
   strappy_session_record session;
   char *resource_dir;
   char *model;
+  char *assistant_set_id;
   int ok;
 
   if ((runtime == NULL) || (system_prompt_template_path == NULL) ||
@@ -1524,6 +1690,7 @@ static int strappy_responses_prepare_runtime(
   strappy_session_record_init(&session);
   resource_dir = NULL;
   model = NULL;
+  assistant_set_id = NULL;
 
   ok = strappy_config_load_with_fallback_credentials(
     &runtime->config,
@@ -1542,7 +1709,14 @@ static int strappy_responses_prepare_runtime(
     return 0;
   }
   runtime->config.web_search_enabled = session.web_search_enabled ? 1 : 0;
+  assistant_set_id = strappy_string_duplicate(session.assistant_set_id);
   strappy_session_record_destroy(&session);
+  if (assistant_set_id == NULL) {
+    strappy_set_error(error_out,
+                      "Could not allocate session assistant set.");
+    strappy_responses_runtime_destroy(runtime);
+    return 0;
+  }
 
   if (!strappy_db_get_session_model(session_db_path,
                                     session_id,
@@ -1550,6 +1724,7 @@ static int strappy_responses_prepare_runtime(
                                     error_out) ||
       !strappy_config_set_api_model(&runtime->config, model, error_out)) {
     free(model);
+    free(assistant_set_id);
     strappy_responses_runtime_destroy(runtime);
     return 0;
   }
@@ -1564,14 +1739,31 @@ static int strappy_responses_prepare_runtime(
                                                 resource_dir,
                                                 error_out)) {
     free(resource_dir);
+    free(assistant_set_id);
     strappy_responses_runtime_destroy(runtime);
     return 0;
   }
   free(resource_dir);
 
+  if (!strappy_assistant_sets_load_profile(
+        runtime->config.guidance_resource_dir,
+        assistant_set_id,
+        &runtime->assistant_set,
+        error_out) ||
+      !strappy_responses_validate_assistant_set(runtime, error_out)) {
+    free(assistant_set_id);
+    strappy_responses_runtime_destroy(runtime);
+    return 0;
+  }
+  free(assistant_set_id);
+  runtime->config.tool_allowlist =
+    (const char * const *)runtime->assistant_set.tool_names;
+  runtime->config.tool_allowlist_count = runtime->assistant_set.tool_name_count;
+
   runtime->system_prompt =
-    strappy_prompt_render_system_prompt(system_prompt_template_path,
-                                        error_out);
+    strappy_prompt_render_resource(runtime->config.guidance_resource_dir,
+                                   runtime->assistant_set.prompt_resource,
+                                   error_out);
   if (runtime->system_prompt == NULL) {
     strappy_responses_runtime_destroy(runtime);
     return 0;
@@ -2366,6 +2558,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
         session_id,
         runtime.config.guidance_resource_dir,
         prompt_group_key,
+        &runtime.assistant_set,
         error_out)) {
     free(prompt_group_key);
     free(last_model);

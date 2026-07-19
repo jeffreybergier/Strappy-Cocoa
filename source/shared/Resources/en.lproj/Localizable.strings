@@ -37,6 +37,17 @@
 "The required tool was not called." = "The required tool was not called.";
 "Options" = "Options";
 "Prompt Options" = "Prompt Options";
+"Assistant" = "Assistant";
+"Available Tools" = "Available Tools";
+"World Knowledge" = "World Knowledge";
+"General knowledge and web research" = "General knowledge and web research";
+"Personal Assistant" = "Personal Assistant";
+"Personal databases and assistance" = "Personal databases and assistance";
+"Coding Assistant" = "Coding Assistant";
+"Coming Soon" = "Coming Soon";
+"Assistant is not selected." = "Assistant is not selected.";
+"Failed to Save Changes" = "Failed to Save Changes";
+"Your changes could not be saved." = "Your changes could not be saved.";
 "Send" = "Send";
 "Send Prompt" = "Send Prompt";
 "Stream Responses" = "Stream Responses";
@@ -77,7 +88,6 @@
 "Model is not selected." = "Model is not selected.";
 "Model refresh is already running." = "Model refresh is already running.";
 "Model refresh failed." = "Model refresh failed.";
-"Could not update model setting." = "Could not update model setting.";
 "Database Search" = "Database Search";
 "Database scan is already running." = "Database scan is already running.";
 "Database scan failed." = "Database scan failed.";
@@ -143,8 +153,6 @@
 "Correct Spelling Automatically" = "Correct Spelling Automatically";
 "Could Not Delete Chat" = "Could Not Delete Chat";
 "Could not create session directory." = "Could not create session directory.";
-"Could not update streaming setting." = "Could not update streaming setting.";
-"Could not update database" = "Could not update database";
 "Data Detectors" = "Data Detectors";
 "Database" = "Database";
 "Database cannot be used" = "Database cannot be used";
@@ -225,11 +233,7 @@
 "Thinking" = "Thinking";
 "%@ (Selected)" = "%@ (Selected)";
 "An unknown error occurred." = "An unknown error occurred.";
-"Model Not Changed" = "Model Not Changed";
-"Streaming Not Changed" = "Streaming Not Changed";
 "This will permanently delete \"%@\" and all of its messages. This cannot be undone." = "This will permanently delete \"%@\" and all of its messages. This cannot be undone.";
 "Transformations" = "Transformations";
 "Use Selection for Find" = "Use Selection for Find";
-"Could not update web search setting." = "Could not update web search setting.";
-"Web Search" = "Web Search";
-"Web Search Not Changed" = "Web Search Not Changed";
+"Web Search incurs additional charges" = "Web Search incurs additional charges";
