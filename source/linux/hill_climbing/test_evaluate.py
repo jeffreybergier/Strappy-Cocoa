@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import re
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,7 @@ from evaluate import (
     frozen_top_five,
     price_points_for_cost,
     score_answer,
+    score_session,
 )
 from hill_climbing_ground_truth import (
     REQUIRED_GROUP_COUNT,
@@ -188,6 +190,86 @@ class ParallelRunnerTests(unittest.TestCase):
             )
 
 
+class EmptyAnswerPersistenceTests(unittest.TestCase):
+    def test_final_audit_attempt_outranks_earlier_assistant_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "session.sqlite"
+            with sqlite3.connect(database_path) as database:
+                database.executescript(
+                    """
+                    CREATE TABLE sessions (id INTEGER, model_id TEXT);
+                    CREATE TABLE turns (id INTEGER, session_id INTEGER);
+                    CREATE TABLE model_requests (id INTEGER, turn_id INTEGER);
+                    CREATE TABLE http_attempts (
+                      id INTEGER, request_id INTEGER, state TEXT,
+                      http_status INTEGER, started_at_ms INTEGER,
+                      completed_at_ms INTEGER
+                    );
+                    CREATE TABLE api_results (
+                      attempt_id INTEGER, error_type TEXT,
+                      error_message TEXT, parse_error TEXT
+                    );
+                    CREATE TABLE api_usage (
+                      attempt_id INTEGER, cost_nano_usd INTEGER
+                    );
+                    CREATE TABLE answer_quality_audits (
+                      id INTEGER, response_attempt_id INTEGER,
+                      outcome TEXT, guidance_version TEXT
+                    );
+                    CREATE TABLE answer_quality_checks (
+                      audit_id INTEGER, ordinal INTEGER, check_key TEXT,
+                      check_kind TEXT, label TEXT, status TEXT,
+                      tool_name TEXT, detail TEXT
+                    );
+                    CREATE TABLE conversation_items (
+                      id INTEGER, session_id INTEGER, source_attempt_id INTEGER,
+                      sequence INTEGER, kind TEXT
+                    );
+                    CREATE TABLE message_items (item_id INTEGER, role TEXT);
+                    CREATE TABLE item_text_parts (
+                      item_id INTEGER, collection_name TEXT,
+                      ordinal INTEGER, text TEXT
+                    );
+                    CREATE TABLE function_calls (item_id INTEGER, tool_name TEXT);
+                    CREATE TABLE tool_executions (
+                      function_call_item_id INTEGER, state TEXT
+                    );
+
+                    INSERT INTO sessions VALUES (1, 'test/model');
+                    INSERT INTO turns VALUES (1, 1);
+                    INSERT INTO model_requests VALUES (1, 1), (2, 1);
+                    INSERT INTO http_attempts VALUES
+                      (1, 1, 'completed', 200, 1000, 1100),
+                      (2, 2, 'completed', 200, 1200, 1300);
+                    INSERT INTO api_usage VALUES (1, 0), (2, 0);
+                    INSERT INTO conversation_items VALUES
+                      (1, 1, 1, 1, 'message');
+                    INSERT INTO message_items VALUES (1, 'assistant');
+                    INSERT INTO item_text_parts VALUES
+                      (1, 'content', 0, 'Jeff and every expected member.');
+                    INSERT INTO answer_quality_audits VALUES
+                      (1, 2, 'failed', '3');
+                    INSERT INTO answer_quality_checks VALUES
+                      (1, 0, 'answer_non_empty', 'answer_content',
+                       'Answer provided', 'failed', NULL,
+                       'The response did not include a non-empty assistant answer.');
+                    """
+                )
+
+            result = score_session(
+                database_path,
+                "test-model",
+                sample_roster(),
+                [(f"Artist {index}", index) for index in range(1, 6)],
+                {"expected_name": "Jeff"},
+            )
+
+            self.assertEqual(result.metrics["answer_characters"], 0)
+            self.assertEqual(result.failed_audit_count, 1)
+            self.assertEqual(result.potential_bonus, 0)
+            self.assertEqual(result.score, -5)
+
+
 class PriceScoreTests(unittest.TestCase):
     def test_price_scores_one_point_per_rounded_cent_from_goal(self) -> None:
         expected = {
@@ -224,6 +306,33 @@ class PriceScoreTests(unittest.TestCase):
 
 
 class AuditFirstScoreTests(unittest.TestCase):
+    def test_empty_answer_accumulates_normal_audit_failures(self) -> None:
+        roster = sample_roster()
+        result = score_answer(
+            "",
+            [
+                {
+                    "check_key": "answer_non_empty",
+                    "status": "failed",
+                },
+                {
+                    "check_key": "database_context_read",
+                    "status": "failed",
+                },
+                {
+                    "check_key": "web_reference",
+                    "status": "not_applicable",
+                },
+            ],
+            roster,
+            "Jeff",
+            0.00,
+        )
+        self.assertEqual(result.failed_audit_count, 2)
+        self.assertEqual(result.audit_penalty, -10)
+        self.assertEqual(result.awarded_price_points, 0)
+        self.assertEqual(result.score, -10)
+
     def test_compliant_answer_receives_all_recognized_bonuses(self) -> None:
         roster = sample_roster()
         audit_checks = [

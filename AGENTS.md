@@ -121,11 +121,13 @@ House style for Strappy source:
     objects and arrays as `structured_documents` / `structured_nodes`. Never
     persist request bodies, response bodies, headers, or raw JSON. Reconstruct
     provider-shaped JSON transiently only at an API or compatibility boundary.
-    At every canonical, successful, tool-free candidate final answer containing
-    non-whitespace text, evaluate the code-owned ordered quality checks exactly
-    once and persist one `answer_quality_audits` report with its
-    `answer_quality_checks`. Render that informational report in the visible
-    timeline immediately before its assistant answer, and track tool activity
+    At every canonical, successful, tool-free final response, evaluate the
+    code-owned ordered quality checks exactly once and persist one
+    `answer_quality_audits` report with its `answer_quality_checks`. The first
+    check verifies that the response contains a non-whitespace assistant
+    answer. Render that informational report in the visible timeline
+    immediately before its assistant answer when present; an empty response
+    leaves the failed report as the final timeline item. Track tool activity
     across the whole logical request. When `openrouter:web_search` or
     `openrouter:web_fetch`
     activity has occurred, scan the answer for a non-image inline Markdown HTTP
@@ -145,12 +147,12 @@ House style for Strappy source:
     approved databases, while database-hint memory must not store private row
     values or one-off query results. Never append a developer remediation
     message or issue another model request because a quality check failed; the
-    report informs the user, who decides whether to ask for corrections. For
-    every empty tool-free candidate answer, append the code-owned empty-answer
-    instruction once as a tool-disabled `audit_finalize` recovery turn. Fail
-    explicitly if that recovery is also empty; never silently reuse an earlier
-    answer. Every quality report, recovery, tool, and assistant item uses the
-    normal database and timeline paths.
+    report informs the user, who decides whether to ask for corrections. Accept
+    an empty tool-free response as final after recording the failed non-empty
+    answer check alongside every other applicable check. Never append a
+    developer message or issue another model request for an empty answer. Every
+    quality report, tool, and assistant item uses the normal database and
+    timeline paths.
 17. OpenRouter model catalog and selection state live in shared SQLite storage.
     `strappy_db` owns `models`, `model_prices`, `model_features`,
     `model_preferences`, `app_preferences.default_model_id`, and

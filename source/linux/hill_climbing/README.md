@@ -35,14 +35,12 @@ as model tool calls or tool executions. The runtime quality policy checks
 `database_context_read`, session naming, Font Awesome shortcode confirmation,
 durable user-memory consideration, and database-hint consideration in a fixed
 order. It also checks for a linked source when web search or web fetch activity
-occurred. Each non-empty candidate final answer receives one persisted quality
-report in the visible timeline immediately before the assistant answer. Failed
-checks are informational: the runtime does not append a developer remediation
-prompt or make another API request. If a tool-free candidate answer is empty,
-the runtime sends its empty-answer instruction once as a tool-disabled
-`audit_finalize` recovery; a second empty response fails explicitly. That
-active recovery and all normal tool and assistant items use the same database
-ledger and visible timeline paths as other turns.
+occurred. Every tool-free final response receives one persisted quality report.
+Its first check verifies that a non-empty assistant answer was provided. The
+report appears immediately before a non-empty assistant answer; for an empty
+response, the failed report is the final timeline item. Failed checks are
+informational: the runtime does not append a developer remediation prompt or
+make another API request.
 
 Each isolated model database is seeded first by executing the real
 `memory_user_fact_remember` tool with the stable identity fact that the user's

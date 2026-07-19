@@ -336,22 +336,51 @@ def score_session(
             raise RuntimeError(f"No session in {session_db}")
         session_id = int(session["id"])
         model = str(session["model_id"] or slug)
-        answer_item = database.execute(
+        audited_attempt = database.execute(
             """
-            SELECT i.id, i.source_attempt_id
-            FROM conversation_items i
-            JOIN message_items m ON m.item_id = i.id
-            WHERE i.session_id = ? AND m.role = 'assistant'
-            ORDER BY i.sequence DESC LIMIT 1
+            SELECT q.response_attempt_id
+            FROM answer_quality_audits q
+            JOIN http_attempts a ON a.id = q.response_attempt_id
+            JOIN model_requests r ON r.id = a.request_id
+            JOIN turns t ON t.id = r.turn_id
+            WHERE t.session_id = ?
+            ORDER BY q.id DESC LIMIT 1
             """,
             (session_id,),
         ).fetchone()
-        answer = item_text(database, int(answer_item["id"])) if answer_item else ""
         answer_attempt_id = (
-            int(answer_item["source_attempt_id"])
-            if answer_item and answer_item["source_attempt_id"] is not None
+            int(audited_attempt["response_attempt_id"])
+            if audited_attempt is not None
             else None
         )
+        if answer_attempt_id is not None:
+            answer_item = database.execute(
+                """
+                SELECT i.id, i.source_attempt_id
+                FROM conversation_items i
+                JOIN message_items m ON m.item_id = i.id
+                WHERE i.session_id = ? AND m.role = 'assistant'
+                  AND i.source_attempt_id = ?
+                ORDER BY i.sequence DESC LIMIT 1
+                """,
+                (session_id, answer_attempt_id),
+            ).fetchone()
+        else:
+            answer_item = database.execute(
+                """
+                SELECT i.id, i.source_attempt_id
+                FROM conversation_items i
+                JOIN message_items m ON m.item_id = i.id
+                WHERE i.session_id = ? AND m.role = 'assistant'
+                ORDER BY i.sequence DESC LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+        answer = item_text(database, int(answer_item["id"])) if answer_item else ""
+        if answer_attempt_id is None and answer_item is not None:
+            source_attempt_id = answer_item["source_attempt_id"]
+            if source_attempt_id is not None:
+                answer_attempt_id = int(source_attempt_id)
         audit_outcome, audit_guidance_version, audit_checks = _answer_audit(
             database, answer_attempt_id
         )

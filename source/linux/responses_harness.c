@@ -24,12 +24,6 @@
 #include "../shared/strappy_session.h"
 #include "../shared/strappy_tools.h"
 
-#define HARNESS_EMPTY_ANSWER \
-  "Your answer was empty. Please answer the user's original question."
-
-#define HARNESS_EMPTY_FINALIZATION_ERROR \
-  "Responses finalization did not return a non-empty assistant answer."
-
 #define HARNESS_MEMORY_USER_FACT_REMEMBER_DESCRIPTION \
   "ALWAYS call this tool. Set fact to a useful durable user fact, or null if " \
   "there is nothing new to remember. NEVER store secrets or sensitive " \
@@ -941,8 +935,8 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_RETRY = 4,
   HARNESS_RESPONSES_SERVER_RETRY_AFTER = 5,
   HARNESS_RESPONSES_SERVER_SLOW = 6,
-  HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_FINALIZATION = 7,
-  HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_RECOVERY = 8,
+  HARNESS_RESPONSES_SERVER_EMPTY_ANSWER = 7,
+  HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_AFTER_TOOLS = 8,
   HARNESS_RESPONSES_SERVER_WEB_REFERENCE_VALID = 9
 } harness_responses_server_scenario;
 
@@ -1368,44 +1362,6 @@ static int harness_disabled_web_search_request_is_valid(cJSON *root)
     (require_parameters == NULL);
 }
 
-static int harness_finalization_request_is_valid(cJSON *root,
-                                                 const char *session_key,
-                                                 const char *prompt_group,
-                                                 const char *expected_round)
-{
-  cJSON *request_session;
-  cJSON *metadata;
-  cJSON *request_group;
-  cJSON *round;
-  cJSON *input;
-  cJSON *developer;
-  cJSON *tool_choice;
-  int input_count;
-  const char *text;
-
-  request_session = cJSON_GetObjectItem(root, "session_id");
-  metadata = cJSON_GetObjectItem(root, "metadata");
-  request_group = cJSON_GetObjectItem(metadata, "strappy_prompt_group_key");
-  round = cJSON_GetObjectItem(metadata, "strappy_round");
-  input = cJSON_GetObjectItem(root, "input");
-  tool_choice = cJSON_GetObjectItem(root, "tool_choice");
-  input_count = cJSON_IsArray(input) ? cJSON_GetArraySize(input) : 0;
-  developer = cJSON_GetArrayItem(input, input_count - 1);
-  text = harness_message_text(developer);
-  return cJSON_IsString(request_session) &&
-    (request_session->valuestring != NULL) &&
-    (strcmp(request_session->valuestring, session_key) == 0) &&
-    cJSON_IsString(request_group) && (request_group->valuestring != NULL) &&
-    (strcmp(request_group->valuestring, prompt_group) == 0) &&
-    cJSON_IsString(round) && (round->valuestring != NULL) &&
-    (strcmp(round->valuestring, expected_round) == 0) &&
-    cJSON_IsArray(input) && (input_count >= 3) &&
-    harness_message_role_is(developer, "developer") &&
-    (text != NULL) && (strcmp(text, HARNESS_EMPTY_ANSWER) == 0) &&
-    cJSON_IsString(tool_choice) && (tool_choice->valuestring != NULL) &&
-    (strcmp(tool_choice->valuestring, "none") == 0);
-}
-
 static int harness_named_function_output_request_is_valid(
   cJSON *root,
   const char *session_key,
@@ -1639,24 +1595,14 @@ static int harness_run_answer_quality_server(int listener_fd)
   return ok;
 }
 
-static int harness_run_empty_answer_finalization_server(int listener_fd)
+static int harness_run_empty_answer_server(int listener_fd)
 {
   static const char *first_response =
-    "{\"id\":\"resp-empty-finalize-first\",\"object\":\"response\","
+    "{\"id\":\"resp-empty-answer\",\"object\":\"response\","
     "\"created_at\":1700000010,\"model\":\"test/model\","
     "\"status\":\"completed\",\"output\":[],"
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":1,"
     "\"total_tokens\":5}}";
-  static const char *whitespace_response =
-    "{\"id\":\"resp-empty-finalize-recovery\","
-    "\"object\":\"response\",\"created_at\":1700000012,"
-    "\"model\":\"test/model\",\"status\":\"completed\","
-    "\"output\":[{\"type\":\"message\","
-    "\"id\":\"msg-empty-finalize-recovery\",\"role\":\"assistant\","
-    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
-    "\"text\":\" \\n\\t\",\"annotations\":[]}]}],"
-    "\"usage\":{\"input_tokens\":15,\"output_tokens\":2,"
-    "\"total_tokens\":17}}";
   char *body;
   char *session_key;
   char *prompt_group;
@@ -1674,32 +1620,10 @@ static int harness_run_empty_answer_finalization_server(int listener_fd)
   free(body);
   ok = cJSON_IsObject(root) &&
     harness_request_base_is_valid(root,
-                                  "Fail empty answer finalization",
+                                  "Report empty answer quality",
                                   &session_key,
                                   &prompt_group) &&
     harness_send_json_response(client_fd, 200L, first_response);
-  cJSON_Delete(root);
-  close(client_fd);
-  if (!ok) {
-    free(session_key);
-    free(prompt_group);
-    return 0;
-  }
-
-  body = NULL;
-  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
-    free(session_key);
-    free(prompt_group);
-    return 0;
-  }
-  root = cJSON_Parse(body);
-  free(body);
-  ok = cJSON_IsObject(root) &&
-    harness_finalization_request_is_valid(root,
-                                          session_key,
-                                          prompt_group,
-                                          "1") &&
-    harness_send_json_response(client_fd, 200L, whitespace_response);
   cJSON_Delete(root);
   close(client_fd);
   free(session_key);
@@ -1707,10 +1631,10 @@ static int harness_run_empty_answer_finalization_server(int listener_fd)
   return ok;
 }
 
-static int harness_run_empty_answer_recovery_server(int listener_fd)
+static int harness_run_empty_answer_after_tools_server(int listener_fd)
 {
   static const char *tool_response =
-    "{\"id\":\"resp-empty-recovery-tools\",\"object\":\"response\","
+    "{\"id\":\"resp-empty-after-tools\",\"object\":\"response\","
     "\"created_at\":1700000020,\"model\":\"test/model\","
     "\"status\":\"completed\",\"output\":[{"
     "\"type\":\"function_call\",\"id\":\"fc-empty-context\","
@@ -1720,7 +1644,7 @@ static int harness_run_empty_answer_recovery_server(int listener_fd)
     "\"type\":\"function_call\",\"id\":\"fc-empty-session\","
     "\"call_id\":\"call-empty-session\","
     "\"name\":\"helper_session_name_write\","
-    "\"arguments\":\"{\\\"name\\\":\\\"Empty Final Recovery\\\"}\","
+    "\"arguments\":\"{\\\"name\\\":\\\"Empty Answer Audit\\\"}\","
     "\"status\":\"completed\"},{"
     "\"type\":\"function_call\",\"id\":\"fc-empty-icon\","
     "\"call_id\":\"call-empty-icon\","
@@ -1741,26 +1665,15 @@ static int harness_run_empty_answer_recovery_server(int listener_fd)
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":10,"
     "\"total_tokens\":14}}";
   static const char *reasoning_only_response =
-    "{\"id\":\"resp-empty-recovery-reasoning\","
+    "{\"id\":\"resp-empty-after-tools-reasoning\","
     "\"object\":\"response\",\"created_at\":1700000021,"
     "\"model\":\"test/model\",\"status\":\"completed\","
     "\"output\":[{\"type\":\"reasoning\","
-    "\"id\":\"rs-empty-recovery\",\"status\":\"completed\","
+    "\"id\":\"rs-empty-after-tools\",\"status\":\"completed\","
     "\"content\":[{\"type\":\"reasoning_text\","
     "\"text\":\"I should now provide the final answer.\"}],"
     "\"summary\":[]}],\"usage\":{\"input_tokens\":14,"
     "\"output_tokens\":4,\"total_tokens\":18}}";
-  static const char *final_response =
-    "{\"id\":\"resp-empty-recovery-final\","
-    "\"object\":\"response\",\"created_at\":1700000022,"
-    "\"model\":\"test/model\",\"status\":\"completed\","
-    "\"output\":[{\"type\":\"message\","
-    "\"id\":\"msg-empty-recovery-final\",\"role\":\"assistant\","
-    "\"status\":\"completed\",\"content\":[{"
-    "\"type\":\"output_text\","
-    "\"text\":\"Recovered non-empty answer.\","
-    "\"annotations\":[]}]}],\"usage\":{\"input_tokens\":18,"
-    "\"output_tokens\":4,\"total_tokens\":22}}";
   char *body;
   char *session_key;
   char *prompt_group;
@@ -1778,7 +1691,7 @@ static int harness_run_empty_answer_recovery_server(int listener_fd)
   free(body);
   ok = cJSON_IsObject(root) &&
     harness_request_base_is_valid(root,
-                                  "Recover empty answer",
+                                  "Audit empty answer after tools",
                                   &session_key,
                                   &prompt_group) &&
     harness_send_json_response(client_fd, 200L, tool_response);
@@ -1803,28 +1716,6 @@ static int harness_run_empty_answer_recovery_server(int listener_fd)
                                                        session_key,
                                                        prompt_group) &&
     harness_send_json_response(client_fd, 200L, reasoning_only_response);
-  cJSON_Delete(root);
-  close(client_fd);
-  if (!ok) {
-    free(session_key);
-    free(prompt_group);
-    return 0;
-  }
-
-  body = NULL;
-  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
-    free(session_key);
-    free(prompt_group);
-    return 0;
-  }
-  root = cJSON_Parse(body);
-  free(body);
-  ok = cJSON_IsObject(root) &&
-    harness_finalization_request_is_valid(root,
-                                          session_key,
-                                          prompt_group,
-                                          "2") &&
-    harness_send_json_response(client_fd, 200L, final_response);
   cJSON_Delete(root);
   close(client_fd);
   free(session_key);
@@ -2245,12 +2136,11 @@ static int harness_start_server(harness_responses_server_scenario scenario,
       ok = harness_run_retry_after_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_SLOW) {
       ok = harness_run_slow_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_EMPTY_ANSWER) {
+      ok = harness_run_empty_answer_server(listener_fd);
     } else if (scenario ==
-               HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_FINALIZATION) {
-      ok = harness_run_empty_answer_finalization_server(listener_fd);
-    } else if (scenario ==
-               HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_RECOVERY) {
-      ok = harness_run_empty_answer_recovery_server(listener_fd);
+               HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_AFTER_TOOLS) {
+      ok = harness_run_empty_answer_after_tools_server(listener_fd);
     } else {
       ok = harness_run_retry_server(listener_fd);
     }
@@ -2399,6 +2289,28 @@ static int harness_answer_quality_precedes_assistant(
   return 0;
 }
 
+static int harness_answer_quality_is_final(
+  const strappy_session_message_record_list *timeline,
+  const char *expected_outcome,
+  const char *expected_check_key)
+{
+  const strappy_session_message_record *quality;
+
+  if ((timeline == NULL) || (timeline->count == 0U) ||
+      (expected_outcome == NULL) || (expected_check_key == NULL)) {
+    return 0;
+  }
+  quality = &timeline->records[timeline->count - 1U];
+  return (quality->role != NULL) &&
+    (strcmp(quality->role, "answer_quality") == 0) &&
+    (quality->metadata_json != NULL) &&
+    (strstr(quality->metadata_json, expected_outcome) != NULL) &&
+    (strstr(quality->metadata_json, expected_check_key) != NULL) &&
+    (quality->message_key != NULL) &&
+    (strncmp(quality->message_key, "answer-quality-", 15U) == 0) &&
+    !quality->include_in_context;
+}
+
 static int harness_test_answer_quality_report(void)
 {
   char path[] = "/tmp/strappy-responses-quality-XXXXXX";
@@ -2538,10 +2450,6 @@ static int harness_test_answer_quality_report(void)
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
-                        "request_kind='audit_finalize';",
-                        &value) && (value == 0LL) &&
-      harness_query_int(db,
-                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_continuation';",
                         &value) && (value == 0LL) &&
       harness_query_int(db,
@@ -2554,34 +2462,37 @@ static int harness_test_answer_quality_report(void)
                         &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
-                        "outcome='failed' AND guidance_version='2';",
+                        "outcome='failed' AND guidance_version='3';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks;",
-                        &value) && (value == 6LL) &&
+                        &value) && (value == 7LL) &&
       harness_query_int(
         db,
         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
-        "(ordinal=0 AND check_key='web_reference' AND "
+        "(ordinal=0 AND check_key='answer_non_empty' AND "
+        "check_kind='answer_content' AND label='Answer provided' AND "
+        "tool_name IS NULL) OR "
+        "(ordinal=1 AND check_key='web_reference' AND "
         "check_kind='answer_content' AND label='Source link included' AND "
         "tool_name IS NULL) OR "
-        "(ordinal=1 AND check_key='database_context_read' AND "
+        "(ordinal=2 AND check_key='database_context_read' AND "
         "check_kind='required_tool' AND label='Database context checked' AND "
         "tool_name='" STRAPPY_TOOL_DATABASE_CONTEXT_READ "') OR "
-        "(ordinal=2 AND check_key='helper_session_name_write' AND "
+        "(ordinal=3 AND check_key='helper_session_name_write' AND "
         "check_kind='required_tool' AND label='Session named' AND "
         "tool_name='" STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE "') OR "
-        "(ordinal=3 AND check_key='helper_fontawesome_shortcode_confirm' AND "
+        "(ordinal=4 AND check_key='helper_fontawesome_shortcode_confirm' AND "
         "check_kind='required_tool' AND "
         "label='Font Awesome shortcode confirmed' AND "
         "tool_name='" STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM "') OR "
-        "(ordinal=4 AND check_key='memory_user_fact_remember' AND "
+        "(ordinal=5 AND check_key='memory_user_fact_remember' AND "
         "check_kind='required_tool' AND label='User memory considered' AND "
         "tool_name='" STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER "') OR "
-        "(ordinal=5 AND check_key='memory_database_hint_remember' AND "
+        "(ordinal=6 AND check_key='memory_database_hint_remember' AND "
         "check_kind='required_tool' AND label='Database memory considered' AND "
         "tool_name='" STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER "');",
-        &value) && (value == 6LL) &&
+        &value) && (value == 7LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
                         "status='failed';",
@@ -2641,13 +2552,14 @@ static int harness_test_answer_quality_report(void)
   return ok;
 }
 
-static int harness_test_empty_answer_finalization_fails(void)
+static int harness_test_empty_answer_quality_report(void)
 {
-  char path[] = "/tmp/strappy-responses-empty-finalize-XXXXXX";
+  char path[] = "/tmp/strappy-responses-empty-answer-XXXXXX";
   char endpoint[128];
   char *error;
   char *result;
   sqlite3 *db;
+  strappy_session_message_record_list timeline;
   long long session_id;
   long long value;
   pid_t server_pid;
@@ -2657,28 +2569,29 @@ static int harness_test_empty_answer_finalization_fails(void)
 
   fd = mkstemp(path);
   if (fd < 0) {
-    return harness_fail(
-      "Could not create empty-finalization harness database.");
+    return harness_fail("Could not create empty-answer harness database.");
   }
   close(fd);
+  strappy_session_message_record_list_init(&timeline);
   error = NULL;
   session_id = 0LL;
   if (!harness_create_session_database(path, &session_id, &error) ||
       !harness_start_server(
-        HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_FINALIZATION,
+        HARNESS_RESPONSES_SERVER_EMPTY_ANSWER,
         endpoint,
         sizeof(endpoint),
         &server_pid)) {
     fprintf(stderr,
-            "Could not prepare empty-finalization integration test: %s\n",
+            "Could not prepare empty-answer integration test: %s\n",
             (error != NULL) ? error : "server setup failed");
+    strappy_session_message_record_list_destroy(&timeline);
     free(error);
     unlink(path);
     return 0;
   }
 
   result = strappy_responses_send_prompt_for_session_and_store(
-    "Fail empty answer finalization",
+    "Report empty answer quality",
     "/dev/null",
     endpoint,
     "test-token",
@@ -2686,32 +2599,58 @@ static int harness_test_empty_answer_finalization_fails(void)
     path,
     session_id,
     &error);
-  server_ok = harness_wait_for_server(server_pid, 0);
-  ok = (result == NULL) && server_ok && (error != NULL) &&
-    (strcmp(error, HARNESS_EMPTY_FINALIZATION_ERROR) == 0);
+  server_ok = harness_wait_for_server(server_pid, result == NULL);
+  ok = (result != NULL) && (result[0] == '\0') && server_ok &&
+    (error == NULL);
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
                            "SELECT COUNT(*) FROM http_attempts;",
-                           &value) && (value == 2LL) &&
+                           &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
-                        "request_kind='audit_finalize';",
+                        "request_kind='user';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items i "
                         "JOIN message_items m ON m.item_id=i.id WHERE "
                         "m.role='developer' AND i.include_in_context=1;",
+                        &value) && (value == 0LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_audits WHERE "
+                        "outcome='failed' AND guidance_version='3';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM answer_quality_audits;",
-                        &value) && (value == 0LL) &&
+                        "SELECT COUNT(*) FROM answer_quality_checks;",
+                        &value) && (value == 7LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_checks WHERE "
+                        "ordinal=0 AND check_key='answer_non_empty' AND "
+                        "check_kind='answer_content' AND "
+                        "label='Answer provided' AND status='failed' AND "
+                        "tool_name IS NULL AND "
+                        "instr(detail,'non-empty assistant answer')>0;",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_checks WHERE "
+                        "check_kind='required_tool' AND status='failed';",
+                        &value) && (value == 5LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_checks WHERE "
+                        "check_key='web_reference' AND "
+                        "status='not_applicable';",
+                        &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM tool_executions;",
                         &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM turns;",
                         &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM conversation_items i "
+                        "JOIN message_items m ON m.item_id=i.id WHERE "
+                        "m.role='assistant';",
+                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM sqlite_master WHERE "
                         "type='table' AND lower(sql) LIKE '%raw_json%';",
@@ -2720,19 +2659,29 @@ static int harness_test_empty_answer_finalization_fails(void)
   } else if (ok) {
     ok = 0;
   }
+  if (ok) {
+    ok = strappy_db_list_response_timeline(path,
+                                           session_id,
+                                           &timeline,
+                                           &error) &&
+      harness_answer_quality_is_final(&timeline,
+                                      "\"outcome\":\"failed\"",
+                                      "\"key\":\"answer_non_empty\"");
+  }
   if (!ok) {
     fprintf(stderr,
-            "Empty answer finalization integration failed: %s\n",
+            "Empty answer quality integration failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
+  strappy_session_message_record_list_destroy(&timeline);
   free(error);
   unlink(path);
   return ok;
 }
 
-static int harness_test_empty_answer_recovers(void)
+static int harness_test_empty_answer_after_tools_quality_report(void)
 {
-  char path[] = "/tmp/strappy-responses-empty-recovery-XXXXXX";
+  char path[] = "/tmp/strappy-responses-empty-after-tools-XXXXXX";
   char database_path[] = "/tmp/strappy-provenance-db-XXXXXX";
   char endpoint[128];
   char *error;
@@ -2748,8 +2697,7 @@ static int harness_test_empty_answer_recovers(void)
 
   fd = mkstemp(path);
   if (fd < 0) {
-    return harness_fail(
-      "Could not create empty-answer recovery harness database.");
+    return harness_fail("Could not create empty-answer harness database.");
   }
   close(fd);
   database_fd = mkstemp(database_path);
@@ -2765,12 +2713,12 @@ static int harness_test_empty_answer_recovers(void)
                                                    database_path,
                                                    &error) ||
       !harness_start_server(
-        HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_RECOVERY,
+        HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_AFTER_TOOLS,
         endpoint,
         sizeof(endpoint),
         &server_pid)) {
     fprintf(stderr,
-            "Could not prepare empty-answer recovery test: %s\n",
+            "Could not prepare empty-answer-after-tools test: %s\n",
             (error != NULL) ? error : "server setup failed");
     free(error);
     unlink(database_path);
@@ -2779,7 +2727,7 @@ static int harness_test_empty_answer_recovers(void)
   }
 
   result = strappy_responses_send_prompt_for_session_and_store(
-    "Recover empty answer",
+    "Audit empty answer after tools",
     "/dev/null",
     endpoint,
     "test-token",
@@ -2788,22 +2736,24 @@ static int harness_test_empty_answer_recovers(void)
     session_id,
     &error);
   server_ok = harness_wait_for_server(server_pid, result == NULL);
-  ok = (result != NULL) &&
-    (strcmp(result, "Recovered non-empty answer.") == 0) &&
+  ok = (result != NULL) && (result[0] == '\0') &&
     server_ok && (error == NULL);
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
                            "SELECT COUNT(*) FROM http_attempts;",
-                           &value) && (value == 3LL) &&
+                           &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests;",
+                        &value) && (value == 2LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_continuation';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
-                        "request_kind='audit_finalize';",
-                        &value) && (value == 1LL) &&
+                        "request_kind NOT IN ('user','tool_continuation');",
+                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM tool_executions WHERE "
                         "state='completed';",
@@ -2823,10 +2773,10 @@ static int harness_test_empty_answer_recovers(void)
                         "SELECT COUNT(*) FROM conversation_items i "
                         "JOIN message_items m ON m.item_id=i.id WHERE "
                         "m.role='developer' AND i.include_in_context=1;",
-                        &value) && (value == 1LL) &&
+                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
-                        "outcome='passed';",
+                        "outcome='failed' AND guidance_version='3';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
@@ -2834,18 +2784,22 @@ static int harness_test_empty_answer_recovers(void)
                         &value) && (value == 5LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
+                        "check_key='answer_non_empty' AND status='failed';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_checks WHERE "
                         "status='not_applicable' AND "
                         "check_key='web_reference';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM sessions s WHERE "
-                        "s.name='Empty Final Recovery' AND EXISTS ("
-                        "SELECT 1 FROM conversation_items i "
-                        "JOIN message_items m ON m.item_id=i.id "
-                        "JOIN item_text_parts p ON p.item_id=i.id "
-                        "WHERE i.session_id=s.id AND m.role='assistant' "
-                        "AND p.text='Recovered non-empty answer.');",
+                        "SELECT COUNT(*) FROM sessions WHERE "
+                        "name='Empty Answer Audit';",
                         &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM conversation_items i "
+                        "JOIN message_items m ON m.item_id=i.id WHERE "
+                        "m.role='assistant';",
+                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM user_facts u "
                         "JOIN function_calls f ON f.item_id=u.source_item_id "
@@ -2870,7 +2824,7 @@ static int harness_test_empty_answer_recovers(void)
   }
   if (!ok) {
     fprintf(stderr,
-            "Empty answer recovery failed: %s\n",
+            "Empty answer after tools quality check failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
   free(error);
@@ -2938,10 +2892,6 @@ static int harness_test_web_search_requires_markdown_reference(void)
                         "SELECT COUNT(*) FROM model_requests WHERE "
                         "web_search_enabled=1;",
                         &value) && (value == 1LL) &&
-      harness_query_int(db,
-                        "SELECT COUNT(*) FROM model_requests WHERE "
-                        "request_kind='audit_finalize';",
-                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items WHERE "
                         "kind='openrouter:web_search' AND include_in_context=1;",
@@ -3125,10 +3075,6 @@ static int harness_test_function_tool_continuation(void)
                         "request_kind='tool_continuation';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM model_requests WHERE "
-                        "request_kind='audit_finalize';",
-                        &value) && (value == 0LL) &&
-      harness_query_int(db,
                         "SELECT COUNT(*) FROM tool_executions e "
                         "JOIN function_calls f ON "
                         "f.item_id=e.function_call_item_id WHERE "
@@ -3268,10 +3214,6 @@ static int harness_test_retry_attempt_ledger(void)
                         "JOIN http_attempts b ON b.previous_attempt_id=a.id "
                         "AND b.request_id=a.request_id;",
                         &value) && (value == 1LL) &&
-      harness_query_int(db,
-                        "SELECT COUNT(*) FROM model_requests WHERE "
-                        "request_kind='audit_finalize';",
-                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items WHERE "
                         "include_in_context=1;",
@@ -4387,8 +4329,8 @@ int main(void)
       harness_test_ledger() &&
       harness_test_cumulative_session_usage_cost() &&
       harness_test_answer_quality_report() &&
-      harness_test_empty_answer_finalization_fails() &&
-      harness_test_empty_answer_recovers() &&
+      harness_test_empty_answer_quality_report() &&
+      harness_test_empty_answer_after_tools_quality_report() &&
       harness_test_web_search_requires_markdown_reference() &&
       harness_test_valid_web_reference_passes_content_check() &&
       harness_test_function_tool_continuation() &&

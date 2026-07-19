@@ -23,9 +23,11 @@
 #define STRAPPY_RESPONSES_MAX_RETRY_DELAY_MS 60000L
 #define STRAPPY_RESPONSES_AUDIT_RULE_COUNT 5U
 
-static const char strappy_responses_audit_guidance_version[] = "2";
-static const char strappy_responses_empty_answer[] =
-  "Your answer was empty. Please answer the user's original question.";
+static const char strappy_responses_audit_guidance_version[] = "3";
+static const char strappy_responses_answer_non_empty_check_key[] =
+  "answer_non_empty";
+static const char strappy_responses_answer_non_empty_label[] =
+  "Answer provided";
 static const char strappy_responses_web_reference_check_key[] =
   "web_reference";
 static const char strappy_responses_web_reference_label[] =
@@ -108,6 +110,8 @@ static const strappy_responses_audit_rule strappy_responses_audit_rules[
     0
   }
 };
+
+static int strappy_responses_text_has_non_whitespace(const char *text);
 
 static void strappy_responses_buffer_destroy(strappy_responses_buffer *buffer)
 {
@@ -280,7 +284,7 @@ static int strappy_responses_audit_evaluate(
     return 0;
   }
   memset(result, 0, sizeof(*result));
-  check_count = STRAPPY_RESPONSES_AUDIT_RULE_COUNT + 1U;
+  check_count = STRAPPY_RESPONSES_AUDIT_RULE_COUNT + 2U;
   checks = (strappy_answer_quality_check_input *)calloc(
     check_count,
     sizeof(strappy_answer_quality_check_input));
@@ -291,17 +295,29 @@ static int strappy_responses_audit_evaluate(
   }
 
   failed = 0;
-  checks[0].check_key = strappy_responses_web_reference_check_key;
+  checks[0].check_key = strappy_responses_answer_non_empty_check_key;
   checks[0].check_kind = "answer_content";
-  checks[0].label = strappy_responses_web_reference_label;
-  if (!audit->web_reference_required) {
-    checks[0].status = "not_applicable";
-    checks[0].detail = "No web search or web fetch was used.";
-  } else if (strappy_responses_text_has_http_markdown_link(response_text)) {
+  checks[0].label = strappy_responses_answer_non_empty_label;
+  if (strappy_responses_text_has_non_whitespace(response_text)) {
     checks[0].status = "passed";
   } else {
     checks[0].status = "failed";
     checks[0].detail =
+      "The response did not include a non-empty assistant answer.";
+    failed = 1;
+  }
+
+  checks[1].check_key = strappy_responses_web_reference_check_key;
+  checks[1].check_kind = "answer_content";
+  checks[1].label = strappy_responses_web_reference_label;
+  if (!audit->web_reference_required) {
+    checks[1].status = "not_applicable";
+    checks[1].detail = "No web search or web fetch was used.";
+  } else if (strappy_responses_text_has_http_markdown_link(response_text)) {
+    checks[1].status = "passed";
+  } else {
+    checks[1].status = "failed";
+    checks[1].detail =
       "A linked HTTP source reference was required but not found.";
     failed = 1;
   }
@@ -311,7 +327,7 @@ static int strappy_responses_audit_evaluate(
     strappy_answer_quality_check_input *check;
 
     rule = &audit->rules[index];
-    check = &checks[index + 1U];
+    check = &checks[index + 2U];
     check->check_key = rule->check_key;
     check->check_kind = "required_tool";
     check->label = rule->label;
@@ -1333,7 +1349,6 @@ static char *strappy_responses_build_request_json(
   const char *tools_json,
   const strappy_response_item_raw_record_list *history,
   const strappy_responses_owned_items *new_items,
-  int allow_tool_calls,
   long *new_input_start_index_out,
   char **error_out)
 {
@@ -1438,7 +1453,7 @@ static char *strappy_responses_build_request_json(
     "\"parallel_tool_calls\":true,\"tool_choice\":\"") &&
     strappy_responses_buffer_append_string(
       &buffer,
-      allow_tool_calls ? "auto" : "none") &&
+      "auto") &&
     strappy_responses_buffer_append_string(&buffer, "\",\"tools\":") &&
     strappy_responses_buffer_append_string(&buffer, tools_json);
   ok = ok && strappy_responses_buffer_append_string(&buffer, "}");
@@ -1458,8 +1473,6 @@ typedef struct strappy_responses_runtime {
   strappy_responses_audit audit;
   char *request_url;
 } strappy_responses_runtime;
-
-static int strappy_responses_text_has_non_whitespace(const char *text);
 
 static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
 {
@@ -2114,9 +2127,7 @@ static int strappy_responses_send_round(
           &runtime->audit,
           analysis.tool_activity_names[activity_index]);
       }
-      if ((analysis.tool_call_count == 0U) &&
-          strappy_responses_text_has_non_whitespace(
-            analysis.response_text)) {
+      if (analysis.tool_call_count == 0U) {
         if (!strappy_responses_audit_evaluate(&runtime->audit,
                                               analysis.response_text,
                                               &answer_quality,
@@ -2316,8 +2327,6 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   long last_http_status;
   long round_index;
   long long processing_started_ms;
-  int allow_tool_calls;
-  int finalization_sent;
   int ok;
 
   if ((prompt == NULL) || (prompt[0] == '\0') ||
@@ -2336,8 +2345,6 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   last_http_status = 0L;
   processing_started_ms = strappy_responses_now_ms();
   next_request_kind = "user";
-  allow_tool_calls = 1;
-  finalization_sent = 0;
 
   if (!strappy_responses_prepare_runtime(&runtime,
                                          env_path,
@@ -2422,7 +2429,6 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
       runtime.tools_json,
       &history,
       &new_items,
-      allow_tool_calls,
       &new_input_start_index,
       error_out);
     strappy_response_item_raw_record_list_destroy(&history);
@@ -2463,15 +2469,10 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
     }
 
     last_http_status = http.http_status;
-    if (((analysis.model != NULL) &&
-         !strappy_responses_replace_string(&last_model,
-                                           analysis.model,
-                                           error_out)) ||
-        (strappy_responses_text_has_non_whitespace(
-           analysis.response_text) &&
-         !strappy_responses_replace_string(&final_text,
-                                           analysis.response_text,
-                                           error_out))) {
+    if ((analysis.model != NULL) &&
+        !strappy_responses_replace_string(&last_model,
+                                          analysis.model,
+                                          error_out)) {
       strappy_responses_analysis_destroy(&analysis);
       strappy_responses_http_result_destroy(&http);
       break;
@@ -2501,57 +2502,22 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
         break;
       }
       next_request_kind = "tool_continuation";
-      allow_tool_calls = 1;
       strappy_responses_analysis_destroy(&analysis);
       strappy_responses_http_result_destroy(&http);
       continue;
     }
 
-    if (!strappy_responses_text_has_non_whitespace(
-          analysis.response_text)) {
-      const char *failure_message;
-      char *finalization_item;
-
-      failure_message =
-        "Responses finalization did not return a non-empty "
-        "assistant answer.";
-      if (finalization_sent) {
-        strappy_set_error(error_out, failure_message);
-        strappy_responses_update_failure_summary(session_db_path,
-                                                 session_id,
-                                                 prompt,
-                                                 last_model,
-                                                 last_http_status,
-                                                 failure_message);
-        strappy_responses_analysis_destroy(&analysis);
-        strappy_responses_http_result_destroy(&http);
-        break;
-      }
-      finalization_item = strappy_responses_message_item_json(
-        "developer",
-        strappy_responses_empty_answer,
-        error_out);
-      if ((finalization_item == NULL) ||
-          !strappy_responses_owned_items_append(&new_items,
-                                                finalization_item,
-                                                error_out)) {
-        strappy_responses_analysis_destroy(&analysis);
-        strappy_responses_http_result_destroy(&http);
-        break;
-      }
-      finalization_sent = 1;
-      next_request_kind = "audit_finalize";
-      allow_tool_calls = 0;
+    if (!strappy_responses_replace_string(
+          &final_text,
+          (analysis.response_text != NULL) ? analysis.response_text : "",
+          error_out)) {
       strappy_responses_analysis_destroy(&analysis);
       strappy_responses_http_result_destroy(&http);
-      continue;
+      break;
     }
 
     strappy_responses_analysis_destroy(&analysis);
     strappy_responses_http_result_destroy(&http);
-    if (final_text == NULL) {
-      final_text = strappy_string_duplicate("");
-    }
     if ((final_text == NULL) ||
         !strappy_db_update_response_session_summary(session_db_path,
                                                     session_id,
