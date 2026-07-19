@@ -24,6 +24,17 @@
 "Passed" = "合格";
 "Failed" = "不合格";
 "Not Applicable" = "対象外";
+"Check" = "チェック";
+"Source link included" = "ソースリンクを記載";
+"Database context checked" = "データベースコンテキストを確認";
+"Session named" = "セッション名を設定";
+"Font Awesome shortcode confirmed" = "Font Awesome ショートコードを確認";
+"User memory considered" = "ユーザーメモリへの保存を検討";
+"Database memory considered" = "データベースメモリへの保存を検討";
+"No web search or web fetch was used." = "Web 検索も Web フェッチも使用されませんでした。";
+"A linked HTTP source reference was required but not found." = "リンク付きの HTTP ソース参照が必要でしたが、見つかりませんでした。";
+"This check did not apply to the answer." = "このチェックは回答に適用されませんでした。";
+"The required tool was not called." = "必須ツールが呼び出されませんでした。";
 "Options" = "オプション";
 "Prompt Options" = "プロンプトオプション";
 "Send" = "送信";

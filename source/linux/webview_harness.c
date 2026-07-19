@@ -95,7 +95,28 @@ static int harness_check_localized_labels(void)
        harness_expect_equal(labels->answer_quality, "Answer Quality") &&
        harness_expect_equal(labels->passed, "Passed") &&
        harness_expect_equal(labels->failed, "Failed") &&
-       harness_expect_equal(labels->not_applicable, "Not Applicable");
+       harness_expect_equal(labels->not_applicable, "Not Applicable") &&
+       harness_expect_equal(labels->check, "Check") &&
+       harness_expect_equal(labels->source_link_included,
+                            "Source link included") &&
+       harness_expect_equal(labels->database_context_checked,
+                            "Database context checked") &&
+       harness_expect_equal(labels->session_named, "Session named") &&
+       harness_expect_equal(labels->fontawesome_shortcode_confirmed,
+                            "Font Awesome shortcode confirmed") &&
+       harness_expect_equal(labels->user_memory_considered,
+                            "User memory considered") &&
+       harness_expect_equal(labels->database_memory_considered,
+                            "Database memory considered") &&
+       harness_expect_equal(labels->no_web_search_or_fetch_used,
+                            "No web search or web fetch was used.") &&
+       harness_expect_equal(
+         labels->linked_source_reference_not_found,
+         "A linked HTTP source reference was required but not found.") &&
+       harness_expect_equal(labels->check_did_not_apply,
+                            "This check did not apply to the answer.") &&
+       harness_expect_equal(labels->required_tool_not_called,
+                            "The required tool was not called.");
   strappy_webview_free(error);
   return ok;
 }
@@ -476,6 +497,13 @@ static int harness_check_page_scripts(void)
                                "function renderAnswerQualityRows()") &&
        harness_expect_contains(page_html,
                                "function answerQualityStatusIconHTML(status)") &&
+       harness_expect_contains(
+         page_html,
+         "function answerQualitySummaryErrorIconHTML(row)") &&
+       harness_expect_contains(
+         page_html,
+         "aria-label=\"'+escHTML(label)+'\">'+"
+         "answerQualityStatusIconHTML('failed')") &&
        harness_expect_contains(page_html,
                                "faIconHTML('solid','check','')") &&
        harness_expect_contains(page_html,
@@ -484,6 +512,38 @@ static int harness_check_page_scripts(void)
                                "\"xmark\":'F00D'") &&
        harness_expect_contains(page_html,
                                "faIconHTML('solid','minus','')") &&
+       harness_expect_contains(page_html,
+                               "\"minus\":'F068'") &&
+       harness_expect_contains(page_html,
+                               "function answerQualityCheckLabel(row,check)") &&
+       harness_expect_contains(
+         page_html,
+         "key=='web_reference')return answerQualityAttr(row,"
+         "'source-link-included-label'") &&
+       harness_expect_contains(
+         page_html,
+         "key=='memory_database_hint_remember')return answerQualityAttr(row,"
+         "'database-memory-considered-label'") &&
+       harness_expect_contains(page_html,
+                               "function answerQualityCheckDetail("
+                               "row,check,status)") &&
+       harness_expect_contains(
+         page_html,
+         "status=='not_applicable')return answerQualityAttr(row,"
+         "'check-did-not-apply-label',detail)") &&
+       harness_expect_contains(
+         page_html,
+         "kind=='required_tool'&&(status=='failed'||status=='error'))"
+         "return answerQualityAttr(row,'required-tool-not-called-label',"
+         "detail)") &&
+       harness_expect_contains(
+         page_html,
+         "summaryText=answerQualityAttr(row,'answer-quality-label',"
+         "'Answer Quality')") &&
+       harness_expect_contains(
+         page_html,
+         "summary.innerHTML=(error?answerQualitySummaryErrorIconHTML(row):"
+         "'')+escHTML(summaryText)") &&
        harness_expect_contains(page_html,
                                ".answer-quality-check-status{flex:0 0 12px;"
                                "width:12px;margin-right:8px;") &&
@@ -1926,6 +1986,19 @@ static int harness_check_responses_items(void)
   labels.passed = "Localized Passed";
   labels.failed = "Localized Failed";
   labels.not_applicable = "Localized Not Applicable";
+  labels.check = "Localized Check";
+  labels.source_link_included = "Localized Source Link Included";
+  labels.database_context_checked = "Localized Database Context Checked";
+  labels.session_named = "Localized Session Named";
+  labels.fontawesome_shortcode_confirmed =
+    "Localized Font Awesome Shortcode Confirmed";
+  labels.user_memory_considered = "Localized User Memory Considered";
+  labels.database_memory_considered = "Localized Database Memory Considered";
+  labels.no_web_search_or_fetch_used = "Localized No Web Activity";
+  labels.linked_source_reference_not_found =
+    "Localized Linked Source Reference Not Found";
+  labels.check_did_not_apply = "Localized Check Did Not Apply";
+  labels.required_tool_not_called = "Localized Required Tool Not Called";
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-call-1";
@@ -2219,6 +2292,49 @@ static int harness_check_responses_items(void)
                                "Quality\"") &&
        harness_expect_contains(quality_html,
                                "data-passed-label=\"Localized Passed\"") &&
+       harness_expect_contains(
+         quality_html,
+         "data-not-applicable-label=\"Localized Not Applicable\"") &&
+       harness_expect_contains(quality_html,
+                               "data-check-label=\"Localized Check\"") &&
+       harness_expect_contains(
+         quality_html,
+         "data-source-link-included-label=\"Localized Source Link "
+         "Included\"") &&
+       harness_expect_contains(
+         quality_html,
+         "data-database-context-checked-label=\"Localized Database Context "
+         "Checked\"") &&
+       harness_expect_contains(
+         quality_html,
+         "data-session-named-label=\"Localized Session Named\"") &&
+       harness_expect_contains(
+         quality_html,
+         "data-fontawesome-shortcode-confirmed-label=\"Localized Font "
+         "Awesome Shortcode Confirmed\"") &&
+       harness_expect_contains(
+         quality_html,
+         "data-user-memory-considered-label=\"Localized User Memory "
+         "Considered\"") &&
+       harness_expect_contains(
+         quality_html,
+         "data-database-memory-considered-label=\"Localized Database Memory "
+         "Considered\"") &&
+       harness_expect_contains(
+         quality_html,
+         "data-no-web-search-or-fetch-used-label=\"Localized No Web "
+         "Activity\"") &&
+       harness_expect_contains(
+         quality_html,
+         "data-linked-source-reference-not-found-label=\"Localized Linked "
+         "Source Reference Not Found\"") &&
+       harness_expect_contains(
+         quality_html,
+         "data-check-did-not-apply-label=\"Localized Check Did Not Apply\"") &&
+       harness_expect_contains(
+         quality_html,
+         "data-required-tool-not-called-label=\"Localized Required Tool Not "
+         "Called\"") &&
        harness_expect_contains(quality_html,
                                "class=\"bubble api-tool-card tool-card "
                                "tool-error tool-card-open\"") &&
@@ -2228,6 +2344,9 @@ static int harness_check_responses_items(void)
        harness_expect_contains(quality_html,
                                "class=\"tool-card-summary\">Localized Answer "
                                "Quality</span>") &&
+       harness_expect_contains(
+         quality_html,
+         "<div class=\"api-tool-fallback\">Localized Answer Quality</div>") &&
        harness_expect_not_contains(quality_html,
                                    "<div class=\"role\">");
 

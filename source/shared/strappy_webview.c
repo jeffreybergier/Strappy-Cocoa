@@ -45,6 +45,17 @@ typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_PASSED,
   STRAPPY_WEBVIEW_LABEL_FAILED,
   STRAPPY_WEBVIEW_LABEL_NOT_APPLICABLE,
+  STRAPPY_WEBVIEW_LABEL_CHECK,
+  STRAPPY_WEBVIEW_LABEL_SOURCE_LINK_INCLUDED,
+  STRAPPY_WEBVIEW_LABEL_DATABASE_CONTEXT_CHECKED,
+  STRAPPY_WEBVIEW_LABEL_SESSION_NAMED,
+  STRAPPY_WEBVIEW_LABEL_FONTAWESOME_SHORTCODE_CONFIRMED,
+  STRAPPY_WEBVIEW_LABEL_USER_MEMORY_CONSIDERED,
+  STRAPPY_WEBVIEW_LABEL_DATABASE_MEMORY_CONSIDERED,
+  STRAPPY_WEBVIEW_LABEL_NO_WEB_SEARCH_OR_FETCH_USED,
+  STRAPPY_WEBVIEW_LABEL_LINKED_SOURCE_REFERENCE_NOT_FOUND,
+  STRAPPY_WEBVIEW_LABEL_CHECK_DID_NOT_APPLY,
+  STRAPPY_WEBVIEW_LABEL_REQUIRED_TOOL_NOT_CALLED,
   STRAPPY_WEBVIEW_LABEL_COUNT
 } strappy_webview_label_index;
 
@@ -72,7 +83,18 @@ static const char * const g_strappy_webview_label_keys[
   "Answer Quality",
   "Passed",
   "Failed",
-  "Not Applicable"
+  "Not Applicable",
+  "Check",
+  "Source link included",
+  "Database context checked",
+  "Session named",
+  "Font Awesome shortcode confirmed",
+  "User memory considered",
+  "Database memory considered",
+  "No web search or web fetch was used.",
+  "A linked HTTP source reference was required but not found.",
+  "This check did not apply to the answer.",
+  "The required tool was not called."
 };
 
 static char *g_strappy_webview_localized_label_values[
@@ -112,6 +134,26 @@ static void strappy_webview_assign_localized_labels(
   labels->passed = values[STRAPPY_WEBVIEW_LABEL_PASSED];
   labels->failed = values[STRAPPY_WEBVIEW_LABEL_FAILED];
   labels->not_applicable = values[STRAPPY_WEBVIEW_LABEL_NOT_APPLICABLE];
+  labels->check = values[STRAPPY_WEBVIEW_LABEL_CHECK];
+  labels->source_link_included =
+    values[STRAPPY_WEBVIEW_LABEL_SOURCE_LINK_INCLUDED];
+  labels->database_context_checked =
+    values[STRAPPY_WEBVIEW_LABEL_DATABASE_CONTEXT_CHECKED];
+  labels->session_named = values[STRAPPY_WEBVIEW_LABEL_SESSION_NAMED];
+  labels->fontawesome_shortcode_confirmed =
+    values[STRAPPY_WEBVIEW_LABEL_FONTAWESOME_SHORTCODE_CONFIRMED];
+  labels->user_memory_considered =
+    values[STRAPPY_WEBVIEW_LABEL_USER_MEMORY_CONSIDERED];
+  labels->database_memory_considered =
+    values[STRAPPY_WEBVIEW_LABEL_DATABASE_MEMORY_CONSIDERED];
+  labels->no_web_search_or_fetch_used =
+    values[STRAPPY_WEBVIEW_LABEL_NO_WEB_SEARCH_OR_FETCH_USED];
+  labels->linked_source_reference_not_found =
+    values[STRAPPY_WEBVIEW_LABEL_LINKED_SOURCE_REFERENCE_NOT_FOUND];
+  labels->check_did_not_apply =
+    values[STRAPPY_WEBVIEW_LABEL_CHECK_DID_NOT_APPLY];
+  labels->required_tool_not_called =
+    values[STRAPPY_WEBVIEW_LABEL_REQUIRED_TOOL_NOT_CALLED];
 }
 
 int strappy_webview_configure_localized_labels(char **error_out)
@@ -780,6 +822,119 @@ static const char *strappy_webview_not_applicable_label(
     return labels->not_applicable;
   }
   return "Not Applicable";
+}
+
+static const char *strappy_webview_check_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->check != NULL) &&
+      (labels->check[0] != '\0')) {
+    return labels->check;
+  }
+  return "Check";
+}
+
+static const char *strappy_webview_source_link_included_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->source_link_included != NULL) &&
+      (labels->source_link_included[0] != '\0')) {
+    return labels->source_link_included;
+  }
+  return "Source link included";
+}
+
+static const char *strappy_webview_database_context_checked_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->database_context_checked != NULL) &&
+      (labels->database_context_checked[0] != '\0')) {
+    return labels->database_context_checked;
+  }
+  return "Database context checked";
+}
+
+static const char *strappy_webview_session_named_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->session_named != NULL) &&
+      (labels->session_named[0] != '\0')) {
+    return labels->session_named;
+  }
+  return "Session named";
+}
+
+static const char *strappy_webview_fontawesome_shortcode_confirmed_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->fontawesome_shortcode_confirmed != NULL) &&
+      (labels->fontawesome_shortcode_confirmed[0] != '\0')) {
+    return labels->fontawesome_shortcode_confirmed;
+  }
+  return "Font Awesome shortcode confirmed";
+}
+
+static const char *strappy_webview_user_memory_considered_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->user_memory_considered != NULL) &&
+      (labels->user_memory_considered[0] != '\0')) {
+    return labels->user_memory_considered;
+  }
+  return "User memory considered";
+}
+
+static const char *strappy_webview_database_memory_considered_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->database_memory_considered != NULL) &&
+      (labels->database_memory_considered[0] != '\0')) {
+    return labels->database_memory_considered;
+  }
+  return "Database memory considered";
+}
+
+static const char *strappy_webview_no_web_search_or_fetch_used_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->no_web_search_or_fetch_used != NULL) &&
+      (labels->no_web_search_or_fetch_used[0] != '\0')) {
+    return labels->no_web_search_or_fetch_used;
+  }
+  return "No web search or web fetch was used.";
+}
+
+static const char *strappy_webview_linked_source_reference_not_found_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->linked_source_reference_not_found != NULL) &&
+      (labels->linked_source_reference_not_found[0] != '\0')) {
+    return labels->linked_source_reference_not_found;
+  }
+  return "A linked HTTP source reference was required but not found.";
+}
+
+static const char *strappy_webview_check_did_not_apply_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->check_did_not_apply != NULL) &&
+      (labels->check_did_not_apply[0] != '\0')) {
+    return labels->check_did_not_apply;
+  }
+  return "This check did not apply to the answer.";
+}
+
+static const char *strappy_webview_required_tool_not_called_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->required_tool_not_called != NULL) &&
+      (labels->required_tool_not_called[0] != '\0')) {
+    return labels->required_tool_not_called;
+  }
+  return "The required tool was not called.";
 }
 
 static int strappy_webview_is_assistant_role(const char *role)
@@ -2430,15 +2585,31 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function answerQualityRows(){var m=byId('messages');var out=[];var n,i;if(!m)return out;",
     "n=m.getElementsByTagName('*');for(i=0;i<n.length;i++){if(hasClass(n[i],'row')&&hasClass(n[i],'answer_quality'))out[out.length]=n[i];}return out;}",
     "function answerQualityAttr(row,name,fallback){var v=row&&row.getAttribute?row.getAttribute('data-'+name)||'':'';return v!==''?v:fallback;}",
+    "function answerQualityCheckLabel(row,check){var key=jsonText(check&&check.key);",
+    "if(key=='web_reference')return answerQualityAttr(row,'source-link-included-label',jsonText(check.label));",
+    "if(key=='database_context_read')return answerQualityAttr(row,'database-context-checked-label',jsonText(check.label));",
+    "if(key=='helper_session_name_write')return answerQualityAttr(row,'session-named-label',jsonText(check.label));",
+    "if(key=='helper_fontawesome_shortcode_confirm')return answerQualityAttr(row,'fontawesome-shortcode-confirmed-label',jsonText(check.label));",
+    "if(key=='memory_user_fact_remember')return answerQualityAttr(row,'user-memory-considered-label',jsonText(check.label));",
+    "if(key=='memory_database_hint_remember')return answerQualityAttr(row,'database-memory-considered-label',jsonText(check.label));",
+    "return jsonText(check.label||key||answerQualityAttr(row,'check-label','Check'));}",
+    "function answerQualityCheckDetail(row,check,status){var key=jsonText(check&&check.key);",
+    "var kind=jsonText(check&&check.kind);var detail=jsonText(check&&check.detail);if(detail==='')return '';",
+    "if(key=='web_reference'&&status=='not_applicable')return answerQualityAttr(row,'no-web-search-or-fetch-used-label',detail);",
+    "if(key=='web_reference'&&(status=='failed'||status=='error'))return answerQualityAttr(row,'linked-source-reference-not-found-label',detail);",
+    "if(status=='not_applicable')return answerQualityAttr(row,'check-did-not-apply-label',detail);",
+    "if(kind=='required_tool'&&(status=='failed'||status=='error'))return answerQualityAttr(row,'required-tool-not-called-label',detail);return detail;}",
     "function answerQualityStatusIconHTML(status){if(status=='passed')return faIconHTML('solid','check','');",
     "if(status=='failed'||status=='error')return faIconHTML('solid','xmark','');return faIconHTML('solid','minus','');}",
+    "function answerQualitySummaryErrorIconHTML(row){var label=answerQualityAttr(row,'failed-label','Failed');",
+    "return '<span class=\"tool-error-icon\" role=\"img\" aria-label=\"'+escHTML(label)+'\">'+answerQualityStatusIconHTML('failed')+'</span>';}",
     "function renderAnswerQualityRows(){var rows=answerQualityRows();var i,j,row,data,checks,check,status,label,detail,",
     "passed,failed,skipped,error,bubble,body,summary,h,summaryText,statusText,statusIcon;",
     "for(i=0;i<rows.length;i++){row=rows[i];data=parseJSONSafe(answerQualityAttr(row,'answer-quality-json',''));",
     "checks=isObj(data)&&isArr(data.checks)?data.checks:[];passed=0;failed=0;skipped=0;h=[];",
     "for(j=0;j<checks.length;j++){check=checks[j]||{};status=jsonText(check.status);",
     "if(status=='passed')passed++;else if(status=='failed'||status=='error')failed++;else skipped++;",
-    "label=jsonText(check.label||check.key||'Check');detail=jsonText(check.detail);",
+    "label=answerQualityCheckLabel(row,check);detail=answerQualityCheckDetail(row,check,status);",
     "statusText=status=='passed'?answerQualityAttr(row,'passed-label','Passed'):",
     "((status=='failed'||status=='error')?answerQualityAttr(row,'failed-label','Failed'):answerQualityAttr(row,'not-applicable-label','Not Applicable'));",
     "statusIcon=answerQualityStatusIconHTML(status);",
@@ -2452,7 +2623,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(checks.length){summaryText+=' - '+passed+' '+answerQualityAttr(row,'passed-label','Passed');",
     "if(failed)summaryText+=' / '+failed+' '+answerQualityAttr(row,'failed-label','Failed');",
     "if(skipped)summaryText+=' / '+skipped+' '+answerQualityAttr(row,'not-applicable-label','Not Applicable');}",
-    "setToolCardSummary(summary,summaryText,error);if(body)body.innerHTML=h.join('');",
+    "if(summary)summary.innerHTML=(error?answerQualitySummaryErrorIconHTML(row):'')+escHTML(summaryText);",
+    "if(body)body.innerHTML=h.join('');",
     "setClass(bubble,'tool-error',error);setClass(row,'state-error',error);}}",
     "function renderMessageDecorations(root){renderMarkdown(root);renderResponseMetadata(root);renderTools(root);renderAnswerQualityRows();decorateAPIExchanges(root);decorateAPIToolGroups(root);decoratePromptGroups(root);",
     "if(processingInteractionsLocked())syncProcessingInteractionState(1,strappyProcessingPromptGroupKey);}",
@@ -3082,7 +3254,51 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
          strappy_webview_append_data_attribute(
            &buffer,
            "not-applicable-label",
-           strappy_webview_not_applicable_label(labels));
+           strappy_webview_not_applicable_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "check-label",
+           strappy_webview_check_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "source-link-included-label",
+           strappy_webview_source_link_included_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "database-context-checked-label",
+           strappy_webview_database_context_checked_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "session-named-label",
+           strappy_webview_session_named_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "fontawesome-shortcode-confirmed-label",
+           strappy_webview_fontawesome_shortcode_confirmed_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "user-memory-considered-label",
+           strappy_webview_user_memory_considered_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "database-memory-considered-label",
+           strappy_webview_database_memory_considered_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "no-web-search-or-fetch-used-label",
+           strappy_webview_no_web_search_or_fetch_used_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "linked-source-reference-not-found-label",
+           strappy_webview_linked_source_reference_not_found_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "check-did-not-apply-label",
+           strappy_webview_check_did_not_apply_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "required-tool-not-called-label",
+           strappy_webview_required_tool_not_called_label(labels));
   }
   if (ok && ((render_streaming && strappy_webview_is_assistant_role(role)) ||
              strappy_webview_is_api_reasoning_role(role))) {
@@ -3202,7 +3418,10 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
            &buffer,
            "</span></a><div class=\"tool-card-body\">"
            "<div class=\"api-tool-fallback\">") &&
-         strappy_webview_append_html_escaped(&buffer, text) &&
+         strappy_webview_append_html_escaped(
+           &buffer,
+           strappy_webview_is_answer_quality_role(role) ?
+             strappy_webview_answer_quality_label(labels) : text) &&
          strappy_webview_buffer_append_cstring(&buffer, "</div></div>");
   } else {
     ok = ok && strappy_webview_append_html_escaped(&buffer, text);
