@@ -4,13 +4,13 @@ This is a manual, live OpenRouter evaluation harness for Strappy. It runs the
 same personal-media question against the currently enabled models while exercising
 the real shared Responses API, tool executor, database catalog, and ledger code.
 
-The checked-in model list enables GLM, DeepSeek, Gemma, and Qwen for the full
-four-model comparison.
+The checked-in model list enables GLM, DeepSeek, Gemma, Qwen, Gemini, GPT-OSS,
+and GPT-5.6 Luna Pro for the full seven-model comparison.
 
 The default evaluation prompt is:
 
 > Please list out the names, blood types, and personalities of the members of
-> my top 3 listened to KPOP bands
+> my top 5 listened to KPOP bands
 
 The shared runtime resources themselves are intentionally reduced to the
 minimum baseline:
@@ -52,25 +52,22 @@ first name is Jeff. The prompt does not contain that name. The existing
 It is intentionally isolated from `source/linux/Makefile`; neither the normal
 `test` target nor a plain invocation of this Makefile performs network calls.
 
-Live output follows the same nested shape as the iOS response timeline. Each
-additional `>` marks another level, while reasoning and large tool results
-use compact previews like their collapsed webview sections:
+All enabled models launch concurrently in isolated child processes. The live
+terminal keeps output intentionally small and updates a single pending counter
+as models finish:
 
 ```text
-> Model | google/gemma-4-31b-it
->> Session 1 | google/gemma-4-31b-it | Started
->>> API Turn 1 | User | Round 1 | Attempt 1
->>>> Request
->>>>> User Prompt
->>>>>> Please list out ...
->>>>> Tool Call | database_list_info
->>>>> Tool Call | memory_user_fact_read
->>>>> Tool Output | {"databases":[{"database_id":"...","app_name":"...","path":"...","size_bytes":4096,"modified_at":...}]}
->>>>> Tool Output | [{"id":1,"fact":"The user's name is Jeff.","date_saved":"..."}]
->>>> Response | completed | HTTP 200 | 12.7s
->>>>> Reasoning | 2270 characters
->>>>> Tool Call | database_query
+Hill climbs pending: 7/7
+Hill climbs pending: 6/7
+...
+Hill climbs pending: 0/7
+> Run Complete
 ```
+
+On an interactive terminal the counter is redrawn in place. Each model's full
+runner output is preserved in its own `runner.log`, and evaluator output is
+preserved once per run in `evaluation.log`. Failures receive a compact summary
+after every child has completed.
 
 ## Private inputs and outputs
 
@@ -79,6 +76,9 @@ use compact previews like their collapsed webview sections:
   `user_decision` is `allowed`, including available WAL/SHM/journal sidecars;
 - `private/gomadango/databases.json` records the ignored fixture inventory used
   by the runner. It is the sole database-fixture input to a live run;
+- `private/gomadango/member_roster.json` is the ignored, prefetched active-member
+  snapshot for the database-derived top five. It includes one or more serialized
+  regular expressions per member plus a public source and retrieval timestamp;
 - `runs/` contains answers, per-model Strappy databases, costs, and reports.
 - `.env` files are ignored. The default live run reads the repository-root
   `.env` through the normal Strappy configuration loader.
@@ -122,8 +122,8 @@ database and its available SQLite sidecars:
 make -C source/linux/hill_climbing refresh-fixture
 ```
 
-Run every currently enabled model. The confirmation is deliberately required
-because this makes billable network requests:
+Run every currently enabled model concurrently. The confirmation is
+deliberately required because this makes billable network requests:
 
 ```sh
 make -C source/linux/hill_climbing run CONFIRM_LIVE=yes
@@ -143,6 +143,7 @@ model directory also contains:
 - `answer.md`: Strappy's extracted final answer;
 - `output.json`: a readable snapshot reconstructed from normalized attempts,
   results, usage, typed response items, and tool records in call order;
+- `runner.log`: that model's complete captured runner output;
 - `strappy.sqlite`: the complete queryable semantic request, response, item,
   catalog, memory, and tool ledger.
 
@@ -152,25 +153,41 @@ columns and structured-node trees; it is not a copy of the provider payload.
 
 ## Scoring and iteration
 
-The evaluator derives the top three K-pop artists dynamically from aggregate
-play counts in the private fixture. It scores whether the runtime and model:
+Score version 3 is centered on zero and uses the shared runtime's persisted
+answer-quality audit as its mandatory baseline:
 
-- preload the approved inventory and query MediaLibrary;
-- receive the seeded user fact through the memory preflight and mention Jeff in
-  the final answer;
-- filters the ranking to KPOP records and aggregates total play counts rather
-  than ranking groups by one song;
-- covers the dynamically calculated top three in descending order;
-- provides the requested public details with links;
-- stores the dynamically calculated favorite bands as durable user memory;
-- stays within API-call, web-search, latency, and the $0.01 cost budget.
+- every `failed` or `error` audit check scores -5 points;
+- `passed` and `not_applicable` checks score zero;
+- a required-tool audit passes only after that tool completes successfully;
+- if any audit check fails, all answer bonuses are reported but withheld;
+- when every applicable audit passes, the answer starts at zero and earns +5
+  for mentioning the seeded remembered name, +1 for every unique expected
+  active member mentioned, and +1 for every unique valid non-image inline
+  Markdown HTTP(S) link, up to 10 link points;
+- total run cost is rounded to the nearest cent using half-up rounding, then
+  scores `5 - rounded cost in cents`: $0.00 is +5, $0.03 is +2, $0.05 is 0,
+  and $0.06 is -1. A failed audit withholds positive price points along with
+  the answer bonuses, but negative price points still apply.
 
-The positive checks are proportionally normalized to 100 points so the score
-ceiling remains stable as the checklist evolves.
+The evaluator derives the top five K-pop artists dynamically from aggregate
+play counts in the private fixture. Before a live comparison, the roster for
+those exact five artists must be prefetched once into
+`private/gomadango/member_roster.json`. The runner validates it against the
+ranking and embeds the complete snapshot and its SHA-256 in `run.json`, so every
+model in that run is scored against the same active roster.
 
-The score deliberately does not declare public biographical facts correct.
-Roster freshness, blood types, and subjective personality descriptions remain
-part of the human review checklist in each report.
+Member matching executes the serialized regular expressions in the frozen
+roster. Patterns use case and letter boundaries appropriate to each name.
+Ambiguous short stage names such as `K`, `Q`, and `EJ` are case-sensitive and
+must be surrounded by non-letter boundaries. Hyphen-connected words are treated
+as words as well, so the `K` in `K-pop` does not count as member `K`.
+
+Latency, API attempts, local tool errors, and web activity remain visible
+diagnostics but do not affect the score. Cost is the sole efficiency metric in
+the score. With the current 35-member roster and 10-link cap, a zero-cost,
+fully compliant answer can score at most +55. The score measures audit
+compliance and answer coverage; it does not declare blood types or subjective
+personality descriptions factually correct.
 
 A useful hill-climbing cycle is:
 

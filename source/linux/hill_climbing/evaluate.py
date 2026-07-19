@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic ledger scorer for hill-climbing runs.
-
-The score is a regression signal, not a substitute for checking public facts.
-"""
+"""Audit-first deterministic scorer for private hill-climbing runs."""
 
 from __future__ import annotations
 
@@ -11,60 +8,62 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass, field
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+
+from hill_climbing_ground_truth import (
+    REQUIRED_GROUP_COUNT,
+    matched_roster_members,
+    roster_member_count,
+    standalone_alias_pattern,
+    validate_member_roster,
+)
 
 
-REQUIRED_GROUP_COUNT = 3
-COST_BUDGET_USD = 0.01
+SCORE_VERSION = 3
+AUDIT_FAILURE_POINTS = 5
+NAME_BONUS_POINTS = 5
+LINK_BONUS_LIMIT = 10
+PRICE_GOAL_CENTS = 5
 
-# This is an alias map, not a checklist. Any of these groups may occupy one of
-# the three database-derived ranking slots, and only those three slots are
-# required for full coverage credit.
-ALLOWED_ARTIST_ALIASES: dict[str, tuple[str, ...]] = {
-    "the boyz": ("the boyz", "boyz"),
-    "zerobaseone": ("zerobaseone", "zerobase", "zb1"),
-    "tomorrow x together": ("tomorrow x together", "txt"),
-    "&team": ("&team",),
-    "enhypen": ("enhypen",),
-    "seventeen": ("seventeen",),
-}
+MARKDOWN_LINK = re.compile(
+    r"(?<!!)\[([^\]\r\n]+)\]\((https?://[^\s)\r\n]+)\)",
+    flags=re.IGNORECASE,
+)
+
+
+@dataclass
+class ScoreBreakdown:
+    score: int
+    audit_penalty: int
+    failed_audit_count: int
+    awarded_bonus: int
+    potential_bonus: int
+    price_points: int
+    awarded_price_points: int
+    rounded_cost_cents: int
+    name_mentioned: bool
+    matched_members: list[dict[str, str]] = field(default_factory=list)
+    links: list[dict[str, str]] = field(default_factory=list)
+    audit_checks: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
 class Result:
     model: str
     slug: str
-    score: int = 0
-    grade: str = "F"
-    checks: list[dict[str, Any]] = field(default_factory=list)
+    score: int
+    audit_penalty: int
+    failed_audit_count: int
+    awarded_bonus: int
+    potential_bonus: int
+    price_points: int
+    awarded_price_points: int
+    audit_checks: list[dict[str, Any]] = field(default_factory=list)
+    bonus_checks: list[dict[str, Any]] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
-
-    def add(self, name: str, passed: bool, points: int, note: str = "") -> None:
-        earned = points if passed else 0
-        self.score += earned
-        self.checks.append(
-            {
-                "name": name,
-                "passed": passed,
-                "earned": earned,
-                "possible": points,
-                "note": note,
-            }
-        )
-
-    def normalize_positive_score(self, target: int = 100) -> None:
-        possible = sum(
-            int(check["possible"])
-            for check in self.checks
-            if int(check["possible"]) > 0
-        )
-        earned = self.score
-        normalized = round(earned * target / possible) if possible else 0
-        self.metrics["positive_points_earned"] = earned
-        self.metrics["positive_points_possible"] = possible
-        self.metrics["normalized_score"] = normalized
-        self.score = normalized
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,185 +72,32 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def frozen_top_five(metadata: dict[str, Any]) -> list[tuple[str, int]]:
+    values = metadata.get("expected_top_five")
+    if not isinstance(values, list) or len(values) != REQUIRED_GROUP_COUNT:
+        raise RuntimeError(
+            f"Run metadata must freeze exactly {REQUIRED_GROUP_COUNT} top groups."
+        )
+    result: list[tuple[str, int]] = []
+    for index, value in enumerate(values, 1):
+        if not isinstance(value, dict):
+            raise RuntimeError(f"Frozen top-five entry {index} is invalid.")
+        name = value.get("name")
+        plays = value.get("total_plays")
+        if not isinstance(name, str) or not name.strip():
+            raise RuntimeError(f"Frozen top-five entry {index} has no name.")
+        if isinstance(plays, bool) or not isinstance(plays, int) or plays < 0:
+            raise RuntimeError(
+                f"Frozen top-five entry {index} has an invalid play count."
+            )
+        result.append((name, plays))
+    return result
+
+
 def connect_readonly(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     return connection
-
-
-def resolve_database_manifest(metadata: dict[str, Any]) -> Path:
-    recorded_value = metadata.get("database_manifest")
-    if not isinstance(recorded_value, str):
-        raise RuntimeError("Run metadata does not identify its database manifest.")
-
-    recorded = Path(recorded_value)
-    harness_dir = Path(__file__).resolve().parent
-    candidates = (recorded, harness_dir / "private/gomadango/databases.json")
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    raise RuntimeError("The run's database manifest is unavailable.")
-
-
-def resolve_ranking_database(metadata: dict[str, Any]) -> Path:
-    if "database_manifest" not in metadata:
-        recorded_value = metadata.get("media_db")
-        if not isinstance(recorded_value, str):
-            raise RuntimeError(
-                "Legacy run metadata does not identify its ranking database."
-            )
-        recorded = Path(recorded_value)
-        harness_dir = Path(__file__).resolve().parent
-        candidates = (
-            recorded,
-            harness_dir
-            / "private/gomadango/root/var/mobile/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb",
-            harness_dir
-            / "private/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb",
-        )
-        for candidate in candidates:
-            if candidate.is_file():
-                return candidate
-        raise RuntimeError("The legacy run's ranking database is unavailable.")
-
-    suffix = "/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb"
-    manifest_path = resolve_database_manifest(metadata)
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    entries = manifest.get("databases")
-    if manifest.get("format_version") != 1 or not isinstance(entries, list):
-        raise RuntimeError(f"Invalid database manifest: {manifest_path}")
-
-    matches = [
-        entry
-        for entry in entries
-        if isinstance(entry, dict)
-        and isinstance(entry.get("remote_path"), str)
-        and entry["remote_path"].endswith(suffix)
-    ]
-    if len(matches) != 1:
-        raise RuntimeError(
-            "The run manifest must contain exactly one ranking database; "
-            f"found {len(matches)}."
-        )
-    entry = matches[0]
-    local_path = entry.get("local_path")
-    if not isinstance(local_path, str):
-        raise RuntimeError(f"Invalid ranking database entry in {manifest_path}")
-    fixture_root = manifest_path.parent.resolve()
-    database = (fixture_root / local_path).resolve()
-    if fixture_root not in database.parents:
-        raise RuntimeError(f"Ranking database escapes private root: {database}")
-    if not database.is_file():
-        raise RuntimeError(
-            f"The ranking database is unavailable: {database}"
-        )
-    return database
-
-
-def expected_artists(ranking_db: Path, limit: int = 7) -> list[tuple[str, int]]:
-    sql = """
-        SELECT ia.item_artist AS artist,
-               SUM(COALESCE(s.play_count_user, 0)) AS total_plays
-        FROM item i
-        JOIN item_artist ia ON ia.item_artist_pid = i.item_artist_pid
-        JOIN genre g ON g.genre_id = i.genre_id
-        LEFT JOIN item_stats s ON s.item_pid = i.item_pid
-        WHERE LOWER(REPLACE(REPLACE(g.genre, '-', ''), ' ', '')) = 'kpop'
-        GROUP BY ia.item_artist
-        HAVING total_plays > 0
-        ORDER BY total_plays DESC, COUNT(*) DESC
-    """
-    ignored_fragments = (" feat. ", "jonas brothers")
-    with connect_readonly(ranking_db) as database:
-        rows = database.execute(sql).fetchall()
-    primary = []
-    for row in rows:
-        artist = str(row["artist"])
-        if any(fragment in artist.lower() for fragment in ignored_fragments):
-            continue
-        primary.append((artist, int(row["total_plays"])))
-        if len(primary) == limit:
-            break
-    return primary
-
-
-def safe_json(value: str | None) -> dict[str, Any]:
-    if not value:
-        return {}
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def safe_json_array(value: str | None) -> list[Any]:
-    if not value:
-        return []
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return []
-    return parsed if isinstance(parsed, list) else []
-
-
-def structured_value(
-    database: sqlite3.Connection,
-    owner_item_id: int,
-    purpose: str,
-) -> object | None:
-    document = database.execute(
-        """
-        SELECT id FROM structured_documents
-        WHERE owner_item_id = ? AND purpose = ?
-        """,
-        (owner_item_id, purpose),
-    ).fetchone()
-    if document is None:
-        return None
-    rows = database.execute(
-        """
-        SELECT node_id, parent_node_id, ordinal, member_name, value_type,
-               text_value, number_value, boolean_value
-        FROM structured_nodes WHERE document_id = ? ORDER BY node_id
-        """,
-        (document["id"],),
-    ).fetchall()
-    if not rows:
-        return None
-    nodes = {int(row["node_id"]): row for row in rows}
-    children: dict[int, list[sqlite3.Row]] = {}
-    for row in rows:
-        parent = row["parent_node_id"]
-        if parent is not None:
-            children.setdefault(int(parent), []).append(row)
-    for values in children.values():
-        values.sort(key=lambda row: int(row["ordinal"]))
-
-    def build(node_id: int) -> object | None:
-        row = nodes[node_id]
-        value_type = str(row["value_type"])
-        child_rows = children.get(node_id, [])
-        if value_type == "object":
-            return {
-                str(child["member_name"]): build(int(child["node_id"]))
-                for child in child_rows
-            }
-        if value_type == "array":
-            return [build(int(child["node_id"])) for child in child_rows]
-        if value_type == "string":
-            return str(row["text_value"] or "")
-        if value_type == "number":
-            number = str(row["number_value"] or "0")
-            try:
-                return json.loads(number)
-            except json.JSONDecodeError:
-                return number
-        if value_type == "boolean":
-            return bool(row["boolean_value"])
-        return None
-
-    return build(0)
 
 
 def item_text(database: sqlite3.Connection, item_id: int) -> str:
@@ -266,77 +112,220 @@ def item_text(database: sqlite3.Connection, item_id: int) -> str:
     return "\n".join(str(row["text"]) for row in rows)
 
 
-def output_json(database: sqlite3.Connection, row: sqlite3.Row) -> str:
-    item_id = row["output_item_id"]
-    if item_id is None:
-        return ""
-    if row["output_format"] == "structured":
-        value = structured_value(database, int(item_id), "output")
-        return json.dumps(value, ensure_ascii=False)
-    return str(row["text_output"] or "")
-
-
-def fact_matches(candidate: Any, expected: dict[str, Any]) -> bool:
-    if not isinstance(candidate, dict):
-        return False
-    return all(
-        str(candidate.get(field, "")).casefold()
-        == str(expected.get(field, "")).casefold()
-        for field in ("kind", "subject", "predicate", "value")
+def _normalized_link(url: str) -> str | None:
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return None
+    if parsed.scheme.casefold() not in ("http", "https") or not parsed.hostname:
+        return None
+    return urlunsplit(
+        (
+            parsed.scheme.casefold(),
+            parsed.netloc.casefold(),
+            parsed.path,
+            parsed.query,
+            "",
+        )
     )
 
 
-def preflight_fact_matches(candidate: Any, expected: dict[str, Any]) -> bool:
-    if not isinstance(candidate, dict):
-        return False
-    return str(candidate.get("fact", "")).casefold() == str(
-        expected.get("value", "")
-    ).casefold()
+def extract_unique_markdown_links(answer: str) -> list[dict[str, str]]:
+    links: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for match in MARKDOWN_LINK.finditer(answer):
+        title = match.group(1).strip()
+        url = match.group(2)
+        normalized = _normalized_link(url)
+        if not title or normalized is None or normalized in seen:
+            continue
+        seen.add(normalized)
+        links.append({"title": title, "url": url})
+    return links
 
 
-def artist_aliases(artist: str) -> tuple[str, ...]:
-    lowered = artist.lower()
-    return ALLOWED_ARTIST_ALIASES.get(lowered, (lowered,))
-
-
-def artist_position(answer_lower: str, artist: str) -> int:
-    positions = [
-        answer_lower.find(alias)
-        for alias in artist_aliases(artist)
-        if answer_lower.find(alias) >= 0
-    ]
-    return min(positions) if positions else -1
-
-
-def efficiency_points(result: Result, cost: float, wall: float, calls: int, web: int) -> None:
-    result.add("Cost budget", cost <= COST_BUDGET_USD, 5, f"${cost:.4f}")
-    result.add("Latency budget", wall <= 360.0, 4, f"{wall:.1f}s")
-    if calls <= 8:
-        call_points = 3
-    elif calls <= 12:
-        call_points = 2
-    elif calls <= 16:
-        call_points = 1
-    else:
-        call_points = 0
-    result.score += call_points
-    result.checks.append(
-        {
-            "name": "API-call budget",
-            "passed": call_points == 3,
-            "earned": call_points,
-            "possible": 3,
-            "note": str(calls),
-        }
+def audit_check_failed(check: dict[str, Any]) -> bool:
+    return str(check.get("status", "error")) not in (
+        "passed",
+        "not_applicable",
     )
-    result.add("Web-search budget", web <= 10, 3, str(web))
+
+
+def price_points_for_cost(cost_usd: float) -> tuple[int, int]:
+    cost = Decimal(str(cost_usd))
+    if not cost.is_finite() or cost < 0:
+        raise ValueError("Run cost must be a finite non-negative amount.")
+    rounded_cost_cents = int(
+        (cost * Decimal(100)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
+    return PRICE_GOAL_CENTS - rounded_cost_cents, rounded_cost_cents
+
+
+def score_answer(
+    answer: str,
+    audit_checks: list[dict[str, Any]],
+    roster: dict[str, Any],
+    expected_user_name: str,
+    cost_usd: float,
+) -> ScoreBreakdown:
+    failed_audits = [check for check in audit_checks if audit_check_failed(check)]
+    audit_penalty = -AUDIT_FAILURE_POINTS * len(failed_audits)
+
+    name_pattern = (
+        standalone_alias_pattern(expected_user_name, case_sensitive=False)
+        if expected_user_name
+        else None
+    )
+    name_mentioned = bool(name_pattern and re.search(name_pattern, answer))
+    matched_members = matched_roster_members(answer, roster)
+    links = extract_unique_markdown_links(answer)
+    potential_bonus = (
+        (NAME_BONUS_POINTS if name_mentioned else 0)
+        + len(matched_members)
+        + min(len(links), LINK_BONUS_LIMIT)
+    )
+    awarded_bonus = potential_bonus if not failed_audits else 0
+    price_points, rounded_cost_cents = price_points_for_cost(cost_usd)
+    awarded_price_points = (
+        price_points if not failed_audits else min(price_points, 0)
+    )
+    score = audit_penalty + awarded_bonus + awarded_price_points
+    return ScoreBreakdown(
+        score=score,
+        audit_penalty=audit_penalty,
+        failed_audit_count=len(failed_audits),
+        awarded_bonus=awarded_bonus,
+        potential_bonus=potential_bonus,
+        price_points=price_points,
+        awarded_price_points=awarded_price_points,
+        rounded_cost_cents=rounded_cost_cents,
+        name_mentioned=name_mentioned,
+        matched_members=matched_members,
+        links=links,
+        audit_checks=audit_checks,
+    )
+
+
+def _missing_audit_check(detail: str) -> dict[str, Any]:
+    return {
+        "check_key": "answer_quality_audit_missing",
+        "check_kind": "answer_content",
+        "label": "Answer quality audit available",
+        "status": "error",
+        "tool_name": None,
+        "detail": detail,
+    }
+
+
+def _answer_audit(
+    database: sqlite3.Connection,
+    answer_attempt_id: int | None,
+) -> tuple[str, str | None, list[dict[str, Any]]]:
+    if answer_attempt_id is None:
+        return (
+            "error",
+            None,
+            [_missing_audit_check("The final answer has no source attempt.")],
+        )
+    audit = database.execute(
+        """
+        SELECT id, outcome, guidance_version
+        FROM answer_quality_audits WHERE response_attempt_id = ?
+        """,
+        (answer_attempt_id,),
+    ).fetchone()
+    if audit is None:
+        return (
+            "error",
+            None,
+            [_missing_audit_check("The final answer has no quality audit.")],
+        )
+    rows = database.execute(
+        """
+        SELECT check_key, check_kind, label, status, tool_name, detail
+        FROM answer_quality_checks WHERE audit_id = ? ORDER BY ordinal
+        """,
+        (audit["id"],),
+    ).fetchall()
+    checks = [dict(row) for row in rows]
+    if not checks:
+        checks = [_missing_audit_check("The answer quality audit has no checks.")]
+    if str(audit["outcome"]) != "passed" and not any(
+        audit_check_failed(check) for check in checks
+    ):
+        checks.append(
+            _missing_audit_check(
+                "The answer quality audit outcome is not passed but has no "
+                "failed check."
+            )
+        )
+    return str(audit["outcome"]), audit["guidance_version"], checks
+
+
+def _runtime_metrics(
+    database: sqlite3.Connection,
+    session_id: int,
+) -> dict[str, Any]:
+    calls = database.execute(
+        """
+        SELECT COUNT(*) AS calls,
+               COALESCE(SUM(CASE
+                 WHEN a.state != 'completed' OR a.http_status >= 400
+                   OR ar.error_type IS NOT NULL
+                   OR ar.error_message IS NOT NULL
+                   OR ar.parse_error IS NOT NULL
+                 THEN 1 ELSE 0 END), 0) AS errors,
+               COALESCE(SUM(u.cost_nano_usd), 0) / 1000000000.0 AS cost,
+               COALESCE((MAX(COALESCE(a.completed_at_ms, a.started_at_ms)) -
+                         MIN(a.started_at_ms)) / 1000.0, 0) AS wall
+        FROM http_attempts a
+        JOIN model_requests r ON r.id = a.request_id
+        JOIN turns t ON t.id = r.turn_id
+        LEFT JOIN api_results ar ON ar.attempt_id = a.id
+        LEFT JOIN api_usage u ON u.attempt_id = a.id
+        WHERE t.session_id = ?
+        """,
+        (session_id,),
+    ).fetchone()
+    tools = database.execute(
+        """
+        SELECT COUNT(*) AS count,
+               COALESCE(SUM(CASE WHEN e.state = 'error' THEN 1 ELSE 0 END), 0)
+                 AS errors
+        FROM tool_executions e
+        JOIN function_calls f ON f.item_id = e.function_call_item_id
+        JOIN conversation_items i ON i.id = f.item_id
+        WHERE i.session_id = ?
+        """,
+        (session_id,),
+    ).fetchone()
+    web = int(
+        database.execute(
+            """
+            SELECT COUNT(*) FROM conversation_items
+            WHERE session_id = ?
+              AND kind IN ('openrouter:web_search', 'openrouter:web_fetch')
+              AND source_attempt_id IS NOT NULL
+            """,
+            (session_id,),
+        ).fetchone()[0]
+    )
+    return {
+        "calls": int(calls["calls"] or 0),
+        "api_errors": int(calls["errors"] or 0),
+        "local_tools": int(tools["count"] or 0),
+        "tool_errors": int(tools["errors"] or 0),
+        "web_activities": web,
+        "cost": float(calls["cost"] or 0.0),
+        "wall_seconds": float(calls["wall"] or 0.0),
+    }
 
 
 def score_session(
     session_db: Path,
-    ranking_db: Path,
     slug: str,
-    expected_database_count: int,
+    roster: dict[str, Any],
+    top_five: list[tuple[str, int]],
     expected_user_fact: dict[str, Any] | None,
 ) -> Result:
     with connect_readonly(session_db) as database:
@@ -349,418 +338,213 @@ def score_session(
         model = str(session["model_id"] or slug)
         answer_item = database.execute(
             """
-            SELECT i.id FROM conversation_items i
+            SELECT i.id, i.source_attempt_id
+            FROM conversation_items i
             JOIN message_items m ON m.item_id = i.id
             WHERE i.session_id = ? AND m.role = 'assistant'
             ORDER BY i.sequence DESC LIMIT 1
             """,
             (session_id,),
         ).fetchone()
-        answer = (
-            item_text(database, int(answer_item["id"]))
-            if answer_item
-            else ""
+        answer = item_text(database, int(answer_item["id"])) if answer_item else ""
+        answer_attempt_id = (
+            int(answer_item["source_attempt_id"])
+            if answer_item and answer_item["source_attempt_id"] is not None
+            else None
         )
-        answer_lower = answer.lower()
+        audit_outcome, audit_guidance_version, audit_checks = _answer_audit(
+            database, answer_attempt_id
+        )
+        runtime_metrics = _runtime_metrics(database, session_id)
 
-        calls_row = database.execute(
-            """
-            SELECT COUNT(*) AS calls,
-                   COALESCE(SUM(CASE
-                     WHEN a.state != 'completed' OR a.http_status >= 400
-                       OR ar.error_type IS NOT NULL
-                       OR ar.error_message IS NOT NULL
-                       OR ar.parse_error IS NOT NULL
-                     THEN 1 ELSE 0 END), 0) AS errors,
-                   COALESCE(SUM(u.cost_nano_usd), 0) / 1000000000.0 AS cost,
-                   COALESCE((MAX(COALESCE(a.completed_at_ms,
-                                         a.started_at_ms)) -
-                             MIN(a.started_at_ms)) / 1000.0, 0) AS wall
-            FROM http_attempts a
-            JOIN model_requests r ON r.id = a.request_id
-            JOIN turns t ON t.id = r.turn_id
-            LEFT JOIN api_results ar ON ar.attempt_id = a.id
-            LEFT JOIN api_usage u ON u.attempt_id = a.id
-            WHERE t.session_id = ?
-            """,
-            (session_id,),
-        ).fetchone()
-        tool_rows = database.execute(
-            """
-            SELECT e.id, f.tool_name, f.item_id AS call_item_id,
-                   e.state AS status, e.error_message AS error_text,
-                   fo.item_id AS output_item_id, fo.output_format,
-                   fo.text_output
-            FROM tool_executions e
-            JOIN function_calls f ON f.item_id = e.function_call_item_id
-            JOIN conversation_items i ON i.id = f.item_id
-            LEFT JOIN function_outputs fo
-              ON fo.function_call_item_id = f.item_id
-            WHERE i.session_id = ? ORDER BY e.id
-            """,
-            (session_id,),
-        ).fetchall()
-        tools = []
-        for row in tool_rows:
-            arguments = structured_value(
-                database, int(row["call_item_id"]), "arguments"
-            )
-            tools.append(
-                {
-                    "tool_name": row["tool_name"],
-                    "arguments_json": json.dumps(
-                        arguments if arguments is not None else {},
-                        ensure_ascii=False,
-                    ),
-                    "status": row["status"],
-                    "output_json": output_json(database, row),
-                    "error_text": row["error_text"],
-                }
-            )
-        media_row = database.execute(
-            """
-            SELECT d.assistant_database_id
-            FROM databases d
-            JOIN database_locations l
-              ON l.database_id = d.id AND l.active = 1
-            WHERE l.path LIKE
-              '%/Media/iTunes_Control/iTunes/MediaLibrary.sqlitedb'
-            LIMIT 1
-            """
-        ).fetchone()
-        web = int(
-            database.execute(
-                """
-                SELECT COUNT(*) FROM conversation_items
-                WHERE session_id = ? AND kind = 'openrouter:web_search'
-                  AND source_attempt_id IS NOT NULL
-                """,
-                (session_id,),
-            ).fetchone()[0]
-        )
-        preflight_pairs = int(
-            database.execute(
-                """
-                SELECT COUNT(DISTINCT calls.tool_name)
-                FROM function_calls AS calls
-                JOIN conversation_items AS call_items
-                  ON call_items.id = calls.item_id
-                WHERE call_items.session_id = ?
-                  AND calls.tool_name IN ('database_list_info',
-                                          'memory_user_fact_read')
-                  AND EXISTS (
-                    SELECT 1 FROM function_outputs AS outputs
-                    WHERE outputs.function_call_item_id = calls.item_id
-                  )
-                """,
-                (session_id,),
-            ).fetchone()[0]
-        )
-        approved_databases = int(
-            database.execute(
-                """
-                SELECT COUNT(DISTINCT d.id)
-                FROM databases d
-                JOIN database_locations l
-                  ON l.database_id = d.id AND l.active = 1
-                JOIN database_permissions p ON p.database_id = d.id
-                WHERE p.decision = 'allowed'
-                  AND l.validation_state = 'valid'
-                """
-            ).fetchone()[0]
-        )
-        stored_user_facts = [
-            dict(row)
-            for row in database.execute(
-                """
-                SELECT id, kind, subject, predicate, value,
-                       confidence_basis_points / 10000.0 AS confidence,
-                       'model_observed' AS source
-                FROM user_facts ORDER BY id
-                """
-            ).fetchall()
-        ]
-        memory_rows = database.execute(
-            """
-            SELECT outputs.item_id AS output_item_id,
-                   outputs.output_format, outputs.text_output
-            FROM function_calls AS calls
-            JOIN conversation_items AS call_items
-              ON call_items.id = calls.item_id
-            JOIN function_outputs AS outputs
-              ON outputs.function_call_item_id = calls.item_id
-            WHERE call_items.session_id = ?
-              AND calls.tool_name = 'memory_user_fact_read'
-            """,
-            (session_id,),
-        ).fetchall()
-        memory_preflight_outputs = [
-            output_json(database, row) for row in memory_rows
-        ]
-        if expected_database_count <= 0:
-            expected_database_count = approved_databases
-
-    media_id = str(media_row[0]) if media_row else ""
-    parsed_tools = [(row, safe_json(row["arguments_json"])) for row in tools]
-    media_queries = [
-        args
-        for row, args in parsed_tools
-        if row["tool_name"] == "database_query"
-        and args.get("database_id") == media_id
-    ]
-    sql_queries = [str(args.get("sql", "")).lower() for args in media_queries]
-    sql_text = "\n".join(sql_queries)
-    tool_errors = [row for row in tools if row["status"] == "error"]
-    completed_user_fact_write_values: set[str] = set()
-    for row in tools:
-        if (
-            row["tool_name"] != "memory_user_fact_remember"
-            or row["status"] != "completed"
-        ):
-            continue
-        fact = safe_json(row["arguments_json"]).get("fact")
-        if isinstance(fact, str) and fact:
-            completed_user_fact_write_values.add(fact.casefold())
-
-    calls = int(calls_row["calls"] or 0)
-    errors = int(calls_row["errors"] or 0)
-    cost = float(calls_row["cost"] or 0.0)
-    wall = float(calls_row["wall"] or 0.0)
-    artists = expected_artists(ranking_db)
-    top_three = artists[:REQUIRED_GROUP_COUNT]
-    favorite_memory_facts = [
-        fact
-        for fact in stored_user_facts
-        if str(fact.get("subject", "")).casefold() == "user"
-        and str(fact.get("value", "")).casefold()
-        in completed_user_fact_write_values
-        and all(
-            artist_position(str(fact.get("value", "")).lower(), artist) >= 0
-            for artist, _ in top_three
-        )
-    ]
-    mentioned_top_three = [
-        name
-        for name, _ in top_three
-        if artist_position(answer_lower, name) >= 0
-    ]
-    user_fact_stored = bool(expected_user_fact) and any(
-        fact_matches(fact, expected_user_fact) for fact in stored_user_facts
-    )
-    user_fact_preflight = bool(expected_user_fact) and any(
-        any(
-            preflight_fact_matches(fact, expected_user_fact)
-            for fact in safe_json_array(output)
-        )
-        for output in memory_preflight_outputs
-    )
-    expected_user_name = (
-        str(
+    expected_user_name = ""
+    if expected_user_fact:
+        expected_user_name = str(
             expected_user_fact.get(
                 "expected_name", expected_user_fact.get("value", "")
             )
         )
-        if expected_user_fact
-        else ""
+    breakdown = score_answer(
+        answer,
+        audit_checks,
+        roster,
+        expected_user_name,
+        runtime_metrics["cost"],
     )
-    user_name_mentioned = bool(expected_user_name) and bool(
-        re.search(
-            rf"(?<![A-Za-z]){re.escape(expected_user_name)}(?![A-Za-z])",
-            answer,
-            flags=re.IGNORECASE,
-        )
-    )
+    member_names = [match["name"] for match in breakdown.matched_members]
+    member_possible = roster_member_count(roster)
+    link_points = min(len(breakdown.links), LINK_BONUS_LIMIT)
 
-    result = Result(model=model, slug=slug)
-    result.metrics = {
-        "calls": calls,
-        "api_errors": errors,
-        "local_tools": len(tools),
-        "tool_errors": len(tool_errors),
-        "web_searches": web,
-        "preflight_tool_pairs": preflight_pairs,
-        "approved_databases": approved_databases,
-        "expected_databases": expected_database_count,
-        "cost": cost,
-        "wall_seconds": wall,
-        "answer_characters": len(answer),
-        "expected_artists": [
-            {"name": name, "total_plays": plays} for name, plays in artists
-        ],
-        "expected_top_three": [
-            {"name": name, "total_plays": plays} for name, plays in top_three
-        ],
-        "mentioned_top_three": mentioned_top_three,
-        "seeded_user_fact_stored": user_fact_stored,
-        "seeded_user_fact_in_preflight": user_fact_preflight,
-        "seeded_user_name_mentioned": user_name_mentioned,
-        "completed_user_fact_writes": len(completed_user_fact_write_values),
-        "favorite_memory_facts": len(favorite_memory_facts),
-    }
-
-    result.add(
-        "Loaded all approved fixtures",
-        preflight_pairs == 2
-        and approved_databases == expected_database_count,
-        5,
-        f"{approved_databases}/{expected_database_count}",
-    )
-    if expected_user_fact:
-        result.add(
-            "Loaded seeded user fact",
-            user_fact_stored and user_fact_preflight,
-            4,
-            (
-                f"stored={'yes' if user_fact_stored else 'no'}, "
-                f"preflight={'yes' if user_fact_preflight else 'no'}"
-            ),
+    audit_records = []
+    for check in breakdown.audit_checks:
+        failed = audit_check_failed(check)
+        audit_records.append(
+            {
+                "name": str(check.get("label") or check.get("check_key") or "Audit"),
+                "check_key": str(check.get("check_key", "")),
+                "status": str(check.get("status", "error")),
+                "passed": not failed,
+                "earned": -AUDIT_FAILURE_POINTS if failed else 0,
+                "detail": str(check.get("detail") or ""),
+                "tool_name": check.get("tool_name"),
+            }
         )
-        result.add(
-            "Used remembered user name in answer",
-            user_fact_stored and user_fact_preflight and user_name_mentioned,
-            6,
-            expected_user_name,
-        )
-    result.add("Queried MediaLibrary", bool(media_queries), 8)
-    aggregate_queries = [
-        sql
-        for sql in sql_queries
-        if all(token in sql for token in ("sum(", "play_count_user", "group by"))
-    ]
-    kpop_lookup = any(
-        ("from genre" in sql) and (("kpop" in sql) or ("k-pop" in sql))
-        for sql in sql_queries
-    )
-    aggregate_filters_genre = any(
-        ("genre_id" in sql) or (("genre" in sql) and ("kpop" in sql))
-        for sql in aggregate_queries
-    )
-    result.add(
-        "Filtered the ranking to KPOP records",
-        kpop_lookup and aggregate_filters_genre,
-        5,
-    )
-    result.add(
-        "Aggregated play counts instead of ranking one track",
-        bool(aggregate_queries),
-        12,
-    )
-    result.add("No local tool errors", not tool_errors, 5, str(len(tool_errors)))
-
-    coverage_points = round(
-        14 * len(mentioned_top_three) / REQUIRED_GROUP_COUNT
-    )
-    result.score += coverage_points
-    result.checks.append(
+    bonus_eligible = breakdown.failed_audit_count == 0
+    if breakdown.price_points > 0:
+        price_state = "AWARDED" if bonus_eligible else "WITHHELD"
+    elif breakdown.price_points < 0:
+        price_state = "APPLIED"
+    else:
+        price_state = "NEUTRAL"
+    bonus_records = [
         {
-            "name": "Covered the dynamically calculated top three",
-            "passed": len(mentioned_top_three) == REQUIRED_GROUP_COUNT,
-            "earned": coverage_points,
-            "possible": 14,
-            "note": (
-                f"{len(mentioned_top_three)}/{REQUIRED_GROUP_COUNT}: "
-                f"{', '.join(mentioned_top_three)}"
+            "name": "Mentioned remembered user name",
+            "earned": NAME_BONUS_POINTS if breakdown.name_mentioned else 0,
+            "possible": NAME_BONUS_POINTS,
+            "awarded": bonus_eligible and breakdown.name_mentioned,
+            "state": (
+                "AWARDED"
+                if bonus_eligible and breakdown.name_mentioned
+                else ("WITHHELD" if breakdown.name_mentioned else "MISS")
             ),
-        }
+            "note": expected_user_name,
+        },
+        {
+            "name": "Mentioned expected active members",
+            "earned": len(member_names),
+            "possible": member_possible,
+            "awarded": bonus_eligible and bool(member_names),
+            "state": (
+                "AWARDED"
+                if bonus_eligible and member_names
+                else ("WITHHELD" if member_names else "MISS")
+            ),
+            "note": f"{len(member_names)}/{member_possible}",
+        },
+        {
+            "name": "Included unique Markdown links",
+            "earned": link_points,
+            "possible": LINK_BONUS_LIMIT,
+            "awarded": bonus_eligible and link_points > 0,
+            "state": (
+                "AWARDED"
+                if bonus_eligible and link_points > 0
+                else ("WITHHELD" if link_points > 0 else "MISS")
+            ),
+            "note": (
+                f"{len(breakdown.links)} unique; first {LINK_BONUS_LIMIT} score"
+            ),
+        },
+        {
+            "name": "Price against $0.05 goal",
+            "earned": breakdown.price_points,
+            "possible": PRICE_GOAL_CENTS,
+            "awarded": breakdown.awarded_price_points == breakdown.price_points,
+            "state": price_state,
+            "note": (
+                f"${runtime_metrics['cost']:.4f} rounds to "
+                f"{breakdown.rounded_cost_cents} cents"
+            ),
+        },
+    ]
+    metrics = {
+        **runtime_metrics,
+        "answer_characters": len(answer),
+        "audit_outcome": audit_outcome,
+        "audit_guidance_version": audit_guidance_version,
+        "expected_top_five": [
+            {"name": name, "total_plays": plays} for name, plays in top_five
+        ],
+        "expected_member_count": member_possible,
+        "matched_member_count": len(member_names),
+        "matched_members": member_names,
+        "unique_markdown_link_count": len(breakdown.links),
+        "unique_markdown_links": breakdown.links,
+        "name_mentioned": breakdown.name_mentioned,
+        "bonuses_eligible": bonus_eligible,
+        "price_goal_usd": PRICE_GOAL_CENTS / 100.0,
+        "rounded_cost_cents": breakdown.rounded_cost_cents,
+        "price_points": breakdown.price_points,
+        "awarded_price_points": breakdown.awarded_price_points,
+    }
+    return Result(
+        model=model,
+        slug=slug,
+        score=breakdown.score,
+        audit_penalty=breakdown.audit_penalty,
+        failed_audit_count=breakdown.failed_audit_count,
+        awarded_bonus=breakdown.awarded_bonus,
+        potential_bonus=breakdown.potential_bonus,
+        price_points=breakdown.price_points,
+        awarded_price_points=breakdown.awarded_price_points,
+        audit_checks=audit_records,
+        bonus_checks=bonus_records,
+        metrics=metrics,
     )
-    requested_attributes = ("blood type" in answer_lower) and (
-        ("personality" in answer_lower) or ("mbti" in answer_lower)
-    )
-    result.add("Addressed personality and blood type", requested_attributes, 6)
-    result.add(
-        "Linked public sources",
-        bool(re.search(r"https?://", answer, flags=re.IGNORECASE)),
-        5,
-    )
-    positions = [artist_position(answer_lower, name) for name, _ in top_three]
-    correct_order = (
-        len(positions) == 3
-        and all(position >= 0 for position in positions)
-        and positions == sorted(positions)
-    )
-    result.add("Presented the top three in descending order", correct_order, 3)
-    top_artist = top_three[0][0] if top_three else ""
-    result.add(
-        "Included the top aggregate-play artist",
-        bool(top_artist) and artist_position(answer_lower, top_artist) >= 0,
-        4,
-    )
-
-    result.add(
-        "Stored favorite bands in durable memory",
-        bool(favorite_memory_facts),
-        7,
-        (
-            f"{len(favorite_memory_facts)} matching active fact"
-            f"{'s' if len(favorite_memory_facts) != 1 else ''}"
-        ),
-    )
-    result.add("No failed API attempts", errors == 0, 3, str(errors))
-    efficiency_points(result, cost, wall, calls, web)
-    result.normalize_positive_score()
-
-    if result.score >= 90:
-        result.grade = "A"
-    elif result.score >= 80:
-        result.grade = "B"
-    elif result.score >= 70:
-        result.grade = "C"
-    elif result.score >= 60:
-        result.grade = "D"
-    return result
 
 
 def render_markdown(results: list[Result]) -> str:
     lines = [
         "# Hill-climbing evaluation",
         "",
-        "This deterministic score measures database workflow, evidence coverage, "
-        "state safety, and efficiency. Positive checks are normalized to 100 "
-        "points. Public roster, blood-type, and personality claims still require "
-        "human/source review.",
+        "Score version 3 is audit-first: every failed applicable audit check "
+        "scores -5. A fully compliant answer starts at 0 and earns bonuses for "
+        "the remembered user name, expected active members of the database-derived "
+        "top five K-pop bands, unique Markdown links, and cost below the $0.05 "
+        "goal. Each rounded cent below or above the goal is worth +1 or -1. "
+        "Any audit failure withholds positive bonuses; negative cost points remain.",
         "",
-        "| Model | Score | Grade | Time | Cost | Calls | Local tools | Web |",
-        "|---|---:|:---:|---:|---:|---:|---:|---:|",
+        "| Model | Score | Audit | Answer bonus | Price | Members | Links | Time | Cost | Calls |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for result in sorted(results, key=lambda item: item.score, reverse=True):
         metrics = result.metrics
-        lines.append(
-            f"| {result.model} | {result.score}/100 | {result.grade} | "
-            f"{metrics['wall_seconds']:.1f}s | ${metrics['cost']:.4f} | "
-            f"{metrics['calls']} | {metrics['local_tools']} | "
-            f"{metrics['web_searches']} |"
+        bonus_text = (
+            str(result.awarded_bonus)
+            if result.failed_audit_count == 0
+            else f"0 (+{result.potential_bonus} withheld)"
         )
+        lines.append(
+            f"| {result.model} | {result.score:+d} | "
+            f"{result.audit_penalty:+d} | {bonus_text} | "
+            f"{result.awarded_price_points:+d} | "
+            f"{metrics['matched_member_count']}/{metrics['expected_member_count']} | "
+            f"{metrics['unique_markdown_link_count']} | "
+            f"{metrics['wall_seconds']:.1f}s | ${metrics['cost']:.4f} | "
+            f"{metrics['calls']} |"
+        )
+
     for result in results:
-        lines.extend(["", f"## {result.model}", ""])
-        metrics = result.metrics
         lines.extend(
             [
-                "- Positive-check subtotal: "
-                f"{metrics['positive_points_earned']}/"
-                f"{metrics['positive_points_possible']}, normalized to "
-                f"{metrics['normalized_score']}/100.",
+                "",
+                f"## {result.model}",
+                "",
+                f"- Final score: {result.score:+d}",
+                f"- Audit penalty: {result.audit_penalty:+d} "
+                f"({result.failed_audit_count} failed)",
+                f"- Bonus: +{result.awarded_bonus} awarded; "
+                f"+{result.potential_bonus} recognized",
+                f"- Price: {result.awarded_price_points:+d} awarded; "
+                f"{result.price_points:+d} calculated",
+                "",
+                "### Audit checks",
                 "",
             ]
         )
-        for check in result.checks:
-            marker = "PASS" if check["passed"] else "MISS"
+        for check in result.audit_checks:
+            marker = "PASS" if check["passed"] else "FAIL"
+            points = "0" if check["passed"] else f"{check['earned']:+d}"
+            detail = f" — {check['detail']}" if check["detail"] else ""
+            lines.append(f"- {marker} {check['name']}: {points}{detail}")
+        lines.extend(["", "### Bonuses", ""])
+        for check in result.bonus_checks:
             note = f" — {check['note']}" if check["note"] else ""
             lines.append(
-                f"- {marker} {check['name']}: "
+                f"- {check['state']} {check['name']}: "
                 f"{check['earned']}/{check['possible']}{note}"
             )
-    lines.extend(
-        [
-            "",
-            "## Human review checklist",
-            "",
-            "- Are current group rosters checked against current authoritative sources?",
-            "- Are blood types supported by the linked sources rather than recalled?",
-            "- Are personality descriptions qualified as subjective and time-sensitive?",
-            "- Is the answer proportionate, readable, and free of exposed planning text?",
-            "",
-        ]
-    )
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -771,8 +555,15 @@ def main() -> int:
     if not metadata_path.is_file():
         raise SystemExit(f"Missing run metadata: {metadata_path}")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    ranking_db = resolve_ranking_database(metadata)
-    expected_database_count = int(metadata.get("database_count", 0))
+    try:
+        top_five = frozen_top_five(metadata)
+    except RuntimeError as error:
+        raise SystemExit(str(error)) from error
+    roster_value = metadata.get("member_roster")
+    try:
+        roster = validate_member_roster(roster_value, top_five)
+    except RuntimeError as error:
+        raise SystemExit(str(error)) from error
     expected_user_fact = metadata.get("seeded_user_fact")
     if not isinstance(expected_user_fact, dict):
         expected_user_fact = None
@@ -785,9 +576,9 @@ def main() -> int:
             continue
         result = score_session(
             session_db,
-            ranking_db,
             slug,
-            expected_database_count,
+            roster,
+            top_five,
             expected_user_fact,
         )
         if result.model != model:
@@ -798,26 +589,34 @@ def main() -> int:
         raise SystemExit("No completed session databases were available to score.")
 
     report_json = {
+        "score_version": SCORE_VERSION,
         "run_dir": str(run_dir),
+        "roster_retrieved_at": roster["retrieved_at"],
         "results": [
             {
                 "model": result.model,
                 "slug": result.slug,
                 "score": result.score,
-                "grade": result.grade,
+                "audit_penalty": result.audit_penalty,
+                "failed_audit_count": result.failed_audit_count,
+                "awarded_bonus": result.awarded_bonus,
+                "potential_bonus": result.potential_bonus,
+                "price_points": result.price_points,
+                "awarded_price_points": result.awarded_price_points,
                 "metrics": result.metrics,
-                "checks": result.checks,
+                "audit_checks": result.audit_checks,
+                "bonus_checks": result.bonus_checks,
             }
             for result in results
         ],
     }
     (run_dir / "report.json").write_text(
-        json.dumps(report_json, indent=2) + "\n", encoding="utf-8"
+        json.dumps(report_json, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
     )
-    (run_dir / "report.md").write_text(
-        render_markdown(results), encoding="utf-8"
-    )
-    print(render_markdown(results))
+    rendered = render_markdown(results)
+    (run_dir / "report.md").write_text(rendered, encoding="utf-8")
+    print(rendered)
     return 0
 
 

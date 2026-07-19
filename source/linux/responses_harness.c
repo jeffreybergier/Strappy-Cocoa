@@ -1559,9 +1559,9 @@ static int harness_function_output_request_is_valid(cJSON *root,
     root,
     session_key,
     prompt_group,
-    "database_list_info",
-    "call-database-list",
-    "Error: database_list_info takes no arguments.");
+    "database_context_read",
+    "call-database-context-error",
+    "Error: database_context_read does not accept argument 'unexpected'.");
 }
 
 static int harness_accept_request(int listener_fd,
@@ -1925,9 +1925,9 @@ static int harness_run_function_tool_server(int listener_fd)
     "{\"id\":\"resp-function-tool\",\"object\":\"response\","
     "\"created_at\":1700000003,\"model\":\"test/model\","
     "\"status\":\"completed\",\"output\":[{"
-    "\"type\":\"function_call\",\"id\":\"fc-database-list\","
-    "\"call_id\":\"call-database-list\","
-    "\"name\":\"database_list_info\","
+    "\"type\":\"function_call\",\"id\":\"fc-database-context-error\","
+    "\"call_id\":\"call-database-context-error\","
+    "\"name\":\"database_context_read\","
     "\"arguments\":\"{\\\"unexpected\\\":true}\","
     "\"status\":\"completed\"}],"
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":4,"
@@ -2554,7 +2554,7 @@ static int harness_test_answer_quality_report(void)
                         &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
-                        "outcome='failed' AND guidance_version='1';",
+                        "outcome='failed' AND guidance_version='2';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks;",
@@ -3132,23 +3132,23 @@ static int harness_test_function_tool_continuation(void)
                         "SELECT COUNT(*) FROM tool_executions e "
                         "JOIN function_calls f ON "
                         "f.item_id=e.function_call_item_id WHERE "
-                        "f.provider_call_id='call-database-list' AND "
-                        "f.tool_name='database_list_info' AND "
+                        "f.provider_call_id='call-database-context-error' AND "
+                        "f.tool_name='database_context_read' AND "
                         "e.state='error' AND "
-                        "e.error_message='database_list_info takes no "
-                        "arguments.';",
+                        "e.error_message='database_context_read does not "
+                        "accept argument ''unexpected''.';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM function_outputs o "
                         "JOIN function_calls f ON "
                         "f.item_id=o.function_call_item_id "
                         "JOIN conversation_items i ON i.id=o.item_id WHERE "
-                        "f.provider_call_id='call-database-list' AND "
+                        "f.provider_call_id='call-database-context-error' AND "
                         "o.execution_state='error' AND "
                         "o.started_at_ms IS NOT NULL AND "
                         "o.completed_at_ms >= o.started_at_ms AND "
-                        "o.error_message='database_list_info takes no "
-                        "arguments.' AND i.is_error=1 AND "
+                        "o.error_message='database_context_read does not "
+                        "accept argument ''unexpected''.' AND i.is_error=1 AND "
                         "i.include_in_context=1;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,

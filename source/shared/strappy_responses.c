@@ -23,7 +23,7 @@
 #define STRAPPY_RESPONSES_MAX_RETRY_DELAY_MS 60000L
 #define STRAPPY_RESPONSES_AUDIT_RULE_COUNT 5U
 
-static const char strappy_responses_audit_guidance_version[] = "1";
+static const char strappy_responses_audit_guidance_version[] = "2";
 static const char strappy_responses_empty_answer[] =
   "Your answer was empty. Please answer the user's original question.";
 static const char strappy_responses_web_reference_check_key[] =
@@ -67,7 +67,7 @@ typedef struct strappy_responses_audit_rule {
   const char *check_key;
   const char *label;
   const char *tool_name;
-  int called;
+  int completed;
 } strappy_responses_audit_rule;
 
 typedef struct strappy_responses_audit {
@@ -161,7 +161,20 @@ static void strappy_responses_audit_init(strappy_responses_audit *audit)
   audit->web_reference_required = 0;
 }
 
-static void strappy_responses_audit_record_tool(
+static void strappy_responses_audit_record_activity(
+  strappy_responses_audit *audit,
+  const char *tool_name)
+{
+  if ((audit == NULL) || (tool_name == NULL) || (tool_name[0] == '\0')) {
+    return;
+  }
+  if ((strcmp(tool_name, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) ||
+      (strcmp(tool_name, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0)) {
+    audit->web_reference_required = 1;
+  }
+}
+
+static void strappy_responses_audit_record_completed_tool(
   strappy_responses_audit *audit,
   const char *tool_name)
 {
@@ -170,13 +183,9 @@ static void strappy_responses_audit_record_tool(
   if ((audit == NULL) || (tool_name == NULL) || (tool_name[0] == '\0')) {
     return;
   }
-  if ((strcmp(tool_name, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) ||
-      (strcmp(tool_name, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0)) {
-    audit->web_reference_required = 1;
-  }
   for (index = 0U; index < STRAPPY_RESPONSES_AUDIT_RULE_COUNT; index++) {
     if (strcmp(audit->rules[index].tool_name, tool_name) == 0) {
-      audit->rules[index].called = 1;
+      audit->rules[index].completed = 1;
     }
   }
 }
@@ -307,11 +316,11 @@ static int strappy_responses_audit_evaluate(
     check->check_kind = "required_tool";
     check->label = rule->label;
     check->tool_name = rule->tool_name;
-    if (rule->called) {
+    if (rule->completed) {
       check->status = "passed";
     } else {
       check->status = "failed";
-      check->detail = "The required tool was not called.";
+      check->detail = "The required tool did not complete successfully.";
       failed = 1;
     }
   }
@@ -1890,6 +1899,7 @@ static int strappy_responses_execute_tool_calls(
   const char *resource_dir,
   long long response_call_id,
   const strappy_responses_analysis *analysis,
+  strappy_responses_audit *audit,
   strappy_responses_owned_items *outputs,
   char **error_out)
 {
@@ -1948,6 +1958,9 @@ static int strappy_responses_execute_tool_calls(
       free(tool_error);
       strappy_responses_owned_items_destroy(outputs);
       return 0;
+    }
+    if (tool_succeeded) {
+      strappy_responses_audit_record_completed_tool(audit, call->name);
     }
 
     item_json = strappy_responses_function_output_item_json(call->call_id,
@@ -2097,7 +2110,7 @@ static int strappy_responses_send_round(
       for (activity_index = 0U;
            activity_index < analysis.tool_activity_count;
            activity_index++) {
-        strappy_responses_audit_record_tool(
+        strappy_responses_audit_record_activity(
           &runtime->audit,
           analysis.tool_activity_names[activity_index]);
       }
@@ -2480,6 +2493,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
             runtime.config.guidance_resource_dir,
             successful_call_id,
             &analysis,
+            &runtime.audit,
             &new_items,
             error_out)) {
         strappy_responses_analysis_destroy(&analysis);

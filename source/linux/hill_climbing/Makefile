@@ -12,6 +12,7 @@ RUNNER := $(BUILD_DIR)/hill_climbing
 DEVICE_HOST ?= gomadango
 DEVICE_FIXTURE_DIR ?= private/gomadango
 DATABASE_MANIFEST ?= $(DEVICE_FIXTURE_DIR)/databases.json
+MEMBER_ROSTER ?= $(DEVICE_FIXTURE_DIR)/member_roster.json
 SYNC_FIXTURES := sync_device_fixtures.py
 ENV_FILE ?= ../../../.env
 SYSTEM_PROMPT ?= $(SHARED_DIR)/Resources/PromptSystem.txt
@@ -34,9 +35,12 @@ RUNNER_SOURCES = \
 
 .DEFAULT_GOAL := build
 .NOTPARALLEL: run
-.PHONY: build verify-fixture run refresh-fixture clean
+.PHONY: build test verify-fixture run refresh-fixture clean
 
 build: $(RUNNER)
+
+test:
+	python3 -m unittest -v test_evaluate.py
 
 $(BUILD_DIR):
 	mkdir -p $@
@@ -59,6 +63,10 @@ verify-fixture: build
 	}
 
 run: build verify-fixture
+	@test -f "$(MEMBER_ROSTER)" || { \
+		echo "Missing prefetched member roster: $(MEMBER_ROSTER)" >&2; \
+		exit 2; \
+	}
 	@test "$(CONFIRM_LIVE)" = "yes" || { \
 		echo "Live OpenRouter calls are manual only." >&2; \
 		echo "Run: make run CONFIRM_LIVE=yes" >&2; \
@@ -67,6 +75,7 @@ run: build verify-fixture
 	python3 run_hill_climbing.py \
 		--runner "$(RUNNER)" \
 		--database-manifest "$(DATABASE_MANIFEST)" \
+		--member-roster "$(MEMBER_ROSTER)" \
 		--env-file "$(ENV_FILE)" \
 		--system-prompt "$(SYSTEM_PROMPT)" \
 		$(if $(MODEL),--model "$(MODEL)",)

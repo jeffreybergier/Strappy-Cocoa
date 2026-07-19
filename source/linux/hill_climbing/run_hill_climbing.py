@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import datetime as dt
 import hashlib
 import json
@@ -12,10 +13,17 @@ import subprocess
 import sys
 from pathlib import Path
 
+from hill_climbing_ground_truth import (
+    REQUIRED_GROUP_COUNT,
+    expected_artists,
+    load_member_roster,
+    resolve_ranking_database,
+)
+
 
 PROMPT = (
     "Please list out the names, blood types, and personalities of the members "
-    "of my top 3 listened to KPOP bands"
+    "of my top 5 listened to KPOP bands"
 )
 
 MODELS = (
@@ -23,6 +31,9 @@ MODELS = (
     ("deepseek/deepseek-v4-pro", "deepseek-v4-pro"),
     ("google/gemma-4-31b-it", "gemma-4-31b-it"),
     ("qwen/qwen3.6-27b", "qwen3.6-27b"),
+    ("google/gemini-3.1-flash-lite", "gemini-3.1-flash-lite"),
+    ("openai/gpt-oss-120b", "gpt-oss-120b"),
+    ("openai/gpt-5.6-luna-pro", "gpt-5.6-luna-pro"),
 )
 
 SEEDED_USER_FACT = {
@@ -38,12 +49,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--runner", required=True, type=Path)
     parser.add_argument("--database-manifest", required=True, type=Path)
+    parser.add_argument("--member-roster", required=True, type=Path)
     parser.add_argument("--env-file", required=True, type=Path)
     parser.add_argument("--system-prompt", required=True, type=Path)
     parser.add_argument(
         "--model",
         choices=[model for model, _ in MODELS],
-        help="Run one model instead of the full four-model comparison.",
+        help="Run one model instead of the full seven-model comparison.",
     )
     parser.add_argument("--prompt", default=PROMPT)
     return parser.parse_args()
@@ -454,15 +466,120 @@ def registered_database_paths(session_db: Path) -> set[Path]:
     return {Path(str(row[0])).resolve() for row in rows}
 
 
+def run_model(
+    runner: Path,
+    model: str,
+    slug: str,
+    run_dir: Path,
+    databases: list[Path],
+    env_file: Path,
+    system_prompt: Path,
+    prompt: str,
+) -> dict[str, object]:
+    model_dir = run_dir / slug
+    model_dir.mkdir()
+    session_db = model_dir / "strappy.sqlite"
+    answer_file = model_dir / "answer.md"
+    output_file = model_dir / "output.json"
+    runner_log = model_dir / "runner.log"
+    started = dt.datetime.now(dt.timezone.utc)
+    command = [
+        str(runner),
+        "--model",
+        model,
+        "--session-db",
+        str(session_db),
+        "--env-file",
+        str(env_file),
+        "--system-prompt",
+        str(system_prompt),
+        "--answer-file",
+        str(answer_file),
+        "--prompt",
+        prompt,
+    ]
+    for database in databases:
+        command.extend(["--database", str(database)])
+
+    launch_error = None
+    exit_code = 127
+    with runner_log.open("w", encoding="utf-8") as log:
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
+            exit_code = completed.returncode
+        except OSError as error:
+            launch_error = str(error)
+            log.write(f"Could not launch runner: {error}\n")
+
+    finished = dt.datetime.now(dt.timezone.utc)
+    export_error = None
+    registration_error = None
+    registered_database_count = None
+    if session_db.is_file():
+        try:
+            registered = registered_database_paths(session_db)
+            registered_database_count = len(registered)
+            expected = set(databases)
+            if registered != expected:
+                registration_error = (
+                    "Run database registration mismatch: "
+                    f"expected {len(expected)}, found {len(registered)}"
+                )
+        except (OSError, sqlite3.Error) as error:
+            registration_error = str(error)
+        try:
+            export_output(session_db, output_file)
+        except (RuntimeError, sqlite3.Error, OSError) as error:
+            export_error = str(error)
+    else:
+        registration_error = "Session database was not created."
+
+    return {
+        "slug": slug,
+        "exit_code": exit_code,
+        "started_at": started.isoformat(),
+        "completed_at": finished.isoformat(),
+        "elapsed_seconds": (finished - started).total_seconds(),
+        "registered_database_count": registered_database_count,
+        "database_registration_error": registration_error,
+        "output_file": (
+            str(output_file.relative_to(run_dir)) if output_file.is_file() else None
+        ),
+        "output_export_error": export_error,
+        "runner_log": str(runner_log.relative_to(run_dir)),
+        "runner_launch_error": launch_error,
+    }
+
+
+def print_pending(pending: int, total: int) -> None:
+    message = f"Hill climbs pending: {pending}/{total}"
+    if sys.stdout.isatty():
+        print(f"\r{message}", end="\n" if pending == 0 else "", flush=True)
+    else:
+        print(message, flush=True)
+
+
 def main() -> int:
     args = parse_args()
     harness_dir = Path(__file__).resolve().parent
     runner = args.runner.resolve()
     database_manifest = args.database_manifest.resolve()
+    member_roster_path = args.member_roster.resolve()
     env_file = args.env_file.resolve()
     system_prompt = args.system_prompt.resolve()
 
-    required = (runner, database_manifest, env_file, system_prompt)
+    required = (
+        runner,
+        database_manifest,
+        member_roster_path,
+        env_file,
+        system_prompt,
+    )
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         print("Missing required file(s):", file=sys.stderr)
@@ -471,6 +588,14 @@ def main() -> int:
         return 2
     try:
         databases = load_database_fixtures(database_manifest)
+        ranking_db = resolve_ranking_database(
+            {"database_manifest": str(database_manifest)}
+        )
+        top_five = expected_artists(
+            ranking_db,
+            limit=REQUIRED_GROUP_COUNT,
+        )
+        member_roster = load_member_roster(member_roster_path, top_five)
     except (json.JSONDecodeError, OSError, RuntimeError) as error:
         print(str(error), file=sys.stderr)
         return 2
@@ -480,11 +605,20 @@ def main() -> int:
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "prompt": args.prompt,
         "models": [model for model, _ in selected],
+        "execution_mode": "parallel",
+        "parallel_model_count": len(selected),
         "database_manifest": str(database_manifest),
+        "database_manifest_sha256": sha256(database_manifest),
         "database_count": len(databases),
         "database_fixtures": [
             {"path": str(database)} for database in databases
         ],
+        "expected_top_five": [
+            {"name": name, "total_plays": plays} for name, plays in top_five
+        ],
+        "member_roster_path": str(member_roster_path),
+        "member_roster_sha256": sha256(member_roster_path),
+        "member_roster": member_roster,
         "seeded_user_fact": SEEDED_USER_FACT,
         "system_prompt": str(system_prompt),
         "system_prompt_sha256": sha256(system_prompt),
@@ -504,91 +638,107 @@ def main() -> int:
     )
 
     any_failed = False
-    for model, slug in selected:
-        model_dir = run_dir / slug
-        model_dir.mkdir()
-        session_db = model_dir / "strappy.sqlite"
-        answer_file = model_dir / "answer.md"
-        output_file = model_dir / "output.json"
-        print(f"\n> Model | {model}", flush=True)
-        started = dt.datetime.now(dt.timezone.utc)
-        command = [
-            str(runner),
-            "--model",
-            model,
-            "--session-db",
-            str(session_db),
-            "--env-file",
-            str(env_file),
-            "--system-prompt",
-            str(system_prompt),
-            "--answer-file",
-            str(answer_file),
-            "--prompt",
-            args.prompt,
-        ]
-        for database in databases:
-            command.extend(["--database", str(database)])
-        completed = subprocess.run(command, check=False)
-        finished = dt.datetime.now(dt.timezone.utc)
-        export_error = None
-        registration_error = None
-        registered_database_count = None
-        if session_db.is_file():
-            try:
-                registered = registered_database_paths(session_db)
-                registered_database_count = len(registered)
-                expected = set(databases)
-                if registered != expected:
-                    registration_error = (
-                        "Run database registration mismatch: "
-                        f"expected {len(expected)}, found {len(registered)}"
-                    )
-                    print(registration_error, file=sys.stderr)
-            except (OSError, sqlite3.Error) as error:
-                registration_error = str(error)
-                print(
-                    f"Could not verify database registration in {session_db}: "
-                    f"{error}",
-                    file=sys.stderr,
-                )
-            try:
-                export_output(session_db, output_file)
-            except (RuntimeError, sqlite3.Error, OSError) as error:
-                export_error = str(error)
-                print(f"Could not export {output_file}: {error}", file=sys.stderr)
-        metadata["results"][model] = {
-            "slug": slug,
-            "exit_code": completed.returncode,
-            "started_at": started.isoformat(),
-            "completed_at": finished.isoformat(),
-            "elapsed_seconds": (finished - started).total_seconds(),
-            "registered_database_count": registered_database_count,
-            "database_registration_error": registration_error,
-            "output_file": (
-                str(output_file.relative_to(run_dir))
-                if output_file.is_file()
-                else None
-            ),
-            "output_export_error": export_error,
+    completed_results: dict[str, dict[str, object]] = {}
+    print_pending(len(selected), len(selected))
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=len(selected),
+        thread_name_prefix="hill-climb",
+    ) as executor:
+        futures = {
+            executor.submit(
+                run_model,
+                runner,
+                model,
+                slug,
+                run_dir,
+                databases,
+                env_file,
+                system_prompt,
+                args.prompt,
+            ): (model, slug)
+            for model, slug in selected
         }
-        (run_dir / "run.json").write_text(
-            json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
-        )
-        if completed.returncode != 0 or registration_error is not None:
-            any_failed = True
+        pending = len(futures)
+        for future in concurrent.futures.as_completed(futures):
+            model, slug = futures[future]
+            try:
+                result = future.result()
+            except Exception as error:
+                now = dt.datetime.now(dt.timezone.utc).isoformat()
+                result = {
+                    "slug": slug,
+                    "exit_code": 1,
+                    "started_at": now,
+                    "completed_at": now,
+                    "elapsed_seconds": 0.0,
+                    "registered_database_count": None,
+                    "database_registration_error": None,
+                    "output_file": None,
+                    "output_export_error": None,
+                    "runner_log": None,
+                    "runner_launch_error": None,
+                    "orchestration_error": str(error),
+                }
+            completed_results[model] = result
+            metadata["results"] = {
+                selected_model: completed_results[selected_model]
+                for selected_model, _ in selected
+                if selected_model in completed_results
+            }
+            pending -= 1
+            print_pending(pending, len(selected))
+            if (
+                int(result["exit_code"]) != 0
+                or result.get("database_registration_error") is not None
+                or result.get("orchestration_error") is not None
+            ):
+                any_failed = True
+            (run_dir / "run.json").write_text(
+                json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
+            )
 
     evaluator = harness_dir / "evaluate.py"
-    evaluation = subprocess.run(
-        [sys.executable, str(evaluator), "--run-dir", str(run_dir)],
-        check=False,
-    )
-    if evaluation.returncode != 0:
+    evaluation_log = run_dir / "evaluation.log"
+    evaluation_exit_code = 127
+    with evaluation_log.open("w", encoding="utf-8") as log:
+        try:
+            evaluation = subprocess.run(
+                [sys.executable, str(evaluator), "--run-dir", str(run_dir)],
+                check=False,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
+            evaluation_exit_code = evaluation.returncode
+        except OSError as error:
+            log.write(f"Could not launch evaluator: {error}\n")
+    if evaluation_exit_code != 0:
         any_failed = True
 
-    print("\n> Run Complete")
+    print("> Run Complete")
     print(f">> Artifacts | {run_dir}")
     print(f">> Evaluation | {run_dir / 'report.md'}")
+    failures = [
+        (model, result)
+        for model, result in completed_results.items()
+        if int(result["exit_code"]) != 0
+        or result.get("database_registration_error") is not None
+        or result.get("orchestration_error") is not None
+    ]
+    if failures:
+        print(f">> Failed Models | {len(failures)}", file=sys.stderr)
+        for model, result in failures:
+            reason = (
+                result.get("orchestration_error")
+                or result.get("runner_launch_error")
+                or result.get("database_registration_error")
+                or f"runner exited {result['exit_code']}"
+            )
+            print(f">>> {model} | {reason}", file=sys.stderr)
+    if evaluation_exit_code != 0:
+        print(
+            f">> Evaluation Failed | see {evaluation_log}",
+            file=sys.stderr,
+        )
     return 1 if any_failed else 0
 
 

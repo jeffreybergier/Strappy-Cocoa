@@ -57,7 +57,15 @@ static const char *HILL_MODELS_JSON =
   "{\"id\":\"google/gemma-4-31b-it\",\"name\":\"Gemma 4 31B IT\","
   "\"context_length\":131072,\"supported_parameters\":[\"tools\"]},"
   "{\"id\":\"qwen/qwen3.6-27b\",\"name\":\"Qwen 3.6 27B\","
-  "\"context_length\":131072,\"supported_parameters\":[\"tools\"]}"
+  "\"context_length\":131072,\"supported_parameters\":[\"tools\"]},"
+  "{\"id\":\"google/gemini-3.1-flash-lite\","
+  "\"name\":\"Gemini 3.1 Flash Lite\","
+  "\"context_length\":1048576,\"supported_parameters\":[\"tools\"]},"
+  "{\"id\":\"openai/gpt-oss-120b\",\"name\":\"gpt-oss-120b\","
+  "\"context_length\":131072,\"supported_parameters\":[\"tools\"]},"
+  "{\"id\":\"openai/gpt-5.6-luna-pro\","
+  "\"name\":\"GPT-5.6 Luna Pro\","
+  "\"context_length\":1050000,\"supported_parameters\":[\"tools\"]}"
   "]}";
 
 static const char *HILL_USER_FACT_JSON =
