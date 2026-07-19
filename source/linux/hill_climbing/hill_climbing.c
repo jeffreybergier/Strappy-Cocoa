@@ -318,9 +318,6 @@ static const char *hill_request_kind_label(const char *request_kind)
   if (strcmp(request_kind, "tool_continuation") == 0) {
     return "Tool Continuation";
   }
-  if (strcmp(request_kind, "tool_audit") == 0) {
-    return "Harness Audit";
-  }
   if (strcmp(request_kind, "retry") == 0) {
     return "Retry";
   }
@@ -461,10 +458,7 @@ static void hill_log_timeline_item(
     hill_log_line(5U, "Harness Prompt");
     hill_log_multiline(6U, content);
   } else if (strcmp(role, "developer") == 0) {
-    hill_log_line(5U,
-                  "%s",
-                  (strcmp(summary->request_kind, "tool_audit") == 0) ?
-                    "Harness Prompt" : "Developer Prompt");
+    hill_log_line(5U, "Developer Prompt");
     hill_log_multiline(6U, content);
   } else if (strcmp(role, "assistant") == 0) {
     hill_log_line(5U, "Assistant");

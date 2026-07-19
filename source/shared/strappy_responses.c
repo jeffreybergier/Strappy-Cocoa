@@ -21,7 +21,15 @@
 #define STRAPPY_RESPONSES_MAX_ATTEMPTS 3L
 #define STRAPPY_RESPONSES_INITIAL_RETRY_DELAY_MS 500L
 #define STRAPPY_RESPONSES_MAX_RETRY_DELAY_MS 60000L
-#define STRAPPY_RESPONSES_AUDIT_RESOURCE "GuidanceAudit.json"
+#define STRAPPY_RESPONSES_AUDIT_RULE_COUNT 5U
+
+static const char strappy_responses_audit_guidance_version[] = "1";
+static const char strappy_responses_empty_answer[] =
+  "Your answer was empty. Please answer the user's original question.";
+static const char strappy_responses_web_reference_check_key[] =
+  "web_reference";
+static const char strappy_responses_web_reference_label[] =
+  "Source link included";
 
 typedef struct strappy_responses_buffer {
   char *data;
@@ -56,31 +64,50 @@ typedef struct strappy_responses_analysis {
 } strappy_responses_analysis;
 
 typedef struct strappy_responses_audit_rule {
-  char *check_key;
-  char *label;
-  char *tool_name;
-  char *if_not_called;
-  char *when_tool_called;
-  int when_tool_called_seen;
-  int when_session_name_empty;
+  const char *check_key;
+  const char *label;
+  const char *tool_name;
   int called;
 } strappy_responses_audit_rule;
 
 typedef struct strappy_responses_audit {
-  strappy_responses_audit_rule *rules;
-  size_t count;
-  char *guidance_version;
-  char *audit_header;
-  char *audit_footer;
-  char *empty_answer;
-  char *web_reference_check_key;
-  char *web_reference_label;
-  char *web_reference_if_missing;
-  int automatic_remediation_enabled;
-  int session_name_empty;
+  strappy_responses_audit_rule rules[STRAPPY_RESPONSES_AUDIT_RULE_COUNT];
   int web_reference_required;
-  int message_sent;
 } strappy_responses_audit;
+
+static const strappy_responses_audit_rule strappy_responses_audit_rules[
+  STRAPPY_RESPONSES_AUDIT_RULE_COUNT] = {
+  {
+    "database_context_read",
+    "Database context checked",
+    STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+    0
+  },
+  {
+    "helper_session_name_write",
+    "Session named",
+    STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+    0
+  },
+  {
+    "helper_fontawesome_shortcode_confirm",
+    "Font Awesome shortcode confirmed",
+    STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+    0
+  },
+  {
+    "memory_user_fact_remember",
+    "User memory considered",
+    STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+    0
+  },
+  {
+    "memory_database_hint_remember",
+    "Database memory considered",
+    STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+    0
+  }
+};
 
 static void strappy_responses_buffer_destroy(strappy_responses_buffer *buffer)
 {
@@ -128,402 +155,10 @@ static void strappy_responses_audit_init(strappy_responses_audit *audit)
   if (audit == NULL) {
     return;
   }
-  audit->rules = NULL;
-  audit->count = 0U;
-  audit->guidance_version = NULL;
-  audit->audit_header = NULL;
-  audit->audit_footer = NULL;
-  audit->empty_answer = NULL;
-  audit->web_reference_check_key = NULL;
-  audit->web_reference_label = NULL;
-  audit->web_reference_if_missing = NULL;
-  audit->automatic_remediation_enabled = 0;
-  audit->session_name_empty = 0;
+  memcpy(audit->rules,
+         strappy_responses_audit_rules,
+         sizeof(audit->rules));
   audit->web_reference_required = 0;
-  audit->message_sent = 0;
-}
-
-static void strappy_responses_audit_destroy(strappy_responses_audit *audit)
-{
-  size_t index;
-
-  if (audit == NULL) {
-    return;
-  }
-  for (index = 0U; index < audit->count; index++) {
-    free(audit->rules[index].check_key);
-    free(audit->rules[index].label);
-    free(audit->rules[index].tool_name);
-    free(audit->rules[index].if_not_called);
-    free(audit->rules[index].when_tool_called);
-  }
-  free(audit->rules);
-  free(audit->guidance_version);
-  free(audit->audit_header);
-  free(audit->audit_footer);
-  free(audit->empty_answer);
-  free(audit->web_reference_check_key);
-  free(audit->web_reference_label);
-  free(audit->web_reference_if_missing);
-  strappy_responses_audit_init(audit);
-}
-
-static char *strappy_responses_audit_resource_path(
-  const char *resource_dir,
-  char **error_out)
-{
-  size_t directory_length;
-  size_t filename_length;
-  size_t separator_length;
-  char *path;
-
-  if ((resource_dir == NULL) || (resource_dir[0] == '\0')) {
-    strappy_set_error(error_out,
-                      "Audit guidance resource directory is missing.");
-    return NULL;
-  }
-  directory_length = strlen(resource_dir);
-  filename_length = strlen(STRAPPY_RESPONSES_AUDIT_RESOURCE);
-  separator_length =
-    (resource_dir[directory_length - 1U] == '/') ? 0U : 1U;
-  if (directory_length > (((size_t)-1) - filename_length -
-                          separator_length - 1U)) {
-    strappy_set_error(error_out, "Audit guidance resource path is too long.");
-    return NULL;
-  }
-  path = (char *)malloc(directory_length + separator_length +
-                        filename_length + 1U);
-  if (path == NULL) {
-    strappy_set_error(error_out,
-                      "Could not allocate audit guidance resource path.");
-    return NULL;
-  }
-  memcpy(path, resource_dir, directory_length);
-  if (separator_length > 0U) {
-    path[directory_length] = '/';
-  }
-  memcpy(path + directory_length + separator_length,
-         STRAPPY_RESPONSES_AUDIT_RESOURCE,
-         filename_length + 1U);
-  return path;
-}
-
-static char *strappy_responses_audit_read_file(const char *path,
-                                                char **error_out)
-{
-  FILE *file;
-  long file_length;
-  size_t length;
-  size_t bytes_read;
-  char *text;
-
-  file = fopen(path, "rb");
-  if (file == NULL) {
-    strappy_set_formatted_error(error_out,
-                                "Could not open audit guidance: %s",
-                                path);
-    return NULL;
-  }
-  if ((fseek(file, 0L, SEEK_END) != 0) ||
-      ((file_length = ftell(file)) < 0L) ||
-      (fseek(file, 0L, SEEK_SET) != 0)) {
-    fclose(file);
-    strappy_set_formatted_error(error_out,
-                                "Could not read audit guidance: %s",
-                                path);
-    return NULL;
-  }
-  if ((unsigned long)file_length >= (unsigned long)((size_t)-1)) {
-    fclose(file);
-    strappy_set_error(error_out, "Audit guidance resource is too large.");
-    return NULL;
-  }
-  length = (size_t)file_length;
-  text = (char *)malloc(length + 1U);
-  if (text == NULL) {
-    fclose(file);
-    strappy_set_error(error_out, "Could not allocate audit guidance.");
-    return NULL;
-  }
-  bytes_read = fread(text, 1U, length, file);
-  if ((bytes_read != length) || ferror(file)) {
-    free(text);
-    fclose(file);
-    strappy_set_formatted_error(error_out,
-                                "Could not read audit guidance: %s",
-                                path);
-    return NULL;
-  }
-  text[length] = '\0';
-  fclose(file);
-  return text;
-}
-
-static int strappy_responses_audit_has_rule(
-  const strappy_responses_audit *audit,
-  const char *tool_name)
-{
-  size_t index;
-
-  if ((audit == NULL) || (tool_name == NULL)) {
-    return 0;
-  }
-  for (index = 0U; index < audit->count; index++) {
-    if (strcmp(audit->rules[index].tool_name, tool_name) == 0) {
-      return 1;
-    }
-  }
-  return 0;
-}
-
-static int strappy_responses_audit_has_check_key(
-  const strappy_responses_audit *audit,
-  const char *check_key)
-{
-  size_t index;
-
-  if ((audit == NULL) || (check_key == NULL)) {
-    return 0;
-  }
-  if ((audit->web_reference_check_key != NULL) &&
-      (strcmp(audit->web_reference_check_key, check_key) == 0)) {
-    return 1;
-  }
-  for (index = 0U; index < audit->count; index++) {
-    if (strcmp(audit->rules[index].check_key, check_key) == 0) {
-      return 1;
-    }
-  }
-  return 0;
-}
-
-static int strappy_responses_audit_load(strappy_responses_audit *audit,
-                                        const char *resource_dir,
-                                        int session_name_empty,
-                                        char **error_out)
-{
-  char *path;
-  char *text;
-  cJSON *root;
-  cJSON *rules;
-  cJSON *guidance_version;
-  cJSON *automatic_remediation_enabled;
-  cJSON *audit_header;
-  cJSON *audit_footer;
-  cJSON *empty_answer;
-  cJSON *web_reference;
-  cJSON *web_reference_check_key;
-  cJSON *web_reference_label;
-  cJSON *web_reference_if_missing;
-  cJSON *item;
-
-  if (audit == NULL) {
-    strappy_set_error(error_out, "Audit guidance destination is missing.");
-    return 0;
-  }
-  strappy_responses_audit_destroy(audit);
-  audit->session_name_empty = session_name_empty ? 1 : 0;
-  path = strappy_responses_audit_resource_path(resource_dir, error_out);
-  if (path == NULL) {
-    return 0;
-  }
-  text = strappy_responses_audit_read_file(path, error_out);
-  if (text == NULL) {
-    free(path);
-    return 0;
-  }
-  root = cJSON_Parse(text);
-  free(text);
-  if (!cJSON_IsObject(root)) {
-    cJSON_Delete(root);
-    strappy_set_formatted_error(error_out,
-                                "Audit guidance must be a JSON object: %s",
-                                path);
-    free(path);
-    return 0;
-  }
-  rules = cJSON_GetObjectItem(root, "tool_usage_priority");
-  guidance_version = cJSON_GetObjectItem(root, "version");
-  automatic_remediation_enabled = cJSON_GetObjectItem(
-    root,
-    "automatic_remediation_enabled");
-  audit_header = cJSON_GetObjectItem(root, "audit_header");
-  audit_footer = cJSON_GetObjectItem(root, "audit_footer");
-  empty_answer = cJSON_GetObjectItem(root, "empty_answer");
-  web_reference = cJSON_GetObjectItem(root, "web_reference");
-  web_reference_check_key = cJSON_IsObject(web_reference) ?
-    cJSON_GetObjectItem(web_reference, "check_key") : NULL;
-  web_reference_label = cJSON_IsObject(web_reference) ?
-    cJSON_GetObjectItem(web_reference, "label") : NULL;
-  web_reference_if_missing = cJSON_IsObject(web_reference) ?
-    cJSON_GetObjectItem(web_reference, "if_missing") : NULL;
-  if (!cJSON_IsArray(rules) ||
-      !cJSON_IsString(guidance_version) ||
-      (guidance_version->valuestring == NULL) ||
-      (guidance_version->valuestring[0] == '\0') ||
-      !cJSON_IsBool(automatic_remediation_enabled) ||
-      !cJSON_IsString(audit_header) ||
-      (audit_header->valuestring == NULL) ||
-      (audit_header->valuestring[0] == '\0') ||
-      !cJSON_IsString(audit_footer) ||
-      (audit_footer->valuestring == NULL) ||
-      (audit_footer->valuestring[0] == '\0') ||
-      !cJSON_IsString(empty_answer) ||
-      (empty_answer->valuestring == NULL) ||
-      (empty_answer->valuestring[0] == '\0') ||
-      !cJSON_IsObject(web_reference) ||
-      !cJSON_IsString(web_reference_check_key) ||
-      (web_reference_check_key->valuestring == NULL) ||
-      (web_reference_check_key->valuestring[0] == '\0') ||
-      !cJSON_IsString(web_reference_label) ||
-      (web_reference_label->valuestring == NULL) ||
-      (web_reference_label->valuestring[0] == '\0') ||
-      !cJSON_IsString(web_reference_if_missing) ||
-      (web_reference_if_missing->valuestring == NULL) ||
-      (web_reference_if_missing->valuestring[0] == '\0')) {
-    cJSON_Delete(root);
-    strappy_set_formatted_error(
-      error_out,
-      "Audit guidance is missing version, automatic_remediation_enabled, "
-      "tool_usage_priority, audit_header, audit_footer, empty_answer, or "
-      "web_reference check metadata: %s",
-      path);
-    free(path);
-    return 0;
-  }
-  audit->guidance_version =
-    strappy_string_duplicate(guidance_version->valuestring);
-  audit->audit_header =
-    strappy_string_duplicate(audit_header->valuestring);
-  audit->audit_footer =
-    strappy_string_duplicate(audit_footer->valuestring);
-  audit->empty_answer =
-    strappy_string_duplicate(empty_answer->valuestring);
-  audit->web_reference_check_key =
-    strappy_string_duplicate(web_reference_check_key->valuestring);
-  audit->web_reference_label =
-    strappy_string_duplicate(web_reference_label->valuestring);
-  audit->web_reference_if_missing =
-    strappy_string_duplicate(web_reference_if_missing->valuestring);
-  audit->automatic_remediation_enabled =
-    cJSON_IsTrue(automatic_remediation_enabled) ? 1 : 0;
-  if ((audit->guidance_version == NULL) ||
-      (audit->audit_header == NULL) || (audit->audit_footer == NULL) ||
-      (audit->empty_answer == NULL) ||
-      (audit->web_reference_check_key == NULL) ||
-      (audit->web_reference_label == NULL) ||
-      (audit->web_reference_if_missing == NULL)) {
-    cJSON_Delete(root);
-    strappy_set_error(error_out,
-                      "Could not allocate combined audit guidance.");
-    free(path);
-    strappy_responses_audit_destroy(audit);
-    return 0;
-  }
-  for (item = rules->child; item != NULL; item = item->next) {
-    cJSON *check_key;
-    cJSON *label;
-    cJSON *tool_name;
-    cJSON *if_not_called;
-    cJSON *when;
-    cJSON *when_tool_called;
-    cJSON *when_session_name_empty;
-    strappy_responses_audit_rule *next;
-    strappy_responses_audit_rule *rule;
-
-    check_key = cJSON_IsObject(item) ?
-      cJSON_GetObjectItem(item, "check_key") : NULL;
-    label = cJSON_IsObject(item) ?
-      cJSON_GetObjectItem(item, "label") : NULL;
-    tool_name = cJSON_IsObject(item) ?
-      cJSON_GetObjectItem(item, "tool_name") : NULL;
-    if_not_called = cJSON_IsObject(item) ?
-      cJSON_GetObjectItem(item, "if_not_called") : NULL;
-    when = cJSON_IsObject(item) ? cJSON_GetObjectItem(item, "when") : NULL;
-    when_tool_called = cJSON_IsObject(when) ?
-      cJSON_GetObjectItem(when, "tool_called") : NULL;
-    when_session_name_empty = cJSON_IsObject(when) ?
-      cJSON_GetObjectItem(when, "session_name_empty") : NULL;
-    if (!cJSON_IsString(check_key) ||
-        (check_key->valuestring == NULL) ||
-        (check_key->valuestring[0] == '\0') ||
-        !cJSON_IsString(label) ||
-        (label->valuestring == NULL) ||
-        (label->valuestring[0] == '\0') ||
-        (tool_name == NULL) ||
-        !cJSON_IsString(tool_name) ||
-        (tool_name->valuestring == NULL) ||
-        (tool_name->valuestring[0] == '\0') ||
-        (if_not_called == NULL) ||
-        !cJSON_IsString(if_not_called) ||
-        (if_not_called->valuestring == NULL) ||
-        (if_not_called->valuestring[0] == '\0') ||
-        ((when != NULL) && !cJSON_IsObject(when)) ||
-        ((when_tool_called != NULL) &&
-         (!cJSON_IsString(when_tool_called) ||
-          (when_tool_called->valuestring == NULL) ||
-          (when_tool_called->valuestring[0] == '\0'))) ||
-        ((when_session_name_empty != NULL) &&
-         !cJSON_IsTrue(when_session_name_empty)) ||
-        ((when != NULL) && (when_tool_called == NULL) &&
-         (when_session_name_empty == NULL)) ||
-        strappy_responses_audit_has_check_key(audit,
-                                              check_key->valuestring) ||
-        strappy_responses_audit_has_rule(audit,
-                                         tool_name->valuestring) ||
-        (audit->count >= (((size_t)-1) /
-                          sizeof(strappy_responses_audit_rule)))) {
-      cJSON_Delete(root);
-      strappy_set_formatted_error(error_out,
-                                  "Audit guidance has an invalid rule: %s",
-                                  path);
-      free(path);
-      strappy_responses_audit_destroy(audit);
-      return 0;
-    }
-    next = (strappy_responses_audit_rule *)realloc(
-      audit->rules,
-      (audit->count + 1U) * sizeof(strappy_responses_audit_rule));
-    if (next == NULL) {
-      cJSON_Delete(root);
-      strappy_set_error(error_out, "Could not allocate audit guidance rules.");
-      free(path);
-      strappy_responses_audit_destroy(audit);
-      return 0;
-    }
-    audit->rules = next;
-    rule = &audit->rules[audit->count];
-    memset(rule, 0, sizeof(*rule));
-    rule->check_key = strappy_string_duplicate(check_key->valuestring);
-    rule->label = strappy_string_duplicate(label->valuestring);
-    rule->tool_name = strappy_string_duplicate(tool_name->valuestring);
-    rule->if_not_called =
-      strappy_string_duplicate(if_not_called->valuestring);
-    rule->when_tool_called = (when_tool_called != NULL) ?
-      strappy_string_duplicate(when_tool_called->valuestring) : NULL;
-    rule->when_session_name_empty =
-      (when_session_name_empty != NULL) ? 1 : 0;
-    if ((rule->check_key == NULL) || (rule->label == NULL) ||
-        (rule->tool_name == NULL) || (rule->if_not_called == NULL) ||
-        ((when_tool_called != NULL) &&
-         (rule->when_tool_called == NULL))) {
-      free(rule->check_key);
-      free(rule->label);
-      free(rule->tool_name);
-      free(rule->if_not_called);
-      free(rule->when_tool_called);
-      memset(rule, 0, sizeof(*rule));
-      cJSON_Delete(root);
-      strappy_set_error(error_out, "Could not allocate audit guidance rule.");
-      free(path);
-      strappy_responses_audit_destroy(audit);
-      return 0;
-    }
-    audit->count++;
-  }
-  cJSON_Delete(root);
-  free(path);
-  return 1;
 }
 
 static void strappy_responses_audit_record_tool(
@@ -539,13 +174,9 @@ static void strappy_responses_audit_record_tool(
       (strcmp(tool_name, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0)) {
     audit->web_reference_required = 1;
   }
-  for (index = 0U; index < audit->count; index++) {
+  for (index = 0U; index < STRAPPY_RESPONSES_AUDIT_RULE_COUNT; index++) {
     if (strcmp(audit->rules[index].tool_name, tool_name) == 0) {
       audit->rules[index].called = 1;
-    }
-    if ((audit->rules[index].when_tool_called != NULL) &&
-        (strcmp(audit->rules[index].when_tool_called, tool_name) == 0)) {
-      audit->rules[index].when_tool_called_seen = 1;
     }
   }
 }
@@ -624,23 +255,6 @@ static void strappy_responses_answer_quality_destroy(
   memset(result, 0, sizeof(*result));
 }
 
-static int strappy_responses_audit_rule_is_applicable(
-  const strappy_responses_audit *audit,
-  const strappy_responses_audit_rule *rule)
-{
-  if ((audit == NULL) || (rule == NULL)) {
-    return 0;
-  }
-  if (rule->when_session_name_empty && !audit->session_name_empty) {
-    return 0;
-  }
-  if ((rule->when_tool_called != NULL) &&
-      !rule->when_tool_called_seen) {
-    return 0;
-  }
-  return 1;
-}
-
 static int strappy_responses_audit_evaluate(
   const strappy_responses_audit *audit,
   const char *response_text,
@@ -657,16 +271,7 @@ static int strappy_responses_audit_evaluate(
     return 0;
   }
   memset(result, 0, sizeof(*result));
-  if (audit->count >= ((size_t)-1)) {
-    strappy_set_error(error_out, "Answer quality evaluation is too large.");
-    return 0;
-  }
-  check_count = audit->count + 1U;
-  if (check_count > (((size_t)-1) /
-                     sizeof(strappy_answer_quality_check_input))) {
-    strappy_set_error(error_out, "Answer quality evaluation is too large.");
-    return 0;
-  }
+  check_count = STRAPPY_RESPONSES_AUDIT_RULE_COUNT + 1U;
   checks = (strappy_answer_quality_check_input *)calloc(
     check_count,
     sizeof(strappy_answer_quality_check_input));
@@ -677,9 +282,9 @@ static int strappy_responses_audit_evaluate(
   }
 
   failed = 0;
-  checks[0].check_key = audit->web_reference_check_key;
+  checks[0].check_key = strappy_responses_web_reference_check_key;
   checks[0].check_kind = "answer_content";
-  checks[0].label = audit->web_reference_label;
+  checks[0].label = strappy_responses_web_reference_label;
   if (!audit->web_reference_required) {
     checks[0].status = "not_applicable";
     checks[0].detail = "No web search or web fetch was used.";
@@ -692,7 +297,7 @@ static int strappy_responses_audit_evaluate(
     failed = 1;
   }
 
-  for (index = 0U; index < audit->count; index++) {
+  for (index = 0U; index < STRAPPY_RESPONSES_AUDIT_RULE_COUNT; index++) {
     const strappy_responses_audit_rule *rule;
     strappy_answer_quality_check_input *check;
 
@@ -702,10 +307,7 @@ static int strappy_responses_audit_evaluate(
     check->check_kind = "required_tool";
     check->label = rule->label;
     check->tool_name = rule->tool_name;
-    if (!strappy_responses_audit_rule_is_applicable(audit, rule)) {
-      check->status = "not_applicable";
-      check->detail = "This check did not apply to the answer.";
-    } else if (rule->called) {
+    if (rule->called) {
       check->status = "passed";
     } else {
       check->status = "failed";
@@ -715,152 +317,9 @@ static int strappy_responses_audit_evaluate(
   }
 
   result->outcome = failed ? "failed" : "passed";
-  result->guidance_version = audit->guidance_version;
+  result->guidance_version = strappy_responses_audit_guidance_version;
   result->checks = checks;
   result->check_count = check_count;
-  return 1;
-}
-
-static int strappy_responses_audit_rule_can_be_selected(
-  const strappy_responses_audit *audit,
-  const strappy_responses_audit_rule *rule)
-{
-  if ((audit == NULL) || (rule == NULL) || rule->called ||
-      (rule->when_session_name_empty && !audit->session_name_empty)) {
-    return 0;
-  }
-  return 1;
-}
-
-static int strappy_responses_audit_selection_contains_tool(
-  const strappy_responses_audit *audit,
-  const int *selected,
-  const char *tool_name)
-{
-  size_t index;
-
-  if ((audit == NULL) || (selected == NULL) || (tool_name == NULL)) {
-    return 0;
-  }
-  for (index = 0U; index < audit->count; index++) {
-    if (selected[index] &&
-        (strcmp(audit->rules[index].tool_name, tool_name) == 0)) {
-      return 1;
-    }
-  }
-  return 0;
-}
-
-static int strappy_responses_audit_build_message(
-  strappy_responses_audit *audit,
-  const char *response_text,
-  char **message_out,
-  char **error_out)
-{
-  strappy_responses_buffer buffer;
-  int *selected;
-  size_t index;
-  size_t listed_count;
-  size_t selected_count;
-  int changed;
-  int ok;
-  int web_reference_missing;
-
-  if (message_out == NULL) {
-    strappy_set_error(error_out, "Audit message destination is missing.");
-    return 0;
-  }
-  *message_out = NULL;
-  if ((audit == NULL) || audit->message_sent) {
-    return 1;
-  }
-  if (audit->count > (((size_t)-1) / sizeof(int))) {
-    strappy_set_error(error_out, "Audit guidance selection is too large.");
-    return 0;
-  }
-  selected = (audit->count > 0U) ?
-    (int *)calloc(audit->count, sizeof(int)) : NULL;
-  if ((audit->count > 0U) && (selected == NULL)) {
-    strappy_set_error(error_out, "Could not allocate audit guidance selection.");
-    return 0;
-  }
-
-  web_reference_missing = audit->web_reference_required &&
-    !strappy_responses_text_has_http_markdown_link(response_text);
-  selected_count = web_reference_missing ? 1U : 0U;
-  for (index = 0U; index < audit->count; index++) {
-    strappy_responses_audit_rule *rule;
-
-    rule = &audit->rules[index];
-    if (strappy_responses_audit_rule_can_be_selected(audit, rule) &&
-        ((rule->when_tool_called == NULL) ||
-         rule->when_tool_called_seen)) {
-      selected[index] = 1;
-      selected_count++;
-    }
-  }
-
-  do {
-    changed = 0;
-    for (index = 0U; index < audit->count; index++) {
-      strappy_responses_audit_rule *rule;
-
-      rule = &audit->rules[index];
-      if (selected[index] ||
-          !strappy_responses_audit_rule_can_be_selected(audit, rule) ||
-          (rule->when_tool_called == NULL) ||
-          !strappy_responses_audit_selection_contains_tool(
-            audit,
-            selected,
-            rule->when_tool_called)) {
-        continue;
-      }
-      selected[index] = 1;
-      selected_count++;
-      changed = 1;
-    }
-  } while (changed);
-
-  if (selected_count == 0U) {
-    free(selected);
-    return 1;
-  }
-
-  memset(&buffer, 0, sizeof(buffer));
-  ok = strappy_responses_buffer_append_string(&buffer,
-                                              audit->audit_header);
-  listed_count = 0U;
-  if (ok && web_reference_missing) {
-    ok = strappy_responses_buffer_append_string(&buffer, "\n\n- ") &&
-      strappy_responses_buffer_append_string(
-        &buffer,
-        audit->web_reference_if_missing);
-    listed_count++;
-  }
-  for (index = 0U; ok && (index < audit->count); index++) {
-    if (!selected[index]) {
-      continue;
-    }
-    ok = strappy_responses_buffer_append_string(
-      &buffer,
-      (listed_count == 0U) ? "\n\n- " : "\n- ") &&
-      strappy_responses_buffer_append_string(
-        &buffer,
-        audit->rules[index].if_not_called);
-    listed_count++;
-  }
-  if (ok) {
-    ok = strappy_responses_buffer_append_string(&buffer, "\n\n") &&
-      strappy_responses_buffer_append_string(&buffer, audit->audit_footer);
-  }
-  free(selected);
-  if (!ok) {
-    strappy_responses_buffer_destroy(&buffer);
-    strappy_set_error(error_out, "Could not allocate combined audit message.");
-    return 0;
-  }
-  audit->message_sent = 1;
-  *message_out = buffer.data;
   return 1;
 }
 
@@ -2014,7 +1473,6 @@ static void strappy_responses_runtime_destroy(
   strappy_config_destroy(&runtime->config);
   free(runtime->system_prompt);
   free(runtime->tools_json);
-  strappy_responses_audit_destroy(&runtime->audit);
   free(runtime->request_url);
   strappy_responses_runtime_init(runtime);
 }
@@ -2032,7 +1490,6 @@ static int strappy_responses_prepare_runtime(
   strappy_session_record session;
   char *resource_dir;
   char *model;
-  int session_name_empty;
   int ok;
 
   if ((runtime == NULL) || (system_prompt_template_path == NULL) ||
@@ -2063,8 +1520,6 @@ static int strappy_responses_prepare_runtime(
     return 0;
   }
   runtime->config.web_search_enabled = session.web_search_enabled ? 1 : 0;
-  session_name_empty =
-    (session.name == NULL) || (session.name[0] == '\0');
   strappy_session_record_destroy(&session);
 
   if (!strappy_db_get_session_model(session_db_path,
@@ -2107,14 +1562,6 @@ static int strappy_responses_prepare_runtime(
       runtime->config.web_search_enabled,
       error_out);
   if (runtime->tools_json == NULL) {
-    strappy_responses_runtime_destroy(runtime);
-    return 0;
-  }
-  if (!strappy_responses_audit_load(
-        &runtime->audit,
-        runtime->config.guidance_resource_dir,
-        session_name_empty,
-        error_out)) {
     strappy_responses_runtime_destroy(runtime);
     return 0;
   }
@@ -2666,11 +2113,7 @@ static int strappy_responses_send_round(
           return 0;
         }
         answer_quality.evaluated_at_ms = strappy_responses_now_ms();
-        if (!runtime->audit.automatic_remediation_enabled ||
-            runtime->audit.message_sent ||
-            (strcmp(answer_quality.outcome, "passed") == 0)) {
-          answer_quality_to_store = &answer_quality;
-        }
+        answer_quality_to_store = &answer_quality;
       }
     }
     if (!strappy_responses_finish_call(session_db_path,
@@ -3050,41 +2493,6 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
       continue;
     }
 
-    if (runtime.audit.automatic_remediation_enabled) {
-      char *audit_message;
-      char *audit_item;
-
-      audit_message = NULL;
-      if (!strappy_responses_audit_build_message(&runtime.audit,
-                                                 analysis.response_text,
-                                                 &audit_message,
-                                                 error_out)) {
-        strappy_responses_analysis_destroy(&analysis);
-        strappy_responses_http_result_destroy(&http);
-        break;
-      }
-      if (audit_message != NULL) {
-        audit_item = strappy_responses_message_item_json(
-          "developer",
-          audit_message,
-          error_out);
-        free(audit_message);
-        if ((audit_item == NULL) ||
-            !strappy_responses_owned_items_append(&new_items,
-                                                  audit_item,
-                                                  error_out)) {
-          strappy_responses_analysis_destroy(&analysis);
-          strappy_responses_http_result_destroy(&http);
-          break;
-        }
-        next_request_kind = "tool_audit";
-        allow_tool_calls = 1;
-        strappy_responses_analysis_destroy(&analysis);
-        strappy_responses_http_result_destroy(&http);
-        continue;
-      }
-    }
-
     if (!strappy_responses_text_has_non_whitespace(
           analysis.response_text)) {
       const char *failure_message;
@@ -3107,7 +2515,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
       }
       finalization_item = strappy_responses_message_item_json(
         "developer",
-        runtime.audit.empty_answer,
+        strappy_responses_empty_answer,
         error_out);
       if ((finalization_item == NULL) ||
           !strappy_responses_owned_items_append(&new_items,

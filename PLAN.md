@@ -154,10 +154,10 @@ Deliverables:
 - [x] Bounded multi-round Responses tool loop: execute typed function calls,
   append `function_call_output` items, and continue until final output or the
   round limit.
-- [x] Single combined post-answer audit message that lists every applicable
-  missing-tool check once, permits normal tool continuations, and asks for the
-  corrected standalone answer. A tool-disabled finalization recovery runs only
-  when the post-audit response contains no non-whitespace assistant answer.
+- [x] Persisted post-answer quality report that lists every applicable check
+  once in the visible timeline without automatically asking the model to
+  remediate failures. A tool-disabled finalization recovery runs only when a
+  candidate final response contains no non-whitespace assistant answer.
 - [x] Persisted prompt, assistant, tool-call, tool-result, and harness messages
   in `session_messages`, with `session_turns`, `turn_key`, `prompt_group_key`,
   raw message JSON, reasoning text, context inclusion flags, tool names,

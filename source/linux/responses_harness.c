@@ -935,14 +935,14 @@ static int harness_record_ledger_event(
 #define HARNESS_HTTP_MAX_REQUEST_BYTES (4U * 1024U * 1024U)
 
 typedef enum harness_responses_server_scenario {
-  HARNESS_RESPONSES_SERVER_TOOL_AUDIT = 1,
+  HARNESS_RESPONSES_SERVER_ANSWER_QUALITY = 1,
   HARNESS_RESPONSES_SERVER_SERVER_TOOL = 2,
   HARNESS_RESPONSES_SERVER_FUNCTION_TOOL = 3,
   HARNESS_RESPONSES_SERVER_RETRY = 4,
   HARNESS_RESPONSES_SERVER_RETRY_AFTER = 5,
   HARNESS_RESPONSES_SERVER_SLOW = 6,
-  HARNESS_RESPONSES_SERVER_EMPTY_AUDIT_FINALIZATION = 7,
-  HARNESS_RESPONSES_SERVER_EMPTY_FINAL_WITHOUT_AUDIT = 8,
+  HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_FINALIZATION = 7,
+  HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_RECOVERY = 8,
   HARNESS_RESPONSES_SERVER_WEB_REFERENCE_VALID = 9
 } harness_responses_server_scenario;
 
@@ -1585,13 +1585,13 @@ static int harness_accept_request(int listener_fd,
   return 1;
 }
 
-static int harness_run_audit_server(int listener_fd)
+static int harness_run_answer_quality_server(int listener_fd)
 {
   static const char *first_response =
-    "{\"id\":\"resp-audit-first\",\"object\":\"response\","
+    "{\"id\":\"resp-quality-first\",\"object\":\"response\","
     "\"created_at\":1700000000,\"model\":\"test/model\","
     "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
-    "\"id\":\"msg-audit-first\",\"role\":\"assistant\","
+    "\"id\":\"msg-quality-first\",\"role\":\"assistant\","
     "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
     "\"text\":\"Initial answer.\",\"annotations\":[]}]}],"
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":3,"
@@ -1613,7 +1613,7 @@ static int harness_run_audit_server(int listener_fd)
   free(body);
   ok = cJSON_IsObject(root) &&
     harness_request_base_is_valid(root,
-                                  "Audit this request",
+                                  "Report answer quality",
                                   &session_key,
                                   &prompt_group) &&
     harness_request_preflight_contains(
@@ -1632,14 +1632,14 @@ static int harness_run_audit_server(int listener_fd)
   cJSON_Delete(root);
   close(client_fd);
   if (!ok) {
-    fprintf(stderr, "Audit recovery server rejected the initial request.\n");
+    fprintf(stderr, "Answer quality server rejected the request.\n");
   }
   free(session_key);
   free(prompt_group);
   return ok;
 }
 
-static int harness_run_empty_audit_finalization_server(int listener_fd)
+static int harness_run_empty_answer_finalization_server(int listener_fd)
 {
   static const char *first_response =
     "{\"id\":\"resp-empty-finalize-first\",\"object\":\"response\","
@@ -1674,7 +1674,7 @@ static int harness_run_empty_audit_finalization_server(int listener_fd)
   free(body);
   ok = cJSON_IsObject(root) &&
     harness_request_base_is_valid(root,
-                                  "Fail empty audit finalization",
+                                  "Fail empty answer finalization",
                                   &session_key,
                                   &prompt_group) &&
     harness_send_json_response(client_fd, 200L, first_response);
@@ -1707,10 +1707,10 @@ static int harness_run_empty_audit_finalization_server(int listener_fd)
   return ok;
 }
 
-static int harness_run_empty_final_without_audit_server(int listener_fd)
+static int harness_run_empty_answer_recovery_server(int listener_fd)
 {
   static const char *tool_response =
-    "{\"id\":\"resp-empty-no-audit-tools\",\"object\":\"response\","
+    "{\"id\":\"resp-empty-recovery-tools\",\"object\":\"response\","
     "\"created_at\":1700000020,\"model\":\"test/model\","
     "\"status\":\"completed\",\"output\":[{"
     "\"type\":\"function_call\",\"id\":\"fc-empty-context\","
@@ -1741,21 +1741,21 @@ static int harness_run_empty_final_without_audit_server(int listener_fd)
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":10,"
     "\"total_tokens\":14}}";
   static const char *reasoning_only_response =
-    "{\"id\":\"resp-empty-no-audit-reasoning\","
+    "{\"id\":\"resp-empty-recovery-reasoning\","
     "\"object\":\"response\",\"created_at\":1700000021,"
     "\"model\":\"test/model\",\"status\":\"completed\","
     "\"output\":[{\"type\":\"reasoning\","
-    "\"id\":\"rs-empty-no-audit\",\"status\":\"completed\","
+    "\"id\":\"rs-empty-recovery\",\"status\":\"completed\","
     "\"content\":[{\"type\":\"reasoning_text\","
     "\"text\":\"I should now provide the final answer.\"}],"
     "\"summary\":[]}],\"usage\":{\"input_tokens\":14,"
     "\"output_tokens\":4,\"total_tokens\":18}}";
   static const char *final_response =
-    "{\"id\":\"resp-empty-no-audit-final\","
+    "{\"id\":\"resp-empty-recovery-final\","
     "\"object\":\"response\",\"created_at\":1700000022,"
     "\"model\":\"test/model\",\"status\":\"completed\","
     "\"output\":[{\"type\":\"message\","
-    "\"id\":\"msg-empty-no-audit-final\",\"role\":\"assistant\","
+    "\"id\":\"msg-empty-recovery-final\",\"role\":\"assistant\","
     "\"status\":\"completed\",\"content\":[{"
     "\"type\":\"output_text\","
     "\"text\":\"Recovered non-empty answer.\","
@@ -1778,7 +1778,7 @@ static int harness_run_empty_final_without_audit_server(int listener_fd)
   free(body);
   ok = cJSON_IsObject(root) &&
     harness_request_base_is_valid(root,
-                                  "Recover empty final without audit",
+                                  "Recover empty answer",
                                   &session_key,
                                   &prompt_group) &&
     harness_send_json_response(client_fd, 200L, tool_response);
@@ -2232,8 +2232,8 @@ static int harness_start_server(harness_responses_server_scenario scenario,
     int ok;
 
     alarm(15U);
-    if (scenario == HARNESS_RESPONSES_SERVER_TOOL_AUDIT) {
-      ok = harness_run_audit_server(listener_fd);
+    if (scenario == HARNESS_RESPONSES_SERVER_ANSWER_QUALITY) {
+      ok = harness_run_answer_quality_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_SERVER_TOOL) {
       ok = harness_run_server_tool_server(listener_fd);
     } else if (scenario ==
@@ -2246,11 +2246,11 @@ static int harness_start_server(harness_responses_server_scenario scenario,
     } else if (scenario == HARNESS_RESPONSES_SERVER_SLOW) {
       ok = harness_run_slow_server(listener_fd);
     } else if (scenario ==
-               HARNESS_RESPONSES_SERVER_EMPTY_AUDIT_FINALIZATION) {
-      ok = harness_run_empty_audit_finalization_server(listener_fd);
+               HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_FINALIZATION) {
+      ok = harness_run_empty_answer_finalization_server(listener_fd);
     } else if (scenario ==
-               HARNESS_RESPONSES_SERVER_EMPTY_FINAL_WITHOUT_AUDIT) {
-      ok = harness_run_empty_final_without_audit_server(listener_fd);
+               HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_RECOVERY) {
+      ok = harness_run_empty_answer_recovery_server(listener_fd);
     } else {
       ok = harness_run_retry_server(listener_fd);
     }
@@ -2399,9 +2399,9 @@ static int harness_answer_quality_precedes_assistant(
   return 0;
 }
 
-static int harness_test_combined_tool_audit_once(void)
+static int harness_test_answer_quality_report(void)
 {
-  char path[] = "/tmp/strappy-responses-audit-XXXXXX";
+  char path[] = "/tmp/strappy-responses-quality-XXXXXX";
   char database_path[] = "/tmp/strappy-preflight-db-XXXXXX";
   char endpoint[128];
   char *error;
@@ -2422,7 +2422,7 @@ static int harness_test_combined_tool_audit_once(void)
 
   fd = mkstemp(path);
   if (fd < 0) {
-    return harness_fail("Could not create tool-audit harness database.");
+    return harness_fail("Could not create answer-quality harness database.");
   }
   close(fd);
   database_fd = mkstemp(database_path);
@@ -2458,7 +2458,7 @@ static int harness_test_combined_tool_audit_once(void)
     &error);
   if (seed_output == NULL) {
     fprintf(stderr,
-            "Could not prepare tool-audit integration test: %s\n",
+            "Could not prepare answer-quality integration test: %s\n",
             (error != NULL) ? error : "server setup failed");
     free(error);
     unlink(database_path);
@@ -2474,12 +2474,12 @@ static int harness_test_combined_tool_audit_once(void)
     "{\"name\":\"Earlier Request\"}",
     &error);
   if ((seed_output == NULL) ||
-      !harness_start_server(HARNESS_RESPONSES_SERVER_TOOL_AUDIT,
+      !harness_start_server(HARNESS_RESPONSES_SERVER_ANSWER_QUALITY,
                             endpoint,
                             sizeof(endpoint),
                             &server_pid)) {
     fprintf(stderr,
-            "Could not prepare titled tool-audit integration test: %s\n",
+            "Could not prepare titled answer-quality integration test: %s\n",
             (error != NULL) ? error : "server setup failed");
     free(seed_output);
     free(error);
@@ -2495,7 +2495,7 @@ static int harness_test_combined_tool_audit_once(void)
   events.db_path = path;
   events.valid = 1;
   result = strappy_responses_send_prompt_for_session_and_store_with_events(
-    "Audit this request",
+    "Report answer quality",
     "/dev/null",
     endpoint,
     "test-token",
@@ -2515,7 +2515,7 @@ static int harness_test_combined_tool_audit_once(void)
     (events.clear_count == 1L);
   if (!ok) {
     fprintf(stderr,
-            "Audit recovery result mismatch: result=%s server=%d valid=%d "
+            "Answer quality result mismatch: result=%s server=%d valid=%d "
             "events=%lld processing=%lld clear=%ld thinking=%d tools=%d\n",
             (result != NULL) ? result : "(null)",
             server_ok,
@@ -2538,10 +2538,6 @@ static int harness_test_combined_tool_audit_once(void)
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
-                        "request_kind='tool_audit';",
-                        &value) && (value == 0LL) &&
-      harness_query_int(db,
-                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='audit_finalize';",
                         &value) && (value == 0LL) &&
       harness_query_int(db,
@@ -2552,12 +2548,40 @@ static int harness_test_combined_tool_audit_once(void)
                         "SELECT COUNT(*) FROM tool_executions;",
                         &value) && (value == 0LL) &&
       harness_query_int(db,
+                        "SELECT COUNT(*) FROM conversation_items i "
+                        "JOIN message_items m ON m.item_id=i.id WHERE "
+                        "m.role='developer' AND i.include_in_context=1;",
+                        &value) && (value == 0LL) &&
+      harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
                         "outcome='failed' AND guidance_version='1';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks;",
                         &value) && (value == 6LL) &&
+      harness_query_int(
+        db,
+        "SELECT COUNT(*) FROM answer_quality_checks WHERE "
+        "(ordinal=0 AND check_key='web_reference' AND "
+        "check_kind='answer_content' AND label='Source link included' AND "
+        "tool_name IS NULL) OR "
+        "(ordinal=1 AND check_key='database_context_read' AND "
+        "check_kind='required_tool' AND label='Database context checked' AND "
+        "tool_name='" STRAPPY_TOOL_DATABASE_CONTEXT_READ "') OR "
+        "(ordinal=2 AND check_key='helper_session_name_write' AND "
+        "check_kind='required_tool' AND label='Session named' AND "
+        "tool_name='" STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE "') OR "
+        "(ordinal=3 AND check_key='helper_fontawesome_shortcode_confirm' AND "
+        "check_kind='required_tool' AND "
+        "label='Font Awesome shortcode confirmed' AND "
+        "tool_name='" STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM "') OR "
+        "(ordinal=4 AND check_key='memory_user_fact_remember' AND "
+        "check_kind='required_tool' AND label='User memory considered' AND "
+        "tool_name='" STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER "') OR "
+        "(ordinal=5 AND check_key='memory_database_hint_remember' AND "
+        "check_kind='required_tool' AND label='Database memory considered' AND "
+        "tool_name='" STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER "');",
+        &value) && (value == 6LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
                         "status='failed';",
@@ -2567,12 +2591,6 @@ static int harness_test_combined_tool_audit_once(void)
                         "status='not_applicable' AND "
                         "check_key='web_reference';",
                         &value) && (value == 1LL) &&
-      harness_query_int(db,
-                        "SELECT COUNT(*) FROM item_text_parts p "
-                        "JOIN message_items m ON m.item_id=p.item_id WHERE "
-                        "m.role='developer' AND "
-                        "instr(p.text,'audited due to your failure')>0;",
-                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM item_text_parts p "
                         "JOIN message_items m ON m.item_id=p.item_id WHERE "
@@ -2612,7 +2630,7 @@ static int harness_test_combined_tool_audit_once(void)
   }
   if (!ok) {
     fprintf(stderr,
-            "Combined tool-audit integration failed: %s\n",
+            "Answer quality report integration failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
   strappy_session_message_record_list_destroy(&timeline_tail);
@@ -2623,7 +2641,7 @@ static int harness_test_combined_tool_audit_once(void)
   return ok;
 }
 
-static int harness_test_empty_audit_finalization_fails(void)
+static int harness_test_empty_answer_finalization_fails(void)
 {
   char path[] = "/tmp/strappy-responses-empty-finalize-XXXXXX";
   char endpoint[128];
@@ -2647,7 +2665,7 @@ static int harness_test_empty_audit_finalization_fails(void)
   session_id = 0LL;
   if (!harness_create_session_database(path, &session_id, &error) ||
       !harness_start_server(
-        HARNESS_RESPONSES_SERVER_EMPTY_AUDIT_FINALIZATION,
+        HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_FINALIZATION,
         endpoint,
         sizeof(endpoint),
         &server_pid)) {
@@ -2660,7 +2678,7 @@ static int harness_test_empty_audit_finalization_fails(void)
   }
 
   result = strappy_responses_send_prompt_for_session_and_store(
-    "Fail empty audit finalization",
+    "Fail empty answer finalization",
     "/dev/null",
     endpoint,
     "test-token",
@@ -2676,10 +2694,6 @@ static int harness_test_empty_audit_finalization_fails(void)
     ok = harness_query_int(db,
                            "SELECT COUNT(*) FROM http_attempts;",
                            &value) && (value == 2LL) &&
-      harness_query_int(db,
-                        "SELECT COUNT(*) FROM model_requests WHERE "
-                        "request_kind='tool_audit';",
-                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='audit_finalize';",
@@ -2708,7 +2722,7 @@ static int harness_test_empty_audit_finalization_fails(void)
   }
   if (!ok) {
     fprintf(stderr,
-            "Empty audit finalization integration failed: %s\n",
+            "Empty answer finalization integration failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
   free(error);
@@ -2716,9 +2730,9 @@ static int harness_test_empty_audit_finalization_fails(void)
   return ok;
 }
 
-static int harness_test_empty_final_without_audit_recovers(void)
+static int harness_test_empty_answer_recovers(void)
 {
-  char path[] = "/tmp/strappy-responses-empty-no-audit-XXXXXX";
+  char path[] = "/tmp/strappy-responses-empty-recovery-XXXXXX";
   char database_path[] = "/tmp/strappy-provenance-db-XXXXXX";
   char endpoint[128];
   char *error;
@@ -2735,7 +2749,7 @@ static int harness_test_empty_final_without_audit_recovers(void)
   fd = mkstemp(path);
   if (fd < 0) {
     return harness_fail(
-      "Could not create empty-final-without-audit harness database.");
+      "Could not create empty-answer recovery harness database.");
   }
   close(fd);
   database_fd = mkstemp(database_path);
@@ -2751,12 +2765,12 @@ static int harness_test_empty_final_without_audit_recovers(void)
                                                    database_path,
                                                    &error) ||
       !harness_start_server(
-        HARNESS_RESPONSES_SERVER_EMPTY_FINAL_WITHOUT_AUDIT,
+        HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_RECOVERY,
         endpoint,
         sizeof(endpoint),
         &server_pid)) {
     fprintf(stderr,
-            "Could not prepare empty-final-without-audit test: %s\n",
+            "Could not prepare empty-answer recovery test: %s\n",
             (error != NULL) ? error : "server setup failed");
     free(error);
     unlink(database_path);
@@ -2765,7 +2779,7 @@ static int harness_test_empty_final_without_audit_recovers(void)
   }
 
   result = strappy_responses_send_prompt_for_session_and_store(
-    "Recover empty final without audit",
+    "Recover empty answer",
     "/dev/null",
     endpoint,
     "test-token",
@@ -2782,10 +2796,6 @@ static int harness_test_empty_final_without_audit_recovers(void)
     ok = harness_query_int(db,
                            "SELECT COUNT(*) FROM http_attempts;",
                            &value) && (value == 3LL) &&
-      harness_query_int(db,
-                        "SELECT COUNT(*) FROM model_requests WHERE "
-                        "request_kind='tool_audit';",
-                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_continuation';",
@@ -2860,7 +2870,7 @@ static int harness_test_empty_final_without_audit_recovers(void)
   }
   if (!ok) {
     fprintf(stderr,
-            "Empty final without audit recovery failed: %s\n",
+            "Empty answer recovery failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
   free(error);
@@ -2930,10 +2940,6 @@ static int harness_test_web_search_requires_markdown_reference(void)
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
-                        "request_kind='tool_audit';",
-                        &value) && (value == 0LL) &&
-      harness_query_int(db,
-                        "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='audit_finalize';",
                         &value) && (value == 0LL) &&
       harness_query_int(db,
@@ -2955,7 +2961,7 @@ static int harness_test_web_search_requires_markdown_reference(void)
   }
   if (!ok) {
     fprintf(stderr,
-            "Web-search reference audit failed: %s\n",
+            "Web-search reference quality check failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
   free(error);
@@ -2963,7 +2969,7 @@ static int harness_test_web_search_requires_markdown_reference(void)
   return ok;
 }
 
-static int harness_test_valid_web_reference_avoids_content_audit(void)
+static int harness_test_valid_web_reference_passes_content_check(void)
 {
   char path[] = "/tmp/strappy-responses-web-reference-XXXXXX";
   char endpoint[128];
@@ -3017,10 +3023,6 @@ static int harness_test_valid_web_reference_avoids_content_audit(void)
                            "SELECT COUNT(*) FROM http_attempts;",
                            &value) && (value == 1LL) &&
       harness_query_int(db,
-                        "SELECT COUNT(*) FROM model_requests WHERE "
-                        "request_kind='tool_audit';",
-                        &value) && (value == 0LL) &&
-      harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items WHERE "
                         "kind='openrouter:web_fetch' AND include_in_context=1;",
                         &value) && (value == 1LL) &&
@@ -3042,7 +3044,7 @@ static int harness_test_valid_web_reference_avoids_content_audit(void)
   }
   if (!ok) {
     fprintf(stderr,
-            "Valid web-reference audit suppression failed: %s\n",
+            "Valid web-reference quality check failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
   free(error);
@@ -3122,10 +3124,6 @@ static int harness_test_function_tool_continuation(void)
                         "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_continuation';",
                         &value) && (value == 1LL) &&
-      harness_query_int(db,
-                        "SELECT COUNT(*) FROM model_requests WHERE "
-                        "request_kind='tool_audit';",
-                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='audit_finalize';",
@@ -3270,10 +3268,6 @@ static int harness_test_retry_attempt_ledger(void)
                         "JOIN http_attempts b ON b.previous_attempt_id=a.id "
                         "AND b.request_id=a.request_id;",
                         &value) && (value == 1LL) &&
-      harness_query_int(db,
-                        "SELECT COUNT(*) FROM model_requests WHERE "
-                        "request_kind='tool_audit';",
-                        &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='audit_finalize';",
@@ -4392,11 +4386,11 @@ int main(void)
   if (harness_test_request_surfaces() &&
       harness_test_ledger() &&
       harness_test_cumulative_session_usage_cost() &&
-      harness_test_combined_tool_audit_once() &&
-      harness_test_empty_audit_finalization_fails() &&
-      harness_test_empty_final_without_audit_recovers() &&
+      harness_test_answer_quality_report() &&
+      harness_test_empty_answer_finalization_fails() &&
+      harness_test_empty_answer_recovers() &&
       harness_test_web_search_requires_markdown_reference() &&
-      harness_test_valid_web_reference_avoids_content_audit() &&
+      harness_test_valid_web_reference_passes_content_check() &&
       harness_test_function_tool_continuation() &&
       harness_test_retry_attempt_ledger() &&
       harness_test_active_request_cancellation() &&

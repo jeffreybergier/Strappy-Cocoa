@@ -121,45 +121,36 @@ House style for Strappy source:
     objects and arrays as `structured_documents` / `structured_nodes`. Never
     persist request bodies, response bodies, headers, or raw JSON. Reconstruct
     provider-shaped JSON transiently only at an API or compatibility boundary.
-    At a
-    candidate final answer, collect every applicable missing-tool rule from
-    `GuidanceAudit.json` into one ordered bulleted `developer` message, honoring
-    each rule's optional `when` conditions. Include a tool-conditioned rule
-    prospectively when its prerequisite is another unresolved audit item, so it
-    can still apply if that prerequisite tool is called while resolving the
-    combined audit. Web search is not a missing-tool audit rule. When
-    `openrouter:web_search` or `openrouter:web_fetch` activity has occurred,
-    scan the candidate answer for a non-image inline Markdown HTTP or HTTPS
-    link with a non-empty title and URL. If a linked source reference is
-    missing, place the `web_reference.if_missing` content rule before the
-    missing-tool bullets in the same combined audit message. Database inventory
-    is an application-seeded preflight tool output rather than a missing-tool
-    rule. The audit always checks `database_context_read`,
+    At every canonical, successful, tool-free candidate final answer containing
+    non-whitespace text, evaluate the code-owned ordered quality checks exactly
+    once and persist one `answer_quality_audits` report with its
+    `answer_quality_checks`. Render that informational report in the visible
+    timeline immediately before its assistant answer, and track tool activity
+    across the whole logical request. When `openrouter:web_search` or
+    `openrouter:web_fetch`
+    activity has occurred, scan the answer for a non-image inline Markdown HTTP
+    or HTTPS link with a non-empty title and URL. Database inventory is an
+    application-seeded preflight tool output rather than a quality rule. The
+    report always checks `database_context_read`,
     `helper_session_name_write`, `helper_fontawesome_shortcode_confirm`,
     `memory_user_fact_remember`, and `memory_database_hint_remember`. The
     database-context and memory tools are report-or-act tools whose fully empty,
     JSON-null, or quoted `"null"` arguments produce a successful no-op. The
     session-name tool instead requires a non-empty string and updates the active
-    session name. The Font
-    Awesome confirmation tool requires a non-empty `shortcodes` array and does
-    not accept a null or empty-array no-op. `database_query` is not an audit rule
-    and still requires both an approved database id and read-only SQL. User-fact
-    and database-hint memory checks are last, and neither reminder may encourage
-    storing secrets or sensitive information. User-fact memory may include
-    useful durable facts learned from approved databases; database-hint memory
-    must not store private row values or one-off query results. Wrap the
-    bullets with the `audit_header` and `audit_footer` guidance and append that
-    combined message at most once in the same Responses history. Allow normal
-    tool calls and tool-output continuations while resolving it. Once the
-    combined message has been sent, never audit another response from that user
-    request. Accept a response without local tool calls only when it contains a
-    non-whitespace assistant answer, even if some audit items remain
-    unsatisfied. For every empty tool-free candidate answer, whether or not an
-    audit message was needed, append the `empty_answer` guidance once as a
-    tool-disabled `audit_finalize` recovery turn. Fail explicitly if that
-    recovery is also empty; never silently reuse an earlier answer. Every audit,
-    recovery, tool, and assistant item uses the normal database and timeline
-    paths. If no audit item is unresolved, do not add an audit turn.
+    session name. The Font Awesome confirmation tool requires a non-empty
+    `shortcodes` array and does not accept a null or empty-array no-op.
+    `database_query` is not a quality rule and still requires both an approved
+    database id and read-only SQL. User-fact and database-hint memory checks are
+    last; user-fact memory may include useful durable facts learned from
+    approved databases, while database-hint memory must not store private row
+    values or one-off query results. Never append a developer remediation
+    message or issue another model request because a quality check failed; the
+    report informs the user, who decides whether to ask for corrections. For
+    every empty tool-free candidate answer, append the code-owned empty-answer
+    instruction once as a tool-disabled `audit_finalize` recovery turn. Fail
+    explicitly if that recovery is also empty; never silently reuse an earlier
+    answer. Every quality report, recovery, tool, and assistant item uses the
+    normal database and timeline paths.
 17. OpenRouter model catalog and selection state live in shared SQLite storage.
     `strappy_db` owns `models`, `model_prices`, `model_features`,
     `model_preferences`, `app_preferences.default_model_id`, and

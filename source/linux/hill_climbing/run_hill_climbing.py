@@ -493,7 +493,6 @@ def main() -> int:
             for name in (
                 "PromptSystem.txt",
                 "GuidanceTools.json",
-                "GuidanceAudit.json",
                 "GuidanceDatabase.json",
             )
             if (system_prompt.parent / name).is_file()

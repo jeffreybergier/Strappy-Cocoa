@@ -20,7 +20,7 @@ minimum baseline:
 - tool-specific behavioral instructions live in their relevant tool
   descriptions instead of the system prompt;
 - display metadata and unrelated parameter guidance are removed;
-- ordered post-answer tool audits live separately in `GuidanceAudit.json`;
+- ordered answer-quality checks are owned by the shared Responses runtime;
 - database descriptions, matching rules, related-database hints, and recovery
   instructions are removed;
 - every database selected in the device's Strappy catalog is approved in each
@@ -31,26 +31,18 @@ Before round zero, the application supplies fresh `database_list_info` and
 `memory_user_fact_read` results as application-seeded, matched
 `function_call` / `function_call_output` input pairs. Their call IDs are
 created by the application, and those typed conversation items are not counted
-as model tool calls or tool executions. The audit file checks
-`database_query`, web search, conditional session naming, optional durable user
-facts, and query-conditioned database hints in array order. Session naming
-applies only when the session began untitled, and web search is omitted when it
-is disabled. The user-fact reminder encourages useful durable facts learned
-from the user or their databases while forbidding secrets and sensitive
-information. Database-hint memory excludes private row values and one-off query
-results. At a candidate answer, the runtime places every applicable missing
-tool's `if_not_called` message into one bulleted developer audit message. A
-tool-conditioned item is included prospectively when its prerequisite is also
-in that message. The message is sent at most once, followed only by any normal
-tool-output continuations it causes. The first subsequent response without a
-local tool call is accepted when it contains a non-whitespace assistant answer,
-even if the model left an item unresolved. If that response is empty, the
-runtime sends the audit footer once as a tool-disabled `audit_finalize`
-recovery; a second empty response fails explicitly instead of silently reusing
-the pre-audit answer. Developer messages, tool activity, and the corrected
-answer all use the same database ledger and visible timeline paths as other
-turns. The remaining generic database labels are structural runtime
-requirements, not task guidance.
+as model tool calls or tool executions. The runtime quality policy checks
+`database_context_read`, session naming, Font Awesome shortcode confirmation,
+durable user-memory consideration, and database-hint consideration in a fixed
+order. It also checks for a linked source when web search or web fetch activity
+occurred. Each non-empty candidate final answer receives one persisted quality
+report in the visible timeline immediately before the assistant answer. Failed
+checks are informational: the runtime does not append a developer remediation
+prompt or make another API request. If a tool-free candidate answer is empty,
+the runtime sends its empty-answer instruction once as a tool-disabled
+`audit_finalize` recovery; a second empty response fails explicitly. That
+active recovery and all normal tool and assistant items use the same database
+ledger and visible timeline paths as other turns.
 
 Each isolated model database is seeded first by executing the real
 `memory_user_fact_remember` tool with the stable identity fact that the user's
@@ -171,12 +163,10 @@ play counts in the private fixture. It scores whether the runtime and model:
 - covers the dynamically calculated top three in descending order;
 - provides the requested public details with links;
 - stores the dynamically calculated favorite bands as durable user memory;
-- deducts 3 points for every live tool-audit intervention;
 - stays within API-call, web-search, latency, and the $0.01 cost budget.
 
-The remaining positive checks are proportionally normalized to 100 points
-before audit penalties. This keeps the score ceiling stable without assigning
-the removed provenance points arbitrarily to another behavior.
+The positive checks are proportionally normalized to 100 points so the score
+ceiling remains stable as the checklist evolves.
 
 The score deliberately does not declare public biographical facts correct.
 Roster freshness, blood types, and subjective personality descriptions remain
