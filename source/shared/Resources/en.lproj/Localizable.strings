@@ -25,13 +25,13 @@
 "Failed" = "Failed";
 "Not Applicable" = "Not Applicable";
 "Check" = "Check";
+"No emoji" = "No emoji";
 "Source link included" = "Source link included";
 "Database context checked" = "Database context checked";
 "Session named" = "Session named";
 "Font Awesome shortcode confirmed" = "Font Awesome shortcode confirmed";
-"User memory considered" = "User memory considered";
-"Database memory considered" = "Database memory considered";
 "No web search or web fetch was used." = "No web search or web fetch was used.";
+"The response included emoji." = "The response included emoji.";
 "A linked HTTP source reference was required but not found." = "A linked HTTP source reference was required but not found.";
 "This check did not apply to the answer." = "This check did not apply to the answer.";
 "The required tool was not called." = "The required tool was not called.";

@@ -19,10 +19,10 @@
     ],
     "quality_checks": [
       "answer_non_empty",
+      "unicode_emoji_absent",
       "web_reference",
       "helper_session_name_write",
-      "helper_fontawesome_shortcode_confirm",
-      "memory_user_fact_remember"
+      "helper_fontawesome_shortcode_confirm"
     ]
   },
   "sets": [
@@ -53,8 +53,7 @@
         "database_list_info"
       ],
       "additional_quality_checks": [
-        "database_context_read",
-        "memory_database_hint_remember"
+        "database_context_read"
       ]
     },
     {

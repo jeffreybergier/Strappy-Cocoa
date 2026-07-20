@@ -97,6 +97,8 @@ static int harness_check_localized_labels(void)
        harness_expect_equal(labels->failed, "Failed") &&
        harness_expect_equal(labels->not_applicable, "Not Applicable") &&
        harness_expect_equal(labels->check, "Check") &&
+       harness_expect_equal(labels->no_unicode_emoji,
+                            "No emoji") &&
        harness_expect_equal(labels->source_link_included,
                             "Source link included") &&
        harness_expect_equal(labels->database_context_checked,
@@ -104,12 +106,10 @@ static int harness_check_localized_labels(void)
        harness_expect_equal(labels->session_named, "Session named") &&
        harness_expect_equal(labels->fontawesome_shortcode_confirmed,
                             "Font Awesome shortcode confirmed") &&
-       harness_expect_equal(labels->user_memory_considered,
-                            "User memory considered") &&
-       harness_expect_equal(labels->database_memory_considered,
-                            "Database memory considered") &&
        harness_expect_equal(labels->no_web_search_or_fetch_used,
                             "No web search or web fetch was used.") &&
+       harness_expect_equal(labels->unicode_emoji_found,
+                            "The response included emoji.") &&
        harness_expect_equal(
          labels->linked_source_reference_not_found,
          "A linked HTTP source reference was required but not found.") &&
@@ -518,15 +518,19 @@ static int harness_check_page_scripts(void)
                                "function answerQualityCheckLabel(row,check)") &&
        harness_expect_contains(
          page_html,
-         "key=='web_reference')return answerQualityAttr(row,"
-         "'source-link-included-label'") &&
+         "key=='unicode_emoji_absent')return answerQualityAttr(row,"
+         "'no-unicode-emoji-label'") &&
        harness_expect_contains(
          page_html,
-         "key=='memory_database_hint_remember')return answerQualityAttr(row,"
-         "'database-memory-considered-label'") &&
+         "key=='web_reference')return answerQualityAttr(row,"
+         "'source-link-included-label'") &&
        harness_expect_contains(page_html,
                                "function answerQualityCheckDetail("
                                "row,check,status)") &&
+       harness_expect_contains(
+         page_html,
+         "key=='unicode_emoji_absent'&&(status=='failed'||status=='error'))"
+         "return answerQualityAttr(row,'unicode-emoji-found-label',detail)") &&
        harness_expect_contains(
          page_html,
          "status=='not_applicable')return answerQualityAttr(row,"
@@ -1987,14 +1991,14 @@ static int harness_check_responses_items(void)
   labels.failed = "Localized Failed";
   labels.not_applicable = "Localized Not Applicable";
   labels.check = "Localized Check";
+  labels.no_unicode_emoji = "Localized No Emoji";
   labels.source_link_included = "Localized Source Link Included";
   labels.database_context_checked = "Localized Database Context Checked";
   labels.session_named = "Localized Session Named";
   labels.fontawesome_shortcode_confirmed =
     "Localized Font Awesome Shortcode Confirmed";
-  labels.user_memory_considered = "Localized User Memory Considered";
-  labels.database_memory_considered = "Localized Database Memory Considered";
   labels.no_web_search_or_fetch_used = "Localized No Web Activity";
+  labels.unicode_emoji_found = "Localized Emoji Found";
   labels.linked_source_reference_not_found =
     "Localized Linked Source Reference Not Found";
   labels.check_did_not_apply = "Localized Check Did Not Apply";
@@ -2123,6 +2127,9 @@ static int harness_check_responses_items(void)
   message.text = "Answer Quality";
   message.metadata_json =
     "{\"outcome\":\"failed\",\"checks\":["
+    "{\"key\":\"unicode_emoji_absent\","
+    "\"label\":\"No emoji\",\"status\":\"failed\","
+    "\"detail\":\"The response included emoji.\"},"
     "{\"key\":\"database_context_read\","
     "\"label\":\"Database context checked\",\"status\":\"failed\"},"
     "{\"key\":\"web_reference\",\"label\":\"Source link included\","
@@ -2299,6 +2306,9 @@ static int harness_check_responses_items(void)
                                "data-check-label=\"Localized Check\"") &&
        harness_expect_contains(
          quality_html,
+         "data-no-unicode-emoji-label=\"Localized No Emoji\"") &&
+       harness_expect_contains(
+         quality_html,
          "data-source-link-included-label=\"Localized Source Link "
          "Included\"") &&
        harness_expect_contains(
@@ -2314,16 +2324,11 @@ static int harness_check_responses_items(void)
          "Awesome Shortcode Confirmed\"") &&
        harness_expect_contains(
          quality_html,
-         "data-user-memory-considered-label=\"Localized User Memory "
-         "Considered\"") &&
-       harness_expect_contains(
-         quality_html,
-         "data-database-memory-considered-label=\"Localized Database Memory "
-         "Considered\"") &&
-       harness_expect_contains(
-         quality_html,
          "data-no-web-search-or-fetch-used-label=\"Localized No Web "
          "Activity\"") &&
+       harness_expect_contains(
+         quality_html,
+         "data-unicode-emoji-found-label=\"Localized Emoji Found\"") &&
        harness_expect_contains(
          quality_html,
          "data-linked-source-reference-not-found-label=\"Localized Linked "

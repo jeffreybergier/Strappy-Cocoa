@@ -21,6 +21,7 @@
 #include "../shared/strappy_config.h"
 #include "../shared/strappy_db.h"
 #include "../shared/strappy_prompt.h"
+#include "../shared/strappy_quality_policy.h"
 #include "../shared/strappy_responses.h"
 #include "../shared/strappy_session.h"
 #include "../shared/strappy_tools.h"
@@ -78,6 +79,9 @@
   "ALWAYS call this tool when converting ISO 8601 datetimes to numeric " \
   "timestamps. Returns a JSON array of timestamp strings in input order."
 
+#define HARNESS_UNICODE_EMOJI_ANSWER \
+  "Initial answer. \xF0\x9F\x98\x80"
+
 #define HARNESS_MEMORY_USER_FACT_FORGET_DESCRIPTION \
   "Call this tool to forget durable facts that are no longer correct or useful."
 
@@ -85,6 +89,52 @@ static int harness_fail(const char *message)
 {
   fprintf(stderr, "%s\n", message);
   return 0;
+}
+
+static int harness_test_unicode_emoji_scan(void)
+{
+  static const struct {
+    const char *text;
+    int expected;
+  } cases[] = {
+    { NULL, 0 },
+    { "", 0 },
+    { "Plain ASCII [source](https://example.com).", 0 },
+    { "# * 0123456789", 0 },
+    { "Japanese: \xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E", 0 },
+    { "Invalid UTF-8: \xF0\x28\x8C\x28", 0 },
+    { "Copyright: \xC2\xA9", 1 },
+    { "Heart: \xE2\x9D\xA4", 1 },
+    { "Grinning: \xF0\x9F\x98\x80", 1 },
+    { "Flag: \xF0\x9F\x87\xBA\xF0\x9F\x87\xB8", 1 },
+    { "Skin tone: \xF0\x9F\x8F\xBD", 1 },
+    { "Keycap: 1\xEF\xB8\x8F\xE2\x83\xA3", 1 },
+    { "[source](https://example.com) then \xF0\x9F\x98\x80", 1 }
+  };
+  size_t index;
+
+  for (index = 0U; index < (sizeof(cases) / sizeof(cases[0])); index++) {
+    int actual;
+
+    actual = strappy_quality_policy_text_has_unicode_emoji(
+      cases[index].text);
+    if (actual != cases[index].expected) {
+      fprintf(stderr,
+              "Unicode emoji scan case %lu failed: expected=%d actual=%d\n",
+              (unsigned long)index,
+              cases[index].expected,
+              actual);
+      return 0;
+    }
+  }
+  if ((strappy_quality_policy_find(
+         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) != NULL) ||
+      (strappy_quality_policy_find(
+         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) != NULL)) {
+    return harness_fail(
+      "Optional memory tools unexpectedly remain answer-quality checks.");
+  }
+  return 1;
 }
 
 static int harness_double_matches(double actual, double expected)
@@ -1346,6 +1396,10 @@ static int harness_request_base_is_valid(cJSON *root,
       (instructions->valuestring == NULL) ||
       !harness_instructions_include_resource_sections(
         instructions->valuestring) ||
+      (strstr(instructions->valuestring,
+              "`unicode_emoji_absent`") == NULL) ||
+      (strstr(instructions->valuestring,
+              "NEVER use unicode emoji in your answer") == NULL) ||
       (has_web_search != has_web_fetch) ||
       (has_web_search != has_web_reference_key) ||
       (has_web_search != has_web_reference_instruction) ||
@@ -1679,7 +1733,8 @@ static int harness_run_answer_quality_server(int listener_fd)
     "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
     "\"id\":\"msg-quality-first\",\"role\":\"assistant\","
     "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
-    "\"text\":\"Initial answer.\",\"annotations\":[]}]}],"
+    "\"text\":\"" HARNESS_UNICODE_EMOJI_ANSWER
+    "\",\"annotations\":[]}]}],"
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":3,"
     "\"total_tokens\":7}}";
   char *body;
@@ -2594,7 +2649,7 @@ static int harness_test_answer_quality_report(void)
     &error);
   server_ok = harness_wait_for_server(server_pid, result == NULL);
   ok = (result != NULL) &&
-    (strcmp(result, "Initial answer.") == 0) &&
+    (strcmp(result, HARNESS_UNICODE_EMOJI_ANSWER) == 0) &&
     server_ok && events.valid && (events.count == 1LL) &&
     (events.answer_quality_count == 1LL) &&
     events.saw_thinking && !events.saw_tools &&
@@ -2637,50 +2692,59 @@ static int harness_test_answer_quality_report(void)
                         &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
-                        "outcome='failed' AND guidance_version='4';",
+                        "outcome='failed' AND guidance_version='6';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks;",
-                        &value) && (value == 7LL) &&
+                        &value) && (value == 6LL) &&
       harness_query_int(
         db,
         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
         "(ordinal=0 AND check_key='answer_non_empty' AND "
         "check_kind='answer_content' AND label='Answer provided' AND "
         "tool_name IS NULL) OR "
-        "(ordinal=1 AND check_key='web_reference' AND "
+        "(ordinal=1 AND check_key='unicode_emoji_absent' AND "
+        "check_kind='answer_content' AND label='No emoji' AND "
+        "tool_name IS NULL) OR "
+        "(ordinal=2 AND check_key='web_reference' AND "
         "check_kind='answer_content' AND label='Source link included' AND "
         "tool_name IS NULL) OR "
         "(ordinal=5 AND check_key='database_context_read' AND "
         "check_kind='required_tool' AND label='Database context checked' AND "
         "tool_name='" STRAPPY_TOOL_DATABASE_CONTEXT_READ "') OR "
-        "(ordinal=2 AND check_key='helper_session_name_write' AND "
+        "(ordinal=3 AND check_key='helper_session_name_write' AND "
         "check_kind='required_tool' AND label='Session named' AND "
         "tool_name='" STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE "') OR "
-        "(ordinal=3 AND check_key='helper_fontawesome_shortcode_confirm' AND "
+        "(ordinal=4 AND check_key='helper_fontawesome_shortcode_confirm' AND "
         "check_kind='required_tool' AND "
         "label='Font Awesome shortcode confirmed' AND "
-        "tool_name='" STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM "') OR "
-        "(ordinal=4 AND check_key='memory_user_fact_remember' AND "
-        "check_kind='required_tool' AND label='User memory considered' AND "
-        "tool_name='" STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER "') OR "
-        "(ordinal=6 AND check_key='memory_database_hint_remember' AND "
-        "check_kind='required_tool' AND label='Database memory considered' AND "
-        "tool_name='" STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER "');",
-        &value) && (value == 7LL) &&
+        "tool_name='" STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM "');",
+        &value) && (value == 6LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
                         "status='failed';",
-                        &value) && (value == 5LL) &&
+                        &value) && (value == 4LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_checks WHERE "
+                        "check_key='unicode_emoji_absent' AND "
+                        "status='failed' AND "
+                        "detail='The response included emoji.';",
+                        &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
                         "status='not_applicable' AND "
                         "check_key='web_reference';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_checks WHERE "
+                        "check_key IN ('memory_user_fact_remember',"
+                        "'memory_database_hint_remember');",
+                        &value) && (value == 0LL) &&
+      harness_query_int(db,
                         "SELECT COUNT(*) FROM item_text_parts p "
                         "JOIN message_items m ON m.item_id=p.item_id WHERE "
-                        "m.role='assistant' AND p.text='Initial answer.';",
+                        "m.role='assistant' AND p.text='"
+                        HARNESS_UNICODE_EMOJI_ANSWER "';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM sessions WHERE "
@@ -2700,7 +2764,7 @@ static int harness_test_answer_quality_report(void)
                                            &timeline,
                                            &error) &&
       harness_answer_quality_precedes_assistant(&timeline,
-                                                "Initial answer.",
+                                                HARNESS_UNICODE_EMOJI_ANSWER,
                                                 "\"outcome\":\"failed\"") &&
       (timeline.count >= 2U) &&
       strappy_db_list_response_timeline_range(path,
@@ -2711,7 +2775,7 @@ static int harness_test_answer_quality_report(void)
                                               &error) &&
       (timeline_total == timeline.count) && (timeline_tail.count == 2U) &&
       harness_answer_quality_precedes_assistant(&timeline_tail,
-                                                "Initial answer.",
+                                                HARNESS_UNICODE_EMOJI_ANSWER,
                                                 "\"outcome\":\"failed\"");
   }
   if (!ok) {
@@ -2810,7 +2874,7 @@ static int harness_test_world_knowledge_assistant_set(void)
                            &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
-                        "outcome='failed' AND guidance_version='4';",
+                        "outcome='failed' AND guidance_version='6';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks;",
@@ -2818,9 +2882,9 @@ static int harness_test_world_knowledge_assistant_set(void)
       harness_query_int(
         db,
         "SELECT COUNT(*) FROM answer_quality_checks WHERE check_key IN ("
-        "'answer_non_empty','web_reference','helper_session_name_write',"
-        "'helper_fontawesome_shortcode_confirm',"
-        "'memory_user_fact_remember');",
+        "'answer_non_empty','unicode_emoji_absent','web_reference',"
+        "'helper_session_name_write',"
+        "'helper_fontawesome_shortcode_confirm');",
         &value) && (value == 5LL) &&
       harness_query_int(
         db,
@@ -2927,11 +2991,11 @@ static int harness_test_empty_answer_quality_report(void)
                         &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
-                        "outcome='failed' AND guidance_version='4';",
+                        "outcome='failed' AND guidance_version='6';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks;",
-                        &value) && (value == 7LL) &&
+                        &value) && (value == 6LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
                         "ordinal=0 AND check_key='answer_non_empty' AND "
@@ -2943,7 +3007,12 @@ static int harness_test_empty_answer_quality_report(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
                         "check_kind='required_tool' AND status='failed';",
-                        &value) && (value == 5LL) &&
+                        &value) && (value == 3LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_checks WHERE "
+                        "check_key='unicode_emoji_absent' AND "
+                        "status='passed';",
+                        &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
                         "check_key='web_reference' AND "
@@ -3085,12 +3154,12 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
                         &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
-                        "outcome='failed' AND guidance_version='4';",
+                        "outcome='failed' AND guidance_version='6';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
                         "status='passed';",
-                        &value) && (value == 5LL) &&
+                        &value) && (value == 4LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
                         "check_key='answer_non_empty' AND status='failed';",
@@ -3296,7 +3365,7 @@ static int harness_test_valid_web_reference_passes_content_check(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
                         "status='failed';",
-                        &value) && (value == 5LL);
+                        &value) && (value == 3LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;
@@ -3418,7 +3487,7 @@ static int harness_test_function_tool_continuation(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
                         "status='failed';",
-                        &value) && (value == 5LL);
+                        &value) && (value == 3LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;
@@ -4634,7 +4703,8 @@ cleanup:
 
 int main(void)
 {
-  if (harness_test_request_surfaces() &&
+  if (harness_test_unicode_emoji_scan() &&
+      harness_test_request_surfaces() &&
       harness_test_ledger() &&
       harness_test_cumulative_session_usage_cost() &&
       harness_test_answer_quality_report() &&

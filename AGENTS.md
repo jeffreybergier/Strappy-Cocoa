@@ -137,7 +137,10 @@ House style for Strappy source:
     code-owned ordered quality checks exactly once and persist one
     `answer_quality_audits` report with its `answer_quality_checks`. The first
     check verifies that the response contains a non-whitespace assistant
-    answer. Render that informational report in the visible timeline
+    answer. The next check scans the answer's UTF-8 text for Unicode emoji and
+    fails at the first match; ASCII keycap bases such as digits, `#`, and `*`
+    are allowed unless an emoji selector or keycap combining mark follows.
+    Render that informational report in the visible timeline
     immediately before its assistant answer when present; an empty response
     leaves the failed report as the final timeline item. Track tool activity
     across the whole logical request. When `openrouter:web_search` or
@@ -146,25 +149,25 @@ House style for Strappy source:
     or HTTPS link with a non-empty title and URL. Database inventory is an
     application-seeded preflight tool output rather than a quality rule. The
     report always uses the universal set checks for
-    `helper_session_name_write`, `helper_fontawesome_shortcode_confirm`, and
-    `memory_user_fact_remember`. Personal Assistant additionally checks
-    `database_context_read` and `memory_database_hint_remember`; World Knowledge
-    never runs those database-specific checks. The database-context and memory
-    remember tools are action-only: `database_context_read` requires an approved
-    database id, `memory_user_fact_remember` requires a non-empty fact, and
+    `helper_session_name_write` and `helper_fontawesome_shortcode_confirm`.
+    Personal Assistant additionally checks `database_context_read`; World
+    Knowledge never runs that database-specific check. `database_context_read`
+    requires an approved database id and may be skipped when it is not
+    applicable, in which case its informational quality check may fail. The
+    memory remember tools are optional and are not quality checks:
+    `memory_user_fact_remember` requires a non-empty fact, and
     `memory_database_hint_remember` requires both an approved database id and a
-    non-empty hint. They do not accept empty or null no-ops and may be skipped
-    when they are not applicable; their informational quality checks may then
-    fail. The session-name tool requires a non-empty string and updates the
-    active session name. The Font Awesome confirmation tool requires a non-empty
-    `shortcodes` array and does not accept a null or empty-array no-op.
+    non-empty hint. They do not accept empty or null no-ops. The session-name
+    tool requires a non-empty string and updates the active session name. The
+    Font Awesome confirmation tool requires a non-empty `shortcodes` array and
+    does not accept a null or empty-array no-op.
     `database_query` is not a quality rule and still requires both an approved
-    database id and read-only SQL. User-fact and database-hint memory checks are
-    last; user-fact memory may include useful durable facts learned from
-    approved databases, while database-hint memory must not store private row
-    values or one-off query results. Never append a developer remediation
-    message or issue another model request because a quality check failed; the
-    report informs the user, who decides whether to ask for corrections. Accept
+    database id and read-only SQL. User-fact memory may include useful durable
+    facts learned from approved databases, while database-hint memory must not
+    store private row values or one-off query results. Never append a developer
+    remediation message or issue another model request because a quality check
+    failed; the report informs the user, who decides whether to ask for
+    corrections. Accept
     an empty tool-free response as final after recording the failed non-empty
     answer check alongside every other applicable check. Never append a
     developer message or issue another model request for an empty answer. Every

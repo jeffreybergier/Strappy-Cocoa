@@ -32,13 +32,13 @@ typedef struct strappy_webview_labels {
   const char *failed;
   const char *not_applicable;
   const char *check;
+  const char *no_unicode_emoji;
   const char *source_link_included;
   const char *database_context_checked;
   const char *session_named;
   const char *fontawesome_shortcode_confirmed;
-  const char *user_memory_considered;
-  const char *database_memory_considered;
   const char *no_web_search_or_fetch_used;
+  const char *unicode_emoji_found;
   const char *linked_source_reference_not_found;
   const char *check_did_not_apply;
   const char *required_tool_not_called;

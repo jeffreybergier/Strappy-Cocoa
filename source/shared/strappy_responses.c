@@ -322,6 +322,15 @@ static int strappy_responses_audit_evaluate(
         failed = 1;
       }
     } else if (rule->definition->evaluation_kind ==
+               STRAPPY_QUALITY_CHECK_UNICODE_EMOJI_ABSENT) {
+      if (strappy_quality_policy_text_has_unicode_emoji(response_text)) {
+        check->status = "failed";
+        check->detail = "The response included emoji.";
+        failed = 1;
+      } else {
+        check->status = "passed";
+      }
+    } else if (rule->definition->evaluation_kind ==
                STRAPPY_QUALITY_CHECK_WEB_REFERENCE) {
       if (!audit->web_reference_required) {
         check->status = "not_applicable";

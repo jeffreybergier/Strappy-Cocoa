@@ -2057,6 +2057,12 @@ static int harness_run_assistant_set_tests(void)
       STRAPPY_TOOL_MEMORY_USER_FACT_READ) &&
     strappy_assistant_set_profile_allows_tool(
       &world,
+      STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) &&
+    !strappy_assistant_set_profile_has_quality_check(
+      &world,
+      STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) &&
+    strappy_assistant_set_profile_allows_tool(
+      &world,
       STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
     !strappy_assistant_set_profile_allows_tool(
       &world,
@@ -2072,11 +2078,14 @@ static int harness_run_assistant_set_tests(void)
     strappy_assistant_set_profile_is_available(&personal) &&
     (personal.tool_name_count == 15U) &&
     (personal.preflight_tool_name_count == 2U) &&
-    (personal.quality_check_key_count == 7U) &&
+    (personal.quality_check_key_count == 6U) &&
     strappy_assistant_set_profile_allows_tool(
       &personal,
       STRAPPY_TOOL_DATABASE_QUERY) &&
-    strappy_assistant_set_profile_has_quality_check(
+    strappy_assistant_set_profile_allows_tool(
+      &personal,
+      STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
+    !strappy_assistant_set_profile_has_quality_check(
       &personal,
       STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
     strappy_assistant_sets_load_profile(

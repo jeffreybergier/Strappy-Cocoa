@@ -46,13 +46,13 @@ typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_FAILED,
   STRAPPY_WEBVIEW_LABEL_NOT_APPLICABLE,
   STRAPPY_WEBVIEW_LABEL_CHECK,
+  STRAPPY_WEBVIEW_LABEL_NO_UNICODE_EMOJI,
   STRAPPY_WEBVIEW_LABEL_SOURCE_LINK_INCLUDED,
   STRAPPY_WEBVIEW_LABEL_DATABASE_CONTEXT_CHECKED,
   STRAPPY_WEBVIEW_LABEL_SESSION_NAMED,
   STRAPPY_WEBVIEW_LABEL_FONTAWESOME_SHORTCODE_CONFIRMED,
-  STRAPPY_WEBVIEW_LABEL_USER_MEMORY_CONSIDERED,
-  STRAPPY_WEBVIEW_LABEL_DATABASE_MEMORY_CONSIDERED,
   STRAPPY_WEBVIEW_LABEL_NO_WEB_SEARCH_OR_FETCH_USED,
+  STRAPPY_WEBVIEW_LABEL_UNICODE_EMOJI_FOUND,
   STRAPPY_WEBVIEW_LABEL_LINKED_SOURCE_REFERENCE_NOT_FOUND,
   STRAPPY_WEBVIEW_LABEL_CHECK_DID_NOT_APPLY,
   STRAPPY_WEBVIEW_LABEL_REQUIRED_TOOL_NOT_CALLED,
@@ -85,13 +85,13 @@ static const char * const g_strappy_webview_label_keys[
   "Failed",
   "Not Applicable",
   "Check",
+  "No emoji",
   "Source link included",
   "Database context checked",
   "Session named",
   "Font Awesome shortcode confirmed",
-  "User memory considered",
-  "Database memory considered",
   "No web search or web fetch was used.",
+  "The response included emoji.",
   "A linked HTTP source reference was required but not found.",
   "This check did not apply to the answer.",
   "The required tool was not called."
@@ -135,6 +135,8 @@ static void strappy_webview_assign_localized_labels(
   labels->failed = values[STRAPPY_WEBVIEW_LABEL_FAILED];
   labels->not_applicable = values[STRAPPY_WEBVIEW_LABEL_NOT_APPLICABLE];
   labels->check = values[STRAPPY_WEBVIEW_LABEL_CHECK];
+  labels->no_unicode_emoji =
+    values[STRAPPY_WEBVIEW_LABEL_NO_UNICODE_EMOJI];
   labels->source_link_included =
     values[STRAPPY_WEBVIEW_LABEL_SOURCE_LINK_INCLUDED];
   labels->database_context_checked =
@@ -142,12 +144,10 @@ static void strappy_webview_assign_localized_labels(
   labels->session_named = values[STRAPPY_WEBVIEW_LABEL_SESSION_NAMED];
   labels->fontawesome_shortcode_confirmed =
     values[STRAPPY_WEBVIEW_LABEL_FONTAWESOME_SHORTCODE_CONFIRMED];
-  labels->user_memory_considered =
-    values[STRAPPY_WEBVIEW_LABEL_USER_MEMORY_CONSIDERED];
-  labels->database_memory_considered =
-    values[STRAPPY_WEBVIEW_LABEL_DATABASE_MEMORY_CONSIDERED];
   labels->no_web_search_or_fetch_used =
     values[STRAPPY_WEBVIEW_LABEL_NO_WEB_SEARCH_OR_FETCH_USED];
+  labels->unicode_emoji_found =
+    values[STRAPPY_WEBVIEW_LABEL_UNICODE_EMOJI_FOUND];
   labels->linked_source_reference_not_found =
     values[STRAPPY_WEBVIEW_LABEL_LINKED_SOURCE_REFERENCE_NOT_FOUND];
   labels->check_did_not_apply =
@@ -844,6 +844,16 @@ static const char *strappy_webview_source_link_included_label(
   return "Source link included";
 }
 
+static const char *strappy_webview_no_unicode_emoji_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->no_unicode_emoji != NULL) &&
+      (labels->no_unicode_emoji[0] != '\0')) {
+    return labels->no_unicode_emoji;
+  }
+  return "No emoji";
+}
+
 static const char *strappy_webview_database_context_checked_label(
   const strappy_webview_labels *labels)
 {
@@ -875,26 +885,6 @@ static const char *strappy_webview_fontawesome_shortcode_confirmed_label(
   return "Font Awesome shortcode confirmed";
 }
 
-static const char *strappy_webview_user_memory_considered_label(
-  const strappy_webview_labels *labels)
-{
-  if ((labels != NULL) && (labels->user_memory_considered != NULL) &&
-      (labels->user_memory_considered[0] != '\0')) {
-    return labels->user_memory_considered;
-  }
-  return "User memory considered";
-}
-
-static const char *strappy_webview_database_memory_considered_label(
-  const strappy_webview_labels *labels)
-{
-  if ((labels != NULL) && (labels->database_memory_considered != NULL) &&
-      (labels->database_memory_considered[0] != '\0')) {
-    return labels->database_memory_considered;
-  }
-  return "Database memory considered";
-}
-
 static const char *strappy_webview_no_web_search_or_fetch_used_label(
   const strappy_webview_labels *labels)
 {
@@ -915,6 +905,16 @@ static const char *strappy_webview_linked_source_reference_not_found_label(
     return labels->linked_source_reference_not_found;
   }
   return "A linked HTTP source reference was required but not found.";
+}
+
+static const char *strappy_webview_unicode_emoji_found_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->unicode_emoji_found != NULL) &&
+      (labels->unicode_emoji_found[0] != '\0')) {
+    return labels->unicode_emoji_found;
+  }
+  return "The response included emoji.";
 }
 
 static const char *strappy_webview_check_did_not_apply_label(
@@ -2586,15 +2586,15 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "n=m.getElementsByTagName('*');for(i=0;i<n.length;i++){if(hasClass(n[i],'row')&&hasClass(n[i],'answer_quality'))out[out.length]=n[i];}return out;}",
     "function answerQualityAttr(row,name,fallback){var v=row&&row.getAttribute?row.getAttribute('data-'+name)||'':'';return v!==''?v:fallback;}",
     "function answerQualityCheckLabel(row,check){var key=jsonText(check&&check.key);",
+    "if(key=='unicode_emoji_absent')return answerQualityAttr(row,'no-unicode-emoji-label',jsonText(check.label));",
     "if(key=='web_reference')return answerQualityAttr(row,'source-link-included-label',jsonText(check.label));",
     "if(key=='database_context_read')return answerQualityAttr(row,'database-context-checked-label',jsonText(check.label));",
     "if(key=='helper_session_name_write')return answerQualityAttr(row,'session-named-label',jsonText(check.label));",
     "if(key=='helper_fontawesome_shortcode_confirm')return answerQualityAttr(row,'fontawesome-shortcode-confirmed-label',jsonText(check.label));",
-    "if(key=='memory_user_fact_remember')return answerQualityAttr(row,'user-memory-considered-label',jsonText(check.label));",
-    "if(key=='memory_database_hint_remember')return answerQualityAttr(row,'database-memory-considered-label',jsonText(check.label));",
     "return jsonText(check.label||key||answerQualityAttr(row,'check-label','Check'));}",
     "function answerQualityCheckDetail(row,check,status){var key=jsonText(check&&check.key);",
     "var kind=jsonText(check&&check.kind);var detail=jsonText(check&&check.detail);if(detail==='')return '';",
+    "if(key=='unicode_emoji_absent'&&(status=='failed'||status=='error'))return answerQualityAttr(row,'unicode-emoji-found-label',detail);",
     "if(key=='web_reference'&&status=='not_applicable')return answerQualityAttr(row,'no-web-search-or-fetch-used-label',detail);",
     "if(key=='web_reference'&&(status=='failed'||status=='error'))return answerQualityAttr(row,'linked-source-reference-not-found-label',detail);",
     "if(status=='not_applicable')return answerQualityAttr(row,'check-did-not-apply-label',detail);",
@@ -3261,6 +3261,10 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
            strappy_webview_check_label(labels)) &&
          strappy_webview_append_data_attribute(
            &buffer,
+           "no-unicode-emoji-label",
+           strappy_webview_no_unicode_emoji_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
            "source-link-included-label",
            strappy_webview_source_link_included_label(labels)) &&
          strappy_webview_append_data_attribute(
@@ -3277,16 +3281,12 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
            strappy_webview_fontawesome_shortcode_confirmed_label(labels)) &&
          strappy_webview_append_data_attribute(
            &buffer,
-           "user-memory-considered-label",
-           strappy_webview_user_memory_considered_label(labels)) &&
-         strappy_webview_append_data_attribute(
-           &buffer,
-           "database-memory-considered-label",
-           strappy_webview_database_memory_considered_label(labels)) &&
-         strappy_webview_append_data_attribute(
-           &buffer,
            "no-web-search-or-fetch-used-label",
            strappy_webview_no_web_search_or_fetch_used_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
+           "unicode-emoji-found-label",
+           strappy_webview_unicode_emoji_found_label(labels)) &&
          strappy_webview_append_data_attribute(
            &buffer,
            "linked-source-reference-not-found-label",

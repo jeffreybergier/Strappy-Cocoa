@@ -7,10 +7,11 @@
 extern "C" {
 #endif
 
-#define STRAPPY_QUALITY_POLICY_GUIDANCE_VERSION "4"
+#define STRAPPY_QUALITY_POLICY_GUIDANCE_VERSION "6"
 
 typedef enum strappy_quality_check_evaluation_kind {
   STRAPPY_QUALITY_CHECK_ANSWER_NON_EMPTY = 1,
+  STRAPPY_QUALITY_CHECK_UNICODE_EMOJI_ABSENT,
   STRAPPY_QUALITY_CHECK_WEB_REFERENCE,
   STRAPPY_QUALITY_CHECK_REQUIRED_TOOL
 } strappy_quality_check_evaluation_kind;
@@ -28,6 +29,7 @@ const strappy_quality_check_definition *strappy_quality_policy_find(
 size_t strappy_quality_policy_count(void);
 const strappy_quality_check_definition *strappy_quality_policy_at(
   size_t index);
+int strappy_quality_policy_text_has_unicode_emoji(const char *text);
 
 #ifdef __cplusplus
 }

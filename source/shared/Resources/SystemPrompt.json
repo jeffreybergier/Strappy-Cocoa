@@ -27,6 +27,10 @@
       "requirement": "required",
       "instruction": "Return a non-whitespace, self-contained final answer that directly fulfills the user's request. Include the requested result itself; never merely say that it is ready or was provided earlier."
     },
+    "unicode_emoji_absent": {
+      "requirement": "required",
+      "instruction": "NEVER use unicode emoji in your answer. If you do this audit check will FAIL. Use confirmed Font Awesome Markdown shortcodes for visual expression instead."
+    },
     "web_reference": {
       "requirement": "conditional",
       "instruction": "If web search or web fetch activity occurs, your final answer MUST include at least one titled inline Markdown HTTP or HTTPS link to a source you used."
@@ -42,14 +46,6 @@
     "helper_fontawesome_shortcode_confirm": {
       "requirement": "required",
       "instruction": "Before your final answer, helper_fontawesome_shortcode_confirm MUST complete successfully with at least one valid shortcode, which you must use in the answer."
-    },
-    "memory_user_fact_remember": {
-      "requirement": "conditional",
-      "instruction": "If this request reveals a real, useful, durable user fact, store it with memory_user_fact_remember. NEVER invent a fact or store sensitive information."
-    },
-    "memory_database_hint_remember": {
-      "requirement": "conditional",
-      "instruction": "If this request reveals a real, useful, durable database hint, store it with memory_database_hint_remember. NEVER store private row values, guesses, or one-off results."
     }
   }
 }
