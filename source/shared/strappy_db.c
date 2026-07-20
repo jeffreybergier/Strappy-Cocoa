@@ -6,6 +6,7 @@
 #include "strappy_tools.h"
 
 #include <cJSON.h>
+#include <errno.h>
 #include <limits.h>
 #include <pthread.h>
 #include <sqlite3.h>
@@ -1324,6 +1325,12 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "CREATE TABLE IF NOT EXISTS session_assistant_sets ("
     "session_id INTEGER PRIMARY KEY,"
     "assistant_set_id TEXT NOT NULL CHECK(length(assistant_set_id) > 0),"
+    "updated_at_ms INTEGER NOT NULL,"
+    "FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE"
+    ");"
+    "CREATE TABLE IF NOT EXISTS session_working_directories ("
+    "session_id INTEGER PRIMARY KEY,"
+    "working_directory TEXT NOT NULL CHECK(length(working_directory) > 0),"
     "updated_at_ms INTEGER NOT NULL,"
     "FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE"
     ");"
@@ -7338,9 +7345,85 @@ static int strappy_db_update_session_summary(sqlite3 *db,
   return 1;
 }
 
-int strappy_db_create_session(const char *db_path,
-                              long long *session_id_out,
-                              char **error_out)
+static int strappy_db_validate_working_directory(
+  const char *working_directory,
+  char **error_out)
+{
+  struct stat directory_stat;
+
+  if ((working_directory == NULL) || (working_directory[0] == '\0')) {
+    strappy_set_error(error_out, "Session working directory is empty.");
+    return 0;
+  }
+  if (working_directory[0] != '/') {
+    strappy_set_error(error_out,
+                      "Session working directory must be an absolute path.");
+    return 0;
+  }
+  errno = 0;
+  if (stat(working_directory, &directory_stat) != 0) {
+    strappy_set_formatted_error(error_out,
+                                "Could not inspect session working directory "
+                                "%s: %s.",
+                                working_directory,
+                                strerror(errno));
+    return 0;
+  }
+  if (!S_ISDIR(directory_stat.st_mode)) {
+    strappy_set_formatted_error(error_out,
+                                "Session working directory is not a directory: "
+                                "%s.",
+                                working_directory);
+    return 0;
+  }
+  return 1;
+}
+
+static int strappy_db_save_session_working_directory(
+  sqlite3 *db,
+  long long session_id,
+  const char *working_directory,
+  char **error_out)
+{
+  static const char *sql =
+    "INSERT OR REPLACE INTO session_working_directories "
+    "(session_id, working_directory, updated_at_ms) VALUES (?, ?, ?);";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt,
+                           2,
+                           working_directory,
+                           -1,
+                           SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 3, (sqlite3_int64)strappy_db_now_ms());
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save session working directory: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+  return 1;
+}
+
+int strappy_db_create_session_with_working_directory(
+  const char *db_path,
+  const char *working_directory,
+  long long *session_id_out,
+  char **error_out)
 {
   static const char *sql =
     "INSERT INTO sessions "
@@ -7350,9 +7433,15 @@ int strappy_db_create_session(const char *db_path,
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;
+  long long session_id;
+  long long now_ms;
 
   if (session_id_out != NULL) {
     *session_id_out = 0;
+  }
+
+  if (!strappy_db_validate_working_directory(working_directory, error_out)) {
+    return 0;
   }
 
   if (!strappy_db_open(db_path, &db, error_out)) {
@@ -7372,6 +7461,16 @@ int strappy_db_create_session(const char *db_path,
     return 0;
   }
 
+  if (!strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin session insert",
+                       error_out)) {
+    free(default_model_id);
+    strappy_db_release(db);
+    return 0;
+  }
+
+  now_ms = strappy_db_now_ms();
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
@@ -7379,16 +7478,20 @@ int strappy_db_create_session(const char *db_path,
                                 "Could not prepare session insert: %s",
                                 sqlite3_errmsg(db));
     free(default_model_id);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back session insert",
+                    NULL);
     strappy_db_release(db);
     return 0;
   }
 
   rc = sqlite3_bind_text(stmt, 1, default_model_id, -1, SQLITE_TRANSIENT);
   if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_int64(stmt, 2, (sqlite3_int64)strappy_db_now_ms());
+    rc = sqlite3_bind_int64(stmt, 2, (sqlite3_int64)now_ms);
   }
   if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_int64(stmt, 3, (sqlite3_int64)strappy_db_now_ms());
+    rc = sqlite3_bind_int64(stmt, 3, (sqlite3_int64)now_ms);
   }
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
@@ -7396,6 +7499,10 @@ int strappy_db_create_session(const char *db_path,
                                 sqlite3_errmsg(db));
     free(default_model_id);
     sqlite3_finalize(stmt);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back session insert",
+                    NULL);
     strappy_db_release(db);
     return 0;
   }
@@ -7407,18 +7514,206 @@ int strappy_db_create_session(const char *db_path,
                                 sqlite3_errmsg(db));
     free(default_model_id);
     sqlite3_finalize(stmt);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back session insert",
+                    NULL);
     strappy_db_release(db);
     return 0;
   }
 
-  if (session_id_out != NULL) {
-    *session_id_out = (long long)sqlite3_last_insert_rowid(db);
-  }
-
+  session_id = (long long)sqlite3_last_insert_rowid(db);
   free(default_model_id);
   sqlite3_finalize(stmt);
+  if (!strappy_db_save_session_working_directory(db,
+                                                 session_id,
+                                                 working_directory,
+                                                 error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back session insert",
+                    NULL);
+    strappy_db_release(db);
+    return 0;
+  }
+  if (!strappy_db_exec(db,
+                       "COMMIT;",
+                       "Could not commit session insert",
+                       error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back session insert",
+                    NULL);
+    strappy_db_release(db);
+    return 0;
+  }
+  if (session_id_out != NULL) {
+    *session_id_out = session_id;
+  }
   strappy_db_release(db);
   return 1;
+}
+
+int strappy_db_create_session(const char *db_path,
+                              long long *session_id_out,
+                              char **error_out)
+{
+  const char *home_directory;
+
+  home_directory = getenv("HOME");
+  if ((home_directory == NULL) || (home_directory[0] == '\0')) {
+    if (session_id_out != NULL) {
+      *session_id_out = 0;
+    }
+    strappy_set_error(error_out,
+                      "Could not determine the session home directory.");
+    return 0;
+  }
+  return strappy_db_create_session_with_working_directory(db_path,
+                                                          home_directory,
+                                                          session_id_out,
+                                                          error_out);
+}
+
+static int strappy_db_copy_session_working_directory(
+  sqlite3 *db,
+  long long session_id,
+  char **working_directory_out,
+  int *found_out,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT working_directory FROM session_working_directories "
+    "WHERE session_id = ?;";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  *working_directory_out = NULL;
+  *found_out = 0;
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc == SQLITE_ROW) {
+    *working_directory_out = strappy_db_column_string(stmt, 0);
+    *found_out = 1;
+    sqlite3_finalize(stmt);
+    if (*working_directory_out == NULL) {
+      strappy_set_error(error_out,
+                        "Could not allocate session working directory.");
+      return 0;
+    }
+    return 1;
+  }
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read session working directory: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+  return 1;
+}
+
+int strappy_db_get_session_working_directory(
+  const char *db_path,
+  long long session_id,
+  char **working_directory_out,
+  char **error_out)
+{
+  sqlite3 *db;
+  const char *home_directory;
+  int found;
+
+  if (working_directory_out != NULL) {
+    *working_directory_out = NULL;
+  }
+  if ((working_directory_out == NULL) || (session_id <= 0LL)) {
+    strappy_set_error(error_out,
+                      "Session working-directory request is incomplete.");
+    return 0;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  if (!strappy_db_copy_session_working_directory(db,
+                                                 session_id,
+                                                 working_directory_out,
+                                                 &found,
+                                                 error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  if (found) {
+    strappy_db_release(db);
+    return 1;
+  }
+  if (!strappy_db_session_exists(db, session_id, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+
+  home_directory = getenv("HOME");
+  if (!strappy_db_validate_working_directory(home_directory, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  if (!strappy_db_save_session_working_directory(db,
+                                                 session_id,
+                                                 home_directory,
+                                                 error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  *working_directory_out = strappy_string_duplicate(home_directory);
+  if (*working_directory_out == NULL) {
+    strappy_set_error(error_out,
+                      "Could not allocate session working directory.");
+    strappy_db_release(db);
+    return 0;
+  }
+  strappy_db_release(db);
+  return 1;
+}
+
+int strappy_db_update_session_working_directory(
+  const char *db_path,
+  long long session_id,
+  const char *working_directory,
+  char **error_out)
+{
+  sqlite3 *db;
+  int ok;
+
+  if (session_id <= 0LL) {
+    strappy_set_error(error_out, "Session id is not valid.");
+    return 0;
+  }
+  if (!strappy_db_validate_working_directory(working_directory, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out) ||
+      !strappy_db_session_exists(db, session_id, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  ok = strappy_db_save_session_working_directory(db,
+                                                 session_id,
+                                                 working_directory,
+                                                 error_out);
+  strappy_db_release(db);
+  return ok;
 }
 
 static int strappy_db_delete_session_rows(sqlite3 *db,

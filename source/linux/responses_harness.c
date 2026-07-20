@@ -2823,13 +2823,15 @@ static int harness_test_world_knowledge_assistant_set(void)
     unlink(path);
     return 0;
   }
-  if (strappy_session_update_assistant_set(
+  if (!strappy_session_update_assistant_set(
         path,
         session_id,
         "../shared/Resources",
         STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
-        &error) || (error == NULL)) {
-    fprintf(stderr, "Unavailable Coding Assistant set was accepted.\n");
+        &error) || (error != NULL)) {
+    fprintf(stderr,
+            "Available Coding Assistant set was not accepted: %s\n",
+            (error != NULL) ? error : "unknown");
     free(error);
     unlink(path);
     return 0;

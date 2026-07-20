@@ -117,7 +117,7 @@ Deliverables:
   parsing, and result serialization. The registry exposes `database_list_info`,
   `database_context_read`, `database_query`, timestamp helpers, remembered user
   fact helpers, remembered database hint helpers, and
-  `helper_session_name_write`.
+  `helper_session_name_write`, plus the Coding Assistant-only `file_read` tool.
 - [x] Stable database tools named `database_list_info`,
   `database_context_read`, and `database_query`, all using assistant-visible
   database IDs when a database is selected.
@@ -133,7 +133,8 @@ Deliverables:
   round-zero preflight, and ordered answer-quality checks. World Knowledge uses
   only universal tools and `memory_user_fact_read` preflight; Personal Assistant
   additionally enables database tools and `database_list_info` preflight;
-  Coding Assistant is registered as unavailable/Coming Soon.
+  Coding Assistant is available and exclusively receives `file_read` while its
+  remaining coding tools are built.
 - [x] Round-zero application preflight executes the tools selected by the
   session's assistant set and injects their fresh results as application-seeded,
   matched `function_call` / `function_call_output` input pairs without creating
@@ -257,7 +258,7 @@ centralized so phase deliverables do not duplicate test-plan details.
 - [x] Linux `database_query_harness` coverage for tool schema loading/filtering,
   database-list output shape, SQL safety checks, timestamp helpers, remembered
   user/database helper memory, session naming, session-backed tool audit fields,
-  and message persistence.
+  message persistence, and bounded UTF-8 `file_read` behavior.
 - [x] Linux `webview_harness` coverage for webview rendering of generated
   HTML/JS, JSON objects, tool events, reasoning, and harness turns.
 - [ ] Mocked API responses covering success, malformed JSON, HTTP errors, and

@@ -3,6 +3,7 @@
 #include "strappy_cocoa.h"
 #include "strappy_core.h"
 #include "strappy_db.h"
+#include "strappy_file_read.h"
 
 #include <cJSON.h>
 #include <errno.h>
@@ -60,7 +61,8 @@
 
 typedef enum strappy_tool_kind {
   STRAPPY_TOOL_KIND_DATABASE = 1,
-  STRAPPY_TOOL_KIND_HELPER = 2
+  STRAPPY_TOOL_KIND_HELPER = 2,
+  STRAPPY_TOOL_KIND_DEVELOPER = 3
 } strappy_tool_kind;
 
 typedef struct strappy_tool_definition {
@@ -140,6 +142,7 @@ static int strappy_tools_helper_is_space(char value);
 static const strappy_tool_definition strappy_tool_definitions[] = {
   { STRAPPY_TOOL_DATABASE_LIST_INFO, STRAPPY_TOOL_KIND_DATABASE },
   { STRAPPY_TOOL_DATABASE_QUERY, STRAPPY_TOOL_KIND_DATABASE },
+  { STRAPPY_TOOL_FILE_READ, STRAPPY_TOOL_KIND_DEVELOPER },
   { STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_MEMORY_USER_FACT_READ, STRAPPY_TOOL_KIND_HELPER },
@@ -6252,6 +6255,13 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
   if ((tool_name == NULL) || (tool_name[0] == '\0')) {
     strappy_set_error(error_out, "Tool name is empty.");
     return NULL;
+  }
+
+  if (strcmp(tool_name, STRAPPY_TOOL_FILE_READ) == 0) {
+    return strappy_file_read_execute(session_db_path,
+                                     active_session_id,
+                                     arguments_json,
+                                     error_out);
   }
 
   if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_LIST_INFO) == 0) {

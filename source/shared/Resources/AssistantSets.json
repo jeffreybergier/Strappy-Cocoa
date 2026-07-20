@@ -59,10 +59,12 @@
     {
       "id": "coding_assistant",
       "display_name": "Coding Assistant",
-      "detail": "Coming Soon",
-      "availability": "coming_soon",
-      "goal": "You are an expert coding assistant. Help inspect, explain, change, and verify software using the coding tools available to you. This assistant set remains unavailable until those coding tools are implemented.",
-      "additional_tools": [],
+      "detail": "Code inspection and development",
+      "availability": "available",
+      "goal": "You are an expert coding assistant. Help inspect, explain, change, and verify software using the coding tools available to you.",
+      "additional_tools": [
+        "file_read"
+      ],
       "additional_preflight_tools": [],
       "additional_quality_checks": []
     }

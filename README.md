@@ -34,8 +34,8 @@ copy, audit guidance, invariant personality, and hard rules in
   and session-name tools.
 - Personal Assistant is the default and adds the personal-database tools and
   database-specific checks.
-- Coding Assistant is visible as Coming Soon and cannot be selected until its
-  coding tools are implemented.
+- Coding Assistant is available with the set-only `file_read` tool, which reads
+  bounded UTF-8 text ranges relative to a per-session working directory.
 
 An assistant set is selected per session and can be changed between prompts.
 The prompt-options button is disabled while a prompt is in progress, so model,

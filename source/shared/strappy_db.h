@@ -373,6 +373,21 @@ int strappy_db_save_exchange_with_id(const char *db_path,
 int strappy_db_create_session(const char *db_path,
                               long long *session_id_out,
                               char **error_out);
+int strappy_db_create_session_with_working_directory(
+  const char *db_path,
+  const char *working_directory,
+  long long *session_id_out,
+  char **error_out);
+int strappy_db_get_session_working_directory(
+  const char *db_path,
+  long long session_id,
+  char **working_directory_out,
+  char **error_out);
+int strappy_db_update_session_working_directory(
+  const char *db_path,
+  long long session_id,
+  const char *working_directory,
+  char **error_out);
 int strappy_db_update_session_name(const char *db_path,
                                    long long session_id,
                                    const char *name,

@@ -79,6 +79,46 @@
     {
       "type": "function",
       "function": {
+        "name": "file_read",
+        "description": "Read a complete range of UTF-8 text lines from a file. Relative paths resolve from the session working directory; absolute paths are accepted. offset is 1-based and defaults to 1. limit defaults to 500 and cannot exceed 500 lines. Returns JSON with content, offset, line_count, and next_offset. The requested range must fit within 25 KiB; if it does not, the tool returns an error and must be retried with a smaller limit.",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "File path, relative to the session working directory or absolute.",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "offset": {
+              "type": "integer",
+              "description": "One-based line at which to start reading.",
+              "minimum": 1,
+              "maximum": 2147483647,
+              "default": 1
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum number of complete lines to read.",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 500
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "path"
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "helper_datetime_to_iso8601",
         "description": "ALWAYS call this tool when displaying numeric timestamps. Convert numeric timestamp strings to ISO 8601 datetimes. Returns a JSON array in input order.",
         "parameters": {
