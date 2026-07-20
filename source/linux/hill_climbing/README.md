@@ -154,21 +154,19 @@ columns and structured-node trees; it is not a copy of the provider payload.
 
 ## Scoring and iteration
 
-Score version 3 is centered on zero and uses the shared runtime's persisted
-answer-quality audit as its mandatory baseline:
+Score version 4 is centered on zero and keeps each scoring rule independent:
 
 - every `failed` or `error` audit check scores -5 points;
 - `passed` and `not_applicable` checks score zero;
 - a required-tool audit passes only after that tool completes successfully;
-- if any audit check fails, all answer bonuses are reported but withheld;
-- when every applicable audit passes, the answer starts at zero and earns +5
-  for mentioning the seeded remembered name, +1 for every unique expected
-  active member mentioned, and +1 for every unique valid non-image inline
-  Markdown HTTP(S) link, up to 10 link points;
-- total run cost is rounded to the nearest cent using half-up rounding, then
-  scores `5 - rounded cost in cents`: $0.00 is +5, $0.03 is +2, $0.05 is 0,
-  and $0.06 is -1. A failed audit withholds positive price points along with
-  the answer bonuses, but negative price points still apply.
+- every bonus hit scores +1 independently: one for mentioning the seeded
+  remembered name, one for every unique expected active member mentioned, and
+  one for every unique valid non-image inline Markdown HTTP(S) link, up to 10
+  link points; a miss scores zero;
+- no points are withheld when an audit fails;
+- total run cost is rounded to the nearest cent using half-up rounding. Every
+  cent below the $0.05 target scores +5 and every cent above it scores -5:
+  $0.03 is +10, $0.05 is 0, and $0.06 is -5.
 
 The evaluator derives the top five K-pop artists dynamically from aggregate
 play counts in the private fixture. Before a live comparison, the roster for
@@ -185,8 +183,9 @@ as words as well, so the `K` in `K-pop` does not count as member `K`.
 
 Latency, API attempts, local tool errors, and web activity remain visible
 diagnostics but do not affect the score. Cost is the sole efficiency metric in
-the score. With the current 35-member roster and 10-link cap, a zero-cost,
-fully compliant answer can score at most +55. The score measures audit
+the score. With the current 35-member roster, one remembered-name hit, a
+10-link cap, and a zero-cost run, a fully compliant answer can score at most
++71. The score measures audit
 compliance and answer coverage; it does not declare blood types or subjective
 personality descriptions factually correct.
 

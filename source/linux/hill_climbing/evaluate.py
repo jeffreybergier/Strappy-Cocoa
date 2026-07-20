@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit-first deterministic scorer for private hill-climbing runs."""
+"""Deterministic scorer for private hill-climbing runs."""
 
 from __future__ import annotations
 
@@ -22,11 +22,12 @@ from hill_climbing_ground_truth import (
 )
 
 
-SCORE_VERSION = 3
+SCORE_VERSION = 4
 AUDIT_FAILURE_POINTS = 5
-NAME_BONUS_POINTS = 5
+BONUS_HIT_POINTS = 1
 LINK_BONUS_LIMIT = 10
 PRICE_GOAL_CENTS = 5
+PRICE_POINTS_PER_CENT = 5
 
 MARKDOWN_LINK = re.compile(
     r"(?<!!)\[([^\]\r\n]+)\]\((https?://[^\s)\r\n]+)\)",
@@ -39,10 +40,8 @@ class ScoreBreakdown:
     score: int
     audit_penalty: int
     failed_audit_count: int
-    awarded_bonus: int
-    potential_bonus: int
+    bonus_points: int
     price_points: int
-    awarded_price_points: int
     rounded_cost_cents: int
     name_mentioned: bool
     matched_members: list[dict[str, str]] = field(default_factory=list)
@@ -57,10 +56,8 @@ class Result:
     score: int
     audit_penalty: int
     failed_audit_count: int
-    awarded_bonus: int
-    potential_bonus: int
+    bonus_points: int
     price_points: int
-    awarded_price_points: int
     audit_checks: list[dict[str, Any]] = field(default_factory=list)
     bonus_checks: list[dict[str, Any]] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
@@ -158,7 +155,10 @@ def price_points_for_cost(cost_usd: float) -> tuple[int, int]:
     rounded_cost_cents = int(
         (cost * Decimal(100)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     )
-    return PRICE_GOAL_CENTS - rounded_cost_cents, rounded_cost_cents
+    price_points = (
+        PRICE_GOAL_CENTS - rounded_cost_cents
+    ) * PRICE_POINTS_PER_CENT
+    return price_points, rounded_cost_cents
 
 
 def score_answer(
@@ -179,25 +179,19 @@ def score_answer(
     name_mentioned = bool(name_pattern and re.search(name_pattern, answer))
     matched_members = matched_roster_members(answer, roster)
     links = extract_unique_markdown_links(answer)
-    potential_bonus = (
-        (NAME_BONUS_POINTS if name_mentioned else 0)
+    bonus_points = BONUS_HIT_POINTS * (
+        (1 if name_mentioned else 0)
         + len(matched_members)
         + min(len(links), LINK_BONUS_LIMIT)
     )
-    awarded_bonus = potential_bonus if not failed_audits else 0
     price_points, rounded_cost_cents = price_points_for_cost(cost_usd)
-    awarded_price_points = (
-        price_points if not failed_audits else min(price_points, 0)
-    )
-    score = audit_penalty + awarded_bonus + awarded_price_points
+    score = audit_penalty + bonus_points + price_points
     return ScoreBreakdown(
         score=score,
         audit_penalty=audit_penalty,
         failed_audit_count=len(failed_audits),
-        awarded_bonus=awarded_bonus,
-        potential_bonus=potential_bonus,
+        bonus_points=bonus_points,
         price_points=price_points,
-        awarded_price_points=awarded_price_points,
         rounded_cost_cents=rounded_cost_cents,
         name_mentioned=name_mentioned,
         matched_members=matched_members,
@@ -418,61 +412,28 @@ def score_session(
                 "tool_name": check.get("tool_name"),
             }
         )
-    bonus_eligible = breakdown.failed_audit_count == 0
-    if breakdown.price_points > 0:
-        price_state = "AWARDED" if bonus_eligible else "WITHHELD"
-    elif breakdown.price_points < 0:
-        price_state = "APPLIED"
-    else:
-        price_state = "NEUTRAL"
     bonus_records = [
         {
             "name": "Mentioned remembered user name",
-            "earned": NAME_BONUS_POINTS if breakdown.name_mentioned else 0,
-            "possible": NAME_BONUS_POINTS,
-            "awarded": bonus_eligible and breakdown.name_mentioned,
-            "state": (
-                "AWARDED"
-                if bonus_eligible and breakdown.name_mentioned
-                else ("WITHHELD" if breakdown.name_mentioned else "MISS")
-            ),
+            "earned": BONUS_HIT_POINTS if breakdown.name_mentioned else 0,
+            "possible": BONUS_HIT_POINTS,
+            "state": "HIT" if breakdown.name_mentioned else "MISS",
             "note": expected_user_name,
         },
         {
             "name": "Mentioned expected active members",
-            "earned": len(member_names),
-            "possible": member_possible,
-            "awarded": bonus_eligible and bool(member_names),
-            "state": (
-                "AWARDED"
-                if bonus_eligible and member_names
-                else ("WITHHELD" if member_names else "MISS")
-            ),
+            "earned": BONUS_HIT_POINTS * len(member_names),
+            "possible": BONUS_HIT_POINTS * member_possible,
+            "state": "HIT" if member_names else "MISS",
             "note": f"{len(member_names)}/{member_possible}",
         },
         {
             "name": "Included unique Markdown links",
-            "earned": link_points,
-            "possible": LINK_BONUS_LIMIT,
-            "awarded": bonus_eligible and link_points > 0,
-            "state": (
-                "AWARDED"
-                if bonus_eligible and link_points > 0
-                else ("WITHHELD" if link_points > 0 else "MISS")
-            ),
+            "earned": BONUS_HIT_POINTS * link_points,
+            "possible": BONUS_HIT_POINTS * LINK_BONUS_LIMIT,
+            "state": "HIT" if link_points > 0 else "MISS",
             "note": (
                 f"{len(breakdown.links)} unique; first {LINK_BONUS_LIMIT} score"
-            ),
-        },
-        {
-            "name": "Price against $0.05 goal",
-            "earned": breakdown.price_points,
-            "possible": PRICE_GOAL_CENTS,
-            "awarded": breakdown.awarded_price_points == breakdown.price_points,
-            "state": price_state,
-            "note": (
-                f"${runtime_metrics['cost']:.4f} rounds to "
-                f"{breakdown.rounded_cost_cents} cents"
             ),
         },
     ]
@@ -490,11 +451,9 @@ def score_session(
         "unique_markdown_link_count": len(breakdown.links),
         "unique_markdown_links": breakdown.links,
         "name_mentioned": breakdown.name_mentioned,
-        "bonuses_eligible": bonus_eligible,
         "price_goal_usd": PRICE_GOAL_CENTS / 100.0,
         "rounded_cost_cents": breakdown.rounded_cost_cents,
         "price_points": breakdown.price_points,
-        "awarded_price_points": breakdown.awarded_price_points,
     }
     return Result(
         model=model,
@@ -502,10 +461,8 @@ def score_session(
         score=breakdown.score,
         audit_penalty=breakdown.audit_penalty,
         failed_audit_count=breakdown.failed_audit_count,
-        awarded_bonus=breakdown.awarded_bonus,
-        potential_bonus=breakdown.potential_bonus,
+        bonus_points=breakdown.bonus_points,
         price_points=breakdown.price_points,
-        awarded_price_points=breakdown.awarded_price_points,
         audit_checks=audit_records,
         bonus_checks=bonus_records,
         metrics=metrics,
@@ -516,27 +473,19 @@ def render_markdown(results: list[Result]) -> str:
     lines = [
         "# Hill-climbing evaluation",
         "",
-        "Score version 3 is audit-first: every failed applicable audit check "
-        "scores -5. A fully compliant answer starts at 0 and earns bonuses for "
-        "the remembered user name, expected active members of the database-derived "
-        "top five K-pop bands, unique Markdown links, and cost below the $0.05 "
-        "goal. Each rounded cent below or above the goal is worth +1 or -1. "
-        "Any audit failure withholds positive bonuses; negative cost points remain.",
+        "Score version 4: audit PASS is +0 and FAIL is -5. Each bonus HIT is "
+        "+1 and MISS is +0. Price is +5 for every rounded cent below the "
+        "$0.05 target and -5 for every rounded cent above it.",
         "",
-        "| Model | Score | Audit | Answer bonus | Price | Members | Links | Time | Cost | Calls |",
+        "| Model | Score | Audit | Bonus | Price | Members | Links | Time | Cost | Calls |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for result in sorted(results, key=lambda item: item.score, reverse=True):
         metrics = result.metrics
-        bonus_text = (
-            str(result.awarded_bonus)
-            if result.failed_audit_count == 0
-            else f"0 (+{result.potential_bonus} withheld)"
-        )
         lines.append(
             f"| {result.model} | {result.score:+d} | "
-            f"{result.audit_penalty:+d} | {bonus_text} | "
-            f"{result.awarded_price_points:+d} | "
+            f"{result.audit_penalty:+d} | {result.bonus_points:+d} | "
+            f"{result.price_points:+d} | "
             f"{metrics['matched_member_count']}/{metrics['expected_member_count']} | "
             f"{metrics['unique_markdown_link_count']} | "
             f"{metrics['wall_seconds']:.1f}s | ${metrics['cost']:.4f} | "
@@ -552,10 +501,8 @@ def render_markdown(results: list[Result]) -> str:
                 f"- Final score: {result.score:+d}",
                 f"- Audit penalty: {result.audit_penalty:+d} "
                 f"({result.failed_audit_count} failed)",
-                f"- Bonus: +{result.awarded_bonus} awarded; "
-                f"+{result.potential_bonus} recognized",
-                f"- Price: {result.awarded_price_points:+d} awarded; "
-                f"{result.price_points:+d} calculated",
+                f"- Bonus points: {result.bonus_points:+d}",
+                f"- Price points: {result.price_points:+d}",
                 "",
                 "### Audit checks",
                 "",
@@ -563,7 +510,7 @@ def render_markdown(results: list[Result]) -> str:
         )
         for check in result.audit_checks:
             marker = "PASS" if check["passed"] else "FAIL"
-            points = "0" if check["passed"] else f"{check['earned']:+d}"
+            points = "+0" if check["passed"] else f"{check['earned']:+d}"
             detail = f" — {check['detail']}" if check["detail"] else ""
             lines.append(f"- {marker} {check['name']}: {points}{detail}")
         lines.extend(["", "### Bonuses", ""])
@@ -571,8 +518,20 @@ def render_markdown(results: list[Result]) -> str:
             note = f" — {check['note']}" if check["note"] else ""
             lines.append(
                 f"- {check['state']} {check['name']}: "
-                f"{check['earned']}/{check['possible']}{note}"
+                f"{check['earned']:+d}{note}"
             )
+        metrics = result.metrics
+        lines.extend(
+            [
+                "",
+                "### Price",
+                "",
+                f"- ${metrics['cost']:.4f} against the "
+                f"${metrics['price_goal_usd']:.2f} target: "
+                f"{result.price_points:+d} "
+                f"({metrics['rounded_cost_cents']} rounded cents)",
+            ]
+        )
     lines.append("")
     return "\n".join(lines)
 
@@ -628,10 +587,8 @@ def main() -> int:
                 "score": result.score,
                 "audit_penalty": result.audit_penalty,
                 "failed_audit_count": result.failed_audit_count,
-                "awarded_bonus": result.awarded_bonus,
-                "potential_bonus": result.potential_bonus,
+                "bonus_points": result.bonus_points,
                 "price_points": result.price_points,
-                "awarded_price_points": result.awarded_price_points,
                 "metrics": result.metrics,
                 "audit_checks": result.audit_checks,
                 "bonus_checks": result.bonus_checks,

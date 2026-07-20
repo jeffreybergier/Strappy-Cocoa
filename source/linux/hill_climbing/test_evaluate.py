@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline unit tests for hill-climbing score version 3."""
+"""Offline unit tests for hill-climbing score version 4."""
 
 from __future__ import annotations
 
@@ -13,9 +13,11 @@ from unittest import mock
 
 from evaluate import (
     LINK_BONUS_LIMIT,
+    Result,
     extract_unique_markdown_links,
     frozen_top_five,
     price_points_for_cost,
+    render_markdown,
     score_answer,
     score_session,
 )
@@ -266,24 +268,25 @@ class EmptyAnswerPersistenceTests(unittest.TestCase):
 
             self.assertEqual(result.metrics["answer_characters"], 0)
             self.assertEqual(result.failed_audit_count, 1)
-            self.assertEqual(result.potential_bonus, 0)
-            self.assertEqual(result.score, -5)
+            self.assertEqual(result.bonus_points, 0)
+            self.assertEqual(result.price_points, 25)
+            self.assertEqual(result.score, 20)
 
 
 class PriceScoreTests(unittest.TestCase):
-    def test_price_scores_one_point_per_rounded_cent_from_goal(self) -> None:
+    def test_price_scores_five_points_per_rounded_cent_from_goal(self) -> None:
         expected = {
-            0.00: (5, 0),
-            0.03: (2, 3),
+            0.00: (25, 0),
+            0.03: (10, 3),
             0.05: (0, 5),
-            0.06: (-1, 6),
+            0.06: (-5, 6),
             0.054: (0, 5),
-            0.055: (-1, 6),
+            0.055: (-5, 6),
         }
         for cost, result in expected.items():
             self.assertEqual(price_points_for_cost(cost), result, cost)
 
-    def test_failed_audit_withholds_savings_but_keeps_overspend(self) -> None:
+    def test_price_and_bonus_points_apply_despite_failed_audit(self) -> None:
         roster = sample_roster()
         cheap = score_answer(
             "Jeff and K.",
@@ -299,13 +302,74 @@ class PriceScoreTests(unittest.TestCase):
             "Jeff",
             0.06,
         )
-        self.assertEqual((cheap.price_points, cheap.awarded_price_points), (2, 0))
-        self.assertEqual(cheap.score, -5)
-        self.assertEqual((costly.price_points, costly.awarded_price_points), (-1, -1))
-        self.assertEqual(costly.score, -6)
+        self.assertEqual((cheap.bonus_points, cheap.price_points), (2, 10))
+        self.assertEqual(cheap.score, 7)
+        self.assertEqual((costly.bonus_points, costly.price_points), (2, -5))
+        self.assertEqual(costly.score, -8)
 
 
-class AuditFirstScoreTests(unittest.TestCase):
+class ReportRenderingTests(unittest.TestCase):
+    def test_report_uses_only_pass_fail_and_hit_miss_states(self) -> None:
+        result = Result(
+            model="test/model",
+            slug="test-model",
+            score=-4,
+            audit_penalty=-5,
+            failed_audit_count=1,
+            bonus_points=1,
+            price_points=0,
+            audit_checks=[
+                {
+                    "name": "Passing audit",
+                    "passed": True,
+                    "earned": 0,
+                    "detail": "",
+                },
+                {
+                    "name": "Failing audit",
+                    "passed": False,
+                    "earned": -5,
+                    "detail": "",
+                },
+            ],
+            bonus_checks=[
+                {
+                    "name": "Bonus hit",
+                    "state": "HIT",
+                    "earned": 1,
+                    "possible": 1,
+                    "note": "",
+                },
+                {
+                    "name": "Bonus miss",
+                    "state": "MISS",
+                    "earned": 0,
+                    "possible": 1,
+                    "note": "",
+                },
+            ],
+            metrics={
+                "matched_member_count": 0,
+                "expected_member_count": 0,
+                "unique_markdown_link_count": 0,
+                "wall_seconds": 0.0,
+                "cost": 0.05,
+                "calls": 1,
+                "price_goal_usd": 0.05,
+                "rounded_cost_cents": 5,
+            },
+        )
+
+        report = render_markdown([result])
+
+        self.assertIn("- PASS Passing audit: +0", report)
+        self.assertIn("- FAIL Failing audit: -5", report)
+        self.assertIn("- HIT Bonus hit: +1", report)
+        self.assertIn("- MISS Bonus miss: +0", report)
+        self.assertNotIn("WITHHELD", report)
+
+
+class ScoreTests(unittest.TestCase):
     def test_empty_answer_accumulates_normal_audit_failures(self) -> None:
         roster = sample_roster()
         result = score_answer(
@@ -326,11 +390,11 @@ class AuditFirstScoreTests(unittest.TestCase):
             ],
             roster,
             "Jeff",
-            0.00,
+            0.05,
         )
         self.assertEqual(result.failed_audit_count, 2)
         self.assertEqual(result.audit_penalty, -10)
-        self.assertEqual(result.awarded_price_points, 0)
+        self.assertEqual(result.price_points, 0)
         self.assertEqual(result.score, -10)
 
     def test_compliant_answer_receives_all_recognized_bonuses(self) -> None:
@@ -348,11 +412,10 @@ class AuditFirstScoreTests(unittest.TestCase):
         )
         self.assertEqual(result.failed_audit_count, 0)
         self.assertEqual(result.audit_penalty, 0)
-        self.assertEqual(result.potential_bonus, 8)
-        self.assertEqual(result.awarded_bonus, 8)
-        self.assertEqual(result.score, 8)
+        self.assertEqual(result.bonus_points, 4)
+        self.assertEqual(result.score, 4)
 
-    def test_any_failed_audit_withholds_all_bonuses(self) -> None:
+    def test_failed_audit_does_not_withhold_bonus_hits(self) -> None:
         roster = sample_roster()
         result = score_answer(
             "Jeff, K, Alpha. [Source](https://example.com/source)",
@@ -363,9 +426,8 @@ class AuditFirstScoreTests(unittest.TestCase):
         )
         self.assertEqual(result.failed_audit_count, 1)
         self.assertEqual(result.audit_penalty, -5)
-        self.assertEqual(result.potential_bonus, 8)
-        self.assertEqual(result.awarded_bonus, 0)
-        self.assertEqual(result.score, -5)
+        self.assertEqual(result.bonus_points, 4)
+        self.assertEqual(result.score, -1)
 
     def test_each_failed_or_error_audit_costs_five_points(self) -> None:
         roster = sample_roster()
@@ -397,7 +459,7 @@ class AuditFirstScoreTests(unittest.TestCase):
             0.05,
         )
         self.assertEqual(len(result.links), LINK_BONUS_LIMIT + 3)
-        self.assertEqual(result.potential_bonus, LINK_BONUS_LIMIT)
+        self.assertEqual(result.bonus_points, LINK_BONUS_LIMIT)
         self.assertEqual(result.score, LINK_BONUS_LIMIT)
 
 
