@@ -484,10 +484,22 @@ static int harness_run_fresh_catalog_schema_tests(
          harness_expect_catalog_journal_mode(context->catalog_path, "wal") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
-           "SELECT id, name, model_id, web_search_enabled, "
-           "streaming_enabled, created_at_ms, updated_at_ms "
+           "SELECT id, name, model_id, created_at_ms, updated_at_ms "
            "FROM sessions LIMIT 0;",
            "sessions columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT session_id, web_search_enabled, bash_enabled, "
+           "streaming_enabled, updated_at_ms "
+           "FROM session_settings LIMIT 0;",
+           "session settings columns") &&
+         harness_expect_catalog_integer(
+           context->catalog_path,
+           "SELECT COUNT(*) FROM pragma_table_info('sessions') "
+           "WHERE name IN ('web_search_enabled','bash_enabled',"
+           "'streaming_enabled');",
+           0LL,
+           "session toggle columns remaining in sessions") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
            "SELECT session_id, working_directory, updated_at_ms "
@@ -1818,6 +1830,92 @@ static int harness_file_read_schema_matches(cJSON *tools)
   return 0;
 }
 
+static int harness_bash_schema_matches(cJSON *tools)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *function;
+    cJSON *name;
+    cJSON *strict;
+    cJSON *parameters;
+    cJSON *properties;
+    cJSON *command;
+    cJSON *timeout;
+    cJSON *required;
+    cJSON *additional_properties;
+    cJSON *value;
+
+    function = cJSON_GetObjectItemCaseSensitive(tool, "function");
+    name = cJSON_IsObject(function) ?
+      cJSON_GetObjectItemCaseSensitive(function, "name") : NULL;
+    if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
+        (strcmp(name->valuestring, STRAPPY_TOOL_BASH) != 0)) {
+      continue;
+    }
+
+    strict = cJSON_GetObjectItemCaseSensitive(function, "strict");
+    parameters = cJSON_GetObjectItemCaseSensitive(function, "parameters");
+    properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters, "properties") : NULL;
+    command = cJSON_IsObject(properties) ?
+      cJSON_GetObjectItemCaseSensitive(properties, "command") : NULL;
+    timeout = cJSON_IsObject(properties) ?
+      cJSON_GetObjectItemCaseSensitive(properties, "timeout") : NULL;
+    required = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters, "required") : NULL;
+    additional_properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters,
+                                       "additionalProperties") : NULL;
+    if (!cJSON_IsFalse(strict) || !cJSON_IsObject(properties) ||
+        (cJSON_GetArraySize(properties) != 2) ||
+        !cJSON_IsArray(required) || (cJSON_GetArraySize(required) != 1) ||
+        !harness_json_array_contains_string(required, "command") ||
+        !cJSON_IsFalse(additional_properties)) {
+      return 0;
+    }
+
+    value = cJSON_GetObjectItemCaseSensitive(command, "type");
+    if (!cJSON_IsString(value) || (value->valuestring == NULL) ||
+        (strcmp(value->valuestring, "string") != 0)) {
+      return 0;
+    }
+    value = cJSON_GetObjectItemCaseSensitive(command, "minLength");
+    if (!cJSON_IsNumber(value) || (value->valuedouble != 1.0)) {
+      return 0;
+    }
+    value = cJSON_GetObjectItemCaseSensitive(command, "maxLength");
+    if (!cJSON_IsNumber(value) || (value->valuedouble != 32768.0)) {
+      return 0;
+    }
+    value = cJSON_GetObjectItemCaseSensitive(command, "pattern");
+    if (!cJSON_IsString(value) || (value->valuestring == NULL) ||
+        (strcmp(value->valuestring, "\\S") != 0)) {
+      return 0;
+    }
+
+    value = cJSON_GetObjectItemCaseSensitive(timeout, "type");
+    if (!cJSON_IsString(value) || (value->valuestring == NULL) ||
+        (strcmp(value->valuestring, "number") != 0)) {
+      return 0;
+    }
+    value = cJSON_GetObjectItemCaseSensitive(timeout, "exclusiveMinimum");
+    if (!cJSON_IsNumber(value) || (value->valuedouble != 0.0)) {
+      return 0;
+    }
+    value = cJSON_GetObjectItemCaseSensitive(timeout, "maximum");
+    if (!cJSON_IsNumber(value) || (value->valuedouble != 120.0)) {
+      return 0;
+    }
+    value = cJSON_GetObjectItemCaseSensitive(timeout, "default");
+    return cJSON_IsNumber(value) && (value->valuedouble == 120.0);
+  }
+  return 0;
+}
+
 static int harness_tool_display_matches(cJSON *registry,
                                         const char *tool_name,
                                         const char *promoted_argument,
@@ -1944,6 +2042,7 @@ static int harness_run_tool_registry_tests(void)
           STRAPPY_TOOL_MEMORY_USER_FACT_READ) &&
         harness_database_context_schema_matches(tools) &&
         harness_file_read_schema_matches(tools) &&
+        harness_bash_schema_matches(tools) &&
         (filtered_json != NULL) && cJSON_IsArray(filtered) &&
         (cJSON_GetArraySize(filtered) == 1) &&
         harness_tool_schemas_hide_display_metadata(filtered) &&
@@ -1955,6 +2054,10 @@ static int harness_run_tool_registry_tests(void)
         harness_tool_display_matches(registry,
                                      STRAPPY_TOOL_FILE_READ,
                                      "path",
+                                     NULL) &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_BASH,
+                                     "command",
                                      NULL) &&
         harness_tool_display_matches(
           registry,
@@ -2075,6 +2178,7 @@ static int harness_run_tool_registry_tests(void)
          NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_LIST_INFO) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_QUERY) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_BASH) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_FILE_READ) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) != NULL) &&
@@ -2104,6 +2208,8 @@ static int harness_run_tool_registry_tests(void)
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM) &&
         strappy_tools_is_registered(STRAPPY_TOOL_FILE_READ) &&
         !strappy_tools_is_helper(STRAPPY_TOOL_FILE_READ) &&
+        strappy_tools_is_registered(STRAPPY_TOOL_BASH) &&
+        !strappy_tools_is_helper(STRAPPY_TOOL_BASH) &&
         !strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_QUERY) &&
         !strappy_tools_is_helper("helper_convert_dates") &&
         (strstr(tools_json, "memory_database_hint_read") == NULL) &&
@@ -2221,6 +2327,9 @@ static int harness_run_assistant_set_tests(void)
       STRAPPY_TOOL_FILE_READ) &&
     !strappy_assistant_set_profile_allows_tool(
       &world,
+      STRAPPY_TOOL_BASH) &&
+    !strappy_assistant_set_profile_allows_tool(
+      &world,
       STRAPPY_TOOL_DATABASE_LIST_INFO) &&
     !strappy_assistant_set_profile_has_quality_check(
       &world,
@@ -2243,6 +2352,9 @@ static int harness_run_assistant_set_tests(void)
     !strappy_assistant_set_profile_allows_tool(
       &personal,
       STRAPPY_TOOL_FILE_READ) &&
+    !strappy_assistant_set_profile_allows_tool(
+      &personal,
+      STRAPPY_TOOL_BASH) &&
     !strappy_assistant_set_profile_has_quality_check(
       &personal,
       STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
@@ -2252,10 +2364,13 @@ static int harness_run_assistant_set_tests(void)
       &coding,
       &error) &&
     strappy_assistant_set_profile_is_available(&coding) &&
-    (coding.tool_name_count == 11U) &&
+    (coding.tool_name_count == 12U) &&
     strappy_assistant_set_profile_allows_tool(
       &coding,
-      STRAPPY_TOOL_FILE_READ);
+      STRAPPY_TOOL_FILE_READ) &&
+    strappy_assistant_set_profile_allows_tool(
+      &coding,
+      STRAPPY_TOOL_BASH);
 
   if (ok) {
     world_tools_json = strappy_tools_responses_request_json_filtered(
@@ -2309,9 +2424,11 @@ static int harness_run_assistant_set_tests(void)
         world_tools_without_web,
         STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
       cJSON_IsArray(coding_tools) &&
-      (cJSON_GetArraySize(coding_tools) == 11) &&
+      (cJSON_GetArraySize(coding_tools) == 12) &&
       harness_responses_tools_contains(coding_tools,
-                                       STRAPPY_TOOL_FILE_READ);
+                                       STRAPPY_TOOL_FILE_READ) &&
+      harness_responses_tools_contains(coding_tools,
+                                       STRAPPY_TOOL_BASH);
   }
   if (ok && strappy_assistant_sets_load_profile(HARNESS_RESOURCE_DIR,
                                                 "missing_set",
@@ -5140,6 +5257,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   const char *home_directory;
   sqlite3 *db;
   char assistant_set_turn_sql[512];
+  int bash_enabled;
   int written;
   int ok;
 
@@ -5201,6 +5319,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (strcmp(session.assistant_set_id,
                STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT) == 0) &&
        (session.web_search_enabled == 1) &&
+       (session.bash_enabled == 0) &&
        (session.streaming_enabled == 0) &&
        (session.http_status == 0L);
   strappy_session_record_destroy(&session);
@@ -5237,6 +5356,66 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
     return 0;
   }
   free(assistant_set_id);
+
+  error = NULL;
+  if (strappy_db_update_session_bash_enabled(context->catalog_path,
+                                             session_id,
+                                             1,
+                                             &error) ||
+      (error == NULL) ||
+      (strstr(error, "only for Coding Assistant sessions") == NULL)) {
+    fprintf(stderr,
+            "Bash could be enabled outside the Coding Assistant.\n");
+    strappy_free_string(error);
+    return 0;
+  }
+  strappy_free_string(error);
+  error = NULL;
+  if (!strappy_db_update_session_assistant_set(
+        context->catalog_path,
+        session_id,
+        STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
+        &error) ||
+      !strappy_db_update_session_bash_enabled(context->catalog_path,
+                                              session_id,
+                                              1,
+                                              &error) ||
+      !strappy_db_get_session_bash_enabled(context->catalog_path,
+                                           session_id,
+                                           &bash_enabled,
+                                           &error) ||
+      !bash_enabled ||
+      !strappy_db_update_session_assistant_set(
+        context->catalog_path,
+        session_id,
+        STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE,
+        &error) ||
+      !strappy_db_get_session_bash_enabled(context->catalog_path,
+                                           session_id,
+                                           &bash_enabled,
+                                           &error) ||
+      bash_enabled ||
+      !strappy_db_update_session_assistant_set(
+        context->catalog_path,
+        session_id,
+        STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
+        &error) ||
+      !strappy_db_get_session_bash_enabled(context->catalog_path,
+                                           session_id,
+                                           &bash_enabled,
+                                           &error) ||
+      bash_enabled ||
+      !strappy_db_update_session_assistant_set(
+        context->catalog_path,
+        session_id,
+        STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE,
+        &error)) {
+    fprintf(stderr,
+            "Session Bash opt-in did not follow assistant selection: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
 
   error = NULL;
   ok = strappy_db_update_session_streaming_enabled(context->catalog_path,
@@ -5552,6 +5731,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (session.model != NULL) &&
        (strcmp(session.model, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0) &&
        (session.web_search_enabled == 0) &&
+       (session.bash_enabled == 0) &&
        (session.streaming_enabled == 1) &&
        (session.http_status == 200L);
   strappy_session_record_destroy(&session);

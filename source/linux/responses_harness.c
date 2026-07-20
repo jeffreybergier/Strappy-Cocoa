@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "../shared/strappy_client.h"
+#include "../shared/strappy_assistant_sets.h"
 #include "../shared/strappy_config.h"
 #include "../shared/strappy_db.h"
 #include "../shared/strappy_prompt.h"
@@ -935,7 +936,10 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_EMPTY_ANSWER = 7,
   HARNESS_RESPONSES_SERVER_EMPTY_ANSWER_AFTER_TOOLS = 8,
   HARNESS_RESPONSES_SERVER_WEB_REFERENCE_VALID = 9,
-  HARNESS_RESPONSES_SERVER_WORLD_KNOWLEDGE = 10
+  HARNESS_RESPONSES_SERVER_WORLD_KNOWLEDGE = 10,
+  HARNESS_RESPONSES_SERVER_BASH_CANCELLATION = 11,
+  HARNESS_RESPONSES_SERVER_CODING_BASH_DISABLED = 12,
+  HARNESS_RESPONSES_SERVER_BASH_OUTPUT = 13
 } harness_responses_server_scenario;
 
 static int harness_send_all(int socket_fd,
@@ -1530,6 +1534,54 @@ static int harness_world_knowledge_request_is_valid(
   return 1;
 }
 
+static int harness_coding_assistant_request_is_valid(
+  cJSON *root,
+  const char *expected_prompt,
+  int bash_enabled)
+{
+  cJSON *instructions;
+  cJSON *metadata;
+  cJSON *prompt_group;
+  cJSON *input;
+  cJSON *memory_call;
+  cJSON *tools;
+  const char *text;
+
+  instructions = cJSON_GetObjectItem(root, "instructions");
+  metadata = cJSON_GetObjectItem(root, "metadata");
+  prompt_group = cJSON_IsObject(metadata) ?
+    cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
+  input = cJSON_GetObjectItem(root, "input");
+  memory_call = cJSON_GetArrayItem(input, 1);
+  tools = cJSON_GetObjectItem(root, "tools");
+  text = harness_message_text(cJSON_GetArrayItem(input, 0));
+  return cJSON_IsString(instructions) &&
+    (instructions->valuestring != NULL) &&
+    (strstr(instructions->valuestring,
+            "You are an expert coding assistant.") != NULL) &&
+    cJSON_IsString(prompt_group) && (prompt_group->valuestring != NULL) &&
+    cJSON_IsArray(input) && (cJSON_GetArraySize(input) == 3) &&
+    harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") &&
+    (text != NULL) && (strcmp(text, expected_prompt) == 0) &&
+    harness_preflight_call_is_valid(memory_call,
+                                    STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                    "fc_pf_0_",
+                                    "call_pf_0_",
+                                    prompt_group->valuestring) &&
+    harness_preflight_output_matches(cJSON_GetArrayItem(input, 2),
+                                     memory_call,
+                                     1) &&
+    cJSON_IsArray(tools) &&
+    (cJSON_GetArraySize(tools) == (bash_enabled ? 10 : 9)) &&
+    (harness_has_tool_name(tools, STRAPPY_TOOL_BASH) ==
+      (bash_enabled ? 1 : 0)) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_FILE_READ) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_QUERY) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+    harness_tools_hide_local_display_metadata(tools);
+}
+
 static int harness_disabled_web_search_request_is_valid(cJSON *root)
 {
   cJSON *tools;
@@ -1702,6 +1754,148 @@ static int harness_function_output_request_is_valid(cJSON *root,
     "database_context_read",
     "call-database-context-error",
     "Error: database_context_read does not accept argument 'unexpected'.");
+}
+
+static void harness_unlink_bash_full_output(const char *output)
+{
+  static const char marker[] = "Full output: ";
+  const char *start;
+  const char *end;
+  size_t length;
+  char *path;
+
+  if (output == NULL) {
+    return;
+  }
+  start = strstr(output, marker);
+  if (start == NULL) {
+    return;
+  }
+  start += sizeof(marker) - 1U;
+  end = strchr(start, ']');
+  if ((end == NULL) || (end <= start)) {
+    return;
+  }
+  length = (size_t)(end - start);
+  path = (char *)malloc(length + 1U);
+  if (path == NULL) {
+    return;
+  }
+  memcpy(path, start, length);
+  path[length] = '\0';
+  unlink(path);
+  free(path);
+}
+
+static int harness_bash_function_pair_is_valid(
+  cJSON *input,
+  const char *expected_call_id,
+  const char *expected_output,
+  int exact_output,
+  int expected_output_truncated)
+{
+  cJSON *item;
+  int call_found;
+  int output_found;
+
+  call_found = 0;
+  output_found = 0;
+  if (!cJSON_IsArray(input) || (expected_call_id == NULL) ||
+      (expected_output == NULL)) {
+    return 0;
+  }
+  for (item = input->child; item != NULL; item = item->next) {
+    cJSON *type;
+    cJSON *call_id;
+
+    type = cJSON_IsObject(item) ? cJSON_GetObjectItem(item, "type") : NULL;
+    call_id = cJSON_IsObject(item) ?
+      cJSON_GetObjectItem(item, "call_id") : NULL;
+    if (!cJSON_IsString(type) || (type->valuestring == NULL) ||
+        !cJSON_IsString(call_id) || (call_id->valuestring == NULL) ||
+        (strcmp(call_id->valuestring, expected_call_id) != 0)) {
+      continue;
+    }
+    if (strcmp(type->valuestring, "function_call") == 0) {
+      cJSON *name;
+
+      name = cJSON_GetObjectItem(item, "name");
+      call_found = cJSON_IsString(name) && (name->valuestring != NULL) &&
+        (strcmp(name->valuestring, STRAPPY_TOOL_BASH) == 0);
+    } else if (strcmp(type->valuestring, "function_call_output") == 0) {
+      cJSON *output;
+      cJSON *result;
+      cJSON *result_output;
+      cJSON *result_truncated;
+      const char *text;
+      int text_matches;
+
+      output = cJSON_GetObjectItem(item, "output");
+      if (!cJSON_IsString(output) || (output->valuestring == NULL) ||
+          (cJSON_GetObjectItem(item, "output_truncated") != NULL)) {
+        continue;
+      }
+      result = cJSON_Parse(output->valuestring);
+      result_output = cJSON_IsObject(result) ?
+        cJSON_GetObjectItem(result, "output") : NULL;
+      result_truncated = cJSON_IsObject(result) ?
+        cJSON_GetObjectItem(result, "output_truncated") : NULL;
+      text = cJSON_IsString(result_output) ? result_output->valuestring : NULL;
+      text_matches = (text != NULL) &&
+        (exact_output ? (strcmp(text, expected_output) == 0) :
+          (strstr(text, expected_output) != NULL));
+      output_found = text_matches &&
+        (expected_output_truncated ? cJSON_IsTrue(result_truncated) :
+          cJSON_IsFalse(result_truncated));
+      if (output_found && expected_output_truncated) {
+        harness_unlink_bash_full_output(text);
+      }
+      cJSON_Delete(result);
+    }
+  }
+  return call_found && output_found;
+}
+
+static int harness_bash_output_request_is_valid(cJSON *root,
+                                                const char *session_key,
+                                                const char *prompt_group)
+{
+  cJSON *request_session;
+  cJSON *metadata;
+  cJSON *request_group;
+  cJSON *input;
+
+  if ((session_key == NULL) || (prompt_group == NULL)) {
+    return 0;
+  }
+  request_session = cJSON_GetObjectItem(root, "session_id");
+  metadata = cJSON_GetObjectItem(root, "metadata");
+  request_group = cJSON_IsObject(metadata) ?
+    cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
+  input = cJSON_GetObjectItem(root, "input");
+  return cJSON_IsString(request_session) &&
+    (request_session->valuestring != NULL) &&
+    (strcmp(request_session->valuestring, session_key) == 0) &&
+    cJSON_IsString(request_group) && (request_group->valuestring != NULL) &&
+    (strcmp(request_group->valuestring, prompt_group) == 0) &&
+    cJSON_IsArray(input) && (cJSON_GetArraySize(input) >= 9) &&
+    harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") &&
+    harness_bash_function_pair_is_valid(input,
+                                        "call-bash-complete",
+                                        "complete\n",
+                                        1,
+                                        0) &&
+    harness_bash_function_pair_is_valid(input,
+                                        "call-bash-truncated",
+                                        "2501\n\n\n[Showing lines ",
+                                        0,
+                                        1) &&
+    harness_bash_function_pair_is_valid(
+      input,
+      "call-bash-error",
+      "Error: failed\n\n\nCommand exited with code 7.",
+      1,
+      0);
 }
 
 static int harness_accept_request(int listener_fd,
@@ -2110,6 +2304,163 @@ static int harness_run_function_tool_server(int listener_fd)
   return ok;
 }
 
+static int harness_run_bash_cancellation_server(int listener_fd)
+{
+  static const char *tool_response =
+    "{\"id\":\"resp-bash-cancel\",\"object\":\"response\","
+    "\"created_at\":1700000007,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{"
+    "\"type\":\"function_call\",\"id\":\"fc-bash-cancel\","
+    "\"call_id\":\"call-bash-cancel\",\"name\":\"bash\","
+    "\"arguments\":\"{\\\"command\\\":\\\"printf 'started\\\\n'; sleep 30\\\"}\","
+    "\"status\":\"completed\"}],\"usage\":{"
+    "\"input_tokens\":4,\"output_tokens\":4,\"total_tokens\":8}}";
+  char *body;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_coding_assistant_request_is_valid(root,
+                                              "Cancel bash tool",
+                                              1) &&
+    harness_send_json_response(client_fd, 200L, tool_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  return ok;
+}
+
+static int harness_run_bash_output_server(int listener_fd)
+{
+  static const char *tool_response =
+    "{\"id\":\"resp-bash-output\",\"object\":\"response\","
+    "\"created_at\":1700000008,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{"
+    "\"type\":\"function_call\",\"id\":\"fc-bash-complete\","
+    "\"call_id\":\"call-bash-complete\",\"name\":\"bash\","
+    "\"arguments\":\"{\\\"command\\\":\\\"printf 'complete\\\\n'\\\"}\","
+    "\"status\":\"completed\"},{"
+    "\"type\":\"function_call\",\"id\":\"fc-bash-truncated\","
+    "\"call_id\":\"call-bash-truncated\",\"name\":\"bash\","
+    "\"arguments\":\"{\\\"command\\\":\\\"seq 1 2501\\\"}\","
+    "\"status\":\"completed\"},{"
+    "\"type\":\"function_call\",\"id\":\"fc-bash-error\","
+    "\"call_id\":\"call-bash-error\",\"name\":\"bash\","
+    "\"arguments\":\"{\\\"command\\\":\\\"printf 'failed\\\\n'; exit 7\\\"}\","
+    "\"status\":\"completed\"}],\"usage\":{"
+    "\"input_tokens\":4,\"output_tokens\":4,\"total_tokens\":8}}";
+  static const char *final_response =
+    "{\"id\":\"resp-bash-output-final\",\"object\":\"response\","
+    "\"created_at\":1700000009,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-bash-output-final\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Bash output flag final answer.\",\"annotations\":[]}]}],"
+    "\"usage\":{\"input_tokens\":8,\"output_tokens\":4,"
+    "\"total_tokens\":12}}";
+  char *body;
+  char *session_key;
+  char *prompt_group;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  session_key = NULL;
+  prompt_group = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  if (cJSON_IsObject(root) &&
+      harness_coding_assistant_request_is_valid(root,
+                                                "Report bash truncation",
+                                                1)) {
+    cJSON *request_session;
+    cJSON *metadata;
+    cJSON *request_group;
+
+    request_session = cJSON_GetObjectItem(root, "session_id");
+    metadata = cJSON_GetObjectItem(root, "metadata");
+    request_group = cJSON_IsObject(metadata) ?
+      cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
+    if (cJSON_IsString(request_session) &&
+        (request_session->valuestring != NULL) &&
+        cJSON_IsString(request_group) &&
+        (request_group->valuestring != NULL)) {
+      session_key = strdup(request_session->valuestring);
+      prompt_group = strdup(request_group->valuestring);
+    }
+  }
+  ok = (session_key != NULL) && (prompt_group != NULL) &&
+    harness_send_json_response(client_fd, 200L, tool_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  ok = cJSON_IsObject(root) &&
+    harness_bash_output_request_is_valid(root,
+                                         session_key,
+                                         prompt_group) &&
+    harness_send_json_response(client_fd, 200L, final_response);
+  free(body);
+  cJSON_Delete(root);
+  close(client_fd);
+  free(session_key);
+  free(prompt_group);
+  return ok;
+}
+
+static int harness_run_coding_bash_disabled_server(int listener_fd)
+{
+  static const char *final_response =
+    "{\"id\":\"resp-bash-disabled\",\"object\":\"response\","
+    "\"created_at\":1700000008,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-bash-disabled\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Bash disabled.\",\"annotations\":[]}]}],"
+    "\"usage\":{\"input_tokens\":4,\"output_tokens\":4,"
+    "\"total_tokens\":8}}";
+  char *body;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_coding_assistant_request_is_valid(root,
+                                              "Keep bash disabled",
+                                              0) &&
+    harness_send_json_response(client_fd, 200L, final_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  return ok;
+}
+
 static int harness_run_retry_server(int listener_fd)
 {
   static const char *retry_response =
@@ -2362,6 +2713,13 @@ static int harness_start_server(harness_responses_server_scenario scenario,
       ok = harness_run_valid_web_reference_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_FUNCTION_TOOL) {
       ok = harness_run_function_tool_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_BASH_CANCELLATION) {
+      ok = harness_run_bash_cancellation_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_BASH_OUTPUT) {
+      ok = harness_run_bash_output_server(listener_fd);
+    } else if (scenario ==
+               HARNESS_RESPONSES_SERVER_CODING_BASH_DISABLED) {
+      ok = harness_run_coding_bash_disabled_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_RETRY_AFTER) {
       ok = harness_run_retry_after_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_SLOW) {
@@ -3391,8 +3749,11 @@ static int harness_test_function_tool_continuation(void)
   sqlite3 *db;
   long long session_id;
   long long value;
+  strappy_session_message_record_list timeline;
   harness_ledger_event_recorder events;
+  size_t timeline_index;
   pid_t server_pid;
+  int saw_named_output;
   int fd;
   int server_ok;
   int ok;
@@ -3404,6 +3765,7 @@ static int harness_test_function_tool_continuation(void)
   close(fd);
   error = NULL;
   session_id = 0LL;
+  strappy_session_message_record_list_init(&timeline);
   if (!harness_create_session_database(path, &session_id, &error) ||
       !strappy_db_update_session_web_search_enabled(path,
                                                     session_id,
@@ -3416,6 +3778,7 @@ static int harness_test_function_tool_continuation(void)
     fprintf(stderr,
             "Could not prepare function-tool integration test: %s\n",
             (error != NULL) ? error : "server setup failed");
+    strappy_session_message_record_list_destroy(&timeline);
     free(error);
     unlink(path);
     return 0;
@@ -3494,9 +3857,348 @@ static int harness_test_function_tool_continuation(void)
   } else if (ok) {
     ok = 0;
   }
+  saw_named_output = 0;
+  if (ok) {
+    ok = strappy_db_list_response_timeline(path,
+                                           session_id,
+                                           &timeline,
+                                           &error);
+  }
+  for (timeline_index = 0U;
+       ok && (timeline_index < timeline.count);
+       timeline_index++) {
+    const strappy_session_message_record *record;
+
+    record = &timeline.records[timeline_index];
+    if ((record->kind != NULL) &&
+        (strcmp(record->kind, "function_call_output") == 0) &&
+        (record->tool_call_id != NULL) &&
+        (strcmp(record->tool_call_id,
+                "call-database-context-error") == 0)) {
+      saw_named_output = (record->tool_name != NULL) &&
+        (strcmp(record->tool_name, "database_context_read") == 0);
+    }
+  }
+  if (ok && !saw_named_output) {
+    ok = 0;
+  }
   if (!ok) {
     fprintf(stderr,
             "Function-tool continuation failed: %s\n",
+            (error != NULL) ? error : "request or ledger mismatch");
+  }
+  strappy_session_message_record_list_destroy(&timeline);
+  free(error);
+  unlink(path);
+  return ok;
+}
+
+static int harness_test_bash_disabled_request(void)
+{
+  char path[] = "/tmp/strappy-responses-bash-disabled-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *result;
+  sqlite3 *db;
+  long long session_id;
+  long long value;
+  pid_t server_pid;
+  int bash_enabled;
+  int fd;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create Bash-disabled database.");
+  }
+  close(fd);
+  error = NULL;
+  session_id = 0LL;
+  bash_enabled = 1;
+  if (!harness_create_session_database(path, &session_id, &error) ||
+      !strappy_db_update_session_assistant_set(
+        path,
+        session_id,
+        STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
+        &error) ||
+      !strappy_db_update_session_web_search_enabled(path,
+                                                    session_id,
+                                                    0,
+                                                    &error) ||
+      !strappy_db_get_session_bash_enabled(path,
+                                           session_id,
+                                           &bash_enabled,
+                                           &error) ||
+      bash_enabled ||
+      !harness_start_server(
+        HARNESS_RESPONSES_SERVER_CODING_BASH_DISABLED,
+        endpoint,
+        sizeof(endpoint),
+        &server_pid)) {
+    fprintf(stderr,
+            "Could not prepare Bash-disabled integration test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  result = strappy_responses_send_prompt_for_session_and_store(
+    "Keep bash disabled",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources",
+    path,
+    session_id,
+    &error);
+  server_ok = harness_wait_for_server(server_pid, result == NULL);
+  ok = (result != NULL) && (strcmp(result, "Bash disabled.") == 0) &&
+    server_ok && (error == NULL);
+  free(result);
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM toolset_members "
+                           "WHERE tool_name='bash';",
+                           &value) && (value == 0LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM toolset_members "
+                        "WHERE tool_name='file_read';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM session_settings WHERE "
+                        "session_id > 0 AND bash_enabled=0;",
+                        &value) && (value == 1LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Disabled Bash leaked into a Coding Assistant request: %s\n",
+            (error != NULL) ? error : "request or ledger mismatch");
+  }
+  free(error);
+  unlink(path);
+  return ok;
+}
+
+static int harness_test_bash_output_truncation_flag(void)
+{
+  char path[] = "/tmp/strappy-responses-bash-output-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *result;
+  sqlite3 *db;
+  long long session_id;
+  long long value;
+  harness_ledger_event_recorder events;
+  pid_t server_pid;
+  int fd;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create Bash output database.");
+  }
+  close(fd);
+  error = NULL;
+  session_id = 0LL;
+  if (!harness_create_session_database(path, &session_id, &error) ||
+      !strappy_db_update_session_assistant_set(
+        path,
+        session_id,
+        STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
+        &error) ||
+      !strappy_db_update_session_bash_enabled(path,
+                                              session_id,
+                                              1,
+                                              &error) ||
+      !strappy_db_update_session_web_search_enabled(path,
+                                                    session_id,
+                                                    0,
+                                                    &error) ||
+      !harness_start_server(HARNESS_RESPONSES_SERVER_BASH_OUTPUT,
+                            endpoint,
+                            sizeof(endpoint),
+                            &server_pid)) {
+    fprintf(stderr,
+            "Could not prepare Bash output integration test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  memset(&events, 0, sizeof(events));
+  events.db_path = path;
+  events.valid = 1;
+  result = strappy_responses_send_prompt_for_session_and_store_with_events(
+    "Report bash truncation",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources",
+    path,
+    session_id,
+    harness_record_ledger_event,
+    &events,
+    &error);
+  server_ok = harness_wait_for_server(server_pid, result == NULL);
+  ok = (result != NULL) &&
+    (strcmp(result, "Bash output flag final answer.") == 0) && server_ok &&
+    events.valid && (events.count == 2LL) && events.saw_tools &&
+    (events.clear_count == 1L);
+  free(result);
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM tool_executions e "
+                           "JOIN function_calls f ON "
+                           "f.item_id=e.function_call_item_id WHERE "
+                           "f.tool_name='bash' AND e.state='completed';",
+                           &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM tool_executions e "
+                        "JOIN function_calls f ON "
+                        "f.item_id=e.function_call_item_id WHERE "
+                        "f.tool_name='bash' AND e.state='error';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM function_outputs o "
+                        "JOIN function_calls f ON "
+                        "f.item_id=o.function_call_item_id WHERE "
+                        "f.tool_name='bash' AND "
+                        "o.output_format='structured';",
+                        &value) && (value == 3LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Bash output truncation flag failed: %s\n",
+            (error != NULL) ? error : "request or ledger mismatch");
+  }
+  free(error);
+  unlink(path);
+  return ok;
+}
+
+static int harness_test_bash_tool_cancellation(void)
+{
+  char path[] = "/tmp/strappy-responses-bash-cancel-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *result;
+  sqlite3 *db;
+  long long session_id;
+  long long started_ms;
+  long long elapsed_ms;
+  long long value;
+  harness_ledger_event_recorder events;
+  pid_t server_pid;
+  int fd;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create Bash cancellation database.");
+  }
+  close(fd);
+  error = NULL;
+  session_id = 0LL;
+  if (!harness_create_session_database(path, &session_id, &error) ||
+      !strappy_db_update_session_assistant_set(
+        path,
+        session_id,
+        STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
+        &error) ||
+      !strappy_db_update_session_bash_enabled(path,
+                                              session_id,
+                                              1,
+                                              &error) ||
+      !strappy_db_update_session_web_search_enabled(path,
+                                                    session_id,
+                                                    0,
+                                                    &error) ||
+      !harness_start_server(HARNESS_RESPONSES_SERVER_BASH_CANCELLATION,
+                            endpoint,
+                            sizeof(endpoint),
+                            &server_pid)) {
+    fprintf(stderr,
+            "Could not prepare Bash cancellation integration test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  memset(&events, 0, sizeof(events));
+  events.db_path = path;
+  events.valid = 1;
+  events.cancel_after_ms = 250LL;
+  started_ms = harness_now_ms();
+  result = strappy_responses_send_prompt_for_session_and_store_with_events(
+    "Cancel bash tool",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources",
+    path,
+    session_id,
+    harness_record_ledger_event,
+    &events,
+    &error);
+  elapsed_ms = harness_now_ms() - started_ms;
+  server_ok = harness_wait_for_server(server_pid, result != NULL);
+  ok = (result == NULL) && server_ok && events.valid &&
+    events.saw_cancellation_poll && events.saw_tools &&
+    (events.count == 1LL) && (events.clear_count == 1L) &&
+    (error != NULL) && (strstr(error, "cancelled") != NULL) &&
+    (elapsed_ms < 3000LL);
+  free(result);
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM http_attempts;",
+                           &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests WHERE "
+                        "request_kind='tool_continuation';",
+                        &value) && (value == 0LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM tool_executions e "
+                        "JOIN function_calls f ON "
+                        "f.item_id=e.function_call_item_id WHERE "
+                        "f.provider_call_id='call-bash-cancel' AND "
+                        "f.tool_name='bash' AND e.state='cancelled' AND "
+                        "e.completed_at_ms >= e.started_at_ms AND "
+                        "e.error_message LIKE '%Command aborted.%';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM function_outputs o "
+                        "JOIN function_calls f ON "
+                        "f.item_id=o.function_call_item_id "
+                        "JOIN conversation_items i ON i.id=o.item_id WHERE "
+                        "f.provider_call_id='call-bash-cancel' AND "
+                        "o.execution_state='cancelled' AND "
+                        "o.output_format='structured' AND "
+                        "i.include_in_context=1 AND i.is_error=1 AND "
+                        "i.introduced_request_id IS NULL;",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM turns WHERE state='cancelled';",
+                        &value) && (value == 1LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Bash tool cancellation failed after %lld ms: %s\n",
+            elapsed_ms,
             (error != NULL) ? error : "request or ledger mismatch");
   }
   free(error);
@@ -4716,6 +5418,9 @@ int main(void)
       harness_test_web_search_requires_markdown_reference() &&
       harness_test_valid_web_reference_passes_content_check() &&
       harness_test_function_tool_continuation() &&
+      harness_test_bash_disabled_request() &&
+      harness_test_bash_output_truncation_flag() &&
+      harness_test_bash_tool_cancellation() &&
       harness_test_retry_attempt_ledger() &&
       harness_test_active_request_cancellation() &&
       harness_test_retry_after_clamp_and_cancellation() &&

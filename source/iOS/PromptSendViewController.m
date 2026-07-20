@@ -13,6 +13,8 @@ static const CGFloat kStrappySendOptionsWidth = 36.0f;
 static const CGFloat kStrappySendDismissGlyphSize = 14.0f;
 static const CGFloat kStrappySendFontSize = 16.0f;
 static const CGFloat kStrappySendFieldRadius = 8.0f;
+static NSString * const kStrappyCodingAssistantIdentifier =
+  @"coding_assistant";
 
 @interface StrappyPromptFieldInnerShadowView : UIView
 @end
@@ -308,6 +310,7 @@ enum {
 @property (nonatomic, assign) BOOL sending;
 @property (nonatomic, assign) BOOL cancellationRequested;
 @property (nonatomic, assign) BOOL webSearchEnabled;
+@property (nonatomic, assign) BOOL bashEnabled;
 - (void)buildSubviews;
 - (UIImage *)iconImageForIcon:(AIFontAwesomeIcon)icon
                         style:(AIFontAwesomeStyle)style
@@ -328,6 +331,7 @@ enum {
 - (NSString *)currentSelectedModelIdentifier;
 - (BOOL)setSelectedModelIdentifierFromOptions:(NSString *)modelIdentifier;
 - (BOOL)setWebSearchEnabledFromOptions:(BOOL)enabled;
+- (BOOL)setBashEnabledFromOptions:(BOOL)enabled;
 - (UIViewController *)containingViewController;
 - (void)dismissOptionsControllerAnimated:(BOOL)animated;
 - (void)dismissTapped:(id)sender;
@@ -343,9 +347,12 @@ enum {
 @property (nonatomic, copy) NSString *selectedModelIdentifier;
 @property (nonatomic, strong) UISwitch *webSearchSwitch;
 @property (nonatomic, assign) BOOL webSearchEnabled;
+@property (nonatomic, strong) UISwitch *bashSwitch;
+@property (nonatomic, assign) BOOL bashEnabled;
 - (instancetype)initWithPromptSendViewController:
     (PromptSendViewController *)promptSendViewController;
 - (void)reloadOptionsFromPrompt;
+- (BOOL)bashAvailable;
 @end
 
 @implementation StrappyPromptOptionsTableViewController
@@ -364,6 +371,7 @@ enum {
 - (void)viewDidLoad
 {
   UISwitch *webSearchSwitch;
+  UISwitch *bashSwitch;
 
   [super viewDidLoad];
 
@@ -372,6 +380,12 @@ enum {
                       action:@selector(webSearchSwitchChanged:)
             forControlEvents:UIControlEventValueChanged];
   [self setWebSearchSwitch:webSearchSwitch];
+
+  bashSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
+  [bashSwitch addTarget:self
+                 action:@selector(bashSwitchChanged:)
+       forControlEvents:UIControlEventValueChanged];
+  [self setBashSwitch:bashSwitch];
 
   [self reloadOptionsFromPrompt];
 
@@ -406,13 +420,26 @@ enum {
     (promptSendViewController != nil)
       ? [promptSendViewController webSearchEnabled]
       : YES];
+  [self setBashEnabled:
+    (promptSendViewController != nil)
+      ? [promptSendViewController bashEnabled]
+      : NO];
 }
 
 - (void)reloadOptionsFromPrompt
 {
   [self reloadOptionsSnapshot];
   [[self webSearchSwitch] setOn:[self webSearchEnabled] animated:NO];
+  [[self bashSwitch] setOn:([self bashAvailable] && [self bashEnabled])
+                      animated:NO];
+  [[self bashSwitch] setEnabled:[self bashAvailable]];
   [[self tableView] reloadData];
+}
+
+- (BOOL)bashAvailable
+{
+  return [[self selectedAssistantSetIdentifier]
+    isEqualToString:kStrappyCodingAssistantIdentifier];
 }
 
 - (void)doneAction:(id)sender
@@ -434,6 +461,21 @@ enum {
   [sender setOn:[self webSearchEnabled] animated:YES];
 }
 
+- (void)bashSwitchChanged:(UISwitch *)sender
+{
+  PromptSendViewController *promptSendViewController;
+
+  promptSendViewController = [self promptSendViewController];
+  if ([self bashAvailable] && (promptSendViewController != nil)) {
+    (void)[promptSendViewController setBashEnabledFromOptions:[sender isOn]];
+    [self setBashEnabled:[promptSendViewController bashEnabled]];
+  } else {
+    [self setBashEnabled:NO];
+  }
+  [sender setOn:([self bashAvailable] && [self bashEnabled]) animated:YES];
+  [sender setEnabled:[self bashAvailable]];
+}
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
   (void)tableView;
@@ -451,7 +493,7 @@ enum {
     return (NSInteger)[[self models] count];
   }
   if (section == kStrappyPromptOptionsSectionAvailableTools) {
-    return 1;
+    return 2;
   }
   return 0;
 }
@@ -517,20 +559,44 @@ titleForHeaderInSection:(NSInteger)section
   }
 
   if ([indexPath section] == kStrappyPromptOptionsSectionAvailableTools) {
-    cell = [tableView dequeueReusableCellWithIdentifier:@"WebSearchCell"];
+    if ([indexPath row] == 0) {
+      cell = [tableView dequeueReusableCellWithIdentifier:@"WebSearchCell"];
+      if (cell == nil) {
+        cell = [[UITableViewCell alloc]
+          initWithStyle:UITableViewCellStyleSubtitle
+         reuseIdentifier:@"WebSearchCell"];
+        [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+        [[cell textLabel] setNumberOfLines:1];
+        [[cell detailTextLabel] setNumberOfLines:1];
+      }
+      [[cell textLabel] setText:NSLocalizedString(@"Search Web", nil)];
+      [[cell textLabel] setTextColor:[UIColor blackColor]];
+      [[cell detailTextLabel] setText:NSLocalizedString(
+        @"Web Search incurs additional charges", nil)];
+      [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+      [[self webSearchSwitch] setOn:[self webSearchEnabled] animated:NO];
+      [cell setAccessoryView:[self webSearchSwitch]];
+      return cell;
+    }
+
+    cell = [tableView dequeueReusableCellWithIdentifier:@"BashCell"];
     if (cell == nil) {
       cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
-                                    reuseIdentifier:@"WebSearchCell"];
+                                    reuseIdentifier:@"BashCell"];
       [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
       [[cell textLabel] setNumberOfLines:1];
       [[cell detailTextLabel] setNumberOfLines:1];
     }
-    [[cell textLabel] setText:NSLocalizedString(@"Search Web", nil)];
+    [[cell textLabel] setText:NSLocalizedString(@"Enable Bash", nil)];
+    [[cell textLabel] setTextColor:[self bashAvailable] ?
+      [UIColor blackColor] : [UIColor grayColor]];
     [[cell detailTextLabel] setText:NSLocalizedString(
-      @"Web Search incurs additional charges", nil)];
+      @"Allows command execution in this session", nil)];
     [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
-    [[self webSearchSwitch] setOn:[self webSearchEnabled] animated:NO];
-    [cell setAccessoryView:[self webSearchSwitch]];
+    [[self bashSwitch] setOn:([self bashAvailable] && [self bashEnabled])
+                      animated:NO];
+    [[self bashSwitch] setEnabled:[self bashAvailable]];
+    [cell setAccessoryView:[self bashSwitch]];
     return cell;
   }
 
@@ -605,17 +671,9 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     if ([assistantSetIdentifier length] == 0U) {
       return;
     }
-    if ([[self promptSendViewController]
-          setSelectedAssistantSetIdentifierFromOptions:
-            assistantSetIdentifier]) {
-      [self setSelectedAssistantSetIdentifier:assistantSetIdentifier];
-      [[self tableView] reloadSections:
-        [NSIndexSet indexSetWithIndex:
-          kStrappyPromptOptionsSectionAssistantSet]
-                    withRowAnimation:UITableViewRowAnimationNone];
-    } else {
-      [self reloadOptionsFromPrompt];
-    }
+    (void)[[self promptSendViewController]
+      setSelectedAssistantSetIdentifierFromOptions:assistantSetIdentifier];
+    [self reloadOptionsFromPrompt];
     return;
   }
   if (([indexPath section] != kStrappyPromptOptionsSectionModels) ||
@@ -652,6 +710,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
       UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin];
     [self setControlsEnabled:YES];
     [self setWebSearchEnabled:YES];
+    [self setBashEnabled:NO];
     [self buildSubviews];
   }
   return self;
@@ -928,6 +987,12 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [[self optionsController] reloadOptionsFromPrompt];
 }
 
+- (void)setBashEnabled:(BOOL)enabled
+{
+  _bashEnabled = enabled ? YES : NO;
+  [[self optionsController] reloadOptionsFromPrompt];
+}
+
 - (void)reloadOptionsMenu
 {
   [self updateControls];
@@ -1181,6 +1246,27 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   }
   if (changed) {
     [self setWebSearchEnabled:enabled];
+  }
+  return changed;
+}
+
+- (BOOL)setBashEnabledFromOptions:(BOOL)enabled
+{
+  BOOL changed;
+
+  if (![[self currentSelectedAssistantSetIdentifier]
+        isEqualToString:kStrappyCodingAssistantIdentifier]) {
+    [self setBashEnabled:NO];
+    return NO;
+  }
+  changed = NO;
+  if ([[self delegate] respondsToSelector:
+        @selector(promptSendViewController:setBashEnabled:)]) {
+    changed = [[self delegate] promptSendViewController:self
+                                         setBashEnabled:(enabled ? YES : NO)];
+  }
+  if (changed) {
+    [self setBashEnabled:enabled];
   }
   return changed;
 }

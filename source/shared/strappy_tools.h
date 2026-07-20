@@ -9,6 +9,7 @@ extern "C" {
 
 #define STRAPPY_TOOL_DATABASE_LIST_INFO "database_list_info"
 #define STRAPPY_TOOL_DATABASE_QUERY "database_query"
+#define STRAPPY_TOOL_BASH "bash"
 #define STRAPPY_TOOL_FILE_READ "file_read"
 #define STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601 "helper_datetime_to_iso8601"
 #define STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601 "helper_datetime_from_iso8601"
@@ -23,6 +24,8 @@ extern "C" {
 #define STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM "helper_fontawesome_shortcode_confirm"
 #define STRAPPY_TOOL_OPENROUTER_WEB_SEARCH "openrouter:web_search"
 #define STRAPPY_TOOL_OPENROUTER_WEB_FETCH "openrouter:web_fetch"
+
+typedef int (*strappy_tools_continue_callback)(void *user_data);
 
 char *strappy_tools_request_json(const char *resource_dir,
                                  char **error_out);
@@ -68,6 +71,18 @@ char *strappy_tools_execute_for_function_call(
   const char *provider_call_id,
   const char *tool_name,
   const char *arguments_json,
+  char **error_out);
+char *strappy_tools_execute_for_function_call_with_cancellation(
+  const char *session_db_path,
+  long long active_session_id,
+  const char *resource_dir,
+  const char *provider_call_id,
+  const char *tool_name,
+  const char *arguments_json,
+  strappy_tools_continue_callback continue_callback,
+  void *continue_callback_data,
+  int *output_truncated_out,
+  int *cancelled_out,
   char **error_out);
 
 #ifdef __cplusplus

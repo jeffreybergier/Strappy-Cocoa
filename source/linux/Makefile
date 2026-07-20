@@ -23,6 +23,7 @@ CFLAGS ?= -std=c99 -Wall -Wextra -Wconversion -Wsign-conversion -Wfloat-conversi
 SQLITE_LIBS ?= -lsqlite3
 THREAD_LIBS ?= -pthread
 DATABASE_QUERY_HARNESS := $(BUILD_DIR)/database_query_harness
+BASH_HARNESS := $(BUILD_DIR)/bash_harness
 WEBVIEW_HARNESS := $(BUILD_DIR)/webview_harness
 RESPONSES_HARNESS := $(BUILD_DIR)/responses_harness
 PROMPT_GENERATOR_HARNESS := $(BUILD_DIR)/prompt_generator_harness
@@ -32,9 +33,19 @@ DATABASE_QUERY_HARNESS_SOURCES = \
 	database_query_harness.c \
 	$(SHARED_DIR)/strappy_cocoa.c \
 	$(SHARED_DIR)/strappy_tools.c \
+	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
 	$(SHARED_DIR)/strappy_db.c \
 	$(SHARED_DIR)/strappy_file_scanner.c \
+	$(SHARED_DIR)/strappy_core.c \
+	$(SHARED_DIR)/strappy_assistant_sets.c \
+	$(CJSON_DIR)/cJSON.c
+
+BASH_HARNESS_SOURCES = \
+	bash_harness.c \
+	$(SHARED_DIR)/strappy_bash.c \
+	$(SHARED_DIR)/strappy_cocoa.c \
+	$(SHARED_DIR)/strappy_db.c \
 	$(SHARED_DIR)/strappy_core.c \
 	$(SHARED_DIR)/strappy_assistant_sets.c \
 	$(CJSON_DIR)/cJSON.c
@@ -59,6 +70,7 @@ RESPONSES_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_responses.c \
 	$(SHARED_DIR)/strappy_session.c \
 	$(SHARED_DIR)/strappy_tools.c \
+	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
 	$(SHARED_DIR)/strappy_webview.c \
 	$(CJSON_DIR)/cJSON.c
@@ -68,6 +80,7 @@ PROMPT_GENERATOR_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_prompt.c \
 	$(SHARED_DIR)/strappy_quality_policy.c \
 	$(SHARED_DIR)/strappy_tools.c \
+	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
 	$(SHARED_DIR)/strappy_assistant_sets.c \
 	$(SHARED_DIR)/strappy_cocoa.c \
@@ -77,8 +90,9 @@ PROMPT_GENERATOR_HARNESS_SOURCES = \
 
 .PHONY: test prompts review-prompts clean
 
-test: $(DATABASE_QUERY_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS)
+test: $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS)
 	./$(DATABASE_QUERY_HARNESS)
+	./$(BASH_HARNESS)
 	./$(WEBVIEW_HARNESS)
 	./$(RESPONSES_HARNESS)
 	./$(PROMPT_GENERATOR_HARNESS) $(SHARED_DIR)/Resources --check
@@ -98,6 +112,9 @@ $(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
 
 $(DATABASE_QUERY_HARNESS): $(DATABASE_QUERY_HARNESS_SOURCES) $(FONTAWESOME_GENERATED) | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(DATABASE_QUERY_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS)
+
+$(BASH_HARNESS): $(BASH_HARNESS_SOURCES) | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(BASH_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS)
 
 $(WEBVIEW_HARNESS): $(WEBVIEW_HARNESS_SOURCES) $(FONTAWESOME_GENERATED) | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(WEBVIEW_HARNESS_SOURCES)

@@ -117,7 +117,8 @@ Deliverables:
   parsing, and result serialization. The registry exposes `database_list_info`,
   `database_context_read`, `database_query`, timestamp helpers, remembered user
   fact helpers, remembered database hint helpers, and
-  `helper_session_name_write`, plus the Coding Assistant-only `file_read` tool.
+  `helper_session_name_write`, plus the Coding Assistant-only `file_read` and
+  `bash` tools.
 - [x] Stable database tools named `database_list_info`,
   `database_context_read`, and `database_query`, all using assistant-visible
   database IDs when a database is selected.
@@ -133,8 +134,9 @@ Deliverables:
   round-zero preflight, and ordered answer-quality checks. World Knowledge uses
   only universal tools and `memory_user_fact_read` preflight; Personal Assistant
   additionally enables database tools and `database_list_info` preflight;
-  Coding Assistant is available and exclusively receives `file_read` while its
-  remaining coding tools are built.
+  Coding Assistant is available and exclusively receives `file_read` plus the
+  per-session, explicitly enabled `bash` tool in addition to the universal
+  tools.
 - [x] Round-zero application preflight executes the tools selected by the
   session's assistant set and injects their fresh results as application-seeded,
   matched `function_call` / `function_call_output` input pairs without creating
@@ -191,7 +193,8 @@ Deliverables:
   prompt submission, processing status, cancellation, and ledger updates.
 - [x] Conversation list, active conversation view, message composer, loading
   state, error state, and cancel action. The iOS prompt options expose model
-  selection and web search; the obsolete streaming option has been removed.
+  selection, web search, and a Coding Assistant-only Bash opt-in; the obsolete
+  streaming option has been removed.
 - [x] macOS Preferences tabs for API credentials, sortable model catalog
   browsing/search with allowed-model checkboxes and a default-model picker,
   database scanning/approval, and read-only system prompt inspection.
@@ -259,6 +262,9 @@ centralized so phase deliverables do not duplicate test-plan details.
   database-list output shape, SQL safety checks, timestamp helpers, remembered
   user/database helper memory, session naming, session-backed tool audit fields,
   message persistence, and bounded UTF-8 `file_read` behavior.
+- [x] Linux `bash_harness` coverage for per-session opt-in, one-shot child-shell
+  execution, combined output, validation, timeout and cancellation,
+  process-group cleanup, bounded display tails, and the hard capture limit.
 - [x] Linux `webview_harness` coverage for webview rendering of generated
   HTML/JS, JSON objects, tool events, reasoning, and harness turns.
 - [ ] Mocked API responses covering success, malformed JSON, HTTP errors, and

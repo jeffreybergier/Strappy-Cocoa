@@ -713,8 +713,7 @@ static int harness_check_page_scripts(void)
                                "return 0;") &&
        harness_expect_contains(page_html,
                                "typeof strappyAPIRoundCollapsed[id]=="
-                               "'undefined'?(apiRoundEndedInError(rows,id)?"
-                               "0:1):") &&
+                               "'undefined'?apiRoundDefaultCollapsed(rows,id):") &&
        harness_expect_contains(page_html,
                                "function rowIsAPIExchangeError(row)") &&
        harness_expect_contains(page_html,
@@ -729,6 +728,23 @@ static int harness_check_page_scripts(void)
                                "return last&&rowIsAPIExchangeError(last)?"
                                "1:0;") &&
        harness_expect_contains(page_html,
+                               "function rowIsBashTool(row)") &&
+       harness_expect_contains(page_html,
+                               "kind=='function_call'||"
+                               "kind=='function_call_output'") &&
+       harness_expect_contains(page_html,
+                               "row.getAttribute('data-tool-name')=='bash'") &&
+       harness_expect_contains(page_html,
+                               "function apiRoundHasBashTool(rows,id)") &&
+       harness_expect_contains(page_html,
+                               "apiRoundId(rows[i])==id&&"
+                               "rowIsBashTool(rows[i])") &&
+       harness_expect_contains(page_html,
+                               "function apiRoundDefaultCollapsed(rows,id)") &&
+       harness_expect_contains(page_html,
+                               "apiRoundEndedInError(rows,id)||"
+                               "apiRoundHasBashTool(rows,id)") &&
+       harness_expect_contains(page_html,
                                "function promptGroupIsProcessing(group)") &&
        harness_expect_contains(page_html,
                                "function beginAPIRoundsForPrompt(group)") &&
@@ -740,7 +756,7 @@ static int harness_check_page_scripts(void)
                                "group===''||strappyAPIRoundSettled[group]") &&
        harness_expect_contains(page_html,
                                "strappyAPIRoundCollapsed[id]="
-                               "apiRoundEndedInError(rows,id)?0:1;") &&
+                               "apiRoundDefaultCollapsed(rows,id);") &&
        harness_expect_contains(page_html,
                                "function rowIsFailedAnswerQuality(row)") &&
        harness_expect_contains(page_html,
@@ -1976,7 +1992,9 @@ static int harness_check_responses_items(void)
   char *call_html;
   char *reasoning_html;
   char *function_html;
+  char *bash_function_html;
   char *output_html;
+  char *bash_output_html;
   char *error_output_html;
   char *search_html;
   char *fetch_html;
@@ -2052,6 +2070,20 @@ static int harness_check_responses_items(void)
   function_html = strappy_webview_message_html(&message, &labels, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
+  message.element_id = "response-bash-function-1";
+  message.round_id = 3LL;
+  message.api_call_id = 1LL;
+  message.direction = "response";
+  message.role = "api_function_call";
+  message.kind = "function_call";
+  message.tool_call_id = "call-bash";
+  message.tool_name = "bash";
+  message.arguments_json = "{\"command\":\"pwd\"}";
+  message.text = "bash\n{\"command\":\"pwd\"}";
+  bash_function_html =
+    strappy_webview_message_html(&message, &labels, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
   message.element_id = "response-output-1";
   message.round_id = 4LL;
   message.round_number = 4L;
@@ -2064,6 +2096,22 @@ static int harness_check_responses_items(void)
     "\"rows_truncated\":false}";
   message.text = "{\"columns\":[\"value\"]}";
   output_html = strappy_webview_message_html(&message, &labels, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "response-bash-output-1";
+  message.round_id = 4LL;
+  message.round_number = 4L;
+  message.direction = "request";
+  message.role = "api_function_output";
+  message.kind = "function_call_output";
+  message.tool_call_id = "call-bash";
+  message.tool_name = "bash";
+  message.result_json =
+    "{\"output\":\"/private/var/mobile\","
+    "\"output_truncated\":false}";
+  message.text = message.result_json;
+  bash_output_html =
+    strappy_webview_message_html(&message, &labels, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-output-error-1";
@@ -2138,7 +2186,8 @@ static int harness_check_responses_items(void)
   quality_html = strappy_webview_message_html(&message, &labels, NULL, NULL);
 
   ok = (call_html != NULL) && (reasoning_html != NULL) &&
-       (function_html != NULL) && (output_html != NULL) &&
+       (function_html != NULL) && (bash_function_html != NULL) &&
+       (output_html != NULL) && (bash_output_html != NULL) &&
        (error_output_html != NULL) &&
        (search_html != NULL) && (fetch_html != NULL) &&
        (developer_html != NULL) && (quality_html != NULL) &&
@@ -2215,6 +2264,17 @@ static int harness_check_responses_items(void)
        harness_expect_not_contains(function_html,
                                    "tool-card-open") &&
        harness_expect_not_contains(function_html, "class=\"row tool_call\"") &&
+       harness_expect_contains(bash_function_html,
+                               "class=\"row api_function_call\"") &&
+       harness_expect_contains(bash_function_html,
+                               "data-tool-name=\"bash\"") &&
+       harness_expect_contains(bash_function_html,
+                               "class=\"bubble api-tool-card tool-card "
+                               "tool-card-open\"") &&
+       harness_expect_contains(bash_function_html,
+                               "aria-expanded=\"true\"") &&
+       harness_expect_contains(bash_function_html, "fa-angle-down") &&
+       harness_expect_not_contains(bash_function_html, "tool-error") &&
        harness_expect_contains(output_html,
                                "class=\"row api_function_output\"") &&
        harness_expect_contains(output_html,
@@ -2250,6 +2310,22 @@ static int harness_check_responses_items(void)
                                "class=\"tool-card-body\"") &&
        harness_expect_not_contains(output_html,
                                    "tool-card-open") &&
+       harness_expect_contains(bash_output_html,
+                               "class=\"row api_function_output\"") &&
+       harness_expect_contains(bash_output_html,
+                               "data-tool-name=\"bash\"") &&
+       harness_expect_contains(bash_output_html,
+                               "data-result-json=\"{&quot;output&quot;:"
+                               "&quot;/private/var/mobile&quot;,") &&
+       harness_expect_contains(bash_output_html,
+                               "&quot;output_truncated&quot;:false}") &&
+       harness_expect_contains(bash_output_html,
+                               "class=\"bubble api-tool-card tool-card "
+                               "tool-card-open\"") &&
+       harness_expect_contains(bash_output_html,
+                               "aria-expanded=\"true\"") &&
+       harness_expect_contains(bash_output_html, "fa-angle-down") &&
+       harness_expect_not_contains(bash_output_html, "tool-error") &&
        harness_expect_contains(error_output_html,
                                "class=\"row api_function_output state-error\"") &&
        harness_expect_contains(error_output_html,
@@ -2360,7 +2436,9 @@ static int harness_check_responses_items(void)
   strappy_webview_free(fetch_html);
   strappy_webview_free(search_html);
   strappy_webview_free(error_output_html);
+  strappy_webview_free(bash_output_html);
   strappy_webview_free(output_html);
+  strappy_webview_free(bash_function_html);
   strappy_webview_free(function_html);
   strappy_webview_free(reasoning_html);
   strappy_webview_free(call_html);

@@ -119,6 +119,40 @@
     {
       "type": "function",
       "function": {
+        "name": "bash",
+        "description": "Bash tool for executing commands on the device. Each tool call is always a fresh session in the user's selected working directory. The shell state does not persist between calls. stdin is closed, stdout and stderr are returned together in arrival order, and shell state does not persist between calls.",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "Shell command to execute in the session working directory.",
+              "minLength": 1,
+              "maxLength": 32768,
+              "pattern": "\\S"
+            },
+            "timeout": {
+              "type": "number",
+              "description": "Maximum execution time in seconds.",
+              "exclusiveMinimum": 0,
+              "maximum": 120,
+              "default": 120
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "command"
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "helper_datetime_to_iso8601",
         "description": "ALWAYS call this tool when displaying numeric timestamps. Convert numeric timestamp strings to ISO 8601 datetimes. Returns a JSON array in input order.",
         "parameters": {

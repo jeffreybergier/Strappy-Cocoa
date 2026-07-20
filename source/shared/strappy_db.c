@@ -33,6 +33,17 @@
 #define STRAPPY_DB_SESSION_ASSISTANT_SET_SQL \
   "COALESCE((SELECT a.assistant_set_id FROM session_assistant_sets a " \
   "WHERE a.session_id = s.id), '" STRAPPY_ASSISTANT_SET_DEFAULT "')"
+#define STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL \
+  "COALESCE((SELECT x.web_search_enabled FROM session_settings x " \
+  "WHERE x.session_id = s.id), 1)"
+#define STRAPPY_DB_SESSION_BASH_ENABLED_SQL \
+  "CASE WHEN " STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " = '" \
+  STRAPPY_ASSISTANT_SET_CODING_ASSISTANT "' THEN " \
+  "COALESCE((SELECT b.bash_enabled FROM session_settings b " \
+  "WHERE b.session_id = s.id), 0) ELSE 0 END"
+#define STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL \
+  "COALESCE((SELECT x.streaming_enabled FROM session_settings x " \
+  "WHERE x.session_id = s.id), 0)"
 #define STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL \
   "COALESCE((SELECT i.created_at_ms FROM conversation_items i " \
   "WHERE i.session_id = s.id ORDER BY i.sequence DESC LIMIT 1), " \
@@ -305,6 +316,7 @@ void strappy_session_record_init(strappy_session_record *record)
   record->last_activity_at = NULL;
   record->last_activity_at_ms = 0LL;
   record->web_search_enabled = 1;
+  record->bash_enabled = 0;
   record->streaming_enabled = 0;
   record->http_status = 0L;
 }
@@ -1312,10 +1324,6 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "id INTEGER PRIMARY KEY,"
     "name TEXT NOT NULL DEFAULT '',"
     "model_id TEXT,"
-    "web_search_enabled INTEGER NOT NULL DEFAULT 1 "
-      "CHECK(web_search_enabled IN (0,1)),"
-    "streaming_enabled INTEGER NOT NULL DEFAULT 0 "
-      "CHECK(streaming_enabled IN (0,1)),"
     "created_at_ms INTEGER NOT NULL,"
     "updated_at_ms INTEGER NOT NULL,"
     "FOREIGN KEY(model_id) REFERENCES models(id)"
@@ -1325,6 +1333,17 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "CREATE TABLE IF NOT EXISTS session_assistant_sets ("
     "session_id INTEGER PRIMARY KEY,"
     "assistant_set_id TEXT NOT NULL CHECK(length(assistant_set_id) > 0),"
+    "updated_at_ms INTEGER NOT NULL,"
+    "FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE"
+    ");"
+    "CREATE TABLE IF NOT EXISTS session_settings ("
+    "session_id INTEGER PRIMARY KEY,"
+    "web_search_enabled INTEGER NOT NULL DEFAULT 1 "
+      "CHECK(web_search_enabled IN (0,1)),"
+    "bash_enabled INTEGER NOT NULL DEFAULT 0 "
+      "CHECK(bash_enabled IN (0,1)),"
+    "streaming_enabled INTEGER NOT NULL DEFAULT 0 "
+      "CHECK(streaming_enabled IN (0,1)),"
     "updated_at_ms INTEGER NOT NULL,"
     "FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE"
     ");"
@@ -2305,14 +2324,15 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   record->http_status = (long)sqlite3_column_int64(stmt, 6);
   record->last_activity_at_ms = (long long)sqlite3_column_int64(stmt, 9);
   record->web_search_enabled = sqlite3_column_int(stmt, 10) ? 1 : 0;
-  record->streaming_enabled = sqlite3_column_int(stmt, 11) ? 1 : 0;
+  record->bash_enabled = sqlite3_column_int(stmt, 11) ? 1 : 0;
+  record->streaming_enabled = sqlite3_column_int(stmt, 12) ? 1 : 0;
 
   name = strappy_db_column_string(stmt, 1);
   prompt = strappy_db_column_string(stmt, 2);
   response = strappy_db_column_string(stmt, 3);
   model = strappy_db_column_string(stmt, 4);
   model_name = strappy_db_column_string(stmt, 5);
-  assistant_set_id = strappy_db_column_string(stmt, 12);
+  assistant_set_id = strappy_db_column_string(stmt, 13);
   created_at = strappy_db_column_string(stmt, 7);
   last_activity_at = strappy_db_column_string(stmt, 8);
 
@@ -7379,6 +7399,38 @@ static int strappy_db_validate_working_directory(
   return 1;
 }
 
+static int strappy_db_save_session_settings(sqlite3 *db,
+                                            long long session_id,
+                                            char **error_out)
+{
+  static const char *sql =
+    "INSERT INTO session_settings "
+    "(session_id, web_search_enabled, bash_enabled, streaming_enabled, "
+     "updated_at_ms) VALUES (?, 1, 0, 0, ?);";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 2, (sqlite3_int64)strappy_db_now_ms());
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save session settings: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+  return 1;
+}
+
 static int strappy_db_save_session_working_directory(
   sqlite3 *db,
   long long session_id,
@@ -7525,10 +7577,11 @@ int strappy_db_create_session_with_working_directory(
   session_id = (long long)sqlite3_last_insert_rowid(db);
   free(default_model_id);
   sqlite3_finalize(stmt);
-  if (!strappy_db_save_session_working_directory(db,
-                                                 session_id,
-                                                 working_directory,
-                                                 error_out)) {
+  if (!strappy_db_save_session_settings(db, session_id, error_out) ||
+      !strappy_db_save_session_working_directory(db,
+                                                  session_id,
+                                                  working_directory,
+                                                  error_out)) {
     strappy_db_exec(db,
                     "ROLLBACK;",
                     "Could not roll back session insert",
@@ -7977,10 +8030,10 @@ int strappy_db_update_session_streaming_enabled(const char *db_path,
                                                 char **error_out)
 {
   static const char *sql =
-    "UPDATE sessions "
+    "UPDATE session_settings "
     "SET streaming_enabled = ?, updated_at_ms = "
       "CAST(strftime('%s','now') AS INTEGER) * 1000 "
-    "WHERE id = ?;";
+    "WHERE session_id = ?;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;
@@ -8020,7 +8073,7 @@ int strappy_db_update_session_streaming_enabled(const char *db_path,
   }
 
   rc = sqlite3_step(stmt);
-  if (rc != SQLITE_DONE) {
+  if ((rc != SQLITE_DONE) || (sqlite3_changes(db) != 1)) {
     strappy_set_formatted_error(error_out,
                                 "Could not update session streaming setting: %s",
                                 sqlite3_errmsg(db));
@@ -8164,10 +8217,10 @@ int strappy_db_update_session_web_search_enabled(const char *db_path,
                                                  char **error_out)
 {
   static const char *sql =
-    "UPDATE sessions "
+    "UPDATE session_settings "
     "SET web_search_enabled = ?, updated_at_ms = "
       "CAST(strftime('%s','now') AS INTEGER) * 1000 "
-    "WHERE id = ?;";
+    "WHERE session_id = ?;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;
@@ -8207,7 +8260,7 @@ int strappy_db_update_session_web_search_enabled(const char *db_path,
   }
 
   rc = sqlite3_step(stmt);
-  if (rc != SQLITE_DONE) {
+  if ((rc != SQLITE_DONE) || (sqlite3_changes(db) != 1)) {
     strappy_set_formatted_error(error_out,
                                 "Could not update session web search setting: %s",
                                 sqlite3_errmsg(db));
@@ -8218,6 +8271,41 @@ int strappy_db_update_session_web_search_enabled(const char *db_path,
 
   sqlite3_finalize(stmt);
   strappy_db_release(db);
+  return 1;
+}
+
+static int strappy_db_save_session_bash_enabled(sqlite3 *db,
+                                                long long session_id,
+                                                int bash_enabled,
+                                                char **error_out)
+{
+  static const char *sql =
+    "UPDATE session_settings "
+    "SET bash_enabled = ?, updated_at_ms = ? WHERE session_id = ?;";
+  sqlite3_stmt *stmt;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int(stmt, 1, bash_enabled ? 1 : 0);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 2, (sqlite3_int64)strappy_db_now_ms());
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 3, (sqlite3_int64)session_id);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  sqlite3_finalize(stmt);
+  if ((rc != SQLITE_DONE) || (sqlite3_changes(db) != 1)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save session Bash setting: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
   return 1;
 }
 
@@ -8308,6 +8396,123 @@ int strappy_db_get_session_assistant_set(const char *db_path,
   return ok;
 }
 
+int strappy_db_get_session_bash_enabled(const char *db_path,
+                                        long long session_id,
+                                        int *bash_enabled_out,
+                                        char **error_out)
+{
+  static const char *sql =
+    "SELECT " STRAPPY_DB_SESSION_BASH_ENABLED_SQL " "
+    "FROM sessions s WHERE s.id = ?;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (bash_enabled_out == NULL) {
+    strappy_set_error(error_out, "Session Bash setting has no output.");
+    return 0;
+  }
+  *bash_enabled_out = 0;
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc == SQLITE_DONE) {
+    strappy_set_error(error_out, "Session was not found.");
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  if (rc != SQLITE_ROW) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read session Bash setting: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  *bash_enabled_out = sqlite3_column_int(stmt, 0) ? 1 : 0;
+  sqlite3_finalize(stmt);
+  strappy_db_release(db);
+  return 1;
+}
+
+int strappy_db_update_session_bash_enabled(const char *db_path,
+                                           long long session_id,
+                                           int bash_enabled,
+                                           char **error_out)
+{
+  sqlite3 *db;
+  char *assistant_set_id;
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out) ||
+      !strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin Bash-setting update",
+                       error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  assistant_set_id = NULL;
+  if (!strappy_db_copy_session_assistant_set(db,
+                                             session_id,
+                                             &assistant_set_id,
+                                             error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back Bash-setting update",
+                    NULL);
+    strappy_db_release(db);
+    return 0;
+  }
+  if (bash_enabled &&
+      (strcmp(assistant_set_id,
+              STRAPPY_ASSISTANT_SET_CODING_ASSISTANT) != 0)) {
+    free(assistant_set_id);
+    strappy_set_error(
+      error_out,
+      "Bash can be enabled only for Coding Assistant sessions.");
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back Bash-setting update",
+                    NULL);
+    strappy_db_release(db);
+    return 0;
+  }
+  free(assistant_set_id);
+  if (!strappy_db_save_session_bash_enabled(db,
+                                            session_id,
+                                            bash_enabled,
+                                            error_out) ||
+      !strappy_db_exec(db,
+                       "COMMIT;",
+                       "Could not commit Bash-setting update",
+                       error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back Bash-setting update",
+                    NULL);
+    strappy_db_release(db);
+    return 0;
+  }
+  strappy_db_release(db);
+  return 1;
+}
+
 int strappy_db_update_session_assistant_set(const char *db_path,
                                             long long session_id,
                                             const char *assistant_set_id,
@@ -8347,6 +8552,20 @@ int strappy_db_update_session_assistant_set(const char *db_path,
                                              &current,
                                              error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back assistant-set update", NULL);
+    strappy_db_release(db);
+    return 0;
+  }
+  if ((strcmp(assistant_set_id,
+              STRAPPY_ASSISTANT_SET_CODING_ASSISTANT) != 0) &&
+      !strappy_db_save_session_bash_enabled(db,
+                                            session_id,
+                                            0,
+                                            error_out)) {
+    free(current);
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back assistant-set update",
+                    NULL);
     strappy_db_release(db);
     return 0;
   }
@@ -8433,7 +8652,9 @@ int strappy_db_list_sessions(const char *db_path,
     "strftime('%Y-%m-%dT%H:%M:%fZ', "
       STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " / 1000.0, 'unixepoch'), "
     STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
-    "s.web_search_enabled, s.streaming_enabled, "
+    STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " "
@@ -8546,7 +8767,9 @@ int strappy_db_load_session(const char *db_path,
     "strftime('%Y-%m-%dT%H:%M:%fZ', "
       STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " / 1000.0, 'unixepoch'), "
     STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
-    "s.web_search_enabled, s.streaming_enabled, "
+    STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " WHERE s.id = ?;";
@@ -8635,7 +8858,9 @@ int strappy_db_load_session_list_record(const char *db_path,
     "strftime('%Y-%m-%dT%H:%M:%fZ', "
       STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " / 1000.0, 'unixepoch'), "
     STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
-    "s.web_search_enabled, s.streaming_enabled, "
+    STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " WHERE s.id = ?;";
@@ -15614,6 +15839,139 @@ int strappy_db_save_response_tool_execution(
   return 1;
 }
 
+int strappy_db_finalize_cancelled_response_tool_outputs(
+  const char *db_path,
+  long long session_id,
+  long long response_call_id,
+  const char * const *item_jsons,
+  size_t item_count,
+  char **error_out)
+{
+  static const char *turn_sql =
+    "SELECT i.turn_id FROM conversation_items i "
+    "JOIN function_calls f ON f.item_id = i.id "
+    "WHERE i.session_id = ? AND i.source_attempt_id = ? "
+    "ORDER BY i.sequence LIMIT 1;";
+  static const char *cancel_turn_sql =
+    "UPDATE turns SET state = 'cancelled', completed_at_ms = ? "
+    "WHERE id = ? AND session_id = ?;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  long long turn_id;
+  size_t index;
+  int rc;
+  int ok;
+
+  if ((session_id <= 0LL) || (response_call_id <= 0LL) ||
+      (item_jsons == NULL) || (item_count == 0U) ||
+      (item_count > (size_t)LONG_MAX)) {
+    strappy_set_error(
+      error_out,
+      "Cancelled Responses tool outputs are incomplete.");
+    return 0;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out) ||
+      !strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin cancelled tool-output save",
+                       error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, turn_sql, -1, &stmt, NULL);
+  ok = (rc == SQLITE_OK) &&
+    (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) == SQLITE_OK) &&
+    (sqlite3_bind_int64(stmt, 2,
+                        (sqlite3_int64)response_call_id) == SQLITE_OK) &&
+    (sqlite3_step(stmt) == SQLITE_ROW);
+  turn_id = ok ? (long long)sqlite3_column_int64(stmt, 0) : 0LL;
+  sqlite3_finalize(stmt);
+  if (!ok || (turn_id <= 0LL)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not find the cancelled Responses tool turn: %s",
+      sqlite3_errmsg(db));
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back cancelled tool outputs",
+                    NULL);
+    strappy_db_release(db);
+    return 0;
+  }
+
+  for (index = 0U; index < item_count; index++) {
+    cJSON *item;
+    cJSON *type;
+
+    item = (item_jsons[index] != NULL) ?
+      cJSON_Parse(item_jsons[index]) : NULL;
+    type = cJSON_IsObject(item) ?
+      cJSON_GetObjectItemCaseSensitive(item, "type") : NULL;
+    if ((type == NULL) || !cJSON_IsString(type) ||
+        (type->valuestring == NULL) ||
+        (strcmp(type->valuestring, "function_call_output") != 0) ||
+        !strappy_db_semantic_insert_item(db,
+                                         session_id,
+                                         turn_id,
+                                         0LL,
+                                         0LL,
+                                         (long)index,
+                                         1,
+                                         1,
+                                         item,
+                                         NULL,
+                                         error_out)) {
+      cJSON_Delete(item);
+      if ((error_out == NULL) || (*error_out == NULL)) {
+        strappy_set_error(error_out,
+                          "Cancelled tool output is not valid.");
+      }
+      strappy_db_exec(db,
+                      "ROLLBACK;",
+                      "Could not roll back cancelled tool outputs",
+                      NULL);
+      strappy_db_release(db);
+      return 0;
+    }
+    cJSON_Delete(item);
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, cancel_turn_sql, -1, &stmt, NULL);
+  ok = (rc == SQLITE_OK) &&
+    (sqlite3_bind_int64(stmt, 1,
+                        (sqlite3_int64)strappy_db_now_ms()) == SQLITE_OK) &&
+    (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)turn_id) == SQLITE_OK) &&
+    (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)session_id) == SQLITE_OK) &&
+    (sqlite3_step(stmt) == SQLITE_DONE) && (sqlite3_changes(db) == 1);
+  sqlite3_finalize(stmt);
+  if (!ok ||
+      !strappy_db_exec(db,
+                       "COMMIT;",
+                       "Could not commit cancelled tool outputs",
+                       error_out)) {
+    if (!ok && ((error_out == NULL) || (*error_out == NULL))) {
+      strappy_set_formatted_error(
+        error_out,
+        "Could not finish the cancelled Responses turn: %s",
+        sqlite3_errmsg(db));
+    }
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back cancelled tool outputs",
+                    NULL);
+    strappy_db_release(db);
+    return 0;
+  }
+  strappy_db_release(db);
+  return 1;
+}
+
 int strappy_db_update_response_session_summary(
   const char *db_path,
   long long session_id,
@@ -16370,6 +16728,39 @@ static int strappy_db_semantic_finalize_ranged_timeline_costs(
   return 1;
 }
 
+static char *strappy_db_semantic_function_output_tool_name(
+  sqlite3 *db,
+  long long item_id,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT c.tool_name FROM function_outputs o "
+    "JOIN function_calls c ON c.item_id = o.function_call_item_id "
+    "WHERE o.item_id = ?;";
+  sqlite3_stmt *stmt;
+  char *tool_name;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)item_id) != SQLITE_OK) ||
+      (sqlite3_step(stmt) != SQLITE_ROW)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read function output tool name: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return NULL;
+  }
+  tool_name = strappy_db_column_string(stmt, 0);
+  sqlite3_finalize(stmt);
+  if (tool_name == NULL) {
+    strappy_set_error(error_out,
+                      "Could not allocate function output tool name.");
+  }
+  return tool_name;
+}
+
 static int strappy_db_semantic_populate_timeline_item(
   sqlite3 *db,
   sqlite3_stmt *stmt,
@@ -16405,6 +16796,17 @@ static int strappy_db_semantic_populate_timeline_item(
   value = cJSON_GetObjectItem(item, "name");
   if (cJSON_IsString(value)) {
     record->tool_name = strappy_string_duplicate(value->valuestring);
+  }
+  if ((record->tool_name == NULL) &&
+      (strcmp(role, "api_function_output") == 0)) {
+    record->tool_name = strappy_db_semantic_function_output_tool_name(
+      db,
+      (long long)sqlite3_column_int64(stmt, 5),
+      error_out);
+    if (record->tool_name == NULL) {
+      cJSON_Delete(item);
+      return 0;
+    }
   }
   value = cJSON_GetObjectItem(item, "arguments");
   if (cJSON_IsString(value)) {

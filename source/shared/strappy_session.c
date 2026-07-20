@@ -201,6 +201,17 @@ int strappy_session_update_web_search_enabled(const char *db_path,
                                                      error_out);
 }
 
+int strappy_session_update_bash_enabled(const char *db_path,
+                                        long long session_id,
+                                        int bash_enabled,
+                                        char **error_out)
+{
+  return strappy_db_update_session_bash_enabled(db_path,
+                                               session_id,
+                                               bash_enabled,
+                                               error_out);
+}
+
 int strappy_session_list_assistant_sets(
   const char *resource_dir,
   strappy_assistant_set_record_list *list,

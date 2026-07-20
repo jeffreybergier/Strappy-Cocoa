@@ -671,6 +671,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self updatePromptIdleTimerAssertion];
   [[self sendBar] setWebSearchEnabled:(session != nil) ?
     [session webSearchEnabled] : YES];
+  [[self sendBar] setBashEnabled:(session != nil) ?
+    [session bashEnabled] : NO];
   [[self sendBar] reloadOptionsMenu];
   if (([self webView] != nil) &&
       (sessionChanged || ![self webViewContentLoaded])) {
@@ -922,6 +924,36 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
 
   [[self sendBar] setWebSearchEnabled:[[self session] webSearchEnabled]];
+  [self setStatusText:nil];
+  return YES;
+}
+
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
+                  setBashEnabled:(BOOL)enabled
+{
+  NSError *error;
+
+  (void)controller;
+  if (![self canSelectModel]) {
+    return NO;
+  }
+
+  error = nil;
+  if (![[self session] setBashEnabled:enabled error:&error]) {
+    NSString *message;
+
+    message = [error localizedDescription];
+    if ([message length] == 0U) {
+      message = NSLocalizedString(@"Your changes could not be saved.", nil);
+    }
+    [self setStatusText:message];
+    [[self sendBar] setBashEnabled:[[self session] bashEnabled]];
+    [self showMessage:message
+                title:NSLocalizedString(@"Failed to Save Changes", nil)];
+    return NO;
+  }
+
+  [[self sendBar] setBashEnabled:[[self session] bashEnabled]];
   [self setStatusText:nil];
   return YES;
 }

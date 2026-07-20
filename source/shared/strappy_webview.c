@@ -1,6 +1,7 @@
 #include "strappy_webview.h"
 
 #include "strappy_cocoa.h"
+#include "strappy_tools.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -2064,14 +2065,18 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function apiRoundEndedInError(rows,id){var i,row,last=null;for(i=0;i<rows.length;i++){row=rows[i];if(apiRoundId(row)!=id)continue;",
     "if(rowIsFailedAnswerQuality(row))return 1;if(rowIsResponseStatus(row))last=row;}",
     "return last&&rowIsAPIExchangeError(last)?1:0;}",
+    "function rowIsBashTool(row){var kind=apiExchangeKind(row);return (kind=='function_call'||kind=='function_call_output')&&",
+    "row&&row.getAttribute&&row.getAttribute('data-tool-name')=='bash';}",
+    "function apiRoundHasBashTool(rows,id){var i;for(i=0;i<rows.length;i++){if(apiRoundId(rows[i])==id&&rowIsBashTool(rows[i]))return 1;}return 0;}",
+    "function apiRoundDefaultCollapsed(rows,id){return (apiRoundEndedInError(rows,id)||apiRoundHasBashTool(rows,id))?0:1;}",
     "function promptGroupIsProcessing(group){return group!==''&&group===strappyProcessingPromptGroupKey&&processingInteractionsLocked();}",
     "function beginAPIRoundsForPrompt(group){if(group!=='')strappyAPIRoundSettled[group]=0;}",
     "function collapseAPIRoundsForPrompt(group){var rows,seen,i,id;if(group===''||strappyAPIRoundSettled[group])return;",
     "rows=messageRows();seen={};for(i=0;i<rows.length;i++){if(promptGroupKey(rows[i])!==group)continue;id=apiRoundId(rows[i]);",
     "if(id===''||seen['$'+id])continue;seen['$'+id]=1;",
-    "strappyAPIRoundCollapsed[id]=apiRoundEndedInError(rows,id)?0:1;}strappyAPIRoundSettled[group]=1;}",
+    "strappyAPIRoundCollapsed[id]=apiRoundDefaultCollapsed(rows,id);}strappyAPIRoundSettled[group]=1;}",
     "function apiRoundCollapsed(id,promptKey,rows){if(promptGroupIsProcessing(promptKey))return 0;",
-    "return typeof strappyAPIRoundCollapsed[id]=='undefined'?(apiRoundEndedInError(rows,id)?0:1):(strappyAPIRoundCollapsed[id]?1:0);}",
+    "return typeof strappyAPIRoundCollapsed[id]=='undefined'?apiRoundDefaultCollapsed(rows,id):(strappyAPIRoundCollapsed[id]?1:0);}",
     "function responseStatusState(row){return row&&row.getAttribute?row.getAttribute('data-attempt-state')||'':'';}",
     "function responseStatusHTTPStatus(row){return row&&row.getAttribute?row.getAttribute('data-http-status')||'':'';}",
     "function responseStatusResolved(row){var state=responseStatusState(row);return state!==''&&state!='pending'&&state!='running';}",
@@ -2943,6 +2948,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   int render_api_tool_card;
   int render_response_status_section;
   int answer_quality_expanded;
+  int tool_card_expanded;
   int ok;
 
   role = ((message != NULL) && (message->role != NULL) &&
@@ -3048,6 +3054,9 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   answer_quality_expanded =
     strappy_webview_is_answer_quality_role(role) &&
     (message != NULL) && message->is_error;
+  tool_card_expanded = answer_quality_expanded ||
+    (render_api_tool_card &&
+     (strcmp(tool_name, STRAPPY_TOOL_BASH) == 0));
   render_created_at =
     (created_at[0] != '\0') &&
     ((message == NULL) || (message->round_id <= 0LL)) &&
@@ -3360,7 +3369,12 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     if (ok && answer_quality_expanded) {
       ok = strappy_webview_buffer_append_cstring(
         &buffer,
-        " tool-error tool-card-open");
+        " tool-error");
+    }
+    if (ok && tool_card_expanded) {
+      ok = strappy_webview_buffer_append_cstring(
+        &buffer,
+        " tool-card-open");
     }
   }
   if (ok && render_bubble_status) {
@@ -3387,7 +3401,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
            "aria-expanded=\"") &&
          strappy_webview_buffer_append_cstring(
            &buffer,
-           answer_quality_expanded ? "true" : "false") &&
+           tool_card_expanded ? "true" : "false") &&
          strappy_webview_buffer_append_cstring(
            &buffer,
            "\" "
@@ -3396,7 +3410,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
          strappy_webview_buffer_append_cstring(
            &buffer,
            strappy_webview_disclosure_icon_html(
-             answer_quality_expanded ? 0 : 1)) &&
+             tool_card_expanded ? 0 : 1)) &&
          strappy_webview_buffer_append_cstring(
            &buffer,
            "</span>"

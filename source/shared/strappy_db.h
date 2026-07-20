@@ -19,6 +19,7 @@ typedef struct strappy_session_record {
   char *last_activity_at;
   long long last_activity_at_ms;
   int web_search_enabled;
+  int bash_enabled;
   int streaming_enabled;
   long http_status;
 } strappy_session_record;
@@ -400,6 +401,14 @@ int strappy_db_update_session_web_search_enabled(const char *db_path,
                                                  long long session_id,
                                                  int web_search_enabled,
                                                  char **error_out);
+int strappy_db_get_session_bash_enabled(const char *db_path,
+                                        long long session_id,
+                                        int *bash_enabled_out,
+                                        char **error_out);
+int strappy_db_update_session_bash_enabled(const char *db_path,
+                                           long long session_id,
+                                           int bash_enabled,
+                                           char **error_out);
 int strappy_db_get_session_assistant_set(const char *db_path,
                                          long long session_id,
                                          char **assistant_set_id_out,
@@ -507,6 +516,13 @@ int strappy_db_list_canonical_response_items(
 int strappy_db_save_response_tool_execution(
   const char *db_path,
   const strappy_response_tool_execution_input *input,
+  char **error_out);
+int strappy_db_finalize_cancelled_response_tool_outputs(
+  const char *db_path,
+  long long session_id,
+  long long response_call_id,
+  const char * const *item_jsons,
+  size_t item_count,
   char **error_out);
 int strappy_db_update_response_session_summary(
   const char *db_path,

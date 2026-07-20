@@ -250,6 +250,7 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
 
   changeKind = [[notification userInfo] objectForKey:StrappySessionChangeKindKey];
   if ([changeKind isEqualToString:StrappySessionChangeKindWebSearch] ||
+      [changeKind isEqualToString:StrappySessionChangeKindBash] ||
       [changeKind isEqualToString:StrappySessionChangeKindStreaming]) {
     return;
   }

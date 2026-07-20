@@ -1,5 +1,6 @@
 #include "strappy_tools.h"
 
+#include "strappy_bash.h"
 #include "strappy_cocoa.h"
 #include "strappy_core.h"
 #include "strappy_db.h"
@@ -142,6 +143,7 @@ static int strappy_tools_helper_is_space(char value);
 static const strappy_tool_definition strappy_tool_definitions[] = {
   { STRAPPY_TOOL_DATABASE_LIST_INFO, STRAPPY_TOOL_KIND_DATABASE },
   { STRAPPY_TOOL_DATABASE_QUERY, STRAPPY_TOOL_KIND_DATABASE },
+  { STRAPPY_TOOL_BASH, STRAPPY_TOOL_KIND_DEVELOPER },
   { STRAPPY_TOOL_FILE_READ, STRAPPY_TOOL_KIND_DEVELOPER },
   { STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601, STRAPPY_TOOL_KIND_HELPER },
@@ -6250,11 +6252,33 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
                                             const char *provider_call_id,
                                             const char *tool_name,
                                             const char *arguments_json,
+                                            strappy_tools_continue_callback
+                                              continue_callback,
+                                            void *continue_callback_data,
+                                            int *output_truncated_out,
+                                            int *cancelled_out,
                                             char **error_out)
 {
+  if (output_truncated_out != NULL) {
+    *output_truncated_out = 0;
+  }
+  if (cancelled_out != NULL) {
+    *cancelled_out = 0;
+  }
   if ((tool_name == NULL) || (tool_name[0] == '\0')) {
     strappy_set_error(error_out, "Tool name is empty.");
     return NULL;
+  }
+
+  if (strcmp(tool_name, STRAPPY_TOOL_BASH) == 0) {
+    return strappy_bash_execute(session_db_path,
+                                active_session_id,
+                                arguments_json,
+                                continue_callback,
+                                continue_callback_data,
+                                output_truncated_out,
+                                cancelled_out,
+                                error_out);
   }
 
   if (strcmp(tool_name, STRAPPY_TOOL_FILE_READ) == 0) {
@@ -6365,6 +6389,10 @@ char *strappy_tools_execute(const char *session_db_path,
                                         NULL,
                                         tool_name,
                                         arguments_json,
+                                        NULL,
+                                        NULL,
+                                        NULL,
+                                        NULL,
                                         error_out);
 }
 
@@ -6387,5 +6415,45 @@ char *strappy_tools_execute_for_function_call(
                                         provider_call_id,
                                         tool_name,
                                         arguments_json,
+                                        NULL,
+                                        NULL,
+                                        NULL,
+                                        NULL,
+                                        error_out);
+}
+
+char *strappy_tools_execute_for_function_call_with_cancellation(
+  const char *session_db_path,
+  long long active_session_id,
+  const char *resource_dir,
+  const char *provider_call_id,
+  const char *tool_name,
+  const char *arguments_json,
+  strappy_tools_continue_callback continue_callback,
+  void *continue_callback_data,
+  int *output_truncated_out,
+  int *cancelled_out,
+  char **error_out)
+{
+  if (output_truncated_out != NULL) {
+    *output_truncated_out = 0;
+  }
+  if (cancelled_out != NULL) {
+    *cancelled_out = 0;
+  }
+  if ((provider_call_id == NULL) || (provider_call_id[0] == '\0')) {
+    strappy_set_error(error_out, "Tool function call id is empty.");
+    return NULL;
+  }
+  return strappy_tools_execute_internal(session_db_path,
+                                        active_session_id,
+                                        resource_dir,
+                                        provider_call_id,
+                                        tool_name,
+                                        arguments_json,
+                                        continue_callback,
+                                        continue_callback_data,
+                                        output_truncated_out,
+                                        cancelled_out,
                                         error_out);
 }

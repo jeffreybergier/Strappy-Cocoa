@@ -12,6 +12,7 @@ extern NSString * const StrappySessionChangeKindActivity;
 extern NSString * const StrappySessionChangeKindModel;
 extern NSString * const StrappySessionChangeKindStreaming;
 extern NSString * const StrappySessionChangeKindWebSearch;
+extern NSString * const StrappySessionChangeKindBash;
 extern NSString * const StrappySessionChangeKindAssistantSet;
 
 @interface StrappySession : NSObject {
@@ -19,6 +20,7 @@ extern NSString * const StrappySessionChangeKindAssistantSet;
   NSNumber     *sessionIdentifier_;
   NSDictionary *cachedSummary_;
   BOOL          webSearchEnabled_;
+  BOOL          bashEnabled_;
   BOOL          streamingEnabled_;
   BOOL          promptInFlight_;
   BOOL          promptCancellationRequested_;
@@ -77,6 +79,8 @@ extern NSString * const StrappySessionChangeKindAssistantSet;
                                         error:(NSError **)error;
 - (BOOL)webSearchEnabled;
 - (BOOL)setWebSearchEnabled:(BOOL)enabled error:(NSError **)error;
+- (BOOL)bashEnabled;
+- (BOOL)setBashEnabled:(BOOL)enabled error:(NSError **)error;
 - (NSString *)assistantSetIdentifier;
 - (BOOL)setAssistantSetIdentifier:(NSString *)assistantSetIdentifier
                             error:(NSError **)error;

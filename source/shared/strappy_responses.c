@@ -1,6 +1,7 @@
 #include "strappy_responses.h"
 
 #include "strappy_assistant_sets.h"
+#include "strappy_bash.h"
 #include "strappy_client.h"
 #include "strappy_config.h"
 #include "strappy_core.h"
@@ -525,6 +526,23 @@ static int strappy_responses_poll_cancelled(
   memset(&event, 0, sizeof(event));
   event.type = STRAPPY_RESPONSES_EVENT_CANCELLATION_POLL;
   return callback(&event, callback_data) ? 0 : 1;
+}
+
+typedef struct strappy_responses_tool_continue_context {
+  strappy_responses_event_callback callback;
+  void *callback_data;
+} strappy_responses_tool_continue_context;
+
+static int strappy_responses_tool_should_continue(void *user_data)
+{
+  strappy_responses_tool_continue_context *context;
+
+  context = (strappy_responses_tool_continue_context *)user_data;
+  if (context == NULL) {
+    return 1;
+  }
+  return strappy_responses_poll_cancelled(context->callback,
+                                           context->callback_data) ? 0 : 1;
 }
 
 static int strappy_responses_sleep_ms(long milliseconds,
@@ -1532,6 +1550,31 @@ static void strappy_responses_runtime_destroy(
   strappy_responses_runtime_init(runtime);
 }
 
+static void strappy_responses_profile_remove_tool(
+  strappy_assistant_set_profile *profile,
+  const char *tool_name)
+{
+  size_t index;
+
+  if ((profile == NULL) || (tool_name == NULL)) {
+    return;
+  }
+  for (index = 0U; index < profile->tool_name_count; index++) {
+    if (strcmp(profile->tool_names[index], tool_name) == 0) {
+      free(profile->tool_names[index]);
+      if ((index + 1U) < profile->tool_name_count) {
+        memmove(&profile->tool_names[index],
+                &profile->tool_names[index + 1U],
+                (profile->tool_name_count - index - 1U) *
+                  sizeof(profile->tool_names[0]));
+      }
+      profile->tool_name_count--;
+      profile->tool_names[profile->tool_name_count] = NULL;
+      return;
+    }
+  }
+}
+
 static int strappy_responses_validate_assistant_set(
   strappy_responses_runtime *runtime,
   char **error_out)
@@ -1595,6 +1638,7 @@ static int strappy_responses_prepare_runtime(
   strappy_session_record session;
   char *model;
   char *assistant_set_id;
+  int bash_enabled;
   int ok;
 
   if ((runtime == NULL) || (guidance_resource_dir == NULL) ||
@@ -1626,6 +1670,7 @@ static int strappy_responses_prepare_runtime(
     return 0;
   }
   runtime->config.web_search_enabled = session.web_search_enabled ? 1 : 0;
+  bash_enabled = session.bash_enabled ? 1 : 0;
   assistant_set_id = strappy_string_duplicate(session.assistant_set_id);
   strappy_session_record_destroy(&session);
   if (assistant_set_id == NULL) {
@@ -1659,13 +1704,20 @@ static int strappy_responses_prepare_runtime(
         runtime->config.guidance_resource_dir,
         assistant_set_id,
         &runtime->assistant_set,
-        error_out) ||
-      !strappy_responses_validate_assistant_set(runtime, error_out)) {
+        error_out)) {
     free(assistant_set_id);
     strappy_responses_runtime_destroy(runtime);
     return 0;
   }
   free(assistant_set_id);
+  if (!bash_enabled) {
+    strappy_responses_profile_remove_tool(&runtime->assistant_set,
+                                          STRAPPY_TOOL_BASH);
+  }
+  if (!strappy_responses_validate_assistant_set(runtime, error_out)) {
+    strappy_responses_runtime_destroy(runtime);
+    return 0;
+  }
   runtime->config.tool_allowlist =
     (const char * const *)runtime->assistant_set.tool_names;
   runtime->config.tool_allowlist_count = runtime->assistant_set.tool_name_count;
@@ -2017,10 +2069,15 @@ static int strappy_responses_execute_tool_calls(
   const strappy_responses_analysis *analysis,
   strappy_responses_audit *audit,
   strappy_responses_owned_items *outputs,
+  strappy_responses_event_callback callback,
+  void *callback_data,
   char **error_out)
 {
+  strappy_responses_tool_continue_context continue_context;
   size_t index;
 
+  continue_context.callback = callback;
+  continue_context.callback_data = callback_data;
   strappy_responses_owned_items_init(outputs);
   for (index = 0U; index < analysis->tool_call_count; index++) {
     const strappy_responses_tool_call *call;
@@ -2030,18 +2087,27 @@ static int strappy_responses_execute_tool_calls(
     char *item_json;
     long long started_at_ms;
     long long completed_at_ms;
+    int output_truncated;
+    int tool_cancelled;
     int tool_succeeded;
 
     call = &analysis->tool_calls[index];
     tool_error = NULL;
+    output_truncated = 0;
+    tool_cancelled = 0;
     started_at_ms = strappy_responses_now_ms();
-    output = strappy_tools_execute_for_function_call(session_db_path,
-                                                     session_id,
-                                                     resource_dir,
-                                                     call->call_id,
-                                                     call->name,
-                                                     call->arguments,
-                                                     &tool_error);
+    output = strappy_tools_execute_for_function_call_with_cancellation(
+      session_db_path,
+      session_id,
+      resource_dir,
+      call->call_id,
+      call->name,
+      call->arguments,
+      strappy_responses_tool_should_continue,
+      &continue_context,
+      &output_truncated,
+      &tool_cancelled,
+      &tool_error);
     completed_at_ms = strappy_responses_now_ms();
     tool_succeeded = (output != NULL) ? 1 : 0;
     if (output == NULL) {
@@ -2053,6 +2119,21 @@ static int strappy_responses_execute_tool_calls(
         strappy_responses_owned_items_destroy(outputs);
         return 0;
       }
+      if (strcmp(call->name, STRAPPY_TOOL_BASH) == 0) {
+        char *bash_error_output;
+
+        bash_error_output = strappy_bash_result_json(
+          output,
+          output_truncated,
+          error_out);
+        free(output);
+        output = bash_error_output;
+        if (output == NULL) {
+          free(tool_error);
+          strappy_responses_owned_items_destroy(outputs);
+          return 0;
+        }
+      }
     }
 
     memset(&execution, 0, sizeof(execution));
@@ -2062,7 +2143,8 @@ static int strappy_responses_execute_tool_calls(
     execution.call_id = call->call_id;
     execution.tool_name = call->name;
     execution.arguments_json = call->arguments;
-    execution.status = tool_succeeded ? "completed" : "error";
+    execution.status = tool_cancelled ? "cancelled" :
+      (tool_succeeded ? "completed" : "error");
     execution.output_json = output;
     execution.error_text = tool_error;
     execution.started_at_ms = started_at_ms;
@@ -2078,7 +2160,6 @@ static int strappy_responses_execute_tool_calls(
     if (tool_succeeded) {
       strappy_responses_audit_record_completed_tool(audit, call->name);
     }
-
     item_json = strappy_responses_function_output_item_json(call->call_id,
                                                             output,
                                                             error_out);
@@ -2089,6 +2170,21 @@ static int strappy_responses_execute_tool_calls(
                                               item_json,
                                               error_out)) {
       strappy_responses_owned_items_destroy(outputs);
+      return 0;
+    }
+    if (tool_cancelled) {
+      if (!strappy_db_finalize_cancelled_response_tool_outputs(
+            session_db_path,
+            session_id,
+            response_call_id,
+            (const char * const *)outputs->items,
+            outputs->count,
+            error_out)) {
+        strappy_responses_owned_items_destroy(outputs);
+        return 0;
+      }
+      strappy_responses_owned_items_destroy(outputs);
+      strappy_set_error(error_out, "Responses request was cancelled.");
       return 0;
     }
   }
@@ -2600,6 +2696,8 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
             &analysis,
             &runtime.audit,
             &new_items,
+            callback,
+            callback_data,
             error_out)) {
         strappy_responses_analysis_destroy(&analysis);
         strappy_responses_http_result_destroy(&http);

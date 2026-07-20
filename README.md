@@ -34,12 +34,18 @@ copy, audit guidance, invariant personality, and hard rules in
   and session-name tools.
 - Personal Assistant is the default and adds the personal-database tools and
   database-specific checks.
-- Coding Assistant is available with the set-only `file_read` tool, which reads
-  bounded UTF-8 text ranges relative to a per-session working directory.
+- Coding Assistant is available with the set-only `file_read` tool and an
+  opt-in `bash` tool. Bash starts disabled for every session and can be enabled
+  from the iOS prompt options only while Coding Assistant is selected; changing
+  assistants disables it again. `file_read` reads bounded UTF-8 text ranges,
+  while `bash` runs a fresh non-interactive child shell with a hard 120-second
+  ceiling; both start in the per-session working directory. Bash results expose
+  `output_truncated` so the model can distinguish complete output from a
+  bounded tail.
 
 An assistant set is selected per session and can be changed between prompts.
 The prompt-options button is disabled while a prompt is in progress, so model,
-assistant-set, and web-search changes cannot overlap an active request.
+assistant-set, web-search, and Bash changes cannot overlap an active request.
 
 Generate all three assistant-set prompts with web search enabled and disabled:
 
