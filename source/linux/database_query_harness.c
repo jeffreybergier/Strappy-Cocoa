@@ -1835,6 +1835,144 @@ static int harness_file_read_schema_matches(cJSON *tools)
   return 0;
 }
 
+static int harness_file_string_property_matches(cJSON *property,
+                                                int has_minimum,
+                                                double minimum,
+                                                double maximum)
+{
+  cJSON *type;
+  cJSON *min_length;
+  cJSON *max_length;
+
+  type = cJSON_IsObject(property) ?
+    cJSON_GetObjectItemCaseSensitive(property, "type") : NULL;
+  min_length = cJSON_IsObject(property) ?
+    cJSON_GetObjectItemCaseSensitive(property, "minLength") : NULL;
+  max_length = cJSON_IsObject(property) ?
+    cJSON_GetObjectItemCaseSensitive(property, "maxLength") : NULL;
+  if (!cJSON_IsString(type) || (type->valuestring == NULL) ||
+      (strcmp(type->valuestring, "string") != 0) ||
+      !cJSON_IsNumber(max_length) ||
+      (max_length->valuedouble != maximum)) {
+    return 0;
+  }
+  if (!has_minimum) {
+    return (min_length == NULL) ? 1 : 0;
+  }
+  return cJSON_IsNumber(min_length) &&
+    (min_length->valuedouble == minimum);
+}
+
+static int harness_file_write_schema_matches(cJSON *tools)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *function;
+    cJSON *name;
+    cJSON *strict;
+    cJSON *parameters;
+    cJSON *properties;
+    cJSON *required;
+    cJSON *additional_properties;
+
+    function = cJSON_GetObjectItemCaseSensitive(tool, "function");
+    name = cJSON_IsObject(function) ?
+      cJSON_GetObjectItemCaseSensitive(function, "name") : NULL;
+    if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
+        (strcmp(name->valuestring, STRAPPY_TOOL_FILE_WRITE) != 0)) {
+      continue;
+    }
+    strict = cJSON_GetObjectItemCaseSensitive(function, "strict");
+    parameters = cJSON_GetObjectItemCaseSensitive(function, "parameters");
+    properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters, "properties") : NULL;
+    required = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters, "required") : NULL;
+    additional_properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters,
+                                       "additionalProperties") : NULL;
+    return cJSON_IsFalse(strict) && cJSON_IsObject(properties) &&
+      (cJSON_GetArraySize(properties) == 2) &&
+      harness_file_string_property_matches(
+        cJSON_GetObjectItemCaseSensitive(properties, "path"),
+        1,
+        1.0,
+        4096.0) &&
+      harness_file_string_property_matches(
+        cJSON_GetObjectItemCaseSensitive(properties, "content"),
+        0,
+        0.0,
+        1048576.0) &&
+      cJSON_IsArray(required) && (cJSON_GetArraySize(required) == 2) &&
+      harness_json_array_contains_string(required, "path") &&
+      harness_json_array_contains_string(required, "content") &&
+      cJSON_IsFalse(additional_properties);
+  }
+  return 0;
+}
+
+static int harness_file_edit_schema_matches(cJSON *tools)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *function;
+    cJSON *name;
+    cJSON *strict;
+    cJSON *parameters;
+    cJSON *properties;
+    cJSON *required;
+    cJSON *additional_properties;
+
+    function = cJSON_GetObjectItemCaseSensitive(tool, "function");
+    name = cJSON_IsObject(function) ?
+      cJSON_GetObjectItemCaseSensitive(function, "name") : NULL;
+    if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
+        (strcmp(name->valuestring, STRAPPY_TOOL_FILE_EDIT) != 0)) {
+      continue;
+    }
+    strict = cJSON_GetObjectItemCaseSensitive(function, "strict");
+    parameters = cJSON_GetObjectItemCaseSensitive(function, "parameters");
+    properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters, "properties") : NULL;
+    required = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters, "required") : NULL;
+    additional_properties = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters,
+                                       "additionalProperties") : NULL;
+    return cJSON_IsFalse(strict) && cJSON_IsObject(properties) &&
+      (cJSON_GetArraySize(properties) == 3) &&
+      harness_file_string_property_matches(
+        cJSON_GetObjectItemCaseSensitive(properties, "path"),
+        1,
+        1.0,
+        4096.0) &&
+      harness_file_string_property_matches(
+        cJSON_GetObjectItemCaseSensitive(properties, "old_text"),
+        1,
+        1.0,
+        1048576.0) &&
+      harness_file_string_property_matches(
+        cJSON_GetObjectItemCaseSensitive(properties, "new_text"),
+        0,
+        0.0,
+        1048576.0) &&
+      cJSON_IsArray(required) && (cJSON_GetArraySize(required) == 3) &&
+      harness_json_array_contains_string(required, "path") &&
+      harness_json_array_contains_string(required, "old_text") &&
+      harness_json_array_contains_string(required, "new_text") &&
+      cJSON_IsFalse(additional_properties);
+  }
+  return 0;
+}
+
 static int harness_bash_schema_matches(cJSON *tools)
 {
   cJSON *tool;
@@ -2047,6 +2185,8 @@ static int harness_run_tool_registry_tests(void)
           STRAPPY_TOOL_MEMORY_USER_FACT_READ) &&
         harness_database_context_schema_matches(tools) &&
         harness_file_read_schema_matches(tools) &&
+        harness_file_write_schema_matches(tools) &&
+        harness_file_edit_schema_matches(tools) &&
         harness_bash_schema_matches(tools) &&
         (filtered_json != NULL) && cJSON_IsArray(filtered) &&
         (cJSON_GetArraySize(filtered) == 1) &&
@@ -2058,6 +2198,14 @@ static int harness_run_tool_registry_tests(void)
                                      "database_filename") &&
         harness_tool_display_matches(registry,
                                      STRAPPY_TOOL_FILE_READ,
+                                     "path",
+                                     NULL) &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_FILE_WRITE,
+                                     "path",
+                                     NULL) &&
+        harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_FILE_EDIT,
                                      "path",
                                      NULL) &&
         harness_tool_display_matches(registry,
@@ -2185,6 +2333,8 @@ static int harness_run_tool_registry_tests(void)
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_QUERY) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_BASH) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_FILE_READ) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_FILE_WRITE) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_FILE_EDIT) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_MEMORY_USER_FACT_READ) != NULL) &&
@@ -2213,6 +2363,10 @@ static int harness_run_tool_registry_tests(void)
         strappy_tools_is_helper(STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM) &&
         strappy_tools_is_registered(STRAPPY_TOOL_FILE_READ) &&
         !strappy_tools_is_helper(STRAPPY_TOOL_FILE_READ) &&
+        strappy_tools_is_registered(STRAPPY_TOOL_FILE_WRITE) &&
+        !strappy_tools_is_helper(STRAPPY_TOOL_FILE_WRITE) &&
+        strappy_tools_is_registered(STRAPPY_TOOL_FILE_EDIT) &&
+        !strappy_tools_is_helper(STRAPPY_TOOL_FILE_EDIT) &&
         strappy_tools_is_registered(STRAPPY_TOOL_BASH) &&
         !strappy_tools_is_helper(STRAPPY_TOOL_BASH) &&
         !strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_QUERY) &&
@@ -2339,6 +2493,12 @@ static int harness_run_assistant_set_tests(void)
       STRAPPY_TOOL_FILE_READ) &&
     !strappy_assistant_set_profile_allows_tool(
       &world,
+      STRAPPY_TOOL_FILE_WRITE) &&
+    !strappy_assistant_set_profile_allows_tool(
+      &world,
+      STRAPPY_TOOL_FILE_EDIT) &&
+    !strappy_assistant_set_profile_allows_tool(
+      &world,
       STRAPPY_TOOL_BASH) &&
     !strappy_assistant_set_profile_allows_tool(
       &world,
@@ -2366,6 +2526,12 @@ static int harness_run_assistant_set_tests(void)
       STRAPPY_TOOL_FILE_READ) &&
     !strappy_assistant_set_profile_allows_tool(
       &personal,
+      STRAPPY_TOOL_FILE_WRITE) &&
+    !strappy_assistant_set_profile_allows_tool(
+      &personal,
+      STRAPPY_TOOL_FILE_EDIT) &&
+    !strappy_assistant_set_profile_allows_tool(
+      &personal,
       STRAPPY_TOOL_BASH) &&
     !strappy_assistant_set_profile_has_quality_check(
       &personal,
@@ -2376,10 +2542,16 @@ static int harness_run_assistant_set_tests(void)
       &coding,
       &error) &&
     strappy_assistant_set_profile_is_available(&coding) &&
-    (coding.tool_name_count == 14U) &&
+    (coding.tool_name_count == 16U) &&
     strappy_assistant_set_profile_allows_tool(
       &coding,
       STRAPPY_TOOL_FILE_READ) &&
+    strappy_assistant_set_profile_allows_tool(
+      &coding,
+      STRAPPY_TOOL_FILE_WRITE) &&
+    strappy_assistant_set_profile_allows_tool(
+      &coding,
+      STRAPPY_TOOL_FILE_EDIT) &&
     strappy_assistant_set_profile_allows_tool(
       &coding,
       STRAPPY_TOOL_BASH);
@@ -2441,6 +2613,12 @@ static int harness_run_assistant_set_tests(void)
         STRAPPY_TOOL_FILE_READ) &&
       !harness_responses_tools_contains(
         world_tools,
+        STRAPPY_TOOL_FILE_WRITE) &&
+      !harness_responses_tools_contains(
+        world_tools,
+        STRAPPY_TOOL_FILE_EDIT) &&
+      !harness_responses_tools_contains(
+        world_tools,
         STRAPPY_TOOL_DATABASE_LIST_INFO) &&
       !harness_responses_tools_contains(
         world_tools,
@@ -2474,9 +2652,13 @@ static int harness_run_assistant_set_tests(void)
         world_tools_without_web,
         STRAPPY_TOOL_WEB_FETCH) &&
       cJSON_IsArray(coding_tools) &&
-      (cJSON_GetArraySize(coding_tools) == 12) &&
+      (cJSON_GetArraySize(coding_tools) == 14) &&
       harness_responses_tools_contains(coding_tools,
                                        STRAPPY_TOOL_FILE_READ) &&
+      harness_responses_tools_contains(coding_tools,
+                                       STRAPPY_TOOL_FILE_WRITE) &&
+      harness_responses_tools_contains(coding_tools,
+                                       STRAPPY_TOOL_FILE_EDIT) &&
       harness_responses_tools_contains(coding_tools,
                                        STRAPPY_TOOL_BASH);
   }
@@ -7398,6 +7580,393 @@ cleanup:
   return ok;
 }
 
+static int harness_file_bytes_match(const char *path,
+                                    const unsigned char *expected,
+                                    size_t expected_length)
+{
+  FILE *file;
+  unsigned char *actual;
+  size_t actual_length;
+  int ok;
+
+  file = fopen(path, "rb");
+  if (file == NULL) {
+    fprintf(stderr, "Could not open file mutation result: %s\n", path);
+    return 0;
+  }
+  actual = (unsigned char *)malloc(expected_length + 1U);
+  if (actual == NULL) {
+    fclose(file);
+    return 0;
+  }
+  actual_length = fread(actual, 1U, expected_length + 1U, file);
+  ok = !ferror(file) && (fclose(file) == 0) &&
+    (actual_length == expected_length) &&
+    ((expected_length == 0U) ||
+     (memcmp(actual, expected, expected_length) == 0));
+  if (!ok) {
+    fprintf(stderr, "File mutation result did not match: %s\n", path);
+  }
+  free(actual);
+  return ok;
+}
+
+static int harness_empty_object_result(cJSON *root)
+{
+  return cJSON_IsObject(root) && (cJSON_GetArraySize(root) == 0);
+}
+
+static int harness_run_file_mutation_tests(const harness_context *context)
+{
+  static const unsigned char initial_write[] =
+    "alpha\n\xCE\xB2" "eta\n";
+  static const unsigned char edit_fixture[] =
+    "\xEF\xBB\xBF" "first\r\nsecond \xCE\xB2\r\nthird\r\n";
+  static const unsigned char first_edit_result[] =
+    "\xEF\xBB\xBF" "first\r\nchanged\r\nline\r\n";
+  static const unsigned char deletion_result[] =
+    "\xEF\xBB\xBF" "first\r\nline\r\n";
+  static const unsigned char duplicate_fixture[] = "same\nsame\n";
+  static const unsigned char invalid_utf8_fixture[] = { 0xC0U, 0xAFU };
+  char nested_dir[1400];
+  char deep_dir[1400];
+  char write_path[1400];
+  char absolute_path[1400];
+  char edit_path[1400];
+  char duplicate_path[1400];
+  char invalid_path[1400];
+  char absolute_arguments[1800];
+  struct stat file_stat;
+  char *error;
+  long long session_id;
+  cJSON *root;
+  int written;
+  int ok;
+
+  nested_dir[0] = '\0';
+  deep_dir[0] = '\0';
+  write_path[0] = '\0';
+  absolute_path[0] = '\0';
+  edit_path[0] = '\0';
+  duplicate_path[0] = '\0';
+  invalid_path[0] = '\0';
+  error = NULL;
+  session_id = 0LL;
+  root = NULL;
+  ok = (context != NULL) &&
+    harness_join_path(nested_dir,
+                      sizeof(nested_dir),
+                      context->temp_dir,
+                      "file_mutation_nested") &&
+    harness_join_path(deep_dir,
+                      sizeof(deep_dir),
+                      nested_dir,
+                      "deep") &&
+    harness_join_path(write_path,
+                      sizeof(write_path),
+                      deep_dir,
+                      "created.txt") &&
+    harness_join_path(absolute_path,
+                      sizeof(absolute_path),
+                      context->temp_dir,
+                      "file_write_absolute.txt") &&
+    harness_join_path(edit_path,
+                      sizeof(edit_path),
+                      context->temp_dir,
+                      "file_edit_crlf.txt") &&
+    harness_join_path(duplicate_path,
+                      sizeof(duplicate_path),
+                      context->temp_dir,
+                      "file_edit_duplicate.txt") &&
+    harness_join_path(invalid_path,
+                      sizeof(invalid_path),
+                      context->temp_dir,
+                      "file_edit_invalid.txt");
+  if (!ok) {
+    fprintf(stderr, "Could not build file mutation fixture paths.\n");
+    goto cleanup;
+  }
+
+  ok = strappy_db_create_session_with_working_directory(
+    context->catalog_path,
+    context->temp_dir,
+    &session_id,
+    &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not create file mutation session: %s\n",
+            (error != NULL) ? error : "unknown");
+    goto cleanup;
+  }
+  ok = harness_expect_session_error_contains(
+    context->catalog_path,
+    session_id,
+    STRAPPY_TOOL_FILE_WRITE,
+    "{\"path\":\"blocked.txt\",\"content\":\"blocked\"}",
+    "file_write is available only in Coding Assistant sessions") &&
+    harness_expect_session_error_contains(
+      context->catalog_path,
+      session_id,
+      STRAPPY_TOOL_FILE_EDIT,
+      "{\"path\":\"blocked.txt\",\"old_text\":\"a\","
+      "\"new_text\":\"b\"}",
+      "file_edit is available only in Coding Assistant sessions") &&
+    strappy_db_update_session_assistant_set(
+      context->catalog_path,
+      session_id,
+      STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
+      &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not isolate file mutations to Coding Assistant: %s\n",
+            (error != NULL) ? error : "unknown");
+    goto cleanup;
+  }
+
+  root = harness_session_tool_output_json(
+    context->catalog_path,
+    session_id,
+    STRAPPY_TOOL_FILE_WRITE,
+    "{\"path\":\"file_mutation_nested/deep/created.txt\","
+    "\"content\":\"alpha\\n\xCE\xB2" "eta\\n\"}");
+  ok = harness_empty_object_result(root) &&
+    harness_file_bytes_match(write_path,
+                             initial_write,
+                             sizeof(initial_write) - 1U) &&
+    (stat(deep_dir, &file_stat) == 0) && S_ISDIR(file_stat.st_mode);
+  cJSON_Delete(root);
+  root = NULL;
+  if (!ok) {
+    fprintf(stderr, "file_write did not create the nested UTF-8 file.\n");
+    goto cleanup;
+  }
+
+  root = harness_session_tool_output_json(
+    context->catalog_path,
+    session_id,
+    STRAPPY_TOOL_FILE_WRITE,
+    "{\"path\":\"file_mutation_nested/deep/created.txt\","
+    "\"content\":\"\"}");
+  ok = harness_empty_object_result(root) &&
+    harness_file_bytes_match(write_path, NULL, 0U);
+  cJSON_Delete(root);
+  root = NULL;
+  if (!ok) {
+    fprintf(stderr, "file_write did not truncate to an empty file.\n");
+    goto cleanup;
+  }
+
+  root = harness_session_tool_output_json(
+    context->catalog_path,
+    session_id,
+    STRAPPY_TOOL_FILE_WRITE,
+    "{\"path\":\"file_mutation_nested/deep/created.txt\","
+    "\"content\":\"literal\\\\u0000\"}");
+  ok = harness_empty_object_result(root) &&
+    harness_file_bytes_match(
+      write_path,
+      (const unsigned char *)"literal\\u0000",
+      strlen("literal\\u0000"));
+  cJSON_Delete(root);
+  root = NULL;
+  if (!ok) {
+    fprintf(stderr, "file_write rejected a literal escaped null sequence.\n");
+    goto cleanup;
+  }
+
+  written = snprintf(absolute_arguments,
+                     sizeof(absolute_arguments),
+                     "{\"path\":\"%s\",\"content\":\"absolute\"}",
+                     absolute_path);
+  if ((written <= 0) || ((size_t)written >= sizeof(absolute_arguments))) {
+    fprintf(stderr, "Could not build absolute file_write arguments.\n");
+    ok = 0;
+    goto cleanup;
+  }
+  root = harness_session_tool_output_json(context->catalog_path,
+                                          session_id,
+                                          STRAPPY_TOOL_FILE_WRITE,
+                                          absolute_arguments);
+  ok = harness_empty_object_result(root) &&
+    harness_file_bytes_match(absolute_path,
+                             (const unsigned char *)"absolute",
+                             8U);
+  cJSON_Delete(root);
+  root = NULL;
+  if (!ok) {
+    fprintf(stderr, "file_write absolute path result did not match.\n");
+    goto cleanup;
+  }
+
+  ok = harness_write_file_bytes(edit_path,
+                                edit_fixture,
+                                sizeof(edit_fixture) - 1U) &&
+    (chmod(edit_path, 0755) == 0) &&
+    harness_write_file_bytes(duplicate_path,
+                             duplicate_fixture,
+                             sizeof(duplicate_fixture) - 1U) &&
+    harness_write_file_bytes(invalid_path,
+                             invalid_utf8_fixture,
+                             sizeof(invalid_utf8_fixture));
+  if (!ok) {
+    goto cleanup;
+  }
+
+  root = harness_session_tool_output_json(
+    context->catalog_path,
+    session_id,
+    STRAPPY_TOOL_FILE_EDIT,
+    "{\"path\":\"file_edit_crlf.txt\","
+    "\"old_text\":\"second \xCE\xB2\\nthird\","
+    "\"new_text\":\"changed\\nline\"}");
+  ok = harness_empty_object_result(root) &&
+    harness_file_bytes_match(edit_path,
+                             first_edit_result,
+                             sizeof(first_edit_result) - 1U) &&
+    (stat(edit_path, &file_stat) == 0) &&
+    ((file_stat.st_mode & 0777) == 0755);
+  cJSON_Delete(root);
+  root = NULL;
+  if (!ok) {
+    fprintf(stderr,
+            "file_edit did not preserve BOM, CRLF, or permissions.\n");
+    goto cleanup;
+  }
+
+  root = harness_session_tool_output_json(
+    context->catalog_path,
+    session_id,
+    STRAPPY_TOOL_FILE_EDIT,
+    "{\"path\":\"file_edit_crlf.txt\","
+    "\"old_text\":\"changed\\n\",\"new_text\":\"\"}");
+  ok = harness_empty_object_result(root) &&
+    harness_file_bytes_match(edit_path,
+                             deletion_result,
+                             sizeof(deletion_result) - 1U);
+  cJSON_Delete(root);
+  root = NULL;
+  if (!ok) {
+    fprintf(stderr, "file_edit deletion result did not match.\n");
+    goto cleanup;
+  }
+
+  ok = harness_expect_session_error_contains(
+    context->catalog_path,
+    session_id,
+    STRAPPY_TOOL_FILE_WRITE,
+    "{\"path\":\".\",\"content\":\"x\"}",
+    "Path is not a regular file") &&
+    harness_expect_session_error_contains(
+      context->catalog_path,
+      session_id,
+      STRAPPY_TOOL_FILE_WRITE,
+      "{\"path\":\"invalid.txt\",\"content\":\"x\","
+      "\"extra\":true}",
+      "file_write accepts only path and content") &&
+    harness_expect_session_error_contains(
+      context->catalog_path,
+      session_id,
+      STRAPPY_TOOL_FILE_WRITE,
+      "{\"path\":\"invalid.txt\"}",
+      "file_write requires path and content strings") &&
+    harness_expect_session_error_contains(
+      context->catalog_path,
+      session_id,
+      STRAPPY_TOOL_FILE_WRITE,
+      "{\"path\":\"invalid.txt\",\"content\":\"a\\u0000b\"}",
+      "file_write arguments cannot contain U+0000") &&
+    harness_expect_session_error_contains(
+      context->catalog_path,
+      session_id,
+      STRAPPY_TOOL_FILE_EDIT,
+      "{\"path\":\"file_edit_duplicate.txt\","
+      "\"old_text\":\"same\",\"new_text\":\"changed\"}",
+      "old_text matches more than once") &&
+    harness_expect_session_error_contains(
+      context->catalog_path,
+      session_id,
+      STRAPPY_TOOL_FILE_EDIT,
+      "{\"path\":\"file_edit_crlf.txt\","
+      "\"old_text\":\"missing\",\"new_text\":\"changed\"}",
+      "Could not find file_edit old_text") &&
+    harness_expect_session_error_contains(
+      context->catalog_path,
+      session_id,
+      STRAPPY_TOOL_FILE_EDIT,
+      "{\"path\":\"file_edit_crlf.txt\","
+      "\"old_text\":\"line\",\"new_text\":\"line\"}",
+      "file_edit would not change") &&
+    harness_expect_session_error_contains(
+      context->catalog_path,
+      session_id,
+      STRAPPY_TOOL_FILE_EDIT,
+      "{\"path\":\"file_edit_crlf.txt\","
+      "\"old_text\":\"\",\"new_text\":\"x\"}",
+      "old_text must be a valid UTF-8 string that is not empty") &&
+    harness_expect_session_error_contains(
+      context->catalog_path,
+      session_id,
+      STRAPPY_TOOL_FILE_EDIT,
+      "{\"path\":\"file_edit_crlf.txt\","
+      "\"old_text\":\"line\",\"new_text\":\"a\\u0000b\"}",
+      "file_edit arguments cannot contain U+0000") &&
+    harness_expect_session_error_contains(
+      context->catalog_path,
+      session_id,
+      STRAPPY_TOOL_FILE_EDIT,
+      "{\"path\":\"file_edit_invalid.txt\","
+      "\"old_text\":\"a\",\"new_text\":\"b\"}",
+      "File is not valid UTF-8 text") &&
+    harness_expect_session_error_contains(
+      context->catalog_path,
+      session_id,
+      STRAPPY_TOOL_FILE_EDIT,
+      "{\"path\":\"file_edit_missing.txt\","
+      "\"old_text\":\"a\",\"new_text\":\"b\"}",
+      "File not found") &&
+    harness_expect_session_error_contains(
+      context->catalog_path,
+      session_id,
+      STRAPPY_TOOL_FILE_EDIT,
+      "{\"path\":\".\",\"old_text\":\"a\","
+      "\"new_text\":\"b\"}",
+      "Path is not a regular file") &&
+    harness_expect_session_error_contains(
+      context->catalog_path,
+      session_id,
+      STRAPPY_TOOL_FILE_EDIT,
+      "{\"path\":\"file_edit_crlf.txt\","
+      "\"old_text\":\"line\",\"new_text\":\"x\","
+      "\"edits\":[]}",
+      "file_edit accepts only path, old_text, and new_text");
+
+cleanup:
+  cJSON_Delete(root);
+  free(error);
+  if (write_path[0] != '\0') {
+    unlink(write_path);
+  }
+  if (absolute_path[0] != '\0') {
+    unlink(absolute_path);
+  }
+  if (edit_path[0] != '\0') {
+    unlink(edit_path);
+  }
+  if (duplicate_path[0] != '\0') {
+    unlink(duplicate_path);
+  }
+  if (invalid_path[0] != '\0') {
+    unlink(invalid_path);
+  }
+  if (deep_dir[0] != '\0') {
+    rmdir(deep_dir);
+  }
+  if (nested_dir[0] != '\0') {
+    rmdir(nested_dir);
+  }
+  return ok;
+}
+
 int main(void)
 {
   harness_context context;
@@ -7428,7 +7997,8 @@ int main(void)
        harness_run_openrouter_model_catalog_tests(&context) &&
        harness_run_sms_context_tests(&context) &&
        harness_run_mail_context_tests(&context) &&
-       harness_run_file_read_tests(&context);
+       harness_run_file_read_tests(&context) &&
+       harness_run_file_mutation_tests(&context);
 
   harness_context_destroy(&context);
 

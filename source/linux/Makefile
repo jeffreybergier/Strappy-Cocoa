@@ -38,6 +38,9 @@ DATABASE_QUERY_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_web.c \
 	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
+	$(SHARED_DIR)/strappy_file_mutation.c \
+	$(SHARED_DIR)/strappy_file_write.c \
+	$(SHARED_DIR)/strappy_file_edit.c \
 	$(SHARED_DIR)/strappy_db.c \
 	$(SHARED_DIR)/strappy_file_scanner.c \
 	$(SHARED_DIR)/strappy_core.c \
@@ -76,6 +79,9 @@ RESPONSES_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_web.c \
 	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
+	$(SHARED_DIR)/strappy_file_mutation.c \
+	$(SHARED_DIR)/strappy_file_write.c \
+	$(SHARED_DIR)/strappy_file_edit.c \
 	$(SHARED_DIR)/strappy_webview.c \
 	$(CJSON_DIR)/cJSON.c
 
@@ -88,6 +94,9 @@ PROMPT_GENERATOR_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_web.c \
 	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
+	$(SHARED_DIR)/strappy_file_mutation.c \
+	$(SHARED_DIR)/strappy_file_write.c \
+	$(SHARED_DIR)/strappy_file_edit.c \
 	$(SHARED_DIR)/strappy_assistant_sets.c \
 	$(SHARED_DIR)/strappy_cocoa.c \
 	$(SHARED_DIR)/strappy_core.c \
@@ -102,6 +111,9 @@ WEB_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_web.c \
 	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
+	$(SHARED_DIR)/strappy_file_mutation.c \
+	$(SHARED_DIR)/strappy_file_write.c \
+	$(SHARED_DIR)/strappy_file_edit.c \
 	$(SHARED_DIR)/strappy_db.c \
 	$(SHARED_DIR)/strappy_file_scanner.c \
 	$(SHARED_DIR)/strappy_core.c \

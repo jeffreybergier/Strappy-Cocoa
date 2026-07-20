@@ -11,6 +11,8 @@ extern "C" {
 #define STRAPPY_TOOL_DATABASE_QUERY "database_query"
 #define STRAPPY_TOOL_BASH "bash"
 #define STRAPPY_TOOL_FILE_READ "file_read"
+#define STRAPPY_TOOL_FILE_WRITE "file_write"
+#define STRAPPY_TOOL_FILE_EDIT "file_edit"
 #define STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601 "helper_datetime_to_iso8601"
 #define STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601 "helper_datetime_from_iso8601"
 #define STRAPPY_TOOL_MEMORY_USER_FACT_READ "memory_user_fact_read"

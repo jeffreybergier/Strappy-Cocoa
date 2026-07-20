@@ -4,7 +4,9 @@
 #include "strappy_cocoa.h"
 #include "strappy_core.h"
 #include "strappy_db.h"
+#include "strappy_file_edit.h"
 #include "strappy_file_read.h"
+#include "strappy_file_write.h"
 #include "strappy_web.h"
 
 #include <cJSON.h>
@@ -147,6 +149,8 @@ static const strappy_tool_definition strappy_tool_definitions[] = {
   { STRAPPY_TOOL_DATABASE_QUERY, STRAPPY_TOOL_KIND_DATABASE },
   { STRAPPY_TOOL_BASH, STRAPPY_TOOL_KIND_DEVELOPER },
   { STRAPPY_TOOL_FILE_READ, STRAPPY_TOOL_KIND_DEVELOPER },
+  { STRAPPY_TOOL_FILE_WRITE, STRAPPY_TOOL_KIND_DEVELOPER },
+  { STRAPPY_TOOL_FILE_EDIT, STRAPPY_TOOL_KIND_DEVELOPER },
   { STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_MEMORY_USER_FACT_READ, STRAPPY_TOOL_KIND_HELPER },
@@ -6492,6 +6496,20 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
 
   if (strcmp(tool_name, STRAPPY_TOOL_FILE_READ) == 0) {
     return strappy_file_read_execute(session_db_path,
+                                     active_session_id,
+                                     arguments_json,
+                                     error_out);
+  }
+
+  if (strcmp(tool_name, STRAPPY_TOOL_FILE_WRITE) == 0) {
+    return strappy_file_write_execute(session_db_path,
+                                      active_session_id,
+                                      arguments_json,
+                                      error_out);
+  }
+
+  if (strcmp(tool_name, STRAPPY_TOOL_FILE_EDIT) == 0) {
+    return strappy_file_edit_execute(session_db_path,
                                      active_session_id,
                                      arguments_json,
                                      error_out);

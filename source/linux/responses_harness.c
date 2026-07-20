@@ -943,7 +943,8 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_WORLD_KNOWLEDGE = 10,
   HARNESS_RESPONSES_SERVER_BASH_CANCELLATION = 11,
   HARNESS_RESPONSES_SERVER_CODING_BASH_DISABLED = 12,
-  HARNESS_RESPONSES_SERVER_BASH_OUTPUT = 13
+  HARNESS_RESPONSES_SERVER_BASH_OUTPUT = 13,
+  HARNESS_RESPONSES_SERVER_FILE_MUTATION = 14
 } harness_responses_server_scenario;
 
 static int harness_send_all(int socket_fd,
@@ -1580,10 +1581,12 @@ static int harness_coding_assistant_request_is_valid(
                                      memory_call,
                                      1) &&
     cJSON_IsArray(tools) &&
-    (cJSON_GetArraySize(tools) == (bash_enabled ? 10 : 9)) &&
+    (cJSON_GetArraySize(tools) == (bash_enabled ? 12 : 11)) &&
     (harness_has_tool_name(tools, STRAPPY_TOOL_BASH) ==
       (bash_enabled ? 1 : 0)) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_FILE_READ) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_FILE_WRITE) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_FILE_EDIT) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_QUERY) &&
     !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
     !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
@@ -1908,6 +1911,85 @@ static int harness_bash_output_request_is_valid(cJSON *root,
       "Error: failed\n\n\nCommand exited with code 7.",
       1,
       0);
+}
+
+static int harness_file_mutation_output_request_is_valid(
+  cJSON *root,
+  const char *session_key,
+  const char *prompt_group)
+{
+  static const char *names[] = {
+    STRAPPY_TOOL_FILE_WRITE,
+    STRAPPY_TOOL_FILE_EDIT
+  };
+  static const char *call_ids[] = {
+    "call-file-write",
+    "call-file-edit"
+  };
+  cJSON *request_session;
+  cJSON *metadata;
+  cJSON *request_group;
+  cJSON *input;
+  size_t expected_index;
+
+  request_session = cJSON_GetObjectItem(root, "session_id");
+  metadata = cJSON_GetObjectItem(root, "metadata");
+  request_group = cJSON_IsObject(metadata) ?
+    cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
+  input = cJSON_GetObjectItem(root, "input");
+  if (!cJSON_IsString(request_session) ||
+      (request_session->valuestring == NULL) ||
+      (strcmp(request_session->valuestring, session_key) != 0) ||
+      !cJSON_IsString(request_group) ||
+      (request_group->valuestring == NULL) ||
+      (strcmp(request_group->valuestring, prompt_group) != 0) ||
+      !cJSON_IsArray(input) ||
+      !harness_message_role_is(cJSON_GetArrayItem(input, 0), "user")) {
+    return 0;
+  }
+
+  for (expected_index = 0U;
+       expected_index < (sizeof(names) / sizeof(names[0]));
+       expected_index++) {
+    cJSON *item;
+    int call_found;
+    int output_found;
+
+    call_found = 0;
+    output_found = 0;
+    for (item = input->child; item != NULL; item = item->next) {
+      cJSON *type;
+      cJSON *call_id;
+
+      type = cJSON_IsObject(item) ? cJSON_GetObjectItem(item, "type") : NULL;
+      call_id = cJSON_IsObject(item) ?
+        cJSON_GetObjectItem(item, "call_id") : NULL;
+      if (!cJSON_IsString(type) || (type->valuestring == NULL) ||
+          !cJSON_IsString(call_id) || (call_id->valuestring == NULL) ||
+          (strcmp(call_id->valuestring, call_ids[expected_index]) != 0)) {
+        continue;
+      }
+      if (strcmp(type->valuestring, "function_call") == 0) {
+        cJSON *name;
+
+        name = cJSON_GetObjectItem(item, "name");
+        call_found = cJSON_IsString(name) &&
+          (name->valuestring != NULL) &&
+          (strcmp(name->valuestring, names[expected_index]) == 0);
+      } else if (strcmp(type->valuestring, "function_call_output") == 0) {
+        cJSON *output;
+
+        output = cJSON_GetObjectItem(item, "output");
+        output_found = cJSON_IsString(output) &&
+          (output->valuestring != NULL) &&
+          (strcmp(output->valuestring, "{}") == 0);
+      }
+    }
+    if (!call_found || !output_found) {
+      return 0;
+    }
+  }
+  return 1;
 }
 
 static int harness_accept_request(int listener_fd,
@@ -2441,6 +2523,98 @@ static int harness_run_bash_output_server(int listener_fd)
   return ok;
 }
 
+static int harness_run_file_mutation_server(int listener_fd)
+{
+  static const char *tool_response =
+    "{\"id\":\"resp-file-mutation\",\"object\":\"response\","
+    "\"created_at\":1700000010,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{"
+    "\"type\":\"function_call\",\"id\":\"fc-file-write\","
+    "\"call_id\":\"call-file-write\",\"name\":\"file_write\","
+    "\"arguments\":\"{\\\"path\\\":\\\"response_mutation.txt\\\","
+    "\\\"content\\\":\\\"first\\\\nsecond\\\\n\\\"}\","
+    "\"status\":\"completed\"},{"
+    "\"type\":\"function_call\",\"id\":\"fc-file-edit\","
+    "\"call_id\":\"call-file-edit\",\"name\":\"file_edit\","
+    "\"arguments\":\"{\\\"path\\\":\\\"response_mutation.txt\\\","
+    "\\\"old_text\\\":\\\"second\\\","
+    "\\\"new_text\\\":\\\"changed\\\"}\","
+    "\"status\":\"completed\"}],\"usage\":{"
+    "\"input_tokens\":4,\"output_tokens\":4,\"total_tokens\":8}}";
+  static const char *final_response =
+    "{\"id\":\"resp-file-mutation-final\",\"object\":\"response\","
+    "\"created_at\":1700000011,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-file-mutation-final\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"File mutation final answer.\",\"annotations\":[]}]}],"
+    "\"usage\":{\"input_tokens\":8,\"output_tokens\":4,"
+    "\"total_tokens\":12}}";
+  char *body;
+  char *session_key;
+  char *prompt_group;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  session_key = NULL;
+  prompt_group = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  if (cJSON_IsObject(root) &&
+      harness_coding_assistant_request_is_valid(root,
+                                                "Mutate a file",
+                                                0)) {
+    cJSON *request_session;
+    cJSON *metadata;
+    cJSON *request_group;
+
+    request_session = cJSON_GetObjectItem(root, "session_id");
+    metadata = cJSON_GetObjectItem(root, "metadata");
+    request_group = cJSON_IsObject(metadata) ?
+      cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
+    if (cJSON_IsString(request_session) &&
+        (request_session->valuestring != NULL) &&
+        cJSON_IsString(request_group) &&
+        (request_group->valuestring != NULL)) {
+      session_key = strdup(request_session->valuestring);
+      prompt_group = strdup(request_group->valuestring);
+    }
+  }
+  ok = (session_key != NULL) && (prompt_group != NULL) &&
+    harness_send_json_response(client_fd, 200L, tool_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_file_mutation_output_request_is_valid(root,
+                                                  session_key,
+                                                  prompt_group) &&
+    harness_send_json_response(client_fd, 200L, final_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  free(session_key);
+  free(prompt_group);
+  return ok;
+}
+
 static int harness_run_coding_bash_disabled_server(int listener_fd)
 {
   static const char *final_response =
@@ -2729,6 +2903,8 @@ static int harness_start_server(harness_responses_server_scenario scenario,
       ok = harness_run_bash_cancellation_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_BASH_OUTPUT) {
       ok = harness_run_bash_output_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_FILE_MUTATION) {
+      ok = harness_run_file_mutation_server(listener_fd);
     } else if (scenario ==
                HARNESS_RESPONSES_SERVER_CODING_BASH_DISABLED) {
       ok = harness_run_coding_bash_disabled_server(listener_fd);
@@ -3901,6 +4077,163 @@ static int harness_test_function_tool_continuation(void)
   }
   strappy_session_message_record_list_destroy(&timeline);
   free(error);
+  unlink(path);
+  return ok;
+}
+
+static int harness_file_content_equals(const char *path,
+                                       const char *expected)
+{
+  FILE *file;
+  char buffer[256];
+  size_t expected_length;
+  size_t actual_length;
+  int ok;
+
+  expected_length = strlen(expected);
+  if (expected_length >= sizeof(buffer)) {
+    return 0;
+  }
+  file = fopen(path, "rb");
+  if (file == NULL) {
+    return 0;
+  }
+  actual_length = fread(buffer, 1U, sizeof(buffer), file);
+  ok = !ferror(file) && (fclose(file) == 0) &&
+    (actual_length == expected_length) &&
+    (memcmp(buffer, expected, expected_length) == 0);
+  return ok;
+}
+
+static int harness_test_file_mutation_continuation(void)
+{
+  char path[] = "/tmp/strappy-responses-file-mutation-XXXXXX";
+  char working_directory[] = "/tmp/strappy-file-mutation-work-XXXXXX";
+  char file_path[256];
+  char endpoint[128];
+  char *error;
+  char *result;
+  sqlite3 *db;
+  long long session_id;
+  long long value;
+  pid_t server_pid;
+  int fd;
+  int written;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create file mutation response database.");
+  }
+  close(fd);
+  if (mkdtemp(working_directory) == NULL) {
+    unlink(path);
+    return harness_fail("Could not create file mutation working directory.");
+  }
+  written = snprintf(file_path,
+                     sizeof(file_path),
+                     "%s/response_mutation.txt",
+                     working_directory);
+  if ((written <= 0) || ((size_t)written >= sizeof(file_path))) {
+    rmdir(working_directory);
+    unlink(path);
+    return harness_fail("Could not build file mutation response path.");
+  }
+
+  error = NULL;
+  session_id = 0LL;
+  if (!harness_create_session_database(path, &session_id, &error) ||
+      !strappy_db_update_session_assistant_set(
+        path,
+        session_id,
+        STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
+        &error) ||
+      !strappy_db_update_session_working_directory(path,
+                                                   session_id,
+                                                   working_directory,
+                                                   &error) ||
+      !strappy_db_update_session_web_search_enabled(path,
+                                                    session_id,
+                                                    0,
+                                                    &error) ||
+      !harness_start_server(HARNESS_RESPONSES_SERVER_FILE_MUTATION,
+                            endpoint,
+                            sizeof(endpoint),
+                            &server_pid)) {
+    fprintf(stderr,
+            "Could not prepare file mutation continuation test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(file_path);
+    rmdir(working_directory);
+    unlink(path);
+    return 0;
+  }
+
+  result = strappy_responses_send_prompt_for_session_and_store(
+    "Mutate a file",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources",
+    path,
+    session_id,
+    &error);
+  server_ok = harness_wait_for_server(server_pid, result == NULL);
+  ok = (result != NULL) &&
+    (strcmp(result, "File mutation final answer.") == 0) &&
+    server_ok && (error == NULL) &&
+    harness_file_content_equals(file_path, "first\nchanged\n");
+  free(result);
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM tool_executions e "
+                           "JOIN function_calls f ON "
+                           "f.item_id=e.function_call_item_id WHERE "
+                           "f.tool_name IN ('file_write','file_edit') AND "
+                           "e.state='completed' AND e.error_message IS NULL;",
+                           &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM function_outputs o "
+                        "JOIN function_calls f ON "
+                        "f.item_id=o.function_call_item_id "
+                        "JOIN conversation_items i ON i.id=o.item_id WHERE "
+                        "f.tool_name IN ('file_write','file_edit') AND "
+                        "o.execution_state='completed' AND "
+                        "o.output_format='structured' AND i.is_error=0;",
+                        &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM structured_documents d "
+                        "JOIN function_outputs o ON o.item_id=d.owner_item_id "
+                        "JOIN function_calls f ON "
+                        "f.item_id=o.function_call_item_id "
+                        "JOIN structured_nodes n ON "
+                        "n.document_id=d.id AND n.node_id=0 WHERE "
+                        "f.tool_name IN ('file_write','file_edit') AND "
+                        "d.purpose='output' AND n.value_type='object' AND "
+                        "NOT EXISTS (SELECT 1 FROM structured_nodes child "
+                        "WHERE child.document_id=d.id AND "
+                        "child.parent_node_id=0);",
+                        &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM structured_documents d "
+                        "JOIN function_calls f ON f.item_id=d.owner_item_id "
+                        "WHERE f.tool_name IN ('file_write','file_edit') "
+                        "AND d.purpose='arguments';",
+                        &value) && (value == 2LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "File mutation continuation failed: %s\n",
+            (error != NULL) ? error : "request, file, or ledger mismatch");
+  }
+  free(error);
+  unlink(file_path);
+  rmdir(working_directory);
   unlink(path);
   return ok;
 }
@@ -5430,6 +5763,7 @@ int main(void)
       harness_test_web_search_requires_markdown_reference() &&
       harness_test_valid_web_reference_passes_content_check() &&
       harness_test_function_tool_continuation() &&
+      harness_test_file_mutation_continuation() &&
       harness_test_bash_disabled_request() &&
       harness_test_bash_output_truncation_flag() &&
       harness_test_bash_tool_cancellation() &&

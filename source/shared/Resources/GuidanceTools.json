@@ -178,6 +178,77 @@
     {
       "type": "function",
       "function": {
+        "name": "file_write",
+        "description": "Create or completely overwrite a UTF-8 text file. Use file_write for new files or intentional complete rewrites. Relative paths resolve from the session working directory; absolute paths are accepted. Missing parent directories are created automatically. content may be empty. Returns an empty JSON object on success. The file content cannot exceed 1 MiB.",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "File path, relative to the session working directory or absolute.",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "content": {
+              "type": "string",
+              "description": "Complete UTF-8 file content. An empty string creates or truncates to an empty file.",
+              "maxLength": 1048576
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "path"
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "file_edit",
+        "description": "Replace exactly one unique text block in an existing UTF-8 file. Use file_edit for precise changes instead of rewriting the complete file. Relative paths resolve from the session working directory; absolute paths are accepted. old_text must match exactly once, except that CRLF and LF line endings are treated as equivalent. new_text may be empty to delete the matched text. The file's UTF-8 BOM and existing line-ending style are preserved. Returns an empty JSON object on success. The resulting file cannot exceed 1 MiB.",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Existing file path, relative to the session working directory or absolute.",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "old_text": {
+              "type": "string",
+              "description": "Exact text to replace. It must be non-empty and occur exactly once.",
+              "minLength": 1,
+              "maxLength": 1048576
+            },
+            "new_text": {
+              "type": "string",
+              "description": "Replacement text. Use an empty string to delete old_text.",
+              "maxLength": 1048576
+            }
+          },
+          "required": [
+            "path",
+            "old_text",
+            "new_text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "path"
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "bash",
         "description": "Bash tool for executing commands on the device. Each tool call is always a fresh session in the user's selected working directory. The shell state does not persist between calls. stdin is closed, stdout and stderr are returned together in arrival order, and shell state does not persist between calls.",
         "strict": false,
