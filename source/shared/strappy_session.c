@@ -5,6 +5,7 @@
 #include "strappy_model_catalog.h"
 #include "strappy_responses.h"
 #include "strappy_tools.h"
+#include "strappy_web.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +23,9 @@ int strappy_session_configure_process(const char *ca_cert_path,
     return 0;
   }
   if (!strappy_client_set_cainfo(ca_cert_path, error_out)) {
+    return 0;
+  }
+  if (!strappy_web_set_cainfo(ca_cert_path, error_out)) {
     return 0;
   }
 
@@ -199,6 +203,19 @@ int strappy_session_update_web_search_enabled(const char *db_path,
                                                      session_id,
                                                      web_search_enabled,
                                                      error_out);
+}
+
+int strappy_session_update_paid_web_search_enabled(
+  const char *db_path,
+  long long session_id,
+  int paid_web_search_enabled,
+  char **error_out)
+{
+  return strappy_db_update_session_paid_web_search_enabled(
+    db_path,
+    session_id,
+    paid_web_search_enabled,
+    error_out);
 }
 
 int strappy_session_update_bash_enabled(const char *db_path,

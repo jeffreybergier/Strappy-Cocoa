@@ -207,6 +207,10 @@
 "Scanning databases..." = "Scanning databases...";
 "Search" = "Search";
 "Search Web" = "Search Web";
+"Enable Web Search" = "Enable Web Search";
+"Allows free web search and public page fetching" = "Allows free web search and public page fetching";
+"Use Paid Web Search" = "Use Paid Web Search";
+"Uses OpenRouter web search and may incur charges" = "Uses OpenRouter web search and may incur charges";
 "Enable Bash" = "Enable Bash";
 "Allows command execution in this session" = "Allows command execution in this session";
 "Services" = "Services";

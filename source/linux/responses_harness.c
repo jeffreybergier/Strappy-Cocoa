@@ -614,7 +614,7 @@ static int harness_test_request_surfaces(void)
   error = NULL;
   tools_json = strappy_tools_responses_request_json(
     "../shared/Resources",
-    1,
+    STRAPPY_WEB_TOOL_MODE_PAID,
     &error);
   if (tools_json == NULL) {
     fprintf(stderr,
@@ -717,6 +717,8 @@ static int harness_test_request_surfaces(void)
     harness_tools_hide_local_display_metadata(tools) &&
     harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
     harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_SEARCH) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_FETCH) &&
     harness_server_tool_has_request_fields_only(
       tools,
       STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
@@ -732,7 +734,7 @@ static int harness_test_request_surfaces(void)
   error = NULL;
   tools_json = strappy_tools_responses_request_json(
     "../shared/Resources",
-    0,
+    STRAPPY_WEB_TOOL_MODE_DISABLED,
     &error);
   if (tools_json == NULL) {
     fprintf(stderr,
@@ -746,7 +748,9 @@ static int harness_test_request_surfaces(void)
   ok = cJSON_IsArray(tools) &&
     harness_tools_hide_local_display_metadata(tools) &&
     !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
-    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH);
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_SEARCH) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_FETCH);
   cJSON_Delete(tools);
   free(error);
   if (!ok) {
@@ -1383,10 +1387,12 @@ static int harness_request_base_is_valid(cJSON *root,
   input_count = cJSON_IsArray(input) ? cJSON_GetArraySize(input) : 0;
   has_web_search = harness_has_tool_type(
     tools,
-    STRAPPY_TOOL_OPENROUTER_WEB_SEARCH);
+    STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) ||
+    harness_has_tool_name(tools, STRAPPY_TOOL_WEB_SEARCH);
   has_web_fetch = harness_has_tool_type(
     tools,
-    STRAPPY_TOOL_OPENROUTER_WEB_FETCH);
+    STRAPPY_TOOL_OPENROUTER_WEB_FETCH) ||
+    harness_has_tool_name(tools, STRAPPY_TOOL_WEB_FETCH);
   has_web_reference_key = cJSON_IsString(instructions) &&
     (instructions->valuestring != NULL) &&
     (strstr(instructions->valuestring, "`web_reference`") != NULL);
@@ -1440,8 +1446,10 @@ static int harness_request_base_is_valid(cJSON *root,
 static int harness_world_knowledge_tools_are_valid(cJSON *tools)
 {
   return cJSON_IsArray(tools) && (cJSON_GetArraySize(tools) == 10) &&
-    harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
-    harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_WEB_SEARCH) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_WEB_FETCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) &&
     harness_has_tool_name(
@@ -1579,6 +1587,8 @@ static int harness_coding_assistant_request_is_valid(
     !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_QUERY) &&
     !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
     !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_SEARCH) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_FETCH) &&
     harness_tools_hide_local_display_metadata(tools);
 }
 
@@ -1595,6 +1605,8 @@ static int harness_disabled_web_search_request_is_valid(cJSON *root)
   return cJSON_IsArray(tools) &&
     !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
     !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_SEARCH) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_FETCH) &&
     (require_parameters == NULL);
 }
 

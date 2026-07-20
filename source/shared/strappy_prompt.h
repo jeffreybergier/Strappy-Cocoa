@@ -2,6 +2,7 @@
 #define STRAPPY_PROMPT_H
 
 #include "strappy_assistant_sets.h"
+#include "strappy_tools.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -13,7 +14,7 @@ extern "C" {
 char *strappy_prompt_build(
   const char *resource_dir,
   const strappy_assistant_set_profile *profile,
-  int web_search_enabled,
+  strappy_web_tool_mode web_tool_mode,
   char **error_out);
 char *strappy_prompt_render_resource(const char *resource_dir,
                                      const char *resource_name,

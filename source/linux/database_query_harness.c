@@ -491,8 +491,13 @@ static int harness_run_fresh_catalog_schema_tests(
            context->catalog_path,
            "SELECT session_id, web_search_enabled, bash_enabled, "
            "streaming_enabled, updated_at_ms "
-           "FROM session_settings LIMIT 0;",
+         "FROM session_settings LIMIT 0;",
            "session settings columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT session_id, paid_web_search_enabled, updated_at_ms "
+           "FROM session_paid_web_search_settings LIMIT 0;",
+           "paid web search settings columns") &&
          harness_expect_catalog_integer(
            context->catalog_path,
            "SELECT COUNT(*) FROM pragma_table_info('sessions') "
@@ -2270,9 +2275,11 @@ static int harness_run_assistant_set_tests(void)
   strappy_assistant_set_profile coding;
   strappy_assistant_set_profile invalid;
   char *world_tools_json;
+  char *world_paid_tools_json;
   char *world_tools_without_web_json;
   char *coding_tools_json;
   cJSON *world_tools;
+  cJSON *world_paid_tools;
   cJSON *world_tools_without_web;
   cJSON *coding_tools;
   char *error;
@@ -2284,9 +2291,11 @@ static int harness_run_assistant_set_tests(void)
   strappy_assistant_set_profile_init(&coding);
   strappy_assistant_set_profile_init(&invalid);
   world_tools_json = NULL;
+  world_paid_tools_json = NULL;
   world_tools_without_web_json = NULL;
   coding_tools_json = NULL;
   world_tools = NULL;
+  world_paid_tools = NULL;
   world_tools_without_web = NULL;
   coding_tools = NULL;
   error = NULL;
@@ -2307,7 +2316,7 @@ static int harness_run_assistant_set_tests(void)
       &world,
       &error) &&
     strappy_assistant_set_profile_is_available(&world) &&
-    (world.tool_name_count == 10U) &&
+    (world.tool_name_count == 12U) &&
     (world.preflight_tool_name_count == 1U) &&
     (world.quality_check_key_count == 5U) &&
     strappy_assistant_set_profile_allows_tool(
@@ -2322,6 +2331,9 @@ static int harness_run_assistant_set_tests(void)
     strappy_assistant_set_profile_allows_tool(
       &world,
       STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    strappy_assistant_set_profile_allows_tool(
+      &world,
+      STRAPPY_TOOL_WEB_SEARCH) &&
     !strappy_assistant_set_profile_allows_tool(
       &world,
       STRAPPY_TOOL_FILE_READ) &&
@@ -2340,7 +2352,7 @@ static int harness_run_assistant_set_tests(void)
       &personal,
       &error) &&
     strappy_assistant_set_profile_is_available(&personal) &&
-    (personal.tool_name_count == 15U) &&
+    (personal.tool_name_count == 17U) &&
     (personal.preflight_tool_name_count == 2U) &&
     (personal.quality_check_key_count == 6U) &&
     strappy_assistant_set_profile_allows_tool(
@@ -2364,7 +2376,7 @@ static int harness_run_assistant_set_tests(void)
       &coding,
       &error) &&
     strappy_assistant_set_profile_is_available(&coding) &&
-    (coding.tool_name_count == 12U) &&
+    (coding.tool_name_count == 14U) &&
     strappy_assistant_set_profile_allows_tool(
       &coding,
       STRAPPY_TOOL_FILE_READ) &&
@@ -2377,23 +2389,32 @@ static int harness_run_assistant_set_tests(void)
       HARNESS_RESOURCE_DIR,
       (const char * const *)world.tool_names,
       world.tool_name_count,
-      1,
+      STRAPPY_WEB_TOOL_MODE_CUSTOM,
       &error);
+    world_paid_tools_json =
+      strappy_tools_responses_request_json_filtered(
+        HARNESS_RESOURCE_DIR,
+        (const char * const *)world.tool_names,
+        world.tool_name_count,
+        STRAPPY_WEB_TOOL_MODE_PAID,
+        &error);
     world_tools_without_web_json =
       strappy_tools_responses_request_json_filtered(
         HARNESS_RESOURCE_DIR,
         (const char * const *)world.tool_names,
         world.tool_name_count,
-        0,
+        STRAPPY_WEB_TOOL_MODE_DISABLED,
         &error);
     coding_tools_json = strappy_tools_responses_request_json_filtered(
       HARNESS_RESOURCE_DIR,
       (const char * const *)coding.tool_names,
       coding.tool_name_count,
-      1,
+      STRAPPY_WEB_TOOL_MODE_CUSTOM,
       &error);
     world_tools = (world_tools_json != NULL) ?
       cJSON_Parse(world_tools_json) : NULL;
+    world_paid_tools = (world_paid_tools_json != NULL) ?
+      cJSON_Parse(world_paid_tools_json) : NULL;
     world_tools_without_web = (world_tools_without_web_json != NULL) ?
       cJSON_Parse(world_tools_without_web_json) : NULL;
     coding_tools = (coding_tools_json != NULL) ?
@@ -2402,8 +2423,14 @@ static int harness_run_assistant_set_tests(void)
       (cJSON_GetArraySize(world_tools) == 10) &&
       harness_responses_tools_contains(
         world_tools,
-        STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+        STRAPPY_TOOL_WEB_SEARCH) &&
       harness_responses_tools_contains(
+        world_tools,
+        STRAPPY_TOOL_WEB_FETCH) &&
+      !harness_responses_tools_contains(
+        world_tools,
+        STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+      !harness_responses_tools_contains(
         world_tools,
         STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
       harness_responses_tools_contains(
@@ -2418,11 +2445,34 @@ static int harness_run_assistant_set_tests(void)
       !harness_responses_tools_contains(
         world_tools,
         STRAPPY_TOOL_DATABASE_QUERY) &&
+      cJSON_IsArray(world_paid_tools) &&
+      (cJSON_GetArraySize(world_paid_tools) == 10) &&
+      harness_responses_tools_contains(
+        world_paid_tools,
+        STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+      harness_responses_tools_contains(
+        world_paid_tools,
+        STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+      !harness_responses_tools_contains(
+        world_paid_tools,
+        STRAPPY_TOOL_WEB_SEARCH) &&
+      !harness_responses_tools_contains(
+        world_paid_tools,
+        STRAPPY_TOOL_WEB_FETCH) &&
       cJSON_IsArray(world_tools_without_web) &&
       (cJSON_GetArraySize(world_tools_without_web) == 8) &&
       !harness_responses_tools_contains(
         world_tools_without_web,
         STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+      !harness_responses_tools_contains(
+        world_tools_without_web,
+        STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+      !harness_responses_tools_contains(
+        world_tools_without_web,
+        STRAPPY_TOOL_WEB_SEARCH) &&
+      !harness_responses_tools_contains(
+        world_tools_without_web,
+        STRAPPY_TOOL_WEB_FETCH) &&
       cJSON_IsArray(coding_tools) &&
       (cJSON_GetArraySize(coding_tools) == 12) &&
       harness_responses_tools_contains(coding_tools,
@@ -2447,9 +2497,11 @@ static int harness_run_assistant_set_tests(void)
 
   free(error);
   free(world_tools_json);
+  free(world_paid_tools_json);
   free(world_tools_without_web_json);
   free(coding_tools_json);
   cJSON_Delete(world_tools);
+  cJSON_Delete(world_paid_tools);
   cJSON_Delete(world_tools_without_web);
   cJSON_Delete(coding_tools);
   strappy_assistant_set_profile_destroy(&invalid);
@@ -5319,6 +5371,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (strcmp(session.assistant_set_id,
                STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT) == 0) &&
        (session.web_search_enabled == 1) &&
+       (session.paid_web_search_enabled == 0) &&
        (session.bash_enabled == 0) &&
        (session.streaming_enabled == 0) &&
        (session.http_status == 0L);
@@ -5451,6 +5504,19 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   }
 
   error = NULL;
+  if (!strappy_db_update_session_paid_web_search_enabled(
+        context->catalog_path,
+        session_id,
+        1,
+        &error)) {
+    fprintf(stderr,
+            "Could not update paid web search setting: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  error = NULL;
   ok = strappy_db_update_session_web_search_enabled(context->catalog_path,
                                                     session_id,
                                                     0,
@@ -5476,7 +5542,8 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
     strappy_session_record_destroy(&session);
     return 0;
   }
-  ok = (session.web_search_enabled == 0);
+  ok = (session.web_search_enabled == 0) &&
+    (session.paid_web_search_enabled == 1);
   strappy_session_record_destroy(&session);
   if (!ok) {
     fprintf(stderr, "Session web search setting was not stored.\n");
@@ -5731,6 +5798,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (session.model != NULL) &&
        (strcmp(session.model, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0) &&
        (session.web_search_enabled == 0) &&
+       (session.paid_web_search_enabled == 1) &&
        (session.bash_enabled == 0) &&
        (session.streaming_enabled == 1) &&
        (session.http_status == 200L);

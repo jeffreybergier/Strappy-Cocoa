@@ -3,6 +3,8 @@
   "default_set_id": "personal_assistant",
   "universal": {
     "tools": [
+      "web_search",
+      "web_fetch",
       "openrouter:web_search",
       "openrouter:web_fetch",
       "helper_datetime_to_iso8601",

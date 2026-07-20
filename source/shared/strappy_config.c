@@ -232,6 +232,7 @@ void strappy_config_init(strappy_config *config)
   config->tool_allowlist = NULL;
   config->tool_allowlist_count = 0U;
   config->web_search_enabled = 0;
+  config->paid_web_search_enabled = 0;
 }
 
 void strappy_config_destroy(strappy_config *config)

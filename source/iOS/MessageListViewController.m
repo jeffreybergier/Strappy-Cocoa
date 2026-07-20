@@ -671,6 +671,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self updatePromptIdleTimerAssertion];
   [[self sendBar] setWebSearchEnabled:(session != nil) ?
     [session webSearchEnabled] : YES];
+  [[self sendBar] setPaidWebSearchEnabled:(session != nil) ?
+    [session paidWebSearchEnabled] : NO];
   [[self sendBar] setBashEnabled:(session != nil) ?
     [session bashEnabled] : NO];
   [[self sendBar] reloadOptionsMenu];
@@ -742,6 +744,12 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (BOOL)webSearchEnabled
 {
   return ([self session] != nil) ? [[self session] webSearchEnabled] : YES;
+}
+
+- (BOOL)paidWebSearchEnabled
+{
+  return ([self session] != nil) ?
+    [[self session] paidWebSearchEnabled] : NO;
 }
 
 - (NSArray *)availableModels
@@ -924,6 +932,36 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
 
   [[self sendBar] setWebSearchEnabled:[[self session] webSearchEnabled]];
+  [self setStatusText:nil];
+  return YES;
+}
+
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
+         setPaidWebSearchEnabled:(BOOL)enabled
+{
+  NSError *error;
+
+  (void)controller;
+  if (![self canSelectModel] || ![[self session] webSearchEnabled]) {
+    return NO;
+  }
+  error = nil;
+  if (![[self session] setPaidWebSearchEnabled:enabled error:&error]) {
+    NSString *message;
+
+    message = [error localizedDescription];
+    if ([message length] == 0U) {
+      message = NSLocalizedString(@"Your changes could not be saved.", nil);
+    }
+    [self setStatusText:message];
+    [[self sendBar] setPaidWebSearchEnabled:
+      [[self session] paidWebSearchEnabled]];
+    [self showMessage:message
+                title:NSLocalizedString(@"Failed to Save Changes", nil)];
+    return NO;
+  }
+  [[self sendBar] setPaidWebSearchEnabled:
+    [[self session] paidWebSearchEnabled]];
   [self setStatusText:nil];
   return YES;
 }

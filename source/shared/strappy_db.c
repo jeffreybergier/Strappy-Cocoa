@@ -36,6 +36,10 @@
 #define STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL \
   "COALESCE((SELECT x.web_search_enabled FROM session_settings x " \
   "WHERE x.session_id = s.id), 1)"
+#define STRAPPY_DB_SESSION_PAID_WEB_SEARCH_ENABLED_SQL \
+  "COALESCE((SELECT p.paid_web_search_enabled " \
+  "FROM session_paid_web_search_settings p " \
+  "WHERE p.session_id = s.id), 0)"
 #define STRAPPY_DB_SESSION_BASH_ENABLED_SQL \
   "CASE WHEN " STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " = '" \
   STRAPPY_ASSISTANT_SET_CODING_ASSISTANT "' THEN " \
@@ -316,6 +320,7 @@ void strappy_session_record_init(strappy_session_record *record)
   record->last_activity_at = NULL;
   record->last_activity_at_ms = 0LL;
   record->web_search_enabled = 1;
+  record->paid_web_search_enabled = 0;
   record->bash_enabled = 0;
   record->streaming_enabled = 0;
   record->http_status = 0L;
@@ -1347,6 +1352,13 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "updated_at_ms INTEGER NOT NULL,"
     "FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE"
     ");"
+    "CREATE TABLE IF NOT EXISTS session_paid_web_search_settings ("
+    "session_id INTEGER PRIMARY KEY,"
+    "paid_web_search_enabled INTEGER NOT NULL DEFAULT 0 "
+      "CHECK(paid_web_search_enabled IN (0,1)),"
+    "updated_at_ms INTEGER NOT NULL,"
+    "FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE"
+    ");"
     "CREATE TABLE IF NOT EXISTS session_working_directories ("
     "session_id INTEGER PRIMARY KEY,"
     "working_directory TEXT NOT NULL CHECK(length(working_directory) > 0),"
@@ -2324,15 +2336,16 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   record->http_status = (long)sqlite3_column_int64(stmt, 6);
   record->last_activity_at_ms = (long long)sqlite3_column_int64(stmt, 9);
   record->web_search_enabled = sqlite3_column_int(stmt, 10) ? 1 : 0;
-  record->bash_enabled = sqlite3_column_int(stmt, 11) ? 1 : 0;
-  record->streaming_enabled = sqlite3_column_int(stmt, 12) ? 1 : 0;
+  record->paid_web_search_enabled = sqlite3_column_int(stmt, 11) ? 1 : 0;
+  record->bash_enabled = sqlite3_column_int(stmt, 12) ? 1 : 0;
+  record->streaming_enabled = sqlite3_column_int(stmt, 13) ? 1 : 0;
 
   name = strappy_db_column_string(stmt, 1);
   prompt = strappy_db_column_string(stmt, 2);
   response = strappy_db_column_string(stmt, 3);
   model = strappy_db_column_string(stmt, 4);
   model_name = strappy_db_column_string(stmt, 5);
-  assistant_set_id = strappy_db_column_string(stmt, 13);
+  assistant_set_id = strappy_db_column_string(stmt, 14);
   created_at = strappy_db_column_string(stmt, 7);
   last_activity_at = strappy_db_column_string(stmt, 8);
 
@@ -8274,6 +8287,67 @@ int strappy_db_update_session_web_search_enabled(const char *db_path,
   return 1;
 }
 
+int strappy_db_update_session_paid_web_search_enabled(
+  const char *db_path,
+  long long session_id,
+  int paid_web_search_enabled,
+  char **error_out)
+{
+  static const char *sql =
+    "INSERT OR REPLACE INTO session_paid_web_search_settings "
+    "(session_id, paid_web_search_enabled, updated_at_ms) "
+    "VALUES (?, ?, CAST(strftime('%s','now') AS INTEGER) * 1000);";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  if (!strappy_db_session_exists(db, session_id, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not prepare paid web search update: %s",
+      sqlite3_errmsg(db));
+    strappy_db_release(db);
+    return 0;
+  }
+  if ((sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) != SQLITE_OK) ||
+      (sqlite3_bind_int(stmt,
+                        2,
+                        paid_web_search_enabled ? 1 : 0) != SQLITE_OK)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not bind paid web search update: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not update paid web search setting: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+  strappy_db_release(db);
+  return 1;
+}
+
 static int strappy_db_save_session_bash_enabled(sqlite3 *db,
                                                 long long session_id,
                                                 int bash_enabled,
@@ -8653,6 +8727,7 @@ int strappy_db_list_sessions(const char *db_path,
       STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " / 1000.0, 'unixepoch'), "
     STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_PAID_WEB_SEARCH_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " "
@@ -8768,6 +8843,7 @@ int strappy_db_load_session(const char *db_path,
       STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " / 1000.0, 'unixepoch'), "
     STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_PAID_WEB_SEARCH_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " "
@@ -8859,6 +8935,7 @@ int strappy_db_load_session_list_record(const char *db_path,
       STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " / 1000.0, 'unixepoch'), "
     STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_PAID_WEB_SEARCH_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " "
@@ -12972,13 +13049,30 @@ static int strappy_db_semantic_request_has_web_search(cJSON *tools)
        tool != NULL;
        tool = tool->next) {
     cJSON *type;
+    cJSON *name;
+    const char *type_text;
 
     type = cJSON_IsObject(tool) ? cJSON_GetObjectItem(tool, "type") : NULL;
-    if (cJSON_IsString(type) && (type->valuestring != NULL) &&
-        ((strcmp(type->valuestring,
+    name = cJSON_IsObject(tool) ? cJSON_GetObjectItem(tool, "name") : NULL;
+    if ((type == NULL) || !cJSON_IsString(type)) {
+      continue;
+    }
+    type_text = type->valuestring;
+    if (type_text == NULL) {
+      continue;
+    }
+    if (((strcmp(type_text,
                  STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) ||
-         (strcmp(type->valuestring, "web_search") == 0) ||
-         (strcmp(type->valuestring, "web_search_preview") == 0))) {
+         (strcmp(type_text,
+                 STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0) ||
+         (strcmp(type_text, "web_search") == 0) ||
+         (strcmp(type_text, "web_search_preview") == 0))) {
+      return 1;
+    }
+    if ((strcmp(type_text, "function") == 0) && (name != NULL) &&
+        cJSON_IsString(name) && (name->valuestring != NULL) &&
+        ((strcmp(name->valuestring, STRAPPY_TOOL_WEB_SEARCH) == 0) ||
+         (strcmp(name->valuestring, STRAPPY_TOOL_WEB_FETCH) == 0))) {
       return 1;
     }
   }

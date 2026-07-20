@@ -310,6 +310,7 @@ enum {
 @property (nonatomic, assign) BOOL sending;
 @property (nonatomic, assign) BOOL cancellationRequested;
 @property (nonatomic, assign) BOOL webSearchEnabled;
+@property (nonatomic, assign) BOOL paidWebSearchEnabled;
 @property (nonatomic, assign) BOOL bashEnabled;
 - (void)buildSubviews;
 - (UIImage *)iconImageForIcon:(AIFontAwesomeIcon)icon
@@ -331,6 +332,7 @@ enum {
 - (NSString *)currentSelectedModelIdentifier;
 - (BOOL)setSelectedModelIdentifierFromOptions:(NSString *)modelIdentifier;
 - (BOOL)setWebSearchEnabledFromOptions:(BOOL)enabled;
+- (BOOL)setPaidWebSearchEnabledFromOptions:(BOOL)enabled;
 - (BOOL)setBashEnabledFromOptions:(BOOL)enabled;
 - (UIViewController *)containingViewController;
 - (void)dismissOptionsControllerAnimated:(BOOL)animated;
@@ -347,6 +349,8 @@ enum {
 @property (nonatomic, copy) NSString *selectedModelIdentifier;
 @property (nonatomic, strong) UISwitch *webSearchSwitch;
 @property (nonatomic, assign) BOOL webSearchEnabled;
+@property (nonatomic, strong) UISwitch *paidWebSearchSwitch;
+@property (nonatomic, assign) BOOL paidWebSearchEnabled;
 @property (nonatomic, strong) UISwitch *bashSwitch;
 @property (nonatomic, assign) BOOL bashEnabled;
 - (instancetype)initWithPromptSendViewController:
@@ -371,6 +375,7 @@ enum {
 - (void)viewDidLoad
 {
   UISwitch *webSearchSwitch;
+  UISwitch *paidWebSearchSwitch;
   UISwitch *bashSwitch;
 
   [super viewDidLoad];
@@ -380,6 +385,12 @@ enum {
                       action:@selector(webSearchSwitchChanged:)
             forControlEvents:UIControlEventValueChanged];
   [self setWebSearchSwitch:webSearchSwitch];
+
+  paidWebSearchSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
+  [paidWebSearchSwitch addTarget:self
+                          action:@selector(paidWebSearchSwitchChanged:)
+                forControlEvents:UIControlEventValueChanged];
+  [self setPaidWebSearchSwitch:paidWebSearchSwitch];
 
   bashSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
   [bashSwitch addTarget:self
@@ -420,6 +431,10 @@ enum {
     (promptSendViewController != nil)
       ? [promptSendViewController webSearchEnabled]
       : YES];
+  [self setPaidWebSearchEnabled:
+    (promptSendViewController != nil)
+      ? [promptSendViewController paidWebSearchEnabled]
+      : NO];
   [self setBashEnabled:
     (promptSendViewController != nil)
       ? [promptSendViewController bashEnabled]
@@ -430,6 +445,8 @@ enum {
 {
   [self reloadOptionsSnapshot];
   [[self webSearchSwitch] setOn:[self webSearchEnabled] animated:NO];
+  [[self paidWebSearchSwitch] setOn:[self paidWebSearchEnabled] animated:NO];
+  [[self paidWebSearchSwitch] setEnabled:[self webSearchEnabled]];
   [[self bashSwitch] setOn:([self bashAvailable] && [self bashEnabled])
                       animated:NO];
   [[self bashSwitch] setEnabled:[self bashAvailable]];
@@ -459,6 +476,25 @@ enum {
     [self setWebSearchEnabled:[promptSendViewController webSearchEnabled]];
   }
   [sender setOn:[self webSearchEnabled] animated:YES];
+  [[self paidWebSearchSwitch] setEnabled:[self webSearchEnabled]];
+  [[self tableView] reloadSections:
+    [NSIndexSet indexSetWithIndex:kStrappyPromptOptionsSectionAvailableTools]
+                withRowAnimation:UITableViewRowAnimationNone];
+}
+
+- (void)paidWebSearchSwitchChanged:(UISwitch *)sender
+{
+  PromptSendViewController *promptSendViewController;
+
+  promptSendViewController = [self promptSendViewController];
+  if ([self webSearchEnabled] && (promptSendViewController != nil)) {
+    (void)[promptSendViewController setPaidWebSearchEnabledFromOptions:
+      [sender isOn]];
+    [self setPaidWebSearchEnabled:
+      [promptSendViewController paidWebSearchEnabled]];
+  }
+  [sender setOn:[self paidWebSearchEnabled] animated:YES];
+  [sender setEnabled:[self webSearchEnabled]];
 }
 
 - (void)bashSwitchChanged:(UISwitch *)sender
@@ -493,7 +529,7 @@ enum {
     return (NSInteger)[[self models] count];
   }
   if (section == kStrappyPromptOptionsSectionAvailableTools) {
-    return 2;
+    return 3;
   }
   return 0;
 }
@@ -569,13 +605,36 @@ titleForHeaderInSection:(NSInteger)section
         [[cell textLabel] setNumberOfLines:1];
         [[cell detailTextLabel] setNumberOfLines:1];
       }
-      [[cell textLabel] setText:NSLocalizedString(@"Search Web", nil)];
+      [[cell textLabel] setText:NSLocalizedString(@"Enable Web Search", nil)];
       [[cell textLabel] setTextColor:[UIColor blackColor]];
       [[cell detailTextLabel] setText:NSLocalizedString(
-        @"Web Search incurs additional charges", nil)];
+        @"Allows free web search and public page fetching", nil)];
       [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
       [[self webSearchSwitch] setOn:[self webSearchEnabled] animated:NO];
       [cell setAccessoryView:[self webSearchSwitch]];
+      return cell;
+    }
+
+    if ([indexPath row] == 1) {
+      cell = [tableView dequeueReusableCellWithIdentifier:@"PaidWebSearchCell"];
+      if (cell == nil) {
+        cell = [[UITableViewCell alloc]
+          initWithStyle:UITableViewCellStyleSubtitle
+         reuseIdentifier:@"PaidWebSearchCell"];
+        [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+        [[cell textLabel] setNumberOfLines:1];
+        [[cell detailTextLabel] setNumberOfLines:1];
+      }
+      [[cell textLabel] setText:NSLocalizedString(@"Use Paid Web Search", nil)];
+      [[cell textLabel] setTextColor:[self webSearchEnabled] ?
+        [UIColor blackColor] : [UIColor grayColor]];
+      [[cell detailTextLabel] setText:NSLocalizedString(
+        @"Uses OpenRouter web search and may incur charges", nil)];
+      [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+      [[self paidWebSearchSwitch] setOn:[self paidWebSearchEnabled]
+                                    animated:NO];
+      [[self paidWebSearchSwitch] setEnabled:[self webSearchEnabled]];
+      [cell setAccessoryView:[self paidWebSearchSwitch]];
       return cell;
     }
 
@@ -710,6 +769,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
       UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin];
     [self setControlsEnabled:YES];
     [self setWebSearchEnabled:YES];
+    [self setPaidWebSearchEnabled:NO];
     [self setBashEnabled:NO];
     [self buildSubviews];
   }
@@ -987,6 +1047,12 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [[self optionsController] reloadOptionsFromPrompt];
 }
 
+- (void)setPaidWebSearchEnabled:(BOOL)enabled
+{
+  _paidWebSearchEnabled = enabled ? YES : NO;
+  [[self optionsController] reloadOptionsFromPrompt];
+}
+
 - (void)setBashEnabled:(BOOL)enabled
 {
   _bashEnabled = enabled ? YES : NO;
@@ -1246,6 +1312,25 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   }
   if (changed) {
     [self setWebSearchEnabled:enabled];
+  }
+  return changed;
+}
+
+- (BOOL)setPaidWebSearchEnabledFromOptions:(BOOL)enabled
+{
+  BOOL changed;
+
+  changed = NO;
+  if (![self webSearchEnabled]) {
+    return NO;
+  }
+  if ([[self delegate] respondsToSelector:
+        @selector(promptSendViewController:setPaidWebSearchEnabled:)]) {
+    changed = [[self delegate] promptSendViewController:self
+                               setPaidWebSearchEnabled:(enabled ? YES : NO)];
+  }
+  if (changed) {
+    [self setPaidWebSearchEnabled:enabled];
   }
   return changed;
 }

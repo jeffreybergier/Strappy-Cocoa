@@ -5,6 +5,7 @@
 #include "strappy_core.h"
 #include "strappy_db.h"
 #include "strappy_file_read.h"
+#include "strappy_web.h"
 
 #include <cJSON.h>
 #include <errno.h>
@@ -63,7 +64,8 @@
 typedef enum strappy_tool_kind {
   STRAPPY_TOOL_KIND_DATABASE = 1,
   STRAPPY_TOOL_KIND_HELPER = 2,
-  STRAPPY_TOOL_KIND_DEVELOPER = 3
+  STRAPPY_TOOL_KIND_DEVELOPER = 3,
+  STRAPPY_TOOL_KIND_WEB = 4
 } strappy_tool_kind;
 
 typedef struct strappy_tool_definition {
@@ -155,7 +157,9 @@ static const strappy_tool_definition strappy_tool_definitions[] = {
   { STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH, STRAPPY_TOOL_KIND_HELPER },
-  { STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM, STRAPPY_TOOL_KIND_HELPER }
+  { STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_WEB_SEARCH, STRAPPY_TOOL_KIND_WEB },
+  { STRAPPY_TOOL_WEB_FETCH, STRAPPY_TOOL_KIND_WEB }
 };
 
 static const size_t strappy_tool_definition_count =
@@ -1209,7 +1213,7 @@ static int strappy_tools_server_schema_is_enabled(
   cJSON *server_tool,
   const char * const *allowed_names,
   size_t allowed_name_count,
-  int web_search_enabled)
+  strappy_web_tool_mode web_tool_mode)
 {
   const char *type;
   cJSON *feature;
@@ -1230,8 +1234,20 @@ static int strappy_tools_server_schema_is_enabled(
   if (cJSON_IsString(feature) && (feature->valuestring != NULL) &&
       (strcmp(feature->valuestring,
               STRAPPY_TOOL_SERVER_FEATURE_WEB_SEARCH) == 0) &&
-      !web_search_enabled) {
+      (web_tool_mode != STRAPPY_WEB_TOOL_MODE_PAID)) {
     return 0;
+  }
+  return 1;
+}
+
+static int strappy_tools_function_schema_is_enabled(
+  const char *name,
+  strappy_web_tool_mode web_tool_mode)
+{
+  if ((name != NULL) &&
+      ((strcmp(name, STRAPPY_TOOL_WEB_SEARCH) == 0) ||
+       (strcmp(name, STRAPPY_TOOL_WEB_FETCH) == 0))) {
+    return web_tool_mode == STRAPPY_WEB_TOOL_MODE_CUSTOM;
   }
   return 1;
 }
@@ -1428,7 +1444,7 @@ static int strappy_tools_responses_append_server_tools(
   const char *resource_dir,
   const char * const *allowed_names,
   size_t allowed_name_count,
-  int web_search_enabled,
+  strappy_web_tool_mode web_tool_mode,
   char **error_out)
 {
   cJSON *root;
@@ -1459,7 +1475,7 @@ static int strappy_tools_responses_append_server_tools(
     if (!strappy_tools_server_schema_is_enabled(server_tool,
                                                 allowed_names,
                                                 allowed_name_count,
-                                                web_search_enabled)) {
+                                                web_tool_mode)) {
       continue;
     }
     response_tool = cJSON_CreateObject();
@@ -1483,7 +1499,7 @@ static char *strappy_tools_responses_json_from_chat_json(
   const char *resource_dir,
   const char * const *allowed_names,
   size_t allowed_name_count,
-  int web_search_enabled,
+  strappy_web_tool_mode web_tool_mode,
   char **error_out)
 {
   cJSON *chat_tools;
@@ -1518,6 +1534,24 @@ static char *strappy_tools_responses_json_from_chat_json(
       strappy_set_error(error_out,
                         "Chat tool schema is missing its function object.");
       return NULL;
+    }
+
+    {
+      cJSON *name;
+
+      name = cJSON_GetObjectItemCaseSensitive(function, "name");
+      if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
+          !strappy_tools_function_schema_is_enabled(name->valuestring,
+                                                    web_tool_mode)) {
+        if (cJSON_IsString(name) && (name->valuestring != NULL)) {
+          continue;
+        }
+        cJSON_Delete(responses_tools);
+        cJSON_Delete(chat_tools);
+        strappy_set_error(error_out,
+                          "Chat tool schema is missing its function name.");
+        return NULL;
+      }
     }
 
     response_tool = cJSON_CreateObject();
@@ -1577,7 +1611,7 @@ static char *strappy_tools_responses_json_from_chat_json(
                                                    resource_dir,
                                                    allowed_names,
                                                    allowed_name_count,
-                                                   web_search_enabled,
+                                                   web_tool_mode,
                                                    error_out)) {
     cJSON_Delete(responses_tools);
     cJSON_Delete(chat_tools);
@@ -1597,7 +1631,7 @@ char *strappy_tools_responses_request_json_filtered(
   const char *resource_dir,
   const char * const *allowed_names,
   size_t allowed_name_count,
-  int web_search_enabled,
+  strappy_web_tool_mode web_tool_mode,
   char **error_out)
 {
   char *chat_tools_json;
@@ -1617,20 +1651,20 @@ char *strappy_tools_responses_request_json_filtered(
                                                 resource_dir,
                                                 allowed_names,
                                                 allowed_name_count,
-                                                web_search_enabled,
+                                                web_tool_mode,
                                                 error_out);
   free(chat_tools_json);
   return responses_tools_json;
 }
 
 char *strappy_tools_responses_request_json(const char *resource_dir,
-                                           int web_search_enabled,
+                                           strappy_web_tool_mode web_tool_mode,
                                            char **error_out)
 {
   return strappy_tools_responses_request_json_filtered(resource_dir,
                                                        NULL,
                                                        0U,
-                                                       web_search_enabled,
+                                                       web_tool_mode,
                                                        error_out);
 }
 
@@ -1685,7 +1719,7 @@ char *strappy_tools_prompt_markdown_filtered(
   const char *resource_dir,
   const char * const *allowed_names,
   size_t allowed_name_count,
-  int web_search_enabled,
+  strappy_web_tool_mode web_tool_mode,
   char **error_out)
 {
   cJSON *root;
@@ -1735,6 +1769,7 @@ char *strappy_tools_prompt_markdown_filtered(
          strappy_tools_name_is_allowed(name,
                                        allowed_names,
                                        allowed_name_count)) &&
+        strappy_tools_function_schema_is_enabled(name, web_tool_mode) &&
         !strappy_tools_prompt_append(
           &buffer,
           name,
@@ -1752,7 +1787,7 @@ char *strappy_tools_prompt_markdown_filtered(
     if (!strappy_tools_server_schema_is_enabled(tool,
                                                 allowed_names,
                                                 allowed_name_count,
-                                                web_search_enabled)) {
+                                                web_tool_mode)) {
       continue;
     }
     description = cJSON_GetObjectItemCaseSensitive(
@@ -6158,6 +6193,180 @@ static char *strappy_tools_execute_memory_database_hint_forget(
   return json;
 }
 
+static int strappy_tools_web_arguments_have_only(
+  cJSON *root,
+  const char *first_name,
+  const char *second_name)
+{
+  cJSON *item;
+
+  if (!cJSON_IsObject(root)) {
+    return 0;
+  }
+  for (item = root->child; item != NULL; item = item->next) {
+    if ((item->string == NULL) ||
+        ((strcmp(item->string, first_name) != 0) &&
+         ((second_name == NULL) || (strcmp(item->string, second_name) != 0)))) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static char *strappy_tools_web_result_json(const strappy_web_result *result,
+                                           char **error_out)
+{
+  cJSON *root;
+  char *json;
+
+  if ((result == NULL) || (result->content_type == NULL) ||
+      (result->body == NULL)) {
+    strappy_set_error(error_out, "Web tool result is incomplete.");
+    return NULL;
+  }
+  root = cJSON_CreateObject();
+  if ((root == NULL) ||
+      (cJSON_AddNumberToObject(root,
+                              "status",
+                              (double)result->status) == NULL) ||
+      (cJSON_AddStringToObject(root,
+                              "content_type",
+                              result->content_type) == NULL) ||
+      (cJSON_AddStringToObject(root, "body", result->body) == NULL)) {
+    cJSON_Delete(root);
+    strappy_set_error(error_out, "Could not allocate web tool result.");
+    return NULL;
+  }
+  json = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  if (json == NULL) {
+    strappy_set_error(error_out, "Could not serialize web tool result.");
+  }
+  return json;
+}
+
+static char *strappy_tools_execute_web_search(
+  const char *session_db_path,
+  const char *arguments_json,
+  strappy_tools_continue_callback continue_callback,
+  void *continue_callback_data,
+  int *cancelled_out,
+  char **error_out)
+{
+  cJSON *arguments;
+  cJSON *query_item;
+  cJSON *page_item;
+  const char *query;
+  int page;
+  strappy_web_result result;
+  char *output;
+
+  if (cancelled_out != NULL) {
+    *cancelled_out = 0;
+  }
+  arguments = cJSON_Parse(arguments_json);
+  if (!cJSON_IsObject(arguments) ||
+      !strappy_tools_web_arguments_have_only(arguments, "query", "page")) {
+    cJSON_Delete(arguments);
+    strappy_set_error(error_out,
+                      "web_search arguments must contain only query and page.");
+    return NULL;
+  }
+  query_item = cJSON_GetObjectItemCaseSensitive(arguments, "query");
+  page_item = cJSON_GetObjectItemCaseSensitive(arguments, "page");
+  if ((query_item == NULL) || !cJSON_IsString(query_item) ||
+      (query_item->valuestring == NULL) ||
+      (query_item->valuestring[0] == '\0') ||
+      (strlen(query_item->valuestring) > STRAPPY_WEB_MAX_ARGUMENT_BYTES)) {
+    cJSON_Delete(arguments);
+    strappy_set_error(error_out,
+                      "web_search query must contain 1 to 512 bytes.");
+    return NULL;
+  }
+  if ((page_item != NULL) &&
+      (!cJSON_IsNumber(page_item) ||
+       (page_item->valuedouble != (double)page_item->valueint) ||
+       (page_item->valueint < 1) ||
+       (page_item->valueint > STRAPPY_WEB_MAX_SEARCH_PAGE))) {
+    cJSON_Delete(arguments);
+    strappy_set_error(error_out,
+                      "web_search page must be an integer from 1 through 10.");
+    return NULL;
+  }
+  query = query_item->valuestring;
+  page = (page_item != NULL) ? page_item->valueint : 1;
+  strappy_web_result_init(&result);
+  if (!strappy_web_search(session_db_path,
+                          query,
+                          page,
+                          continue_callback,
+                          continue_callback_data,
+                          &result,
+                          error_out)) {
+    if (cancelled_out != NULL) {
+      *cancelled_out = result.cancelled;
+    }
+    strappy_web_result_destroy(&result);
+    cJSON_Delete(arguments);
+    return NULL;
+  }
+  cJSON_Delete(arguments);
+  output = strappy_tools_web_result_json(&result, error_out);
+  strappy_web_result_destroy(&result);
+  return output;
+}
+
+static char *strappy_tools_execute_web_fetch(
+  const char *session_db_path,
+  const char *arguments_json,
+  strappy_tools_continue_callback continue_callback,
+  void *continue_callback_data,
+  int *cancelled_out,
+  char **error_out)
+{
+  cJSON *arguments;
+  cJSON *url_item;
+  strappy_web_result result;
+  char *output;
+
+  if (cancelled_out != NULL) {
+    *cancelled_out = 0;
+  }
+  arguments = cJSON_Parse(arguments_json);
+  if (!cJSON_IsObject(arguments) ||
+      !strappy_tools_web_arguments_have_only(arguments, "url", NULL)) {
+    cJSON_Delete(arguments);
+    strappy_set_error(error_out,
+                      "web_fetch arguments must contain only url.");
+    return NULL;
+  }
+  url_item = cJSON_GetObjectItemCaseSensitive(arguments, "url");
+  if ((url_item == NULL) || !cJSON_IsString(url_item) ||
+      (url_item->valuestring == NULL)) {
+    cJSON_Delete(arguments);
+    strappy_set_error(error_out, "web_fetch url must be a string.");
+    return NULL;
+  }
+  strappy_web_result_init(&result);
+  if (!strappy_web_fetch(session_db_path,
+                         url_item->valuestring,
+                         continue_callback,
+                         continue_callback_data,
+                         &result,
+                         error_out)) {
+    if (cancelled_out != NULL) {
+      *cancelled_out = result.cancelled;
+    }
+    strappy_web_result_destroy(&result);
+    cJSON_Delete(arguments);
+    return NULL;
+  }
+  cJSON_Delete(arguments);
+  output = strappy_tools_web_result_json(&result, error_out);
+  strappy_web_result_destroy(&result);
+  return output;
+}
+
 static char *strappy_tools_execute_database_list_info(
   const char *session_db_path,
   const char *arguments_json,
@@ -6286,6 +6495,24 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
                                      active_session_id,
                                      arguments_json,
                                      error_out);
+  }
+
+  if (strcmp(tool_name, STRAPPY_TOOL_WEB_SEARCH) == 0) {
+    return strappy_tools_execute_web_search(session_db_path,
+                                            arguments_json,
+                                            continue_callback,
+                                            continue_callback_data,
+                                            cancelled_out,
+                                            error_out);
+  }
+
+  if (strcmp(tool_name, STRAPPY_TOOL_WEB_FETCH) == 0) {
+    return strappy_tools_execute_web_fetch(session_db_path,
+                                           arguments_json,
+                                           continue_callback,
+                                           continue_callback_data,
+                                           cancelled_out,
+                                           error_out);
   }
 
   if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_LIST_INFO) == 0) {

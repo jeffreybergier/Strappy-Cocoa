@@ -33,6 +33,9 @@ RUNNER_SOURCES = \
 	$(SHARED_DIR)/strappy_assistant_sets.c \
 	$(SHARED_DIR)/strappy_responses.c \
 	$(SHARED_DIR)/strappy_tools.c \
+	$(SHARED_DIR)/strappy_web.c \
+	$(SHARED_DIR)/strappy_bash.c \
+	$(SHARED_DIR)/strappy_file_read.c \
 	$(CJSON_DIR)/cJSON.c
 
 .DEFAULT_GOAL := build
@@ -48,7 +51,7 @@ $(BUILD_DIR):
 	mkdir -p $@
 
 $(RUNNER): $(RUNNER_SOURCES) | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(RUNNER_SOURCES) $(SQLITE_LIBS) -lcurl
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(RUNNER_SOURCES) $(SQLITE_LIBS) -pthread -lcurl
 
 verify-fixture: build
 	@test -f "$(DATABASE_MANIFEST)" || { \

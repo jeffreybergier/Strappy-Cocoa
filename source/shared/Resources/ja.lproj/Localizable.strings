@@ -207,6 +207,10 @@
 "Scanning databases..." = "データベースをスキャン中...";
 "Search" = "検索";
 "Search Web" = "Web を検索";
+"Enable Web Search" = "Web 検索を有効にする";
+"Allows free web search and public page fetching" = "無料の Web 検索と公開ページの取得を許可します";
+"Use Paid Web Search" = "有料 Web 検索を使用";
+"Uses OpenRouter web search and may incur charges" = "OpenRouter の Web 検索を使用し、料金が発生する場合があります";
 "Enable Bash" = "Bash を有効にする";
 "Allows command execution in this session" = "このセッションでコマンド実行を許可します";
 "Services" = "サービス";

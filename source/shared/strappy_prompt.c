@@ -600,7 +600,7 @@ static cJSON *strappy_prompt_json_read_root(const char *resource_dir,
 char *strappy_prompt_build(
   const char *resource_dir,
   const strappy_assistant_set_profile *profile,
-  int web_search_enabled,
+  strappy_web_tool_mode web_tool_mode,
   char **error_out)
 {
   strappy_prompt_buffer buffer;
@@ -638,7 +638,7 @@ char *strappy_prompt_build(
     resource_dir,
     (const char * const *)profile->tool_names,
     profile->tool_name_count,
-    web_search_enabled,
+    web_tool_mode,
     error_out);
   if (tools_markdown == NULL) {
     cJSON_Delete(root);
@@ -691,7 +691,7 @@ char *strappy_prompt_build(
       ok = 0;
       break;
     }
-    if (!web_search_enabled &&
+    if ((web_tool_mode == STRAPPY_WEB_TOOL_MODE_DISABLED) &&
         (definition->evaluation_kind ==
          STRAPPY_QUALITY_CHECK_WEB_REFERENCE)) {
       continue;

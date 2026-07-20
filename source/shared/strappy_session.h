@@ -86,6 +86,11 @@ int strappy_session_update_web_search_enabled(const char *db_path,
                                               long long session_id,
                                               int web_search_enabled,
                                               char **error_out);
+int strappy_session_update_paid_web_search_enabled(
+  const char *db_path,
+  long long session_id,
+  int paid_web_search_enabled,
+  char **error_out);
 int strappy_session_update_bash_enabled(const char *db_path,
                                         long long session_id,
                                         int bash_enabled,

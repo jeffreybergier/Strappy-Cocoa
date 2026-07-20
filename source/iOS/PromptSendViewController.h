@@ -20,6 +20,8 @@
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
              setWebSearchEnabled:(BOOL)enabled;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
+         setPaidWebSearchEnabled:(BOOL)enabled;
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
                   setBashEnabled:(BOOL)enabled;
 - (void)promptSendViewControllerDidCancelPrompt:
     (PromptSendViewController *)controller;
@@ -37,6 +39,7 @@
 - (void)setSending:(BOOL)sending;
 - (void)setCancellationRequested:(BOOL)requested;
 - (void)setWebSearchEnabled:(BOOL)enabled;
+- (void)setPaidWebSearchEnabled:(BOOL)enabled;
 - (void)setBashEnabled:(BOOL)enabled;
 - (void)reloadOptionsMenu;
 - (BOOL)canSendCurrentPrompt;

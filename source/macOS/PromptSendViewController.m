@@ -88,6 +88,8 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
 - (void)modelMenuItemClicked:(id)sender;
 - (void)actionSegmentClicked:(id)sender;
 - (void)sendButtonClicked:(id)sender;
+- (void)webSearchMenuItemClicked:(id)sender;
+- (void)paidWebSearchMenuItemClicked:(id)sender;
 - (void)streamingMenuItemClicked:(id)sender;
 @end
 
@@ -97,6 +99,7 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
 {
   if ((self = [super init])) {
     enabled_ = YES;
+    webSearchEnabled_ = YES;
   }
   return self;
 }
@@ -194,6 +197,8 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
            object:barView_];
 
   [self setEnabled:enabled_];
+  [self setWebSearchEnabled:webSearchEnabled_];
+  [self setPaidWebSearchEnabled:paidWebSearchEnabled_];
   [self setStreamingEnabled:streamingEnabled_];
 }
 
@@ -298,6 +303,8 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   NSString *selectedTitle;
   NSUInteger index;
   BOOL foundSelectedModel;
+  BOOL webSearchEnabled;
+  BOOL paidWebSearchEnabled;
 
   if (optionsMenu_ == nil) {
     return;
@@ -322,7 +329,21 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
 
   foundSelectedModel = NO;
   selectedTitle = nil;
+  webSearchEnabled = webSearchEnabled_;
+  paidWebSearchEnabled = paidWebSearchEnabled_;
+  if (delegate_ != nil) {
+    webSearchEnabled =
+      [delegate_ webSearchEnabledForPromptSendViewController:self];
+    paidWebSearchEnabled =
+      [delegate_ paidWebSearchEnabledForPromptSendViewController:self];
+  }
+  webSearchEnabled_ = webSearchEnabled ? YES : NO;
+  paidWebSearchEnabled_ = paidWebSearchEnabled ? YES : NO;
 
+  [webSearchMenuItem_ release];
+  webSearchMenuItem_ = nil;
+  [paidWebSearchMenuItem_ release];
+  paidWebSearchMenuItem_ = nil;
   [streamingMenuItem_ release];
   streamingMenuItem_ = nil;
   while ([optionsMenu_ numberOfItems] > 0) {
@@ -382,6 +403,17 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
     [optionsMenu_ addItem:[NSMenuItem separatorItem]];
   }
 
+  webSearchMenuItem_ = [[optionsMenu_
+      addItemWithTitle:NSLocalizedString(@"Enable Web Search", nil)
+                action:@selector(webSearchMenuItemClicked:)
+         keyEquivalent:@""] retain];
+  [webSearchMenuItem_ setTarget:self];
+  paidWebSearchMenuItem_ = [[optionsMenu_
+      addItemWithTitle:NSLocalizedString(@"Use Paid Web Search", nil)
+                action:@selector(paidWebSearchMenuItemClicked:)
+         keyEquivalent:@""] retain];
+  [paidWebSearchMenuItem_ setTarget:self];
+
   streamingMenuItem_ = [[optionsMenu_
       addItemWithTitle:NSLocalizedString(@"Stream Responses", nil)
                 action:@selector(streamingMenuItemClicked:)
@@ -424,7 +456,9 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
         [representedObject isEqualToString:selectedModelIdentifier]) {
       [item setState:XPControlStateValueOn];
       selectedTitle = [item title];
-    } else if (item != streamingMenuItem_) {
+    } else if ((item != webSearchMenuItem_) &&
+               (item != paidWebSearchMenuItem_) &&
+               (item != streamingMenuItem_)) {
       [item setState:XPControlStateValueOff];
     }
   }
@@ -442,6 +476,17 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   [actionSegmented_ setEnabled:(enabled_ && !sending_)
                     forSegment:kPromptActionSegmentOptions];
   [self selectCurrentModelMenuItem];
+  if (webSearchMenuItem_ != nil) {
+    [webSearchMenuItem_ setEnabled:(enabled_ && !sending_)];
+    [webSearchMenuItem_ setState:(webSearchEnabled_ ?
+      XPControlStateValueOn : XPControlStateValueOff)];
+  }
+  if (paidWebSearchMenuItem_ != nil) {
+    [paidWebSearchMenuItem_ setEnabled:
+      (enabled_ && !sending_ && webSearchEnabled_)];
+    [paidWebSearchMenuItem_ setState:(paidWebSearchEnabled_ ?
+      XPControlStateValueOn : XPControlStateValueOff)];
+  }
   if (streamingMenuItem_ != nil) {
     [streamingMenuItem_ setEnabled:(enabled_ && !sending_)];
     [streamingMenuItem_ setState:(streamingEnabled_ ?
@@ -518,6 +563,18 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
 - (void)setCancellationRequested:(BOOL)requested
 {
   cancellationRequested_ = requested ? YES : NO;
+  [self updateActionControls];
+}
+
+- (void)setWebSearchEnabled:(BOOL)enabled
+{
+  webSearchEnabled_ = enabled ? YES : NO;
+  [self updateActionControls];
+}
+
+- (void)setPaidWebSearchEnabled:(BOOL)enabled
+{
+  paidWebSearchEnabled_ = enabled ? YES : NO;
   [self updateActionControls];
 }
 
@@ -633,6 +690,44 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
              afterDelay:0.0];
 }
 
+- (void)webSearchMenuItemClicked:(id)sender
+{
+  BOOL enabled;
+  BOOL changed;
+
+  (void)sender;
+  if (sending_) {
+    return;
+  }
+  enabled = webSearchEnabled_ ? NO : YES;
+  changed = ((delegate_ != nil) &&
+             [delegate_ promptSendViewController:self
+                              setWebSearchEnabled:enabled]) ? YES : NO;
+  if (changed) {
+    webSearchEnabled_ = enabled;
+  }
+  [self updateActionControls];
+}
+
+- (void)paidWebSearchMenuItemClicked:(id)sender
+{
+  BOOL enabled;
+  BOOL changed;
+
+  (void)sender;
+  if (sending_ || !webSearchEnabled_) {
+    return;
+  }
+  enabled = paidWebSearchEnabled_ ? NO : YES;
+  changed = ((delegate_ != nil) &&
+             [delegate_ promptSendViewController:self
+                          setPaidWebSearchEnabled:enabled]) ? YES : NO;
+  if (changed) {
+    paidWebSearchEnabled_ = enabled;
+  }
+  [self updateActionControls];
+}
+
 - (void)performSend:(id)sender
 {
   NSString *text;
@@ -695,6 +790,8 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   [textView_ release];
   [actionSegmented_ release];
   [optionsMenu_ release];
+  [webSearchMenuItem_ release];
+  [paidWebSearchMenuItem_ release];
   [streamingMenuItem_ release];
   [super dealloc];
 }

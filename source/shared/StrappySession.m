@@ -24,6 +24,7 @@ NSString * const StrappySessionChangeKindActivity = @"activity";
 NSString * const StrappySessionChangeKindModel = @"model";
 NSString * const StrappySessionChangeKindStreaming = @"streaming";
 NSString * const StrappySessionChangeKindWebSearch = @"web_search";
+NSString * const StrappySessionChangeKindPaidWebSearch = @"paid_web_search";
 NSString * const StrappySessionChangeKindBash = @"bash";
 NSString * const StrappySessionChangeKindAssistantSet = @"assistant_set";
 
@@ -134,6 +135,19 @@ static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
     return YES;
   }
   return [webSearchEnabled boolValue] ? YES : NO;
+}
+
+static BOOL StrappySessionPaidWebSearchEnabledFromSummary(
+  NSDictionary *summary)
+{
+  NSNumber *paidWebSearchEnabled;
+
+  if (![summary isKindOfClass:[NSDictionary class]]) {
+    return NO;
+  }
+  paidWebSearchEnabled = [summary objectForKey:@"paid_web_search_enabled"];
+  return ([paidWebSearchEnabled isKindOfClass:[NSNumber class]] &&
+          [paidWebSearchEnabled boolValue]) ? YES : NO;
 }
 
 static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
@@ -356,10 +370,13 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   if ((self = [super init])) {
     sessionIdentifier_ = [sessionIdentifier retain];
     webSearchEnabled_ = YES;
+    paidWebSearchEnabled_ = NO;
     bashEnabled_ = NO;
     if ([summary isKindOfClass:[NSDictionary class]]) {
       cachedSummary_ = [summary retain];
       webSearchEnabled_ = StrappySessionWebSearchEnabledFromSummary(summary);
+      paidWebSearchEnabled_ =
+        StrappySessionPaidWebSearchEnabledFromSummary(summary);
       bashEnabled_ = StrappySessionBashEnabledFromSummary(summary);
       streamingEnabled_ = StrappySessionStreamingEnabledFromSummary(summary);
     }
@@ -397,6 +414,8 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
       cachedSummary_ = [summary retain];
     }
     webSearchEnabled_ = StrappySessionWebSearchEnabledFromSummary(summary);
+    paidWebSearchEnabled_ =
+      StrappySessionPaidWebSearchEnabledFromSummary(summary);
     bashEnabled_ = StrappySessionBashEnabledFromSummary(summary);
     streamingEnabled_ = StrappySessionStreamingEnabledFromSummary(summary);
   }
@@ -515,6 +534,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   NSNumber *sessionId;
   NSNumber *httpStatus;
   NSNumber *webSearchEnabled;
+  NSNumber *paidWebSearchEnabled;
   NSNumber *bashEnabled;
   NSNumber *streamingEnabled;
   NSString *name;
@@ -534,6 +554,8 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   httpStatus = [NSNumber numberWithLong:record->http_status];
   webSearchEnabled =
     [NSNumber numberWithBool:(record->web_search_enabled ? YES : NO)];
+  paidWebSearchEnabled =
+    [NSNumber numberWithBool:(record->paid_web_search_enabled ? YES : NO)];
   bashEnabled = [NSNumber numberWithBool:(record->bash_enabled ? YES : NO)];
   streamingEnabled =
     [NSNumber numberWithBool:(record->streaming_enabled ? YES : NO)];
@@ -558,6 +580,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
     assistantSetIdentifier, @"assistant_set_id",
     httpStatus, @"http_status",
     webSearchEnabled, @"web_search_enabled",
+    paidWebSearchEnabled, @"paid_web_search_enabled",
     bashEnabled, @"bash_enabled",
     streamingEnabled, @"streaming_enabled",
     createdAt, @"created_at",
@@ -920,7 +943,9 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   }
   prompt = strappy_prompt_build([resourcePath fileSystemRepresentation],
                                 &profile,
-                                webSearchEnabled ? 1 : 0,
+                                webSearchEnabled ?
+                                  STRAPPY_WEB_TOOL_MODE_CUSTOM :
+                                  STRAPPY_WEB_TOOL_MODE_DISABLED,
                                 &strappyError);
   strappy_assistant_set_profile_destroy(&profile);
   if (prompt == NULL) {
@@ -1206,7 +1231,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   for (index = 0U; index < list.count; index++) {
     NSDictionary *set;
     strappy_assistant_set_profile profile;
-    int webSearchEnabled;
+    int webToolMode;
 
     strappy_assistant_set_profile_init(&profile);
     strappyError = NULL;
@@ -1228,14 +1253,16 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
                          message];
       return nil;
     }
-    for (webSearchEnabled = 0; webSearchEnabled <= 1; webSearchEnabled++) {
+    for (webToolMode = (int)STRAPPY_WEB_TOOL_MODE_DISABLED;
+         webToolMode <= (int)STRAPPY_WEB_TOOL_MODE_PAID;
+         webToolMode++) {
       char *prompt;
 
       strappyError = NULL;
       prompt = strappy_prompt_build(
         [resourcePath fileSystemRepresentation],
         &profile,
-        webSearchEnabled,
+        (strappy_web_tool_mode)webToolMode,
         &strappyError);
       if ((prompt == NULL) || (prompt[0] == '\0')) {
         NSString *message;
@@ -2020,6 +2047,16 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   return enabled;
 }
 
+- (BOOL)paidWebSearchEnabled
+{
+  BOOL enabled;
+
+  @synchronized(self) {
+    enabled = paidWebSearchEnabled_;
+  }
+  return enabled;
+}
+
 - (BOOL)bashEnabled
 {
   BOOL enabled;
@@ -2220,6 +2257,80 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
                 userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
                   notificationSession, @"session",
                   StrappySessionChangeKindWebSearch,
+                  StrappySessionChangeKindKey,
+                  nil]];
+  [notificationSession release];
+  return YES;
+}
+
+- (BOOL)setPaidWebSearchEnabled:(BOOL)enabled error:(NSError **)error
+{
+  NSString *databasePath;
+  NSNumber *paidWebSearchEnabled;
+  NSDictionary *notificationSession;
+  char *strappyError;
+  long long sessionId;
+
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  if (sessionId <= 0) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:
+          NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+  strappyError = NULL;
+  if (!strappy_session_update_paid_web_search_enabled(
+        [databasePath UTF8String],
+        sessionId,
+        enabled ? 1 : 0,
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return NO;
+  }
+
+  paidWebSearchEnabled = [NSNumber numberWithBool:(enabled ? YES : NO)];
+  notificationSession = nil;
+  @synchronized(self) {
+    NSMutableDictionary *summary;
+
+    paidWebSearchEnabled_ = enabled ? YES : NO;
+    if (cachedSummary_ != nil) {
+      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
+      [summary setObject:paidWebSearchEnabled
+                  forKey:@"paid_web_search_enabled"];
+      [cachedSummary_ release];
+      cachedSummary_ = summary;
+      notificationSession = [cachedSummary_ retain];
+    } else {
+      notificationSession =
+        [[NSDictionary alloc] initWithObjectsAndKeys:
+          sessionIdentifier_, @"id",
+          paidWebSearchEnabled, @"paid_web_search_enabled",
+          nil];
+    }
+  }
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionDidUpdateNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  notificationSession, @"session",
+                  StrappySessionChangeKindPaidWebSearch,
                   StrappySessionChangeKindKey,
                   nil]];
   [notificationSession release];

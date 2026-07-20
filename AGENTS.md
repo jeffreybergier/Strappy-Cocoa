@@ -18,11 +18,11 @@ Linux-only shared-core harnesses live under `source/linux`. They are fast
 developer smoke tests for portable C code and do not replace the required
 Altivec iOS/macOS clean builds. The current harness targets are
 `database_query_harness`, `bash_harness`, `webview_harness`,
-`responses_harness`, and `prompt_generator_harness`, run through
+`responses_harness`, `prompt_generator_harness`, and `web_harness`, run through
 `make -C source/linux clean test`.
 Use `make -C source/linux prompts` to write all assistant-set prompts with web
-search enabled and disabled under `source/linux/build-linux/system-prompts`, or
-`make -C source/linux review-prompts` to print all six variants.
+search disabled, custom, and paid under `source/linux/build-linux/system-prompts`,
+or `make -C source/linux review-prompts` to print all nine variants.
 `database_query_harness` also covers
 OpenRouter model catalog persistence, catalog search, default model selection,
 allowed-model whitelisting, per-session model selection, and stale
@@ -94,7 +94,13 @@ House style for Strappy source:
     preflight tools, answer-quality checks, and availability. Keep tool schemas
     in `GuidanceTools.json` in sync with the tool-name constants in
     `strappy_tools.h` and the executor in `strappy_tools.c`; do not duplicate
-    prompt or tool guidance in Objective-C UI code. Strict assistant workflow
+    prompt or tool guidance in Objective-C UI code. At the model-facing
+    boundary, `strappy_tools.c` owns tool JSON
+    argument validation, dispatch, and output serialization. Specialized C
+    modules accept typed values and return typed results rather than parsing or
+    emitting tool JSON. `strappy_web.c` owns custom public-web transport and
+    DuckDuckGo behavior; `strappy_client.c` remains specific to OpenRouter.
+    Strict assistant workflow
     rules, timestamp guidance, memory guidance, and database-specific
     instructions belong in these resources or the shared quality-policy table,
     not in scattered C or Objective-C strings.
@@ -144,8 +150,8 @@ House style for Strappy source:
     Render that informational report in the visible timeline
     immediately before its assistant answer when present; an empty response
     leaves the failed report as the final timeline item. Track tool activity
-    across the whole logical request. When `openrouter:web_search` or
-    `openrouter:web_fetch`
+    across the whole logical request. When `web_search`, `web_fetch`,
+    `openrouter:web_search`, or `openrouter:web_fetch`
     activity has occurred, scan the answer for a non-image inline Markdown HTTP
     or HTTPS link with a non-empty title and URL. Database inventory is an
     application-seeded preflight tool output rather than a quality rule. The
