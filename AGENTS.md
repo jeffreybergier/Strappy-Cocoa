@@ -18,11 +18,12 @@ Linux-only shared-core harnesses live under `source/linux`. They are fast
 developer smoke tests for portable C code and do not replace the required
 Altivec iOS/macOS clean builds. The current harness targets are
 `database_query_harness`, `bash_harness`, `webview_harness`,
-`responses_harness`, `prompt_generator_harness`, and `web_harness`, run through
+`responses_harness` and `prompt_generator_harness`, run through
 `make -C source/linux clean test`.
 Use `make -C source/linux prompts` to write all assistant-set prompts with web
-search disabled, custom, and paid under `source/linux/build-linux/system-prompts`,
-or `make -C source/linux review-prompts` to print all nine variants.
+search set to none, native, Exa, and Parallel under
+`source/linux/build-linux/system-prompts`, or use
+`make -C source/linux review-prompts` to print all twelve variants.
 `database_query_harness` also covers
 OpenRouter model catalog persistence, catalog search, default model selection,
 allowed-model whitelisting, per-session model selection, and stale
@@ -98,8 +99,9 @@ House style for Strappy source:
     boundary, `strappy_tools.c` owns tool JSON
     argument validation, dispatch, and output serialization. Specialized C
     modules accept typed values and return typed results rather than parsing or
-    emitting tool JSON. `strappy_web.c` owns custom public-web transport and
-    DuckDuckGo behavior; `strappy_client.c` remains specific to OpenRouter.
+    emitting tool JSON. Web search and fetch use OpenRouter server tools with a
+    single session-selected provider; `strappy_client.c` remains specific to
+    OpenRouter.
     Strict assistant workflow
     rules, timestamp guidance, memory guidance, and database-specific
     instructions belong in these resources or the shared quality-policy table,
@@ -150,8 +152,8 @@ House style for Strappy source:
     Render that informational report in the visible timeline
     immediately before its assistant answer when present; an empty response
     leaves the failed report as the final timeline item. Track tool activity
-    across the whole logical request. When `web_search`, `web_fetch`,
-    `openrouter:web_search`, or `openrouter:web_fetch`
+    across the whole logical request. When `openrouter:web_search` or
+    `openrouter:web_fetch`
     activity has occurred, scan the answer for a non-image inline Markdown HTTP
     or HTTPS link with a non-empty title and URL. Database inventory is an
     application-seeded preflight tool output rather than a quality rule. The

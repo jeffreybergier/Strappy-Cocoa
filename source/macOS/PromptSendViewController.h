@@ -13,14 +13,10 @@
     (PromptSendViewController *)controller;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
         setSelectedModelIdentifier:(NSString *)modelIdentifier;
-- (BOOL)webSearchEnabledForPromptSendViewController:
-    (PromptSendViewController *)controller;
-- (BOOL)paidWebSearchEnabledForPromptSendViewController:
+- (NSString *)webProviderForPromptSendViewController:
     (PromptSendViewController *)controller;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
-             setWebSearchEnabled:(BOOL)enabled;
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-         setPaidWebSearchEnabled:(BOOL)enabled;
+                  setWebProvider:(NSString *)webProvider;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
               setStreamingEnabled:(BOOL)enabled;
 - (void)promptSendViewControllerDidCancelPrompt:
@@ -37,16 +33,15 @@
   NSTextView   *textView_;
   NSSegmentedControl *actionSegmented_;
   NSMenu       *optionsMenu_;
-  NSMenuItem    *webSearchMenuItem_;
-  NSMenuItem    *paidWebSearchMenuItem_;
+  NSMenuItem    *webProviderMenuItem_;
+  NSMenu        *webProviderMenu_;
   NSMenuItem    *streamingMenuItem_;
   id<PromptSendViewControllerDelegate> delegate_;
   BOOL          enabled_;
   BOOL          expanded_;
   BOOL          sending_;
   BOOL          cancellationRequested_;
-  BOOL          webSearchEnabled_;
-  BOOL          paidWebSearchEnabled_;
+  NSString     *webProvider_;
   BOOL          streamingEnabled_;
 }
 
@@ -56,8 +51,7 @@
 - (void)setEnabled:(BOOL)enabled;
 - (void)setSending:(BOOL)sending;
 - (void)setCancellationRequested:(BOOL)requested;
-- (void)setWebSearchEnabled:(BOOL)enabled;
-- (void)setPaidWebSearchEnabled:(BOOL)enabled;
+- (void)setWebProvider:(NSString *)webProvider;
 - (void)setStreamingEnabled:(BOOL)enabled;
 - (void)reloadOptionsMenu;
 - (BOOL)canSendCurrentPrompt;

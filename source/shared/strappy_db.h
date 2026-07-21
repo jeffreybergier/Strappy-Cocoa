@@ -1,6 +1,8 @@
 #ifndef STRAPPY_DB_H
 #define STRAPPY_DB_H
 
+#include "strappy_config.h"
+
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -18,8 +20,7 @@ typedef struct strappy_session_record {
   char *created_at;
   char *last_activity_at;
   long long last_activity_at_ms;
-  int web_search_enabled;
-  int paid_web_search_enabled;
+  strappy_web_provider web_provider;
   int bash_enabled;
   int streaming_enabled;
   long http_status;
@@ -398,14 +399,10 @@ int strappy_db_update_session_streaming_enabled(const char *db_path,
                                                 long long session_id,
                                                 int streaming_enabled,
                                                 char **error_out);
-int strappy_db_update_session_web_search_enabled(const char *db_path,
-                                                 long long session_id,
-                                                 int web_search_enabled,
-                                                 char **error_out);
-int strappy_db_update_session_paid_web_search_enabled(
+int strappy_db_update_session_web_provider(
   const char *db_path,
   long long session_id,
-  int paid_web_search_enabled,
+  strappy_web_provider web_provider,
   char **error_out);
 int strappy_db_get_session_bash_enabled(const char *db_path,
                                         long long session_id,

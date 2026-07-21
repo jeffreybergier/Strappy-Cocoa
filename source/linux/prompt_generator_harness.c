@@ -291,7 +291,7 @@ static char *harness_heading_marker(size_t level, const char *heading)
 
 static int harness_verify_prompt(
   const strappy_assistant_set_profile *profile,
-  strappy_web_tool_mode web_tool_mode,
+  strappy_web_provider web_provider,
   const char *prompt,
   cJSON *system_prompt,
   const char *tools_json)
@@ -323,10 +323,8 @@ static int harness_verify_prompt(
   cJSON *tool;
   size_t index;
   size_t expected_quality_check_count;
-  int has_paid_web_search;
-  int has_paid_web_fetch;
-  int has_custom_web_search;
-  int has_custom_web_fetch;
+  int has_web_search;
+  int has_web_fetch;
   int result;
 
   sections = harness_json_object(system_prompt, "sections");
@@ -433,10 +431,8 @@ static int harness_verify_prompt(
       "Generated prompt tools do not match the Responses tool count.");
     goto cleanup;
   }
-  has_paid_web_search = 0;
-  has_paid_web_fetch = 0;
-  has_custom_web_search = 0;
-  has_custom_web_fetch = 0;
+  has_web_search = 0;
+  has_web_fetch = 0;
   for (tool = tools->child; tool != NULL; tool = tool->next) {
     const char *name;
 
@@ -451,44 +447,50 @@ static int harness_verify_prompt(
       goto cleanup;
     }
     if (strcmp(name, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) {
-      has_paid_web_search = 1;
+      cJSON *parameters;
+      cJSON *engine;
+
+      parameters = cJSON_GetObjectItemCaseSensitive(tool, "parameters");
+      engine = cJSON_IsObject(parameters) ?
+        cJSON_GetObjectItemCaseSensitive(parameters, "engine") : NULL;
+      if (!cJSON_IsString(engine) || (engine->valuestring == NULL) ||
+          (strcmp(engine->valuestring,
+                  strappy_web_provider_name(web_provider)) != 0)) {
+        cJSON_Delete(tools);
+        (void)harness_fail("Web search engine does not match its provider.");
+        goto cleanup;
+      }
+      has_web_search = 1;
     } else if (strcmp(name, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0) {
-      has_paid_web_fetch = 1;
-    } else if (strcmp(name, STRAPPY_TOOL_WEB_SEARCH) == 0) {
-      has_custom_web_search = 1;
-    } else if (strcmp(name, STRAPPY_TOOL_WEB_FETCH) == 0) {
-      has_custom_web_fetch = 1;
+      cJSON *parameters;
+      cJSON *engine;
+
+      parameters = cJSON_GetObjectItemCaseSensitive(tool, "parameters");
+      engine = cJSON_IsObject(parameters) ?
+        cJSON_GetObjectItemCaseSensitive(parameters, "engine") : NULL;
+      if (!cJSON_IsString(engine) || (engine->valuestring == NULL) ||
+          (strcmp(engine->valuestring,
+                  strappy_web_provider_name(web_provider)) != 0)) {
+        cJSON_Delete(tools);
+        (void)harness_fail("Web fetch engine does not match its provider.");
+        goto cleanup;
+      }
+      has_web_fetch = 1;
     }
   }
   cJSON_Delete(tools);
-  if (web_tool_mode == STRAPPY_WEB_TOOL_MODE_CUSTOM) {
-    if (!has_custom_web_search || !has_custom_web_fetch ||
-        has_paid_web_search || has_paid_web_fetch) {
-      (void)harness_fail(
-        "Custom web mode did not expose only Strappy web tools.");
+  if (strappy_web_provider_is_enabled(web_provider)) {
+    if (!has_web_search || !has_web_fetch) {
+      (void)harness_fail("Web provider did not expose both server tools.");
       goto cleanup;
     }
-  } else if (web_tool_mode == STRAPPY_WEB_TOOL_MODE_PAID) {
-    if (!has_paid_web_search || !has_paid_web_fetch ||
-        has_custom_web_search || has_custom_web_fetch) {
-      (void)harness_fail(
-        "Paid web mode did not expose only OpenRouter web tools.");
-      goto cleanup;
-    }
-  } else if (has_paid_web_search || has_paid_web_fetch ||
-             has_custom_web_search || has_custom_web_fetch ||
+  } else if (has_web_search || has_web_fetch ||
              harness_prompt_has_named_bullet(tools_content_start,
                                              tools_content_end,
                                              STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) ||
              harness_prompt_has_named_bullet(tools_content_start,
                                              tools_content_end,
-                                             STRAPPY_TOOL_OPENROUTER_WEB_FETCH) ||
-             harness_prompt_has_named_bullet(tools_content_start,
-                                             tools_content_end,
-                                             STRAPPY_TOOL_WEB_SEARCH) ||
-             harness_prompt_has_named_bullet(tools_content_start,
-                                             tools_content_end,
-                                             STRAPPY_TOOL_WEB_FETCH)) {
+                                             STRAPPY_TOOL_OPENROUTER_WEB_FETCH)) {
     (void)harness_fail(
       "Web-disabled prompt unexpectedly includes server tools.");
     goto cleanup;
@@ -514,7 +516,7 @@ static int harness_verify_prompt(
       audit_content_end,
       profile->quality_check_keys[index],
       check_guidance);
-    if ((web_tool_mode == STRAPPY_WEB_TOOL_MODE_DISABLED) &&
+    if (!strappy_web_provider_is_enabled(web_provider) &&
         (definition->evaluation_kind ==
          STRAPPY_QUALITY_CHECK_WEB_REFERENCE)) {
       if (has_quality_bullet) {
@@ -547,20 +549,14 @@ cleanup:
   return result;
 }
 
-static const char *harness_web_tool_mode_name(strappy_web_tool_mode mode)
+static const char *harness_web_provider_name(strappy_web_provider provider)
 {
-  if (mode == STRAPPY_WEB_TOOL_MODE_CUSTOM) {
-    return "custom";
-  }
-  if (mode == STRAPPY_WEB_TOOL_MODE_PAID) {
-    return "paid";
-  }
-  return "disabled";
+  return strappy_web_provider_name(provider);
 }
 
 static int harness_write_prompt(const char *output_dir,
                                 const char *assistant_set_id,
-                                strappy_web_tool_mode web_tool_mode,
+                                strappy_web_provider web_provider,
                                 const char *prompt)
 {
   size_t length;
@@ -579,7 +575,7 @@ static int harness_write_prompt(const char *output_dir,
                  "%s/%s-web-%s.txt",
                  output_dir,
                  assistant_set_id,
-                 harness_web_tool_mode_name(web_tool_mode));
+                 harness_web_provider_name(web_provider));
   file = fopen(path, "wb");
   if (file == NULL) {
     free(path);
@@ -647,7 +643,7 @@ int main(int argc, char **argv)
        set_index++) {
     strappy_assistant_set_profile profile;
     char *without_web_prompt;
-    int web_tool_mode_value;
+    int web_provider_value;
 
     strappy_assistant_set_profile_init(&profile);
     error = NULL;
@@ -665,36 +661,36 @@ int main(int argc, char **argv)
       return 1;
     }
     without_web_prompt = NULL;
-    for (web_tool_mode_value = (int)STRAPPY_WEB_TOOL_MODE_DISABLED;
-         web_tool_mode_value <= (int)STRAPPY_WEB_TOOL_MODE_PAID;
-         web_tool_mode_value++) {
+    for (web_provider_value = (int)STRAPPY_WEB_PROVIDER_NONE;
+         web_provider_value <= (int)STRAPPY_WEB_PROVIDER_PARALLEL;
+         web_provider_value++) {
       char *prompt;
       char *tools_json;
-      strappy_web_tool_mode web_tool_mode;
+      strappy_web_provider web_provider;
 
-      web_tool_mode = (strappy_web_tool_mode)web_tool_mode_value;
+      web_provider = (strappy_web_provider)web_provider_value;
       error = NULL;
       prompt = strappy_prompt_build(resource_dir,
                                     &profile,
-                                    web_tool_mode,
+                                    web_provider,
                                     &error);
       tools_json = (prompt != NULL) ?
         strappy_tools_responses_request_json_filtered(
           resource_dir,
           (const char * const *)profile.tool_names,
           profile.tool_name_count,
-          web_tool_mode,
+          web_provider,
           &error) : NULL;
       if ((prompt == NULL) || (tools_json == NULL) ||
           !harness_verify_prompt(&profile,
-                                 web_tool_mode,
+                                 web_provider,
                                  prompt,
                                  system_prompt,
                                  tools_json)) {
         fprintf(stderr,
                 "Could not generate %s with web search %s: %s\n",
                 profile.identifier,
-                harness_web_tool_mode_name(web_tool_mode),
+                harness_web_provider_name(web_provider),
                 (error != NULL) ? error : "prompt validation failed");
         free(tools_json);
         free(prompt);
@@ -706,7 +702,7 @@ int main(int argc, char **argv)
       }
       free(tools_json);
       free(error);
-      if (web_tool_mode == STRAPPY_WEB_TOOL_MODE_DISABLED) {
+      if (web_provider == STRAPPY_WEB_PROVIDER_NONE) {
         without_web_prompt = (char *)malloc(strlen(prompt) + 1U);
         if (without_web_prompt != NULL) {
           memcpy(without_web_prompt, prompt, strlen(prompt) + 1U);
@@ -731,7 +727,7 @@ int main(int argc, char **argv)
       if (output_dir != NULL) {
         if (!harness_write_prompt(output_dir,
                                   profile.identifier,
-                                  web_tool_mode,
+                                  web_provider,
                                   prompt)) {
           free(prompt);
           free(without_web_prompt);
@@ -742,7 +738,7 @@ int main(int argc, char **argv)
       } else if (!check_only) {
         printf("\n===== %s | web search %s =====\n\n%s",
                profile.identifier,
-               harness_web_tool_mode_name(web_tool_mode),
+               harness_web_provider_name(web_provider),
                prompt);
       }
       free(prompt);
@@ -752,7 +748,7 @@ int main(int argc, char **argv)
   }
   cJSON_Delete(system_prompt);
   if (check_only) {
-    printf("Prompt generator harness passed (9 variants).\n");
+    printf("Prompt generator harness passed (12 variants).\n");
   }
   return 0;
 }

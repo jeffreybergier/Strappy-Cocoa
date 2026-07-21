@@ -58,6 +58,11 @@ def parse_args() -> argparse.Namespace:
         help="Run one model instead of the full seven-model comparison.",
     )
     parser.add_argument("--prompt", default=PROMPT)
+    parser.add_argument(
+        "--web-provider",
+        choices=("none", "native", "exa", "parallel"),
+        default="none",
+    )
     return parser.parse_args()
 
 
@@ -475,6 +480,7 @@ def run_model(
     env_file: Path,
     resource_dir: Path,
     prompt: str,
+    web_provider: str = "none",
 ) -> dict[str, object]:
     model_dir = run_dir / slug
     model_dir.mkdir()
@@ -497,6 +503,8 @@ def run_model(
         str(answer_file),
         "--prompt",
         prompt,
+        "--web-provider",
+        web_provider,
     ]
     for database in databases:
         command.extend(["--database", str(database)])
@@ -614,6 +622,7 @@ def main() -> int:
     metadata = {
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "prompt": args.prompt,
+        "web_provider": args.web_provider,
         "models": [model for model, _ in selected],
         "execution_mode": "parallel",
         "parallel_model_count": len(selected),
@@ -665,6 +674,7 @@ def main() -> int:
                 env_file,
                 resource_dir,
                 args.prompt,
+                args.web_provider,
             ): (model, slug)
             for model, slug in selected
         }

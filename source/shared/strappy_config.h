@@ -12,6 +12,13 @@ extern "C" {
   "https://openrouter.ai/api/v1/responses"
 #define STRAPPY_CONFIG_DEFAULT_API_MODEL "z-ai/glm-5.2"
 
+typedef enum strappy_web_provider {
+  STRAPPY_WEB_PROVIDER_NONE = 0,
+  STRAPPY_WEB_PROVIDER_NATIVE = 1,
+  STRAPPY_WEB_PROVIDER_EXA = 2,
+  STRAPPY_WEB_PROVIDER_PARALLEL = 3
+} strappy_web_provider;
+
 typedef struct strappy_config {
   char *api_endpoint;
   char *api_token;
@@ -19,9 +26,13 @@ typedef struct strappy_config {
   char *guidance_resource_dir;
   const char * const *tool_allowlist;
   size_t tool_allowlist_count;
-  int web_search_enabled;
-  int paid_web_search_enabled;
+  strappy_web_provider web_provider;
 } strappy_config;
+
+const char *strappy_web_provider_name(strappy_web_provider provider);
+int strappy_web_provider_parse(const char *name,
+                               strappy_web_provider *provider_out);
+int strappy_web_provider_is_enabled(strappy_web_provider provider);
 
 void strappy_config_init(strappy_config *config);
 void strappy_config_destroy(strappy_config *config);

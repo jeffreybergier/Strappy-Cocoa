@@ -27,15 +27,14 @@ BASH_HARNESS := $(BUILD_DIR)/bash_harness
 WEBVIEW_HARNESS := $(BUILD_DIR)/webview_harness
 RESPONSES_HARNESS := $(BUILD_DIR)/responses_harness
 PROMPT_GENERATOR_HARNESS := $(BUILD_DIR)/prompt_generator_harness
-WEB_HARNESS := $(BUILD_DIR)/web_harness
 PROMPT_OUTPUT_DIR ?= $(BUILD_DIR)/system-prompts
 
 DATABASE_QUERY_HARNESS_SOURCES = \
 	database_query_harness.c \
 	$(SHARED_DIR)/strappy_cocoa.c \
 	$(SHARED_DIR)/strappy_client.c \
+	$(SHARED_DIR)/strappy_config.c \
 	$(SHARED_DIR)/strappy_tools.c \
-	$(SHARED_DIR)/strappy_web.c \
 	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
 	$(SHARED_DIR)/strappy_file_mutation.c \
@@ -51,6 +50,7 @@ BASH_HARNESS_SOURCES = \
 	bash_harness.c \
 	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_cocoa.c \
+	$(SHARED_DIR)/strappy_config.c \
 	$(SHARED_DIR)/strappy_db.c \
 	$(SHARED_DIR)/strappy_core.c \
 	$(SHARED_DIR)/strappy_assistant_sets.c \
@@ -76,7 +76,6 @@ RESPONSES_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_responses.c \
 	$(SHARED_DIR)/strappy_session.c \
 	$(SHARED_DIR)/strappy_tools.c \
-	$(SHARED_DIR)/strappy_web.c \
 	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
 	$(SHARED_DIR)/strappy_file_mutation.c \
@@ -91,7 +90,7 @@ PROMPT_GENERATOR_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_quality_policy.c \
 	$(SHARED_DIR)/strappy_tools.c \
 	$(SHARED_DIR)/strappy_client.c \
-	$(SHARED_DIR)/strappy_web.c \
+	$(SHARED_DIR)/strappy_config.c \
 	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
 	$(SHARED_DIR)/strappy_file_mutation.c \
@@ -101,34 +100,16 @@ PROMPT_GENERATOR_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_cocoa.c \
 	$(SHARED_DIR)/strappy_core.c \
 	$(SHARED_DIR)/strappy_db.c \
-	$(CJSON_DIR)/cJSON.c
-
-WEB_HARNESS_SOURCES = \
-	web_harness.c \
-	$(SHARED_DIR)/strappy_cocoa.c \
-	$(SHARED_DIR)/strappy_client.c \
-	$(SHARED_DIR)/strappy_tools.c \
-	$(SHARED_DIR)/strappy_web.c \
-	$(SHARED_DIR)/strappy_bash.c \
-	$(SHARED_DIR)/strappy_file_read.c \
-	$(SHARED_DIR)/strappy_file_mutation.c \
-	$(SHARED_DIR)/strappy_file_write.c \
-	$(SHARED_DIR)/strappy_file_edit.c \
-	$(SHARED_DIR)/strappy_db.c \
-	$(SHARED_DIR)/strappy_file_scanner.c \
-	$(SHARED_DIR)/strappy_core.c \
-	$(SHARED_DIR)/strappy_assistant_sets.c \
 	$(CJSON_DIR)/cJSON.c
 
 .PHONY: test prompts review-prompts clean
 
-test: $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS) $(WEB_HARNESS)
+test: $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS)
 	./$(DATABASE_QUERY_HARNESS)
 	./$(BASH_HARNESS)
 	./$(WEBVIEW_HARNESS)
 	./$(RESPONSES_HARNESS)
 	./$(PROMPT_GENERATOR_HARNESS) $(SHARED_DIR)/Resources --check
-	./$(WEB_HARNESS)
 
 prompts: $(PROMPT_GENERATOR_HARNESS)
 	mkdir -p $(PROMPT_OUTPUT_DIR)
@@ -157,9 +138,6 @@ $(RESPONSES_HARNESS): $(RESPONSES_HARNESS_SOURCES) $(FONTAWESOME_GENERATED) | $(
 
 $(PROMPT_GENERATOR_HARNESS): $(PROMPT_GENERATOR_HARNESS_SOURCES) | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(PROMPT_GENERATOR_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS) -lcurl
-
-$(WEB_HARNESS): $(WEB_HARNESS_SOURCES) | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(WEB_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS) -lcurl
 
 clean:
 	rm -rf $(BUILD_DIR) database_query_harness webview_harness responses_harness

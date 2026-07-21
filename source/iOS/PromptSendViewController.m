@@ -1,6 +1,7 @@
 #import "PromptSendViewController.h"
 
 #import "AIFontAwesome.h"
+#import "StrappySession.h"
 
 #import <QuartzCore/QuartzCore.h>
 
@@ -15,6 +16,30 @@ static const CGFloat kStrappySendFontSize = 16.0f;
 static const CGFloat kStrappySendFieldRadius = 8.0f;
 static NSString * const kStrappyCodingAssistantIdentifier =
   @"coding_assistant";
+
+static NSArray *StrappyPromptWebProviders(void)
+{
+  return [NSArray arrayWithObjects:
+    StrappyWebProviderNone,
+    StrappyWebProviderNative,
+    StrappyWebProviderExa,
+    StrappyWebProviderParallel,
+    nil];
+}
+
+static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
+{
+  if ([webProvider isEqualToString:StrappyWebProviderNative]) {
+    return NSLocalizedString(@"Native", nil);
+  }
+  if ([webProvider isEqualToString:StrappyWebProviderExa]) {
+    return @"Exa";
+  }
+  if ([webProvider isEqualToString:StrappyWebProviderParallel]) {
+    return @"Parallel";
+  }
+  return NSLocalizedString(@"None", nil);
+}
 
 @interface StrappyPromptFieldInnerShadowView : UIView
 @end
@@ -289,6 +314,7 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
 enum {
   kStrappyPromptOptionsSectionModels = 0,
   kStrappyPromptOptionsSectionAssistantSet,
+  kStrappyPromptOptionsSectionWebSearch,
   kStrappyPromptOptionsSectionAvailableTools,
   kStrappyPromptOptionsSectionCount
 };
@@ -309,8 +335,7 @@ enum {
 @property (nonatomic, assign) BOOL expanded;
 @property (nonatomic, assign) BOOL sending;
 @property (nonatomic, assign) BOOL cancellationRequested;
-@property (nonatomic, assign) BOOL webSearchEnabled;
-@property (nonatomic, assign) BOOL paidWebSearchEnabled;
+@property (nonatomic, copy) NSString *webProvider;
 @property (nonatomic, assign) BOOL bashEnabled;
 - (void)buildSubviews;
 - (UIImage *)iconImageForIcon:(AIFontAwesomeIcon)icon
@@ -331,8 +356,7 @@ enum {
     (NSString *)assistantSetIdentifier;
 - (NSString *)currentSelectedModelIdentifier;
 - (BOOL)setSelectedModelIdentifierFromOptions:(NSString *)modelIdentifier;
-- (BOOL)setWebSearchEnabledFromOptions:(BOOL)enabled;
-- (BOOL)setPaidWebSearchEnabledFromOptions:(BOOL)enabled;
+- (BOOL)setWebProviderFromOptions:(NSString *)webProvider;
 - (BOOL)setBashEnabledFromOptions:(BOOL)enabled;
 - (UIViewController *)containingViewController;
 - (void)dismissOptionsControllerAnimated:(BOOL)animated;
@@ -347,10 +371,7 @@ enum {
 @property (nonatomic, copy) NSString *selectedAssistantSetIdentifier;
 @property (nonatomic, copy) NSArray *models;
 @property (nonatomic, copy) NSString *selectedModelIdentifier;
-@property (nonatomic, strong) UISwitch *webSearchSwitch;
-@property (nonatomic, assign) BOOL webSearchEnabled;
-@property (nonatomic, strong) UISwitch *paidWebSearchSwitch;
-@property (nonatomic, assign) BOOL paidWebSearchEnabled;
+@property (nonatomic, copy) NSString *webProvider;
 @property (nonatomic, strong) UISwitch *bashSwitch;
 @property (nonatomic, assign) BOOL bashEnabled;
 - (instancetype)initWithPromptSendViewController:
@@ -374,23 +395,9 @@ enum {
 
 - (void)viewDidLoad
 {
-  UISwitch *webSearchSwitch;
-  UISwitch *paidWebSearchSwitch;
   UISwitch *bashSwitch;
 
   [super viewDidLoad];
-
-  webSearchSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
-  [webSearchSwitch addTarget:self
-                      action:@selector(webSearchSwitchChanged:)
-            forControlEvents:UIControlEventValueChanged];
-  [self setWebSearchSwitch:webSearchSwitch];
-
-  paidWebSearchSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
-  [paidWebSearchSwitch addTarget:self
-                          action:@selector(paidWebSearchSwitchChanged:)
-                forControlEvents:UIControlEventValueChanged];
-  [self setPaidWebSearchSwitch:paidWebSearchSwitch];
 
   bashSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
   [bashSwitch addTarget:self
@@ -427,14 +434,10 @@ enum {
     (promptSendViewController != nil)
       ? [promptSendViewController currentSelectedModelIdentifier]
       : @""];
-  [self setWebSearchEnabled:
+  [self setWebProvider:
     (promptSendViewController != nil)
-      ? [promptSendViewController webSearchEnabled]
-      : YES];
-  [self setPaidWebSearchEnabled:
-    (promptSendViewController != nil)
-      ? [promptSendViewController paidWebSearchEnabled]
-      : NO];
+      ? [promptSendViewController webProvider]
+      : StrappyWebProviderNone];
   [self setBashEnabled:
     (promptSendViewController != nil)
       ? [promptSendViewController bashEnabled]
@@ -444,9 +447,6 @@ enum {
 - (void)reloadOptionsFromPrompt
 {
   [self reloadOptionsSnapshot];
-  [[self webSearchSwitch] setOn:[self webSearchEnabled] animated:NO];
-  [[self paidWebSearchSwitch] setOn:[self paidWebSearchEnabled] animated:NO];
-  [[self paidWebSearchSwitch] setEnabled:[self webSearchEnabled]];
   [[self bashSwitch] setOn:([self bashAvailable] && [self bashEnabled])
                       animated:NO];
   [[self bashSwitch] setEnabled:[self bashAvailable]];
@@ -463,38 +463,6 @@ enum {
 {
   (void)sender;
   [[self promptSendViewController] dismissOptionsControllerAnimated:YES];
-}
-
-- (void)webSearchSwitchChanged:(UISwitch *)sender
-{
-  PromptSendViewController *promptSendViewController;
-
-  promptSendViewController = [self promptSendViewController];
-  if (promptSendViewController != nil) {
-    (void)[promptSendViewController setWebSearchEnabledFromOptions:
-      [sender isOn]];
-    [self setWebSearchEnabled:[promptSendViewController webSearchEnabled]];
-  }
-  [sender setOn:[self webSearchEnabled] animated:YES];
-  [[self paidWebSearchSwitch] setEnabled:[self webSearchEnabled]];
-  [[self tableView] reloadSections:
-    [NSIndexSet indexSetWithIndex:kStrappyPromptOptionsSectionAvailableTools]
-                withRowAnimation:UITableViewRowAnimationNone];
-}
-
-- (void)paidWebSearchSwitchChanged:(UISwitch *)sender
-{
-  PromptSendViewController *promptSendViewController;
-
-  promptSendViewController = [self promptSendViewController];
-  if ([self webSearchEnabled] && (promptSendViewController != nil)) {
-    (void)[promptSendViewController setPaidWebSearchEnabledFromOptions:
-      [sender isOn]];
-    [self setPaidWebSearchEnabled:
-      [promptSendViewController paidWebSearchEnabled]];
-  }
-  [sender setOn:[self paidWebSearchEnabled] animated:YES];
-  [sender setEnabled:[self webSearchEnabled]];
 }
 
 - (void)bashSwitchChanged:(UISwitch *)sender
@@ -528,8 +496,11 @@ enum {
   if (section == kStrappyPromptOptionsSectionModels) {
     return (NSInteger)[[self models] count];
   }
+  if (section == kStrappyPromptOptionsSectionWebSearch) {
+    return (NSInteger)[StrappyPromptWebProviders() count];
+  }
   if (section == kStrappyPromptOptionsSectionAvailableTools) {
-    return 3;
+    return 1;
   }
   return 0;
 }
@@ -546,8 +517,28 @@ titleForHeaderInSection:(NSInteger)section
   if (section == kStrappyPromptOptionsSectionModels) {
     return ([[self models] count] > 0U) ? NSLocalizedString(@"Models", nil) : nil;
   }
+  if (section == kStrappyPromptOptionsSectionWebSearch) {
+    return NSLocalizedString(@"Web Search", nil);
+  }
   if (section == kStrappyPromptOptionsSectionAvailableTools) {
     return NSLocalizedString(@"Available Tools", nil);
+  }
+  return nil;
+}
+
+- (NSString *)tableView:(UITableView *)tableView
+titleForFooterInSection:(NSInteger)section
+{
+  (void)tableView;
+  if (section == kStrappyPromptOptionsSectionAssistantSet) {
+    return ([[self assistantSets] count] > 0U)
+      ? NSLocalizedString(
+          @"Different tools are available the model based on the selection",
+          nil)
+      : nil;
+  }
+  if (section == kStrappyPromptOptionsSectionWebSearch) {
+    return NSLocalizedString(@"Using web search incurs extra costs", nil);
   }
   return nil;
 }
@@ -561,30 +552,25 @@ titleForHeaderInSection:(NSInteger)section
     NSDictionary *assistantSet;
     NSString *identifier;
     NSString *name;
-    NSString *detail;
     NSNumber *available;
     BOOL enabled;
 
     cell = [tableView dequeueReusableCellWithIdentifier:@"AssistantSetCell"];
     if (cell == nil) {
-      cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
+      cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
                                     reuseIdentifier:@"AssistantSetCell"];
       [[cell textLabel] setNumberOfLines:1];
-      [[cell detailTextLabel] setNumberOfLines:1];
     }
     assistantSet = [[self assistantSets]
       objectAtIndex:(NSUInteger)[indexPath row]];
     identifier = StrappyMessageModelStringForRow(assistantSet, @"id");
     name = StrappyMessageModelStringForRow(assistantSet, @"name");
-    detail = StrappyMessageModelStringForRow(assistantSet, @"detail");
     available = [assistantSet objectForKey:@"available"];
     enabled = [available isKindOfClass:[NSNumber class]] &&
       [available boolValue];
     [[cell textLabel] setText:([name length] > 0U) ? name : identifier];
-    [[cell detailTextLabel] setText:detail];
     [[cell textLabel] setTextColor:enabled ?
       [UIColor blackColor] : [UIColor grayColor]];
-    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
     [cell setSelectionStyle:enabled ?
       UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone];
     [cell setAccessoryType:
@@ -594,49 +580,30 @@ titleForHeaderInSection:(NSInteger)section
     return cell;
   }
 
-  if ([indexPath section] == kStrappyPromptOptionsSectionAvailableTools) {
-    if ([indexPath row] == 0) {
-      cell = [tableView dequeueReusableCellWithIdentifier:@"WebSearchCell"];
-      if (cell == nil) {
-        cell = [[UITableViewCell alloc]
-          initWithStyle:UITableViewCellStyleSubtitle
-         reuseIdentifier:@"WebSearchCell"];
-        [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-        [[cell textLabel] setNumberOfLines:1];
-        [[cell detailTextLabel] setNumberOfLines:1];
-      }
-      [[cell textLabel] setText:NSLocalizedString(@"Enable Web Search", nil)];
-      [[cell textLabel] setTextColor:[UIColor blackColor]];
-      [[cell detailTextLabel] setText:NSLocalizedString(
-        @"Allows free web search and public page fetching", nil)];
-      [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
-      [[self webSearchSwitch] setOn:[self webSearchEnabled] animated:NO];
-      [cell setAccessoryView:[self webSearchSwitch]];
-      return cell;
-    }
+  if ([indexPath section] == kStrappyPromptOptionsSectionWebSearch) {
+    NSString *webProvider;
 
-    if ([indexPath row] == 1) {
-      cell = [tableView dequeueReusableCellWithIdentifier:@"PaidWebSearchCell"];
-      if (cell == nil) {
-        cell = [[UITableViewCell alloc]
-          initWithStyle:UITableViewCellStyleSubtitle
-         reuseIdentifier:@"PaidWebSearchCell"];
-        [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-        [[cell textLabel] setNumberOfLines:1];
-        [[cell detailTextLabel] setNumberOfLines:1];
-      }
-      [[cell textLabel] setText:NSLocalizedString(@"Use Paid Web Search", nil)];
-      [[cell textLabel] setTextColor:[self webSearchEnabled] ?
-        [UIColor blackColor] : [UIColor grayColor]];
-      [[cell detailTextLabel] setText:NSLocalizedString(
-        @"Uses OpenRouter web search and may incur charges", nil)];
-      [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
-      [[self paidWebSearchSwitch] setOn:[self paidWebSearchEnabled]
-                                    animated:NO];
-      [[self paidWebSearchSwitch] setEnabled:[self webSearchEnabled]];
-      [cell setAccessoryView:[self paidWebSearchSwitch]];
-      return cell;
+    cell = [tableView dequeueReusableCellWithIdentifier:@"WebProviderCell"];
+    if (cell == nil) {
+      cell = [[UITableViewCell alloc]
+        initWithStyle:UITableViewCellStyleDefault
+       reuseIdentifier:@"WebProviderCell"];
+      [[cell textLabel] setNumberOfLines:1];
     }
+    webProvider = [StrappyPromptWebProviders()
+      objectAtIndex:(NSUInteger)[indexPath row]];
+    [[cell textLabel] setText:StrappyPromptWebProviderTitle(webProvider)];
+    [[cell textLabel] setTextColor:[UIColor blackColor]];
+    [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
+    [cell setAccessoryView:nil];
+    [cell setAccessoryType:
+      [webProvider isEqualToString:[self webProvider]]
+        ? UITableViewCellAccessoryCheckmark
+        : UITableViewCellAccessoryNone];
+    return cell;
+  }
+
+  if ([indexPath section] == kStrappyPromptOptionsSectionAvailableTools) {
 
     cell = [tableView dequeueReusableCellWithIdentifier:@"BashCell"];
     if (cell == nil) {
@@ -661,10 +628,9 @@ titleForHeaderInSection:(NSInteger)section
 
   cell = [tableView dequeueReusableCellWithIdentifier:@"ModelCell"];
   if (cell == nil) {
-    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
                                   reuseIdentifier:@"ModelCell"];
     [[cell textLabel] setNumberOfLines:1];
-    [[cell detailTextLabel] setNumberOfLines:1];
   }
 
   {
@@ -674,9 +640,7 @@ titleForHeaderInSection:(NSInteger)section
     model = [[self models] objectAtIndex:(NSUInteger)[indexPath row]];
     identifier = StrappyMessageModelStringForRow(model, @"id");
     [[cell textLabel] setText:StrappyMessageModelDisplayNameForRow(model)];
-    [[cell detailTextLabel] setText:identifier];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
-    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
     [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
     [cell setAccessoryType:
       [identifier isEqualToString:[self selectedModelIdentifier]]
@@ -703,6 +667,11 @@ titleForHeaderInSection:(NSInteger)section
     return ([available isKindOfClass:[NSNumber class]] &&
             [available boolValue]) ? indexPath : nil;
   }
+  if ([indexPath section] == kStrappyPromptOptionsSectionWebSearch) {
+    return ((NSUInteger)[indexPath row] < [StrappyPromptWebProviders() count])
+      ? indexPath
+      : nil;
+  }
   if ([indexPath section] != kStrappyPromptOptionsSectionModels) {
     return nil;
   }
@@ -716,6 +685,25 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   NSString *modelIdentifier;
 
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
+  if ([indexPath section] == kStrappyPromptOptionsSectionWebSearch) {
+    NSString *webProvider;
+
+    if ((NSUInteger)[indexPath row] >= [StrappyPromptWebProviders() count]) {
+      return;
+    }
+    webProvider = [StrappyPromptWebProviders()
+      objectAtIndex:(NSUInteger)[indexPath row]];
+    if ([[self promptSendViewController]
+          setWebProviderFromOptions:webProvider]) {
+      [self setWebProvider:webProvider];
+      [[self tableView] reloadSections:
+        [NSIndexSet indexSetWithIndex:kStrappyPromptOptionsSectionWebSearch]
+                    withRowAnimation:UITableViewRowAnimationNone];
+    } else {
+      [self reloadOptionsFromPrompt];
+    }
+    return;
+  }
   if ([indexPath section] == kStrappyPromptOptionsSectionAssistantSet) {
     NSDictionary *assistantSet;
     NSString *assistantSetIdentifier;
@@ -768,8 +756,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     [self setAutoresizingMask:
       UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin];
     [self setControlsEnabled:YES];
-    [self setWebSearchEnabled:YES];
-    [self setPaidWebSearchEnabled:NO];
+    [self setWebProvider:StrappyWebProviderNone];
     [self setBashEnabled:NO];
     [self buildSubviews];
   }
@@ -1041,15 +1028,15 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [self updateControls];
 }
 
-- (void)setWebSearchEnabled:(BOOL)enabled
+- (void)setWebProvider:(NSString *)webProvider
 {
-  _webSearchEnabled = enabled ? YES : NO;
-  [[self optionsController] reloadOptionsFromPrompt];
-}
+  NSString *canonicalWebProvider;
 
-- (void)setPaidWebSearchEnabled:(BOOL)enabled
-{
-  _paidWebSearchEnabled = enabled ? YES : NO;
+  canonicalWebProvider = [StrappyPromptWebProviders()
+    containsObject:webProvider] ? webProvider : StrappyWebProviderNone;
+  if (_webProvider != canonicalWebProvider) {
+    _webProvider = [canonicalWebProvider copy];
+  }
   [[self optionsController] reloadOptionsFromPrompt];
 }
 
@@ -1300,37 +1287,18 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
                        setSelectedModelIdentifier:modelIdentifier];
 }
 
-- (BOOL)setWebSearchEnabledFromOptions:(BOOL)enabled
+- (BOOL)setWebProviderFromOptions:(NSString *)webProvider
 {
   BOOL changed;
 
   changed = NO;
   if ([[self delegate] respondsToSelector:
-        @selector(promptSendViewController:setWebSearchEnabled:)]) {
+        @selector(promptSendViewController:setWebProvider:)]) {
     changed = [[self delegate] promptSendViewController:self
-                                   setWebSearchEnabled:(enabled ? YES : NO)];
+                                        setWebProvider:webProvider];
   }
   if (changed) {
-    [self setWebSearchEnabled:enabled];
-  }
-  return changed;
-}
-
-- (BOOL)setPaidWebSearchEnabledFromOptions:(BOOL)enabled
-{
-  BOOL changed;
-
-  changed = NO;
-  if (![self webSearchEnabled]) {
-    return NO;
-  }
-  if ([[self delegate] respondsToSelector:
-        @selector(promptSendViewController:setPaidWebSearchEnabled:)]) {
-    changed = [[self delegate] promptSendViewController:self
-                               setPaidWebSearchEnabled:(enabled ? YES : NO)];
-  }
-  if (changed) {
-    [self setPaidWebSearchEnabled:enabled];
+    [self setWebProvider:webProvider];
   }
   return changed;
 }

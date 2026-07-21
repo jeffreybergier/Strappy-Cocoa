@@ -14,7 +14,7 @@ extern "C" {
 char *strappy_prompt_build(
   const char *resource_dir,
   const strappy_assistant_set_profile *profile,
-  strappy_web_tool_mode web_tool_mode,
+  strappy_web_provider web_provider,
   char **error_out);
 char *strappy_prompt_render_resource(const char *resource_dir,
                                      const char *resource_name,

@@ -565,21 +565,30 @@ static int harness_tools_hide_local_display_metadata(cJSON *tools)
   return 1;
 }
 
-static int harness_server_tool_has_request_fields_only(cJSON *tools,
-                                                       const char *tool_type)
+static int harness_server_tool_has_engine(cJSON *tools,
+                                          const char *tool_type,
+                                          const char *engine_name)
 {
   cJSON *tool;
 
-  if (!cJSON_IsArray(tools) || (tool_type == NULL)) {
+  if (!cJSON_IsArray(tools) || (tool_type == NULL) ||
+      (engine_name == NULL)) {
     return 0;
   }
   for (tool = tools->child; tool != NULL; tool = tool->next) {
     cJSON *type;
+    cJSON *parameters;
+    cJSON *engine;
 
     type = cJSON_GetObjectItem(tool, "type");
     if (cJSON_IsString(type) && (type->valuestring != NULL) &&
         (strcmp(type->valuestring, tool_type) == 0)) {
-      return cJSON_GetArraySize(tool) == 1;
+      parameters = cJSON_GetObjectItemCaseSensitive(tool, "parameters");
+      engine = cJSON_IsObject(parameters) ?
+        cJSON_GetObjectItemCaseSensitive(parameters, "engine") : NULL;
+      return (cJSON_GetArraySize(tool) == 2) && cJSON_IsString(engine) &&
+        (engine->valuestring != NULL) &&
+        (strcmp(engine->valuestring, engine_name) == 0);
     }
   }
   return 0;
@@ -614,7 +623,7 @@ static int harness_test_request_surfaces(void)
   error = NULL;
   tools_json = strappy_tools_responses_request_json(
     "../shared/Resources",
-    STRAPPY_WEB_TOOL_MODE_PAID,
+    STRAPPY_WEB_PROVIDER_NATIVE,
     &error);
   if (tools_json == NULL) {
     fprintf(stderr,
@@ -717,14 +726,14 @@ static int harness_test_request_surfaces(void)
     harness_tools_hide_local_display_metadata(tools) &&
     harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
     harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
-    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_SEARCH) &&
-    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_FETCH) &&
-    harness_server_tool_has_request_fields_only(
+    harness_server_tool_has_engine(
       tools,
-      STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
-    harness_server_tool_has_request_fields_only(
+      STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
+      "native") &&
+    harness_server_tool_has_engine(
       tools,
-      STRAPPY_TOOL_OPENROUTER_WEB_FETCH);
+      STRAPPY_TOOL_OPENROUTER_WEB_FETCH,
+      "native");
   cJSON_Delete(tools);
   free(error);
   if (!ok) {
@@ -734,7 +743,7 @@ static int harness_test_request_surfaces(void)
   error = NULL;
   tools_json = strappy_tools_responses_request_json(
     "../shared/Resources",
-    STRAPPY_WEB_TOOL_MODE_DISABLED,
+    STRAPPY_WEB_PROVIDER_NONE,
     &error);
   if (tools_json == NULL) {
     fprintf(stderr,
@@ -748,9 +757,7 @@ static int harness_test_request_surfaces(void)
   ok = cJSON_IsArray(tools) &&
     harness_tools_hide_local_display_metadata(tools) &&
     !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
-    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
-    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_SEARCH) &&
-    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_FETCH);
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH);
   cJSON_Delete(tools);
   free(error);
   if (!ok) {
@@ -1388,12 +1395,10 @@ static int harness_request_base_is_valid(cJSON *root,
   input_count = cJSON_IsArray(input) ? cJSON_GetArraySize(input) : 0;
   has_web_search = harness_has_tool_type(
     tools,
-    STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) ||
-    harness_has_tool_name(tools, STRAPPY_TOOL_WEB_SEARCH);
+    STRAPPY_TOOL_OPENROUTER_WEB_SEARCH);
   has_web_fetch = harness_has_tool_type(
     tools,
-    STRAPPY_TOOL_OPENROUTER_WEB_FETCH) ||
-    harness_has_tool_name(tools, STRAPPY_TOOL_WEB_FETCH);
+    STRAPPY_TOOL_OPENROUTER_WEB_FETCH);
   has_web_reference_key = cJSON_IsString(instructions) &&
     (instructions->valuestring != NULL) &&
     (strstr(instructions->valuestring, "`web_reference`") != NULL);
@@ -1447,10 +1452,14 @@ static int harness_request_base_is_valid(cJSON *root,
 static int harness_world_knowledge_tools_are_valid(cJSON *tools)
 {
   return cJSON_IsArray(tools) && (cJSON_GetArraySize(tools) == 10) &&
-    harness_has_tool_name(tools, STRAPPY_TOOL_WEB_SEARCH) &&
-    harness_has_tool_name(tools, STRAPPY_TOOL_WEB_FETCH) &&
-    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
-    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+    harness_server_tool_has_engine(
+      tools,
+      STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
+      "parallel") &&
+    harness_server_tool_has_engine(
+      tools,
+      STRAPPY_TOOL_OPENROUTER_WEB_FETCH,
+      "parallel") &&
     harness_has_tool_name(tools, STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) &&
     harness_has_tool_name(
@@ -1590,8 +1599,6 @@ static int harness_coding_assistant_request_is_valid(
     !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_QUERY) &&
     !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
     !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
-    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_SEARCH) &&
-    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_FETCH) &&
     harness_tools_hide_local_display_metadata(tools);
 }
 
@@ -1608,8 +1615,6 @@ static int harness_disabled_web_search_request_is_valid(cJSON *root)
   return cJSON_IsArray(tools) &&
     !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
     !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
-    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_SEARCH) &&
-    !harness_has_tool_name(tools, STRAPPY_TOOL_WEB_FETCH) &&
     (require_parameters == NULL);
 }
 
@@ -2259,6 +2264,7 @@ static int harness_run_server_tool_server(int listener_fd)
   char *session_key;
   char *prompt_group;
   cJSON *root;
+  cJSON *tools;
   int client_fd;
   int ok;
 
@@ -2270,11 +2276,20 @@ static int harness_run_server_tool_server(int listener_fd)
   }
   root = cJSON_Parse(body);
   free(body);
+  tools = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "tools") : NULL;
   ok = cJSON_IsObject(root) &&
     harness_request_base_is_valid(root,
                                   "Use a server tool",
                                   &session_key,
                                   &prompt_group) &&
+    harness_server_tool_has_engine(
+      tools,
+      STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
+      "native") &&
+    harness_server_tool_has_engine(
+      tools,
+      STRAPPY_TOOL_OPENROUTER_WEB_FETCH,
+      "native") &&
     harness_send_json_response(client_fd, 200L, first_response);
   cJSON_Delete(root);
   close(client_fd);
@@ -3390,6 +3405,11 @@ static int harness_test_world_knowledge_assistant_set(void)
         "../shared/Resources",
         STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE,
         &error) ||
+      !strappy_db_update_session_web_provider(
+        path,
+        session_id,
+        STRAPPY_WEB_PROVIDER_PARALLEL,
+        &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_WORLD_KNOWLEDGE,
                             endpoint,
                             sizeof(endpoint),
@@ -3781,6 +3801,10 @@ static int harness_test_web_search_requires_markdown_reference(void)
   error = NULL;
   session_id = 0LL;
   if (!harness_create_session_database(path, &session_id, &error) ||
+      !strappy_db_update_session_web_provider(path,
+                                              session_id,
+                                              STRAPPY_WEB_PROVIDER_NATIVE,
+                                              &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_SERVER_TOOL,
                             endpoint,
                             sizeof(endpoint),
@@ -3816,7 +3840,7 @@ static int harness_test_web_search_requires_markdown_reference(void)
                            &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
-                        "web_search_enabled=1;",
+                        "web_provider='native';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items WHERE "
@@ -3955,10 +3979,10 @@ static int harness_test_function_tool_continuation(void)
   session_id = 0LL;
   strappy_session_message_record_list_init(&timeline);
   if (!harness_create_session_database(path, &session_id, &error) ||
-      !strappy_db_update_session_web_search_enabled(path,
-                                                    session_id,
-                                                    0,
-                                                    &error) ||
+      !strappy_db_update_session_web_provider(path,
+                                              session_id,
+                                              STRAPPY_WEB_PROVIDER_NONE,
+                                              &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_FUNCTION_TOOL,
                             endpoint,
                             sizeof(endpoint),
@@ -3999,7 +4023,7 @@ static int harness_test_function_tool_continuation(void)
                            &value) && (value == 2LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
-                        "web_search_enabled=1;",
+                        "web_provider!='none';",
                         &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
@@ -4153,10 +4177,10 @@ static int harness_test_file_mutation_continuation(void)
                                                    session_id,
                                                    working_directory,
                                                    &error) ||
-      !strappy_db_update_session_web_search_enabled(path,
-                                                    session_id,
-                                                    0,
-                                                    &error) ||
+      !strappy_db_update_session_web_provider(path,
+                                              session_id,
+                                              STRAPPY_WEB_PROVIDER_NONE,
+                                              &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_FILE_MUTATION,
                             endpoint,
                             sizeof(endpoint),
@@ -4267,10 +4291,10 @@ static int harness_test_bash_disabled_request(void)
         session_id,
         STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
         &error) ||
-      !strappy_db_update_session_web_search_enabled(path,
-                                                    session_id,
-                                                    0,
-                                                    &error) ||
+      !strappy_db_update_session_web_provider(path,
+                                              session_id,
+                                              STRAPPY_WEB_PROVIDER_NONE,
+                                              &error) ||
       !strappy_db_get_session_bash_enabled(path,
                                            session_id,
                                            &bash_enabled,
@@ -4361,10 +4385,10 @@ static int harness_test_bash_output_truncation_flag(void)
                                               session_id,
                                               1,
                                               &error) ||
-      !strappy_db_update_session_web_search_enabled(path,
-                                                    session_id,
-                                                    0,
-                                                    &error) ||
+      !strappy_db_update_session_web_provider(path,
+                                              session_id,
+                                              STRAPPY_WEB_PROVIDER_NONE,
+                                              &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_BASH_OUTPUT,
                             endpoint,
                             sizeof(endpoint),
@@ -4465,10 +4489,10 @@ static int harness_test_bash_tool_cancellation(void)
                                               session_id,
                                               1,
                                               &error) ||
-      !strappy_db_update_session_web_search_enabled(path,
-                                                    session_id,
-                                                    0,
-                                                    &error) ||
+      !strappy_db_update_session_web_provider(path,
+                                              session_id,
+                                              STRAPPY_WEB_PROVIDER_NONE,
+                                              &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_BASH_CANCELLATION,
                             endpoint,
                             sizeof(endpoint),

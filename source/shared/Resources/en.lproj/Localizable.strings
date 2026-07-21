@@ -38,6 +38,7 @@
 "Options" = "Options";
 "Prompt Options" = "Prompt Options";
 "Assistant" = "Assistant";
+"Different tools are available the model based on the selection" = "Different tools are available the model based on the selection";
 "Available Tools" = "Available Tools";
 "World Knowledge" = "World Knowledge";
 "General knowledge and web research" = "General knowledge and web research";
@@ -207,10 +208,11 @@
 "Scanning databases..." = "Scanning databases...";
 "Search" = "Search";
 "Search Web" = "Search Web";
-"Enable Web Search" = "Enable Web Search";
-"Allows free web search and public page fetching" = "Allows free web search and public page fetching";
-"Use Paid Web Search" = "Use Paid Web Search";
-"Uses OpenRouter web search and may incur charges" = "Uses OpenRouter web search and may incur charges";
+"Web Search" = "Web Search";
+"None" = "None";
+"Native" = "Native";
+"Using web search incurs extra costs" = "Using web search incurs extra costs";
+"Web search provider is invalid." = "Web search provider is invalid.";
 "Enable Bash" = "Enable Bash";
 "Allows command execution in this session" = "Allows command execution in this session";
 "Services" = "Services";
@@ -242,4 +244,3 @@
 "This will permanently delete \"%@\" and all of its messages. This cannot be undone." = "This will permanently delete \"%@\" and all of its messages. This cannot be undone.";
 "Transformations" = "Transformations";
 "Use Selection for Find" = "Use Selection for Find";
-"Web Search incurs additional charges" = "Web Search incurs additional charges";

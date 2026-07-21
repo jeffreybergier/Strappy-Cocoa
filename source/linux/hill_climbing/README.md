@@ -27,7 +27,8 @@ resources are intentionally reduced to the minimum baseline:
   instructions are removed;
 - every database selected in the device's Strappy catalog is approved in each
   model's isolated run and described only as `Database.`;
-- web search and web fetch remain available as unannotated server tools.
+- web search and web fetch use the same explicitly selected OpenRouter engine;
+  the harness defaults to `none` so neither tool is sent unless requested.
 
 Before round zero, the Personal Assistant profile supplies fresh
 `memory_user_fact_read` and `database_list_info` results as application-seeded,
@@ -128,6 +129,14 @@ deliberately required because this makes billable network requests:
 
 ```sh
 make -C source/linux/hill_climbing run CONFIRM_LIVE=yes
+```
+
+Select one provider for both web tools with `WEB_PROVIDER=native`,
+`WEB_PROVIDER=exa`, or `WEB_PROVIDER=parallel` (the default is `none`):
+
+```sh
+make -C source/linux/hill_climbing run CONFIRM_LIVE=yes \
+  WEB_PROVIDER=exa
 ```
 
 Run one model:

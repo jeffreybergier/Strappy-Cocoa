@@ -27,6 +27,7 @@ typedef struct hill_options {
   const char *resource_dir;
   const char *answer_file;
   const char *prompt;
+  strappy_web_provider web_provider;
   int prepare_only;
 } hill_options;
 
@@ -76,7 +77,8 @@ static void hill_usage(const char *program)
   fprintf(stderr,
           "Usage: %s --model ID --session-db PATH --database PATH [...] "
           "--env-file PATH --resource-dir PATH --answer-file PATH "
-          "--prompt TEXT [--prepare-only]\n",
+          "--prompt TEXT [--web-provider "
+          "none|native|exa|parallel] [--prepare-only]\n",
           program);
 }
 
@@ -122,6 +124,11 @@ static int hill_parse_options(int argc, char **argv, hill_options *options)
       options->answer_file = value;
     } else if (strcmp(name, "--prompt") == 0) {
       options->prompt = value;
+    } else if (strcmp(name, "--web-provider") == 0) {
+      if (!strappy_web_provider_parse(value, &options->web_provider)) {
+        fprintf(stderr, "Invalid web provider: %s.\n", value);
+        return 0;
+      }
     } else {
       fprintf(stderr, "Unknown option: %s.\n", name);
       return 0;
@@ -788,10 +795,10 @@ int main(int argc, char **argv)
   ok = strappy_db_initialize(options.session_db, &error) &&
     hill_seed_model(options.session_db, options.model, &error) &&
     strappy_db_create_session(options.session_db, &session_id, &error) &&
-    strappy_db_update_session_web_search_enabled(options.session_db,
-                                                  session_id,
-                                                  1,
-                                                  &error) &&
+    strappy_db_update_session_web_provider(options.session_db,
+                                           session_id,
+                                           options.web_provider,
+                                           &error) &&
     hill_seed_user_fact(options.session_db, session_id, &error) &&
     hill_register_databases(options.session_db, &options, &error);
   if (!ok) {

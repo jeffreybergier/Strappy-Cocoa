@@ -5,7 +5,6 @@
 #include "strappy_model_catalog.h"
 #include "strappy_responses.h"
 #include "strappy_tools.h"
-#include "strappy_web.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -25,10 +24,6 @@ int strappy_session_configure_process(const char *ca_cert_path,
   if (!strappy_client_set_cainfo(ca_cert_path, error_out)) {
     return 0;
   }
-  if (!strappy_web_set_cainfo(ca_cert_path, error_out)) {
-    return 0;
-  }
-
   strappy_webview_set_font_dir(font_dir);
   return 1;
 }
@@ -194,28 +189,15 @@ int strappy_session_update_streaming_enabled(const char *db_path,
                                                     error_out);
 }
 
-int strappy_session_update_web_search_enabled(const char *db_path,
-                                              long long session_id,
-                                              int web_search_enabled,
-                                              char **error_out)
+int strappy_session_update_web_provider(const char *db_path,
+                                        long long session_id,
+                                        strappy_web_provider web_provider,
+                                        char **error_out)
 {
-  return strappy_db_update_session_web_search_enabled(db_path,
-                                                     session_id,
-                                                     web_search_enabled,
-                                                     error_out);
-}
-
-int strappy_session_update_paid_web_search_enabled(
-  const char *db_path,
-  long long session_id,
-  int paid_web_search_enabled,
-  char **error_out)
-{
-  return strappy_db_update_session_paid_web_search_enabled(
-    db_path,
-    session_id,
-    paid_web_search_enabled,
-    error_out);
+  return strappy_db_update_session_web_provider(db_path,
+                                                session_id,
+                                                web_provider,
+                                                error_out);
 }
 
 int strappy_session_update_bash_enabled(const char *db_path,

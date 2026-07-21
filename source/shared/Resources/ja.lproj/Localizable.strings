@@ -38,6 +38,7 @@
 "Options" = "オプション";
 "Prompt Options" = "プロンプトオプション";
 "Assistant" = "アシスタント";
+"Different tools are available the model based on the selection" = "選択内容に応じてモデルが利用できるツールが異なります";
 "Available Tools" = "利用可能なツール";
 "World Knowledge" = "世界知識";
 "General knowledge and web research" = "一般知識と Web リサーチ";
@@ -207,10 +208,11 @@
 "Scanning databases..." = "データベースをスキャン中...";
 "Search" = "検索";
 "Search Web" = "Web を検索";
-"Enable Web Search" = "Web 検索を有効にする";
-"Allows free web search and public page fetching" = "無料の Web 検索と公開ページの取得を許可します";
-"Use Paid Web Search" = "有料 Web 検索を使用";
-"Uses OpenRouter web search and may incur charges" = "OpenRouter の Web 検索を使用し、料金が発生する場合があります";
+"Web Search" = "Web 検索";
+"None" = "なし";
+"Native" = "ネイティブ";
+"Using web search incurs extra costs" = "Web 検索を使用すると追加料金が発生します";
+"Web search provider is invalid." = "Web 検索プロバイダーが無効です。";
 "Enable Bash" = "Bash を有効にする";
 "Allows command execution in this session" = "このセッションでコマンド実行を許可します";
 "Services" = "サービス";
@@ -242,4 +244,3 @@
 "This will permanently delete \"%@\" and all of its messages. This cannot be undone." = "「%@」とそのすべてのメッセージを完全に削除します。この操作は取り消せません。";
 "Transformations" = "変換";
 "Use Selection for Find" = "選択部分を検索に使用";
-"Web Search incurs additional charges" = "Web 検索には追加料金が発生します";

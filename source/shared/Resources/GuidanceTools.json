@@ -32,65 +32,6 @@
     {
       "type": "function",
       "function": {
-        "name": "web_search",
-        "description": "Search the public web with DuckDuckGo Lite. Returns the requested result page as raw UTF-8 HTML with its HTTP status and Content-Type. Start with page 1 and request a later page only when needed. A DuckDuckGo CAPTCHA is returned as a rate-limit tool error; do not retry it immediately.",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "query": {
-              "type": "string",
-              "description": "Search query.",
-              "minLength": 1,
-              "maxLength": 512
-            },
-            "page": {
-              "type": "integer",
-              "description": "One-based search result page.",
-              "minimum": 1,
-              "maximum": 10,
-              "default": 1
-            }
-          },
-          "required": [
-            "query"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "x-strappy-display": {
-        "promoted_argument": "query"
-      }
-    },
-    {
-      "type": "function",
-      "function": {
-        "name": "web_fetch",
-        "description": "Fetch a public HTTP or HTTPS page. Returns the final response as raw UTF-8 text with its HTTP status and Content-Type. Redirects are followed, but private and local destinations are blocked.",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "url": {
-              "type": "string",
-              "description": "Public HTTP or HTTPS URL to fetch.",
-              "minLength": 8,
-              "maxLength": 512,
-              "pattern": "^https?://"
-            }
-          },
-          "required": [
-            "url"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "x-strappy-display": {
-        "promoted_argument": "url",
-        "transform": "url"
-      }
-    },
-    {
-      "type": "function",
-      "function": {
         "name": "database_list_info",
         "description": "Call this tool to view approved databases. Returns an object containing a databases array with database_id, app_name, path, size_bytes, and modified_at in Unix seconds. When no databases are approved, the array is empty and guidance explains why.",
         "parameters": {

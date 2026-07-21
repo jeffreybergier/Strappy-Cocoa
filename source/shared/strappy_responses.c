@@ -181,9 +181,7 @@ static void strappy_responses_audit_record_activity(
     return;
   }
   if ((strcmp(tool_name, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) ||
-      (strcmp(tool_name, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0) ||
-      (strcmp(tool_name, STRAPPY_TOOL_WEB_SEARCH) == 0) ||
-      (strcmp(tool_name, STRAPPY_TOOL_WEB_FETCH) == 0)) {
+      (strcmp(tool_name, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0)) {
     audit->web_reference_required = 1;
   }
 }
@@ -1641,7 +1639,6 @@ static int strappy_responses_prepare_runtime(
   char *model;
   char *assistant_set_id;
   int bash_enabled;
-  strappy_web_tool_mode web_tool_mode;
   int ok;
 
   if ((runtime == NULL) || (guidance_resource_dir == NULL) ||
@@ -1672,9 +1669,7 @@ static int strappy_responses_prepare_runtime(
     strappy_responses_runtime_destroy(runtime);
     return 0;
   }
-  runtime->config.web_search_enabled = session.web_search_enabled ? 1 : 0;
-  runtime->config.paid_web_search_enabled =
-    session.paid_web_search_enabled ? 1 : 0;
+  runtime->config.web_provider = session.web_provider;
   bash_enabled = session.bash_enabled ? 1 : 0;
   assistant_set_id = strappy_string_duplicate(session.assistant_set_id);
   strappy_session_record_destroy(&session);
@@ -1726,15 +1721,10 @@ static int strappy_responses_prepare_runtime(
   runtime->config.tool_allowlist =
     (const char * const *)runtime->assistant_set.tool_names;
   runtime->config.tool_allowlist_count = runtime->assistant_set.tool_name_count;
-  web_tool_mode = runtime->config.web_search_enabled ?
-    (runtime->config.paid_web_search_enabled ?
-      STRAPPY_WEB_TOOL_MODE_PAID : STRAPPY_WEB_TOOL_MODE_CUSTOM) :
-    STRAPPY_WEB_TOOL_MODE_DISABLED;
-
   runtime->system_prompt =
     strappy_prompt_build(runtime->config.guidance_resource_dir,
                          &runtime->assistant_set,
-                         web_tool_mode,
+                         runtime->config.web_provider,
                          error_out);
   if (runtime->system_prompt == NULL) {
     strappy_responses_runtime_destroy(runtime);
@@ -1745,7 +1735,7 @@ static int strappy_responses_prepare_runtime(
       runtime->config.guidance_resource_dir,
       runtime->config.tool_allowlist,
       runtime->config.tool_allowlist_count,
-      web_tool_mode,
+      runtime->config.web_provider,
       error_out);
   if (runtime->tools_json == NULL) {
     strappy_responses_runtime_destroy(runtime);

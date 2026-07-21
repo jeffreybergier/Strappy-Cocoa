@@ -11,17 +11,19 @@ extern NSString * const StrappySessionChangeKindKey;
 extern NSString * const StrappySessionChangeKindActivity;
 extern NSString * const StrappySessionChangeKindModel;
 extern NSString * const StrappySessionChangeKindStreaming;
-extern NSString * const StrappySessionChangeKindWebSearch;
-extern NSString * const StrappySessionChangeKindPaidWebSearch;
+extern NSString * const StrappySessionChangeKindWebProvider;
 extern NSString * const StrappySessionChangeKindBash;
 extern NSString * const StrappySessionChangeKindAssistantSet;
+extern NSString * const StrappyWebProviderNone;
+extern NSString * const StrappyWebProviderNative;
+extern NSString * const StrappyWebProviderExa;
+extern NSString * const StrappyWebProviderParallel;
 
 @interface StrappySession : NSObject {
  @private
   NSNumber     *sessionIdentifier_;
   NSDictionary *cachedSummary_;
-  BOOL          webSearchEnabled_;
-  BOOL          paidWebSearchEnabled_;
+  NSString     *webProvider_;
   BOOL          bashEnabled_;
   BOOL          streamingEnabled_;
   BOOL          promptInFlight_;
@@ -79,10 +81,8 @@ extern NSString * const StrappySessionChangeKindAssistantSet;
                                                  error:(NSError **)error;
 - (NSString *)webViewJavaScriptForStreamEvent:(NSDictionary *)event
                                         error:(NSError **)error;
-- (BOOL)webSearchEnabled;
-- (BOOL)setWebSearchEnabled:(BOOL)enabled error:(NSError **)error;
-- (BOOL)paidWebSearchEnabled;
-- (BOOL)setPaidWebSearchEnabled:(BOOL)enabled error:(NSError **)error;
+- (NSString *)webProvider;
+- (BOOL)setWebProvider:(NSString *)webProvider error:(NSError **)error;
 - (BOOL)bashEnabled;
 - (BOOL)setBashEnabled:(BOOL)enabled error:(NSError **)error;
 - (NSString *)assistantSetIdentifier;

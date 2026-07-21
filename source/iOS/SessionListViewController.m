@@ -345,7 +345,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   NSNumber *identifier;
 
   changeKind = [[notification userInfo] objectForKey:StrappySessionChangeKindKey];
-  if ([changeKind isEqualToString:StrappySessionChangeKindWebSearch] ||
+  if ([changeKind isEqualToString:StrappySessionChangeKindWebProvider] ||
       [changeKind isEqualToString:StrappySessionChangeKindBash] ||
       [changeKind isEqualToString:StrappySessionChangeKindStreaming]) {
     return;

@@ -16,6 +16,7 @@ MEMBER_ROSTER ?= $(DEVICE_FIXTURE_DIR)/member_roster.json
 SYNC_FIXTURES := sync_device_fixtures.py
 ENV_FILE ?= ../../../.env
 RESOURCE_DIR ?= $(SHARED_DIR)/Resources
+WEB_PROVIDER ?= none
 
 CPPFLAGS += -I$(SHARED_DIR) -I$(CJSON_DIR)
 CFLAGS ?= -std=c99 -Wall -Wextra -Wconversion -Wsign-conversion -Wfloat-conversion
@@ -33,7 +34,6 @@ RUNNER_SOURCES = \
 	$(SHARED_DIR)/strappy_assistant_sets.c \
 	$(SHARED_DIR)/strappy_responses.c \
 	$(SHARED_DIR)/strappy_tools.c \
-	$(SHARED_DIR)/strappy_web.c \
 	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
 	$(SHARED_DIR)/strappy_file_mutation.c \
@@ -86,6 +86,7 @@ run: build verify-fixture
 		--member-roster "$(MEMBER_ROSTER)" \
 		--env-file "$(ENV_FILE)" \
 		--resource-dir "$(RESOURCE_DIR)" \
+		--web-provider "$(WEB_PROVIDER)" \
 		$(if $(MODEL),--model "$(MODEL)",)
 
 # This copies every Strappy-approved database and its SQLite sidecars. It is

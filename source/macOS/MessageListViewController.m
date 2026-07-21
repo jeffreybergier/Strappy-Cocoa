@@ -258,10 +258,8 @@ static BOOL StrappyEnsureDirectory(NSString *path)
   [self updateSendingStateFromSession];
   [sendController_ setStreamingEnabled:(session_ != nil) ?
     [session_ streamingEnabled] : NO];
-  [sendController_ setWebSearchEnabled:(session_ != nil) ?
-    [session_ webSearchEnabled] : YES];
-  [sendController_ setPaidWebSearchEnabled:(session_ != nil) ?
-    [session_ paidWebSearchEnabled] : NO];
+  [sendController_ setWebProvider:(session_ != nil) ?
+    [session_ webProvider] : StrappyWebProviderNone];
   [sendController_ reloadOptionsMenu];
   if (sessionChanged) {
     [self reloadContent];
@@ -400,18 +398,11 @@ static BOOL StrappyEnsureDirectory(NSString *path)
   return [self selectedModelIdentifier];
 }
 
-- (BOOL)webSearchEnabledForPromptSendViewController:
+- (NSString *)webProviderForPromptSendViewController:
     (PromptSendViewController *)controller
 {
   (void)controller;
-  return (session_ != nil) ? [session_ webSearchEnabled] : YES;
-}
-
-- (BOOL)paidWebSearchEnabledForPromptSendViewController:
-    (PromptSendViewController *)controller
-{
-  (void)controller;
-  return (session_ != nil) ? [session_ paidWebSearchEnabled] : NO;
+  return (session_ != nil) ? [session_ webProvider] : StrappyWebProviderNone;
 }
 
 - (BOOL)canSelectModel
@@ -490,7 +481,7 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 }
 
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
-             setWebSearchEnabled:(BOOL)enabled
+                  setWebProvider:(NSString *)webProvider
 {
   NSError *error;
 
@@ -499,7 +490,7 @@ static BOOL StrappyEnsureDirectory(NSString *path)
     return NO;
   }
   error = nil;
-  if (![session_ setWebSearchEnabled:enabled error:&error]) {
+  if (![session_ setWebProvider:webProvider error:&error]) {
     NSString *errorMessage;
 
     errorMessage = [error localizedDescription];
@@ -508,37 +499,10 @@ static BOOL StrappyEnsureDirectory(NSString *path)
     }
     [statusText_ release];
     statusText_ = [errorMessage retain];
-    [sendController_ setWebSearchEnabled:[session_ webSearchEnabled]];
+    [sendController_ setWebProvider:[session_ webProvider]];
     return NO;
   }
-  [sendController_ setWebSearchEnabled:[session_ webSearchEnabled]];
-  return YES;
-}
-
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-         setPaidWebSearchEnabled:(BOOL)enabled
-{
-  NSError *error;
-
-  (void)controller;
-  if ((session_ == nil) || ![session_ webSearchEnabled]) {
-    return NO;
-  }
-  error = nil;
-  if (![session_ setPaidWebSearchEnabled:enabled error:&error]) {
-    NSString *errorMessage;
-
-    errorMessage = [error localizedDescription];
-    if ([errorMessage length] == 0U) {
-      errorMessage = NSLocalizedString(@"Your changes could not be saved.", nil);
-    }
-    [statusText_ release];
-    statusText_ = [errorMessage retain];
-    [sendController_ setPaidWebSearchEnabled:
-      [session_ paidWebSearchEnabled]];
-    return NO;
-  }
-  [sendController_ setPaidWebSearchEnabled:[session_ paidWebSearchEnabled]];
+  [sendController_ setWebProvider:[session_ webProvider]];
   return YES;
 }
 

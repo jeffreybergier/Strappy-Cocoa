@@ -1,6 +1,8 @@
 #ifndef STRAPPY_TOOLS_H
 #define STRAPPY_TOOLS_H
 
+#include "strappy_config.h"
+
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -24,16 +26,8 @@ extern "C" {
 #define STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET "memory_database_hint_forget"
 #define STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH "helper_fontawesome_shortcode_search"
 #define STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM "helper_fontawesome_shortcode_confirm"
-#define STRAPPY_TOOL_WEB_SEARCH "web_search"
-#define STRAPPY_TOOL_WEB_FETCH "web_fetch"
 #define STRAPPY_TOOL_OPENROUTER_WEB_SEARCH "openrouter:web_search"
 #define STRAPPY_TOOL_OPENROUTER_WEB_FETCH "openrouter:web_fetch"
-
-typedef enum strappy_web_tool_mode {
-  STRAPPY_WEB_TOOL_MODE_DISABLED = 0,
-  STRAPPY_WEB_TOOL_MODE_CUSTOM = 1,
-  STRAPPY_WEB_TOOL_MODE_PAID = 2
-} strappy_web_tool_mode;
 
 typedef int (*strappy_tools_continue_callback)(void *user_data);
 
@@ -47,19 +41,19 @@ char *strappy_tools_display_registry_json(const char *resource_dir,
                                           char **error_out);
 char *strappy_tools_responses_request_json(
   const char *resource_dir,
-  strappy_web_tool_mode web_tool_mode,
+  strappy_web_provider web_provider,
   char **error_out);
 char *strappy_tools_responses_request_json_filtered(
   const char *resource_dir,
   const char * const *allowed_names,
   size_t allowed_name_count,
-  strappy_web_tool_mode web_tool_mode,
+  strappy_web_provider web_provider,
   char **error_out);
 char *strappy_tools_prompt_markdown_filtered(
   const char *resource_dir,
   const char * const *allowed_names,
   size_t allowed_name_count,
-  strappy_web_tool_mode web_tool_mode,
+  strappy_web_provider web_provider,
   char **error_out);
 char *strappy_tools_tool_guidance_string(const char *resource_dir,
                                          const char *section_name,

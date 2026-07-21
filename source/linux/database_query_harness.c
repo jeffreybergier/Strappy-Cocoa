@@ -489,19 +489,21 @@ static int harness_run_fresh_catalog_schema_tests(
            "sessions columns") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
-           "SELECT session_id, web_search_enabled, bash_enabled, "
+           "SELECT session_id, web_provider, bash_enabled, "
            "streaming_enabled, updated_at_ms "
          "FROM session_settings LIMIT 0;",
            "session settings columns") &&
-         harness_expect_catalog_sql_ok(
+         harness_expect_catalog_integer(
            context->catalog_path,
-           "SELECT session_id, paid_web_search_enabled, updated_at_ms "
-           "FROM session_paid_web_search_settings LIMIT 0;",
-           "paid web search settings columns") &&
+           "SELECT COUNT(*) FROM pragma_table_info('session_settings') "
+           "WHERE name = 'web_provider' "
+           "AND trim(dflt_value, char(39)) = 'parallel';",
+           1LL,
+           "parallel session web-provider default") &&
          harness_expect_catalog_integer(
            context->catalog_path,
            "SELECT COUNT(*) FROM pragma_table_info('sessions') "
-           "WHERE name IN ('web_search_enabled','bash_enabled',"
+           "WHERE name IN ('web_provider','bash_enabled',"
            "'streaming_enabled');",
            0LL,
            "session toggle columns remaining in sessions") &&
@@ -2421,6 +2423,35 @@ static int harness_responses_tools_contains(cJSON *tools,
   return 0;
 }
 
+static int harness_responses_tool_has_engine(cJSON *tools,
+                                             const char *tool_name,
+                                             const char *engine_name)
+{
+  cJSON *tool;
+
+  if (!cJSON_IsArray(tools) || (tool_name == NULL) ||
+      (engine_name == NULL)) {
+    return 0;
+  }
+  for (tool = tools->child; tool != NULL; tool = tool->next) {
+    cJSON *type;
+    cJSON *parameters;
+    cJSON *engine;
+
+    type = cJSON_GetObjectItemCaseSensitive(tool, "type");
+    if (!cJSON_IsString(type) || (type->valuestring == NULL) ||
+        (strcmp(type->valuestring, tool_name) != 0)) {
+      continue;
+    }
+    parameters = cJSON_GetObjectItemCaseSensitive(tool, "parameters");
+    engine = cJSON_IsObject(parameters) ?
+      cJSON_GetObjectItemCaseSensitive(parameters, "engine") : NULL;
+    return cJSON_IsString(engine) && (engine->valuestring != NULL) &&
+      (strcmp(engine->valuestring, engine_name) == 0);
+  }
+  return 0;
+}
+
 static int harness_run_assistant_set_tests(void)
 {
   strappy_assistant_set_record_list list;
@@ -2470,7 +2501,7 @@ static int harness_run_assistant_set_tests(void)
       &world,
       &error) &&
     strappy_assistant_set_profile_is_available(&world) &&
-    (world.tool_name_count == 12U) &&
+    (world.tool_name_count == 10U) &&
     (world.preflight_tool_name_count == 1U) &&
     (world.quality_check_key_count == 5U) &&
     strappy_assistant_set_profile_allows_tool(
@@ -2485,9 +2516,6 @@ static int harness_run_assistant_set_tests(void)
     strappy_assistant_set_profile_allows_tool(
       &world,
       STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
-    strappy_assistant_set_profile_allows_tool(
-      &world,
-      STRAPPY_TOOL_WEB_SEARCH) &&
     !strappy_assistant_set_profile_allows_tool(
       &world,
       STRAPPY_TOOL_FILE_READ) &&
@@ -2512,7 +2540,7 @@ static int harness_run_assistant_set_tests(void)
       &personal,
       &error) &&
     strappy_assistant_set_profile_is_available(&personal) &&
-    (personal.tool_name_count == 17U) &&
+    (personal.tool_name_count == 15U) &&
     (personal.preflight_tool_name_count == 2U) &&
     (personal.quality_check_key_count == 6U) &&
     strappy_assistant_set_profile_allows_tool(
@@ -2542,7 +2570,7 @@ static int harness_run_assistant_set_tests(void)
       &coding,
       &error) &&
     strappy_assistant_set_profile_is_available(&coding) &&
-    (coding.tool_name_count == 16U) &&
+    (coding.tool_name_count == 14U) &&
     strappy_assistant_set_profile_allows_tool(
       &coding,
       STRAPPY_TOOL_FILE_READ) &&
@@ -2561,27 +2589,27 @@ static int harness_run_assistant_set_tests(void)
       HARNESS_RESOURCE_DIR,
       (const char * const *)world.tool_names,
       world.tool_name_count,
-      STRAPPY_WEB_TOOL_MODE_CUSTOM,
+      STRAPPY_WEB_PROVIDER_NATIVE,
       &error);
     world_paid_tools_json =
       strappy_tools_responses_request_json_filtered(
         HARNESS_RESOURCE_DIR,
         (const char * const *)world.tool_names,
         world.tool_name_count,
-        STRAPPY_WEB_TOOL_MODE_PAID,
+        STRAPPY_WEB_PROVIDER_EXA,
         &error);
     world_tools_without_web_json =
       strappy_tools_responses_request_json_filtered(
         HARNESS_RESOURCE_DIR,
         (const char * const *)world.tool_names,
         world.tool_name_count,
-        STRAPPY_WEB_TOOL_MODE_DISABLED,
+        STRAPPY_WEB_PROVIDER_NONE,
         &error);
     coding_tools_json = strappy_tools_responses_request_json_filtered(
       HARNESS_RESOURCE_DIR,
       (const char * const *)coding.tool_names,
       coding.tool_name_count,
-      STRAPPY_WEB_TOOL_MODE_CUSTOM,
+      STRAPPY_WEB_PROVIDER_PARALLEL,
       &error);
     world_tools = (world_tools_json != NULL) ?
       cJSON_Parse(world_tools_json) : NULL;
@@ -2595,16 +2623,18 @@ static int harness_run_assistant_set_tests(void)
       (cJSON_GetArraySize(world_tools) == 10) &&
       harness_responses_tools_contains(
         world_tools,
-        STRAPPY_TOOL_WEB_SEARCH) &&
+        STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
       harness_responses_tools_contains(
         world_tools,
-        STRAPPY_TOOL_WEB_FETCH) &&
-      !harness_responses_tools_contains(
-        world_tools,
-        STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
-      !harness_responses_tools_contains(
-        world_tools,
         STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+      harness_responses_tool_has_engine(
+        world_tools,
+        STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
+        "native") &&
+      harness_responses_tool_has_engine(
+        world_tools,
+        STRAPPY_TOOL_OPENROUTER_WEB_FETCH,
+        "native") &&
       harness_responses_tools_contains(
         world_tools,
         STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) &&
@@ -2631,12 +2661,14 @@ static int harness_run_assistant_set_tests(void)
       harness_responses_tools_contains(
         world_paid_tools,
         STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
-      !harness_responses_tools_contains(
+      harness_responses_tool_has_engine(
         world_paid_tools,
-        STRAPPY_TOOL_WEB_SEARCH) &&
-      !harness_responses_tools_contains(
+        STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
+        "exa") &&
+      harness_responses_tool_has_engine(
         world_paid_tools,
-        STRAPPY_TOOL_WEB_FETCH) &&
+        STRAPPY_TOOL_OPENROUTER_WEB_FETCH,
+        "exa") &&
       cJSON_IsArray(world_tools_without_web) &&
       (cJSON_GetArraySize(world_tools_without_web) == 8) &&
       !harness_responses_tools_contains(
@@ -2645,12 +2677,6 @@ static int harness_run_assistant_set_tests(void)
       !harness_responses_tools_contains(
         world_tools_without_web,
         STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
-      !harness_responses_tools_contains(
-        world_tools_without_web,
-        STRAPPY_TOOL_WEB_SEARCH) &&
-      !harness_responses_tools_contains(
-        world_tools_without_web,
-        STRAPPY_TOOL_WEB_FETCH) &&
       cJSON_IsArray(coding_tools) &&
       (cJSON_GetArraySize(coding_tools) == 14) &&
       harness_responses_tools_contains(coding_tools,
@@ -2660,7 +2686,15 @@ static int harness_run_assistant_set_tests(void)
       harness_responses_tools_contains(coding_tools,
                                        STRAPPY_TOOL_FILE_EDIT) &&
       harness_responses_tools_contains(coding_tools,
-                                       STRAPPY_TOOL_BASH);
+                                       STRAPPY_TOOL_BASH) &&
+      harness_responses_tool_has_engine(
+        coding_tools,
+        STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
+        "parallel") &&
+      harness_responses_tool_has_engine(
+        coding_tools,
+        STRAPPY_TOOL_OPENROUTER_WEB_FETCH,
+        "parallel");
   }
   if (ok && strappy_assistant_sets_load_profile(HARNESS_RESOURCE_DIR,
                                                 "missing_set",
@@ -5492,6 +5526,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   sqlite3 *db;
   char assistant_set_turn_sql[512];
   int bash_enabled;
+  int web_provider_value;
   int written;
   int ok;
 
@@ -5552,8 +5587,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (session.assistant_set_id != NULL) &&
        (strcmp(session.assistant_set_id,
                STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT) == 0) &&
-       (session.web_search_enabled == 1) &&
-       (session.paid_web_search_enabled == 0) &&
+       (session.web_provider == STRAPPY_WEB_PROVIDER_PARALLEL) &&
        (session.bash_enabled == 0) &&
        (session.streaming_enabled == 0) &&
        (session.http_status == 0L);
@@ -5685,31 +5719,35 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
     return 0;
   }
 
+  for (web_provider_value = (int)STRAPPY_WEB_PROVIDER_NATIVE;
+       web_provider_value <= (int)STRAPPY_WEB_PROVIDER_PARALLEL;
+       web_provider_value++) {
+    error = NULL;
+    ok = strappy_db_update_session_web_provider(
+      context->catalog_path,
+      session_id,
+      (strappy_web_provider)web_provider_value,
+      &error);
+    if (!ok) {
+      fprintf(stderr,
+              "Could not update session web provider: %s\n",
+              (error != NULL) ? error : "unknown");
+      strappy_free_string(error);
+      return 0;
+    }
+  }
   error = NULL;
-  if (!strappy_db_update_session_paid_web_search_enabled(
+  if (strappy_db_update_session_web_provider(
         context->catalog_path,
         session_id,
-        1,
-        &error)) {
-    fprintf(stderr,
-            "Could not update paid web search setting: %s\n",
-            (error != NULL) ? error : "unknown");
+        (strappy_web_provider)99,
+        &error) || (error == NULL)) {
+    fprintf(stderr, "Invalid session web provider was accepted.\n");
     strappy_free_string(error);
     return 0;
   }
-
+  strappy_free_string(error);
   error = NULL;
-  ok = strappy_db_update_session_web_search_enabled(context->catalog_path,
-                                                    session_id,
-                                                    0,
-                                                    &error);
-  if (!ok) {
-    fprintf(stderr,
-            "Could not update session web search setting: %s\n",
-            (error != NULL) ? error : "unknown");
-    strappy_free_string(error);
-    return 0;
-  }
 
   strappy_session_record_init(&session);
   ok = strappy_db_load_session(context->catalog_path,
@@ -5724,11 +5762,10 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
     strappy_session_record_destroy(&session);
     return 0;
   }
-  ok = (session.web_search_enabled == 0) &&
-    (session.paid_web_search_enabled == 1);
+  ok = (session.web_provider == STRAPPY_WEB_PROVIDER_PARALLEL);
   strappy_session_record_destroy(&session);
   if (!ok) {
-    fprintf(stderr, "Session web search setting was not stored.\n");
+    fprintf(stderr, "Session web provider was not stored.\n");
     return 0;
   }
 
@@ -5979,8 +6016,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (strcmp(session.response, "First answer") == 0) &&
        (session.model != NULL) &&
        (strcmp(session.model, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0) &&
-       (session.web_search_enabled == 0) &&
-       (session.paid_web_search_enabled == 1) &&
+       (session.web_provider == STRAPPY_WEB_PROVIDER_PARALLEL) &&
        (session.bash_enabled == 0) &&
        (session.streaming_enabled == 1) &&
        (session.http_status == 200L);

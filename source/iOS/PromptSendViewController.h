@@ -18,9 +18,7 @@
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
         setSelectedModelIdentifier:(NSString *)modelIdentifier;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
-             setWebSearchEnabled:(BOOL)enabled;
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-         setPaidWebSearchEnabled:(BOOL)enabled;
+                  setWebProvider:(NSString *)webProvider;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
                   setBashEnabled:(BOOL)enabled;
 - (void)promptSendViewControllerDidCancelPrompt:
@@ -38,8 +36,7 @@
 - (void)setEnabled:(BOOL)enabled;
 - (void)setSending:(BOOL)sending;
 - (void)setCancellationRequested:(BOOL)requested;
-- (void)setWebSearchEnabled:(BOOL)enabled;
-- (void)setPaidWebSearchEnabled:(BOOL)enabled;
+- (void)setWebProvider:(NSString *)webProvider;
 - (void)setBashEnabled:(BOOL)enabled;
 - (void)reloadOptionsMenu;
 - (BOOL)canSendCurrentPrompt;

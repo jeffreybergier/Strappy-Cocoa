@@ -1,5 +1,6 @@
 #import "PromptSendViewController.h"
 #import "StrappyBottomToolbarView.h"
+#import "StrappySession.h"
 
 static const CGFloat kPromptSendHeightCollapsed = 32.0;
 static const CGFloat kPromptSendHeightExpanded = 108.0;
@@ -45,6 +46,30 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   return ([modelId length] > 0U) ? modelId : NSLocalizedString(@"Model", nil);
 }
 
+static NSArray *StrappyPromptWebProviders(void)
+{
+  return [NSArray arrayWithObjects:
+    StrappyWebProviderNone,
+    StrappyWebProviderNative,
+    StrappyWebProviderExa,
+    StrappyWebProviderParallel,
+    nil];
+}
+
+static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
+{
+  if ([webProvider isEqualToString:StrappyWebProviderNative]) {
+    return NSLocalizedString(@"Native", nil);
+  }
+  if ([webProvider isEqualToString:StrappyWebProviderExa]) {
+    return @"Exa";
+  }
+  if ([webProvider isEqualToString:StrappyWebProviderParallel]) {
+    return @"Parallel";
+  }
+  return NSLocalizedString(@"None", nil);
+}
+
 @interface StrappyPromptInputBezelView : NSView
 @end
 
@@ -88,8 +113,7 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
 - (void)modelMenuItemClicked:(id)sender;
 - (void)actionSegmentClicked:(id)sender;
 - (void)sendButtonClicked:(id)sender;
-- (void)webSearchMenuItemClicked:(id)sender;
-- (void)paidWebSearchMenuItemClicked:(id)sender;
+- (void)webProviderMenuItemClicked:(id)sender;
 - (void)streamingMenuItemClicked:(id)sender;
 @end
 
@@ -99,7 +123,7 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
 {
   if ((self = [super init])) {
     enabled_ = YES;
-    webSearchEnabled_ = YES;
+    webProvider_ = [StrappyWebProviderNone retain];
   }
   return self;
 }
@@ -197,8 +221,7 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
            object:barView_];
 
   [self setEnabled:enabled_];
-  [self setWebSearchEnabled:webSearchEnabled_];
-  [self setPaidWebSearchEnabled:paidWebSearchEnabled_];
+  [self setWebProvider:webProvider_];
   [self setStreamingEnabled:streamingEnabled_];
 }
 
@@ -301,10 +324,10 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   NSArray *models;
   NSString *selectedModelIdentifier;
   NSString *selectedTitle;
+  NSString *webProvider;
+  NSString *webProviderCopy;
   NSUInteger index;
   BOOL foundSelectedModel;
-  BOOL webSearchEnabled;
-  BOOL paidWebSearchEnabled;
 
   if (optionsMenu_ == nil) {
     return;
@@ -329,21 +352,22 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
 
   foundSelectedModel = NO;
   selectedTitle = nil;
-  webSearchEnabled = webSearchEnabled_;
-  paidWebSearchEnabled = paidWebSearchEnabled_;
+  webProvider = webProvider_;
   if (delegate_ != nil) {
-    webSearchEnabled =
-      [delegate_ webSearchEnabledForPromptSendViewController:self];
-    paidWebSearchEnabled =
-      [delegate_ paidWebSearchEnabledForPromptSendViewController:self];
+    webProvider =
+      [delegate_ webProviderForPromptSendViewController:self];
   }
-  webSearchEnabled_ = webSearchEnabled ? YES : NO;
-  paidWebSearchEnabled_ = paidWebSearchEnabled ? YES : NO;
+  if (![StrappyPromptWebProviders() containsObject:webProvider]) {
+    webProvider = StrappyWebProviderNone;
+  }
+  webProviderCopy = [webProvider copy];
+  [webProvider_ release];
+  webProvider_ = webProviderCopy;
 
-  [webSearchMenuItem_ release];
-  webSearchMenuItem_ = nil;
-  [paidWebSearchMenuItem_ release];
-  paidWebSearchMenuItem_ = nil;
+  [webProviderMenuItem_ release];
+  webProviderMenuItem_ = nil;
+  [webProviderMenu_ release];
+  webProviderMenu_ = nil;
   [streamingMenuItem_ release];
   streamingMenuItem_ = nil;
   while ([optionsMenu_ numberOfItems] > 0) {
@@ -403,16 +427,25 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
     [optionsMenu_ addItem:[NSMenuItem separatorItem]];
   }
 
-  webSearchMenuItem_ = [[optionsMenu_
-      addItemWithTitle:NSLocalizedString(@"Enable Web Search", nil)
-                action:@selector(webSearchMenuItemClicked:)
+  webProviderMenuItem_ = [[optionsMenu_
+      addItemWithTitle:NSLocalizedString(@"Web Search", nil)
+                action:nil
          keyEquivalent:@""] retain];
-  [webSearchMenuItem_ setTarget:self];
-  paidWebSearchMenuItem_ = [[optionsMenu_
-      addItemWithTitle:NSLocalizedString(@"Use Paid Web Search", nil)
-                action:@selector(paidWebSearchMenuItemClicked:)
-         keyEquivalent:@""] retain];
-  [paidWebSearchMenuItem_ setTarget:self];
+  webProviderMenu_ = [[NSMenu alloc]
+    initWithTitle:NSLocalizedString(@"Web Search", nil)];
+  for (index = 0U; index < [StrappyPromptWebProviders() count]; index++) {
+    NSString *provider;
+    NSMenuItem *item;
+
+    provider = [StrappyPromptWebProviders() objectAtIndex:index];
+    item = [webProviderMenu_
+      addItemWithTitle:StrappyPromptWebProviderTitle(provider)
+                action:@selector(webProviderMenuItemClicked:)
+         keyEquivalent:@""];
+    [item setTarget:self];
+    [item setRepresentedObject:provider];
+  }
+  [webProviderMenuItem_ setSubmenu:webProviderMenu_];
 
   streamingMenuItem_ = [[optionsMenu_
       addItemWithTitle:NSLocalizedString(@"Stream Responses", nil)
@@ -456,8 +489,7 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
         [representedObject isEqualToString:selectedModelIdentifier]) {
       [item setState:XPControlStateValueOn];
       selectedTitle = [item title];
-    } else if ((item != webSearchMenuItem_) &&
-               (item != paidWebSearchMenuItem_) &&
+    } else if ((item != webProviderMenuItem_) &&
                (item != streamingMenuItem_)) {
       [item setState:XPControlStateValueOff];
     }
@@ -476,16 +508,20 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   [actionSegmented_ setEnabled:(enabled_ && !sending_)
                     forSegment:kPromptActionSegmentOptions];
   [self selectCurrentModelMenuItem];
-  if (webSearchMenuItem_ != nil) {
-    [webSearchMenuItem_ setEnabled:(enabled_ && !sending_)];
-    [webSearchMenuItem_ setState:(webSearchEnabled_ ?
-      XPControlStateValueOn : XPControlStateValueOff)];
-  }
-  if (paidWebSearchMenuItem_ != nil) {
-    [paidWebSearchMenuItem_ setEnabled:
-      (enabled_ && !sending_ && webSearchEnabled_)];
-    [paidWebSearchMenuItem_ setState:(paidWebSearchEnabled_ ?
-      XPControlStateValueOn : XPControlStateValueOff)];
+  if (webProviderMenuItem_ != nil) {
+    NSInteger count;
+    NSInteger index;
+
+    [webProviderMenuItem_ setEnabled:(enabled_ && !sending_)];
+    count = [webProviderMenu_ numberOfItems];
+    for (index = 0; index < count; index++) {
+      NSMenuItem *item;
+
+      item = [webProviderMenu_ itemAtIndex:index];
+      [item setState:[[item representedObject]
+        isEqualToString:webProvider_] ?
+          XPControlStateValueOn : XPControlStateValueOff];
+    }
   }
   if (streamingMenuItem_ != nil) {
     [streamingMenuItem_ setEnabled:(enabled_ && !sending_)];
@@ -566,15 +602,16 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   [self updateActionControls];
 }
 
-- (void)setWebSearchEnabled:(BOOL)enabled
+- (void)setWebProvider:(NSString *)webProvider
 {
-  webSearchEnabled_ = enabled ? YES : NO;
-  [self updateActionControls];
-}
+  NSString *webProviderCopy;
 
-- (void)setPaidWebSearchEnabled:(BOOL)enabled
-{
-  paidWebSearchEnabled_ = enabled ? YES : NO;
+  if (![StrappyPromptWebProviders() containsObject:webProvider]) {
+    webProvider = StrappyWebProviderNone;
+  }
+  webProviderCopy = [webProvider copy];
+  [webProvider_ release];
+  webProvider_ = webProviderCopy;
   [self updateActionControls];
 }
 
@@ -690,40 +727,27 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
              afterDelay:0.0];
 }
 
-- (void)webSearchMenuItemClicked:(id)sender
+- (void)webProviderMenuItemClicked:(id)sender
 {
-  BOOL enabled;
   BOOL changed;
+  NSString *webProvider;
 
-  (void)sender;
   if (sending_) {
     return;
   }
-  enabled = webSearchEnabled_ ? NO : YES;
-  changed = ((delegate_ != nil) &&
-             [delegate_ promptSendViewController:self
-                              setWebSearchEnabled:enabled]) ? YES : NO;
-  if (changed) {
-    webSearchEnabled_ = enabled;
-  }
-  [self updateActionControls];
-}
-
-- (void)paidWebSearchMenuItemClicked:(id)sender
-{
-  BOOL enabled;
-  BOOL changed;
-
-  (void)sender;
-  if (sending_ || !webSearchEnabled_) {
+  webProvider = [sender representedObject];
+  if (![StrappyPromptWebProviders() containsObject:webProvider]) {
     return;
   }
-  enabled = paidWebSearchEnabled_ ? NO : YES;
   changed = ((delegate_ != nil) &&
              [delegate_ promptSendViewController:self
-                          setPaidWebSearchEnabled:enabled]) ? YES : NO;
+                                   setWebProvider:webProvider]) ? YES : NO;
   if (changed) {
-    paidWebSearchEnabled_ = enabled;
+    NSString *webProviderCopy;
+
+    webProviderCopy = [webProvider copy];
+    [webProvider_ release];
+    webProvider_ = webProviderCopy;
   }
   [self updateActionControls];
 }
@@ -790,8 +814,9 @@ static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
   [textView_ release];
   [actionSegmented_ release];
   [optionsMenu_ release];
-  [webSearchMenuItem_ release];
-  [paidWebSearchMenuItem_ release];
+  [webProviderMenuItem_ release];
+  [webProviderMenu_ release];
+  [webProvider_ release];
   [streamingMenuItem_ release];
   [super dealloc];
 }
