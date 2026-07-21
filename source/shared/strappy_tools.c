@@ -94,13 +94,13 @@ typedef struct strappy_helper_datetime_arguments {
   strappy_cocoa_timestamp_unit unit;
 } strappy_helper_datetime_arguments;
 
-typedef struct strappy_memory_user_fact_remember_arguments {
+typedef struct strappy_memory_save_arguments {
   char *fact;
-} strappy_memory_user_fact_remember_arguments;
+} strappy_memory_save_arguments;
 
-typedef struct strappy_helper_session_name_write_arguments {
+typedef struct strappy_session_rename_arguments {
   char *name;
-} strappy_helper_session_name_write_arguments;
+} strappy_session_rename_arguments;
 
 typedef struct strappy_helper_info_forget_arguments {
   long long id;
@@ -111,18 +111,18 @@ typedef struct strappy_memory_database_hint_remember_arguments {
   char *hint;
 } strappy_memory_database_hint_remember_arguments;
 
-typedef struct strappy_database_context_read_arguments {
+typedef struct strappy_database_context_arguments {
   char *database_id;
-} strappy_database_context_read_arguments;
+} strappy_database_context_arguments;
 
-typedef struct strappy_helper_fontawesome_shortcode_search_arguments {
+typedef struct strappy_fontawesome_search_arguments {
   char *query;
-} strappy_helper_fontawesome_shortcode_search_arguments;
+} strappy_fontawesome_search_arguments;
 
-typedef struct strappy_helper_fontawesome_shortcode_confirm_arguments {
+typedef struct strappy_fontawesome_confirm_arguments {
   char **shortcodes;
   size_t shortcode_count;
-} strappy_helper_fontawesome_shortcode_confirm_arguments;
+} strappy_fontawesome_confirm_arguments;
 
 typedef struct strappy_database_query_authorizer_context {
   int denied_action;
@@ -143,23 +143,23 @@ typedef char *(*strappy_tools_datetime_token_converter)(
 static int strappy_tools_helper_is_space(char value);
 
 static const strappy_tool_definition strappy_tool_definitions[] = {
-  { STRAPPY_TOOL_DATABASE_LIST_INFO, STRAPPY_TOOL_KIND_DATABASE },
+  { STRAPPY_TOOL_DATABASE_LIST, STRAPPY_TOOL_KIND_DATABASE },
   { STRAPPY_TOOL_DATABASE_QUERY, STRAPPY_TOOL_KIND_DATABASE },
   { STRAPPY_TOOL_BASH, STRAPPY_TOOL_KIND_DEVELOPER },
   { STRAPPY_TOOL_FILE_READ, STRAPPY_TOOL_KIND_DEVELOPER },
   { STRAPPY_TOOL_FILE_WRITE, STRAPPY_TOOL_KIND_DEVELOPER },
   { STRAPPY_TOOL_FILE_EDIT, STRAPPY_TOOL_KIND_DEVELOPER },
-  { STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601, STRAPPY_TOOL_KIND_HELPER },
-  { STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601, STRAPPY_TOOL_KIND_HELPER },
-  { STRAPPY_TOOL_MEMORY_USER_FACT_READ, STRAPPY_TOOL_KIND_HELPER },
-  { STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER, STRAPPY_TOOL_KIND_HELPER },
-  { STRAPPY_TOOL_MEMORY_USER_FACT_FORGET, STRAPPY_TOOL_KIND_HELPER },
-  { STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE, STRAPPY_TOOL_KIND_HELPER },
-  { STRAPPY_TOOL_DATABASE_CONTEXT_READ, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_DATETIME_TO_ISO8601, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_DATETIME_FROM_ISO8601, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_MEMORY_READ, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_MEMORY_SAVE, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_MEMORY_DELETE, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_SESSION_RENAME, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_DATABASE_CONTEXT, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET, STRAPPY_TOOL_KIND_HELPER },
-  { STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH, STRAPPY_TOOL_KIND_HELPER },
-  { STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM, STRAPPY_TOOL_KIND_HELPER }
+  { STRAPPY_TOOL_FONTAWESOME_SEARCH, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_FONTAWESOME_CONFIRM, STRAPPY_TOOL_KIND_HELPER }
 };
 
 static const size_t strappy_tool_definition_count =
@@ -283,8 +283,8 @@ static void strappy_helper_datetime_arguments_destroy(
   strappy_helper_datetime_arguments_init(arguments);
 }
 
-static void strappy_memory_user_fact_remember_arguments_init(
-  strappy_memory_user_fact_remember_arguments *arguments)
+static void strappy_memory_save_arguments_init(
+  strappy_memory_save_arguments *arguments)
 {
   if (arguments == NULL) {
     return;
@@ -293,19 +293,19 @@ static void strappy_memory_user_fact_remember_arguments_init(
   arguments->fact = NULL;
 }
 
-static void strappy_memory_user_fact_remember_arguments_destroy(
-  strappy_memory_user_fact_remember_arguments *arguments)
+static void strappy_memory_save_arguments_destroy(
+  strappy_memory_save_arguments *arguments)
 {
   if (arguments == NULL) {
     return;
   }
 
   free(arguments->fact);
-  strappy_memory_user_fact_remember_arguments_init(arguments);
+  strappy_memory_save_arguments_init(arguments);
 }
 
-static void strappy_helper_session_name_write_arguments_init(
-  strappy_helper_session_name_write_arguments *arguments)
+static void strappy_session_rename_arguments_init(
+  strappy_session_rename_arguments *arguments)
 {
   if (arguments == NULL) {
     return;
@@ -314,15 +314,15 @@ static void strappy_helper_session_name_write_arguments_init(
   arguments->name = NULL;
 }
 
-static void strappy_helper_session_name_write_arguments_destroy(
-  strappy_helper_session_name_write_arguments *arguments)
+static void strappy_session_rename_arguments_destroy(
+  strappy_session_rename_arguments *arguments)
 {
   if (arguments == NULL) {
     return;
   }
 
   free(arguments->name);
-  strappy_helper_session_name_write_arguments_init(arguments);
+  strappy_session_rename_arguments_init(arguments);
 }
 
 static void strappy_helper_info_forget_arguments_init(
@@ -358,8 +358,8 @@ static void strappy_memory_database_hint_remember_arguments_destroy(
   strappy_memory_database_hint_remember_arguments_init(arguments);
 }
 
-static void strappy_database_context_read_arguments_init(
-  strappy_database_context_read_arguments *arguments)
+static void strappy_database_context_arguments_init(
+  strappy_database_context_arguments *arguments)
 {
   if (arguments == NULL) {
     return;
@@ -368,19 +368,19 @@ static void strappy_database_context_read_arguments_init(
   arguments->database_id = NULL;
 }
 
-static void strappy_database_context_read_arguments_destroy(
-  strappy_database_context_read_arguments *arguments)
+static void strappy_database_context_arguments_destroy(
+  strappy_database_context_arguments *arguments)
 {
   if (arguments == NULL) {
     return;
   }
 
   free(arguments->database_id);
-  strappy_database_context_read_arguments_init(arguments);
+  strappy_database_context_arguments_init(arguments);
 }
 
-static void strappy_helper_fontawesome_shortcode_search_arguments_init(
-  strappy_helper_fontawesome_shortcode_search_arguments *arguments)
+static void strappy_fontawesome_search_arguments_init(
+  strappy_fontawesome_search_arguments *arguments)
 {
   if (arguments == NULL) {
     return;
@@ -389,19 +389,19 @@ static void strappy_helper_fontawesome_shortcode_search_arguments_init(
   arguments->query = NULL;
 }
 
-static void strappy_helper_fontawesome_shortcode_search_arguments_destroy(
-  strappy_helper_fontawesome_shortcode_search_arguments *arguments)
+static void strappy_fontawesome_search_arguments_destroy(
+  strappy_fontawesome_search_arguments *arguments)
 {
   if (arguments == NULL) {
     return;
   }
 
   free(arguments->query);
-  strappy_helper_fontawesome_shortcode_search_arguments_init(arguments);
+  strappy_fontawesome_search_arguments_init(arguments);
 }
 
-static void strappy_helper_fontawesome_shortcode_confirm_arguments_init(
-  strappy_helper_fontawesome_shortcode_confirm_arguments *arguments)
+static void strappy_fontawesome_confirm_arguments_init(
+  strappy_fontawesome_confirm_arguments *arguments)
 {
   if (arguments == NULL) {
     return;
@@ -411,8 +411,8 @@ static void strappy_helper_fontawesome_shortcode_confirm_arguments_init(
   arguments->shortcode_count = 0U;
 }
 
-static void strappy_helper_fontawesome_shortcode_confirm_arguments_destroy(
-  strappy_helper_fontawesome_shortcode_confirm_arguments *arguments)
+static void strappy_fontawesome_confirm_arguments_destroy(
+  strappy_fontawesome_confirm_arguments *arguments)
 {
   size_t index;
 
@@ -424,7 +424,7 @@ static void strappy_helper_fontawesome_shortcode_confirm_arguments_destroy(
     free(arguments->shortcodes[index]);
   }
   free(arguments->shortcodes);
-  strappy_helper_fontawesome_shortcode_confirm_arguments_init(arguments);
+  strappy_fontawesome_confirm_arguments_init(arguments);
 }
 
 static char *strappy_tools_resource_path(const char *resource_dir,
@@ -2657,9 +2657,9 @@ static int strappy_tools_parse_helper_datetime_arguments(
   return 1;
 }
 
-static int strappy_tools_parse_memory_user_fact_remember_arguments(
+static int strappy_tools_parse_memory_save_arguments(
   const char *arguments_json,
-  strappy_memory_user_fact_remember_arguments *arguments,
+  strappy_memory_save_arguments *arguments,
   char **error_out)
 {
   static const char *const allowed_names[] = { "fact" };
@@ -2668,13 +2668,13 @@ static int strappy_tools_parse_memory_user_fact_remember_arguments(
 
   if (arguments == NULL) {
     strappy_set_error(error_out,
-                      "memory_user_fact_remember argument output is missing.");
+                      "memory_save argument output is missing.");
     return 0;
   }
-  strappy_memory_user_fact_remember_arguments_init(arguments);
+  strappy_memory_save_arguments_init(arguments);
 
   root = strappy_tools_parse_arguments_object(
-    STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+    STRAPPY_TOOL_MEMORY_SAVE,
     arguments_json,
     error_out);
   if (root == NULL) {
@@ -2683,12 +2683,12 @@ static int strappy_tools_parse_memory_user_fact_remember_arguments(
 
   ok = strappy_tools_json_object_accepts_only(
          root,
-         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+         STRAPPY_TOOL_MEMORY_SAVE,
          allowed_names,
          sizeof(allowed_names) / sizeof(allowed_names[0]),
          error_out) &&
        strappy_tools_copy_required_action_string_argument(
-         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+         STRAPPY_TOOL_MEMORY_SAVE,
          root,
          "fact",
          STRAPPY_HELPER_INFO_MAX_VALUE_BYTES,
@@ -2696,14 +2696,14 @@ static int strappy_tools_parse_memory_user_fact_remember_arguments(
          error_out);
   cJSON_Delete(root);
   if (!ok) {
-    strappy_memory_user_fact_remember_arguments_destroy(arguments);
+    strappy_memory_save_arguments_destroy(arguments);
   }
   return ok;
 }
 
-static int strappy_tools_parse_helper_session_name_write_arguments(
+static int strappy_tools_parse_session_rename_arguments(
   const char *arguments_json,
-  strappy_helper_session_name_write_arguments *arguments,
+  strappy_session_rename_arguments *arguments,
   char **error_out)
 {
   static const char *const allowed_names[] = { "name" };
@@ -2713,13 +2713,13 @@ static int strappy_tools_parse_helper_session_name_write_arguments(
   if (arguments == NULL) {
     strappy_set_error(
       error_out,
-      "helper_session_name_write argument output is missing.");
+      "session_rename argument output is missing.");
     return 0;
   }
-  strappy_helper_session_name_write_arguments_init(arguments);
+  strappy_session_rename_arguments_init(arguments);
 
   root = strappy_tools_parse_arguments_object(
-    STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+    STRAPPY_TOOL_SESSION_RENAME,
     arguments_json,
     error_out);
   if (root == NULL) {
@@ -2728,12 +2728,12 @@ static int strappy_tools_parse_helper_session_name_write_arguments(
 
   ok = strappy_tools_json_object_accepts_only(
          root,
-         STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+         STRAPPY_TOOL_SESSION_RENAME,
          allowed_names,
          sizeof(allowed_names) / sizeof(allowed_names[0]),
          error_out) &&
        strappy_tools_copy_string_argument(
-         STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+         STRAPPY_TOOL_SESSION_RENAME,
          root,
          "name",
          1,
@@ -2742,14 +2742,14 @@ static int strappy_tools_parse_helper_session_name_write_arguments(
          error_out);
   cJSON_Delete(root);
   if (!ok) {
-    strappy_helper_session_name_write_arguments_destroy(arguments);
+    strappy_session_rename_arguments_destroy(arguments);
   }
   return ok;
 }
 
-static int strappy_tools_parse_database_context_read_arguments(
+static int strappy_tools_parse_database_context_arguments(
   const char *arguments_json,
-  strappy_database_context_read_arguments *arguments,
+  strappy_database_context_arguments *arguments,
   char **error_out)
 {
   static const char *const allowed_names[] = { "database_id" };
@@ -2758,13 +2758,13 @@ static int strappy_tools_parse_database_context_read_arguments(
 
   if (arguments == NULL) {
     strappy_set_error(error_out,
-                      "database_context_read argument output is missing.");
+                      "database_context argument output is missing.");
     return 0;
   }
-  strappy_database_context_read_arguments_init(arguments);
+  strappy_database_context_arguments_init(arguments);
 
   root = strappy_tools_parse_arguments_object(
-    STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+    STRAPPY_TOOL_DATABASE_CONTEXT,
     arguments_json,
     error_out);
   if (root == NULL) {
@@ -2773,12 +2773,12 @@ static int strappy_tools_parse_database_context_read_arguments(
 
   ok = strappy_tools_json_object_accepts_only(
          root,
-         STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+         STRAPPY_TOOL_DATABASE_CONTEXT,
          allowed_names,
          sizeof(allowed_names) / sizeof(allowed_names[0]),
          error_out) &&
        strappy_tools_copy_required_action_string_argument(
-         STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+         STRAPPY_TOOL_DATABASE_CONTEXT,
          root,
          "database_id",
          STRAPPY_HELPER_INFO_MAX_SHORT_BYTES,
@@ -2786,15 +2786,15 @@ static int strappy_tools_parse_database_context_read_arguments(
          error_out);
   cJSON_Delete(root);
   if (!ok) {
-    strappy_database_context_read_arguments_destroy(arguments);
+    strappy_database_context_arguments_destroy(arguments);
     return 0;
   }
   return 1;
 }
 
-static int strappy_tools_parse_helper_fontawesome_shortcode_search_arguments(
+static int strappy_tools_parse_fontawesome_search_arguments(
   const char *arguments_json,
-  strappy_helper_fontawesome_shortcode_search_arguments *arguments,
+  strappy_fontawesome_search_arguments *arguments,
   char **error_out)
 {
   static const char *const allowed_names[] = { "query" };
@@ -2804,13 +2804,13 @@ static int strappy_tools_parse_helper_fontawesome_shortcode_search_arguments(
   if (arguments == NULL) {
     strappy_set_error(
       error_out,
-      "helper_fontawesome_shortcode_search argument output is missing.");
+      "fontawesome_search argument output is missing.");
     return 0;
   }
-  strappy_helper_fontawesome_shortcode_search_arguments_init(arguments);
+  strappy_fontawesome_search_arguments_init(arguments);
 
   root = strappy_tools_parse_arguments_object(
-    STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+    STRAPPY_TOOL_FONTAWESOME_SEARCH,
     arguments_json,
     error_out);
   if (root == NULL) {
@@ -2819,12 +2819,12 @@ static int strappy_tools_parse_helper_fontawesome_shortcode_search_arguments(
 
   ok = strappy_tools_json_object_accepts_only(
          root,
-         STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+         STRAPPY_TOOL_FONTAWESOME_SEARCH,
          allowed_names,
          sizeof(allowed_names) / sizeof(allowed_names[0]),
          error_out) &&
        strappy_tools_copy_string_argument(
-         STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+         STRAPPY_TOOL_FONTAWESOME_SEARCH,
          root,
          "query",
          1,
@@ -2833,22 +2833,22 @@ static int strappy_tools_parse_helper_fontawesome_shortcode_search_arguments(
          error_out);
   cJSON_Delete(root);
   if (!ok) {
-    strappy_helper_fontawesome_shortcode_search_arguments_destroy(arguments);
+    strappy_fontawesome_search_arguments_destroy(arguments);
     return 0;
   }
   if (!strappy_tools_string_has_non_whitespace(arguments->query)) {
-    strappy_helper_fontawesome_shortcode_search_arguments_destroy(arguments);
+    strappy_fontawesome_search_arguments_destroy(arguments);
     strappy_set_error(
       error_out,
-      "helper_fontawesome_shortcode_search query must not be blank.");
+      "fontawesome_search query must not be blank.");
     return 0;
   }
   return 1;
 }
 
-static int strappy_tools_parse_helper_fontawesome_shortcode_confirm_arguments(
+static int strappy_tools_parse_fontawesome_confirm_arguments(
   const char *arguments_json,
-  strappy_helper_fontawesome_shortcode_confirm_arguments *arguments,
+  strappy_fontawesome_confirm_arguments *arguments,
   char **error_out)
 {
   static const char *const allowed_names[] = {
@@ -2863,13 +2863,13 @@ static int strappy_tools_parse_helper_fontawesome_shortcode_confirm_arguments(
   if (arguments == NULL) {
     strappy_set_error(
       error_out,
-      "helper_fontawesome_shortcode_confirm argument output is missing.");
+      "fontawesome_confirm argument output is missing.");
     return 0;
   }
-  strappy_helper_fontawesome_shortcode_confirm_arguments_init(arguments);
+  strappy_fontawesome_confirm_arguments_init(arguments);
 
   root = strappy_tools_parse_arguments_object(
-    STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+    STRAPPY_TOOL_FONTAWESOME_CONFIRM,
     arguments_json,
     error_out);
   if (root == NULL) {
@@ -2878,7 +2878,7 @@ static int strappy_tools_parse_helper_fontawesome_shortcode_confirm_arguments(
 
   if (!strappy_tools_json_object_accepts_only(
         root,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        STRAPPY_TOOL_FONTAWESOME_CONFIRM,
         allowed_names,
         sizeof(allowed_names) / sizeof(allowed_names[0]),
         error_out)) {
@@ -2891,7 +2891,7 @@ static int strappy_tools_parse_helper_fontawesome_shortcode_confirm_arguments(
     cJSON_Delete(root);
     strappy_set_error(
       error_out,
-      "helper_fontawesome_shortcode_confirm requires a shortcodes array.");
+      "fontawesome_confirm requires a shortcodes array.");
     return 0;
   }
 
@@ -2901,7 +2901,7 @@ static int strappy_tools_parse_helper_fontawesome_shortcode_confirm_arguments(
     cJSON_Delete(root);
     strappy_set_formatted_error(
       error_out,
-      "helper_fontawesome_shortcode_confirm shortcodes must contain 1 to %u items.",
+      "fontawesome_confirm shortcodes must contain 1 to %u items.",
       (unsigned int)STRAPPY_HELPER_FONTAWESOME_MAX_SHORTCODES);
     return 0;
   }
@@ -2920,20 +2920,20 @@ static int strappy_tools_parse_helper_fontawesome_shortcode_confirm_arguments(
 
     if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
       cJSON_Delete(root);
-      strappy_helper_fontawesome_shortcode_confirm_arguments_destroy(arguments);
+      strappy_fontawesome_confirm_arguments_destroy(arguments);
       strappy_set_error(
         error_out,
-        "helper_fontawesome_shortcode_confirm shortcodes must be strings.");
+        "fontawesome_confirm shortcodes must be strings.");
       return 0;
     }
 
     length = strlen(item->valuestring);
     if (length > STRAPPY_HELPER_FONTAWESOME_MAX_SHORTCODE_BYTES) {
       cJSON_Delete(root);
-      strappy_helper_fontawesome_shortcode_confirm_arguments_destroy(arguments);
+      strappy_fontawesome_confirm_arguments_destroy(arguments);
       strappy_set_formatted_error(
         error_out,
-        "helper_fontawesome_shortcode_confirm shortcode is too long; maximum is %u bytes.",
+        "fontawesome_confirm shortcode is too long; maximum is %u bytes.",
         (unsigned int)STRAPPY_HELPER_FONTAWESOME_MAX_SHORTCODE_BYTES);
       return 0;
     }
@@ -2941,7 +2941,7 @@ static int strappy_tools_parse_helper_fontawesome_shortcode_confirm_arguments(
     arguments->shortcodes[index] = strappy_string_duplicate(item->valuestring);
     if (arguments->shortcodes[index] == NULL) {
       cJSON_Delete(root);
-      strappy_helper_fontawesome_shortcode_confirm_arguments_destroy(arguments);
+      strappy_fontawesome_confirm_arguments_destroy(arguments);
       strappy_set_error(error_out,
                         "Could not allocate Font Awesome shortcode argument.");
       return 0;
@@ -3071,7 +3071,7 @@ static char *strappy_tools_copy_normalized_session_name(const char *name,
     free(normalized);
     strappy_set_formatted_error(
       error_out,
-      "helper_session_name_write name is too long; maximum is %u bytes.",
+      "session_rename name is too long; maximum is %u bytes.",
       (unsigned int)STRAPPY_HELPER_SESSION_NAME_MAX_BYTES);
     return NULL;
   }
@@ -3553,7 +3553,7 @@ static char *strappy_tools_read_user_info(sqlite3 *db, char **error_out)
   int rc;
 
   if (db == NULL) {
-    strappy_set_error(error_out, "memory_user_fact_read request is incomplete.");
+    strappy_set_error(error_out, "memory_read request is incomplete.");
     return NULL;
   }
 
@@ -3561,7 +3561,7 @@ static char *strappy_tools_read_user_info(sqlite3 *db, char **error_out)
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
-                                "Could not prepare memory_user_fact_read: %s",
+                                "Could not prepare memory_read: %s",
                                 sqlite3_errmsg(db));
     return NULL;
   }
@@ -3570,7 +3570,7 @@ static char *strappy_tools_read_user_info(sqlite3 *db, char **error_out)
       SQLITE_OK) {
     sqlite3_finalize(stmt);
     strappy_set_formatted_error(error_out,
-                                "Could not bind memory_user_fact_read: %s",
+                                "Could not bind memory_read: %s",
                                 sqlite3_errmsg(db));
     return NULL;
   }
@@ -3612,7 +3612,7 @@ static char *strappy_tools_read_user_info(sqlite3 *db, char **error_out)
 
 static char *strappy_tools_remember_user_info(
   sqlite3 *db,
-  const strappy_memory_user_fact_remember_arguments *arguments,
+  const strappy_memory_save_arguments *arguments,
   long long source_item_id,
   char **error_out)
 {
@@ -3627,7 +3627,7 @@ static char *strappy_tools_remember_user_info(
 
   if ((db == NULL) || (arguments == NULL) || (arguments->fact == NULL)) {
     strappy_set_error(error_out,
-                      "memory_user_fact_remember request is incomplete.");
+                      "memory_save request is incomplete.");
     return NULL;
   }
 
@@ -3635,7 +3635,7 @@ static char *strappy_tools_remember_user_info(
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
-                                "Could not prepare memory_user_fact_remember: %s",
+                                "Could not prepare memory_save: %s",
                                 sqlite3_errmsg(db));
     return NULL;
   }
@@ -3655,7 +3655,7 @@ static char *strappy_tools_remember_user_info(
     sqlite3_finalize(stmt);
     if ((error_out != NULL) && (*error_out == NULL)) {
       strappy_set_formatted_error(error_out,
-                                  "Could not bind memory_user_fact_remember: %s",
+                                  "Could not bind memory_save: %s",
                                   sqlite3_errmsg(db));
     }
     return NULL;
@@ -3944,7 +3944,7 @@ static char *strappy_tools_read_database_info(
   if ((catalog_db == NULL) || (record == NULL) ||
       !strappy_tools_string_has_value(record->path)) {
     strappy_set_error(error_out,
-                      "database_context_read request is incomplete.");
+                      "database_context request is incomplete.");
     return NULL;
   }
 
@@ -4135,7 +4135,7 @@ static char *strappy_tools_remember_database_info(
   return strappy_tools_build_empty_result(error_out);
 }
 
-static int strappy_tools_add_database_list_info_record(
+static int strappy_tools_add_database_list_record(
   cJSON *databases,
   const strappy_discovered_database_record *record,
   char **error_out)
@@ -5264,24 +5264,24 @@ static char *strappy_tools_execute_helper_datetime(
   return json;
 }
 
-static char *strappy_tools_execute_helper_datetime_to_iso8601(
+static char *strappy_tools_execute_datetime_to_iso8601(
   const char *arguments_json,
   char **error_out)
 {
   return strappy_tools_execute_helper_datetime(
-    STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+    STRAPPY_TOOL_DATETIME_TO_ISO8601,
     arguments_json,
     "timestamps",
     strappy_tools_convert_timestamp_token_to_iso8601,
     error_out);
 }
 
-static char *strappy_tools_execute_helper_datetime_from_iso8601(
+static char *strappy_tools_execute_datetime_from_iso8601(
   const char *arguments_json,
   char **error_out)
 {
   return strappy_tools_execute_helper_datetime(
-    STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+    STRAPPY_TOOL_DATETIME_FROM_ISO8601,
     arguments_json,
     "datetimes",
     strappy_tools_convert_iso8601_token_to_timestamp,
@@ -5470,7 +5470,7 @@ static int strappy_tools_fontawesome_string_array_score(cJSON *icon,
 
 static int strappy_tools_fontawesome_icon_score(
   cJSON *icon,
-  const strappy_helper_fontawesome_shortcode_search_arguments *arguments,
+  const strappy_fontawesome_search_arguments *arguments,
   char **error_out)
 {
   cJSON *name;
@@ -5650,12 +5650,12 @@ static void strappy_tools_fontawesome_clear_candidates(cJSON **candidates,
   }
 }
 
-static char *strappy_tools_execute_helper_fontawesome_shortcode_search(
+static char *strappy_tools_execute_fontawesome_search(
   const char *resource_dir,
   const char *arguments_json,
   char **error_out)
 {
-  strappy_helper_fontawesome_shortcode_search_arguments arguments;
+  strappy_fontawesome_search_arguments arguments;
   cJSON *catalog;
   cJSON *catalog_icons;
   cJSON *catalog_icon;
@@ -5666,8 +5666,8 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_search(
   int candidate_count;
   char *json;
 
-  strappy_helper_fontawesome_shortcode_search_arguments_init(&arguments);
-  if (!strappy_tools_parse_helper_fontawesome_shortcode_search_arguments(
+  strappy_fontawesome_search_arguments_init(&arguments);
+  if (!strappy_tools_parse_fontawesome_search_arguments(
         arguments_json,
         &arguments,
         error_out)) {
@@ -5678,14 +5678,14 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_search(
                                              STRAPPY_FONTAWESOME_ICONS_RESOURCE,
                                              error_out);
   if (catalog == NULL) {
-    strappy_helper_fontawesome_shortcode_search_arguments_destroy(&arguments);
+    strappy_fontawesome_search_arguments_destroy(&arguments);
     return NULL;
   }
 
   catalog_icons = cJSON_GetObjectItemCaseSensitive(catalog, "icons");
   if (!cJSON_IsArray(catalog_icons)) {
     cJSON_Delete(catalog);
-    strappy_helper_fontawesome_shortcode_search_arguments_destroy(&arguments);
+    strappy_fontawesome_search_arguments_destroy(&arguments);
     strappy_set_error(error_out,
                       "Font Awesome icon resource must contain an icons array.");
     return NULL;
@@ -5710,7 +5710,7 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_search(
     if (score < 0) {
       strappy_tools_fontawesome_clear_candidates(candidates, candidate_count);
       cJSON_Delete(catalog);
-      strappy_helper_fontawesome_shortcode_search_arguments_destroy(&arguments);
+      strappy_fontawesome_search_arguments_destroy(&arguments);
       return NULL;
     }
     if (score > 0) {
@@ -5723,7 +5723,7 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_search(
                                                    error_out)) {
         strappy_tools_fontawesome_clear_candidates(candidates, candidate_count);
         cJSON_Delete(catalog);
-        strappy_helper_fontawesome_shortcode_search_arguments_destroy(&arguments);
+        strappy_fontawesome_search_arguments_destroy(&arguments);
         return NULL;
       }
     }
@@ -5733,7 +5733,7 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_search(
   if (root == NULL) {
     strappy_tools_fontawesome_clear_candidates(candidates, candidate_count);
     cJSON_Delete(catalog);
-    strappy_helper_fontawesome_shortcode_search_arguments_destroy(&arguments);
+    strappy_fontawesome_search_arguments_destroy(&arguments);
     strappy_set_error(error_out,
                       "Could not allocate Font Awesome search result.");
     return NULL;
@@ -5746,7 +5746,7 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_search(
       cJSON_Delete(root);
       strappy_tools_fontawesome_clear_candidates(candidates, candidate_count);
       cJSON_Delete(catalog);
-      strappy_helper_fontawesome_shortcode_search_arguments_destroy(&arguments);
+      strappy_fontawesome_search_arguments_destroy(&arguments);
       strappy_set_error(error_out,
                         "Could not add Font Awesome shortcode to search result.");
       return NULL;
@@ -5757,7 +5757,7 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_search(
   json = cJSON_PrintUnformatted(root);
   cJSON_Delete(root);
   cJSON_Delete(catalog);
-  strappy_helper_fontawesome_shortcode_search_arguments_destroy(&arguments);
+  strappy_fontawesome_search_arguments_destroy(&arguments);
   if (json == NULL) {
     strappy_set_error(error_out,
                       "Could not serialize Font Awesome search result.");
@@ -5767,12 +5767,12 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_search(
   return json;
 }
 
-static char *strappy_tools_execute_helper_fontawesome_shortcode_confirm(
+static char *strappy_tools_execute_fontawesome_confirm(
   const char *resource_dir,
   const char *arguments_json,
   char **error_out)
 {
-  strappy_helper_fontawesome_shortcode_confirm_arguments arguments;
+  strappy_fontawesome_confirm_arguments arguments;
   cJSON *catalog;
   cJSON *catalog_icons;
   cJSON *root;
@@ -5781,8 +5781,8 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_confirm(
   size_t index;
   char *json;
 
-  strappy_helper_fontawesome_shortcode_confirm_arguments_init(&arguments);
-  if (!strappy_tools_parse_helper_fontawesome_shortcode_confirm_arguments(
+  strappy_fontawesome_confirm_arguments_init(&arguments);
+  if (!strappy_tools_parse_fontawesome_confirm_arguments(
         arguments_json,
         &arguments,
         error_out)) {
@@ -5793,14 +5793,14 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_confirm(
                                              STRAPPY_FONTAWESOME_ICONS_RESOURCE,
                                              error_out);
   if (catalog == NULL) {
-    strappy_helper_fontawesome_shortcode_confirm_arguments_destroy(&arguments);
+    strappy_fontawesome_confirm_arguments_destroy(&arguments);
     return NULL;
   }
 
   catalog_icons = cJSON_GetObjectItemCaseSensitive(catalog, "icons");
   if (!cJSON_IsArray(catalog_icons)) {
     cJSON_Delete(catalog);
-    strappy_helper_fontawesome_shortcode_confirm_arguments_destroy(&arguments);
+    strappy_fontawesome_confirm_arguments_destroy(&arguments);
     strappy_set_error(error_out,
                       "Font Awesome icon resource must contain an icons array.");
     return NULL;
@@ -5814,7 +5814,7 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_confirm(
     cJSON_Delete(confirmed);
     cJSON_Delete(root);
     cJSON_Delete(catalog);
-    strappy_helper_fontawesome_shortcode_confirm_arguments_destroy(&arguments);
+    strappy_fontawesome_confirm_arguments_destroy(&arguments);
     strappy_set_error(error_out,
                       "Could not allocate Font Awesome confirm result.");
     return NULL;
@@ -5825,7 +5825,7 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_confirm(
     cJSON_Delete(confirmed);
     cJSON_Delete(root);
     cJSON_Delete(catalog);
-    strappy_helper_fontawesome_shortcode_confirm_arguments_destroy(&arguments);
+    strappy_fontawesome_confirm_arguments_destroy(&arguments);
     strappy_set_error(error_out, "Could not build Font Awesome confirm result.");
     return NULL;
   }
@@ -5835,7 +5835,7 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_confirm(
     cJSON_Delete(not_found);
     cJSON_Delete(root);
     cJSON_Delete(catalog);
-    strappy_helper_fontawesome_shortcode_confirm_arguments_destroy(&arguments);
+    strappy_fontawesome_confirm_arguments_destroy(&arguments);
     strappy_set_error(error_out, "Could not build Font Awesome confirm result.");
     return NULL;
   }
@@ -5853,7 +5853,7 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_confirm(
                                                           error_out)) {
       cJSON_Delete(root);
       cJSON_Delete(catalog);
-      strappy_helper_fontawesome_shortcode_confirm_arguments_destroy(&arguments);
+      strappy_fontawesome_confirm_arguments_destroy(&arguments);
       return NULL;
     }
 
@@ -5865,7 +5865,7 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_confirm(
       cJSON_Delete(item);
       cJSON_Delete(root);
       cJSON_Delete(catalog);
-      strappy_helper_fontawesome_shortcode_confirm_arguments_destroy(&arguments);
+      strappy_fontawesome_confirm_arguments_destroy(&arguments);
       strappy_set_error(error_out,
                         "Could not add shortcode to Font Awesome confirm result.");
       return NULL;
@@ -5875,7 +5875,7 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_confirm(
   json = cJSON_PrintUnformatted(root);
   cJSON_Delete(root);
   cJSON_Delete(catalog);
-  strappy_helper_fontawesome_shortcode_confirm_arguments_destroy(&arguments);
+  strappy_fontawesome_confirm_arguments_destroy(&arguments);
   if (json == NULL) {
     strappy_set_error(error_out,
                       "Could not serialize Font Awesome confirm result.");
@@ -5885,7 +5885,7 @@ static char *strappy_tools_execute_helper_fontawesome_shortcode_confirm(
   return json;
 }
 
-static char *strappy_tools_execute_memory_user_fact_read(
+static char *strappy_tools_execute_memory_read(
   const char *session_db_path,
   const char *arguments_json,
   char **error_out)
@@ -5894,7 +5894,7 @@ static char *strappy_tools_execute_memory_user_fact_read(
   char *json;
 
   if (!strappy_tools_validate_empty_arguments(
-        STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+        STRAPPY_TOOL_MEMORY_READ,
         arguments_json,
         error_out)) {
     return NULL;
@@ -5912,20 +5912,20 @@ static char *strappy_tools_execute_memory_user_fact_read(
   return json;
 }
 
-static char *strappy_tools_execute_memory_user_fact_remember(
+static char *strappy_tools_execute_memory_save(
   const char *session_db_path,
   long long active_session_id,
   const char *provider_call_id,
   const char *arguments_json,
   char **error_out)
 {
-  strappy_memory_user_fact_remember_arguments arguments;
+  strappy_memory_save_arguments arguments;
   sqlite3 *db;
   char *json;
   long long source_item_id;
 
-  strappy_memory_user_fact_remember_arguments_init(&arguments);
-  if (!strappy_tools_parse_memory_user_fact_remember_arguments(arguments_json,
+  strappy_memory_save_arguments_init(&arguments);
+  if (!strappy_tools_parse_memory_save_arguments(arguments_json,
                                                                &arguments,
                                                                error_out)) {
     return NULL;
@@ -5934,7 +5934,7 @@ static char *strappy_tools_execute_memory_user_fact_remember(
   if (!strappy_tools_open_helper_info_database(session_db_path,
                                                &db,
                                                error_out)) {
-    strappy_memory_user_fact_remember_arguments_destroy(&arguments);
+    strappy_memory_save_arguments_destroy(&arguments);
     return NULL;
   }
 
@@ -5945,7 +5945,7 @@ static char *strappy_tools_execute_memory_user_fact_remember(
                                             &source_item_id,
                                             error_out)) {
     sqlite3_close(db);
-    strappy_memory_user_fact_remember_arguments_destroy(&arguments);
+    strappy_memory_save_arguments_destroy(&arguments);
     return NULL;
   }
   json = strappy_tools_remember_user_info(db,
@@ -5953,11 +5953,11 @@ static char *strappy_tools_execute_memory_user_fact_remember(
                                           source_item_id,
                                           error_out);
   sqlite3_close(db);
-  strappy_memory_user_fact_remember_arguments_destroy(&arguments);
+  strappy_memory_save_arguments_destroy(&arguments);
   return json;
 }
 
-static char *strappy_tools_execute_memory_user_fact_forget(
+static char *strappy_tools_execute_memory_delete(
   const char *session_db_path,
   const char *arguments_json,
   char **error_out)
@@ -5966,7 +5966,7 @@ static char *strappy_tools_execute_memory_user_fact_forget(
   sqlite3 *db;
   char *json;
 
-  if (!strappy_tools_parse_id_argument(STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
+  if (!strappy_tools_parse_id_argument(STRAPPY_TOOL_MEMORY_DELETE,
                                        arguments_json,
                                        &arguments,
                                        error_out)) {
@@ -5988,31 +5988,31 @@ static char *strappy_tools_execute_memory_user_fact_forget(
   return json;
 }
 
-static char *strappy_tools_execute_helper_session_name_write(
+static char *strappy_tools_execute_session_rename(
   const char *session_db_path,
   long long active_session_id,
   const char *arguments_json,
   char **error_out)
 {
-  strappy_helper_session_name_write_arguments arguments;
+  strappy_session_rename_arguments arguments;
   char *name;
   char *json;
 
   if (active_session_id <= 0) {
     strappy_set_error(error_out,
-                      "helper_session_name_write requires an active session.");
+                      "session_rename requires an active session.");
     return NULL;
   }
 
-  strappy_helper_session_name_write_arguments_init(&arguments);
-  if (!strappy_tools_parse_helper_session_name_write_arguments(arguments_json,
+  strappy_session_rename_arguments_init(&arguments);
+  if (!strappy_tools_parse_session_rename_arguments(arguments_json,
                                                                &arguments,
                                                                error_out)) {
     return NULL;
   }
 
   name = strappy_tools_copy_normalized_session_name(arguments.name, error_out);
-  strappy_helper_session_name_write_arguments_destroy(&arguments);
+  strappy_session_rename_arguments_destroy(&arguments);
   if (name == NULL) {
     return NULL;
   }
@@ -6030,20 +6030,20 @@ static char *strappy_tools_execute_helper_session_name_write(
   return json;
 }
 
-static char *strappy_tools_execute_database_context_read(
+static char *strappy_tools_execute_database_context(
   const char *session_db_path,
   const char *arguments_json,
   char **error_out)
 {
-  strappy_database_context_read_arguments arguments;
+  strappy_database_context_arguments arguments;
   strappy_discovered_database_record_list list;
   const strappy_discovered_database_record *record;
   sqlite3 *db;
   char *json;
   int matched_unavailable;
 
-  strappy_database_context_read_arguments_init(&arguments);
-  if (!strappy_tools_parse_database_context_read_arguments(arguments_json,
+  strappy_database_context_arguments_init(&arguments);
+  if (!strappy_tools_parse_database_context_arguments(arguments_json,
                                                                &arguments,
                                                                error_out)) {
     return NULL;
@@ -6053,7 +6053,7 @@ static char *strappy_tools_execute_database_context_read(
   if (!strappy_db_list_discovered_databases(session_db_path,
                                            &list,
                                            error_out)) {
-    strappy_database_context_read_arguments_destroy(&arguments);
+    strappy_database_context_arguments_destroy(&arguments);
     return NULL;
   }
 
@@ -6064,14 +6064,14 @@ static char *strappy_tools_execute_database_context_read(
   if (record == NULL) {
     if (matched_unavailable) {
       strappy_set_error(error_out,
-                        "database_context_read database_id is not approved "
+                        "database_context database_id is not approved "
                         "or is no longer valid.");
     } else {
       strappy_set_error(error_out,
-                        "database_context_read database_id was not found.");
+                        "database_context database_id was not found.");
     }
     strappy_discovered_database_record_list_destroy(&list);
-    strappy_database_context_read_arguments_destroy(&arguments);
+    strappy_database_context_arguments_destroy(&arguments);
     return NULL;
   }
 
@@ -6080,7 +6080,7 @@ static char *strappy_tools_execute_database_context_read(
                                                &db,
                                                error_out)) {
     strappy_discovered_database_record_list_destroy(&list);
-    strappy_database_context_read_arguments_destroy(&arguments);
+    strappy_database_context_arguments_destroy(&arguments);
     return NULL;
   }
 
@@ -6089,7 +6089,7 @@ static char *strappy_tools_execute_database_context_read(
                                           error_out);
   sqlite3_close(db);
   strappy_discovered_database_record_list_destroy(&list);
-  strappy_database_context_read_arguments_destroy(&arguments);
+  strappy_database_context_arguments_destroy(&arguments);
   return json;
 }
 
@@ -6210,7 +6210,7 @@ static char *strappy_tools_execute_memory_database_hint_forget(
   return json;
 }
 
-static char *strappy_tools_execute_database_list_info(
+static char *strappy_tools_execute_database_list(
   const char *session_db_path,
   const char *arguments_json,
   char **error_out)
@@ -6227,7 +6227,7 @@ static char *strappy_tools_execute_database_list_info(
     return NULL;
   }
 
-  if (!strappy_tools_validate_empty_arguments(STRAPPY_TOOL_DATABASE_LIST_INFO,
+  if (!strappy_tools_validate_empty_arguments(STRAPPY_TOOL_DATABASE_LIST,
                                               arguments_json,
                                               error_out)) {
     return NULL;
@@ -6258,7 +6258,7 @@ static char *strappy_tools_execute_database_list_info(
       continue;
     }
 
-    if (!strappy_tools_add_database_list_info_record(databases,
+    if (!strappy_tools_add_database_list_record(databases,
                                                      record,
                                                      error_out)) {
       cJSON_Delete(root);
@@ -6354,8 +6354,8 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
                                      error_out);
   }
 
-  if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_LIST_INFO) == 0) {
-    return strappy_tools_execute_database_list_info(session_db_path,
+  if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_LIST) == 0) {
+    return strappy_tools_execute_database_list(session_db_path,
                                                    arguments_json,
                                                    error_out);
   }
@@ -6367,45 +6367,45 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
                                                 error_out);
   }
 
-  if (strcmp(tool_name, STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) == 0) {
-    return strappy_tools_execute_helper_datetime_to_iso8601(arguments_json,
+  if (strcmp(tool_name, STRAPPY_TOOL_DATETIME_TO_ISO8601) == 0) {
+    return strappy_tools_execute_datetime_to_iso8601(arguments_json,
                                                             error_out);
   }
 
-  if (strcmp(tool_name, STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) == 0) {
-    return strappy_tools_execute_helper_datetime_from_iso8601(arguments_json,
+  if (strcmp(tool_name, STRAPPY_TOOL_DATETIME_FROM_ISO8601) == 0) {
+    return strappy_tools_execute_datetime_from_iso8601(arguments_json,
                                                               error_out);
   }
 
-  if (strcmp(tool_name, STRAPPY_TOOL_MEMORY_USER_FACT_READ) == 0) {
-    return strappy_tools_execute_memory_user_fact_read(session_db_path,
+  if (strcmp(tool_name, STRAPPY_TOOL_MEMORY_READ) == 0) {
+    return strappy_tools_execute_memory_read(session_db_path,
                                                        arguments_json,
                                                        error_out);
   }
 
-  if (strcmp(tool_name, STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) == 0) {
-    return strappy_tools_execute_memory_user_fact_remember(session_db_path,
+  if (strcmp(tool_name, STRAPPY_TOOL_MEMORY_SAVE) == 0) {
+    return strappy_tools_execute_memory_save(session_db_path,
                                                            active_session_id,
                                                            provider_call_id,
                                                            arguments_json,
                                                            error_out);
   }
 
-  if (strcmp(tool_name, STRAPPY_TOOL_MEMORY_USER_FACT_FORGET) == 0) {
-    return strappy_tools_execute_memory_user_fact_forget(session_db_path,
+  if (strcmp(tool_name, STRAPPY_TOOL_MEMORY_DELETE) == 0) {
+    return strappy_tools_execute_memory_delete(session_db_path,
                                                          arguments_json,
                                                          error_out);
   }
 
-  if (strcmp(tool_name, STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) == 0) {
-    return strappy_tools_execute_helper_session_name_write(session_db_path,
+  if (strcmp(tool_name, STRAPPY_TOOL_SESSION_RENAME) == 0) {
+    return strappy_tools_execute_session_rename(session_db_path,
                                                            active_session_id,
                                                            arguments_json,
                                                            error_out);
   }
 
-  if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_CONTEXT_READ) == 0) {
-    return strappy_tools_execute_database_context_read(session_db_path,
+  if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_CONTEXT) == 0) {
+    return strappy_tools_execute_database_context(session_db_path,
                                                        arguments_json,
                                                        error_out);
   }
@@ -6425,14 +6425,14 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
                                                              error_out);
   }
 
-  if (strcmp(tool_name, STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH) == 0) {
-    return strappy_tools_execute_helper_fontawesome_shortcode_search(resource_dir,
+  if (strcmp(tool_name, STRAPPY_TOOL_FONTAWESOME_SEARCH) == 0) {
+    return strappy_tools_execute_fontawesome_search(resource_dir,
                                                                      arguments_json,
                                                                      error_out);
   }
 
-  if (strcmp(tool_name, STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM) == 0) {
-    return strappy_tools_execute_helper_fontawesome_shortcode_confirm(
+  if (strcmp(tool_name, STRAPPY_TOOL_FONTAWESOME_CONFIRM) == 0) {
+    return strappy_tools_execute_fontawesome_confirm(
       resource_dir,
       arguments_json,
       error_out);

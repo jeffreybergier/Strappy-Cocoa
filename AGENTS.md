@@ -106,12 +106,12 @@ House style for Strappy source:
     rules, timestamp guidance, memory guidance, and database-specific
     instructions belong in these resources or the shared quality-policy table,
     not in scattered C or Objective-C strings.
-14. Database tool flow is split by responsibility. `database_list_info` lists
+14. Database tool flow is split by responsibility. `database_list` lists
     approved databases in a compact `databases` array containing
     assistant-visible IDs, inferred app names, paths, sizes, and modification
     times. Its result is always an object; when the array is empty, a guidance
     string explains that the user has not approved any databases.
-    `database_context_read` returns remembered database hints plus compact,
+    `database_context` returns remembered database hints plus compact,
     bounded lists of table and view names. Use targeted read-only SQL through
     `database_query` when column or other schema metadata is needed.
     `database_query` runs bounded read-only SQL against approved databases and
@@ -121,16 +121,16 @@ House style for Strappy source:
     The Responses runtime executes the selected assistant set's preflight tools
     before round zero and seeds each result as a typed `function_call` plus
     matching `function_call_output` input pair. World Knowledge preflights only
-    `memory_user_fact_read`; Personal Assistant additionally preflights
-    `database_list_info`. These application-created, request-direction items do
+    `memory_read`; Personal Assistant additionally preflights
+    `database_list`. These application-created, request-direction items do
     not create response tool-execution rows or count as model-generated calls
     for the tool audit.
     Do not put full schema dumps or learned hint caches into
-    `database_list_info`.
+    `database_list`.
 15. Memory and session-title tools persist durable assistant state.
     `memory_user_fact_*` stores small stable user facts,
     `memory_database_hint_*` stores reusable evidence-backed database hints, and
-    `helper_session_name_write` updates the active session name for every user
+    `session_rename` updates the active session name for every user
     prompt and requires a non-empty string name. Do not store secrets,
     credentials, sensitive identifiers, long copied content, or private row
     contents in memory.
@@ -158,13 +158,13 @@ House style for Strappy source:
     or HTTPS link with a non-empty title and URL. Database inventory is an
     application-seeded preflight tool output rather than a quality rule. The
     report always uses the universal set checks for
-    `helper_session_name_write` and `helper_fontawesome_shortcode_confirm`.
-    Personal Assistant additionally checks `database_context_read`; World
-    Knowledge never runs that database-specific check. `database_context_read`
+    `session_rename` and `fontawesome_confirm`.
+    Personal Assistant additionally checks `database_context`; World
+    Knowledge never runs that database-specific check. `database_context`
     requires an approved database id and may be skipped when it is not
     applicable, in which case its informational quality check may fail. The
     memory remember tools are optional and are not quality checks:
-    `memory_user_fact_remember` requires a non-empty fact, and
+    `memory_save` requires a non-empty fact, and
     `memory_database_hint_remember` requires both an approved database id and a
     non-empty hint. They do not accept empty or null no-ops. The session-name
     tool requires a non-empty string and updates the active session name. The

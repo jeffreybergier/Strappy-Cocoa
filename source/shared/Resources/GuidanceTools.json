@@ -32,7 +32,7 @@
     {
       "type": "function",
       "function": {
-        "name": "database_list_info",
+        "name": "database_list",
         "description": "Call this tool to view approved databases. Returns an object containing a databases array with database_id, app_name, path, size_bytes, and modified_at in Unix seconds. When no databases are approved, the array is empty and guidance explains why.",
         "parameters": {
           "type": "object",
@@ -52,7 +52,7 @@
           "properties": {
             "database_id": {
               "type": "string",
-              "description": "Approved database ID returned by database_list_info.",
+              "description": "Approved database ID returned by database_list.",
               "minLength": 1,
               "maxLength": 64
             },
@@ -224,7 +224,7 @@
     {
       "type": "function",
       "function": {
-        "name": "helper_datetime_to_iso8601",
+        "name": "datetime_to_iso8601",
         "description": "ALWAYS call this tool when displaying numeric timestamps. Convert numeric timestamp strings to ISO 8601 datetimes. Returns a JSON array in input order.",
         "parameters": {
           "type": "object",
@@ -262,7 +262,7 @@
     {
       "type": "function",
       "function": {
-        "name": "helper_datetime_from_iso8601",
+        "name": "datetime_from_iso8601",
         "description": "ALWAYS call this tool when converting ISO 8601 datetimes to numeric timestamps. Returns a JSON array of timestamp strings in input order.",
         "parameters": {
           "type": "object",
@@ -300,7 +300,7 @@
     {
       "type": "function",
       "function": {
-        "name": "helper_fontawesome_shortcode_search",
+        "name": "fontawesome_search",
         "description": "ALWAYS use Font Awesome version 7 Free tools and shortcodes for visual expression instead of Unicode emoji. Search for icon shortcodes and render icons in answers with full Markdown shortcode syntax, such as [fa:heart] or [fa:brands:github]. Returns a ranked JSON array of Markdown shortcodes.",
         "parameters": {
           "type": "object",
@@ -326,7 +326,7 @@
     {
       "type": "function",
       "function": {
-        "name": "helper_fontawesome_shortcode_confirm",
+        "name": "fontawesome_confirm",
         "description": "ALWAYS call this tool before the final answer. Set shortcodes to a non-empty array of Font Awesome version 7 Free Markdown shortcodes, such as [fa:heart] or [fa:brands:github], to confirm before using them. Returns confirmed and not_found arrays. Null and empty arrays are invalid. Render confirmed icons in answers with the returned Markdown shortcode syntax. NEVER use unicode emoji.",
         "parameters": {
           "type": "object",
@@ -357,7 +357,7 @@
     {
       "type": "function",
       "function": {
-        "name": "memory_user_fact_read",
+        "name": "memory_read",
         "description": "Call this tool to retrieve durable facts stored about the user.",
         "parameters": {
           "type": "object",
@@ -370,7 +370,7 @@
     {
       "type": "function",
       "function": {
-        "name": "memory_user_fact_remember",
+        "name": "memory_save",
         "description": "Call this tool to save a useful durable user fact for future prompts. NEVER store secrets or sensitive information.",
         "parameters": {
           "type": "object",
@@ -394,7 +394,7 @@
     {
       "type": "function",
       "function": {
-        "name": "memory_user_fact_forget",
+        "name": "memory_delete",
         "description": "Call this tool to forget durable facts that are no longer correct or useful.",
         "parameters": {
           "type": "object",
@@ -417,7 +417,7 @@
     {
       "type": "function",
       "function": {
-        "name": "helper_session_name_write",
+        "name": "session_rename",
         "description": "ALWAYS call this tool before the final answer. Update the session with a short, descriptive name for the user's latest prompt. A non-empty name is required; null and empty values are invalid.",
         "parameters": {
           "type": "object",
@@ -439,14 +439,14 @@
     {
       "type": "function",
       "function": {
-        "name": "database_context_read",
+        "name": "database_context",
         "description": "ALWAYS call this tool with the relevant approved database_id before database_query. Returns remembered hints, table names, view names, and guidance for exploring them.",
         "parameters": {
           "type": "object",
           "properties": {
             "database_id": {
               "type": "string",
-              "description": "Approved database ID returned by database_list_info.",
+              "description": "Approved database ID returned by database_list.",
               "minLength": 1,
               "maxLength": 128
             }

@@ -7,7 +7,7 @@
 static const char harness_tool_display_registry_json[] =
   "{\"database_query\":{\"promoted_argument\":\"database_id\","
   "\"transform\":\"database_filename\"},"
-  "\"helper_fontawesome_shortcode_confirm\":{"
+  "\"fontawesome_confirm\":{"
   "\"promoted_argument\":\"shortcodes\","
   "\"transform\":\"comma_separated\"},"
   "\"memory_database_hint_forget\":{\"promoted_argument\":\"id\","
@@ -1518,7 +1518,7 @@ static int harness_check_tool_event_text(void)
   event_text = strappy_webview_tool_event_text(
     "result",
     "call-1",
-    "memory_user_fact_read",
+    "memory_read",
     "{\"query\":\"Alice\"}",
     "{\"records\":[{\"kind\":\"person\",\"value\":{\"name\":\"Alice\"}}]}");
   if (event_text == NULL) {
@@ -1534,7 +1534,7 @@ static int harness_check_tool_event_text(void)
     return 0;
   }
 
-  ok = harness_expect_contains(event_text, "\"tool_name\":\"memory_user_fact_read\"") &&
+  ok = harness_expect_contains(event_text, "\"tool_name\":\"memory_read\"") &&
        harness_expect_contains(event_text, "\\\"records\\\"") &&
        harness_expect_contains(script, "appendToolEventText");
 
@@ -2178,7 +2178,7 @@ static int harness_check_responses_items(void)
     "{\"key\":\"unicode_emoji_absent\","
     "\"label\":\"No emoji\",\"status\":\"failed\","
     "\"detail\":\"The response included emoji.\"},"
-    "{\"key\":\"database_context_read\","
+    "{\"key\":\"database_context\","
     "\"label\":\"Database context checked\",\"status\":\"failed\"},"
     "{\"key\":\"web_reference\",\"label\":\"Source link included\","
     "\"status\":\"not_applicable\"}]}";

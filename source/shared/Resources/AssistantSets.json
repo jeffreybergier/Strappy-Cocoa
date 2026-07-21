@@ -5,24 +5,24 @@
     "tools": [
       "openrouter:web_search",
       "openrouter:web_fetch",
-      "helper_datetime_to_iso8601",
-      "helper_datetime_from_iso8601",
-      "helper_fontawesome_shortcode_search",
-      "helper_fontawesome_shortcode_confirm",
-      "memory_user_fact_read",
-      "memory_user_fact_remember",
-      "memory_user_fact_forget",
-      "helper_session_name_write"
+      "datetime_to_iso8601",
+      "datetime_from_iso8601",
+      "fontawesome_search",
+      "fontawesome_confirm",
+      "memory_read",
+      "memory_save",
+      "memory_delete",
+      "session_rename"
     ],
     "preflight_tools": [
-      "memory_user_fact_read"
+      "memory_read"
     ],
     "quality_checks": [
       "answer_non_empty",
       "unicode_emoji_absent",
       "web_reference",
-      "helper_session_name_write",
-      "helper_fontawesome_shortcode_confirm"
+      "session_rename",
+      "fontawesome_confirm"
     ]
   },
   "sets": [
@@ -43,17 +43,17 @@
       "availability": "available",
       "goal": "You are an expert personal assistant. Research the user's approved personal databases, including contacts, calendars, emails, and text messages, whenever the request depends on that personal context. Never use your personal voice when quoting directly from a database.",
       "additional_tools": [
-        "database_list_info",
+        "database_list",
         "database_query",
-        "database_context_read",
+        "database_context",
         "memory_database_hint_remember",
         "memory_database_hint_forget"
       ],
       "additional_preflight_tools": [
-        "database_list_info"
+        "database_list"
       ],
       "additional_quality_checks": [
-        "database_context_read"
+        "database_context"
       ]
     },
     {

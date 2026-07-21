@@ -190,24 +190,24 @@ strappy_quality_check_definitions[] = {
     STRAPPY_QUALITY_CHECK_WEB_REFERENCE
   },
   {
-    "database_context_read",
+    "database_context",
     "required_tool",
     "Database context checked",
-    STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+    STRAPPY_TOOL_DATABASE_CONTEXT,
     STRAPPY_QUALITY_CHECK_REQUIRED_TOOL
   },
   {
-    "helper_session_name_write",
+    "session_rename",
     "required_tool",
     "Session named",
-    STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+    STRAPPY_TOOL_SESSION_RENAME,
     STRAPPY_QUALITY_CHECK_REQUIRED_TOOL
   },
   {
-    "helper_fontawesome_shortcode_confirm",
+    "fontawesome_confirm",
     "required_tool",
     "Font Awesome shortcode confirmed",
-    STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+    STRAPPY_TOOL_FONTAWESOME_CONFIRM,
     STRAPPY_QUALITY_CHECK_REQUIRED_TOOL
   }
 };

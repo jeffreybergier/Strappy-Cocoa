@@ -35,17 +35,17 @@
       "requirement": "conditional",
       "instruction": "If web search or web fetch activity occurs, your final answer MUST include at least one titled inline Markdown HTTP or HTTPS link to a source you used."
     },
-    "database_context_read": {
+    "database_context": {
       "requirement": "conditional",
-      "instruction": "When the request depends on approved personal data, you MUST call database_context_read with a relevant approved database_id before database_query."
+      "instruction": "When the request depends on approved personal data, you MUST call database_context with a relevant approved database_id before database_query."
     },
-    "helper_session_name_write": {
+    "session_rename": {
       "requirement": "required",
-      "instruction": "Before your final answer, helper_session_name_write MUST complete successfully with a short descriptive name for the user's latest prompt."
+      "instruction": "Before your final answer, session_rename MUST complete successfully with a short descriptive name for the user's latest prompt."
     },
-    "helper_fontawesome_shortcode_confirm": {
+    "fontawesome_confirm": {
       "requirement": "required",
-      "instruction": "Before your final answer, helper_fontawesome_shortcode_confirm MUST complete successfully with at least one valid shortcode, which you must use in the answer."
+      "instruction": "Before your final answer, fontawesome_confirm MUST complete successfully with at least one valid shortcode, which you must use in the answer."
     }
   }
 }

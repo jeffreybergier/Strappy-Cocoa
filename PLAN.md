@@ -89,7 +89,7 @@ Deliverables:
   validation state, scan status, user decision, scan root, first/last seen
   timestamps, and last scanned timestamp.
 - [x] Removed the database summary-cache catalog path. The assistant now relies
-  on `database_list_info` for database availability, `database_context_read` for
+  on `database_list` for database availability, `database_context` for
   selected live schema and remembered hints, and bounded read-only
   `database_query` calls for concrete data lookups.
 - [x] Native macOS Preferences allow checkbox whitelisting for valid cataloged
@@ -106,34 +106,34 @@ Architecture decision: expose a small stable tool set backed by the Strappy
 catalog and helper memory tables rather than creating executable tools
 dynamically for each discovered database. Do not make one tool per whitelisted
 database; tools should accept an assistant-visible database ID and resolve it
-through the catalog. `database_list_info` is for selection and availability,
-`database_context_read` is for selected live schema plus remembered hints, and
+through the catalog. `database_list` is for selection and availability,
+`database_context` is for selected live schema plus remembered hints, and
 `database_query` is for bounded read-only SQL. Durable learned user facts and
 database hints live in helper memory tables, not in a schema-summary cache.
 
 Deliverables:
 
 - [x] Tool registry in C with stable tool names, JSON schemas, argument
-  parsing, and result serialization. The registry exposes `database_list_info`,
-  `database_context_read`, `database_query`, timestamp helpers, remembered user
+  parsing, and result serialization. The registry exposes `database_list`,
+  `database_context`, `database_query`, timestamp helpers, remembered user
   fact helpers, remembered database hint helpers, and
-  `helper_session_name_write`, plus the Coding Assistant-only `file_read` and
+  `session_rename`, plus the Coding Assistant-only `file_read` and
   `bash` tools.
-- [x] Stable database tools named `database_list_info`,
-  `database_context_read`, and `database_query`, all using assistant-visible
+- [x] Stable database tools named `database_list`,
+  `database_context`, and `database_query`, all using assistant-visible
   database IDs when a database is selected.
-- [x] `database_list_info` defines `available` and `no_approved_databases`
+- [x] `database_list` defines `available` and `no_approved_databases`
   success states, with tool failure representing errors. Empty success results
   include a `database_manage` user action hint; `database_manage` is not an LLM
   tool.
-- [x] `database_list_info` returns approved databases with assistant-visible
+- [x] `database_list` returns approved databases with assistant-visible
   IDs, safe filename metadata, short descriptions, and availability state. It
   intentionally omits raw filesystem paths, schema, remembered hints, and query
   results.
 - [x] Assistant-set profiles select the system prompt, tool allowlist,
   round-zero preflight, and ordered answer-quality checks. World Knowledge uses
-  only universal tools and `memory_user_fact_read` preflight; Personal Assistant
-  additionally enables database tools and `database_list_info` preflight;
+  only universal tools and `memory_read` preflight; Personal Assistant
+  additionally enables database tools and `database_list` preflight;
   Coding Assistant is available and exclusively receives `file_read` plus the
   per-session, explicitly enabled `bash` tool in addition to the universal
   tools.
@@ -141,14 +141,14 @@ Deliverables:
   session's assistant set and injects their fresh results as application-seeded,
   matched `function_call` / `function_call_output` input pairs without creating
   response tool-execution audit rows.
-- [x] `database_context_read` returns selected database metadata, full
+- [x] `database_context` returns selected database metadata, full
   description, simplified live schema, and remembered database hints; without a
   database ID it can search remembered hints only.
 - [x] `database_query` tool that permits read-only SQL only and enforces
   statement timeouts, row limits, and result size limits.
 - [x] Database ID resolution that maps assistant-visible database IDs to
   cataloged local paths without leaking unnecessary filesystem details. The
-  `database_list_info` result uses assistant-visible IDs and omits raw filesystem
+  `database_list` result uses assistant-visible IDs and omits raw filesystem
   paths.
 - [ ] `database_manage` app action link. The tool result now emits
   `strappy://database-manage`; WebView/native bridge interception that opens
@@ -158,8 +158,8 @@ Deliverables:
   `GuidanceDatabase.json`, with system prompts assembled from the effective
   tool descriptions, audit policy, assistant goal, and invariant contract,
   synchronized with the stable tool names and stricter current guidance that
-  supplies `database_list_info` as a typed preflight tool output, requires
-  `database_context_read` before querying, uses explicit timestamp units, and
+  supplies `database_list` as a typed preflight tool output, requires
+  `database_context` before querying, uses explicit timestamp units, and
   forbids invented schema or private facts.
 - [x] Bounded multi-round Responses tool loop: execute typed function calls,
   append `function_call_output` items, and continue until final output or the
@@ -201,7 +201,7 @@ Deliverables:
 - [x] Local conversation persistence in sqlite using `sessions`,
   `response_api_calls`, `response_api_items`, response item parts, and tool
   executions.
-- [x] Session titles written by `helper_session_name_write` when the active
+- [x] Session titles written by `session_rename` when the active
   session is untitled.
 - [x] Tool activity display for tool-call inputs and tool outputs, including
   dynamic JSON object rendering and tool-error visualization.
@@ -306,7 +306,7 @@ implementation plan:
 - Public stable parsed tool-call result API outside the Responses loop. Typed
   persisted response items are the supported surface.
 - Persisted deterministic schema facts for approved databases. Live schema via
-  `database_context_read` avoids stale catalog facts and migration burden.
+  `database_context` avoids stale catalog facts and migration burden.
 - Proactive prompt context builder for available-database summaries. Tool-first
   discovery keeps prompts smaller and avoids stale injected summaries.
 - Scan/schema/query-specific activity labels beyond generic tool rows. Generic

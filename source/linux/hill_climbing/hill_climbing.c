@@ -763,7 +763,7 @@ static int hill_seed_user_fact(const char *session_db,
   result = strappy_tools_execute(session_db,
                                  session_id,
                                  NULL,
-                                 STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+                                 STRAPPY_TOOL_MEMORY_SAVE,
                                  HILL_USER_FACT_JSON,
                                  error_out);
   if (result == NULL) {
@@ -810,7 +810,7 @@ int main(int argc, char **argv)
     return 1;
   }
   hill_log_line(2U,
-                "Seeded remembered user fact with memory_user_fact_remember");
+                "Seeded remembered user fact with memory_save");
   hill_log_line(2U,
                 "Registered %lu approved database fixtures for %s",
                 (unsigned long)options.database_count,

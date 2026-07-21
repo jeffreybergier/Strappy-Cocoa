@@ -380,7 +380,7 @@ class ScoreTests(unittest.TestCase):
                     "status": "failed",
                 },
                 {
-                    "check_key": "database_context_read",
+                    "check_key": "database_context",
                     "status": "failed",
                 },
                 {

@@ -46,7 +46,7 @@
   "database; do not guess the user's data. Returns ordered column names and " \
   "positional rows. At most 100 rows and 64 columns are returned."
 #define HARNESS_DATABASE_QUERY_DATABASE_ID_DESCRIPTION \
-  "Approved database ID returned by database_list_info."
+  "Approved database ID returned by database_list."
 #define HARNESS_DATABASE_QUERY_SQL_DESCRIPTION \
   "One read-only SQLite SELECT or EXPLAIN query that returns columns. Select " \
   "only needed columns and use LIMIT when practical. Query sqlite_schema for " \
@@ -129,7 +129,7 @@ static int harness_test_unicode_emoji_scan(void)
     }
   }
   if ((strappy_quality_policy_find(
-         STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) != NULL) ||
+         STRAPPY_TOOL_MEMORY_SAVE) != NULL) ||
       (strappy_quality_policy_find(
          STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) != NULL)) {
     return harness_fail(
@@ -237,7 +237,7 @@ static int harness_database_context_parameters_match_contract(
 
     name = cJSON_GetObjectItem(tool, "name");
     if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
-        (strcmp(name->valuestring, STRAPPY_TOOL_DATABASE_CONTEXT_READ) != 0)) {
+        (strcmp(name->valuestring, STRAPPY_TOOL_DATABASE_CONTEXT) != 0)) {
       continue;
     }
     parameters = cJSON_GetObjectItem(tool, "parameters");
@@ -271,7 +271,7 @@ static int harness_database_context_parameters_match_contract(
       (strcmp(type->valuestring, "string") == 0) &&
       cJSON_IsString(description) && (description->valuestring != NULL) &&
       (strcmp(description->valuestring,
-              "Approved database ID returned by database_list_info.") == 0) &&
+              "Approved database ID returned by database_list.") == 0) &&
       cJSON_IsNumber(min_length) && (min_length->valuedouble == 1.0) &&
       cJSON_IsNumber(max_length) && (max_length->valuedouble == 128.0);
   }
@@ -516,11 +516,11 @@ static int harness_fontawesome_parameter_constraints_match(cJSON *tools)
 
   query = harness_tool_parameter_schema(
     tools,
-    STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+    STRAPPY_TOOL_FONTAWESOME_SEARCH,
     "query");
   shortcodes = harness_tool_parameter_schema(
     tools,
-    STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+    STRAPPY_TOOL_FONTAWESOME_CONFIRM,
     "shortcodes");
   items = cJSON_IsObject(shortcodes) ?
     cJSON_GetObjectItem(shortcodes, "items") : NULL;
@@ -640,7 +640,7 @@ static int harness_test_request_surfaces(void)
   description = cJSON_GetObjectItem(first, "description");
   ok = cJSON_IsArray(tools) && cJSON_IsObject(first) &&
     (function == NULL) && cJSON_IsString(name) &&
-    (strcmp(name->valuestring, "database_list_info") == 0) &&
+    (strcmp(name->valuestring, "database_list") == 0) &&
     cJSON_IsString(description) && (description->valuestring != NULL) &&
     (strcmp(description->valuestring,
             HARNESS_DATABASE_LIST_INFO_DESCRIPTION) == 0) &&
@@ -650,19 +650,19 @@ static int harness_test_request_surfaces(void)
       HARNESS_DATABASE_QUERY_DESCRIPTION) &&
     harness_tool_description_equals(
       tools,
-      STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+      STRAPPY_TOOL_DATETIME_FROM_ISO8601,
       HARNESS_DATETIME_FROM_ISO8601_DESCRIPTION) &&
     harness_tool_description_equals(
       tools,
-      STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+      STRAPPY_TOOL_MEMORY_READ,
       HARNESS_MEMORY_USER_FACT_READ_DESCRIPTION) &&
     harness_tool_description_equals(
       tools,
-      STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+      STRAPPY_TOOL_MEMORY_SAVE,
       HARNESS_MEMORY_USER_FACT_REMEMBER_DESCRIPTION) &&
     harness_tool_description_equals(
       tools,
-      STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
+      STRAPPY_TOOL_MEMORY_DELETE,
       HARNESS_MEMORY_USER_FACT_FORGET_DESCRIPTION) &&
     harness_tool_description_equals(
       tools,
@@ -670,50 +670,50 @@ static int harness_test_request_surfaces(void)
       HARNESS_MEMORY_DATABASE_HINT_REMEMBER_DESCRIPTION) &&
     harness_tool_description_equals(
       tools,
-      STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+      STRAPPY_TOOL_DATABASE_CONTEXT,
       HARNESS_DATABASE_CONTEXT_READ_DESCRIPTION) &&
     harness_tool_description_equals(
       tools,
-      STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+      STRAPPY_TOOL_SESSION_RENAME,
       HARNESS_SESSION_NAME_WRITE_DESCRIPTION) &&
     harness_tool_description_equals(
       tools,
-      STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+      STRAPPY_TOOL_FONTAWESOME_CONFIRM,
       HARNESS_FONTAWESOME_CONFIRM_DESCRIPTION) &&
     harness_database_query_parameters_match_contract(tools) &&
     harness_tool_has_required_nonempty_string_array_parameter(
       tools,
-      STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+      STRAPPY_TOOL_DATETIME_TO_ISO8601,
       "timestamps") &&
     harness_tool_has_required_string_parameter(
       tools,
-      STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+      STRAPPY_TOOL_DATETIME_TO_ISO8601,
       "unit") &&
     harness_tool_has_required_nonempty_string_array_parameter(
       tools,
-      STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+      STRAPPY_TOOL_DATETIME_FROM_ISO8601,
       "datetimes") &&
     harness_tool_has_required_string_parameter(
       tools,
-      STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+      STRAPPY_TOOL_DATETIME_FROM_ISO8601,
       "unit") &&
     harness_tool_has_required_string_parameter(
       tools,
-      STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+      STRAPPY_TOOL_SESSION_RENAME,
       "name") &&
     harness_tool_has_required_nonempty_string_array_parameter(
       tools,
-      STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+      STRAPPY_TOOL_FONTAWESOME_CONFIRM,
       "shortcodes") &&
     harness_tool_has_required_string_parameter(
       tools,
-      STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+      STRAPPY_TOOL_FONTAWESOME_SEARCH,
       "query") &&
     harness_fontawesome_parameter_constraints_match(tools) &&
     harness_database_context_parameters_match_contract(tools) &&
     harness_tool_has_required_string_parameter(
       tools,
-      STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+      STRAPPY_TOOL_MEMORY_SAVE,
       "fact") &&
     harness_tool_has_required_string_parameter(
       tools,
@@ -1317,12 +1317,12 @@ static int harness_preflight_input_is_valid(cJSON *input,
   memory_call = cJSON_GetArrayItem(input, 1);
   database_call = cJSON_GetArrayItem(input, 2);
   return harness_preflight_call_is_valid(memory_call,
-                                    "memory_user_fact_read",
+                                    "memory_read",
                                     "fc_pf_0_",
                                     "call_pf_0_",
                                     prompt_group) &&
     harness_preflight_call_is_valid(database_call,
-                                    "database_list_info",
+                                    "database_list",
                                     "fc_pf_1_",
                                     "call_pf_1_",
                                     prompt_group) &&
@@ -1460,21 +1460,21 @@ static int harness_world_knowledge_tools_are_valid(cJSON *tools)
       tools,
       STRAPPY_TOOL_OPENROUTER_WEB_FETCH,
       "parallel") &&
-    harness_has_tool_name(tools, STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) &&
-    harness_has_tool_name(tools, STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_DATETIME_TO_ISO8601) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_DATETIME_FROM_ISO8601) &&
     harness_has_tool_name(
       tools,
-      STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH) &&
+      STRAPPY_TOOL_FONTAWESOME_SEARCH) &&
     harness_has_tool_name(
       tools,
-      STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM) &&
-    harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_USER_FACT_READ) &&
-    harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) &&
-    harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_USER_FACT_FORGET) &&
-    harness_has_tool_name(tools, STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) &&
-    !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_LIST_INFO) &&
+      STRAPPY_TOOL_FONTAWESOME_CONFIRM) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_READ) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_SAVE) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_DELETE) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_SESSION_RENAME) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_LIST) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_QUERY) &&
-    !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_CONTEXT_READ) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_CONTEXT) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET) &&
     harness_tools_hide_local_display_metadata(tools);
@@ -1522,7 +1522,7 @@ static int harness_world_knowledge_request_is_valid(
       !cJSON_IsArray(input) || (cJSON_GetArraySize(input) != 3) ||
       !harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") ||
       !harness_preflight_call_is_valid(memory_call,
-                                       STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                       STRAPPY_TOOL_MEMORY_READ,
                                        "fc_pf_0_",
                                        "call_pf_0_",
                                        prompt_group->valuestring) ||
@@ -1582,7 +1582,7 @@ static int harness_coding_assistant_request_is_valid(
     harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") &&
     (text != NULL) && (strcmp(text, expected_prompt) == 0) &&
     harness_preflight_call_is_valid(memory_call,
-                                    STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                    STRAPPY_TOOL_MEMORY_READ,
                                     "fc_pf_0_",
                                     "call_pf_0_",
                                     prompt_group->valuestring) &&
@@ -1678,10 +1678,10 @@ static int harness_required_function_outputs_request_is_valid(
   const char *prompt_group)
 {
   static const char *names[] = {
-    "database_context_read",
-    "helper_session_name_write",
-    "helper_fontawesome_shortcode_confirm",
-    "memory_user_fact_remember",
+    "database_context",
+    "session_rename",
+    "fontawesome_confirm",
+    "memory_save",
     "memory_database_hint_remember"
   };
   static const char *call_ids[] = {
@@ -1771,9 +1771,9 @@ static int harness_function_output_request_is_valid(cJSON *root,
     root,
     session_key,
     prompt_group,
-    "database_context_read",
+    "database_context",
     "call-database-context-error",
-    "Error: database_context_read does not accept argument 'unexpected'.");
+    "Error: database_context does not accept argument 'unexpected'.");
 }
 
 static void harness_unlink_bash_full_output(const char *output)
@@ -2159,22 +2159,22 @@ static int harness_run_empty_answer_after_tools_server(int listener_fd)
     "\"status\":\"completed\",\"output\":[{"
     "\"type\":\"function_call\",\"id\":\"fc-empty-context\","
     "\"call_id\":\"call-empty-context\","
-    "\"name\":\"database_context_read\","
+    "\"name\":\"database_context\","
     "\"arguments\":\"{\\\"database_id\\\":\\\"db_1\\\"}\","
     "\"status\":\"completed\"},{"
     "\"type\":\"function_call\",\"id\":\"fc-empty-session\","
     "\"call_id\":\"call-empty-session\","
-    "\"name\":\"helper_session_name_write\","
+    "\"name\":\"session_rename\","
     "\"arguments\":\"{\\\"name\\\":\\\"Empty Answer Audit\\\"}\","
     "\"status\":\"completed\"},{"
     "\"type\":\"function_call\",\"id\":\"fc-empty-icon\","
     "\"call_id\":\"call-empty-icon\","
-    "\"name\":\"helper_fontawesome_shortcode_confirm\","
+    "\"name\":\"fontawesome_confirm\","
     "\"arguments\":\"{\\\"shortcodes\\\":[\\\"[fa:music]\\\"]}\","
     "\"status\":\"completed\"},{"
     "\"type\":\"function_call\",\"id\":\"fc-empty-user-fact\","
     "\"call_id\":\"call-empty-user-fact\","
-    "\"name\":\"memory_user_fact_remember\","
+    "\"name\":\"memory_save\","
     "\"arguments\":\"{\\\"fact\\\":\\\"Provenance fact.\\\"}\","
     "\"status\":\"completed\"},{"
     "\"type\":\"function_call\",\"id\":\"fc-empty-database-hint\","
@@ -2349,7 +2349,7 @@ static int harness_run_function_tool_server(int listener_fd)
     "\"status\":\"completed\",\"output\":[{"
     "\"type\":\"function_call\",\"id\":\"fc-database-context-error\","
     "\"call_id\":\"call-database-context-error\","
-    "\"name\":\"database_context_read\","
+    "\"name\":\"database_context\","
     "\"arguments\":\"{\\\"unexpected\\\":true}\","
     "\"status\":\"completed\"}],"
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":4,"
@@ -2674,7 +2674,7 @@ static int harness_run_retry_server(int listener_fd)
     "\"status\":\"completed\",\"output\":[{"
     "\"type\":\"function_call\",\"id\":\"fc-database-list-retry\","
     "\"call_id\":\"call-database-list\","
-    "\"name\":\"database_list_info\",\"arguments\":\"{}\","
+    "\"name\":\"database_list\",\"arguments\":\"{}\","
     "\"status\":\"completed\"}],"
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":4,"
     "\"total_tokens\":8}}";
@@ -2749,7 +2749,7 @@ static int harness_run_retry_server(int listener_fd)
       root,
       session_key,
       prompt_group,
-      "database_list_info",
+      "database_list",
       "call-database-list",
       NULL) &&
     harness_send_json_response(client_fd, 200L, final_response);
@@ -3156,7 +3156,7 @@ static int harness_test_answer_quality_report(void)
     path,
     session_id,
     "../shared/Resources",
-    STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+    STRAPPY_TOOL_MEMORY_SAVE,
     "{\"fact\":\"The user's favorite color is purple.\"}",
     &error);
   if (seed_output == NULL) {
@@ -3173,7 +3173,7 @@ static int harness_test_answer_quality_report(void)
     path,
     session_id,
     "../shared/Resources",
-    STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+    STRAPPY_TOOL_SESSION_RENAME,
     "{\"name\":\"Earlier Request\"}",
     &error);
   if ((seed_output == NULL) ||
@@ -3270,16 +3270,16 @@ static int harness_test_answer_quality_report(void)
         "(ordinal=2 AND check_key='web_reference' AND "
         "check_kind='answer_content' AND label='Source link included' AND "
         "tool_name IS NULL) OR "
-        "(ordinal=5 AND check_key='database_context_read' AND "
+        "(ordinal=5 AND check_key='database_context' AND "
         "check_kind='required_tool' AND label='Database context checked' AND "
-        "tool_name='" STRAPPY_TOOL_DATABASE_CONTEXT_READ "') OR "
-        "(ordinal=3 AND check_key='helper_session_name_write' AND "
+        "tool_name='" STRAPPY_TOOL_DATABASE_CONTEXT "') OR "
+        "(ordinal=3 AND check_key='session_rename' AND "
         "check_kind='required_tool' AND label='Session named' AND "
-        "tool_name='" STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE "') OR "
-        "(ordinal=4 AND check_key='helper_fontawesome_shortcode_confirm' AND "
+        "tool_name='" STRAPPY_TOOL_SESSION_RENAME "') OR "
+        "(ordinal=4 AND check_key='fontawesome_confirm' AND "
         "check_kind='required_tool' AND "
         "label='Font Awesome shortcode confirmed' AND "
-        "tool_name='" STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM "');",
+        "tool_name='" STRAPPY_TOOL_FONTAWESOME_CONFIRM "');",
         &value) && (value == 6LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
@@ -3298,7 +3298,7 @@ static int harness_test_answer_quality_report(void)
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
-                        "check_key IN ('memory_user_fact_remember',"
+                        "check_key IN ('memory_save',"
                         "'memory_database_hint_remember');",
                         &value) && (value == 0LL) &&
       harness_query_int(db,
@@ -3451,13 +3451,13 @@ static int harness_test_world_knowledge_assistant_set(void)
         db,
         "SELECT COUNT(*) FROM answer_quality_checks WHERE check_key IN ("
         "'answer_non_empty','unicode_emoji_absent','web_reference',"
-        "'helper_session_name_write',"
-        "'helper_fontawesome_shortcode_confirm');",
+        "'session_rename',"
+        "'fontawesome_confirm');",
         &value) && (value == 5LL) &&
       harness_query_int(
         db,
         "SELECT COUNT(*) FROM answer_quality_checks WHERE check_key IN ("
-        "'database_context_read','memory_database_hint_remember');",
+        "'database_context','memory_database_hint_remember');",
         &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM tool_executions;",
@@ -3709,10 +3709,10 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
                         "tool_executions e JOIN function_calls f "
                         "ON f.item_id=e.function_call_item_id "
                         "WHERE f.tool_name IN ("
-                        "'database_context_read',"
-                        "'helper_session_name_write',"
-                        "'helper_fontawesome_shortcode_confirm',"
-                        "'memory_user_fact_remember',"
+                        "'database_context',"
+                        "'session_rename',"
+                        "'fontawesome_confirm',"
+                        "'memory_save',"
                         "'memory_database_hint_remember');",
                         &value) && (value == 5LL) &&
       harness_query_int(db,
@@ -3752,7 +3752,7 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
                         "JOIN conversation_items i ON i.id=f.item_id WHERE "
                         "u.value='Provenance fact.' AND "
                         "f.provider_call_id='call-empty-user-fact' AND "
-                        "f.tool_name='memory_user_fact_remember' AND "
+                        "f.tool_name='memory_save' AND "
                         "i.session_id=(SELECT id FROM sessions LIMIT 1);",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
@@ -4034,9 +4034,9 @@ static int harness_test_function_tool_continuation(void)
                         "JOIN function_calls f ON "
                         "f.item_id=e.function_call_item_id WHERE "
                         "f.provider_call_id='call-database-context-error' AND "
-                        "f.tool_name='database_context_read' AND "
+                        "f.tool_name='database_context' AND "
                         "e.state='error' AND "
-                        "e.error_message='database_context_read does not "
+                        "e.error_message='database_context does not "
                         "accept argument ''unexpected''.';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
@@ -4048,7 +4048,7 @@ static int harness_test_function_tool_continuation(void)
                         "o.execution_state='error' AND "
                         "o.started_at_ms IS NOT NULL AND "
                         "o.completed_at_ms >= o.started_at_ms AND "
-                        "o.error_message='database_context_read does not "
+                        "o.error_message='database_context does not "
                         "accept argument ''unexpected''.' AND i.is_error=1 AND "
                         "i.include_in_context=1;",
                         &value) && (value == 1LL) &&
@@ -4088,7 +4088,7 @@ static int harness_test_function_tool_continuation(void)
         (strcmp(record->tool_call_id,
                 "call-database-context-error") == 0)) {
       saw_named_output = (record->tool_name != NULL) &&
-        (strcmp(record->tool_name, "database_context_read") == 0);
+        (strcmp(record->tool_name, "database_context") == 0);
     }
   }
   if (ok && !saw_named_output) {
@@ -5278,7 +5278,7 @@ static int harness_test_ledger(void)
     "\"format\":\"test-v1\",\"signature\":\"sig-test\","
     "\"summary\":[{\"type\":\"summary_text\",\"text\":\"Plan\"}]},"
     "{\"type\":\"function_call\",\"id\":\"fc-test\","
-    "\"call_id\":\"call-test\",\"name\":\"database_list_info\","
+    "\"call_id\":\"call-test\",\"name\":\"database_list\","
     "\"namespace\":\"local\",\"arguments\":\"{}\","
     "\"status\":\"completed\"},"
     "{\"type\":\"openrouter:web_search\",\"id\":\"ws-test\","
@@ -5409,7 +5409,7 @@ static int harness_test_ledger(void)
                       "JOIN structured_documents d ON d.owner_item_id=f.item_id "
                       "JOIN structured_nodes n ON n.document_id=d.id "
                       "WHERE f.provider_call_id='call-test' AND "
-                      "f.tool_name='database_list_info' AND "
+                      "f.tool_name='database_list' AND "
                       "f.tool_namespace='local' AND n.node_id=0 "
                       "AND n.value_type='object';",
                       &value) && (value == 1LL) &&
@@ -5544,7 +5544,7 @@ static int harness_test_ledger(void)
   execution.response_call_id = call_id;
   execution.output_index = 1L;
   execution.call_id = "call-test";
-  execution.tool_name = "database_list_info";
+  execution.tool_name = "database_list";
   execution.arguments_json = "{}";
   execution.status = "completed";
   execution.output_json = "{\"ok\":true}";

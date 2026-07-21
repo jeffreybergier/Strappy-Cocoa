@@ -31,12 +31,12 @@ resources are intentionally reduced to the minimum baseline:
   the harness defaults to `none` so neither tool is sent unless requested.
 
 Before round zero, the Personal Assistant profile supplies fresh
-`memory_user_fact_read` and `database_list_info` results as application-seeded,
+`memory_read` and `database_list` results as application-seeded,
 matched
 `function_call` / `function_call_output` input pairs. Their call IDs are
 created by the application, and those typed conversation items are not counted
 as model tool calls or tool executions. The runtime quality policy checks
-`database_context_read`, session naming, Font Awesome shortcode confirmation,
+`database_context`, session naming, Font Awesome shortcode confirmation,
 durable user-memory consideration, and database-hint consideration in a fixed
 order. It also checks for a linked source when web search or web fetch activity
 occurred. Every tool-free final response receives one persisted quality report.
@@ -47,9 +47,9 @@ informational: the runtime does not append a developer remediation prompt or
 make another API request.
 
 Each isolated model database is seeded first by executing the real
-`memory_user_fact_remember` tool with the stable identity fact that the user's
+`memory_save` tool with the stable identity fact that the user's
 first name is Jeff. The prompt does not contain that name. The existing
-`memory_user_fact_read` preflight result is the only way the model receives it.
+`memory_read` preflight result is the only way the model receives it.
 
 It is intentionally isolated from `source/linux/Makefile`; neither the normal
 `test` target nor a plain invocation of this Makefile performs network calls.

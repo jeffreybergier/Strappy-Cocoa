@@ -1123,7 +1123,7 @@ static int harness_expect_user_fact_read_result(const char *catalog_path,
   int ok;
 
   root = harness_tool_output_json(catalog_path,
-                                  STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                  STRAPPY_TOOL_MEMORY_READ,
                                   arguments_json);
   if (root == NULL) {
     return 0;
@@ -1149,7 +1149,7 @@ static int harness_expect_user_fact_read_result(const char *catalog_path,
     (date_saved->valuestring[0] != '\0') && (property_count == 3);
   if (!ok) {
     fprintf(stderr,
-            "memory_user_fact_read result did not match its public shape.\n");
+            "memory_read result did not match its public shape.\n");
   }
 
   cJSON_Delete(root);
@@ -1369,7 +1369,7 @@ static int harness_expect_database_context_result(
   }
 
   root = harness_tool_output_json(catalog_path,
-                                  STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                  STRAPPY_TOOL_DATABASE_CONTEXT,
                                   arguments_json);
   if (root == NULL) {
     return 0;
@@ -1419,7 +1419,7 @@ static int harness_expect_database_context_result(
 
     actual = cJSON_PrintUnformatted(root);
     fprintf(stderr,
-            "database_context_read result did not match its compact public "
+            "database_context result did not match its compact public "
             "shape: %s\n",
             (actual != NULL) ? actual : "(unserializable)");
     free(actual);
@@ -1694,7 +1694,7 @@ static int harness_database_context_schema_matches(cJSON *tools)
     name = cJSON_IsObject(function) ?
       cJSON_GetObjectItemCaseSensitive(function, "name") : NULL;
     if (!cJSON_IsString(name) || (name->valuestring == NULL) ||
-        (strcmp(name->valuestring, STRAPPY_TOOL_DATABASE_CONTEXT_READ) != 0)) {
+        (strcmp(name->valuestring, STRAPPY_TOOL_DATABASE_CONTEXT) != 0)) {
       continue;
     }
 
@@ -1723,7 +1723,7 @@ static int harness_database_context_schema_matches(cJSON *tools)
       (strcmp(type->valuestring, "string") == 0) &&
       cJSON_IsString(description) && (description->valuestring != NULL) &&
       (strcmp(description->valuestring,
-              "Approved database ID returned by database_list_info.") == 0) &&
+              "Approved database ID returned by database_list.") == 0) &&
       cJSON_IsNumber(min_length) && (min_length->valuedouble == 1.0) &&
       cJSON_IsNumber(max_length) && (max_length->valuedouble == 128.0) &&
       cJSON_IsArray(required) && (cJSON_GetArraySize(required) == 1) &&
@@ -2176,15 +2176,15 @@ static int harness_run_tool_registry_tests(void)
         harness_tool_schemas_hide_display_metadata(tools) &&
         harness_datetime_tool_schema_matches(
           tools,
-          STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+          STRAPPY_TOOL_DATETIME_TO_ISO8601,
           "timestamps") &&
         harness_datetime_tool_schema_matches(
           tools,
-          STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+          STRAPPY_TOOL_DATETIME_FROM_ISO8601,
           "datetimes") &&
         harness_tool_schema_has_no_properties(
           tools,
-          STRAPPY_TOOL_MEMORY_USER_FACT_READ) &&
+          STRAPPY_TOOL_MEMORY_READ) &&
         harness_database_context_schema_matches(tools) &&
         harness_file_read_schema_matches(tools) &&
         harness_file_write_schema_matches(tools) &&
@@ -2216,28 +2216,28 @@ static int harness_run_tool_registry_tests(void)
                                      NULL) &&
         harness_tool_display_matches(
           registry,
-          STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+          STRAPPY_TOOL_FONTAWESOME_SEARCH,
           "query",
           NULL) &&
         harness_tool_display_matches(
           registry,
-          STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+          STRAPPY_TOOL_FONTAWESOME_CONFIRM,
           "shortcodes",
           "comma_separated") &&
         harness_tool_display_matches(registry,
-                                     STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+                                     STRAPPY_TOOL_MEMORY_SAVE,
                                      "fact",
                                      NULL) &&
         harness_tool_display_matches(registry,
-                                     STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
+                                     STRAPPY_TOOL_MEMORY_DELETE,
                                      "id",
                                      "identifier") &&
         harness_tool_display_matches(registry,
-                                     STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+                                     STRAPPY_TOOL_SESSION_RENAME,
                                      "name",
                                      NULL) &&
         harness_tool_display_matches(registry,
-                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                     STRAPPY_TOOL_DATABASE_CONTEXT,
                                      "database_id",
                                      "database_filename") &&
         harness_tool_display_matches(
@@ -2264,15 +2264,15 @@ static int harness_run_tool_registry_tests(void)
           NULL,
           "url") &&
         (cJSON_GetObjectItem(registry,
-                             STRAPPY_TOOL_DATABASE_LIST_INFO) == NULL) &&
+                             STRAPPY_TOOL_DATABASE_LIST) == NULL) &&
         (cJSON_GetObjectItem(
            registry,
-           STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) == NULL) &&
+           STRAPPY_TOOL_DATETIME_TO_ISO8601) == NULL) &&
         (cJSON_GetObjectItem(
            registry,
-           STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) == NULL) &&
+           STRAPPY_TOOL_DATETIME_FROM_ISO8601) == NULL) &&
         (cJSON_GetObjectItem(registry,
-                             STRAPPY_TOOL_MEMORY_USER_FACT_READ) == NULL) &&
+                             STRAPPY_TOOL_MEMORY_READ) == NULL) &&
         (strstr(tools_json,
                 "Call this tool to view approved databases. Returns an "
                 "object containing a databases array with database_id, "
@@ -2331,38 +2331,38 @@ static int harness_run_tool_registry_tests(void)
                 "ALWAYS call this tool before finalizing when the request "
                 "depends on personal data.") !=
          NULL) &&
-        (strstr(tools_json, STRAPPY_TOOL_DATABASE_LIST_INFO) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_DATABASE_LIST) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_QUERY) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_BASH) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_FILE_READ) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_FILE_WRITE) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_FILE_EDIT) != NULL) &&
-        (strstr(tools_json, STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) != NULL) &&
-        (strstr(tools_json, STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) != NULL) &&
-        (strstr(tools_json, STRAPPY_TOOL_MEMORY_USER_FACT_READ) != NULL) &&
-        (strstr(tools_json, STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) != NULL) &&
-        (strstr(tools_json, STRAPPY_TOOL_MEMORY_USER_FACT_FORGET) != NULL) &&
-        (strstr(tools_json, STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) != NULL) &&
-        (strstr(tools_json, STRAPPY_TOOL_DATABASE_CONTEXT_READ) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_DATETIME_TO_ISO8601) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_DATETIME_FROM_ISO8601) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_MEMORY_READ) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_MEMORY_SAVE) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_MEMORY_DELETE) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_SESSION_RENAME) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_DATABASE_CONTEXT) != NULL) &&
         (strstr(tools_json,
                 STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) != NULL) &&
         (strstr(tools_json,
                 STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET) != NULL) &&
         (strstr(tools_json,
-                STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH) != NULL) &&
+                STRAPPY_TOOL_FONTAWESOME_SEARCH) != NULL) &&
         (strstr(tools_json,
-                STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM) != NULL) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_USER_FACT_READ) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_USER_FACT_FORGET) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_CONTEXT_READ) &&
+                STRAPPY_TOOL_FONTAWESOME_CONFIRM) != NULL) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_DATETIME_TO_ISO8601) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_DATETIME_FROM_ISO8601) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_READ) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_SAVE) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_DELETE) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_SESSION_RENAME) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_CONTEXT) &&
         strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
         strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_FONTAWESOME_SEARCH) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_FONTAWESOME_CONFIRM) &&
         strappy_tools_is_registered(STRAPPY_TOOL_FILE_READ) &&
         !strappy_tools_is_helper(STRAPPY_TOOL_FILE_READ) &&
         strappy_tools_is_registered(STRAPPY_TOOL_FILE_WRITE) &&
@@ -2373,6 +2373,18 @@ static int harness_run_tool_registry_tests(void)
         !strappy_tools_is_helper(STRAPPY_TOOL_BASH) &&
         !strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_QUERY) &&
         !strappy_tools_is_helper("helper_convert_dates") &&
+        !strappy_tools_is_registered("database_list_info") &&
+        !strappy_tools_is_registered("database_context_read") &&
+        (strstr(tools_json, "database_list_info") == NULL) &&
+        (strstr(tools_json, "database_context_read") == NULL) &&
+        !strappy_tools_is_registered("session_name_write") &&
+        (strstr(tools_json, "session_name_write") == NULL) &&
+        !strappy_tools_is_registered("memory_user_fact_read") &&
+        !strappy_tools_is_registered("memory_user_fact_remember") &&
+        !strappy_tools_is_registered("memory_user_fact_forget") &&
+        (strstr(tools_json, "memory_user_fact_read") == NULL) &&
+        (strstr(tools_json, "memory_user_fact_remember") == NULL) &&
+        (strstr(tools_json, "memory_user_fact_forget") == NULL) &&
         (strstr(tools_json, "memory_database_hint_read") == NULL) &&
         (strstr(tools_json, "helper_database_info_read") == NULL) &&
         (strstr(tools_json, "helper_user_info_read") == NULL) &&
@@ -2506,13 +2518,13 @@ static int harness_run_assistant_set_tests(void)
     (world.quality_check_key_count == 5U) &&
     strappy_assistant_set_profile_allows_tool(
       &world,
-      STRAPPY_TOOL_MEMORY_USER_FACT_READ) &&
+      STRAPPY_TOOL_MEMORY_READ) &&
     strappy_assistant_set_profile_allows_tool(
       &world,
-      STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) &&
+      STRAPPY_TOOL_MEMORY_SAVE) &&
     !strappy_assistant_set_profile_has_quality_check(
       &world,
-      STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER) &&
+      STRAPPY_TOOL_MEMORY_SAVE) &&
     strappy_assistant_set_profile_allows_tool(
       &world,
       STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
@@ -2530,10 +2542,10 @@ static int harness_run_assistant_set_tests(void)
       STRAPPY_TOOL_BASH) &&
     !strappy_assistant_set_profile_allows_tool(
       &world,
-      STRAPPY_TOOL_DATABASE_LIST_INFO) &&
+      STRAPPY_TOOL_DATABASE_LIST) &&
     !strappy_assistant_set_profile_has_quality_check(
       &world,
-      STRAPPY_TOOL_DATABASE_CONTEXT_READ) &&
+      STRAPPY_TOOL_DATABASE_CONTEXT) &&
     strappy_assistant_sets_load_profile(
       HARNESS_RESOURCE_DIR,
       STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT,
@@ -2637,7 +2649,7 @@ static int harness_run_assistant_set_tests(void)
         "native") &&
       harness_responses_tools_contains(
         world_tools,
-        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601) &&
+        STRAPPY_TOOL_DATETIME_TO_ISO8601) &&
       !harness_responses_tools_contains(
         world_tools,
         STRAPPY_TOOL_FILE_READ) &&
@@ -2649,7 +2661,7 @@ static int harness_run_assistant_set_tests(void)
         STRAPPY_TOOL_FILE_EDIT) &&
       !harness_responses_tools_contains(
         world_tools,
-        STRAPPY_TOOL_DATABASE_LIST_INFO) &&
+        STRAPPY_TOOL_DATABASE_LIST) &&
       !harness_responses_tools_contains(
         world_tools,
         STRAPPY_TOOL_DATABASE_QUERY) &&
@@ -2732,7 +2744,7 @@ static int harness_run_helper_datetime_tests(void)
 {
   if (!harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+        STRAPPY_TOOL_DATETIME_TO_ISO8601,
         "{\"timestamps\":[\"0\",\"1\",\"-1\",\"-0.5\"],"
         "\"unit\":\"unix_seconds\"}",
         "[\"1970-01-01T00:00:00Z\",\"1970-01-01T00:00:01Z\","
@@ -2742,7 +2754,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+        STRAPPY_TOOL_DATETIME_TO_ISO8601,
         "{\"timestamps\":[\"1700000000123\"],"
         "\"unit\":\"unix_milliseconds\"}",
         "[\"2023-11-14T22:13:20.123Z\"]")) {
@@ -2751,7 +2763,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+        STRAPPY_TOOL_DATETIME_TO_ISO8601,
         "{\"timestamps\":[\"0\",\" 1.25 \"],"
         "\"unit\":\"apple_seconds\"}",
         "[\"2001-01-01T00:00:00Z\",\"2001-01-01T00:00:01.25Z\"]")) {
@@ -2760,7 +2772,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+        STRAPPY_TOOL_DATETIME_TO_ISO8601,
         "{\"timestamps\":[\"1\"]}",
         "requires a non-empty unit string")) {
     return 0;
@@ -2768,7 +2780,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+        STRAPPY_TOOL_DATETIME_TO_ISO8601,
         "{\"timestamps\":\"1,2\",\"unit\":\"unix_seconds\"}",
         "must be an array of strings")) {
     return 0;
@@ -2776,7 +2788,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+        STRAPPY_TOOL_DATETIME_TO_ISO8601,
         "{\"timestamps\":[],\"unit\":\"unix_seconds\"}",
         "must contain between 1 and 256 items")) {
     return 0;
@@ -2784,7 +2796,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+        STRAPPY_TOOL_DATETIME_TO_ISO8601,
         "{\"timestamps\":[1],\"unit\":\"unix_seconds\"}",
         "items must be strings")) {
     return 0;
@@ -2792,7 +2804,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+        STRAPPY_TOOL_DATETIME_TO_ISO8601,
         "{\"timestamps\":[\"1\",\" \"],\"unit\":\"unix_seconds\"}",
         "empty item")) {
     return 0;
@@ -2800,7 +2812,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_TO_ISO8601,
+        STRAPPY_TOOL_DATETIME_TO_ISO8601,
         "{\"timestamps\":[\"1\"],\"unit\":\"banana_seconds\"}",
         "unit is not supported")) {
     return 0;
@@ -2808,7 +2820,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        STRAPPY_TOOL_DATETIME_FROM_ISO8601,
         "{\"datetimes\":[\"1970-01-01T00:00:00Z\","
         "\"1970-01-01T00:00:01Z\"],"
         "\"unit\":\"unix_seconds\"}",
@@ -2818,7 +2830,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        STRAPPY_TOOL_DATETIME_FROM_ISO8601,
         "{\"datetimes\":[\"2001-01-01T00:00:00Z\","
         "\"2026-01-01T00:00:00Z\",\"2027-01-01T00:00:00Z\"],"
         "\"unit\":\"apple_seconds\"}",
@@ -2828,7 +2840,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        STRAPPY_TOOL_DATETIME_FROM_ISO8601,
         "{\"datetimes\":[\"2026-01-01\",\"2027-01-01\"],"
         "\"unit\":\"apple_seconds\"}",
         "[\"788918400\",\"820454400\"]")) {
@@ -2837,7 +2849,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        STRAPPY_TOOL_DATETIME_FROM_ISO8601,
         "{\"datetimes\":[\"1969-12-31T23:59:59.5Z\"],"
         "\"unit\":\"unix_seconds\"}",
         "[\"-0.5\"]")) {
@@ -2846,7 +2858,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        STRAPPY_TOOL_DATETIME_FROM_ISO8601,
         "{\"datetimes\":[\"2026-01-01T05:00:00+05:00\"],"
         "\"unit\":\"apple_seconds\"}",
         "[\"788918400\"]")) {
@@ -2855,7 +2867,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        STRAPPY_TOOL_DATETIME_FROM_ISO8601,
         "{\"datetimes\":[\"2026-01-01\"]}",
         "requires a non-empty unit string")) {
     return 0;
@@ -2863,7 +2875,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        STRAPPY_TOOL_DATETIME_FROM_ISO8601,
         "{\"datetimes\":[\"2026-01-01\",\"\",\"2027-01-01\"],"
         "\"unit\":\"apple_seconds\"}",
         "empty item")) {
@@ -2872,7 +2884,7 @@ static int harness_run_helper_datetime_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_DATETIME_FROM_ISO8601,
+        STRAPPY_TOOL_DATETIME_FROM_ISO8601,
         "{\"datetimes\":[\"2026-02-30\"],"
         "\"unit\":\"apple_seconds\"}",
         "date is invalid")) {
@@ -2893,7 +2905,7 @@ static int harness_expect_fontawesome_search_output(
 
   root = harness_tool_output_json(
     NULL,
-    STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+    STRAPPY_TOOL_FONTAWESOME_SEARCH,
     arguments_json);
   count = cJSON_IsArray(root) ? cJSON_GetArraySize(root) : 0;
   item = cJSON_GetArrayItem(root, 0);
@@ -2933,7 +2945,7 @@ static int harness_run_helper_fontawesome_tests(void)
         "[fa:brands:github]") ||
       !harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+        STRAPPY_TOOL_FONTAWESOME_SEARCH,
         "{\"query\":\"strappy-no-such-icon-query\"}",
         "[]")) {
     return 0;
@@ -2941,7 +2953,7 @@ static int harness_run_helper_fontawesome_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+        STRAPPY_TOOL_FONTAWESOME_SEARCH,
         "{\"query\":\"github\",\"style\":\"brands\"}",
         "does not accept argument 'style'")) {
     return 0;
@@ -2949,7 +2961,7 @@ static int harness_run_helper_fontawesome_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+        STRAPPY_TOOL_FONTAWESOME_SEARCH,
         "{\"query\":\"warning\",\"limit\":5}",
         "does not accept argument 'limit'")) {
     return 0;
@@ -2957,12 +2969,12 @@ static int harness_run_helper_fontawesome_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+        STRAPPY_TOOL_FONTAWESOME_SEARCH,
         "{}",
         "requires a non-empty query string") ||
       !harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_SEARCH,
+        STRAPPY_TOOL_FONTAWESOME_SEARCH,
         "{\"query\":\" \\t \\n\"}",
         "query must not be blank")) {
     return 0;
@@ -2970,7 +2982,7 @@ static int harness_run_helper_fontawesome_tests(void)
 
   if (!harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        STRAPPY_TOOL_FONTAWESOME_CONFIRM,
         "{\"shortcodes\":[\"[fa:heart]\",\"database\",\"[fa:not-real]\"]}",
         "{\"confirmed\":[\"[fa:heart]\"],"
         "\"not_found\":[\"database\",\"[fa:not-real]\"]}")) {
@@ -2979,7 +2991,7 @@ static int harness_run_helper_fontawesome_tests(void)
 
   if (!harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        STRAPPY_TOOL_FONTAWESOME_CONFIRM,
         "{\"shortcodes\":[\"[fa:brands:github]\",\"[fa:regular:heart]\"]}",
         "{\"confirmed\":[\"[fa:brands:github]\","
         "\"[fa:regular:heart]\"],\"not_found\":[]}")) {
@@ -2988,7 +3000,7 @@ static int harness_run_helper_fontawesome_tests(void)
 
   if (!harness_expect_output_equals(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        STRAPPY_TOOL_FONTAWESOME_CONFIRM,
         "{\"shortcodes\":[\"heart\",\"fa:heart\","
         "\"[FA:heart]\",\" [fa:heart] \"]}",
         "{\"confirmed\":[],\"not_found\":[\"heart\",\"fa:heart\","
@@ -2998,32 +3010,32 @@ static int harness_run_helper_fontawesome_tests(void)
 
   if (!harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        STRAPPY_TOOL_FONTAWESOME_CONFIRM,
         NULL,
         "requires a shortcodes array") ||
       !harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        STRAPPY_TOOL_FONTAWESOME_CONFIRM,
         "null",
         "must be a JSON object") ||
       !harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        STRAPPY_TOOL_FONTAWESOME_CONFIRM,
         "{}",
         "requires a shortcodes array") ||
       !harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        STRAPPY_TOOL_FONTAWESOME_CONFIRM,
         "{\"shortcodes\":null}",
         "requires a shortcodes array") ||
       !harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        STRAPPY_TOOL_FONTAWESOME_CONFIRM,
         "{\"shortcodes\":[]}",
         "shortcodes must contain 1 to") ||
       !harness_expect_error_contains(
         NULL,
-        STRAPPY_TOOL_HELPER_FONTAWESOME_SHORTCODE_CONFIRM,
+        STRAPPY_TOOL_FONTAWESOME_CONFIRM,
         "{\"shortcodes\":\"[fa:heart]\"}",
         "requires a shortcodes array")) {
     return 0;
@@ -3148,7 +3160,7 @@ static int harness_register_database(harness_context *context)
                                         &context->database_id);
 }
 
-static int harness_run_database_list_info_tests(const harness_context *context)
+static int harness_run_database_list_tests(const harness_context *context)
 {
   static const char *const root_keys[] = { "databases" };
   cJSON *root;
@@ -3173,12 +3185,12 @@ static int harness_run_database_list_info_tests(const harness_context *context)
   output = strappy_tools_execute(context->catalog_path,
                                  0LL,
                                  HARNESS_RESOURCE_DIR,
-                                 STRAPPY_TOOL_DATABASE_LIST_INFO,
+                                 STRAPPY_TOOL_DATABASE_LIST,
                                  "{}",
                                  &error);
   if (output == NULL) {
     fprintf(stderr,
-            "Expected database_list_info output but got error: %s\n",
+            "Expected database_list output but got error: %s\n",
             (error != NULL) ? error : "(null)");
     free(error);
     return 0;
@@ -3228,7 +3240,7 @@ static int harness_run_database_list_info_tests(const harness_context *context)
        (modified_at->valuedouble == 1.0) &&
        (property_count == 5);
   if (!ok) {
-    fprintf(stderr, "database_list_info output was not expected: %s\n", output);
+    fprintf(stderr, "database_list output was not expected: %s\n", output);
   }
 
   cJSON_Delete(root);
@@ -3236,7 +3248,7 @@ static int harness_run_database_list_info_tests(const harness_context *context)
   return ok;
 }
 
-static int harness_run_empty_database_list_info_tests(
+static int harness_run_empty_database_list_tests(
   const harness_context *context)
 {
   static const char *const root_keys[] = { "databases", "guidance" };
@@ -3263,12 +3275,12 @@ static int harness_run_empty_database_list_info_tests(
   output = strappy_tools_execute(context->catalog_path,
                                  0LL,
                                  HARNESS_RESOURCE_DIR,
-                                 STRAPPY_TOOL_DATABASE_LIST_INFO,
+                                 STRAPPY_TOOL_DATABASE_LIST,
                                  "{}",
                                  &error);
   if (output == NULL) {
     fprintf(stderr,
-            "Expected empty database_list_info output but got error: %s\n",
+            "Expected empty database_list output but got error: %s\n",
             (error != NULL) ? error : "(null)");
     free(error);
     return 0;
@@ -3288,7 +3300,7 @@ static int harness_run_empty_database_list_info_tests(
     (strcmp(guidance->valuestring,
             HARNESS_DATABASE_LIST_EMPTY_GUIDANCE) == 0);
   if (!ok) {
-    fprintf(stderr, "empty database_list_info output was not expected: %s\n", output);
+    fprintf(stderr, "empty database_list output was not expected: %s\n", output);
   }
 
   cJSON_Delete(root);
@@ -4958,57 +4970,57 @@ static int harness_run_helper_info_tests(const harness_context *context)
 
   if (!harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        STRAPPY_TOOL_DATABASE_CONTEXT,
         NULL,
         "requires a non-empty database_id string") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        STRAPPY_TOOL_DATABASE_CONTEXT,
         "",
         "requires a non-empty database_id string") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        STRAPPY_TOOL_DATABASE_CONTEXT,
         "null",
         "arguments must be a JSON object") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        STRAPPY_TOOL_DATABASE_CONTEXT,
         "\" NULL \"",
         "arguments must be a JSON object") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        STRAPPY_TOOL_DATABASE_CONTEXT,
         "{}",
         "requires a non-empty database_id string") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        STRAPPY_TOOL_DATABASE_CONTEXT,
         "{\"database_id\":null}",
         "database_id must be a string") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        STRAPPY_TOOL_DATABASE_CONTEXT,
         "{\"database_id\":\"null\"}",
         "database_id must not be blank or null") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+        STRAPPY_TOOL_DATABASE_CONTEXT,
         "{\"database_id\":\"  \"}",
         "database_id must not be blank or null")) {
     return 0;
   }
 
   if (!harness_expect_error_contains(context->catalog_path,
-                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                     STRAPPY_TOOL_DATABASE_CONTEXT,
                                      "{\"query\":null}",
                                      "does not accept argument 'query'") ||
       !harness_expect_error_contains(context->catalog_path,
-                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                     STRAPPY_TOOL_DATABASE_CONTEXT,
                                      "{\"kind\":null}",
                                      "does not accept argument 'kind'") ||
       !harness_expect_error_contains(context->catalog_path,
-                                     STRAPPY_TOOL_DATABASE_CONTEXT_READ,
+                                     STRAPPY_TOOL_DATABASE_CONTEXT,
                                      "{\"limit\":null}",
                                      "does not accept argument 'limit'")) {
     return 0;
@@ -5016,42 +5028,42 @@ static int harness_run_helper_info_tests(const harness_context *context)
 
   if (!harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        STRAPPY_TOOL_MEMORY_SAVE,
         NULL,
         "requires a non-empty fact string") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        STRAPPY_TOOL_MEMORY_SAVE,
         "null",
         "arguments must be a JSON object") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        STRAPPY_TOOL_MEMORY_SAVE,
         "\"null\"",
         "arguments must be a JSON object") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        STRAPPY_TOOL_MEMORY_SAVE,
         "{}",
         "requires a non-empty fact string") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        STRAPPY_TOOL_MEMORY_SAVE,
         "{\"fact\":null}",
         "fact must be a string") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        STRAPPY_TOOL_MEMORY_SAVE,
         "{\"fact\":\" NULL \"}",
         "fact must not be blank or null") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        STRAPPY_TOOL_MEMORY_SAVE,
         "{\"fact\":\"  \\n\\t\"}",
         "fact must not be blank or null") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        STRAPPY_TOOL_MEMORY_SAVE,
         "{\"fact\":\"\"}",
         "requires a non-empty fact string")) {
     return 0;
@@ -5059,7 +5071,7 @@ static int harness_run_helper_info_tests(const harness_context *context)
 
   if (!harness_expect_output_equals(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        STRAPPY_TOOL_MEMORY_SAVE,
         "{\"fact\":\"The user's name is Jeff.\"}",
         "{}")) {
     return 0;
@@ -5075,40 +5087,40 @@ static int harness_run_helper_info_tests(const harness_context *context)
 
   if (!harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER,
+        STRAPPY_TOOL_MEMORY_SAVE,
         "{\"kind\":\"identity\",\"fact\":\"Jeff\"}",
         "does not accept argument 'kind'")) {
     return 0;
   }
 
   if (!harness_expect_error_contains(context->catalog_path,
-                                     STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                     STRAPPY_TOOL_MEMORY_READ,
                                      "{\"query\":\"Jeff\"}",
                                      "takes no arguments") ||
       !harness_expect_error_contains(context->catalog_path,
-                                     STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                     STRAPPY_TOOL_MEMORY_READ,
                                      "{\"kind\":\"fact\"}",
                                      "takes no arguments") ||
       !harness_expect_error_contains(context->catalog_path,
-                                     STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                     STRAPPY_TOOL_MEMORY_READ,
                                      "{\"limit\":1}",
                                      "takes no arguments")) {
     return 0;
   }
 
   if (!harness_expect_output_equals(context->catalog_path,
-                                    STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
+                                    STRAPPY_TOOL_MEMORY_DELETE,
                                     "{\"id\":1}",
                                     "{}") ||
       !harness_expect_output_equals(context->catalog_path,
-                                    STRAPPY_TOOL_MEMORY_USER_FACT_FORGET,
+                                    STRAPPY_TOOL_MEMORY_DELETE,
                                     "{\"id\":1}",
                                     "{}")) {
     return 0;
   }
 
   if (!harness_expect_output_equals(context->catalog_path,
-                                    STRAPPY_TOOL_MEMORY_USER_FACT_READ,
+                                    STRAPPY_TOOL_MEMORY_READ,
                                     "{}",
                                     "[]")) {
     return 0;
@@ -5772,25 +5784,25 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   if (!harness_expect_session_error_contains(
         context->catalog_path,
         session_id,
-        STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+        STRAPPY_TOOL_SESSION_RENAME,
         NULL,
         "requires a non-empty name string") ||
       !harness_expect_session_error_contains(
         context->catalog_path,
         session_id,
-        STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+        STRAPPY_TOOL_SESSION_RENAME,
         "{}",
         "requires a non-empty name string") ||
       !harness_expect_session_error_contains(
         context->catalog_path,
         session_id,
-        STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+        STRAPPY_TOOL_SESSION_RENAME,
         "{\"name\":null}",
         "name must be a string") ||
       !harness_expect_session_error_contains(
         context->catalog_path,
         session_id,
-        STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+        STRAPPY_TOOL_SESSION_RENAME,
         "{\"name\":\"\"}",
         "requires a non-empty name string")) {
     return 0;
@@ -5800,7 +5812,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   output = strappy_tools_execute(context->catalog_path,
                                  session_id,
                                  HARNESS_RESOURCE_DIR,
-                                 STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+                                 STRAPPY_TOOL_SESSION_RENAME,
                                  "{\"name\":\"  Find   Receipts  \"}",
                                  &error);
   if (output == NULL) {
@@ -5842,7 +5854,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   output = strappy_tools_execute(context->catalog_path,
                                  session_id,
                                  HARNESS_RESOURCE_DIR,
-                                 STRAPPY_TOOL_HELPER_SESSION_NAME_WRITE,
+                                 STRAPPY_TOOL_SESSION_RENAME,
                                  "{\"name\":\"Different Title\"}",
                                  &error);
   if (output == NULL) {
@@ -6133,7 +6145,7 @@ static int harness_run_session_turn_storage_tests(const harness_context *context
   messages[3].message_key = "harness-turn-test-tool-result";
   messages[3].target_message_key = "harness-turn-test-assistant";
   messages[3].tool_call_id = "call-1";
-  messages[3].tool_name = STRAPPY_TOOL_MEMORY_USER_FACT_REMEMBER;
+  messages[3].tool_name = STRAPPY_TOOL_MEMORY_SAVE;
   messages[3].arguments_json = "{\"key\":\"value\"}";
   messages[3].result_json = "{\"ok\":true}";
   messages[3].include_in_context = 0;
@@ -8018,10 +8030,10 @@ int main(void)
        harness_run_discovered_database_replacement_tests(&context) &&
        harness_run_file_scanner_batch_catalog_tests(&context) &&
        harness_run_file_scanner_hidden_tests(&context) &&
-       harness_run_empty_database_list_info_tests(&context) &&
+       harness_run_empty_database_list_tests(&context) &&
        harness_create_user_database(context.database_path) &&
        harness_register_database(&context) &&
-       harness_run_database_list_info_tests(&context) &&
+       harness_run_database_list_tests(&context) &&
        harness_run_database_query_tests(&context) &&
        harness_run_missing_database_query_guidance_test(&context) &&
        harness_run_readonly_wal_database_query_test(&context) &&
