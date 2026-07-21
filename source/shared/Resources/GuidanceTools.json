@@ -33,7 +33,7 @@
       "type": "function",
       "function": {
         "name": "web_search",
-        "description": "Search the public web with DuckDuckGo Lite. Returns the requested result page as raw UTF-8 HTML with its HTTP status and Content-Type. Start with page 1 and request a later page only when needed.",
+        "description": "Search the public web with DuckDuckGo Lite. Returns the requested result page as raw UTF-8 HTML with its HTTP status and Content-Type. Start with page 1 and request a later page only when needed. A DuckDuckGo CAPTCHA is returned as a rate-limit tool error; do not retry it immediately.",
         "parameters": {
           "type": "object",
           "properties": {

@@ -23,6 +23,10 @@ typedef int (*strappy_web_continue_callback)(void *user_data);
 void strappy_web_result_init(strappy_web_result *result);
 void strappy_web_result_destroy(strappy_web_result *result);
 int strappy_web_set_cainfo(const char *path, char **error_out);
+int strappy_web_search_response_is_rate_limited(
+  long status,
+  const char *body,
+  size_t body_length);
 int strappy_web_search(
   const char *session_db_path,
   const char *query,

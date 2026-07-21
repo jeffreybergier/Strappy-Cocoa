@@ -118,6 +118,29 @@ static int harness_cancellation_is_reported(const char *database_path)
   return ok;
 }
 
+static int harness_search_rate_limit_is_classified(void)
+{
+  const char challenge[] =
+    "<html><form id=\"challenge-form\" "
+    "action=\"//duckduckgo.com/anomaly.js?sv=lite\">"
+    "Unfortunately, bots use DuckDuckGo too.</form></html>";
+  const char ordinary[] =
+    "<html><a class=\"result-link\">CAPTCHA article</a></html>";
+
+  return strappy_web_search_response_is_rate_limited(
+      202L,
+      ordinary,
+      strlen(ordinary)) &&
+    strappy_web_search_response_is_rate_limited(
+      200L,
+      challenge,
+      strlen(challenge)) &&
+    !strappy_web_search_response_is_rate_limited(
+      200L,
+      ordinary,
+      strlen(ordinary));
+}
+
 static int harness_output_has_exact_envelope(const char *output)
 {
   cJSON *root;
@@ -181,6 +204,7 @@ static int harness_run_live(const char *database_path)
   char *error;
   long search_status;
   int search_has_next_form;
+  int search_rate_limited;
   int ok;
 
   error = NULL;
@@ -190,7 +214,10 @@ static int harness_run_live(const char *database_path)
                                  STRAPPY_TOOL_WEB_SEARCH,
                                  "{\"query\":\"Strappy Cocoa\"}",
                                  &error);
-  ok = (output != NULL) && harness_output_has_exact_envelope(output);
+  search_rate_limited = (output == NULL) && (error != NULL) &&
+    (strstr(error, "temporarily rate limited") != NULL);
+  ok = ((output != NULL) && harness_output_has_exact_envelope(output)) ||
+    search_rate_limited;
   if (!ok) {
     fprintf(stderr,
             "Live web_search failed: %s\n",
@@ -205,7 +232,10 @@ static int harness_run_live(const char *database_path)
     return 0;
   }
 
-  if ((search_status == 200L) && search_has_next_form) {
+  if (!search_rate_limited && (search_status == 200L) &&
+      search_has_next_form) {
+    int paginated_search_rate_limited;
+
     error = NULL;
     output = strappy_tools_execute(
       database_path,
@@ -214,7 +244,10 @@ static int harness_run_live(const char *database_path)
       STRAPPY_TOOL_WEB_SEARCH,
       "{\"query\":\"Strappy Cocoa\",\"page\":2}",
       &error);
-    ok = (output != NULL) && harness_output_has_exact_envelope(output);
+    paginated_search_rate_limited = (output == NULL) && (error != NULL) &&
+      (strstr(error, "temporarily rate limited") != NULL);
+    ok = ((output != NULL) && harness_output_has_exact_envelope(output)) ||
+      paginated_search_rate_limited;
     if (!ok) {
       fprintf(stderr,
               "Live paginated web_search failed: %s\n",
@@ -273,6 +306,7 @@ int main(int argc, char **argv)
 
   ok = strappy_tools_is_registered(STRAPPY_TOOL_WEB_SEARCH) &&
     strappy_tools_is_registered(STRAPPY_TOOL_WEB_FETCH) &&
+    harness_search_rate_limit_is_classified() &&
     harness_typed_web_boundary_rejects_invalid_inputs(database_path) &&
     harness_error_contains(database_path,
                            STRAPPY_TOOL_WEB_SEARCH,

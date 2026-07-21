@@ -27,6 +27,10 @@
   "Mozilla/5.0 (iPhone; CPU iPhone OS 6_0 like Mac OS X) " \
   "AppleWebKit/536.26 (KHTML, like Gecko) Version/6.0 Mobile/10A405 " \
   "Safari/8536.25"
+#define STRAPPY_WEB_SEARCH_RATE_LIMIT_ERROR \
+  "web_search is temporarily rate limited by DuckDuckGo (CAPTCHA " \
+  "challenge). Do not retry immediately; continue without web search or " \
+  "try again later."
 
 typedef struct strappy_web_buffer {
   char *data;
@@ -699,6 +703,33 @@ static const char *strappy_web_ascii_find(const char *start,
     }
   }
   return NULL;
+}
+
+int strappy_web_search_response_is_rate_limited(long status,
+                                                const char *body,
+                                                size_t body_length)
+{
+  const char *end;
+  int has_challenge_form;
+  int has_anomaly_action;
+  int has_bot_message;
+
+  if (status == 202L) {
+    return 1;
+  }
+  if (body == NULL) {
+    return 0;
+  }
+  end = body + body_length;
+  has_challenge_form =
+    strappy_web_ascii_find(body, end, "id=\"challenge-form\"") != NULL;
+  has_anomaly_action =
+    strappy_web_ascii_find(body, end, "duckduckgo.com/anomaly.js") != NULL;
+  has_bot_message = strappy_web_ascii_find(
+    body,
+    end,
+    "Unfortunately, bots use DuckDuckGo too.") != NULL;
+  return has_challenge_form && (has_anomaly_action || has_bot_message);
 }
 
 static int strappy_web_utf8_is_valid(const char *value, size_t length)
@@ -1428,6 +1459,14 @@ int strappy_web_search(
       break;
     }
     if (!strappy_web_validate_response(&http_result, error_out)) {
+      strappy_web_http_result_destroy(&http_result);
+      break;
+    }
+    if (strappy_web_search_response_is_rate_limited(
+          http_result.http_status,
+          http_result.body,
+          http_result.body_length)) {
+      strappy_set_error(error_out, STRAPPY_WEB_SEARCH_RATE_LIMIT_ERROR);
       strappy_web_http_result_destroy(&http_result);
       break;
     }
