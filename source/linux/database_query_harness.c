@@ -1219,7 +1219,7 @@ static int harness_database_hint_array_matches(cJSON *array,
                                                const char *first_hint,
                                                const char *last_hint)
 {
-  static const char *const keys[] = { "id", "hint", "date_saved" };
+  static const char *const keys[] = { "hint", "date_saved" };
   cJSON *item;
   size_t index;
 
@@ -1229,7 +1229,6 @@ static int harness_database_hint_array_matches(cJSON *array,
 
   item = array->child;
   for (index = 0U; index < expected_count; index++) {
-    cJSON *id;
     cJSON *hint;
     cJSON *date_saved;
 
@@ -1239,11 +1238,10 @@ static int harness_database_hint_array_matches(cJSON *array,
                                        sizeof(keys) / sizeof(keys[0]))) {
       return 0;
     }
-    id = cJSON_GetObjectItemCaseSensitive(item, "id");
     hint = cJSON_GetObjectItemCaseSensitive(item, "hint");
     date_saved = cJSON_GetObjectItemCaseSensitive(item, "date_saved");
-    if (!cJSON_IsNumber(id) || !cJSON_IsString(hint) ||
-        (hint->valuestring == NULL) || !cJSON_IsString(date_saved) ||
+    if (!cJSON_IsString(hint) || (hint->valuestring == NULL) ||
+        !cJSON_IsString(date_saved) ||
         (date_saved->valuestring == NULL) ||
         (date_saved->valuestring[0] == '\0')) {
       return 0;
@@ -2242,13 +2240,9 @@ static int harness_run_tool_registry_tests(void)
                                      "database_filename") &&
         harness_tool_display_matches(
           registry,
-          STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+          STRAPPY_TOOL_DATABASE_STUDY,
           "database_id",
           "database_filename") &&
-        harness_tool_display_matches(registry,
-                                     STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET,
-                                     "id",
-                                     "database_hint_filename") &&
         harness_server_tool_display_matches(
           registry,
           STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
@@ -2345,9 +2339,7 @@ static int harness_run_tool_registry_tests(void)
         (strstr(tools_json, STRAPPY_TOOL_SESSION_RENAME) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_CONTEXT) != NULL) &&
         (strstr(tools_json,
-                STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) != NULL) &&
-        (strstr(tools_json,
-                STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET) != NULL) &&
+                STRAPPY_TOOL_DATABASE_STUDY) != NULL) &&
         (strstr(tools_json,
                 STRAPPY_TOOL_FONTAWESOME_SEARCH) != NULL) &&
         (strstr(tools_json,
@@ -2359,8 +2351,7 @@ static int harness_run_tool_registry_tests(void)
         strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_DELETE) &&
         strappy_tools_is_helper(STRAPPY_TOOL_SESSION_RENAME) &&
         strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_CONTEXT) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
-        strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_STUDY) &&
         strappy_tools_is_helper(STRAPPY_TOOL_FONTAWESOME_SEARCH) &&
         strappy_tools_is_helper(STRAPPY_TOOL_FONTAWESOME_CONFIRM) &&
         strappy_tools_is_registered(STRAPPY_TOOL_FILE_READ) &&
@@ -2379,6 +2370,10 @@ static int harness_run_tool_registry_tests(void)
         (strstr(tools_json, "database_context_read") == NULL) &&
         !strappy_tools_is_registered("session_name_write") &&
         (strstr(tools_json, "session_name_write") == NULL) &&
+        !strappy_tools_is_registered("memory_database_hint_remember") &&
+        !strappy_tools_is_registered("memory_database_hint_forget") &&
+        (strstr(tools_json, "memory_database_hint_remember") == NULL) &&
+        (strstr(tools_json, "memory_database_hint_forget") == NULL) &&
         !strappy_tools_is_registered("memory_user_fact_read") &&
         !strappy_tools_is_registered("memory_user_fact_remember") &&
         !strappy_tools_is_registered("memory_user_fact_forget") &&
@@ -2552,7 +2547,7 @@ static int harness_run_assistant_set_tests(void)
       &personal,
       &error) &&
     strappy_assistant_set_profile_is_available(&personal) &&
-    (personal.tool_name_count == 15U) &&
+    (personal.tool_name_count == 14U) &&
     (personal.preflight_tool_name_count == 2U) &&
     (personal.quality_check_key_count == 6U) &&
     strappy_assistant_set_profile_allows_tool(
@@ -2560,7 +2555,7 @@ static int harness_run_assistant_set_tests(void)
       STRAPPY_TOOL_DATABASE_QUERY) &&
     strappy_assistant_set_profile_allows_tool(
       &personal,
-      STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
+      STRAPPY_TOOL_DATABASE_STUDY) &&
     !strappy_assistant_set_profile_allows_tool(
       &personal,
       STRAPPY_TOOL_FILE_READ) &&
@@ -2575,7 +2570,7 @@ static int harness_run_assistant_set_tests(void)
       STRAPPY_TOOL_BASH) &&
     !strappy_assistant_set_profile_has_quality_check(
       &personal,
-      STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
+      STRAPPY_TOOL_DATABASE_STUDY) &&
     strappy_assistant_sets_load_profile(
       HARNESS_RESOURCE_DIR,
       STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
@@ -5128,52 +5123,52 @@ static int harness_run_helper_info_tests(const harness_context *context)
 
   if (!harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        STRAPPY_TOOL_DATABASE_STUDY,
         NULL,
         "requires a non-empty database_id string") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        STRAPPY_TOOL_DATABASE_STUDY,
         "null",
         "arguments must be a JSON object") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        STRAPPY_TOOL_DATABASE_STUDY,
         "\"null\"",
         "arguments must be a JSON object") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        STRAPPY_TOOL_DATABASE_STUDY,
         "{}",
         "requires a non-empty database_id string") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        STRAPPY_TOOL_DATABASE_STUDY,
         "{\"database_id\":null,\"hint\":null}",
         "database_id must be a string") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        STRAPPY_TOOL_DATABASE_STUDY,
         "{\"database_id\":\"null\",\"hint\":\"null\"}",
         "database_id must not be blank or null") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        STRAPPY_TOOL_DATABASE_STUDY,
         "{\"database_id\":\"unused\",\"hint\":\" NULL \"}",
         "hint must not be blank or null") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        STRAPPY_TOOL_DATABASE_STUDY,
         "{\"database_id\":\"unused\",\"hint\":\"\"}",
         "requires a non-empty hint string") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        STRAPPY_TOOL_DATABASE_STUDY,
         "{\"database_id\":\"unused\"}",
         "requires a non-empty hint string") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        STRAPPY_TOOL_DATABASE_STUDY,
         "{\"database_id\":\"unused\",\"hint\":null}",
         "hint must be a string")) {
     return 0;
@@ -5181,12 +5176,12 @@ static int harness_run_helper_info_tests(const harness_context *context)
 
   if (!harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        STRAPPY_TOOL_DATABASE_STUDY,
         "{\"database_id\":null,\"hint\":\"Useful\"}",
         "database_id must be a string") ||
       !harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        STRAPPY_TOOL_DATABASE_STUDY,
         "{\"database_id\":\"null\",\"hint\":\"Useful\"}",
         "database_id must not be blank or null")) {
     return 0;
@@ -5200,13 +5195,13 @@ static int harness_run_helper_info_tests(const harness_context *context)
     "when validating exact integer serialization.\"}",
     context->database_id);
   if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
-    fprintf(stderr, "Could not build database hint remember arguments.\n");
+    fprintf(stderr, "Could not build database study arguments.\n");
     return 0;
   }
 
   if (!harness_expect_output_equals(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        STRAPPY_TOOL_DATABASE_STUDY,
         arguments,
         "{}")) {
     return 0;
@@ -5247,40 +5242,9 @@ static int harness_run_helper_info_tests(const harness_context *context)
 
   if (!harness_expect_error_contains(
         context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+        STRAPPY_TOOL_DATABASE_STUDY,
         arguments,
         "does not accept argument 'title'")) {
-    return 0;
-  }
-
-  if (!harness_expect_output_equals(
-        context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET,
-        "{\"id\":1}",
-        "{}") ||
-      !harness_expect_output_equals(
-        context->catalog_path,
-        STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET,
-        "{\"id\":1}",
-        "{}")) {
-    return 0;
-  }
-
-  written = snprintf(arguments,
-                     sizeof(arguments),
-                     "{\"database_id\":\"%s\"}",
-                     context->database_id);
-  if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
-    fprintf(stderr, "Could not rebuild database context arguments.\n");
-    return 0;
-  }
-
-  memset(&expected_context, 0, sizeof(expected_context));
-  expected_context.tables = base_tables;
-  expected_context.table_count = sizeof(base_tables) / sizeof(base_tables[0]);
-  if (!harness_expect_database_context_result(context->catalog_path,
-                                              arguments,
-                                              &expected_context)) {
     return 0;
   }
 
@@ -5373,7 +5337,7 @@ static int harness_run_database_context_limit_tests(
     if ((written <= 0) || ((size_t)written >= sizeof(arguments)) ||
         !harness_expect_output_equals(
           context->catalog_path,
-          STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+          STRAPPY_TOOL_DATABASE_STUDY,
           arguments,
           "{}")) {
       return 0;

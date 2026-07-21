@@ -10,8 +10,6 @@ static const char harness_tool_display_registry_json[] =
   "\"fontawesome_confirm\":{"
   "\"promoted_argument\":\"shortcodes\","
   "\"transform\":\"comma_separated\"},"
-  "\"memory_database_hint_forget\":{\"promoted_argument\":\"id\","
-  "\"transform\":\"database_hint_filename\"},"
   "\"openrouter:web_search\":{\"label\":\"Web Search\","
   "\"promoted_path\":[\"action\",\"query\"],\"response_item\":true},"
   "\"openrouter:web_fetch\":{\"label\":\"Web Fetch\","
@@ -943,8 +941,6 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "transform=='comma_separated'") &&
        harness_expect_contains(page_html, "parts.join(', ')") &&
        harness_expect_contains(page_html, "transform=='database_filename'") &&
-       harness_expect_contains(page_html,
-                               "transform=='database_hint_filename'") &&
        harness_expect_contains(page_html, "function responseItemObject") &&
        harness_expect_contains(page_html,
                                "function renderAPIServerToolRows") &&

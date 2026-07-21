@@ -102,14 +102,14 @@ typedef struct strappy_session_rename_arguments {
   char *name;
 } strappy_session_rename_arguments;
 
-typedef struct strappy_helper_info_forget_arguments {
+typedef struct strappy_memory_delete_arguments {
   long long id;
-} strappy_helper_info_forget_arguments;
+} strappy_memory_delete_arguments;
 
-typedef struct strappy_memory_database_hint_remember_arguments {
+typedef struct strappy_database_study_arguments {
   char *database_id;
   char *hint;
-} strappy_memory_database_hint_remember_arguments;
+} strappy_database_study_arguments;
 
 typedef struct strappy_database_context_arguments {
   char *database_id;
@@ -156,8 +156,7 @@ static const strappy_tool_definition strappy_tool_definitions[] = {
   { STRAPPY_TOOL_MEMORY_DELETE, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_SESSION_RENAME, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_DATABASE_CONTEXT, STRAPPY_TOOL_KIND_HELPER },
-  { STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER, STRAPPY_TOOL_KIND_HELPER },
-  { STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_DATABASE_STUDY, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_FONTAWESOME_SEARCH, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_FONTAWESOME_CONFIRM, STRAPPY_TOOL_KIND_HELPER }
 };
@@ -325,8 +324,8 @@ static void strappy_session_rename_arguments_destroy(
   strappy_session_rename_arguments_init(arguments);
 }
 
-static void strappy_helper_info_forget_arguments_init(
-  strappy_helper_info_forget_arguments *arguments)
+static void strappy_memory_delete_arguments_init(
+  strappy_memory_delete_arguments *arguments)
 {
   if (arguments == NULL) {
     return;
@@ -335,8 +334,8 @@ static void strappy_helper_info_forget_arguments_init(
   arguments->id = 0;
 }
 
-static void strappy_memory_database_hint_remember_arguments_init(
-  strappy_memory_database_hint_remember_arguments *arguments)
+static void strappy_database_study_arguments_init(
+  strappy_database_study_arguments *arguments)
 {
   if (arguments == NULL) {
     return;
@@ -346,8 +345,8 @@ static void strappy_memory_database_hint_remember_arguments_init(
   arguments->hint = NULL;
 }
 
-static void strappy_memory_database_hint_remember_arguments_destroy(
-  strappy_memory_database_hint_remember_arguments *arguments)
+static void strappy_database_study_arguments_destroy(
+  strappy_database_study_arguments *arguments)
 {
   if (arguments == NULL) {
     return;
@@ -355,7 +354,7 @@ static void strappy_memory_database_hint_remember_arguments_destroy(
 
   free(arguments->database_id);
   free(arguments->hint);
-  strappy_memory_database_hint_remember_arguments_init(arguments);
+  strappy_database_study_arguments_init(arguments);
 }
 
 static void strappy_database_context_arguments_init(
@@ -671,9 +670,6 @@ static int strappy_tools_display_transform_matches_type(
   }
   if (strcmp(transform, "url") == 0) {
     return strcmp(property_type, "string") == 0;
-  }
-  if (strcmp(transform, "database_hint_filename") == 0) {
-    return strcmp(property_type, "integer") == 0;
   }
   if (strcmp(transform, "comma_separated") == 0) {
     return strcmp(property_type, "array") == 0;
@@ -2352,10 +2348,10 @@ static int strappy_tools_copy_required_action_string_argument(
   return 1;
 }
 
-static int strappy_tools_parse_id_argument(const char *tool_name,
-                                           const char *arguments_json,
-                                           strappy_helper_info_forget_arguments *arguments,
-                                           char **error_out)
+static int strappy_tools_parse_memory_delete_arguments(
+  const char *arguments_json,
+  strappy_memory_delete_arguments *arguments,
+  char **error_out)
 {
   static const char *const allowed_names[] = { "id" };
   cJSON *root;
@@ -2364,12 +2360,12 @@ static int strappy_tools_parse_id_argument(const char *tool_name,
   if (arguments == NULL) {
     strappy_set_formatted_error(error_out,
                                 "%s argument output is missing.",
-                                tool_name);
+                                STRAPPY_TOOL_MEMORY_DELETE);
     return 0;
   }
-  strappy_helper_info_forget_arguments_init(arguments);
+  strappy_memory_delete_arguments_init(arguments);
 
-  root = strappy_tools_parse_arguments_object(tool_name,
+  root = strappy_tools_parse_arguments_object(STRAPPY_TOOL_MEMORY_DELETE,
                                               arguments_json,
                                               error_out);
   if (root == NULL) {
@@ -2377,7 +2373,7 @@ static int strappy_tools_parse_id_argument(const char *tool_name,
   }
 
   if (!strappy_tools_json_object_accepts_only(root,
-                                              tool_name,
+                                              STRAPPY_TOOL_MEMORY_DELETE,
                                               allowed_names,
                                               sizeof(allowed_names) /
                                                 sizeof(allowed_names[0]),
@@ -2392,7 +2388,7 @@ static int strappy_tools_parse_id_argument(const char *tool_name,
     cJSON_Delete(root);
     strappy_set_formatted_error(error_out,
                                 "%s requires a positive integer id.",
-                                tool_name);
+                                STRAPPY_TOOL_MEMORY_DELETE);
     return 0;
   }
 
@@ -2954,9 +2950,9 @@ static int strappy_tools_parse_fontawesome_confirm_arguments(
   return 1;
 }
 
-static int strappy_tools_parse_memory_database_hint_remember_arguments(
+static int strappy_tools_parse_database_study_arguments(
   const char *arguments_json,
-  strappy_memory_database_hint_remember_arguments *arguments,
+  strappy_database_study_arguments *arguments,
   char **error_out)
 {
   static const char *const allowed_names[] = { "database_id", "hint" };
@@ -2966,13 +2962,13 @@ static int strappy_tools_parse_memory_database_hint_remember_arguments(
   if (arguments == NULL) {
     strappy_set_error(
       error_out,
-      "memory_database_hint_remember argument output is missing.");
+      "database_study argument output is missing.");
     return 0;
   }
-  strappy_memory_database_hint_remember_arguments_init(arguments);
+  strappy_database_study_arguments_init(arguments);
 
   root = strappy_tools_parse_arguments_object(
-    STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+    STRAPPY_TOOL_DATABASE_STUDY,
     arguments_json,
     error_out);
   if (root == NULL) {
@@ -2981,19 +2977,19 @@ static int strappy_tools_parse_memory_database_hint_remember_arguments(
 
   ok = strappy_tools_json_object_accepts_only(
          root,
-         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+         STRAPPY_TOOL_DATABASE_STUDY,
          allowed_names,
          sizeof(allowed_names) / sizeof(allowed_names[0]),
          error_out) &&
        strappy_tools_copy_required_action_string_argument(
-         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+         STRAPPY_TOOL_DATABASE_STUDY,
          root,
          "database_id",
          STRAPPY_HELPER_INFO_MAX_SHORT_BYTES,
          &arguments->database_id,
          error_out) &&
        strappy_tools_copy_required_action_string_argument(
-         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+         STRAPPY_TOOL_DATABASE_STUDY,
          root,
          "hint",
          STRAPPY_HELPER_INFO_MAX_CONTENT_BYTES,
@@ -3001,7 +2997,7 @@ static int strappy_tools_parse_memory_database_hint_remember_arguments(
          error_out);
   cJSON_Delete(root);
   if (!ok) {
-    strappy_memory_database_hint_remember_arguments_destroy(arguments);
+    strappy_database_study_arguments_destroy(arguments);
     return 0;
   }
   return 1;
@@ -3122,94 +3118,6 @@ static char *strappy_tools_convert_iso8601_token_to_timestamp(
                                                               error_out);
   free(iso8601);
   return timestamp;
-}
-
-static char *strappy_tools_sqlite_quote_identifier(const char *identifier)
-{
-  size_t length;
-  size_t quote_count;
-  size_t index;
-  size_t output_index;
-  char *quoted;
-
-  if (identifier == NULL) {
-    return NULL;
-  }
-
-  length = strlen(identifier);
-  quote_count = 0U;
-  for (index = 0U; index < length; index++) {
-    if (identifier[index] == '"') {
-      quote_count++;
-    }
-  }
-
-  if (length > (((size_t)-1) - quote_count - 3U)) {
-    return NULL;
-  }
-
-  quoted = (char *)malloc(length + quote_count + 3U);
-  if (quoted == NULL) {
-    return NULL;
-  }
-
-  output_index = 0U;
-  quoted[output_index++] = '"';
-  for (index = 0U; index < length; index++) {
-    if (identifier[index] == '"') {
-      quoted[output_index++] = '"';
-    }
-    quoted[output_index++] = identifier[index];
-  }
-  quoted[output_index++] = '"';
-  quoted[output_index] = '\0';
-
-  return quoted;
-}
-
-static char *strappy_tools_build_identifier_sql(const char *prefix,
-                                                const char *identifier,
-                                                const char *suffix)
-{
-  char *quoted_identifier;
-  char *sql;
-  size_t prefix_length;
-  size_t quoted_length;
-  size_t suffix_length;
-  size_t total_length;
-
-  if ((prefix == NULL) || (identifier == NULL) || (suffix == NULL)) {
-    return NULL;
-  }
-
-  quoted_identifier = strappy_tools_sqlite_quote_identifier(identifier);
-  if (quoted_identifier == NULL) {
-    return NULL;
-  }
-
-  prefix_length = strlen(prefix);
-  quoted_length = strlen(quoted_identifier);
-  suffix_length = strlen(suffix);
-  if ((prefix_length > (((size_t)-1) - quoted_length)) ||
-      ((prefix_length + quoted_length) > (((size_t)-1) - suffix_length - 1U))) {
-    free(quoted_identifier);
-    return NULL;
-  }
-
-  total_length = prefix_length + quoted_length + suffix_length;
-  sql = (char *)malloc(total_length + 1U);
-  if (sql == NULL) {
-    free(quoted_identifier);
-    return NULL;
-  }
-
-  memcpy(sql, prefix, prefix_length);
-  memcpy(sql + prefix_length, quoted_identifier, quoted_length);
-  memcpy(sql + prefix_length + quoted_length, suffix, suffix_length);
-  sql[total_length] = '\0';
-
-  free(quoted_identifier);
-  return sql;
 }
 
 static const char *strappy_tools_sqlite_column_text(sqlite3_stmt *stmt,
@@ -3674,43 +3582,31 @@ static char *strappy_tools_remember_user_info(
   return strappy_tools_build_empty_result(error_out);
 }
 
-static char *strappy_tools_forget_info_row(sqlite3 *db,
-                                           const char *table_name,
-                                           long long id,
-                                           char **error_out)
+static char *strappy_tools_delete_user_fact(sqlite3 *db,
+                                            long long id,
+                                            char **error_out)
 {
+  static const char *sql = "DELETE FROM user_facts WHERE id = ?;";
   sqlite3_stmt *stmt;
-  char *sql;
   int rc;
 
-  if ((db == NULL) || !strappy_tools_string_has_value(table_name) ||
-      (id <= 0)) {
-    strappy_set_error(error_out, "Forget memory request is incomplete.");
-    return NULL;
-  }
-
-  sql = strappy_tools_build_identifier_sql(
-    "DELETE FROM ",
-    table_name,
-    " WHERE id = ?;");
-  if (sql == NULL) {
-    strappy_set_error(error_out, "Could not allocate forget memory SQL.");
+  if ((db == NULL) || (id <= 0)) {
+    strappy_set_error(error_out, "memory_delete request is incomplete.");
     return NULL;
   }
 
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-  free(sql);
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
-                                "Could not prepare forget memory: %s",
+                                "Could not prepare memory_delete: %s",
                                 sqlite3_errmsg(db));
     return NULL;
   }
 
   if (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)id) != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
-                                "Could not bind forget memory: %s",
+                                "Could not bind memory_delete: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     return NULL;
@@ -3719,7 +3615,7 @@ static char *strappy_tools_forget_info_row(sqlite3 *db,
   rc = sqlite3_step(stmt);
   if (rc != SQLITE_DONE) {
     strappy_set_formatted_error(error_out,
-                                "Could not forget memory row: %s",
+                                "Could not execute memory_delete: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     return NULL;
@@ -3742,8 +3638,8 @@ static int strappy_tools_add_database_info_row(cJSON *array,
     return 0;
   }
 
-  hint = strappy_tools_sqlite_column_text(stmt, 1);
-  date_saved = strappy_tools_sqlite_column_text(stmt, 2);
+  hint = strappy_tools_sqlite_column_text(stmt, 0);
+  date_saved = strappy_tools_sqlite_column_text(stmt, 1);
   if ((hint == NULL) || (date_saved == NULL)) {
     strappy_set_error(error_out, "Stored database hint is incomplete.");
     return 0;
@@ -3755,10 +3651,7 @@ static int strappy_tools_add_database_info_row(cJSON *array,
     return 0;
   }
 
-  if ((cJSON_AddNumberToObject(object,
-                               "id",
-                               (double)sqlite3_column_int64(stmt, 0)) == NULL) ||
-      (cJSON_AddStringToObject(object, "hint", hint) == NULL) ||
+  if ((cJSON_AddStringToObject(object, "hint", hint) == NULL) ||
       (cJSON_AddStringToObject(object, "date_saved", date_saved) == NULL) ||
       !cJSON_AddItemToArray(array, object)) {
     cJSON_Delete(object);
@@ -3777,7 +3670,7 @@ static int strappy_tools_read_database_hints(
   char **error_out)
 {
   static const char *sql =
-    "SELECT id, content, "
+    "SELECT content, "
     "strftime('%Y-%m-%dT%H:%M:%fZ', created_at_ms / 1000.0, 'unixepoch') "
     "FROM database_hints WHERE kind = 'hint' AND database_id = ?1 "
     "ORDER BY created_at_ms DESC, id DESC LIMIT ?2;";
@@ -4061,10 +3954,10 @@ static char *strappy_tools_read_database_info(
   return json;
 }
 
-static char *strappy_tools_remember_database_info(
+static char *strappy_tools_save_database_hint(
   sqlite3 *db,
   const strappy_discovered_database_record *record,
-  const strappy_memory_database_hint_remember_arguments *arguments,
+  const strappy_database_study_arguments *arguments,
   long long source_item_id,
   char **error_out)
 {
@@ -4081,7 +3974,7 @@ static char *strappy_tools_remember_database_info(
   if ((db == NULL) || (record == NULL) || (arguments == NULL) ||
       (arguments->database_id == NULL) || (arguments->hint == NULL)) {
     strappy_set_error(error_out,
-                      "memory_database_hint_remember request is incomplete.");
+                      "database_study request is incomplete.");
     return NULL;
   }
 
@@ -4090,7 +3983,7 @@ static char *strappy_tools_remember_database_info(
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(
       error_out,
-      "Could not prepare memory_database_hint_remember: %s",
+      "Could not prepare database_study: %s",
       sqlite3_errmsg(db));
     return NULL;
   }
@@ -4116,7 +4009,7 @@ static char *strappy_tools_remember_database_info(
     if ((error_out != NULL) && (*error_out == NULL)) {
       strappy_set_formatted_error(
         error_out,
-        "Could not bind memory_database_hint_remember: %s",
+        "Could not bind database_study: %s",
         sqlite3_errmsg(db));
     }
     return NULL;
@@ -4125,7 +4018,7 @@ static char *strappy_tools_remember_database_info(
   rc = sqlite3_step(stmt);
   if (rc != SQLITE_DONE) {
     strappy_set_formatted_error(error_out,
-                                "Could not save memory_database_hint: %s",
+                                "Could not save database hint: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     return NULL;
@@ -5962,14 +5855,13 @@ static char *strappy_tools_execute_memory_delete(
   const char *arguments_json,
   char **error_out)
 {
-  strappy_helper_info_forget_arguments arguments;
+  strappy_memory_delete_arguments arguments;
   sqlite3 *db;
   char *json;
 
-  if (!strappy_tools_parse_id_argument(STRAPPY_TOOL_MEMORY_DELETE,
-                                       arguments_json,
-                                       &arguments,
-                                       error_out)) {
+  if (!strappy_tools_parse_memory_delete_arguments(arguments_json,
+                                                   &arguments,
+                                                   error_out)) {
     return NULL;
   }
 
@@ -5980,10 +5872,7 @@ static char *strappy_tools_execute_memory_delete(
     return NULL;
   }
 
-  json = strappy_tools_forget_info_row(db,
-                                       "user_facts",
-                                       arguments.id,
-                                       error_out);
+  json = strappy_tools_delete_user_fact(db, arguments.id, error_out);
   sqlite3_close(db);
   return json;
 }
@@ -6093,7 +5982,7 @@ static char *strappy_tools_execute_database_context(
   return json;
 }
 
-static char *strappy_tools_execute_memory_database_hint_remember(
+static char *strappy_tools_execute_database_study(
   const char *session_db_path,
   long long active_session_id,
   const char *resource_dir,
@@ -6101,7 +5990,7 @@ static char *strappy_tools_execute_memory_database_hint_remember(
   const char *arguments_json,
   char **error_out)
 {
-  strappy_memory_database_hint_remember_arguments arguments;
+  strappy_database_study_arguments arguments;
   strappy_discovered_database_record_list list;
   const strappy_discovered_database_record *record;
   sqlite3 *db;
@@ -6109,8 +5998,8 @@ static char *strappy_tools_execute_memory_database_hint_remember(
   long long source_item_id;
   int matched_unavailable;
 
-  strappy_memory_database_hint_remember_arguments_init(&arguments);
-  if (!strappy_tools_parse_memory_database_hint_remember_arguments(
+  strappy_database_study_arguments_init(&arguments);
+  if (!strappy_tools_parse_database_study_arguments(
         arguments_json,
         &arguments,
         error_out)) {
@@ -6120,7 +6009,7 @@ static char *strappy_tools_execute_memory_database_hint_remember(
   if (!strappy_db_list_discovered_databases(session_db_path,
                                            &list,
                                            error_out)) {
-    strappy_memory_database_hint_remember_arguments_destroy(&arguments);
+    strappy_database_study_arguments_destroy(&arguments);
     return NULL;
   }
 
@@ -6132,19 +6021,19 @@ static char *strappy_tools_execute_memory_database_hint_remember(
     if (matched_unavailable) {
       strappy_tools_set_error_with_database_guidance(
         error_out,
-        "memory_database_hint_remember database_id is not approved or is no "
+        "database_study database_id is not approved or is no "
         "longer valid.",
         resource_dir,
-        "memory_database_hint_remember_unavailable_database_id");
+        "database_study_unavailable_database_id");
     } else {
       strappy_tools_set_error_with_database_guidance(
         error_out,
-        "memory_database_hint_remember database_id was not found.",
+        "database_study database_id was not found.",
         resource_dir,
-        "memory_database_hint_remember_missing_database_id");
+        "database_study_missing_database_id");
     }
     strappy_discovered_database_record_list_destroy(&list);
-    strappy_memory_database_hint_remember_arguments_destroy(&arguments);
+    strappy_database_study_arguments_destroy(&arguments);
     return NULL;
   }
 
@@ -6153,7 +6042,7 @@ static char *strappy_tools_execute_memory_database_hint_remember(
                                                &db,
                                                error_out)) {
     strappy_discovered_database_record_list_destroy(&list);
-    strappy_memory_database_hint_remember_arguments_destroy(&arguments);
+    strappy_database_study_arguments_destroy(&arguments);
     return NULL;
   }
 
@@ -6165,48 +6054,17 @@ static char *strappy_tools_execute_memory_database_hint_remember(
                                             error_out)) {
     sqlite3_close(db);
     strappy_discovered_database_record_list_destroy(&list);
-    strappy_memory_database_hint_remember_arguments_destroy(&arguments);
+    strappy_database_study_arguments_destroy(&arguments);
     return NULL;
   }
-  json = strappy_tools_remember_database_info(db,
-                                              record,
-                                              &arguments,
-                                              source_item_id,
-                                              error_out);
+  json = strappy_tools_save_database_hint(db,
+                                          record,
+                                          &arguments,
+                                          source_item_id,
+                                          error_out);
   sqlite3_close(db);
   strappy_discovered_database_record_list_destroy(&list);
-  strappy_memory_database_hint_remember_arguments_destroy(&arguments);
-  return json;
-}
-
-static char *strappy_tools_execute_memory_database_hint_forget(
-  const char *session_db_path,
-  const char *arguments_json,
-  char **error_out)
-{
-  strappy_helper_info_forget_arguments arguments;
-  sqlite3 *db;
-  char *json;
-
-  if (!strappy_tools_parse_id_argument(STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET,
-                                       arguments_json,
-                                       &arguments,
-                                       error_out)) {
-    return NULL;
-  }
-
-  db = NULL;
-  if (!strappy_tools_open_helper_info_database(session_db_path,
-                                               &db,
-                                               error_out)) {
-    return NULL;
-  }
-
-  json = strappy_tools_forget_info_row(db,
-                                       "database_hints",
-                                       arguments.id,
-                                       error_out);
-  sqlite3_close(db);
+  strappy_database_study_arguments_destroy(&arguments);
   return json;
 }
 
@@ -6410,19 +6268,13 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
                                                        error_out);
   }
 
-  if (strcmp(tool_name, STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) == 0) {
-    return strappy_tools_execute_memory_database_hint_remember(session_db_path,
+  if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_STUDY) == 0) {
+    return strappy_tools_execute_database_study(session_db_path,
                                                                active_session_id,
                                                                resource_dir,
                                                                provider_call_id,
                                                                arguments_json,
                                                                error_out);
-  }
-
-  if (strcmp(tool_name, STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET) == 0) {
-    return strappy_tools_execute_memory_database_hint_forget(session_db_path,
-                                                             arguments_json,
-                                                             error_out);
   }
 
   if (strcmp(tool_name, STRAPPY_TOOL_FONTAWESOME_SEARCH) == 0) {

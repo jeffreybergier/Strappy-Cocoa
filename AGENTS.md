@@ -128,8 +128,8 @@ House style for Strappy source:
     Do not put full schema dumps or learned hint caches into
     `database_list`.
 15. Memory and session-title tools persist durable assistant state.
-    `memory_user_fact_*` stores small stable user facts,
-    `memory_database_hint_*` stores reusable evidence-backed database hints, and
+    `memory_read`, `memory_save`, and `memory_delete` manage small stable user
+    facts, `database_study` stores reusable evidence-backed database hints, and
     `session_rename` updates the active session name for every user
     prompt and requires a non-empty string name. Do not store secrets,
     credentials, sensitive identifiers, long copied content, or private row
@@ -163,9 +163,9 @@ House style for Strappy source:
     Knowledge never runs that database-specific check. `database_context`
     requires an approved database id and may be skipped when it is not
     applicable, in which case its informational quality check may fail. The
-    memory remember tools are optional and are not quality checks:
+    memory-saving tools are optional and are not quality checks:
     `memory_save` requires a non-empty fact, and
-    `memory_database_hint_remember` requires both an approved database id and a
+    `database_study` requires both an approved database id and a
     non-empty hint. They do not accept empty or null no-ops. The session-name
     tool requires a non-empty string and updates the active session name. The
     Font Awesome confirmation tool requires a non-empty `shortcodes` array and

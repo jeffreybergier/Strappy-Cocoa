@@ -46,8 +46,7 @@
         "database_list",
         "database_query",
         "database_context",
-        "memory_database_hint_remember",
-        "memory_database_hint_forget"
+        "database_study"
       ],
       "additional_preflight_tools": [
         "database_list"

@@ -115,10 +115,9 @@ Deliverables:
 
 - [x] Tool registry in C with stable tool names, JSON schemas, argument
   parsing, and result serialization. The registry exposes `database_list`,
-  `database_context`, `database_query`, timestamp helpers, remembered user
-  fact helpers, remembered database hint helpers, and
-  `session_rename`, plus the Coding Assistant-only `file_read` and
-  `bash` tools.
+  `database_context`, `database_query`, timestamp helpers, `memory_read`,
+  `memory_save`, `memory_delete`, `database_study`, and `session_rename`, plus
+  the Coding Assistant-only `file_read` and `bash` tools.
 - [x] Stable database tools named `database_list`,
   `database_context`, and `database_query`, all using assistant-visible
   database IDs when a database is selected.

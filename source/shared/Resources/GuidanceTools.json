@@ -465,7 +465,7 @@
     {
       "type": "function",
       "function": {
-        "name": "memory_database_hint_remember",
+        "name": "database_study",
         "description": "Call this tool to save useful durable query, schema, or access information for an approved database. NEVER store user data, secrets, sensitive information, guesses, or one-off query results.",
         "parameters": {
           "type": "object",
@@ -491,29 +491,6 @@
       "x-strappy-display": {
         "promoted_argument": "database_id",
         "transform": "database_filename"
-      }
-    },
-    {
-      "type": "function",
-      "function": {
-        "name": "memory_database_hint_forget",
-        "description": "Call this tool to forget information about databases that is no longer correct nor helpful.",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "integer"
-            }
-          },
-          "required": [
-            "id"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "x-strappy-display": {
-        "promoted_argument": "id",
-        "transform": "database_hint_filename"
       }
     }
   ]

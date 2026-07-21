@@ -131,7 +131,7 @@ static int harness_test_unicode_emoji_scan(void)
   if ((strappy_quality_policy_find(
          STRAPPY_TOOL_MEMORY_SAVE) != NULL) ||
       (strappy_quality_policy_find(
-         STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) != NULL)) {
+         STRAPPY_TOOL_DATABASE_STUDY) != NULL)) {
     return harness_fail(
       "Optional memory tools unexpectedly remain answer-quality checks.");
   }
@@ -666,7 +666,7 @@ static int harness_test_request_surfaces(void)
       HARNESS_MEMORY_USER_FACT_FORGET_DESCRIPTION) &&
     harness_tool_description_equals(
       tools,
-      STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+      STRAPPY_TOOL_DATABASE_STUDY,
       HARNESS_MEMORY_DATABASE_HINT_REMEMBER_DESCRIPTION) &&
     harness_tool_description_equals(
       tools,
@@ -717,11 +717,11 @@ static int harness_test_request_surfaces(void)
       "fact") &&
     harness_tool_has_required_string_parameter(
       tools,
-      STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+      STRAPPY_TOOL_DATABASE_STUDY,
       "database_id") &&
     harness_tool_has_required_string_parameter(
       tools,
-      STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER,
+      STRAPPY_TOOL_DATABASE_STUDY,
       "hint") &&
     harness_tools_hide_local_display_metadata(tools) &&
     harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
@@ -1475,8 +1475,7 @@ static int harness_world_knowledge_tools_are_valid(cJSON *tools)
     !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_LIST) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_QUERY) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_CONTEXT) &&
-    !harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_DATABASE_HINT_REMEMBER) &&
-    !harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_DATABASE_HINT_FORGET) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_STUDY) &&
     harness_tools_hide_local_display_metadata(tools);
 }
 
@@ -1682,7 +1681,7 @@ static int harness_required_function_outputs_request_is_valid(
     "session_rename",
     "fontawesome_confirm",
     "memory_save",
-    "memory_database_hint_remember"
+    "database_study"
   };
   static const char *call_ids[] = {
     "call-empty-context",
@@ -2179,7 +2178,7 @@ static int harness_run_empty_answer_after_tools_server(int listener_fd)
     "\"status\":\"completed\"},{"
     "\"type\":\"function_call\",\"id\":\"fc-empty-database-hint\","
     "\"call_id\":\"call-empty-database-hint\","
-    "\"name\":\"memory_database_hint_remember\","
+    "\"name\":\"database_study\","
     "\"arguments\":\"{\\\"database_id\\\":\\\"db_1\\\","
     "\\\"hint\\\":\\\"Provenance hint.\\\"}\","
     "\"status\":\"completed\"}],"
@@ -3299,7 +3298,7 @@ static int harness_test_answer_quality_report(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_checks WHERE "
                         "check_key IN ('memory_save',"
-                        "'memory_database_hint_remember');",
+                        "'database_study');",
                         &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM item_text_parts p "
@@ -3457,7 +3456,7 @@ static int harness_test_world_knowledge_assistant_set(void)
       harness_query_int(
         db,
         "SELECT COUNT(*) FROM answer_quality_checks WHERE check_key IN ("
-        "'database_context','memory_database_hint_remember');",
+        "'database_context','database_study');",
         &value) && (value == 0LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM tool_executions;",
@@ -3713,7 +3712,7 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
                         "'session_rename',"
                         "'fontawesome_confirm',"
                         "'memory_save',"
-                        "'memory_database_hint_remember');",
+                        "'database_study');",
                         &value) && (value == 5LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items i "
@@ -3761,7 +3760,7 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
                         "JOIN conversation_items i ON i.id=f.item_id WHERE "
                         "h.content='Provenance hint.' AND "
                         "f.provider_call_id='call-empty-database-hint' AND "
-                        "f.tool_name='memory_database_hint_remember' AND "
+                        "f.tool_name='database_study' AND "
                         "i.session_id=(SELECT id FROM sessions LIMIT 1);",
                         &value) && (value == 1LL);
     sqlite3_close(db);
