@@ -92,8 +92,6 @@
 #define HARNESS_CODING_PREFLIGHT_ASSISTANT_TEXT \
   "Strappy here! Your strap-on coding master. Let me check out the " \
   "environment we are working with before kicking things off!"
-#define HARNESS_CODING_PREFLIGHT_BASH_ARGUMENTS \
-  "{\"command\":\"uname -a\"}"
 
 #define HARNESS_MEMORY_USER_FACT_FORGET_DESCRIPTION \
   "Call this tool to forget durable facts that are no longer correct or useful."
@@ -1272,7 +1270,7 @@ static int harness_preflight_call_is_valid(cJSON *item,
   call_id = cJSON_GetObjectItem(item, "call_id");
   name = cJSON_GetObjectItem(item, "name");
   arguments = cJSON_GetObjectItem(item, "arguments");
-  return (expected_arguments != NULL) && cJSON_IsObject(item) &&
+  return cJSON_IsObject(item) &&
     cJSON_IsString(type) && (type->valuestring != NULL) &&
     (strcmp(type->valuestring, "function_call") == 0) &&
     cJSON_IsString(item_id) && (item_id->valuestring != NULL) &&
@@ -1286,7 +1284,59 @@ static int harness_preflight_call_is_valid(cJSON *item,
     cJSON_IsString(name) && (name->valuestring != NULL) &&
     (strcmp(name->valuestring, expected_name) == 0) &&
     cJSON_IsString(arguments) && (arguments->valuestring != NULL) &&
-    (strcmp(arguments->valuestring, expected_arguments) == 0);
+    ((expected_arguments == NULL) ||
+     (strcmp(arguments->valuestring, expected_arguments) == 0));
+}
+
+static int harness_coding_preflight_bash_arguments_are_valid(
+  const char *arguments_json)
+{
+  static const char *required_fragments[] = {
+    "uname -a",
+    "SystemVersion.plist",
+    "dpkg --print-architecture",
+    "id",
+    "PWD=$PWD",
+    "HOME=$HOME",
+    "SHELL=$SHELL",
+    "PATH=$PATH",
+    "df -h .",
+    "/usr/include",
+    "which clang",
+    "which gcc",
+    "command -v cc",
+    "command -v make",
+    "command -v ld",
+    "command -v ar",
+    "command -v git",
+    "command -v ldid",
+    "command -v dpkg-deb",
+    "command -v curl",
+    "command -v sqlite3",
+    "clang --version",
+    "gcc --version",
+    "make --version",
+    "git --version",
+    " && pwd && ls -al"
+  };
+  cJSON *root;
+  cJSON *command;
+  size_t index;
+  int ok;
+
+  root = cJSON_Parse((arguments_json != NULL) ? arguments_json : "");
+  command = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "command") : NULL;
+  ok = cJSON_IsString(command) && (command->valuestring != NULL) &&
+    (root->child == command) && (command->next == NULL) &&
+    (strstr(command->valuestring, "python") == NULL);
+  for (index = 0U;
+       ok && (index < (sizeof(required_fragments) /
+                       sizeof(required_fragments[0])));
+       index++) {
+    ok = (strstr(command->valuestring, required_fragments[index]) != NULL);
+  }
+  cJSON_Delete(root);
+  return ok;
 }
 
 static int harness_preflight_output_matches(cJSON *item,
@@ -1666,6 +1716,7 @@ static int harness_coding_assistant_request_is_valid(
   cJSON *input;
   cJSON *memory_call;
   cJSON *bash_call;
+  cJSON *bash_arguments;
   cJSON *tools;
   const char *text;
 
@@ -1676,6 +1727,8 @@ static int harness_coding_assistant_request_is_valid(
   input = cJSON_GetObjectItem(root, "input");
   memory_call = cJSON_GetArrayItem(input, 2);
   bash_call = cJSON_GetArrayItem(input, 3);
+  bash_arguments = cJSON_IsObject(bash_call) ?
+    cJSON_GetObjectItem(bash_call, "arguments") : NULL;
   tools = cJSON_GetObjectItem(root, "tools");
   text = harness_message_text(cJSON_GetArrayItem(input, 0));
   return cJSON_IsString(instructions) &&
@@ -1698,10 +1751,12 @@ static int harness_coding_assistant_request_is_valid(
                                     prompt_group->valuestring) &&
     harness_preflight_call_is_valid(bash_call,
                                     STRAPPY_TOOL_BASH,
-                                    HARNESS_CODING_PREFLIGHT_BASH_ARGUMENTS,
+                                    NULL,
                                     "fc_pf_1_",
                                     "call_pf_1_",
                                     prompt_group->valuestring) &&
+    harness_coding_preflight_bash_arguments_are_valid(
+      cJSON_IsString(bash_arguments) ? bash_arguments->valuestring : NULL) &&
     harness_preflight_output_matches(cJSON_GetArrayItem(input, 4),
                                      memory_call,
                                      1) &&

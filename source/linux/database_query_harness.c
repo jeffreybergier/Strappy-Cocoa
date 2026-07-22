@@ -2459,6 +2459,58 @@ static int harness_responses_tool_has_engine(cJSON *tools,
   return 0;
 }
 
+static int harness_coding_preflight_bash_arguments_are_valid(
+  const char *arguments_json)
+{
+  static const char *required_fragments[] = {
+    "uname -a",
+    "SystemVersion.plist",
+    "dpkg --print-architecture",
+    "id",
+    "PWD=$PWD",
+    "HOME=$HOME",
+    "SHELL=$SHELL",
+    "PATH=$PATH",
+    "df -h .",
+    "/usr/include",
+    "which clang",
+    "which gcc",
+    "command -v cc",
+    "command -v make",
+    "command -v ld",
+    "command -v ar",
+    "command -v git",
+    "command -v ldid",
+    "command -v dpkg-deb",
+    "command -v curl",
+    "command -v sqlite3",
+    "clang --version",
+    "gcc --version",
+    "make --version",
+    "git --version",
+    " && pwd && ls -al"
+  };
+  cJSON *root;
+  cJSON *command;
+  size_t index;
+  int ok;
+
+  root = cJSON_Parse((arguments_json != NULL) ? arguments_json : "");
+  command = cJSON_IsObject(root) ?
+    cJSON_GetObjectItemCaseSensitive(root, "command") : NULL;
+  ok = cJSON_IsString(command) && (command->valuestring != NULL) &&
+    (root->child == command) && (command->next == NULL) &&
+    (strstr(command->valuestring, "python") == NULL);
+  for (index = 0U;
+       ok && (index < (sizeof(required_fragments) /
+                       sizeof(required_fragments[0])));
+       index++) {
+    ok = (strstr(command->valuestring, required_fragments[index]) != NULL);
+  }
+  cJSON_Delete(root);
+  return ok;
+}
+
 static int harness_run_assistant_set_tests(void)
 {
   strappy_assistant_set_record_list list;
@@ -2609,8 +2661,8 @@ static int harness_run_assistant_set_tests(void)
     (strcmp(coding.preflight_calls[0].arguments_json, "{}") == 0) &&
     (strcmp(coding.preflight_calls[1].tool_name,
             STRAPPY_TOOL_BASH) == 0) &&
-    (strcmp(coding.preflight_calls[1].arguments_json,
-            "{\"command\":\"uname -a\"}") == 0) &&
+    harness_coding_preflight_bash_arguments_are_valid(
+      coding.preflight_calls[1].arguments_json) &&
     strappy_assistant_set_profile_allows_tool(
       &coding,
       STRAPPY_TOOL_FILE_READ) &&

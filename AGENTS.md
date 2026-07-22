@@ -125,9 +125,12 @@ House style for Strappy source:
     a typed `function_call` plus matching `function_call_output` input pair.
     World Knowledge preflights only `memory_read`; Personal Assistant
     additionally preflights `database_list`. Coding Assistant preflights
-    `memory_read` and the application-approved `bash` command `uname -a`, which
-    runs even when model access to Bash is disabled for the session. Each
-    assistant set owns its message, calls, and argument values independently.
+    `memory_read` and an application-approved `bash` environment probe. The
+    probe reports the system and iOS version, identity, working environment,
+    disk and header roots, developer-tool locations and versions, and the
+    working-directory listing. It runs even when model access to Bash is
+    disabled for the session. Each assistant set owns its message, calls, and
+    argument values independently.
     These application-created, request-direction items do not create response
     tool-execution rows or count as model-generated calls for the tool audit.
     Do not put full schema dumps or learned hint caches into

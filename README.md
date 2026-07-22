@@ -38,12 +38,15 @@ copy, audit guidance, invariant personality, and hard rules in
   opt-in `bash` tool. Bash starts disabled for every session and can be enabled
   from the iOS prompt options only while Coding Assistant is selected; changing
   assistants disables it again. This setting controls model access only: the
-  application-owned first-prompt preflight always runs `uname -a` and seeds its
-  result, even when model access to Bash is disabled. `file_read` reads bounded
-  UTF-8 text ranges, while `bash` runs a fresh non-interactive child shell with
-  a hard 120-second ceiling; both start in the per-session working directory.
-  Bash results expose `output_truncated` so the model can distinguish complete
-  output from a bounded tail.
+  application-owned first-prompt preflight always runs a bounded environment
+  probe and seeds its result, even when model access to Bash is disabled. The
+  probe reports the iOS/system identity, current directory and safe shell-path
+  variables, disk/header roots, relevant C and jailbroken-device tool paths and
+  versions, and `ls -al`; it does not dump the full environment. `file_read`
+  reads bounded UTF-8 text ranges, while `bash` runs a fresh non-interactive
+  child shell with a hard 120-second ceiling; both start in the per-session
+  working directory. Bash results expose `output_truncated` so the model can
+  distinguish complete output from a bounded tail.
 
 An assistant set is selected per session and can be changed between prompts.
 The prompt-options button is disabled while a prompt is in progress, so model,
