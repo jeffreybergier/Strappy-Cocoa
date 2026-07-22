@@ -83,6 +83,18 @@
 #define HARNESS_UNICODE_EMOJI_ANSWER \
   "Initial answer. \xF0\x9F\x98\x80"
 
+#define HARNESS_WORLD_PREFLIGHT_ASSISTANT_TEXT \
+  "Strappy here! Your favorite world knowledge babe. Let me read any stored " \
+  "memories before kicking things off!"
+#define HARNESS_PERSONAL_PREFLIGHT_ASSISTANT_TEXT \
+  "Strappy here! Your favorite database sleuth! Let me see what I have to " \
+  "work with before kicking things off!"
+#define HARNESS_CODING_PREFLIGHT_ASSISTANT_TEXT \
+  "Strappy here! Your strap-on coding master. Let me check out the " \
+  "environment we are working with before kicking things off!"
+#define HARNESS_CODING_PREFLIGHT_BASH_ARGUMENTS \
+  "{\"command\":\"uname -a\"}"
+
 #define HARNESS_MEMORY_USER_FACT_FORGET_DESCRIPTION \
   "Call this tool to forget durable facts that are no longer correct or useful."
 
@@ -951,7 +963,8 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_BASH_CANCELLATION = 11,
   HARNESS_RESPONSES_SERVER_CODING_BASH_DISABLED = 12,
   HARNESS_RESPONSES_SERVER_BASH_OUTPUT = 13,
-  HARNESS_RESPONSES_SERVER_FILE_MUTATION = 14
+  HARNESS_RESPONSES_SERVER_FILE_MUTATION = 14,
+  HARNESS_RESPONSES_SERVER_PREFLIGHT_FIRST_PROMPT_ONLY = 15
 } harness_responses_server_scenario;
 
 static int harness_send_all(int socket_fd,
@@ -1243,6 +1256,7 @@ static int harness_string_has_prefix_and_suffix(const char *value,
 
 static int harness_preflight_call_is_valid(cJSON *item,
                                            const char *expected_name,
+                                           const char *expected_arguments,
                                            const char *item_id_prefix,
                                            const char *call_id_prefix,
                                            const char *prompt_group)
@@ -1258,7 +1272,7 @@ static int harness_preflight_call_is_valid(cJSON *item,
   call_id = cJSON_GetObjectItem(item, "call_id");
   name = cJSON_GetObjectItem(item, "name");
   arguments = cJSON_GetObjectItem(item, "arguments");
-  return cJSON_IsObject(item) &&
+  return (expected_arguments != NULL) && cJSON_IsObject(item) &&
     cJSON_IsString(type) && (type->valuestring != NULL) &&
     (strcmp(type->valuestring, "function_call") == 0) &&
     cJSON_IsString(item_id) && (item_id->valuestring != NULL) &&
@@ -1272,7 +1286,7 @@ static int harness_preflight_call_is_valid(cJSON *item,
     cJSON_IsString(name) && (name->valuestring != NULL) &&
     (strcmp(name->valuestring, expected_name) == 0) &&
     cJSON_IsString(arguments) && (arguments->valuestring != NULL) &&
-    (strcmp(arguments->valuestring, "{}") == 0);
+    (strcmp(arguments->valuestring, expected_arguments) == 0);
 }
 
 static int harness_preflight_output_matches(cJSON *item,
@@ -1308,28 +1322,58 @@ static int harness_preflight_output_matches(cJSON *item,
   return ok;
 }
 
+static int harness_preflight_bash_output_is_valid(cJSON *item, cJSON *call)
+{
+  cJSON *output;
+  cJSON *result;
+  cJSON *command_output;
+  cJSON *output_truncated;
+  int ok;
+
+  if (!harness_preflight_output_matches(item, call, 0)) {
+    return 0;
+  }
+  output = cJSON_GetObjectItem(item, "output");
+  result = cJSON_Parse(output->valuestring);
+  command_output = cJSON_GetObjectItem(result, "output");
+  output_truncated = cJSON_GetObjectItem(result, "output_truncated");
+  ok = cJSON_IsString(command_output) &&
+    (command_output->valuestring != NULL) &&
+    (command_output->valuestring[0] != '\0') &&
+    cJSON_IsFalse(output_truncated);
+  cJSON_Delete(result);
+  return ok;
+}
+
 static int harness_preflight_input_is_valid(cJSON *input,
                                             const char *prompt_group)
 {
   cJSON *memory_call;
   cJSON *database_call;
+  const char *assistant_text;
 
-  memory_call = cJSON_GetArrayItem(input, 1);
-  database_call = cJSON_GetArrayItem(input, 2);
-  return harness_preflight_call_is_valid(memory_call,
+  assistant_text = harness_message_text(cJSON_GetArrayItem(input, 1));
+  memory_call = cJSON_GetArrayItem(input, 2);
+  database_call = cJSON_GetArrayItem(input, 3);
+  return harness_message_role_is(cJSON_GetArrayItem(input, 1), "assistant") &&
+    (assistant_text != NULL) &&
+    (strcmp(assistant_text, HARNESS_PERSONAL_PREFLIGHT_ASSISTANT_TEXT) == 0) &&
+    harness_preflight_call_is_valid(memory_call,
                                     "memory_read",
+                                    "{}",
                                     "fc_pf_0_",
                                     "call_pf_0_",
                                     prompt_group) &&
     harness_preflight_call_is_valid(database_call,
                                     "database_list",
+                                    "{}",
                                     "fc_pf_1_",
                                     "call_pf_1_",
                                     prompt_group) &&
-    harness_preflight_output_matches(cJSON_GetArrayItem(input, 3),
+    harness_preflight_output_matches(cJSON_GetArrayItem(input, 4),
                                      memory_call,
                                      1) &&
-    harness_preflight_output_matches(cJSON_GetArrayItem(input, 4),
+    harness_preflight_output_matches(cJSON_GetArrayItem(input, 5),
                                      database_call,
                                      0);
 }
@@ -1421,7 +1465,7 @@ static int harness_request_base_is_valid(cJSON *root,
       (has_web_search != has_web_reference_instruction) ||
       !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
       !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
-      !cJSON_IsArray(input) || (input_count != 5) ||
+      !cJSON_IsArray(input) || (input_count != 6) ||
       !harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") ||
       !harness_preflight_input_is_valid(input, prompt_group->valuestring) ||
       (text == NULL) || (strcmp(text, expected_prompt) != 0) ||
@@ -1504,7 +1548,7 @@ static int harness_world_knowledge_request_is_valid(
   prompt_group = cJSON_IsObject(metadata) ?
     cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
   input = cJSON_GetObjectItem(root, "input");
-  memory_call = cJSON_GetArrayItem(input, 1);
+  memory_call = cJSON_GetArrayItem(input, 2);
   tools = cJSON_GetObjectItem(root, "tools");
   text = harness_message_text(cJSON_GetArrayItem(input, 0));
   if (!cJSON_IsFalse(stream) || !cJSON_IsFalse(store) ||
@@ -1518,14 +1562,19 @@ static int harness_world_knowledge_request_is_valid(
               "You are an expert personal assistant.") != NULL) ||
       !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
       !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
-      !cJSON_IsArray(input) || (cJSON_GetArraySize(input) != 3) ||
+      !cJSON_IsArray(input) || (cJSON_GetArraySize(input) != 4) ||
       !harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") ||
+      !harness_message_role_is(cJSON_GetArrayItem(input, 1), "assistant") ||
+      (harness_message_text(cJSON_GetArrayItem(input, 1)) == NULL) ||
+      (strcmp(harness_message_text(cJSON_GetArrayItem(input, 1)),
+              HARNESS_WORLD_PREFLIGHT_ASSISTANT_TEXT) != 0) ||
       !harness_preflight_call_is_valid(memory_call,
                                        STRAPPY_TOOL_MEMORY_READ,
+                                       "{}",
                                        "fc_pf_0_",
                                        "call_pf_0_",
                                        prompt_group->valuestring) ||
-      !harness_preflight_output_matches(cJSON_GetArrayItem(input, 2),
+      !harness_preflight_output_matches(cJSON_GetArrayItem(input, 3),
                                         memory_call,
                                         1) ||
       (text == NULL) || (strcmp(text, expected_prompt) != 0) ||
@@ -1551,6 +1600,61 @@ static int harness_world_knowledge_request_is_valid(
   return 1;
 }
 
+static int harness_world_followup_request_is_valid(
+  cJSON *root,
+  const char *session_key,
+  const char *first_prompt_group)
+{
+  cJSON *request_session;
+  cJSON *metadata;
+  cJSON *prompt_group;
+  cJSON *input;
+  cJSON *memory_call;
+  const char *first_prompt;
+  const char *announcement;
+  const char *first_answer;
+  const char *second_prompt;
+
+  request_session = cJSON_GetObjectItem(root, "session_id");
+  metadata = cJSON_GetObjectItem(root, "metadata");
+  prompt_group = cJSON_IsObject(metadata) ?
+    cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
+  input = cJSON_GetObjectItem(root, "input");
+  memory_call = cJSON_GetArrayItem(input, 2);
+  first_prompt = harness_message_text(cJSON_GetArrayItem(input, 0));
+  announcement = harness_message_text(cJSON_GetArrayItem(input, 1));
+  first_answer = harness_message_text(cJSON_GetArrayItem(input, 4));
+  second_prompt = harness_message_text(cJSON_GetArrayItem(input, 5));
+  return cJSON_IsString(request_session) &&
+    (request_session->valuestring != NULL) &&
+    (strcmp(request_session->valuestring, session_key) == 0) &&
+    cJSON_IsString(prompt_group) && (prompt_group->valuestring != NULL) &&
+    (strcmp(prompt_group->valuestring, first_prompt_group) != 0) &&
+    cJSON_IsArray(input) && (cJSON_GetArraySize(input) == 6) &&
+    harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") &&
+    (first_prompt != NULL) && (strcmp(first_prompt, "First prompt") == 0) &&
+    harness_message_role_is(cJSON_GetArrayItem(input, 1), "assistant") &&
+    (announcement != NULL) &&
+    (strcmp(announcement, HARNESS_WORLD_PREFLIGHT_ASSISTANT_TEXT) == 0) &&
+    harness_preflight_call_is_valid(memory_call,
+                                    STRAPPY_TOOL_MEMORY_READ,
+                                    "{}",
+                                    "fc_pf_0_",
+                                    "call_pf_0_",
+                                    first_prompt_group) &&
+    harness_preflight_output_matches(cJSON_GetArrayItem(input, 3),
+                                     memory_call,
+                                     1) &&
+    harness_message_role_is(cJSON_GetArrayItem(input, 4), "assistant") &&
+    (first_answer != NULL) &&
+    (strcmp(first_answer, "First round answer.") == 0) &&
+    harness_message_role_is(cJSON_GetArrayItem(input, 5), "user") &&
+    (second_prompt != NULL) &&
+    (strcmp(second_prompt, "Second prompt") == 0) &&
+    harness_world_knowledge_tools_are_valid(cJSON_GetObjectItem(root,
+                                                                "tools"));
+}
+
 static int harness_coding_assistant_request_is_valid(
   cJSON *root,
   const char *expected_prompt,
@@ -1561,6 +1665,7 @@ static int harness_coding_assistant_request_is_valid(
   cJSON *prompt_group;
   cJSON *input;
   cJSON *memory_call;
+  cJSON *bash_call;
   cJSON *tools;
   const char *text;
 
@@ -1569,7 +1674,8 @@ static int harness_coding_assistant_request_is_valid(
   prompt_group = cJSON_IsObject(metadata) ?
     cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
   input = cJSON_GetObjectItem(root, "input");
-  memory_call = cJSON_GetArrayItem(input, 1);
+  memory_call = cJSON_GetArrayItem(input, 2);
+  bash_call = cJSON_GetArrayItem(input, 3);
   tools = cJSON_GetObjectItem(root, "tools");
   text = harness_message_text(cJSON_GetArrayItem(input, 0));
   return cJSON_IsString(instructions) &&
@@ -1577,17 +1683,30 @@ static int harness_coding_assistant_request_is_valid(
     (strstr(instructions->valuestring,
             "You are an expert coding assistant.") != NULL) &&
     cJSON_IsString(prompt_group) && (prompt_group->valuestring != NULL) &&
-    cJSON_IsArray(input) && (cJSON_GetArraySize(input) == 3) &&
+    cJSON_IsArray(input) && (cJSON_GetArraySize(input) == 6) &&
     harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") &&
+    harness_message_role_is(cJSON_GetArrayItem(input, 1), "assistant") &&
+    (harness_message_text(cJSON_GetArrayItem(input, 1)) != NULL) &&
+    (strcmp(harness_message_text(cJSON_GetArrayItem(input, 1)),
+            HARNESS_CODING_PREFLIGHT_ASSISTANT_TEXT) == 0) &&
     (text != NULL) && (strcmp(text, expected_prompt) == 0) &&
     harness_preflight_call_is_valid(memory_call,
                                     STRAPPY_TOOL_MEMORY_READ,
+                                    "{}",
                                     "fc_pf_0_",
                                     "call_pf_0_",
                                     prompt_group->valuestring) &&
-    harness_preflight_output_matches(cJSON_GetArrayItem(input, 2),
+    harness_preflight_call_is_valid(bash_call,
+                                    STRAPPY_TOOL_BASH,
+                                    HARNESS_CODING_PREFLIGHT_BASH_ARGUMENTS,
+                                    "fc_pf_1_",
+                                    "call_pf_1_",
+                                    prompt_group->valuestring) &&
+    harness_preflight_output_matches(cJSON_GetArrayItem(input, 4),
                                      memory_call,
                                      1) &&
+    harness_preflight_bash_output_is_valid(cJSON_GetArrayItem(input, 5),
+                                           bash_call) &&
     cJSON_IsArray(tools) &&
     (cJSON_GetArraySize(tools) == (bash_enabled ? 12 : 11)) &&
     (harness_has_tool_name(tools, STRAPPY_TOOL_BASH) ==
@@ -2110,6 +2229,78 @@ static int harness_run_world_knowledge_server(int listener_fd)
   free(prompt_group);
   if (!ok) {
     fprintf(stderr, "World Knowledge server rejected the request.\n");
+  }
+  return ok;
+}
+
+static int harness_run_first_prompt_preflight_server(int listener_fd)
+{
+  static const char *first_response =
+    "{\"id\":\"resp-preflight-first\",\"object\":\"response\","
+    "\"created_at\":1700000030,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-preflight-first\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"First round answer.\",\"annotations\":[]}]}],"
+    "\"usage\":{\"input_tokens\":4,\"output_tokens\":4,"
+    "\"total_tokens\":8}}";
+  static const char *second_response =
+    "{\"id\":\"resp-preflight-second\",\"object\":\"response\","
+    "\"created_at\":1700000031,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-preflight-second\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Second round answer.\",\"annotations\":[]}]}],"
+    "\"usage\":{\"input_tokens\":8,\"output_tokens\":4,"
+    "\"total_tokens\":12}}";
+  char *body;
+  char *session_key;
+  char *prompt_group;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  session_key = NULL;
+  prompt_group = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_world_knowledge_request_is_valid(root,
+                                             "First prompt",
+                                             &session_key,
+                                             &prompt_group) &&
+    harness_send_json_response(client_fd, 200L, first_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_world_followup_request_is_valid(root,
+                                            session_key,
+                                            prompt_group) &&
+    harness_send_json_response(client_fd, 200L, second_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  free(session_key);
+  free(prompt_group);
+  if (!ok) {
+    fprintf(stderr, "First-prompt-only preflight server rejected a request.\n");
   }
   return ok;
 }
@@ -2906,6 +3097,9 @@ static int harness_start_server(harness_responses_server_scenario scenario,
       ok = harness_run_answer_quality_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_WORLD_KNOWLEDGE) {
       ok = harness_run_world_knowledge_server(listener_fd);
+    } else if (scenario ==
+               HARNESS_RESPONSES_SERVER_PREFLIGHT_FIRST_PROMPT_ONLY) {
+      ok = harness_run_first_prompt_preflight_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_SERVER_TOOL) {
       ok = harness_run_server_tool_server(listener_fd);
     } else if (scenario ==
@@ -3492,6 +3686,137 @@ static int harness_test_world_knowledge_assistant_set(void)
   return ok;
 }
 
+static int harness_test_preflight_runs_only_on_first_prompt(void)
+{
+  char path[] = "/tmp/strappy-responses-first-preflight-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *first_result;
+  char *second_result;
+  sqlite3 *db;
+  strappy_session_record session;
+  long long session_id;
+  long long value;
+  pid_t server_pid;
+  int fd;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create first-preflight harness database.");
+  }
+  close(fd);
+  error = NULL;
+  first_result = NULL;
+  second_result = NULL;
+  session_id = 0LL;
+  strappy_session_record_init(&session);
+  if (!harness_create_session_database(path, &session_id, &error) ||
+      !strappy_session_update_assistant_set(
+        path,
+        session_id,
+        "../shared/Resources",
+        STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE,
+        &error) ||
+      !strappy_db_update_session_web_provider(
+        path,
+        session_id,
+        STRAPPY_WEB_PROVIDER_PARALLEL,
+        &error) ||
+      !harness_start_server(
+        HARNESS_RESPONSES_SERVER_PREFLIGHT_FIRST_PROMPT_ONLY,
+        endpoint,
+        sizeof(endpoint),
+        &server_pid)) {
+    fprintf(stderr,
+            "Could not prepare first-prompt preflight test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    strappy_session_record_destroy(&session);
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  first_result = strappy_responses_send_prompt_for_session_and_store(
+    "First prompt",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources",
+    path,
+    session_id,
+    &error);
+  if ((first_result != NULL) &&
+      (strcmp(first_result, "First round answer.") == 0) &&
+      (error == NULL)) {
+    second_result = strappy_responses_send_prompt_for_session_and_store(
+      "Second prompt",
+      "/dev/null",
+      endpoint,
+      "test-token",
+      "../shared/Resources",
+      path,
+      session_id,
+      &error);
+  }
+  server_ok = harness_wait_for_server(
+    server_pid,
+    (first_result == NULL) || (second_result == NULL));
+  ok = (first_result != NULL) &&
+    (strcmp(first_result, "First round answer.") == 0) &&
+    (second_result != NULL) &&
+    (strcmp(second_result, "Second round answer.") == 0) &&
+    server_ok && (error == NULL);
+  free(first_result);
+  free(second_result);
+
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM model_requests WHERE "
+                           "request_kind='user';",
+                           &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM function_calls f "
+                        "JOIN conversation_items i ON i.id=f.item_id WHERE "
+                        "f.tool_name='memory_read' AND "
+                        "i.introduced_request_id IS NOT NULL AND "
+                        "i.source_attempt_id IS NULL;",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM conversation_items i "
+                        "JOIN message_items m ON m.item_id=i.id "
+                        "JOIN item_text_parts p ON p.item_id=i.id WHERE "
+                        "m.role='assistant' AND p.part_type='input_text' AND "
+                        "p.text='" HARNESS_WORLD_PREFLIGHT_ASSISTANT_TEXT "' "
+                        "AND i.introduced_request_id IS NOT NULL AND "
+                        "i.source_attempt_id IS NULL;",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM tool_executions;",
+                        &value) && (value == 0LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+  if (ok) {
+    ok = strappy_db_load_session(path, session_id, &session, &error) &&
+      (session.prompt != NULL) &&
+      (strcmp(session.prompt, "Second prompt") == 0) &&
+      (session.response != NULL) &&
+      (strcmp(session.response, "Second round answer.") == 0);
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "First-prompt-only preflight integration failed: %s\n",
+            (error != NULL) ? error : "request or ledger mismatch");
+  }
+  strappy_session_record_destroy(&session);
+  free(error);
+  unlink(path);
+  return ok;
+}
+
 static int harness_test_empty_answer_quality_report(void)
 {
   char path[] = "/tmp/strappy-responses-empty-answer-XXXXXX";
@@ -3594,8 +3919,17 @@ static int harness_test_empty_answer_quality_report(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items i "
                         "JOIN message_items m ON m.item_id=i.id WHERE "
-                        "m.role='assistant';",
+                        "m.role='assistant' AND "
+                        "i.source_attempt_id IS NOT NULL;",
                         &value) && (value == 0LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM conversation_items i "
+                        "JOIN message_items m ON m.item_id=i.id "
+                        "JOIN item_text_parts p ON p.item_id=i.id WHERE "
+                        "m.role='assistant' AND "
+                        "i.introduced_request_id IS NOT NULL AND p.text='"
+                        HARNESS_PERSONAL_PREFLIGHT_ASSISTANT_TEXT "';",
+                        &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM sqlite_master WHERE "
                         "type='table' AND lower(sql) LIKE '%raw_json%';",
@@ -3743,8 +4077,17 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items i "
                         "JOIN message_items m ON m.item_id=i.id WHERE "
-                        "m.role='assistant';",
+                        "m.role='assistant' AND "
+                        "i.source_attempt_id IS NOT NULL;",
                         &value) && (value == 0LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM conversation_items i "
+                        "JOIN message_items m ON m.item_id=i.id "
+                        "JOIN item_text_parts p ON p.item_id=i.id WHERE "
+                        "m.role='assistant' AND "
+                        "i.introduced_request_id IS NOT NULL AND p.text='"
+                        HARNESS_PERSONAL_PREFLIGHT_ASSISTANT_TEXT "';",
+                        &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM user_facts u "
                         "JOIN function_calls f ON f.item_id=u.source_item_id "
@@ -4439,7 +4782,7 @@ static int harness_test_bash_output_truncation_flag(void)
                         "f.item_id=o.function_call_item_id WHERE "
                         "f.tool_name='bash' AND "
                         "o.output_format='structured';",
-                        &value) && (value == 3LL);
+                        &value) && (value == 4LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;
@@ -4667,12 +5010,12 @@ static int harness_test_retry_attempt_ledger(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items WHERE "
                         "include_in_context=1;",
-                        &value) && (value == 8LL) &&
+                        &value) && (value == 9LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items WHERE "
                         "introduced_request_id IS NOT NULL AND "
                         "include_in_context=1;",
-                        &value) && (value == 6LL) &&
+                        &value) && (value == 7LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
                         "outcome='failed';",
@@ -5781,6 +6124,7 @@ int main(void)
       harness_test_cumulative_session_usage_cost() &&
       harness_test_answer_quality_report() &&
       harness_test_world_knowledge_assistant_set() &&
+      harness_test_preflight_runs_only_on_first_prompt() &&
       harness_test_empty_answer_quality_report() &&
       harness_test_empty_answer_after_tools_quality_report() &&
       harness_test_web_search_requires_markdown_reference() &&

@@ -92,7 +92,8 @@ House style for Strappy source:
     text. `SystemPrompt.json` owns section copy, prompt-facing audit guidance,
     invariant personality, and hard rules; executable audit evaluation remains
     code-owned. `AssistantSets.json` owns each set's goal, tool allowlist,
-    preflight tools, answer-quality checks, and availability. Keep tool schemas
+    first-prompt preflight assistant text, preflight calls and argument values,
+    answer-quality checks, and availability. Keep tool schemas
     in `GuidanceTools.json` in sync with the tool-name constants in
     `strappy_tools.h` and the executor in `strappy_tools.c`; do not duplicate
     prompt or tool guidance in Objective-C UI code. At the model-facing
@@ -118,13 +119,17 @@ House style for Strappy source:
     returns only ordered column-name and positional-row arrays plus a
     `rows_truncated` boolean. Exceptional text and BLOB cells carry their own
     compact metadata.
-    The Responses runtime executes the selected assistant set's preflight tools
-    before round zero and seeds each result as a typed `function_call` plus
-    matching `function_call_output` input pair. World Knowledge preflights only
-    `memory_read`; Personal Assistant additionally preflights
-    `database_list`. These application-created, request-direction items do
-    not create response tool-execution rows or count as model-generated calls
-    for the tool audit.
+    On the first user prompt in a new session, the Responses runtime inserts the
+    selected assistant set's configured assistant preflight message, executes
+    its configured preflight calls before round zero, and seeds each result as
+    a typed `function_call` plus matching `function_call_output` input pair.
+    World Knowledge preflights only `memory_read`; Personal Assistant
+    additionally preflights `database_list`. Coding Assistant preflights
+    `memory_read` and the application-approved `bash` command `uname -a`, which
+    runs even when model access to Bash is disabled for the session. Each
+    assistant set owns its message, calls, and argument values independently.
+    These application-created, request-direction items do not create response
+    tool-execution rows or count as model-generated calls for the tool audit.
     Do not put full schema dumps or learned hint caches into
     `database_list`.
 15. Memory and session-title tools persist durable assistant state.

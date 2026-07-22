@@ -67,6 +67,13 @@ char *strappy_tools_execute(const char *session_db_path,
                             const char *tool_name,
                             const char *arguments_json,
                             char **error_out);
+/* arguments_json must come from application-owned preflight configuration. */
+char *strappy_tools_execute_preflight(const char *session_db_path,
+                                      long long active_session_id,
+                                      const char *resource_dir,
+                                      const char *tool_name,
+                                      const char *arguments_json,
+                                      char **error_out);
 char *strappy_tools_execute_for_function_call(
   const char *session_db_path,
   long long active_session_id,

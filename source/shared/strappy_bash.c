@@ -1640,7 +1640,7 @@ char *strappy_bash_result_json(const char *output,
   return json;
 }
 
-char *strappy_bash_execute(
+static char *strappy_bash_execute_internal(
   const char *session_db_path,
   long long session_id,
   const char *arguments_json,
@@ -1648,6 +1648,7 @@ char *strappy_bash_execute(
   void *continue_callback_data,
   int *output_truncated_out,
   int *cancelled_out,
+  int require_session_enablement,
   char **error_out)
 {
   strappy_bash_arguments arguments;
@@ -1693,16 +1694,18 @@ char *strappy_bash_execute(
   }
   free(assistant_set_id);
 
-  bash_enabled = 0;
-  if (!strappy_db_get_session_bash_enabled(session_db_path,
-                                           session_id,
-                                           &bash_enabled,
-                                           error_out)) {
-    return NULL;
-  }
-  if (!bash_enabled) {
-    strappy_set_error(error_out, "bash is disabled for this session.");
-    return NULL;
+  if (require_session_enablement) {
+    bash_enabled = 0;
+    if (!strappy_db_get_session_bash_enabled(session_db_path,
+                                             session_id,
+                                             &bash_enabled,
+                                             error_out)) {
+      return NULL;
+    }
+    if (!bash_enabled) {
+      strappy_set_error(error_out, "bash is disabled for this session.");
+      return NULL;
+    }
   }
 
   if (!strappy_bash_parse_arguments(arguments_json, &arguments, error_out)) {
@@ -1819,4 +1822,42 @@ char *strappy_bash_execute(
   }
   strappy_bash_set_owned_error(error_out, message);
   return NULL;
+}
+
+char *strappy_bash_execute(
+  const char *session_db_path,
+  long long session_id,
+  const char *arguments_json,
+  strappy_bash_continue_callback continue_callback,
+  void *continue_callback_data,
+  int *output_truncated_out,
+  int *cancelled_out,
+  char **error_out)
+{
+  return strappy_bash_execute_internal(session_db_path,
+                                       session_id,
+                                       arguments_json,
+                                       continue_callback,
+                                       continue_callback_data,
+                                       output_truncated_out,
+                                       cancelled_out,
+                                       1,
+                                       error_out);
+}
+
+char *strappy_bash_execute_preflight(
+  const char *session_db_path,
+  long long session_id,
+  const char *arguments_json,
+  char **error_out)
+{
+  return strappy_bash_execute_internal(session_db_path,
+                                       session_id,
+                                       arguments_json,
+                                       NULL,
+                                       NULL,
+                                       NULL,
+                                       NULL,
+                                       0,
+                                       error_out);
 }

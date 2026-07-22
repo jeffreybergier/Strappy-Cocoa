@@ -75,6 +75,19 @@ static void strappy_assistant_sets_destroy_strings(char **values, size_t count)
   free(values);
 }
 
+static void strappy_assistant_sets_destroy_preflight_calls(
+  strappy_assistant_set_preflight_call *calls,
+  size_t count)
+{
+  size_t index;
+
+  for (index = 0U; index < count; index++) {
+    free(calls[index].tool_name);
+    free(calls[index].arguments_json);
+  }
+  free(calls);
+}
+
 void strappy_assistant_set_profile_destroy(
   strappy_assistant_set_profile *profile)
 {
@@ -88,8 +101,11 @@ void strappy_assistant_set_profile_destroy(
   free(profile->goal);
   strappy_assistant_sets_destroy_strings(profile->tool_names,
                                          profile->tool_name_count);
-  strappy_assistant_sets_destroy_strings(profile->preflight_tool_names,
-                                         profile->preflight_tool_name_count);
+  free(profile->preflight_when);
+  free(profile->preflight_assistant_text);
+  strappy_assistant_sets_destroy_preflight_calls(
+    profile->preflight_calls,
+    profile->preflight_call_count);
   strappy_assistant_sets_destroy_strings(profile->quality_check_keys,
                                          profile->quality_check_key_count);
   strappy_assistant_set_profile_init(profile);
@@ -311,6 +327,128 @@ static int strappy_assistant_sets_append_array(cJSON *object,
                                               count,
                                               item->valuestring,
                                               error_out)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int strappy_assistant_sets_preflight_has_tool(
+  const strappy_assistant_set_profile *profile,
+  const char *tool_name)
+{
+  size_t index;
+
+  for (index = 0U; index < profile->preflight_call_count; index++) {
+    if (strcmp(profile->preflight_calls[index].tool_name, tool_name) == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int strappy_assistant_sets_load_preflight(
+  cJSON *set,
+  strappy_assistant_set_profile *profile,
+  char **error_out)
+{
+  cJSON *preflight;
+  cJSON *calls;
+  cJSON *call;
+  const char *when;
+  const char *assistant_text;
+
+  preflight = cJSON_IsObject(set) ?
+    cJSON_GetObjectItemCaseSensitive(set, "preflight") : NULL;
+  if (!cJSON_IsObject(preflight)) {
+    strappy_set_error(error_out,
+                      "Assistant-set preflight must be an object.");
+    return 0;
+  }
+  when = strappy_assistant_sets_required_string(preflight,
+                                                 "when",
+                                                 error_out);
+  assistant_text = strappy_assistant_sets_required_string(
+    preflight,
+    "assistant_text",
+    error_out);
+  calls = cJSON_GetObjectItemCaseSensitive(preflight, "calls");
+  if ((when == NULL) || (assistant_text == NULL)) {
+    return 0;
+  }
+  if (strcmp(when, STRAPPY_ASSISTANT_SET_PREFLIGHT_FIRST_USER_PROMPT) != 0) {
+    strappy_set_formatted_error(error_out,
+                                "Assistant-set preflight trigger is invalid: %s",
+                                when);
+    return 0;
+  }
+  if (!cJSON_IsArray(calls)) {
+    strappy_set_error(error_out,
+                      "Assistant-set preflight calls must be an array.");
+    return 0;
+  }
+  if (!strappy_assistant_sets_copy_string(&profile->preflight_when,
+                                          when,
+                                          error_out) ||
+      !strappy_assistant_sets_copy_string(
+        &profile->preflight_assistant_text,
+        assistant_text,
+        error_out)) {
+    return 0;
+  }
+
+  for (call = calls->child; call != NULL; call = call->next) {
+    strappy_assistant_set_preflight_call *next;
+    strappy_assistant_set_preflight_call *target;
+    cJSON *arguments;
+    const char *tool_name;
+
+    tool_name = strappy_assistant_sets_required_string(call,
+                                                        "name",
+                                                        error_out);
+    arguments = cJSON_IsObject(call) ?
+      cJSON_GetObjectItemCaseSensitive(call, "arguments") : NULL;
+    if (tool_name == NULL) {
+      return 0;
+    }
+    if (!cJSON_IsObject(arguments)) {
+      strappy_set_formatted_error(
+        error_out,
+        "Assistant-set preflight arguments must be an object: %s",
+        tool_name);
+      return 0;
+    }
+    if (strappy_assistant_sets_preflight_has_tool(profile, tool_name)) {
+      strappy_set_formatted_error(error_out,
+                                  "Assistant-set preflight tool is duplicated: %s",
+                                  tool_name);
+      return 0;
+    }
+    if (profile->preflight_call_count >=
+        (((size_t)-1) / sizeof(strappy_assistant_set_preflight_call))) {
+      strappy_set_error(error_out,
+                        "Assistant-set preflight call list is too large.");
+      return 0;
+    }
+    next = (strappy_assistant_set_preflight_call *)realloc(
+      profile->preflight_calls,
+      (profile->preflight_call_count + 1U) *
+        sizeof(strappy_assistant_set_preflight_call));
+    if (next == NULL) {
+      strappy_set_error(error_out,
+                        "Could not allocate assistant-set preflight calls.");
+      return 0;
+    }
+    profile->preflight_calls = next;
+    target = &profile->preflight_calls[profile->preflight_call_count];
+    target->tool_name = NULL;
+    target->arguments_json = NULL;
+    profile->preflight_call_count++;
+    target->tool_name = strappy_string_duplicate(tool_name);
+    target->arguments_json = cJSON_PrintUnformatted(arguments);
+    if ((target->tool_name == NULL) || (target->arguments_json == NULL)) {
+      strappy_set_error(error_out,
+                        "Could not allocate assistant-set preflight call.");
       return 0;
     }
   }
@@ -557,16 +695,7 @@ int strappy_assistant_sets_load_profile(
                                         &profile->tool_names,
                                         &profile->tool_name_count,
                                         error_out) &&
-    strappy_assistant_sets_append_array(universal,
-                                        "preflight_tools",
-                                        &profile->preflight_tool_names,
-                                        &profile->preflight_tool_name_count,
-                                        error_out) &&
-    strappy_assistant_sets_append_array(set,
-                                        "additional_preflight_tools",
-                                        &profile->preflight_tool_names,
-                                        &profile->preflight_tool_name_count,
-                                        error_out) &&
+    strappy_assistant_sets_load_preflight(set, profile, error_out) &&
     strappy_assistant_sets_append_array(universal,
                                         "quality_checks",
                                         &profile->quality_check_keys,
@@ -582,15 +711,15 @@ int strappy_assistant_sets_load_profile(
     strappy_assistant_set_profile_destroy(profile);
     return 0;
   }
-  for (index = 0U; index < profile->preflight_tool_name_count; index++) {
+  for (index = 0U; index < profile->preflight_call_count; index++) {
     if (!strappy_assistant_sets_array_contains(
           profile->tool_names,
           profile->tool_name_count,
-          profile->preflight_tool_names[index])) {
+          profile->preflight_calls[index].tool_name)) {
       strappy_set_formatted_error(
         error_out,
         "Assistant-set preflight tool is not allowed: %s",
-        profile->preflight_tool_names[index]);
+        profile->preflight_calls[index].tool_name);
       strappy_assistant_set_profile_destroy(profile);
       return 0;
     }

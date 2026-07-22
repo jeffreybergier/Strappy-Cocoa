@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "default_set_id": "personal_assistant",
   "universal": {
     "tools": [
@@ -13,9 +13,6 @@
       "memory_save",
       "memory_delete",
       "session_rename"
-    ],
-    "preflight_tools": [
-      "memory_read"
     ],
     "quality_checks": [
       "answer_non_empty",
@@ -32,8 +29,17 @@
       "detail": "General knowledge and web research",
       "availability": "available",
       "goal": "You are an expert world-knowledge assistant. Answer general-knowledge questions and research current public information when useful. You do not have access to the user's personal databases in this assistant set and must never imply that you inspected them.",
+      "preflight": {
+        "when": "first_user_prompt",
+        "assistant_text": "Strappy here! Your favorite world knowledge babe. Let me read any stored memories before kicking things off!",
+        "calls": [
+          {
+            "name": "memory_read",
+            "arguments": {}
+          }
+        ]
+      },
       "additional_tools": [],
-      "additional_preflight_tools": [],
       "additional_quality_checks": []
     },
     {
@@ -42,14 +48,25 @@
       "detail": "Personal databases and assistance",
       "availability": "available",
       "goal": "You are an expert personal assistant. Research the user's approved personal databases, including contacts, calendars, emails, and text messages, whenever the request depends on that personal context. Never use your personal voice when quoting directly from a database.",
+      "preflight": {
+        "when": "first_user_prompt",
+        "assistant_text": "Strappy here! Your favorite database sleuth! Let me see what I have to work with before kicking things off!",
+        "calls": [
+          {
+            "name": "memory_read",
+            "arguments": {}
+          },
+          {
+            "name": "database_list",
+            "arguments": {}
+          }
+        ]
+      },
       "additional_tools": [
         "database_list",
         "database_query",
         "database_context",
         "database_study"
-      ],
-      "additional_preflight_tools": [
-        "database_list"
       ],
       "additional_quality_checks": [
         "database_context"
@@ -61,13 +78,28 @@
       "detail": "Code inspection and development",
       "availability": "available",
       "goal": "You are an expert coding assistant. Help inspect, explain, change, and verify software using the coding tools available to you.",
+      "preflight": {
+        "when": "first_user_prompt",
+        "assistant_text": "Strappy here! Your strap-on coding master. Let me check out the environment we are working with before kicking things off!",
+        "calls": [
+          {
+            "name": "memory_read",
+            "arguments": {}
+          },
+          {
+            "name": "bash",
+            "arguments": {
+              "command": "uname -a"
+            }
+          }
+        ]
+      },
       "additional_tools": [
         "file_read",
         "file_write",
         "file_edit",
         "bash"
       ],
-      "additional_preflight_tools": [],
       "additional_quality_checks": []
     }
   ]

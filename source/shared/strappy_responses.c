@@ -1206,14 +1206,14 @@ static int strappy_responses_append_preflight_items(
                       "Responses preflight assistant set is incomplete.");
     return 0;
   }
-  if (profile->preflight_tool_name_count == 0U) {
+  if (profile->preflight_call_count == 0U) {
     return 1;
   }
-  call_ids = (char **)calloc(profile->preflight_tool_name_count,
+  call_ids = (char **)calloc(profile->preflight_call_count,
                              sizeof(char *));
-  item_ids = (char **)calloc(profile->preflight_tool_name_count,
+  item_ids = (char **)calloc(profile->preflight_call_count,
                              sizeof(char *));
-  results = (char **)calloc(profile->preflight_tool_name_count,
+  results = (char **)calloc(profile->preflight_call_count,
                             sizeof(char *));
   if ((call_ids == NULL) || (item_ids == NULL) || (results == NULL)) {
     free(call_ids);
@@ -1225,7 +1225,7 @@ static int strappy_responses_append_preflight_items(
   }
   ok = 1;
   for (index = 0U;
-       ok && (index < profile->preflight_tool_name_count);
+       ok && (index < profile->preflight_call_count);
        index++) {
     char call_prefix[64];
     char item_prefix[64];
@@ -1250,12 +1250,12 @@ static int strappy_responses_append_preflight_items(
       ok = 0;
       break;
     }
-    results[index] = strappy_tools_execute(
+    results[index] = strappy_tools_execute_preflight(
       session_db_path,
       session_id,
       resource_dir,
-      profile->preflight_tool_names[index],
-      "{}",
+      profile->preflight_calls[index].tool_name,
+      profile->preflight_calls[index].arguments_json,
       error_out);
     call_ids[index] = strappy_responses_preflight_identifier(call_prefix,
                                                              prompt_group_key,
@@ -1271,8 +1271,8 @@ static int strappy_responses_append_preflight_items(
     item_json = strappy_responses_function_call_item_json(
       item_ids[index],
       call_ids[index],
-      profile->preflight_tool_names[index],
-      "{}",
+      profile->preflight_calls[index].tool_name,
+      profile->preflight_calls[index].arguments_json,
       error_out);
     if ((item_json == NULL) ||
         !strappy_responses_owned_items_append(items,
@@ -1282,7 +1282,7 @@ static int strappy_responses_append_preflight_items(
     }
   }
   for (index = 0U;
-       ok && (index < profile->preflight_tool_name_count);
+       ok && (index < profile->preflight_call_count);
        index++) {
     char *item_json;
 
@@ -1297,7 +1297,7 @@ static int strappy_responses_append_preflight_items(
     }
   }
 
-  for (index = 0U; index < profile->preflight_tool_name_count; index++) {
+  for (index = 0U; index < profile->preflight_call_count; index++) {
     free(call_ids[index]);
     free(item_ids[index]);
     free(results[index]);
@@ -1316,6 +1316,7 @@ static int strappy_responses_append_initial_items(
   const char *resource_dir,
   const char *prompt_group_key,
   const strappy_assistant_set_profile *profile,
+  int should_run_preflight,
   char **error_out)
 {
   char *item_json;
@@ -1323,6 +1324,18 @@ static int strappy_responses_append_initial_items(
   item_json = strappy_responses_message_item_json("user",
                                                   prompt,
                                                   error_out);
+  if ((item_json == NULL) ||
+      !strappy_responses_owned_items_append(items, item_json, error_out)) {
+    return 0;
+  }
+  if (!should_run_preflight) {
+    return 1;
+  }
+
+  item_json = strappy_responses_message_item_json(
+    "assistant",
+    profile->preflight_assistant_text,
+    error_out);
   if ((item_json == NULL) ||
       !strappy_responses_owned_items_append(items, item_json, error_out)) {
     return 0;
@@ -1521,6 +1534,7 @@ typedef struct strappy_responses_runtime {
   char *tools_json;
   strappy_responses_audit audit;
   char *request_url;
+  int is_first_user_prompt;
 } strappy_responses_runtime;
 
 static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
@@ -1534,6 +1548,7 @@ static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
   runtime->tools_json = NULL;
   strappy_responses_audit_reset(&runtime->audit);
   runtime->request_url = NULL;
+  runtime->is_first_user_prompt = 0;
 }
 
 static void strappy_responses_runtime_destroy(
@@ -1604,14 +1619,24 @@ static int strappy_responses_validate_assistant_set(
       return 0;
     }
   }
+  if ((runtime->assistant_set.preflight_when == NULL) ||
+      (strcmp(runtime->assistant_set.preflight_when,
+              STRAPPY_ASSISTANT_SET_PREFLIGHT_FIRST_USER_PROMPT) != 0) ||
+      (runtime->assistant_set.preflight_assistant_text == NULL) ||
+      (runtime->assistant_set.preflight_assistant_text[0] == '\0')) {
+    strappy_set_error(error_out,
+                      "Assistant-set preflight configuration is invalid.");
+    return 0;
+  }
   for (index = 0U;
-       index < runtime->assistant_set.preflight_tool_name_count;
+       index < runtime->assistant_set.preflight_call_count;
        index++) {
     const char *tool_name;
 
-    tool_name = runtime->assistant_set.preflight_tool_names[index];
+    tool_name = runtime->assistant_set.preflight_calls[index].tool_name;
     if (!strappy_tools_is_registered(tool_name) ||
         strappy_tools_is_server(tool_name) ||
+        (runtime->assistant_set.preflight_calls[index].arguments_json == NULL) ||
         !strappy_assistant_set_profile_allows_tool(&runtime->assistant_set,
                                                    tool_name)) {
       strappy_set_formatted_error(error_out,
@@ -1671,6 +1696,8 @@ static int strappy_responses_prepare_runtime(
   }
   runtime->config.web_provider = session.web_provider;
   bash_enabled = session.bash_enabled ? 1 : 0;
+  runtime->is_first_user_prompt =
+    (session.prompt == NULL) || (session.prompt[0] == '\0');
   assistant_set_id = strappy_string_duplicate(session.assistant_set_id);
   strappy_session_record_destroy(&session);
   if (assistant_set_id == NULL) {
@@ -1710,13 +1737,13 @@ static int strappy_responses_prepare_runtime(
     return 0;
   }
   free(assistant_set_id);
-  if (!bash_enabled) {
-    strappy_responses_profile_remove_tool(&runtime->assistant_set,
-                                          STRAPPY_TOOL_BASH);
-  }
   if (!strappy_responses_validate_assistant_set(runtime, error_out)) {
     strappy_responses_runtime_destroy(runtime);
     return 0;
+  }
+  if (!bash_enabled) {
+    strappy_responses_profile_remove_tool(&runtime->assistant_set,
+                                          STRAPPY_TOOL_BASH);
   }
   runtime->config.tool_allowlist =
     (const char * const *)runtime->assistant_set.tool_names;
@@ -2566,6 +2593,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
         runtime.config.guidance_resource_dir,
         prompt_group_key,
         &runtime.assistant_set,
+        runtime.is_first_user_prompt,
         error_out)) {
     free(prompt_group_key);
     free(last_model);

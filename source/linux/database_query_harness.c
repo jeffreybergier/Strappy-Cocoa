@@ -2509,7 +2509,15 @@ static int harness_run_assistant_set_tests(void)
       &error) &&
     strappy_assistant_set_profile_is_available(&world) &&
     (world.tool_name_count == 10U) &&
-    (world.preflight_tool_name_count == 1U) &&
+    (world.preflight_call_count == 1U) &&
+    (strcmp(world.preflight_when,
+            STRAPPY_ASSISTANT_SET_PREFLIGHT_FIRST_USER_PROMPT) == 0) &&
+    (strcmp(world.preflight_assistant_text,
+            "Strappy here! Your favorite world knowledge babe. Let me read "
+            "any stored memories before kicking things off!") == 0) &&
+    (strcmp(world.preflight_calls[0].tool_name,
+            STRAPPY_TOOL_MEMORY_READ) == 0) &&
+    (strcmp(world.preflight_calls[0].arguments_json, "{}") == 0) &&
     (world.quality_check_key_count == 5U) &&
     strappy_assistant_set_profile_allows_tool(
       &world,
@@ -2548,7 +2556,18 @@ static int harness_run_assistant_set_tests(void)
       &error) &&
     strappy_assistant_set_profile_is_available(&personal) &&
     (personal.tool_name_count == 14U) &&
-    (personal.preflight_tool_name_count == 2U) &&
+    (personal.preflight_call_count == 2U) &&
+    (strcmp(personal.preflight_when,
+            STRAPPY_ASSISTANT_SET_PREFLIGHT_FIRST_USER_PROMPT) == 0) &&
+    (strcmp(personal.preflight_assistant_text,
+            "Strappy here! Your favorite database sleuth! Let me see what I "
+            "have to work with before kicking things off!") == 0) &&
+    (strcmp(personal.preflight_calls[0].tool_name,
+            STRAPPY_TOOL_MEMORY_READ) == 0) &&
+    (strcmp(personal.preflight_calls[0].arguments_json, "{}") == 0) &&
+    (strcmp(personal.preflight_calls[1].tool_name,
+            STRAPPY_TOOL_DATABASE_LIST) == 0) &&
+    (strcmp(personal.preflight_calls[1].arguments_json, "{}") == 0) &&
     (personal.quality_check_key_count == 6U) &&
     strappy_assistant_set_profile_allows_tool(
       &personal,
@@ -2578,6 +2597,20 @@ static int harness_run_assistant_set_tests(void)
       &error) &&
     strappy_assistant_set_profile_is_available(&coding) &&
     (coding.tool_name_count == 14U) &&
+    (coding.preflight_call_count == 2U) &&
+    (strcmp(coding.preflight_when,
+            STRAPPY_ASSISTANT_SET_PREFLIGHT_FIRST_USER_PROMPT) == 0) &&
+    (strcmp(coding.preflight_assistant_text,
+            "Strappy here! Your strap-on coding master. Let me check out the "
+            "environment we are working with before kicking things off!") ==
+     0) &&
+    (strcmp(coding.preflight_calls[0].tool_name,
+            STRAPPY_TOOL_MEMORY_READ) == 0) &&
+    (strcmp(coding.preflight_calls[0].arguments_json, "{}") == 0) &&
+    (strcmp(coding.preflight_calls[1].tool_name,
+            STRAPPY_TOOL_BASH) == 0) &&
+    (strcmp(coding.preflight_calls[1].arguments_json,
+            "{\"command\":\"uname -a\"}") == 0) &&
     strappy_assistant_set_profile_allows_tool(
       &coding,
       STRAPPY_TOOL_FILE_READ) &&

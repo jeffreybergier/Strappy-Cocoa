@@ -8776,7 +8776,7 @@ int strappy_db_load_session(const char *db_path,
       "JOIN message_items m ON m.item_id = i.id "
       "JOIN item_text_parts p ON p.item_id = i.id "
       "WHERE i.session_id = s.id AND m.role = 'assistant' "
-      "AND i.include_in_context = 1 "
+      "AND i.include_in_context = 1 AND i.source_attempt_id IS NOT NULL "
       "ORDER BY i.sequence DESC, p.ordinal LIMIT 1), ''), "
     STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL ", "
     "COALESCE(m.name, " STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL "), "

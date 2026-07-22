@@ -28,6 +28,12 @@ char *strappy_bash_execute(
   int *output_truncated_out,
   int *cancelled_out,
   char **error_out);
+/* arguments_json must come from application-owned preflight configuration. */
+char *strappy_bash_execute_preflight(
+  const char *session_db_path,
+  long long session_id,
+  const char *arguments_json,
+  char **error_out);
 
 #ifdef __cplusplus
 }

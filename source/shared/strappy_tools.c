@@ -6314,6 +6314,28 @@ char *strappy_tools_execute(const char *session_db_path,
                                         error_out);
 }
 
+char *strappy_tools_execute_preflight(const char *session_db_path,
+                                      long long active_session_id,
+                                      const char *resource_dir,
+                                      const char *tool_name,
+                                      const char *arguments_json,
+                                      char **error_out)
+{
+  if ((tool_name != NULL) &&
+      (strcmp(tool_name, STRAPPY_TOOL_BASH) == 0)) {
+    return strappy_bash_execute_preflight(session_db_path,
+                                          active_session_id,
+                                          arguments_json,
+                                          error_out);
+  }
+  return strappy_tools_execute(session_db_path,
+                               active_session_id,
+                               resource_dir,
+                               tool_name,
+                               arguments_json,
+                               error_out);
+}
+
 char *strappy_tools_execute_for_function_call(
   const char *session_db_path,
   long long active_session_id,
