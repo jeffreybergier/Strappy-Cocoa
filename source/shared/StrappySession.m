@@ -27,6 +27,7 @@ NSString * const StrappySessionChangeKindWebProvider = @"web_provider";
 NSString * const StrappySessionChangeKindBash = @"bash";
 NSString * const StrappySessionChangeKindAssistantSet = @"assistant_set";
 NSString * const StrappyWebProviderNone = @"none";
+NSString * const StrappyWebProviderAuto = @"auto";
 NSString * const StrappyWebProviderNative = @"native";
 NSString * const StrappyWebProviderExa = @"exa";
 NSString * const StrappyWebProviderParallel = @"parallel";
@@ -134,6 +135,8 @@ static NSString *StrappySessionWebProviderFromValue(NSString *value)
     return StrappyWebProviderNone;
   }
   switch (provider) {
+    case STRAPPY_WEB_PROVIDER_AUTO:
+      return StrappyWebProviderAuto;
     case STRAPPY_WEB_PROVIDER_NATIVE:
       return StrappyWebProviderNative;
     case STRAPPY_WEB_PROVIDER_EXA:
@@ -957,7 +960,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   prompt = strappy_prompt_build([resourcePath fileSystemRepresentation],
                                 &profile,
                                 webSearchEnabled ?
-                                  STRAPPY_WEB_PROVIDER_NATIVE :
+                                  STRAPPY_WEB_PROVIDER_AUTO :
                                   STRAPPY_WEB_PROVIDER_NONE,
                                 &strappyError);
   strappy_assistant_set_profile_destroy(&profile);

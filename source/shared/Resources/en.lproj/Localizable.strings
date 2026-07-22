@@ -210,6 +210,7 @@
 "Search Web" = "Search Web";
 "Web Search" = "Web Search";
 "None" = "None";
+"Auto" = "Auto";
 "Native" = "Native";
 "Using web search incurs extra costs" = "Using web search incurs extra costs";
 "Web search provider is invalid." = "Web search provider is invalid.";

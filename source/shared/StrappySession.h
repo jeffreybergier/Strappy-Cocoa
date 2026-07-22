@@ -15,6 +15,7 @@ extern NSString * const StrappySessionChangeKindWebProvider;
 extern NSString * const StrappySessionChangeKindBash;
 extern NSString * const StrappySessionChangeKindAssistantSet;
 extern NSString * const StrappyWebProviderNone;
+extern NSString * const StrappyWebProviderAuto;
 extern NSString * const StrappyWebProviderNative;
 extern NSString * const StrappyWebProviderExa;
 extern NSString * const StrappyWebProviderParallel;

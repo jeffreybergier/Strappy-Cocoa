@@ -12,6 +12,8 @@ const char *strappy_web_provider_name(strappy_web_provider provider)
   switch (provider) {
     case STRAPPY_WEB_PROVIDER_NONE:
       return "none";
+    case STRAPPY_WEB_PROVIDER_AUTO:
+      return "auto";
     case STRAPPY_WEB_PROVIDER_NATIVE:
       return "native";
     case STRAPPY_WEB_PROVIDER_EXA:
@@ -32,6 +34,8 @@ int strappy_web_provider_parse(const char *name,
   }
   if (strcmp(name, "none") == 0) {
     provider = STRAPPY_WEB_PROVIDER_NONE;
+  } else if (strcmp(name, "auto") == 0) {
+    provider = STRAPPY_WEB_PROVIDER_AUTO;
   } else if (strcmp(name, "native") == 0) {
     provider = STRAPPY_WEB_PROVIDER_NATIVE;
   } else if (strcmp(name, "exa") == 0) {
@@ -47,7 +51,8 @@ int strappy_web_provider_parse(const char *name,
 
 int strappy_web_provider_is_enabled(strappy_web_provider provider)
 {
-  return (provider == STRAPPY_WEB_PROVIDER_NATIVE) ||
+  return (provider == STRAPPY_WEB_PROVIDER_AUTO) ||
+    (provider == STRAPPY_WEB_PROVIDER_NATIVE) ||
     (provider == STRAPPY_WEB_PROVIDER_EXA) ||
     (provider == STRAPPY_WEB_PROVIDER_PARALLEL);
 }

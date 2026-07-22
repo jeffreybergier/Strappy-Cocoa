@@ -78,7 +78,7 @@ static void hill_usage(const char *program)
           "Usage: %s --model ID --session-db PATH --database PATH [...] "
           "--env-file PATH --resource-dir PATH --answer-file PATH "
           "--prompt TEXT [--web-provider "
-          "none|native|exa|parallel] [--prepare-only]\n",
+          "none|auto|native|exa|parallel] [--prepare-only]\n",
           program);
 }
 

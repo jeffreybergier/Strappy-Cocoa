@@ -50,6 +50,7 @@ static NSArray *StrappyPromptWebProviders(void)
 {
   return [NSArray arrayWithObjects:
     StrappyWebProviderNone,
+    StrappyWebProviderAuto,
     StrappyWebProviderNative,
     StrappyWebProviderExa,
     StrappyWebProviderParallel,
@@ -58,6 +59,9 @@ static NSArray *StrappyPromptWebProviders(void)
 
 static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 {
+  if ([webProvider isEqualToString:StrappyWebProviderAuto]) {
+    return NSLocalizedString(@"Auto", nil);
+  }
   if ([webProvider isEqualToString:StrappyWebProviderNative]) {
     return NSLocalizedString(@"Native", nil);
   }

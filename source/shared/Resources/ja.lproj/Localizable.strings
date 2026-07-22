@@ -210,6 +210,7 @@
 "Search Web" = "Web を検索";
 "Web Search" = "Web 検索";
 "None" = "なし";
+"Auto" = "自動";
 "Native" = "ネイティブ";
 "Using web search incurs extra costs" = "Web 検索を使用すると追加料金が発生します";
 "Web search provider is invalid." = "Web 検索プロバイダーが無効です。";

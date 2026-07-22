@@ -36,7 +36,7 @@
 #define STRAPPY_DB_SESSION_WEB_PROVIDER_SQL \
   "COALESCE((SELECT x.web_provider FROM session_settings x " \
   "WHERE x.session_id = s.id), 'none')"
-#define STRAPPY_DB_DEFAULT_SESSION_WEB_PROVIDER "parallel"
+#define STRAPPY_DB_DEFAULT_SESSION_WEB_PROVIDER "auto"
 #define STRAPPY_DB_SESSION_BASH_ENABLED_SQL \
   "CASE WHEN " STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " = '" \
   STRAPPY_ASSISTANT_SET_CODING_ASSISTANT "' THEN " \
@@ -1341,7 +1341,7 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "session_id INTEGER PRIMARY KEY,"
     "web_provider TEXT NOT NULL DEFAULT '"
       STRAPPY_DB_DEFAULT_SESSION_WEB_PROVIDER "' "
-      "CHECK(web_provider IN ('none','native','exa','parallel')),"
+      "CHECK(web_provider IN ('none','auto','native','exa','parallel')),"
     "bash_enabled INTEGER NOT NULL DEFAULT 0 "
       "CHECK(bash_enabled IN (0,1)),"
     "streaming_enabled INTEGER NOT NULL DEFAULT 0 "
@@ -1411,7 +1411,7 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "max_output_tokens INTEGER,"
     "temperature_millionths INTEGER,"
     "web_provider TEXT NOT NULL DEFAULT 'none' "
-      "CHECK(web_provider IN ('none','native','exa','parallel')),"
+      "CHECK(web_provider IN ('none','auto','native','exa','parallel')),"
     "stream_enabled INTEGER NOT NULL DEFAULT 0 CHECK(stream_enabled IN (0,1)),"
     "reasoning_enabled INTEGER NOT NULL DEFAULT 1 "
       "CHECK(reasoning_enabled IN (0,1)),"

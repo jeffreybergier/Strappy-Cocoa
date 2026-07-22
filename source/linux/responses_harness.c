@@ -623,7 +623,7 @@ static int harness_test_request_surfaces(void)
   error = NULL;
   tools_json = strappy_tools_responses_request_json(
     "../shared/Resources",
-    STRAPPY_WEB_PROVIDER_NATIVE,
+    STRAPPY_WEB_PROVIDER_AUTO,
     &error);
   if (tools_json == NULL) {
     fprintf(stderr,
@@ -729,11 +729,11 @@ static int harness_test_request_surfaces(void)
     harness_server_tool_has_engine(
       tools,
       STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
-      "native") &&
+      "auto") &&
     harness_server_tool_has_engine(
       tools,
       STRAPPY_TOOL_OPENROUTER_WEB_FETCH,
-      "native");
+      "auto");
   cJSON_Delete(tools);
   free(error);
   if (!ok) {
@@ -2284,11 +2284,11 @@ static int harness_run_server_tool_server(int listener_fd)
     harness_server_tool_has_engine(
       tools,
       STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
-      "native") &&
+      "auto") &&
     harness_server_tool_has_engine(
       tools,
       STRAPPY_TOOL_OPENROUTER_WEB_FETCH,
-      "native") &&
+      "auto") &&
     harness_send_json_response(client_fd, 200L, first_response);
   cJSON_Delete(root);
   close(client_fd);
@@ -3802,7 +3802,7 @@ static int harness_test_web_search_requires_markdown_reference(void)
   if (!harness_create_session_database(path, &session_id, &error) ||
       !strappy_db_update_session_web_provider(path,
                                               session_id,
-                                              STRAPPY_WEB_PROVIDER_NATIVE,
+                                              STRAPPY_WEB_PROVIDER_AUTO,
                                               &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_SERVER_TOOL,
                             endpoint,
@@ -3839,7 +3839,7 @@ static int harness_test_web_search_requires_markdown_reference(void)
                            &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
-                        "web_provider='native';",
+                        "web_provider='auto';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items WHERE "

@@ -14,9 +14,10 @@ extern "C" {
 
 typedef enum strappy_web_provider {
   STRAPPY_WEB_PROVIDER_NONE = 0,
-  STRAPPY_WEB_PROVIDER_NATIVE = 1,
-  STRAPPY_WEB_PROVIDER_EXA = 2,
-  STRAPPY_WEB_PROVIDER_PARALLEL = 3
+  STRAPPY_WEB_PROVIDER_AUTO = 1,
+  STRAPPY_WEB_PROVIDER_NATIVE = 2,
+  STRAPPY_WEB_PROVIDER_EXA = 3,
+  STRAPPY_WEB_PROVIDER_PARALLEL = 4
 } strappy_web_provider;
 
 typedef struct strappy_config {

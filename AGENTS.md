@@ -21,9 +21,9 @@ Altivec iOS/macOS clean builds. The current harness targets are
 `responses_harness` and `prompt_generator_harness`, run through
 `make -C source/linux clean test`.
 Use `make -C source/linux prompts` to write all assistant-set prompts with web
-search set to none, native, Exa, and Parallel under
+search set to none, auto, native, Exa, and Parallel under
 `source/linux/build-linux/system-prompts`, or use
-`make -C source/linux review-prompts` to print all twelve variants.
+`make -C source/linux review-prompts` to print all fifteen variants.
 `database_query_harness` also covers
 OpenRouter model catalog persistence, catalog search, default model selection,
 allowed-model whitelisting, per-session model selection, and stale

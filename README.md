@@ -47,12 +47,13 @@ An assistant set is selected per session and can be changed between prompts.
 The prompt-options button is disabled while a prompt is in progress, so model,
 assistant-set, web-search, and Bash changes cannot overlap an active request.
 
-Generate all three assistant-set prompts with web search enabled and disabled:
+Generate every assistant-set prompt with web search set to none, auto, native,
+Exa, and Parallel:
 
 ```sh
 make -C source/linux prompts
 ```
 
-The six review files are written under
+The fifteen review files are written under
 `source/linux/build-linux/system-prompts`. Use `review-prompts` instead of
 `prompts` to print them to standard output.

@@ -497,9 +497,9 @@ static int harness_run_fresh_catalog_schema_tests(
            context->catalog_path,
            "SELECT COUNT(*) FROM pragma_table_info('session_settings') "
            "WHERE name = 'web_provider' "
-           "AND trim(dflt_value, char(39)) = 'parallel';",
+           "AND trim(dflt_value, char(39)) = 'auto';",
            1LL,
-           "parallel session web-provider default") &&
+           "automatic session web-provider default") &&
          harness_expect_catalog_integer(
            context->catalog_path,
            "SELECT COUNT(*) FROM pragma_table_info('sessions') "
@@ -5563,7 +5563,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (session.assistant_set_id != NULL) &&
        (strcmp(session.assistant_set_id,
                STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT) == 0) &&
-       (session.web_provider == STRAPPY_WEB_PROVIDER_PARALLEL) &&
+       (session.web_provider == STRAPPY_WEB_PROVIDER_AUTO) &&
        (session.bash_enabled == 0) &&
        (session.streaming_enabled == 0) &&
        (session.http_status == 0L);
@@ -5695,7 +5695,7 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
     return 0;
   }
 
-  for (web_provider_value = (int)STRAPPY_WEB_PROVIDER_NATIVE;
+  for (web_provider_value = (int)STRAPPY_WEB_PROVIDER_AUTO;
        web_provider_value <= (int)STRAPPY_WEB_PROVIDER_PARALLEL;
        web_provider_value++) {
     error = NULL;

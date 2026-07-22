@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt", default=PROMPT)
     parser.add_argument(
         "--web-provider",
-        choices=("none", "native", "exa", "parallel"),
+        choices=("none", "auto", "native", "exa", "parallel"),
         default="none",
     )
     return parser.parse_args()

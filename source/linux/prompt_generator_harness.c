@@ -748,7 +748,7 @@ int main(int argc, char **argv)
   }
   cJSON_Delete(system_prompt);
   if (check_only) {
-    printf("Prompt generator harness passed (12 variants).\n");
+    printf("Prompt generator harness passed (15 variants).\n");
   }
   return 0;
 }
