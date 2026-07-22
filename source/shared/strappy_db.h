@@ -114,6 +114,7 @@ typedef struct strappy_response_call_begin_input {
   long round_index;
   long attempt_index;
   long new_input_start_index;
+  int input_from_current_turn;
   const char *request_method;
   const char *request_url;
   const char *request_headers_json;
@@ -514,6 +515,12 @@ int strappy_db_finish_response_call(
 int strappy_db_list_canonical_response_items(
   const char *db_path,
   long long session_id,
+  strappy_response_item_raw_record_list *list,
+  char **error_out);
+int strappy_db_list_canonical_response_items_for_prompt_group(
+  const char *db_path,
+  long long session_id,
+  const char *prompt_group_key,
   strappy_response_item_raw_record_list *list,
   char **error_out);
 int strappy_db_save_response_tool_execution(

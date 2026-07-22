@@ -33,7 +33,7 @@
       "type": "function",
       "function": {
         "name": "database_list",
-        "description": "Call this tool to view approved databases. Returns an object containing a databases array with database_id, app_name, path, size_bytes, and modified_at in Unix seconds. When no databases are approved, the array is empty and guidance explains why.",
+        "description": "Call this tool to view approved databases. Returns an object containing a databases array with database_id, description, app_name, path, size_bytes, and modified_at in Unix seconds. description is null until the current database file has been studied. When no databases are approved, the array is empty and guidance explains why.",
         "parameters": {
           "type": "object",
           "properties": {},
@@ -440,7 +440,7 @@
       "type": "function",
       "function": {
         "name": "database_context",
-        "description": "ALWAYS call this tool with the relevant approved database_id before database_query. Returns remembered hints, table names, view names, and guidance for exploring them.",
+        "description": "ALWAYS call this tool with the relevant approved database_id before database_query. Returns the studied context value (or null), table names, view names, and guidance for exploring them.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -466,24 +466,33 @@
       "type": "function",
       "function": {
         "name": "database_study",
-        "description": "Call this tool to save useful durable query, schema, or access information for an approved database. NEVER store user data, secrets, sensitive information, guesses, or one-off query results.",
+        "description": "Write exactly one studied value for an approved database. Use key description for a high-level overview of what the database contains. Use key context for concise, evidence-backed instructions for accessing that data. A later write with the same database_id and key overwrites the earlier value. The result is only a write acknowledgement. NEVER store private row values, secrets, sensitive identifiers, guesses, or one-off query results.",
         "parameters": {
           "type": "object",
           "properties": {
+            "key": {
+              "type": "string",
+              "enum": [
+                "description",
+                "context"
+              ]
+            },
             "database_id": {
               "type": "string",
               "minLength": 1,
               "maxLength": 128
             },
-            "hint": {
+            "value": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4096
+              "maxLength": 4096,
+              "pattern": "\\S"
             }
           },
           "required": [
+            "key",
             "database_id",
-            "hint"
+            "value"
           ],
           "additionalProperties": false
         }

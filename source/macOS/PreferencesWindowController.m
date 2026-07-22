@@ -5,6 +5,7 @@
 #import "StrappySession.h"
 #import "StrappyPreferencesAuthenticationView.h"
 #import "StrappyPreferencesDatabaseWhitelistView.h"
+#import "StrappyPreferencesDatabaseStudyView.h"
 #import "StrappyPreferencesModelWhitelistView.h"
 #import "StrappyPreferencesSystemPromptsView.h"
 #import "StrappyKeychain.h"
@@ -24,6 +25,8 @@ static NSString * const kStrappyPreferencesToolbarModels =
   @"StrappyPreferencesToolbar.Models";
 static NSString * const kStrappyPreferencesToolbarDatabases =
   @"StrappyPreferencesToolbar.Databases";
+static NSString * const kStrappyPreferencesToolbarStudy =
+  @"StrappyPreferencesToolbar.Study";
 static NSString * const kStrappyPreferencesToolbarPrompts =
   @"StrappyPreferencesToolbar.Prompts";
 static NSString * const kStrappyModelSearchTextKey =
@@ -522,6 +525,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
                                            label:(NSString *)label;
 - (void)refreshAPITokenStatusWithSaved:(BOOL)saved;
 - (void)loadSystemPrompt;
+- (void)loadDatabaseStudy;
+- (void)showDatabaseStudyError:(NSError *)error title:(NSString *)title;
+- (void)resetDatabaseStudy:(id)sender;
+- (void)beginDatabaseStudy:(id)sender;
 - (NSString *)currentModelSearchText;
 - (NSArray *)modelRows:(NSArray *)rows matchingSearchText:(NSString *)searchText;
 - (void)applyModelRows;
@@ -687,6 +694,12 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
            name:NSControlTextDidChangeNotification
          object:databaseSearchField_];
 
+  databaseStudyPaneView_ =
+    [[StrappyPreferencesDatabaseStudyView alloc] initWithFrame:paneFrame
+                                                        target:self];
+  databaseStudyTextView_ = [[databaseStudyPaneView_ textView] retain];
+  [self loadDatabaseStudy];
+
   systemPromptsPaneView_ =
     [[StrappyPreferencesSystemPromptsView alloc] initWithFrame:paneFrame];
   systemPromptTextView_ = [[systemPromptsPaneView_ textView] retain];
@@ -718,6 +731,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     kStrappyPreferencesToolbarAuthentication,
     kStrappyPreferencesToolbarModels,
     kStrappyPreferencesToolbarDatabases,
+    kStrappyPreferencesToolbarStudy,
     kStrappyPreferencesToolbarPrompts,
     nil];
 }
@@ -755,6 +769,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     paneView = modelWhitelistView_;
   } else if ([identifier isEqualToString:kStrappyPreferencesToolbarDatabases]) {
     paneView = databaseWhitelistView_;
+  } else if ([identifier isEqualToString:kStrappyPreferencesToolbarStudy]) {
+    [self loadDatabaseStudy];
+    paneView = databaseStudyPaneView_;
   } else if ([identifier isEqualToString:kStrappyPreferencesToolbarPrompts]) {
     paneView = systemPromptsPaneView_;
   }
@@ -816,6 +833,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
                                           icon:AIFADatabase
                                          label:NSLocalizedString(@"Databases", nil)];
   }
+  if ([identifier isEqualToString:kStrappyPreferencesToolbarStudy]) {
+    return [self makeToolbarItemWithIdentifier:identifier
+                                          icon:AIFABookOpen
+                                         label:NSLocalizedString(@"Study", nil)];
+  }
   if ([identifier isEqualToString:kStrappyPreferencesToolbarPrompts]) {
     return [self makeToolbarItemWithIdentifier:identifier
                                           icon:AIFAScroll
@@ -848,6 +870,90 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 }
 
 #pragma mark - Authentication
+
+- (void)loadDatabaseStudy
+{
+  NSError *error;
+  NSString *json;
+
+  if (databaseStudyTextView_ == nil) {
+    return;
+  }
+  error = nil;
+  json = [StrappySession databaseStudyJSONWithError:&error];
+  if (json == nil) {
+    [databaseStudyTextView_ setString:@""];
+    [self showDatabaseStudyError:error
+                           title:NSLocalizedString(@"Could Not Load Study", nil)];
+    return;
+  }
+  [databaseStudyTextView_ setString:json];
+  [databaseStudyTextView_ scrollRangeToVisible:NSMakeRange(0U, 0U)];
+}
+
+- (void)showDatabaseStudyError:(NSError *)error title:(NSString *)title
+{
+  NSAlert *alert;
+  NSString *message;
+
+  message = [error localizedDescription];
+  if ([message length] == 0U) {
+    message = NSLocalizedString(@"The request failed.", nil);
+  }
+  alert = [[[NSAlert alloc] init] autorelease];
+  [alert setMessageText:title];
+  [alert setInformativeText:message];
+  [alert runModal];
+}
+
+- (void)resetDatabaseStudy:(id)sender
+{
+  NSAlert *alert;
+  NSError *error;
+
+  (void)sender;
+  alert = [[[NSAlert alloc] init] autorelease];
+  [alert setMessageText:NSLocalizedString(@"Reset Database Study?", nil)];
+  [alert setInformativeText:NSLocalizedString(
+    @"This clears every stored database description and context.", nil)];
+  [alert addButtonWithTitle:NSLocalizedString(@"Reset", nil)];
+  [alert addButtonWithTitle:NSLocalizedString(@"Cancel", nil)];
+  if ([alert runModal] != NSAlertFirstButtonReturn) {
+    return;
+  }
+  error = nil;
+  if (![StrappySession resetDatabaseStudyWithError:&error]) {
+    [self showDatabaseStudyError:error
+                           title:NSLocalizedString(@"Could Not Reset Study", nil)];
+    return;
+  }
+  [self loadDatabaseStudy];
+}
+
+- (void)beginDatabaseStudy:(id)sender
+{
+  NSAlert *alert;
+  NSError *error;
+
+  (void)sender;
+  alert = [[[NSAlert alloc] init] autorelease];
+  [alert setMessageText:NSLocalizedString(@"Study Databases?", nil)];
+  [alert setInformativeText:NSLocalizedString(
+    @"The default model will be used to study approved databases that are currently not studied.",
+    nil)];
+  [alert addButtonWithTitle:NSLocalizedString(@"Study", nil)];
+  [alert addButtonWithTitle:NSLocalizedString(@"Cancel", nil)];
+  if ([alert runModal] != NSAlertFirstButtonReturn) {
+    return;
+  }
+  error = nil;
+  if ([StrappySession beginDatabaseStudyWithError:&error] == nil) {
+    [self showDatabaseStudyError:error
+                           title:NSLocalizedString(@"Could Not Start Study", nil)];
+    return;
+  }
+  [[self window] close];
+}
 
 - (void)refreshAPITokenStatusWithSaved:(BOOL)saved
 {
@@ -2142,6 +2248,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [databaseSearchField_ release];
   [databaseTableView_ release];
   [databaseWhitelistView_ release];
+  [databaseStudyPaneView_ release];
+  [databaseStudyTextView_ release];
   [scanButton_ release];
   [scanProgressIndicator_ release];
   [databaseStatusLabel_ release];

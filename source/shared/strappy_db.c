@@ -13067,11 +13067,11 @@ static int strappy_db_semantic_begin_response_call(
      "temperature_millionths, web_provider, stream_enabled, "
      "reasoning_enabled, reasoning_summary, tool_calls_enabled, state, "
      "created_at_ms) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, NULL, ?, ?, ?, ?, ?, ?, ?, "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, "
      "'running', ?);";
   static const char *update_request_sql =
-    "UPDATE model_requests SET input_through_sequence = ?, "
-    "new_input_from_sequence = ? WHERE id = ?;";
+    "UPDATE model_requests SET input_from_sequence = ?, "
+    "input_through_sequence = ?, new_input_from_sequence = ? WHERE id = ?;";
   static const char *insert_attempt_sql =
     "INSERT INTO http_attempts "
     "(request_id, previous_attempt_id, attempt_index, state, method, endpoint, "
@@ -13099,6 +13099,7 @@ static int strappy_db_semantic_begin_response_call(
   long long previous_request_id;
   long long instruction_revision_id;
   long long toolset_revision_id;
+  long long input_from_sequence;
   long long input_through_sequence;
   long long new_input_from_sequence;
   long long call_id;
@@ -13266,30 +13267,31 @@ static int strappy_db_semantic_begin_response_call(
             (sqlite3_bind_int64(stmt, 7,
                                 (sqlite3_int64)toolset_revision_id) == SQLITE_OK) :
             (sqlite3_bind_null(stmt, 7) == SQLITE_OK)) &&
-         (sqlite3_bind_int64(stmt, 8, 0) == SQLITE_OK) &&
+         (sqlite3_bind_int64(stmt, 8, 1) == SQLITE_OK) &&
+         (sqlite3_bind_int64(stmt, 9, 0) == SQLITE_OK) &&
          (cJSON_IsNumber(max_output_tokens) ?
-            (sqlite3_bind_int64(stmt, 9,
-                                (sqlite3_int64)max_output_tokens->valuedouble) == SQLITE_OK) :
-            (sqlite3_bind_null(stmt, 9) == SQLITE_OK)) &&
-         (cJSON_IsNumber(temperature) ?
             (sqlite3_bind_int64(stmt, 10,
+                                (sqlite3_int64)max_output_tokens->valuedouble) == SQLITE_OK) :
+            (sqlite3_bind_null(stmt, 10) == SQLITE_OK)) &&
+         (cJSON_IsNumber(temperature) ?
+            (sqlite3_bind_int64(stmt, 11,
                                 (sqlite3_int64)(temperature->valuedouble *
                                                 1000000.0)) == SQLITE_OK) :
-            (sqlite3_bind_null(stmt, 10) == SQLITE_OK)) &&
+            (sqlite3_bind_null(stmt, 11) == SQLITE_OK)) &&
          (sqlite3_bind_text(stmt,
-                            11,
+                            12,
                             web_provider_name,
                             -1,
                             SQLITE_TRANSIENT) == SQLITE_OK) &&
-         (sqlite3_bind_int(stmt, 12,
-                           cJSON_IsTrue(stream) ? 1 : 0) == SQLITE_OK) &&
          (sqlite3_bind_int(stmt, 13,
+                           cJSON_IsTrue(stream) ? 1 : 0) == SQLITE_OK) &&
+         (sqlite3_bind_int(stmt, 14,
                            (reasoning == NULL || cJSON_IsNull(reasoning)) ? 0 : 1) == SQLITE_OK) &&
-         strappy_db_bind_nullable_text_value(stmt, 14, summary_text) &&
-         (sqlite3_bind_int(stmt, 15,
+         strappy_db_bind_nullable_text_value(stmt, 15, summary_text) &&
+         (sqlite3_bind_int(stmt, 16,
                            cJSON_IsArray(tools) &&
                            (cJSON_GetArraySize(tools) > 0) ? 1 : 0) == SQLITE_OK) &&
-         (sqlite3_bind_int64(stmt, 16, (sqlite3_int64)now_ms) == SQLITE_OK);
+         (sqlite3_bind_int64(stmt, 17, (sqlite3_int64)now_ms) == SQLITE_OK);
     if (!ok || (sqlite3_step(stmt) != SQLITE_DONE)) {
       strappy_set_formatted_error(error_out,
                                   "Could not save semantic Responses request: %s",
@@ -13351,14 +13353,26 @@ static int strappy_db_semantic_begin_response_call(
     stmt = NULL;
     rc = sqlite3_prepare_v2(
       db,
-      "SELECT COALESCE(MAX(sequence), 0) FROM conversation_items "
-      "WHERE session_id = ?;",
+      input->input_from_current_turn ?
+        "SELECT COALESCE(MIN(i.sequence), 1), "
+        "COALESCE(MAX(i.sequence), 0) FROM conversation_items i "
+        "JOIN turns t ON t.id = i.turn_id "
+        "WHERE i.session_id = ?1 AND t.prompt_group_key = ?2 "
+        "AND i.include_in_context = 1;" :
+        "SELECT 1, COALESCE(MAX(sequence), 0) FROM conversation_items "
+        "WHERE session_id = ?1 AND include_in_context = 1;",
       -1,
       &stmt,
       NULL);
     if ((rc != SQLITE_OK) ||
         (sqlite3_bind_int64(stmt, 1,
                             (sqlite3_int64)input->session_id) != SQLITE_OK) ||
+        (input->input_from_current_turn &&
+         (sqlite3_bind_text(stmt,
+                            2,
+                            input->prompt_group_key,
+                            -1,
+                            SQLITE_TRANSIENT) != SQLITE_OK)) ||
         (sqlite3_step(stmt) != SQLITE_ROW)) {
       strappy_set_formatted_error(error_out,
                                   "Could not measure Responses context: %s",
@@ -13369,7 +13383,8 @@ static int strappy_db_semantic_begin_response_call(
       cJSON_Delete(root);
       return 0;
     }
-    input_through_sequence = (long long)sqlite3_column_int64(stmt, 0);
+    input_from_sequence = (long long)sqlite3_column_int64(stmt, 0);
+    input_through_sequence = (long long)sqlite3_column_int64(stmt, 1);
     sqlite3_finalize(stmt);
     new_input_from_sequence = (input->new_input_start_index >= 0L) ?
       input_through_sequence -
@@ -13383,12 +13398,14 @@ static int strappy_db_semantic_begin_response_call(
     rc = sqlite3_prepare_v2(db, update_request_sql, -1, &stmt, NULL);
     ok = (rc == SQLITE_OK) &&
          (sqlite3_bind_int64(stmt, 1,
+                             (sqlite3_int64)input_from_sequence) == SQLITE_OK) &&
+         (sqlite3_bind_int64(stmt, 2,
                              (sqlite3_int64)input_through_sequence) == SQLITE_OK) &&
          ((new_input_from_sequence > 0LL) ?
-            (sqlite3_bind_int64(stmt, 2,
+            (sqlite3_bind_int64(stmt, 3,
                                 (sqlite3_int64)new_input_from_sequence) == SQLITE_OK) :
-            (sqlite3_bind_null(stmt, 2) == SQLITE_OK)) &&
-         (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)request_id) == SQLITE_OK);
+            (sqlite3_bind_null(stmt, 3) == SQLITE_OK)) &&
+         (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)request_id) == SQLITE_OK);
     if (!ok || (sqlite3_step(stmt) != SQLITE_DONE)) {
       strappy_set_formatted_error(error_out,
                                   "Could not finalize Responses context range: %s",
@@ -15515,12 +15532,18 @@ static cJSON *strappy_db_semantic_load_item(sqlite3 *db,
 static int strappy_db_semantic_list_canonical_response_items(
   const char *db_path,
   long long session_id,
+  const char *prompt_group_key,
   strappy_response_item_raw_record_list *list,
   char **error_out)
 {
-  static const char *sql =
+  static const char *all_sql =
     "SELECT id FROM conversation_items "
     "WHERE session_id = ? AND include_in_context = 1 ORDER BY sequence;";
+  static const char *prompt_group_sql =
+    "SELECT i.id FROM conversation_items i "
+    "JOIN turns t ON t.id = i.turn_id "
+    "WHERE i.session_id = ?1 AND t.prompt_group_key = ?2 "
+    "AND i.include_in_context = 1 ORDER BY i.sequence;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;
@@ -15543,9 +15566,21 @@ static int strappy_db_semantic_list_canonical_response_items(
     return 0;
   }
   stmt = NULL;
-  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  rc = sqlite3_prepare_v2(db,
+                          (prompt_group_key != NULL) ?
+                            prompt_group_sql : all_sql,
+                          -1,
+                          &stmt,
+                          NULL);
   if ((rc != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) != SQLITE_OK)) {
+      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) != SQLITE_OK) ||
+      ((prompt_group_key != NULL) &&
+       ((prompt_group_key[0] == '\0') ||
+        (sqlite3_bind_text(stmt,
+                           2,
+                           prompt_group_key,
+                           -1,
+                           SQLITE_TRANSIENT) != SQLITE_OK)))) {
     strappy_set_formatted_error(
       error_out,
       "Could not prepare canonical Responses item query: %s",
@@ -15630,6 +15665,7 @@ int strappy_db_list_canonical_response_items(
 
   return strappy_db_semantic_list_canonical_response_items(db_path,
                                                            session_id,
+                                                           NULL,
                                                            list,
                                                            error_out);
 
@@ -15723,6 +15759,24 @@ int strappy_db_list_canonical_response_items(
   sqlite3_finalize(stmt);
   strappy_db_release(db);
   return 1;
+}
+
+int strappy_db_list_canonical_response_items_for_prompt_group(
+  const char *db_path,
+  long long session_id,
+  const char *prompt_group_key,
+  strappy_response_item_raw_record_list *list,
+  char **error_out)
+{
+  if ((prompt_group_key == NULL) || (prompt_group_key[0] == '\0')) {
+    strappy_set_error(error_out, "Responses prompt group key is empty.");
+    return 0;
+  }
+  return strappy_db_semantic_list_canonical_response_items(db_path,
+                                                           session_id,
+                                                           prompt_group_key,
+                                                           list,
+                                                           error_out);
 }
 
 static int strappy_db_semantic_save_response_tool_execution(

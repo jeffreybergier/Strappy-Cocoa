@@ -335,6 +335,7 @@ enum {
 @property (nonatomic, strong) UINavigationController *optionsNavigationController;
 @property (nonatomic, strong) StrappyPromptOptionsTableViewController *optionsController;
 @property (nonatomic, assign) BOOL controlsEnabled;
+@property (nonatomic, assign) BOOL studyLocked;
 @property (nonatomic, assign) BOOL composing;
 @property (nonatomic, assign) BOOL expanded;
 @property (nonatomic, assign) BOOL sending;
@@ -1013,7 +1014,13 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 - (void)setEnabled:(BOOL)enabled
 {
   [self setControlsEnabled:enabled ? YES : NO];
-  [[self textView] setEditable:enabled ? YES : NO];
+  [[self textView] setEditable:(enabled && ![self studyLocked]) ? YES : NO];
+  [self updateControls];
+}
+
+- (void)setStudyLocked:(BOOL)studyLocked
+{
+  _studyLocked = studyLocked ? YES : NO;
   [self updateControls];
 }
 
@@ -1070,7 +1077,8 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
 - (BOOL)canSendCurrentPrompt
 {
-  if (![self controlsEnabled] || [self sending] || ([self textView] == nil)) {
+  if ([self studyLocked] || ![self controlsEnabled] || [self sending] ||
+      ([self textView] == nil)) {
     return NO;
   }
   return ([[self trimmedPromptText] length] > 0U) ? YES : NO;
@@ -1084,15 +1092,16 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
   canSend = [self canSendCurrentPrompt];
   sendEnabled = [self sending]
-    ? ([self controlsEnabled] && ![self cancellationRequested])
+    ? (([self controlsEnabled] || [self studyLocked]) &&
+       ![self cancellationRequested])
     : canSend;
 
   [[self optionsButton] setEnabled:
-    ([self controlsEnabled] && ![self sending]) ? YES : NO];
+    ([self controlsEnabled] && ![self studyLocked] && ![self sending]) ? YES : NO];
   [[self dismissButton] setEnabled:
-    ([self controlsEnabled] && [self composing]) ? YES : NO];
+    ([self controlsEnabled] && ![self studyLocked] && [self composing]) ? YES : NO];
   [[self textView] setEditable:
-    ([self controlsEnabled] && ![self sending]) ? YES : NO];
+    ([self controlsEnabled] && ![self studyLocked] && ![self sending]) ? YES : NO];
   [[self sendButton] setEnabled:sendEnabled];
 
   if ([self sending]) {

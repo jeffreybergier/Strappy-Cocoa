@@ -119,6 +119,17 @@ int strappy_session_send_prompt_with_events_and_load(
   void *callback_data,
   strappy_session_record *record,
   char **error_out);
+int strappy_session_send_isolated_prompt_with_events_and_load(
+  const char *prompt,
+  const char *api_endpoint,
+  const char *api_token,
+  const char *guidance_resource_dir,
+  const char *db_path,
+  long long session_id,
+  strappy_responses_event_callback callback,
+  void *callback_data,
+  strappy_session_record *record,
+  char **error_out);
 
 char *strappy_session_webview_batched_js(const char *java_script);
 char *strappy_session_webview_messages_page_html_for_session(

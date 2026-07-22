@@ -2227,6 +2227,7 @@ static int strappy_responses_send_round(
   const char *request_kind,
   const char *request_json,
   long new_input_start_index,
+  int input_from_current_turn,
   long long *previous_call_id_io,
   long long *successful_call_id_out,
   long long processing_started_ms,
@@ -2281,6 +2282,7 @@ static int strappy_responses_send_round(
     begin.attempt_index = attempt_index;
     begin.new_input_start_index = (attempt_index == 0L) ?
       new_input_start_index : -1L;
+    begin.input_from_current_turn = input_from_current_turn;
     begin.request_method = "POST";
     begin.request_url = runtime->request_url;
     begin.request_headers_json = request_headers_json;
@@ -2531,7 +2533,7 @@ static void strappy_responses_update_failure_summary(
   free(ignored_error);
 }
 
-char *strappy_responses_send_prompt_for_session_and_store_with_events(
+static char *strappy_responses_send_prompt_for_session_and_store_internal(
   const char *prompt,
   const char *env_path,
   const char *fallback_api_endpoint,
@@ -2539,6 +2541,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   const char *guidance_resource_dir,
   const char *session_db_path,
   long long session_id,
+  int input_from_current_turn,
   strappy_responses_event_callback callback,
   void *callback_data,
   char **error_out)
@@ -2628,10 +2631,17 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
     strappy_response_item_raw_record_list_init(&history);
     strappy_responses_http_result_init(&http);
     strappy_responses_analysis_init(&analysis);
-    if (!strappy_db_list_canonical_response_items(session_db_path,
-                                                  session_id,
-                                                  &history,
-                                                  error_out)) {
+    if (!(input_from_current_turn ?
+          strappy_db_list_canonical_response_items_for_prompt_group(
+            session_db_path,
+            session_id,
+            prompt_group_key,
+            &history,
+            error_out) :
+          strappy_db_list_canonical_response_items(session_db_path,
+                                                   session_id,
+                                                   &history,
+                                                   error_out))) {
       strappy_responses_update_failure_summary(
         session_db_path,
         session_id,
@@ -2673,6 +2683,7 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
                                       next_request_kind,
                                       request_json,
                                       new_input_start_index,
+                                      input_from_current_turn,
                                       &previous_call_id,
                                       &successful_call_id,
                                       processing_started_ms,
@@ -2813,6 +2824,58 @@ char *strappy_responses_send_prompt_for_session_and_store_with_events(
   strappy_responses_owned_items_destroy(&new_items);
   strappy_responses_runtime_destroy(&runtime);
   return NULL;
+}
+
+char *strappy_responses_send_prompt_for_session_and_store_with_events(
+  const char *prompt,
+  const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
+  const char *guidance_resource_dir,
+  const char *session_db_path,
+  long long session_id,
+  strappy_responses_event_callback callback,
+  void *callback_data,
+  char **error_out)
+{
+  return strappy_responses_send_prompt_for_session_and_store_internal(
+    prompt,
+    env_path,
+    fallback_api_endpoint,
+    fallback_api_token,
+    guidance_resource_dir,
+    session_db_path,
+    session_id,
+    0,
+    callback,
+    callback_data,
+    error_out);
+}
+
+char *strappy_responses_send_isolated_prompt_for_session_and_store_with_events(
+  const char *prompt,
+  const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
+  const char *guidance_resource_dir,
+  const char *session_db_path,
+  long long session_id,
+  strappy_responses_event_callback callback,
+  void *callback_data,
+  char **error_out)
+{
+  return strappy_responses_send_prompt_for_session_and_store_internal(
+    prompt,
+    env_path,
+    fallback_api_endpoint,
+    fallback_api_token,
+    guidance_resource_dir,
+    session_db_path,
+    session_id,
+    1,
+    callback,
+    callback_data,
+    error_out);
 }
 
 char *strappy_responses_send_prompt_for_session_and_store(

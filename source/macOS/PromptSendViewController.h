@@ -38,6 +38,7 @@
   NSMenuItem    *streamingMenuItem_;
   id<PromptSendViewControllerDelegate> delegate_;
   BOOL          enabled_;
+  BOOL          studyLocked_;
   BOOL          expanded_;
   BOOL          sending_;
   BOOL          cancellationRequested_;
@@ -49,6 +50,7 @@
 - (id<PromptSendViewControllerDelegate>)delegate;
 - (CGFloat)preferredHeight;
 - (void)setEnabled:(BOOL)enabled;
+- (void)setStudyLocked:(BOOL)studyLocked;
 - (void)setSending:(BOOL)sending;
 - (void)setCancellationRequested:(BOOL)requested;
 - (void)setWebProvider:(NSString *)webProvider;

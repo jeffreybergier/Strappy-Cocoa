@@ -3,6 +3,7 @@
 
 @class StrappyPreferencesAuthenticationView;
 @class StrappyPreferencesDatabaseWhitelistView;
+@class StrappyPreferencesDatabaseStudyView;
 @class StrappyPreferencesModelWhitelistView;
 @class StrappyPreferencesSystemPromptsView;
 
@@ -26,6 +27,8 @@
   NSSearchField       *databaseSearchField_;
   NSTableView         *databaseTableView_;
   StrappyPreferencesDatabaseWhitelistView *databaseWhitelistView_;
+  StrappyPreferencesDatabaseStudyView *databaseStudyPaneView_;
+  NSTextView          *databaseStudyTextView_;
   NSButton            *scanButton_;
   NSProgressIndicator *scanProgressIndicator_;
   NSTextField         *databaseStatusLabel_;

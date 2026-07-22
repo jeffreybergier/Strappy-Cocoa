@@ -245,6 +245,27 @@ static const char *strappy_assistant_sets_required_string(cJSON *object,
   return value->valuestring;
 }
 
+static int strappy_assistant_sets_required_boolean(cJSON *object,
+                                                    const char *key,
+                                                    int *value_out,
+                                                    char **error_out)
+{
+  cJSON *value;
+
+  value = cJSON_IsObject(object) ?
+    cJSON_GetObjectItemCaseSensitive(object, key) : NULL;
+  if (!cJSON_IsBool(value)) {
+    strappy_set_formatted_error(error_out,
+                                "Assistant set is missing boolean %s.",
+                                key);
+    return 0;
+  }
+  if (value_out != NULL) {
+    *value_out = cJSON_IsTrue(value) ? 1 : 0;
+  }
+  return 1;
+}
+
 static int strappy_assistant_sets_copy_string(char **target,
                                               const char *value,
                                               char **error_out)
@@ -551,6 +572,19 @@ int strappy_assistant_sets_list(const char *resource_dir,
   }
   for (set = sets->child; set != NULL; set = set->next) {
     strappy_assistant_set_record *next;
+    int user_selectable;
+
+    if (!strappy_assistant_sets_required_boolean(set,
+                                                  "user_selectable",
+                                                  &user_selectable,
+                                                  error_out)) {
+      cJSON_Delete(root);
+      strappy_assistant_set_record_list_destroy(list);
+      return 0;
+    }
+    if (!user_selectable) {
+      continue;
+    }
 
     if (list->count >= (((size_t)-1) /
                         sizeof(strappy_assistant_set_record))) {
@@ -621,6 +655,8 @@ int strappy_assistant_sets_load_profile(
   const char *detail;
   const char *availability;
   const char *goal;
+  int inherits_universal_tools;
+  int user_selectable;
   size_t index;
   int ok;
 
@@ -662,6 +698,14 @@ int strappy_assistant_sets_load_profile(
   goal = strappy_assistant_sets_required_string(set, "goal", error_out);
   if ((display_name == NULL) || (detail == NULL) || (availability == NULL) ||
       (goal == NULL) ||
+      !strappy_assistant_sets_required_boolean(set,
+                                                "user_selectable",
+                                                &user_selectable,
+                                                error_out) ||
+      !strappy_assistant_sets_required_boolean(set,
+                                                "inherits_universal_tools",
+                                                &inherits_universal_tools,
+                                                error_out) ||
       !strappy_assistant_sets_availability_is_valid(availability)) {
     if ((error_out == NULL) || (*error_out == NULL)) {
       strappy_set_error(error_out, "Assistant-set profile is invalid.");
@@ -669,6 +713,7 @@ int strappy_assistant_sets_load_profile(
     cJSON_Delete(root);
     return 0;
   }
+  (void)user_selectable;
 
   ok = strappy_assistant_sets_copy_string(&profile->identifier,
                                           selected_identifier,
@@ -685,11 +730,12 @@ int strappy_assistant_sets_load_profile(
     strappy_assistant_sets_copy_string(&profile->goal,
                                        goal,
                                        error_out) &&
-    strappy_assistant_sets_append_array(universal,
-                                        "tools",
-                                        &profile->tool_names,
-                                        &profile->tool_name_count,
-                                        error_out) &&
+    (!inherits_universal_tools ||
+     strappy_assistant_sets_append_array(universal,
+                                         "tools",
+                                         &profile->tool_names,
+                                         &profile->tool_name_count,
+                                         error_out)) &&
     strappy_assistant_sets_append_array(set,
                                         "additional_tools",
                                         &profile->tool_names,

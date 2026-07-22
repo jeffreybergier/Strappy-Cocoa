@@ -214,6 +214,7 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 - (void)reloadWithSession:(StrappySession *)session
 {
   BOOL sessionChanged;
+  BOOL studyLocked;
 
   if (![session isKindOfClass:[StrappySession class]]) {
     session = nil;
@@ -254,7 +255,9 @@ static BOOL StrappyEnsureDirectory(NSString *path)
     }
   }
 
-  [sendController_ setEnabled:(session_ != nil)];
+  studyLocked = (session_ != nil) && [session_ isDatabaseStudySession];
+  [sendController_ setEnabled:((session_ != nil) && !studyLocked)];
+  [sendController_ setStudyLocked:studyLocked];
   [self updateSendingStateFromSession];
   [sendController_ setStreamingEnabled:(session_ != nil) ?
     [session_ streamingEnabled] : NO];
@@ -272,7 +275,8 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 
 - (BOOL)canSendCurrentPrompt
 {
-  if ((session_ == nil) || sending_ || [self sessionPromptIsInFlight]) {
+  if ((session_ == nil) || [session_ isDatabaseStudySession] || sending_ ||
+      [self sessionPromptIsInFlight]) {
     return NO;
   }
   return [sendController_ canSendCurrentPrompt];
@@ -303,7 +307,8 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 
 - (BOOL)canToggleStreaming
 {
-  if ((session_ == nil) || sending_ || [self sessionPromptIsInFlight]) {
+  if ((session_ == nil) || [session_ isDatabaseStudySession] || sending_ ||
+      [self sessionPromptIsInFlight]) {
     return NO;
   }
   return YES;
@@ -407,7 +412,8 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 
 - (BOOL)canSelectModel
 {
-  if ((session_ == nil) || sending_ || [self sessionPromptIsInFlight]) {
+  if ((session_ == nil) || [session_ isDatabaseStudySession] || sending_ ||
+      [self sessionPromptIsInFlight]) {
     return NO;
   }
   return YES;
@@ -616,7 +622,8 @@ static BOOL StrappyEnsureDirectory(NSString *path)
     return;
   }
 
-  if ((session_ == nil) || [self sessionPromptIsInFlight]) {
+  if ((session_ == nil) || [session_ isDatabaseStudySession] ||
+      [self sessionPromptIsInFlight]) {
     return;
   }
 

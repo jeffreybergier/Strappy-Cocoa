@@ -35,6 +35,7 @@ DATABASE_QUERY_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_client.c \
 	$(SHARED_DIR)/strappy_config.c \
 	$(SHARED_DIR)/strappy_tools.c \
+	$(SHARED_DIR)/strappy_study.c \
 	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
 	$(SHARED_DIR)/strappy_file_mutation.c \
@@ -76,6 +77,7 @@ RESPONSES_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_responses.c \
 	$(SHARED_DIR)/strappy_session.c \
 	$(SHARED_DIR)/strappy_tools.c \
+	$(SHARED_DIR)/strappy_study.c \
 	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
 	$(SHARED_DIR)/strappy_file_mutation.c \
@@ -89,6 +91,7 @@ PROMPT_GENERATOR_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_prompt.c \
 	$(SHARED_DIR)/strappy_quality_policy.c \
 	$(SHARED_DIR)/strappy_tools.c \
+	$(SHARED_DIR)/strappy_study.c \
 	$(SHARED_DIR)/strappy_client.c \
 	$(SHARED_DIR)/strappy_config.c \
 	$(SHARED_DIR)/strappy_bash.c \

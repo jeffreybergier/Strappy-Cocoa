@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "default_set_id": "personal_assistant",
   "universal": {
     "tools": [
@@ -27,6 +27,8 @@
       "id": "world_knowledge",
       "display_name": "World Knowledge",
       "detail": "General knowledge and web research",
+      "user_selectable": true,
+      "inherits_universal_tools": true,
       "availability": "available",
       "goal": "You are an expert world-knowledge assistant. Answer general-knowledge questions and research current public information when useful. You do not have access to the user's personal databases in this assistant set and must never imply that you inspected them.",
       "preflight": {
@@ -46,6 +48,8 @@
       "id": "personal_assistant",
       "display_name": "Personal Assistant",
       "detail": "Personal databases and assistance",
+      "user_selectable": true,
+      "inherits_universal_tools": true,
       "availability": "available",
       "goal": "You are an expert personal assistant. Research the user's approved personal databases, including contacts, calendars, emails, and text messages, whenever the request depends on that personal context. Never use your personal voice when quoting directly from a database.",
       "preflight": {
@@ -65,8 +69,7 @@
       "additional_tools": [
         "database_list",
         "database_query",
-        "database_context",
-        "database_study"
+        "database_context"
       ],
       "additional_quality_checks": [
         "database_context"
@@ -76,6 +79,8 @@
       "id": "coding_assistant",
       "display_name": "Coding Assistant",
       "detail": "Code inspection and development",
+      "user_selectable": true,
+      "inherits_universal_tools": true,
       "availability": "available",
       "goal": "You are an expert coding assistant. Help inspect, explain, change, and verify software using the coding tools available to you.",
       "preflight": {
@@ -101,6 +106,36 @@
         "bash"
       ],
       "additional_quality_checks": []
+    },
+    {
+      "id": "database_study",
+      "display_name": "Database Study",
+      "detail": "Internal database coverage workflow",
+      "user_selectable": false,
+      "inherits_universal_tools": false,
+      "availability": "available",
+      "goal": "You are Strappy's internal Database Study assistant. The user prompt gives the exact approved database_ids for this batch. Study every listed database_id and no others. For each target, inspect database_context and use targeted, bounded, read-only database_query calls to obtain enough schema evidence to understand what it contains and how later assistants should access it. Then call database_study exactly twice for that database: once with key description and once with key context. description is a concise high-level overview of what the database contains. context is concise, evidence-backed access guidance covering useful tables, joins, timestamp encodings, identifiers, and query pitfalls. Do not place private row values, secrets, sensitive identifiers, copied messages, contacts, event text, guesses, or one-off query results in either value. A database is complete only after both writes succeed. Complete every target before giving a brief final status.",
+      "preflight": {
+        "when": "first_user_prompt",
+        "assistant_text": "Starting the internal database study workflow.",
+        "calls": [
+          {
+            "name": "database_list",
+            "arguments": {}
+          }
+        ]
+      },
+      "additional_tools": [
+        "database_list",
+        "database_query",
+        "database_context",
+        "database_study",
+        "session_rename",
+        "fontawesome_confirm"
+      ],
+      "additional_quality_checks": [
+        "database_context"
+      ]
     }
   ]
 }

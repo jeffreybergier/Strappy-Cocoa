@@ -509,14 +509,15 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 {
   [self updateSendButtonAppearance];
 
-  [actionSegmented_ setEnabled:(enabled_ && !sending_)
+  [actionSegmented_ setEnabled:(enabled_ && !studyLocked_ && !sending_)
                     forSegment:kPromptActionSegmentOptions];
   [self selectCurrentModelMenuItem];
   if (webProviderMenuItem_ != nil) {
     NSInteger count;
     NSInteger index;
 
-    [webProviderMenuItem_ setEnabled:(enabled_ && !sending_)];
+    [webProviderMenuItem_ setEnabled:
+      (enabled_ && !studyLocked_ && !sending_)];
     count = [webProviderMenu_ numberOfItems];
     for (index = 0; index < count; index++) {
       NSMenuItem *item;
@@ -528,12 +529,14 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
     }
   }
   if (streamingMenuItem_ != nil) {
-    [streamingMenuItem_ setEnabled:(enabled_ && !sending_)];
+    [streamingMenuItem_ setEnabled:
+      (enabled_ && !studyLocked_ && !sending_)];
     [streamingMenuItem_ setState:(streamingEnabled_ ?
       XPControlStateValueOn : XPControlStateValueOff)];
   }
   [actionSegmented_ setEnabled:(sending_ ?
-    (enabled_ && !cancellationRequested_) : [self canSendCurrentPrompt])
+    ((enabled_ || studyLocked_) && !cancellationRequested_) :
+    [self canSendCurrentPrompt])
                     forSegment:kPromptActionSegmentSend];
 }
 
@@ -582,12 +585,20 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 - (void)setEnabled:(BOOL)enabled
 {
   enabled_ = enabled ? YES : NO;
-  [textView_ setEditable:enabled_];
-  [textView_ setSelectable:enabled_];
+  [textView_ setEditable:(enabled_ && !studyLocked_)];
+  [textView_ setSelectable:(enabled_ && !studyLocked_)];
   [textView_ setDrawsBackground:YES];
   [textView_ setBackgroundColor:enabled_
     ? [NSColor controlBackgroundColor]
     : [NSColor disabledControlTextColor]];
+  [self updateActionControls];
+}
+
+- (void)setStudyLocked:(BOOL)studyLocked
+{
+  studyLocked_ = studyLocked ? YES : NO;
+  [textView_ setEditable:(enabled_ && !studyLocked_)];
+  [textView_ setSelectable:(enabled_ && !studyLocked_)];
   [self updateActionControls];
 }
 
@@ -630,7 +641,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   NSString *text;
   NSString *trimmed;
 
-  if (!enabled_ || sending_ || (textView_ == nil)) {
+  if (studyLocked_ || !enabled_ || sending_ || (textView_ == nil)) {
     return NO;
   }
 

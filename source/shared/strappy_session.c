@@ -319,6 +319,39 @@ int strappy_session_send_prompt_with_events_and_load(
                                            error_out);
 }
 
+int strappy_session_send_isolated_prompt_with_events_and_load(
+  const char *prompt,
+  const char *api_endpoint,
+  const char *api_token,
+  const char *guidance_resource_dir,
+  const char *db_path,
+  long long session_id,
+  strappy_responses_event_callback callback,
+  void *callback_data,
+  strappy_session_record *record,
+  char **error_out)
+{
+  char *response;
+
+  response =
+    strappy_responses_send_isolated_prompt_for_session_and_store_with_events(
+      prompt,
+      NULL,
+      api_endpoint,
+      api_token,
+      guidance_resource_dir,
+      db_path,
+      session_id,
+      callback,
+      callback_data,
+      error_out);
+  return strappy_session_load_after_prompt(db_path,
+                                           session_id,
+                                           response,
+                                           record,
+                                           error_out);
+}
+
 char *strappy_session_webview_batched_js(const char *java_script)
 {
   strappy_webview_script_batch *batch;

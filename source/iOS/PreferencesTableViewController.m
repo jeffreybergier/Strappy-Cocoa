@@ -4,6 +4,7 @@
 #import "StrappyKeychain.h"
 #import "StrappyActivityAccessoryView.h"
 #import "StrappyPreferencesDatabaseWhitelistTableViewController.h"
+#import "StrappyPreferencesDatabaseStudyViewController.h"
 #import "StrappyPreferencesModelWhitelistTableViewController.h"
 #import "StrappyPreferencesSystemPromptsTableViewController.h"
 #import "StrappySession.h"
@@ -32,6 +33,7 @@ enum {
 enum {
   kStrappyPaneRowModels = 0,
   kStrappyPaneRowDatabases,
+  kStrappyPaneRowStudy,
   kStrappyPaneRowPrompts,
   kStrappyPaneRowCount
 };
@@ -306,6 +308,9 @@ titleForFooterInSection:(NSInteger)section
       [cell setAccessoryType:UITableViewCellAccessoryNone];
       [cell setAccessoryView:StrappyActivityAccessoryView([UIColor grayColor])];
     }
+  } else if ([indexPath row] == kStrappyPaneRowStudy) {
+    [[cell textLabel] setText:NSLocalizedString(@"Study", nil)];
+    [[cell detailTextLabel] setText:NSLocalizedString(@"Database hints", nil)];
   } else {
     [[cell textLabel] setText:NSLocalizedString(@"Prompts", nil)];
     [[cell detailTextLabel] setText:NSLocalizedString(@"System prompt", nil)];
@@ -318,7 +323,7 @@ titleForFooterInSection:(NSInteger)section
 - (void)tableView:(UITableView *)tableView
 didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
-  UITableViewController *controller;
+  UIViewController *controller;
 
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
@@ -333,6 +338,9 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   } else if ([indexPath row] == kStrappyPaneRowDatabases) {
     controller =
       [[StrappyPreferencesDatabaseWhitelistTableViewController alloc] init];
+  } else if ([indexPath row] == kStrappyPaneRowStudy) {
+    controller =
+      [[StrappyPreferencesDatabaseStudyViewController alloc] init];
   } else if ([indexPath row] == kStrappyPaneRowPrompts) {
     controller =
       [[StrappyPreferencesSystemPromptsTableViewController alloc] init];

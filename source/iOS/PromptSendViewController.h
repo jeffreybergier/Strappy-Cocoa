@@ -34,6 +34,7 @@
 - (CGFloat)preferredHeight;
 - (void)setComposing:(BOOL)composing;
 - (void)setEnabled:(BOOL)enabled;
+- (void)setStudyLocked:(BOOL)studyLocked;
 - (void)setSending:(BOOL)sending;
 - (void)setCancellationRequested:(BOOL)requested;
 - (void)setWebProvider:(NSString *)webProvider;

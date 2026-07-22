@@ -36,9 +36,10 @@
 
 #define HARNESS_DATABASE_LIST_INFO_DESCRIPTION \
   "Call this tool to view approved databases. Returns an object containing " \
-  "a databases array with database_id, app_name, path, size_bytes, and " \
-  "modified_at in Unix seconds. When no databases are approved, the array " \
-  "is empty and guidance explains why."
+  "a databases array with database_id, description, app_name, path, " \
+  "size_bytes, and modified_at in Unix seconds. description is null until " \
+  "the current database file has been studied. When no databases are " \
+  "approved, the array is empty and guidance explains why."
 
 #define HARNESS_DATABASE_QUERY_DESCRIPTION \
   "ALWAYS call this tool before finalizing when the request depends on " \
@@ -55,8 +56,8 @@
 
 #define HARNESS_DATABASE_CONTEXT_READ_DESCRIPTION \
   "ALWAYS call this tool with the relevant approved database_id before " \
-  "database_query. Returns remembered hints, table names, view names, and " \
-  "guidance for exploring them."
+  "database_query. Returns the studied context value (or null), table names, " \
+  "view names, and guidance for exploring them."
 
 #define HARNESS_SESSION_NAME_WRITE_DESCRIPTION \
   "ALWAYS call this tool before the final answer. Update the session with a " \
@@ -72,9 +73,13 @@
   "NEVER use unicode emoji."
 
 #define HARNESS_MEMORY_DATABASE_HINT_REMEMBER_DESCRIPTION \
-  "Call this tool to save useful durable query, schema, or access information " \
-  "for an approved database. NEVER store user data, secrets, sensitive " \
-  "information, guesses, or one-off query results."
+  "Write exactly one studied value for an approved database. Use key " \
+  "description for a high-level overview of what the database contains. Use " \
+  "key context for concise, evidence-backed instructions for accessing that " \
+  "data. A later write with the same database_id and key overwrites the " \
+  "earlier value. The result is only a write acknowledgement. NEVER store " \
+  "private row values, secrets, sensitive identifiers, guesses, or one-off " \
+  "query results."
 
 #define HARNESS_DATETIME_FROM_ISO8601_DESCRIPTION \
   "ALWAYS call this tool when converting ISO 8601 datetimes to numeric " \
@@ -92,6 +97,8 @@
 #define HARNESS_CODING_PREFLIGHT_ASSISTANT_TEXT \
   "Strappy here! Your strap-on coding master. Let me check out the " \
   "environment we are working with before kicking things off!"
+#define HARNESS_DATABASE_STUDY_PREFLIGHT_ASSISTANT_TEXT \
+  "Starting the internal database study workflow."
 
 #define HARNESS_MEMORY_USER_FACT_FORGET_DESCRIPTION \
   "Call this tool to forget durable facts that are no longer correct or useful."
@@ -302,6 +309,50 @@ static int harness_array_contains_string(cJSON *array, const char *expected)
     }
   }
   return 0;
+}
+
+static int harness_tool_has_required_string_parameter(
+  cJSON *tools,
+  const char *tool_name,
+  const char *parameter_name);
+static cJSON *harness_tool_parameter_schema(cJSON *tools,
+                                            const char *tool_name,
+                                            const char *parameter_name);
+
+static int harness_database_study_parameters_match_contract(cJSON *tools)
+{
+  cJSON *key;
+  cJSON *key_enum;
+  cJSON *database_id;
+  cJSON *value;
+
+  key = harness_tool_parameter_schema(tools,
+                                      STRAPPY_TOOL_DATABASE_STUDY,
+                                      "key");
+  database_id = harness_tool_parameter_schema(tools,
+                                              STRAPPY_TOOL_DATABASE_STUDY,
+                                              "database_id");
+  value = harness_tool_parameter_schema(tools,
+                                        STRAPPY_TOOL_DATABASE_STUDY,
+                                        "value");
+  key_enum = cJSON_IsObject(key) ? cJSON_GetObjectItem(key, "enum") : NULL;
+  return cJSON_IsObject(key) && cJSON_IsArray(key_enum) &&
+    (cJSON_GetArraySize(key_enum) == 2) &&
+    harness_array_contains_string(key_enum, "description") &&
+    harness_array_contains_string(key_enum, "context") &&
+    cJSON_IsObject(database_id) && cJSON_IsObject(value) &&
+    harness_tool_has_required_string_parameter(tools,
+                                               STRAPPY_TOOL_DATABASE_STUDY,
+                                               "key") &&
+    harness_tool_has_required_string_parameter(tools,
+                                               STRAPPY_TOOL_DATABASE_STUDY,
+                                               "database_id") &&
+    harness_tool_has_required_string_parameter(tools,
+                                               STRAPPY_TOOL_DATABASE_STUDY,
+                                               "value") &&
+    (harness_tool_parameter_schema(tools,
+                                   STRAPPY_TOOL_DATABASE_STUDY,
+                                   "hint") == NULL);
 }
 
 static int harness_database_query_parameters_match_contract(cJSON *tools)
@@ -725,14 +776,7 @@ static int harness_test_request_surfaces(void)
       tools,
       STRAPPY_TOOL_MEMORY_SAVE,
       "fact") &&
-    harness_tool_has_required_string_parameter(
-      tools,
-      STRAPPY_TOOL_DATABASE_STUDY,
-      "database_id") &&
-    harness_tool_has_required_string_parameter(
-      tools,
-      STRAPPY_TOOL_DATABASE_STUDY,
-      "hint") &&
+    harness_database_study_parameters_match_contract(tools) &&
     harness_tools_hide_local_display_metadata(tools) &&
     harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
     harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
@@ -962,7 +1006,8 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_CODING_BASH_DISABLED = 12,
   HARNESS_RESPONSES_SERVER_BASH_OUTPUT = 13,
   HARNESS_RESPONSES_SERVER_FILE_MUTATION = 14,
-  HARNESS_RESPONSES_SERVER_PREFLIGHT_FIRST_PROMPT_ONLY = 15
+  HARNESS_RESPONSES_SERVER_PREFLIGHT_FIRST_PROMPT_ONLY = 15,
+  HARNESS_RESPONSES_SERVER_ISOLATED_PROMPTS = 16
 } harness_responses_server_scenario;
 
 static int harness_send_all(int socket_fd,
@@ -1537,6 +1582,7 @@ static int harness_request_base_is_valid(cJSON *root,
       (text == NULL) || (strcmp(text, expected_prompt) != 0) ||
       !cJSON_IsArray(tools) || !cJSON_IsObject(first_tool) ||
       !harness_tools_hide_local_display_metadata(tools) ||
+      harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_STUDY) ||
       (function_wrapper != NULL)) {
     return 0;
   }
@@ -1586,6 +1632,21 @@ static int harness_world_knowledge_tools_are_valid(cJSON *tools)
     !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_QUERY) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_CONTEXT) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_STUDY) &&
+    harness_tools_hide_local_display_metadata(tools);
+}
+
+static int harness_database_study_tools_are_valid(cJSON *tools)
+{
+  return cJSON_IsArray(tools) && (cJSON_GetArraySize(tools) == 6) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_LIST) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_QUERY) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_CONTEXT) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_STUDY) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_SESSION_RENAME) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_FONTAWESOME_CONFIRM) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_READ) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
     harness_tools_hide_local_display_metadata(tools);
 }
 
@@ -1666,6 +1727,80 @@ static int harness_world_knowledge_request_is_valid(
   return 1;
 }
 
+static int harness_database_study_request_is_valid(
+  cJSON *root,
+  const char *expected_prompt,
+  char **session_key_out,
+  char **prompt_group_out)
+{
+  cJSON *stream;
+  cJSON *store;
+  cJSON *instructions;
+  cJSON *session_key;
+  cJSON *metadata;
+  cJSON *prompt_group;
+  cJSON *input;
+  cJSON *database_call;
+  const char *text;
+
+  stream = cJSON_GetObjectItem(root, "stream");
+  store = cJSON_GetObjectItem(root, "store");
+  instructions = cJSON_GetObjectItem(root, "instructions");
+  session_key = cJSON_GetObjectItem(root, "session_id");
+  metadata = cJSON_GetObjectItem(root, "metadata");
+  prompt_group = cJSON_IsObject(metadata) ?
+    cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
+  input = cJSON_GetObjectItem(root, "input");
+  database_call = cJSON_GetArrayItem(input, 2);
+  text = harness_message_text(cJSON_GetArrayItem(input, 0));
+  if (!cJSON_IsFalse(stream) || !cJSON_IsFalse(store) ||
+      !cJSON_IsString(instructions) ||
+      (instructions->valuestring == NULL) ||
+      (strstr(instructions->valuestring,
+              "internal Database Study assistant") == NULL) ||
+      (strstr(instructions->valuestring,
+              "call database_study exactly twice") == NULL) ||
+      !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
+      !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
+      !cJSON_IsArray(input) || (cJSON_GetArraySize(input) != 4) ||
+      !harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") ||
+      !harness_message_role_is(cJSON_GetArrayItem(input, 1), "assistant") ||
+      (harness_message_text(cJSON_GetArrayItem(input, 1)) == NULL) ||
+      (strcmp(harness_message_text(cJSON_GetArrayItem(input, 1)),
+              HARNESS_DATABASE_STUDY_PREFLIGHT_ASSISTANT_TEXT) != 0) ||
+      !harness_preflight_call_is_valid(database_call,
+                                       STRAPPY_TOOL_DATABASE_LIST,
+                                       "{}",
+                                       "fc_pf_0_",
+                                       "call_pf_0_",
+                                       prompt_group->valuestring) ||
+      !harness_preflight_output_matches(cJSON_GetArrayItem(input, 3),
+                                        database_call,
+                                        0) ||
+      (text == NULL) || (strcmp(text, expected_prompt) != 0) ||
+      !harness_database_study_tools_are_valid(cJSON_GetObjectItem(root,
+                                                                  "tools"))) {
+    return 0;
+  }
+  if (session_key_out != NULL) {
+    *session_key_out = strdup(session_key->valuestring);
+    if (*session_key_out == NULL) {
+      return 0;
+    }
+  }
+  if (prompt_group_out != NULL) {
+    *prompt_group_out = strdup(prompt_group->valuestring);
+    if (*prompt_group_out == NULL) {
+      free((session_key_out != NULL) ? *session_key_out : NULL);
+      if (session_key_out != NULL) {
+        *session_key_out = NULL;
+      }
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int harness_world_followup_request_is_valid(
   cJSON *root,
   const char *session_key,
@@ -1719,6 +1854,35 @@ static int harness_world_followup_request_is_valid(
     (strcmp(second_prompt, "Second prompt") == 0) &&
     harness_world_knowledge_tools_are_valid(cJSON_GetObjectItem(root,
                                                                 "tools"));
+}
+
+static int harness_isolated_followup_request_is_valid(
+  cJSON *root,
+  const char *session_key,
+  const char *first_prompt_group)
+{
+  cJSON *request_session;
+  cJSON *metadata;
+  cJSON *prompt_group;
+  cJSON *input;
+  const char *prompt;
+
+  request_session = cJSON_GetObjectItem(root, "session_id");
+  metadata = cJSON_GetObjectItem(root, "metadata");
+  prompt_group = cJSON_IsObject(metadata) ?
+    cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
+  input = cJSON_GetObjectItem(root, "input");
+  prompt = harness_message_text(cJSON_GetArrayItem(input, 0));
+  return cJSON_IsString(request_session) &&
+    (request_session->valuestring != NULL) &&
+    (strcmp(request_session->valuestring, session_key) == 0) &&
+    cJSON_IsString(prompt_group) && (prompt_group->valuestring != NULL) &&
+    (strcmp(prompt_group->valuestring, first_prompt_group) != 0) &&
+    cJSON_IsArray(input) && (cJSON_GetArraySize(input) == 1) &&
+    harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") &&
+    (prompt != NULL) && (strcmp(prompt, "Second isolated prompt") == 0) &&
+    harness_database_study_tools_are_valid(cJSON_GetObjectItem(root,
+                                                               "tools"));
 }
 
 static int harness_coding_assistant_request_is_valid(
@@ -1870,15 +2034,13 @@ static int harness_required_function_outputs_request_is_valid(
     "database_context",
     "session_rename",
     "fontawesome_confirm",
-    "memory_save",
-    "database_study"
+    "memory_save"
   };
   static const char *call_ids[] = {
     "call-empty-context",
     "call-empty-session",
     "call-empty-icon",
-    "call-empty-user-fact",
-    "call-empty-database-hint"
+    "call-empty-user-fact"
   };
   cJSON *request_session;
   cJSON *metadata;
@@ -2376,6 +2538,80 @@ static int harness_run_first_prompt_preflight_server(int listener_fd)
   return ok;
 }
 
+static int harness_run_isolated_prompts_server(int listener_fd)
+{
+  static const char *first_response =
+    "{\"id\":\"resp-isolated-first\",\"object\":\"response\","
+    "\"created_at\":1700000040,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-isolated-first\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"First isolated answer.\",\"annotations\":[]}]}],"
+    "\"usage\":{\"input_tokens\":4,\"output_tokens\":4,"
+    "\"total_tokens\":8}}";
+  static const char *second_response =
+    "{\"id\":\"resp-isolated-second\",\"object\":\"response\","
+    "\"created_at\":1700000041,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-isolated-second\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Second isolated answer.\",\"annotations\":[]}]}],"
+    "\"usage\":{\"input_tokens\":1,\"output_tokens\":4,"
+    "\"total_tokens\":5}}";
+  char *body;
+  char *session_key;
+  char *prompt_group;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  session_key = NULL;
+  prompt_group = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_database_study_request_is_valid(root,
+                                            "First isolated prompt",
+                                            &session_key,
+                                            &prompt_group) &&
+    harness_send_json_response(client_fd, 200L, first_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  ok = cJSON_IsObject(root) &&
+    (strstr(body, "First isolated prompt") == NULL) &&
+    (strstr(body, "First isolated answer.") == NULL) &&
+    harness_isolated_followup_request_is_valid(root,
+                                               session_key,
+                                               prompt_group) &&
+    harness_send_json_response(client_fd, 200L, second_response);
+  free(body);
+  cJSON_Delete(root);
+  close(client_fd);
+  free(session_key);
+  free(prompt_group);
+  if (!ok) {
+    fprintf(stderr, "Isolated prompt server observed leaked prior context.\n");
+  }
+  return ok;
+}
+
 static int harness_run_empty_answer_server(int listener_fd)
 {
   static const char *first_response =
@@ -2437,12 +2673,6 @@ static int harness_run_empty_answer_after_tools_server(int listener_fd)
     "\"call_id\":\"call-empty-user-fact\","
     "\"name\":\"memory_save\","
     "\"arguments\":\"{\\\"fact\\\":\\\"Provenance fact.\\\"}\","
-    "\"status\":\"completed\"},{"
-    "\"type\":\"function_call\",\"id\":\"fc-empty-database-hint\","
-    "\"call_id\":\"call-empty-database-hint\","
-    "\"name\":\"database_study\","
-    "\"arguments\":\"{\\\"database_id\\\":\\\"db_1\\\","
-    "\\\"hint\\\":\\\"Provenance hint.\\\"}\","
     "\"status\":\"completed\"}],"
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":10,"
     "\"total_tokens\":14}}";
@@ -3171,6 +3401,8 @@ static int harness_start_server(harness_responses_server_scenario scenario,
     } else if (scenario ==
                HARNESS_RESPONSES_SERVER_PREFLIGHT_FIRST_PROMPT_ONLY) {
       ok = harness_run_first_prompt_preflight_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_ISOLATED_PROMPTS) {
+      ok = harness_run_isolated_prompts_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_SERVER_TOOL) {
       ok = harness_run_server_tool_server(listener_fd);
     } else if (scenario ==
@@ -3910,6 +4142,133 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
   return ok;
 }
 
+static int harness_test_isolated_prompt_context(void)
+{
+  char path[] = "/tmp/strappy-responses-isolated-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *first_result;
+  char *second_result;
+  sqlite3 *db;
+  long long session_id;
+  long long value;
+  pid_t server_pid;
+  int fd;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create isolated-prompt harness database.");
+  }
+  close(fd);
+  error = NULL;
+  first_result = NULL;
+  second_result = NULL;
+  session_id = 0LL;
+  if (!harness_create_session_database(path, &session_id, &error) ||
+      !strappy_session_update_assistant_set(
+        path,
+        session_id,
+        "../shared/Resources",
+        STRAPPY_ASSISTANT_SET_DATABASE_STUDY,
+        &error) ||
+      !harness_start_server(HARNESS_RESPONSES_SERVER_ISOLATED_PROMPTS,
+                            endpoint,
+                            sizeof(endpoint),
+                            &server_pid)) {
+    fprintf(stderr,
+            "Could not prepare isolated-prompt test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  first_result =
+    strappy_responses_send_isolated_prompt_for_session_and_store_with_events(
+      "First isolated prompt",
+      "/dev/null",
+      endpoint,
+      "test-token",
+      "../shared/Resources",
+      path,
+      session_id,
+      NULL,
+      NULL,
+      &error);
+  if ((first_result != NULL) &&
+      (strcmp(first_result, "First isolated answer.") == 0) &&
+      (error == NULL)) {
+    second_result =
+      strappy_responses_send_isolated_prompt_for_session_and_store_with_events(
+        "Second isolated prompt",
+        "/dev/null",
+        endpoint,
+        "test-token",
+        "../shared/Resources",
+        path,
+        session_id,
+        NULL,
+        NULL,
+        &error);
+  }
+  server_ok = harness_wait_for_server(
+    server_pid,
+    (first_result == NULL) || (second_result == NULL));
+  ok = (first_result != NULL) &&
+    (strcmp(first_result, "First isolated answer.") == 0) &&
+    (second_result != NULL) &&
+    (strcmp(second_result, "Second isolated answer.") == 0) &&
+    server_ok && (error == NULL);
+  free(first_result);
+  free(second_result);
+
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM turns;",
+                           &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests WHERE "
+                        "request_kind='user' AND previous_request_id IS NULL;",
+                        &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests WHERE "
+                        "input_from_sequence=1 AND "
+                        "input_through_sequence=4;",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests r "
+                        "JOIN conversation_items i ON "
+                        "i.sequence=r.input_from_sequence AND "
+                        "i.introduced_request_id=r.id "
+                        "JOIN message_items m ON m.item_id=i.id "
+                        "JOIN item_text_parts p ON p.item_id=i.id WHERE "
+                        "r.input_from_sequence=r.input_through_sequence AND "
+                        "m.role='user' AND p.text='Second isolated prompt';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM conversation_items;",
+                        &value) && (value == 7LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM item_text_parts WHERE text IN "
+                        "('First isolated prompt','First isolated answer.',"
+                        "'Second isolated prompt','Second isolated answer.');",
+                        &value) && (value == 4LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Isolated prompt context was not cleared between batches: %s\n",
+            (error != NULL) ? error : "request or ledger mismatch");
+  }
+  free(error);
+  unlink(path);
+  return ok;
+}
+
 static int harness_test_empty_answer_quality_report(void)
 {
   char path[] = "/tmp/strappy-responses-empty-answer-XXXXXX";
@@ -4129,7 +4488,7 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM tool_executions WHERE "
                         "state='completed';",
-                        &value) && (value == 5LL) &&
+                        &value) && (value == 4LL) &&
       harness_query_int(db,
                         "SELECT COUNT(DISTINCT f.tool_name) FROM "
                         "tool_executions e JOIN function_calls f "
@@ -4138,9 +4497,8 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
                         "'database_context',"
                         "'session_rename',"
                         "'fontawesome_confirm',"
-                        "'memory_save',"
-                        "'database_study');",
-                        &value) && (value == 5LL) &&
+                        "'memory_save');",
+                        &value) && (value == 4LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items i "
                         "JOIN message_items m ON m.item_id=i.id WHERE "
@@ -4188,15 +4546,6 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
                         "u.value='Provenance fact.' AND "
                         "f.provider_call_id='call-empty-user-fact' AND "
                         "f.tool_name='memory_save' AND "
-                        "i.session_id=(SELECT id FROM sessions LIMIT 1);",
-                        &value) && (value == 1LL) &&
-      harness_query_int(db,
-                        "SELECT COUNT(*) FROM database_hints h "
-                        "JOIN function_calls f ON f.item_id=h.source_item_id "
-                        "JOIN conversation_items i ON i.id=f.item_id WHERE "
-                        "h.content='Provenance hint.' AND "
-                        "f.provider_call_id='call-empty-database-hint' AND "
-                        "f.tool_name='database_study' AND "
                         "i.session_id=(SELECT id FROM sessions LIMIT 1);",
                         &value) && (value == 1LL);
     sqlite3_close(db);
@@ -6218,6 +6567,7 @@ int main(void)
       harness_test_answer_quality_report() &&
       harness_test_world_knowledge_assistant_set() &&
       harness_test_preflight_runs_only_on_first_prompt() &&
+      harness_test_isolated_prompt_context() &&
       harness_test_empty_answer_quality_report() &&
       harness_test_empty_answer_after_tools_quality_report() &&
       harness_test_web_search_requires_markdown_reference() &&

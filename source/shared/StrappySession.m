@@ -3,7 +3,10 @@
 #import "StrappyKeychain.h"
 #import "strappy_prompt.h"
 #import "strappy_session.h"
+#import "strappy_study.h"
 #import "XPFoundation.h"
+
+#include <string.h>
 
 NSString * const StrappySessionDidUpdateNotification =
   @"StrappySessionDidUpdateNotification";
@@ -83,8 +86,10 @@ static NSString *StrappySessionStringFromCString(char *value)
 - (void)postStreamEventAndRelease:(NSDictionary *)event;
 - (NSDictionary *)submitPrompt:(NSString *)prompt
                        context:(NSDictionary *)context
+                      isolated:(BOOL)isolated
                          error:(NSError **)error;
 - (void)sendPromptInBackground:(NSDictionary *)request;
+- (void)runDatabaseStudyInBackground:(id)ignored;
 - (void)promptDidFinish:(NSDictionary *)result;
 @end
 
@@ -450,6 +455,12 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
     inFlight = promptInFlight_;
   }
   return inFlight;
+}
+
+- (BOOL)isDatabaseStudySession
+{
+  return [[self assistantSetIdentifier] isEqualToString:
+    [NSString stringWithUTF8String:STRAPPY_ASSISTANT_SET_DATABASE_STUDY]];
 }
 
 - (BOOL)promptCancellationRequested
@@ -1603,6 +1614,213 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
                                                     summary:summary] autorelease];
 }
 
++ (NSString *)databaseStudyJSONWithError:(NSError **)error
+{
+  NSString *databasePath;
+  char *json;
+  char *strappyError;
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+  strappyError = NULL;
+  json = strappy_study_status_json([databasePath UTF8String], &strappyError);
+  if (json == NULL) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return nil;
+  }
+  strappy_session_free_string(strappyError);
+  return StrappySessionStringFromCString(json);
+}
+
++ (BOOL)resetDatabaseStudyWithError:(NSError **)error
+{
+  NSString *databasePath;
+  char *strappyError;
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+  strappyError = NULL;
+  if (!strappy_study_reset([databasePath UTF8String], &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return NO;
+  }
+  strappy_session_free_string(strappyError);
+  return YES;
+}
+
++ (NSUInteger)databaseStudyPendingDatabaseCountWithError:(NSError **)error
+{
+  NSString *databasePath;
+  strappy_study_database_id_list list;
+  char *strappyError;
+  NSUInteger count;
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return 0U;
+  }
+  strappy_study_database_id_list_init(&list);
+  strappyError = NULL;
+  if (!strappy_study_list_unstudied_database_ids([databasePath UTF8String],
+                                                  &list,
+                                                  &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return 0U;
+  }
+  count = (NSUInteger)list.count;
+  strappy_study_database_id_list_destroy(&list);
+  strappy_session_free_string(strappyError);
+  return count;
+}
+
++ (StrappySession *)beginDatabaseStudyWithError:(NSError **)error
+{
+  NSString *databasePath;
+  NSString *defaultModel;
+  NSString *resourcePath;
+  StrappySession *session;
+  NSDictionary *summary;
+  strappy_study_database_id_list pending;
+  char *strappyError;
+  char *cleanupError;
+  long long sessionId;
+  BOOL studyAlreadyRunning;
+
+  studyAlreadyRunning = NO;
+  @synchronized(self) {
+    NSEnumerator *enumerator;
+    StrappySession *candidate;
+
+    enumerator = [[[self inFlightSessions] allValues] objectEnumerator];
+    while ((candidate = [enumerator nextObject]) != nil) {
+      if ([candidate isDatabaseStudySession]) {
+        studyAlreadyRunning = YES;
+        break;
+      }
+    }
+  }
+  if (studyAlreadyRunning) {
+    if (error != nil) {
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:13
+                               userInfo:[NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"A Database Study session is already running.", nil)
+                                                            forKey:NSLocalizedDescriptionKey]];
+    }
+    return nil;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+  strappy_study_database_id_list_init(&pending);
+  strappyError = NULL;
+  if (!strappy_study_list_unstudied_database_ids([databasePath UTF8String],
+                                                  &pending,
+                                                  &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return nil;
+  }
+  if (pending.count == 0U) {
+    strappy_study_database_id_list_destroy(&pending);
+    if (error != nil) {
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:14
+                               userInfo:[NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"All currently approved databases are studied.", nil)
+                                                            forKey:NSLocalizedDescriptionKey]];
+    }
+    return nil;
+  }
+  strappy_study_database_id_list_destroy(&pending);
+
+  defaultModel = [StrappySession defaultOpenRouterModelIdentifierWithError:error];
+  resourcePath = [StrappySession guidanceResourceDirectoryWithError:error];
+  if ((defaultModel == nil) || (resourcePath == nil)) {
+    return nil;
+  }
+  session = [StrappySession createSessionWithError:error];
+  if (session == nil) {
+    return nil;
+  }
+  sessionId = [[session sessionIdentifier] longLongValue];
+  strappyError = NULL;
+  if (!strappy_session_update_assistant_set(
+        [databasePath UTF8String],
+        sessionId,
+        [resourcePath fileSystemRepresentation],
+        STRAPPY_ASSISTANT_SET_DATABASE_STUDY,
+        &strappyError) ||
+      !strappy_db_update_session_name([databasePath UTF8String],
+                                      sessionId,
+                                      "Database Study",
+                                      &strappyError) ||
+      !strappy_session_update_model([databasePath UTF8String],
+                                    sessionId,
+                                    [defaultModel UTF8String],
+                                    &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    cleanupError = NULL;
+    strappy_session_delete([databasePath UTF8String], sessionId, &cleanupError);
+    strappy_session_free_string(cleanupError);
+    return nil;
+  }
+  strappy_session_free_string(strappyError);
+  summary = [session summaryWithError:error];
+  if (summary == nil) {
+    cleanupError = NULL;
+    strappy_session_delete([databasePath UTF8String], sessionId, &cleanupError);
+    strappy_session_free_string(cleanupError);
+    return nil;
+  }
+  [session updateCachedSummary:summary];
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionDidUpdateNotification
+                  object:session
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  summary, @"session",
+                  StrappySessionChangeKindAssistantSet,
+                  StrappySessionChangeKindKey,
+                  nil]];
+
+  @synchronized(session) {
+    session->promptInFlight_ = YES;
+    session->promptCancellationRequested_ = NO;
+  }
+  [StrappySession registerInFlightSession:session];
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionPromptDidStartNotification
+                  object:session];
+  [NSThread detachNewThreadSelector:@selector(runDatabaseStudyInBackground:)
+                           toTarget:session
+                         withObject:nil];
+  return session;
+}
+
 + (BOOL)deleteSessionWithIdentifier:(NSNumber *)sessionIdentifier
                                error:(NSError **)error
 {
@@ -2568,6 +2786,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
 
 - (NSDictionary *)submitPrompt:(NSString *)prompt
                        context:(NSDictionary *)context
+                      isolated:(BOOL)isolated
                          error:(NSError **)error
 {
   NSString *databasePath;
@@ -2629,17 +2848,29 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
 
   strappy_session_record_init(&record);
   strappyError = NULL;
-  if (!strappy_session_send_prompt_with_events_and_load(
-        [prompt UTF8String],
-        StrappySessionOptionalCString(apiEndpoint),
-        StrappySessionOptionalCString(apiToken),
-        [guidanceResourceDirectory fileSystemRepresentation],
-        [databasePath UTF8String],
-        sessionId,
-        StrappySessionHandleResponsesEvent,
-        &responsesContext,
-        &record,
-        &strappyError)) {
+  if (!(isolated ?
+        strappy_session_send_isolated_prompt_with_events_and_load(
+          [prompt UTF8String],
+          StrappySessionOptionalCString(apiEndpoint),
+          StrappySessionOptionalCString(apiToken),
+          [guidanceResourceDirectory fileSystemRepresentation],
+          [databasePath UTF8String],
+          sessionId,
+          StrappySessionHandleResponsesEvent,
+          &responsesContext,
+          &record,
+          &strappyError) :
+        strappy_session_send_prompt_with_events_and_load(
+          [prompt UTF8String],
+          StrappySessionOptionalCString(apiEndpoint),
+          StrappySessionOptionalCString(apiToken),
+          [guidanceResourceDirectory fileSystemRepresentation],
+          [databasePath UTF8String],
+          sessionId,
+          StrappySessionHandleResponsesEvent,
+          &responsesContext,
+          &record,
+          &strappyError))) {
     [responsesContext.context release];
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
@@ -2760,6 +2991,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   error = nil;
   session = [self submitPrompt:prompt
                        context:context
+                      isolated:NO
                          error:&error];
   if (session != nil) {
     [result setObject:session forKey:@"session"];
@@ -2776,6 +3008,153 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
                       waitUntilDone:NO];
   [result release];
 
+  [pool release];
+}
+
+- (void)runDatabaseStudyInBackground:(id)ignored
+{
+  NSAutoreleasePool *pool;
+  NSString *databasePath;
+  NSDictionary *eventContext;
+  NSDictionary *lastSession;
+  NSMutableDictionary *result;
+  NSError *requestError;
+  NSString *errorMessage;
+  unsigned int consecutiveNoProgress;
+
+  (void)ignored;
+  pool = [[NSAutoreleasePool alloc] init];
+  databasePath = [StrappySession sessionsDatabasePath];
+  eventContext = [NSDictionary dictionaryWithObject:[NSNumber numberWithBool:YES]
+                                             forKey:@"database_study"];
+  lastSession = nil;
+  result = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
+    [NSNumber numberWithBool:YES], @"database_study", nil];
+  errorMessage = nil;
+  consecutiveNoProgress = 0U;
+
+  while (![self promptCancellationRequested]) {
+    strappy_study_database_id_list pending;
+    strappy_study_database_id_list after;
+    const char *batchIds[5];
+    char *promptText;
+    char *strappyError;
+    NSString *prompt;
+    size_t batchCount;
+    size_t index;
+    int batchProgressed;
+
+    strappy_study_database_id_list_init(&pending);
+    strappyError = NULL;
+    if (!strappy_study_list_unstudied_database_ids([databasePath UTF8String],
+                                                    &pending,
+                                                    &strappyError)) {
+      requestError = [StrappySession errorFromCString:strappyError];
+      errorMessage = [requestError localizedDescription];
+      strappy_session_free_string(strappyError);
+      break;
+    }
+    if (pending.count == 0U) {
+      strappy_study_database_id_list_destroy(&pending);
+      break;
+    }
+
+    batchCount = (pending.count < 5U) ? pending.count : 5U;
+    for (index = 0U; index < batchCount; index++) {
+      batchIds[index] = pending.database_ids[index];
+    }
+    strappyError = NULL;
+    promptText = strappy_study_batch_prompt(batchIds,
+                                            batchCount,
+                                            &strappyError);
+    if (promptText == NULL) {
+      requestError = [StrappySession errorFromCString:strappyError];
+      errorMessage = [requestError localizedDescription];
+      strappy_session_free_string(strappyError);
+      strappy_study_database_id_list_destroy(&pending);
+      break;
+    }
+    prompt = [NSString stringWithUTF8String:promptText];
+    strappy_session_free_string(promptText);
+    if (prompt == nil) {
+      errorMessage = NSLocalizedString(@"Database Study prompt is not valid text.", nil);
+      strappy_study_database_id_list_destroy(&pending);
+      break;
+    }
+
+    requestError = nil;
+    lastSession = [self submitPrompt:prompt
+                             context:eventContext
+                            isolated:YES
+                               error:&requestError];
+    if (lastSession == nil) {
+      errorMessage = [requestError localizedDescription];
+      if ([errorMessage length] == 0U) {
+        errorMessage = NSLocalizedString(@"Database Study request failed.", nil);
+      }
+      strappy_study_database_id_list_destroy(&pending);
+      break;
+    }
+    if ([self promptCancellationRequested]) {
+      strappy_study_database_id_list_destroy(&pending);
+      break;
+    }
+
+    strappy_study_database_id_list_init(&after);
+    strappyError = NULL;
+    if (!strappy_study_list_unstudied_database_ids([databasePath UTF8String],
+                                                    &after,
+                                                    &strappyError)) {
+      requestError = [StrappySession errorFromCString:strappyError];
+      errorMessage = [requestError localizedDescription];
+      strappy_session_free_string(strappyError);
+      strappy_study_database_id_list_destroy(&pending);
+      break;
+    }
+    batchProgressed = 0;
+    for (index = 0U; index < batchCount; index++) {
+      size_t afterIndex;
+      int stillPending;
+
+      stillPending = 0;
+      for (afterIndex = 0U; afterIndex < after.count; afterIndex++) {
+        if (strcmp(batchIds[index], after.database_ids[afterIndex]) == 0) {
+          stillPending = 1;
+          break;
+        }
+      }
+      if (!stillPending) {
+        batchProgressed = 1;
+      }
+    }
+    strappy_study_database_id_list_destroy(&after);
+    strappy_study_database_id_list_destroy(&pending);
+
+    if (batchProgressed) {
+      consecutiveNoProgress = 0U;
+    } else {
+      consecutiveNoProgress++;
+      if (consecutiveNoProgress >= 3U) {
+        errorMessage = NSLocalizedString(
+          @"Database Study could not complete every database after three attempts.",
+          nil);
+        break;
+      }
+    }
+  }
+
+  if ([self promptCancellationRequested] && ([errorMessage length] == 0U)) {
+    errorMessage = NSLocalizedString(@"Database Study was cancelled.", nil);
+  }
+  if ([errorMessage length] > 0U) {
+    [result setObject:errorMessage forKey:@"error"];
+  } else if (lastSession != nil) {
+    [result setObject:lastSession forKey:@"session"];
+  }
+  [self performSelectorOnMainThread:@selector(promptDidFinish:)
+                         withObject:result
+                      waitUntilDone:NO];
+  [result release];
   [pool release];
 }
 

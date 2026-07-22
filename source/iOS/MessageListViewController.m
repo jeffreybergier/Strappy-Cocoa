@@ -621,6 +621,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 {
   StrappySession *oldSession;
   BOOL sessionChanged;
+  BOOL studyLocked;
 
   if ([self tearingDown]) {
     return;
@@ -666,7 +667,9 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
 
   [self updateTitleFromSession];
-  [[self sendBar] setEnabled:(session != nil)];
+  studyLocked = (session != nil) && [session isDatabaseStudySession];
+  [[self sendBar] setEnabled:((session != nil) && !studyLocked)];
+  [[self sendBar] setStudyLocked:studyLocked];
   [self updateSendingStateFromSession];
   [self updatePromptIdleTimerAssertion];
   [[self sendBar] setWebProvider:(session != nil) ?
@@ -710,6 +713,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (BOOL)canSendCurrentPrompt
 {
   if (([self session] == nil) || [self sending] ||
+      [[self session] isDatabaseStudySession] ||
       [self sessionPromptIsInFlight]) {
     return NO;
   }
@@ -845,6 +849,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (BOOL)canSelectModel
 {
   if (([self session] == nil) || [self sending] ||
+      [[self session] isDatabaseStudySession] ||
       [self sessionPromptIsInFlight]) {
     return NO;
   }
@@ -1072,7 +1077,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   if ([self sending]) {
     return;
   }
-  if (([self session] == nil) || [self sessionPromptIsInFlight]) {
+  if (([self session] == nil) || [[self session] isDatabaseStudySession] ||
+      [self sessionPromptIsInFlight]) {
     return;
   }
   if (![prompt isKindOfClass:[NSString class]] || ([prompt length] == 0U)) {

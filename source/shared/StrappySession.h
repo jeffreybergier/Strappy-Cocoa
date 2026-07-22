@@ -66,6 +66,10 @@ extern NSString * const StrappyWebProviderParallel;
                 forModelIdentifier:(NSString *)modelIdentifier
                              error:(NSError **)error;
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error;
++ (NSString *)databaseStudyJSONWithError:(NSError **)error;
++ (BOOL)resetDatabaseStudyWithError:(NSError **)error;
++ (NSUInteger)databaseStudyPendingDatabaseCountWithError:(NSError **)error;
++ (StrappySession *)beginDatabaseStudyWithError:(NSError **)error;
 + (NSString *)webViewBatchedJavaScriptForJavaScript:(NSString *)javaScript;
 
 - (id)initWithSessionIdentifier:(NSNumber *)sessionIdentifier
@@ -95,6 +99,7 @@ extern NSString * const StrappyWebProviderParallel;
 - (BOOL)setSelectedOpenRouterModelIdentifier:(NSString *)modelIdentifier
                                        error:(NSError **)error;
 - (BOOL)isPromptInFlight;
+- (BOOL)isDatabaseStudySession;
 - (BOOL)promptCancellationRequested;
 - (BOOL)beginStreamingPrompt:(NSString *)prompt
                      context:(NSDictionary *)context
