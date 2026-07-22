@@ -4016,10 +4016,14 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
   char path[] = "/tmp/strappy-responses-first-preflight-XXXXXX";
   char endpoint[128];
   char *error;
+  char *first_page_html;
   char *first_result;
+  char *followup_append_script;
   char *second_result;
   sqlite3 *db;
   strappy_session_record session;
+  size_t first_message_count;
+  size_t total_message_count;
   long long session_id;
   long long value;
   pid_t server_pid;
@@ -4033,8 +4037,12 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
   }
   close(fd);
   error = NULL;
+  first_page_html = NULL;
   first_result = NULL;
+  followup_append_script = NULL;
   second_result = NULL;
+  first_message_count = 0U;
+  total_message_count = 0U;
   session_id = 0LL;
   strappy_session_record_init(&session);
   if (!harness_create_session_database(path, &session_id, &error) ||
@@ -4075,15 +4083,28 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
   if ((first_result != NULL) &&
       (strcmp(first_result, "First round answer.") == 0) &&
       (error == NULL)) {
-    second_result = strappy_responses_send_prompt_for_session_and_store(
-      "Second prompt",
-      "/dev/null",
-      endpoint,
-      "test-token",
-      "../shared/Resources",
-      path,
-      session_id,
-      &error);
+    first_page_html =
+      strappy_session_webview_messages_page_html_for_session(
+        path,
+        session_id,
+        "../shared/Resources",
+        NULL,
+        &first_message_count,
+        &error);
+    if ((first_page_html != NULL) &&
+        (strstr(first_page_html,
+                HARNESS_WORLD_PREFLIGHT_ASSISTANT_TEXT) != NULL) &&
+        (strstr(first_page_html, "call_pf_0_") != NULL)) {
+      second_result = strappy_responses_send_prompt_for_session_and_store(
+        "Second prompt",
+        "/dev/null",
+        endpoint,
+        "test-token",
+        "../shared/Resources",
+        path,
+        session_id,
+        &error);
+    }
   }
   server_ok = harness_wait_for_server(
     server_pid,
@@ -4095,6 +4116,23 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
     server_ok && (error == NULL);
   free(first_result);
   free(second_result);
+
+  if (ok) {
+    followup_append_script =
+      strappy_session_webview_append_messages_js_for_session(
+        path,
+        session_id,
+        first_message_count,
+        &total_message_count,
+        &error);
+    ok = (followup_append_script != NULL) &&
+      (total_message_count > first_message_count) &&
+      (strstr(followup_append_script,
+              HARNESS_WORLD_PREFLIGHT_ASSISTANT_TEXT) == NULL) &&
+      (strstr(followup_append_script, "call_pf_0_") == NULL) &&
+      (strstr(followup_append_script, "Second prompt") != NULL) &&
+      (strstr(followup_append_script, "Second round answer.") != NULL);
+  }
 
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
@@ -4137,6 +4175,8 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
             (error != NULL) ? error : "request or ledger mismatch");
   }
   strappy_session_record_destroy(&session);
+  free(followup_append_script);
+  free(first_page_html);
   free(error);
   unlink(path);
   return ok;

@@ -237,6 +237,14 @@ static int harness_check_page_scripts(void)
                                "function appendMessage(html){"
                                "clearTimelineError();") &&
        harness_expect_contains(page_html,
+                               "key=rowMessageKey(n);") &&
+       harness_expect_contains(page_html,
+                               "key!==''&&rowByMessageKeyAny(key)") &&
+       harness_expect_contains(page_html,
+                               "id!==''&&byId(id)") &&
+       harness_expect_contains(page_html,
+                               "d.removeChild(n);continue;") &&
+       harness_expect_contains(page_html,
                                ".api-tool-card .tool-card-body{"
                                "font-family:inherit;") &&
        harness_expect_contains(page_html,
@@ -1173,8 +1181,8 @@ static int harness_check_page_scripts(void)
                                "removeEventListener('webkitAnimationEnd',"
                                "finishInsertedRowAnimation,false)") &&
        harness_expect_contains(page_html,
-                               "while(n){prepareInsertedRow(n);"
-                               "n=n.nextSibling;}") &&
+                               "m.appendChild(n);prepareInsertedRow(n);"
+                               "added=1;") &&
        harness_expect_contains(page_html,
                                "while(d.firstChild){n=d.firstChild;"
                                "prepareInsertedRow(n);m.insertBefore(n,before);}") &&

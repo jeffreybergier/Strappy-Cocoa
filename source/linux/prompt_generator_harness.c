@@ -11,7 +11,8 @@
 static const char *harness_assistant_set_ids[] = {
   STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE,
   STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT,
-  STRAPPY_ASSISTANT_SET_CODING_ASSISTANT
+  STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
+  STRAPPY_ASSISTANT_SET_DATABASE_STUDY
 };
 
 static const size_t harness_assistant_set_count =
@@ -325,6 +326,7 @@ static int harness_verify_prompt(
   size_t expected_quality_check_count;
   int has_web_search;
   int has_web_fetch;
+  int expects_web_tools;
   int result;
 
   sections = harness_json_object(system_prompt, "sections");
@@ -479,7 +481,15 @@ static int harness_verify_prompt(
     }
   }
   cJSON_Delete(tools);
-  if (strappy_web_provider_is_enabled(web_provider)) {
+  expects_web_tools =
+    strappy_web_provider_is_enabled(web_provider) &&
+    strappy_assistant_set_profile_allows_tool(
+      profile,
+      STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    strappy_assistant_set_profile_allows_tool(
+      profile,
+      STRAPPY_TOOL_OPENROUTER_WEB_FETCH);
+  if (expects_web_tools) {
     if (!has_web_search || !has_web_fetch) {
       (void)harness_fail("Web provider did not expose both server tools.");
       goto cleanup;
@@ -492,7 +502,7 @@ static int harness_verify_prompt(
                                              tools_content_end,
                                              STRAPPY_TOOL_OPENROUTER_WEB_FETCH)) {
     (void)harness_fail(
-      "Web-disabled prompt unexpectedly includes server tools.");
+      "Prompt unexpectedly includes unavailable server tools.");
     goto cleanup;
   }
 
@@ -643,6 +653,7 @@ int main(int argc, char **argv)
        set_index++) {
     strappy_assistant_set_profile profile;
     char *without_web_prompt;
+    int supports_web_tools;
     int web_provider_value;
 
     strappy_assistant_set_profile_init(&profile);
@@ -660,6 +671,13 @@ int main(int argc, char **argv)
       cJSON_Delete(system_prompt);
       return 1;
     }
+    supports_web_tools =
+      strappy_assistant_set_profile_allows_tool(
+        &profile,
+        STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+      strappy_assistant_set_profile_allows_tool(
+        &profile,
+        STRAPPY_TOOL_OPENROUTER_WEB_FETCH);
     without_web_prompt = NULL;
     for (web_provider_value = (int)STRAPPY_WEB_PROVIDER_NONE;
          web_provider_value <= (int)STRAPPY_WEB_PROVIDER_PARALLEL;
@@ -714,7 +732,8 @@ int main(int argc, char **argv)
           (void)harness_fail("Could not retain generated prompt.");
           return 1;
         }
-      } else if (strcmp(without_web_prompt, prompt) == 0) {
+      } else if (supports_web_tools &&
+                 (strcmp(without_web_prompt, prompt) == 0)) {
         free(prompt);
         free(without_web_prompt);
         strappy_assistant_set_profile_destroy(&profile);
@@ -748,7 +767,7 @@ int main(int argc, char **argv)
   }
   cJSON_Delete(system_prompt);
   if (check_only) {
-    printf("Prompt generator harness passed (15 variants).\n");
+    printf("Prompt generator harness passed (20 variants).\n");
   }
   return 0;
 }

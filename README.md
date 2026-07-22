@@ -62,6 +62,6 @@ Exa, and Parallel:
 make -C source/linux prompts
 ```
 
-The fifteen review files are written under
+The twenty review files are written under
 `source/linux/build-linux/system-prompts`. Use `review-prompts` instead of
 `prompts` to print them to standard output.
