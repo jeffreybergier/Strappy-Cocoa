@@ -11,8 +11,8 @@
 "You" = "あなた";
 "Agent" = "エージェント";
 "Tool" = "ツール";
-"Tool Call" = "ツール呼び出し";
-"Tool Result" = "ツール結果";
+"Tool Request" = "ツールリクエスト";
+"Tool Response" = "ツールレスポンス";
 "Response Status" = "レスポンス状態";
 "API Error" = "API エラー";
 "Response Item" = "レスポンス項目";

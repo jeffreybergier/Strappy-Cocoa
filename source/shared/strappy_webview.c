@@ -71,8 +71,8 @@ static const char * const g_strappy_webview_label_keys[
   "Waiting for response...",
   "No HTTP response",
   "Tool",
-  "Tool Call",
-  "Tool Result",
+  "Tool Request",
+  "Tool Response",
   "Retry",
   "Response Status",
   "API Error",
@@ -700,7 +700,7 @@ static const char *strappy_webview_tool_call_label(
       (labels->tool_call[0] != '\0')) {
     return labels->tool_call;
   }
-  return "Tool Call";
+  return "Tool Request";
 }
 
 static const char *strappy_webview_tool_label(
@@ -722,7 +722,7 @@ static const char *strappy_webview_tool_result_label(
       (labels->tool_result[0] != '\0')) {
     return labels->tool_result;
   }
-  return "Tool Result";
+  return "Tool Response";
 }
 
 static const char *strappy_webview_response_status_label(
@@ -1001,6 +1001,21 @@ static int strappy_webview_is_api_item_role(const char *role)
 static int strappy_webview_is_answer_quality_role(const char *role)
 {
   return (role != NULL) && (strcmp(role, "answer_quality") == 0);
+}
+
+static const char *strappy_webview_tool_activity_label(
+  const char *role,
+  const strappy_webview_labels *labels)
+{
+  if (strappy_webview_is_tool_call_role(role) ||
+      strappy_webview_is_api_function_call_role(role)) {
+    return strappy_webview_tool_call_label(labels);
+  }
+  if (strappy_webview_is_tool_result_role(role) ||
+      strappy_webview_is_api_function_output_role(role)) {
+    return strappy_webview_tool_result_label(labels);
+  }
+  return strappy_webview_tool_label(labels);
 }
 
 static const char *strappy_webview_role_label(
@@ -3189,7 +3204,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
          &buffer,
          "tool-label",
          (render_api_tool_card || strappy_webview_is_api_item_role(role)) ?
-           strappy_webview_tool_label(labels) : NULL) &&
+           strappy_webview_tool_activity_label(role, labels) : NULL) &&
        strappy_webview_append_data_attribute(&buffer,
                                              "tool-call-id",
                                              (message != NULL) ?
@@ -3406,7 +3421,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
            &buffer,
            strappy_webview_is_answer_quality_role(role) ?
              strappy_webview_answer_quality_label(labels) :
-             strappy_webview_tool_label(labels));
+             strappy_webview_tool_activity_label(role, labels));
     if (ok && !strappy_webview_is_answer_quality_role(role)) {
       ok = strappy_webview_buffer_append_cstring(&buffer, ": ") &&
            strappy_webview_append_html_escaped(

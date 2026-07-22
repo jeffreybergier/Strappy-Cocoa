@@ -11,8 +11,8 @@
 "You" = "You";
 "Agent" = "Agent";
 "Tool" = "Tool";
-"Tool Call" = "Tool Call";
-"Tool Result" = "Tool Result";
+"Tool Request" = "Tool Request";
+"Tool Response" = "Tool Response";
 "Response Status" = "Response Status";
 "API Error" = "API Error";
 "Response Item" = "Response Item";

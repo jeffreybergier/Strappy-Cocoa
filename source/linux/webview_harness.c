@@ -80,8 +80,8 @@ static int harness_check_localized_labels(void)
        harness_expect_equal(labels->no_http_response,
                             "No HTTP response") &&
        harness_expect_equal(labels->tool, "Tool") &&
-       harness_expect_equal(labels->tool_call, "Tool Call") &&
-       harness_expect_equal(labels->tool_result, "Tool Result") &&
+       harness_expect_equal(labels->tool_call, "Tool Request") &&
+       harness_expect_equal(labels->tool_result, "Tool Response") &&
        harness_expect_equal(labels->retry, "Retry") &&
        harness_expect_equal(labels->response_status, "Response Status") &&
        harness_expect_equal(labels->api_error, "API Error") &&
@@ -2008,6 +2008,8 @@ static int harness_check_responses_items(void)
 
   memset(&labels, 0, sizeof(labels));
   labels.tool = "Localized Tool";
+  labels.tool_call = "Localized Tool Request";
+  labels.tool_result = "Localized Tool Response";
   labels.answer_quality = "Localized Answer Quality";
   labels.passed = "Localized Passed";
   labels.failed = "Localized Failed";
@@ -2241,13 +2243,13 @@ static int harness_check_responses_items(void)
        harness_expect_contains(function_html,
                                "class=\"row api_function_call\"") &&
        harness_expect_not_contains(function_html,
-                                   "<div class=\"role\">Tool Call</div>") &&
+                                   "<div class=\"role\">Tool Request</div>") &&
        harness_expect_contains(function_html,
                                "data-tool-call-id=\"call-database-query\"") &&
        harness_expect_contains(function_html,
                                "data-tool-name=\"database_query\"") &&
        harness_expect_contains(function_html,
-                               "data-tool-label=\"Localized Tool\"") &&
+                               "data-tool-label=\"Localized Tool Request\"") &&
        harness_expect_contains(function_html,
                                "data-arguments-json=\"{&quot;database_id&quot;:") &&
        harness_expect_contains(function_html,
@@ -2255,7 +2257,7 @@ static int harness_check_responses_items(void)
        harness_expect_contains(function_html,
                                "class=\"tool-card-toggle disclosure-title\"") &&
        harness_expect_contains(function_html,
-                               "class=\"tool-card-summary\">Localized Tool: "
+                               "class=\"tool-card-summary\">Localized Tool Request: "
                                "database_query</span>") &&
        harness_expect_contains(function_html,
                                "aria-expanded=\"false\"") &&
@@ -2290,11 +2292,11 @@ static int harness_check_responses_items(void)
        harness_expect_contains(output_html,
                                "data-direction-label=\"Request\"") &&
        harness_expect_not_contains(output_html,
-                                   "<div class=\"role\">Tool Result</div>") &&
+                                   "<div class=\"role\">Tool Response</div>") &&
        harness_expect_contains(output_html,
                                "data-tool-call-id=\"call-database-query\"") &&
        harness_expect_contains(output_html,
-                               "data-tool-label=\"Localized Tool\"") &&
+                               "data-tool-label=\"Localized Tool Response\"") &&
        harness_expect_contains(output_html,
                                "data-result-json=\"{&quot;columns&quot;:") &&
        harness_expect_contains(output_html,
@@ -2302,8 +2304,8 @@ static int harness_check_responses_items(void)
        harness_expect_contains(output_html,
                                "class=\"tool-card-toggle disclosure-title\"") &&
        harness_expect_contains(output_html,
-                               "class=\"tool-card-summary\">Localized Tool: "
-                               "Tool Result</span>") &&
+                               "class=\"tool-card-summary\">Localized Tool Response: "
+                               "Localized Tool Response</span>") &&
        harness_expect_contains(output_html,
                                "aria-expanded=\"false\"") &&
        harness_expect_contains(output_html,
