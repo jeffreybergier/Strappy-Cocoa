@@ -1372,6 +1372,22 @@ static int harness_preflight_output_matches(cJSON *item,
   return ok;
 }
 
+static int harness_preflight_output_equals(cJSON *item,
+                                           cJSON *call,
+                                           const char *expected_output)
+{
+  cJSON *output;
+
+  if ((expected_output == NULL) ||
+      !harness_preflight_output_matches(item, call, 1)) {
+    return 0;
+  }
+  output = cJSON_GetObjectItem(item, "output");
+  return (output != NULL) && cJSON_IsString(output) &&
+    (output->valuestring != NULL) &&
+    (strcmp(output->valuestring, expected_output) == 0);
+}
+
 static int harness_preflight_bash_output_is_valid(cJSON *item, cJSON *call)
 {
   cJSON *output;
@@ -1624,9 +1640,9 @@ static int harness_world_knowledge_request_is_valid(
                                        "fc_pf_0_",
                                        "call_pf_0_",
                                        prompt_group->valuestring) ||
-      !harness_preflight_output_matches(cJSON_GetArrayItem(input, 3),
-                                        memory_call,
-                                        1) ||
+      !harness_preflight_output_equals(cJSON_GetArrayItem(input, 3),
+                                       memory_call,
+                                       "[]") ||
       (text == NULL) || (strcmp(text, expected_prompt) != 0) ||
       !harness_world_knowledge_tools_are_valid(tools)) {
     return 0;
@@ -1692,9 +1708,9 @@ static int harness_world_followup_request_is_valid(
                                     "fc_pf_0_",
                                     "call_pf_0_",
                                     first_prompt_group) &&
-    harness_preflight_output_matches(cJSON_GetArrayItem(input, 3),
-                                     memory_call,
-                                     1) &&
+    harness_preflight_output_equals(cJSON_GetArrayItem(input, 3),
+                                    memory_call,
+                                    "[]") &&
     harness_message_role_is(cJSON_GetArrayItem(input, 4), "assistant") &&
     (first_answer != NULL) &&
     (strcmp(first_answer, "First round answer.") == 0) &&
@@ -3632,6 +3648,23 @@ static int harness_test_world_knowledge_assistant_set(void)
     unlink(path);
     return 0;
   }
+  result = strappy_tools_execute(
+    path,
+    session_id,
+    "../shared/Resources",
+    STRAPPY_TOOL_MEMORY_SAVE,
+    "{\"fact\":\"Personal-only preflight memory.\"}",
+    &error);
+  if (result == NULL) {
+    fprintf(stderr,
+            "Could not seed assistant-scoped preflight memory: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+  free(result);
+  result = NULL;
   if (!strappy_session_update_assistant_set(
         path,
         session_id,
@@ -3688,6 +3721,11 @@ static int harness_test_world_knowledge_assistant_set(void)
                            "SELECT COUNT(*) FROM session_assistant_sets "
                            "WHERE assistant_set_id='world_knowledge';",
                            &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM user_facts WHERE "
+                        "assistant_set_id='personal_assistant' AND "
+                        "value='Personal-only preflight memory.';",
+                        &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
                         "outcome='failed' AND guidance_version='6';",

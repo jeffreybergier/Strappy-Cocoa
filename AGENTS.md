@@ -137,7 +137,10 @@ House style for Strappy source:
     `database_list`.
 15. Memory and session-title tools persist durable assistant state.
     `memory_read`, `memory_save`, and `memory_delete` manage small stable user
-    facts, `database_study` stores reusable evidence-backed database hints, and
+    facts. Each user fact is tagged with the assistant set active when it is
+    saved; reads and deletes are limited to the active assistant set, while
+    sessions using that same set share its facts. `database_study` stores
+    reusable evidence-backed database hints, and
     `session_rename` updates the active session name for every user
     prompt and requires a non-empty string name. Do not store secrets,
     credentials, sensitive identifiers, long copied content, or private row

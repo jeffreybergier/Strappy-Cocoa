@@ -1780,6 +1780,7 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
   static const char schema_memory_sql[] =
     "CREATE TABLE IF NOT EXISTS user_facts ("
     "id INTEGER PRIMARY KEY,"
+    "assistant_set_id TEXT NOT NULL CHECK(length(assistant_set_id) > 0),"
     "kind TEXT NOT NULL,"
     "subject TEXT,"
     "predicate TEXT,"
@@ -1793,8 +1794,8 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "FOREIGN KEY(source_item_id) REFERENCES conversation_items(id) "
       "ON DELETE SET NULL"
     ");"
-    "CREATE INDEX IF NOT EXISTS user_facts_kind_idx "
-      "ON user_facts(kind, updated_at_ms DESC);"
+    "CREATE INDEX IF NOT EXISTS user_facts_assistant_set_kind_idx "
+      "ON user_facts(assistant_set_id, kind, updated_at_ms DESC, id DESC);"
     "CREATE TABLE IF NOT EXISTS database_hints ("
     "id INTEGER PRIMARY KEY,"
     "database_id INTEGER NOT NULL,"

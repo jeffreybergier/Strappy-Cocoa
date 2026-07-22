@@ -49,6 +49,9 @@ copy, audit guidance, invariant personality, and hard rules in
   distinguish complete output from a bounded tail.
 
 An assistant set is selected per session and can be changed between prompts.
+User memories are shared by sessions using the same assistant set and isolated
+from sessions using other assistant sets; switching a session changes which
+memories it can read, save, and delete.
 The prompt-options button is disabled while a prompt is in progress, so model,
 assistant-set, web-search, and Bash changes cannot overlap an active request.
 

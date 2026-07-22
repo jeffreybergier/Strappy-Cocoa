@@ -599,7 +599,7 @@ static int harness_run_fresh_catalog_schema_tests(
            "models columns") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
-           "SELECT id, kind, subject, predicate, value, "
+           "SELECT id, assistant_set_id, kind, subject, predicate, value, "
            "confidence_basis_points, source_item_id, created_at_ms, "
            "updated_at_ms "
            "FROM user_facts LIMIT 0;",
@@ -1109,6 +1109,7 @@ static cJSON *harness_session_tool_output_json(const char *catalog_path,
 }
 
 static int harness_expect_user_fact_read_result(const char *catalog_path,
+                                                long long session_id,
                                                 const char *arguments_json,
                                                 long long expected_id,
                                                 const char *expected_fact)
@@ -1122,9 +1123,10 @@ static int harness_expect_user_fact_read_result(const char *catalog_path,
   int property_count;
   int ok;
 
-  root = harness_tool_output_json(catalog_path,
-                                  STRAPPY_TOOL_MEMORY_READ,
-                                  arguments_json);
+  root = harness_session_tool_output_json(catalog_path,
+                                          session_id,
+                                          STRAPPY_TOOL_MEMORY_READ,
+                                          arguments_json);
   if (root == NULL) {
     return 0;
   }
@@ -1469,10 +1471,11 @@ static int harness_expect_output_contains_without(const char *catalog_path,
   return ok;
 }
 
-static int harness_expect_output_equals(const char *catalog_path,
-                                        const char *tool_name,
-                                        const char *arguments_json,
-                                        const char *expected)
+static int harness_expect_session_output_equals(const char *catalog_path,
+                                                long long session_id,
+                                                const char *tool_name,
+                                                const char *arguments_json,
+                                                const char *expected)
 {
   char *error;
   char *output;
@@ -1480,7 +1483,7 @@ static int harness_expect_output_equals(const char *catalog_path,
 
   error = NULL;
   output = strappy_tools_execute(catalog_path,
-                                 0LL,
+                                 session_id,
                                  HARNESS_RESOURCE_DIR,
                                  tool_name,
                                  arguments_json,
@@ -1503,6 +1506,18 @@ static int harness_expect_output_equals(const char *catalog_path,
 
   free(output);
   return ok;
+}
+
+static int harness_expect_output_equals(const char *catalog_path,
+                                        const char *tool_name,
+                                        const char *arguments_json,
+                                        const char *expected)
+{
+  return harness_expect_session_output_equals(catalog_path,
+                                              0LL,
+                                              tool_name,
+                                              arguments_json,
+                                              expected);
 }
 
 static int harness_tool_schemas_hide_display_metadata(cJSON *tools)
@@ -5149,22 +5164,6 @@ static int harness_run_helper_info_tests(const harness_context *context)
     return 0;
   }
 
-  if (!harness_expect_output_equals(
-        context->catalog_path,
-        STRAPPY_TOOL_MEMORY_SAVE,
-        "{\"fact\":\"The user's name is Jeff.\"}",
-        "{}")) {
-    return 0;
-  }
-
-  if (!harness_expect_user_fact_read_result(
-        context->catalog_path,
-        "{}",
-        1LL,
-        "The user's name is Jeff.")) {
-    return 0;
-  }
-
   if (!harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_MEMORY_SAVE,
@@ -5185,24 +5184,6 @@ static int harness_run_helper_info_tests(const harness_context *context)
                                      STRAPPY_TOOL_MEMORY_READ,
                                      "{\"limit\":1}",
                                      "takes no arguments")) {
-    return 0;
-  }
-
-  if (!harness_expect_output_equals(context->catalog_path,
-                                    STRAPPY_TOOL_MEMORY_DELETE,
-                                    "{\"id\":1}",
-                                    "{}") ||
-      !harness_expect_output_equals(context->catalog_path,
-                                    STRAPPY_TOOL_MEMORY_DELETE,
-                                    "{\"id\":1}",
-                                    "{}")) {
-    return 0;
-  }
-
-  if (!harness_expect_output_equals(context->catalog_path,
-                                    STRAPPY_TOOL_MEMORY_READ,
-                                    "{}",
-                                    "[]")) {
     return 0;
   }
 
@@ -5334,6 +5315,208 @@ static int harness_run_helper_info_tests(const harness_context *context)
   }
 
   return 1;
+}
+
+static int harness_run_assistant_scoped_memory_tests(
+  const harness_context *context)
+{
+  char *error;
+  long long personal_writer_session_id;
+  long long personal_reader_session_id;
+  long long world_session_id;
+  long long coding_session_id;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(context->catalog_path,
+                                     STRAPPY_TOOL_MEMORY_READ,
+                                     "{}",
+                                     "requires an active session") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_MEMORY_SAVE,
+        "{\"fact\":\"Unscoped memory.\"}",
+        "requires an active session") ||
+      !harness_expect_error_contains(context->catalog_path,
+                                     STRAPPY_TOOL_MEMORY_DELETE,
+                                     "{\"id\":1}",
+                                     "requires an active session")) {
+    return 0;
+  }
+
+  error = NULL;
+  personal_writer_session_id = 0LL;
+  personal_reader_session_id = 0LL;
+  world_session_id = 0LL;
+  coding_session_id = 0LL;
+  ok = strappy_db_create_session(context->catalog_path,
+                                 &personal_writer_session_id,
+                                 &error) &&
+    strappy_db_create_session(context->catalog_path,
+                              &personal_reader_session_id,
+                              &error) &&
+    strappy_db_create_session(context->catalog_path,
+                              &world_session_id,
+                              &error) &&
+    strappy_db_update_session_assistant_set(
+      context->catalog_path,
+      world_session_id,
+      STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE,
+      &error) &&
+    strappy_db_create_session(context->catalog_path,
+                              &coding_session_id,
+                              &error) &&
+    strappy_db_update_session_assistant_set(
+      context->catalog_path,
+      coding_session_id,
+      STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
+      &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not create assistant-scoped memory sessions: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    return 0;
+  }
+
+  ok = harness_expect_session_output_equals(
+         context->catalog_path,
+         personal_writer_session_id,
+         STRAPPY_TOOL_MEMORY_SAVE,
+         "{\"fact\":\"Personal assistant memory.\"}",
+         "{}") &&
+    harness_expect_user_fact_read_result(context->catalog_path,
+                                         personal_reader_session_id,
+                                         "{}",
+                                         1LL,
+                                         "Personal assistant memory.") &&
+    harness_expect_session_output_equals(context->catalog_path,
+                                         world_session_id,
+                                         STRAPPY_TOOL_MEMORY_READ,
+                                         "{}",
+                                         "[]") &&
+    harness_expect_session_output_equals(
+      context->catalog_path,
+      world_session_id,
+      STRAPPY_TOOL_MEMORY_SAVE,
+      "{\"fact\":\"World knowledge memory.\"}",
+      "{}") &&
+    harness_expect_session_output_equals(context->catalog_path,
+                                         coding_session_id,
+                                         STRAPPY_TOOL_MEMORY_READ,
+                                         "{}",
+                                         "[]") &&
+    harness_expect_session_output_equals(
+      context->catalog_path,
+      coding_session_id,
+      STRAPPY_TOOL_MEMORY_SAVE,
+      "{\"fact\":\"Coding assistant memory.\"}",
+      "{}") &&
+    harness_expect_user_fact_read_result(context->catalog_path,
+                                         personal_writer_session_id,
+                                         "{}",
+                                         1LL,
+                                         "Personal assistant memory.") &&
+    harness_expect_user_fact_read_result(context->catalog_path,
+                                         world_session_id,
+                                         "{}",
+                                         2LL,
+                                         "World knowledge memory.") &&
+    harness_expect_user_fact_read_result(context->catalog_path,
+                                         coding_session_id,
+                                         "{}",
+                                         3LL,
+                                         "Coding assistant memory.") &&
+    harness_expect_catalog_integer(
+      context->catalog_path,
+      "SELECT COUNT(*) FROM user_facts WHERE "
+      "assistant_set_id='personal_assistant' AND "
+      "value='Personal assistant memory.';",
+      1LL,
+      "personal assistant memory scope") &&
+    harness_expect_catalog_integer(
+      context->catalog_path,
+      "SELECT COUNT(*) FROM user_facts WHERE "
+      "assistant_set_id='world_knowledge' AND "
+      "value='World knowledge memory.';",
+      1LL,
+      "world knowledge memory scope") &&
+    harness_expect_catalog_integer(
+      context->catalog_path,
+      "SELECT COUNT(*) FROM user_facts WHERE "
+      "assistant_set_id='coding_assistant' AND "
+      "value='Coding assistant memory.';",
+      1LL,
+      "coding assistant memory scope") &&
+    strappy_db_update_session_assistant_set(
+      context->catalog_path,
+      personal_reader_session_id,
+      STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE,
+      &error) &&
+    harness_expect_user_fact_read_result(context->catalog_path,
+                                         personal_reader_session_id,
+                                         "{}",
+                                         2LL,
+                                         "World knowledge memory.") &&
+    strappy_db_update_session_assistant_set(
+      context->catalog_path,
+      personal_reader_session_id,
+      STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT,
+      &error) &&
+    harness_expect_user_fact_read_result(context->catalog_path,
+                                         personal_reader_session_id,
+                                         "{}",
+                                         1LL,
+                                         "Personal assistant memory.") &&
+    harness_expect_session_output_equals(context->catalog_path,
+                                         personal_writer_session_id,
+                                         STRAPPY_TOOL_MEMORY_DELETE,
+                                         "{\"id\":2}",
+                                         "{}") &&
+    harness_expect_user_fact_read_result(context->catalog_path,
+                                         world_session_id,
+                                         "{}",
+                                         2LL,
+                                         "World knowledge memory.") &&
+    harness_expect_session_output_equals(context->catalog_path,
+                                         personal_writer_session_id,
+                                         STRAPPY_TOOL_MEMORY_DELETE,
+                                         "{\"id\":1}",
+                                         "{}") &&
+    harness_expect_session_output_equals(context->catalog_path,
+                                         personal_writer_session_id,
+                                         STRAPPY_TOOL_MEMORY_DELETE,
+                                         "{\"id\":1}",
+                                         "{}") &&
+    harness_expect_session_output_equals(context->catalog_path,
+                                         personal_writer_session_id,
+                                         STRAPPY_TOOL_MEMORY_READ,
+                                         "{}",
+                                         "[]") &&
+    harness_expect_session_output_equals(context->catalog_path,
+                                         world_session_id,
+                                         STRAPPY_TOOL_MEMORY_DELETE,
+                                         "{\"id\":2}",
+                                         "{}") &&
+    harness_expect_session_output_equals(context->catalog_path,
+                                         coding_session_id,
+                                         STRAPPY_TOOL_MEMORY_DELETE,
+                                         "{\"id\":3}",
+                                         "{}") &&
+    harness_expect_catalog_integer(context->catalog_path,
+                                   "SELECT COUNT(*) FROM user_facts;",
+                                   0LL,
+                                   "assistant-scoped memory cleanup");
+  if (!ok) {
+    fprintf(stderr,
+            "Assistant-scoped memory behavior failed: %s\n",
+            (error != NULL) ? error : "tool result mismatch");
+  }
+  free(error);
+  return ok;
 }
 
 static int harness_expand_database_context_fixture(const char *database_path)
@@ -8088,6 +8271,7 @@ int main(void)
        harness_run_readonly_wal_database_query_test(&context) &&
        harness_run_wide_schema_database_query_test(&context) &&
        harness_run_helper_info_tests(&context) &&
+       harness_run_assistant_scoped_memory_tests(&context) &&
        harness_run_database_context_limit_tests(&context) &&
        harness_run_empty_session_storage_tests(&context) &&
        harness_run_session_turn_storage_tests(&context) &&

@@ -3350,6 +3350,33 @@ static int strappy_tools_open_helper_info_database(const char *session_db_path,
   return 1;
 }
 
+static int strappy_tools_copy_active_assistant_set_id(
+  const char *session_db_path,
+  long long active_session_id,
+  const char *tool_name,
+  char **assistant_set_id_out,
+  char **error_out)
+{
+  if (assistant_set_id_out != NULL) {
+    *assistant_set_id_out = NULL;
+  }
+  if ((assistant_set_id_out == NULL) || (tool_name == NULL)) {
+    strappy_set_error(error_out,
+                      "Memory assistant-set request is incomplete.");
+    return 0;
+  }
+  if (active_session_id <= 0LL) {
+    strappy_set_formatted_error(error_out,
+                                "%s requires an active session.",
+                                tool_name);
+    return 0;
+  }
+  return strappy_db_get_session_assistant_set(session_db_path,
+                                              active_session_id,
+                                              assistant_set_id_out,
+                                              error_out);
+}
+
 static int strappy_tools_resolve_source_item_id(sqlite3 *db,
                                                 long long session_id,
                                                 const char *provider_call_id,
@@ -3447,20 +3474,23 @@ static int strappy_tools_add_user_info_row(cJSON *array,
   return 1;
 }
 
-static char *strappy_tools_read_user_info(sqlite3 *db, char **error_out)
+static char *strappy_tools_read_user_info(sqlite3 *db,
+                                          const char *assistant_set_id,
+                                          char **error_out)
 {
   static const char *sql =
     "SELECT id, value, "
     "strftime('%Y-%m-%dT%H:%M:%fZ', created_at_ms / 1000.0, 'unixepoch') "
-    "FROM user_facts WHERE kind = 'fact' "
+    "FROM user_facts WHERE assistant_set_id = ?1 AND kind = 'fact' "
     "ORDER BY created_at_ms DESC, id DESC "
-    "LIMIT ?1;";
+    "LIMIT ?2;";
   sqlite3_stmt *stmt;
   cJSON *facts;
   char *json;
   int rc;
 
-  if (db == NULL) {
+  if ((db == NULL) || (assistant_set_id == NULL) ||
+      (assistant_set_id[0] == '\0')) {
     strappy_set_error(error_out, "memory_read request is incomplete.");
     return NULL;
   }
@@ -3474,8 +3504,13 @@ static char *strappy_tools_read_user_info(sqlite3 *db, char **error_out)
     return NULL;
   }
 
-  if (sqlite3_bind_int(stmt, 1, STRAPPY_HELPER_INFO_DEFAULT_LIMIT) !=
-      SQLITE_OK) {
+  if ((sqlite3_bind_text(stmt,
+                         1,
+                         assistant_set_id,
+                         -1,
+                         SQLITE_TRANSIENT) != SQLITE_OK) ||
+      (sqlite3_bind_int(stmt, 2, STRAPPY_HELPER_INFO_DEFAULT_LIMIT) !=
+       SQLITE_OK)) {
     sqlite3_finalize(stmt);
     strappy_set_formatted_error(error_out,
                                 "Could not bind memory_read: %s",
@@ -3520,20 +3555,24 @@ static char *strappy_tools_read_user_info(sqlite3 *db, char **error_out)
 
 static char *strappy_tools_remember_user_info(
   sqlite3 *db,
+  const char *assistant_set_id,
   const strappy_memory_save_arguments *arguments,
   long long source_item_id,
   char **error_out)
 {
   static const char *sql =
     "INSERT INTO user_facts "
-    "(kind, subject, predicate, value, confidence_basis_points, "
+    "(assistant_set_id, kind, subject, predicate, value, "
+     "confidence_basis_points, "
      "source_item_id, created_at_ms, updated_at_ms) "
-    "VALUES ('fact', 'user', 'fact', ?, 7500, ?, ?, ?);";
+    "VALUES (?, 'fact', 'user', 'fact', ?, 7500, ?, ?, ?);";
   sqlite3_stmt *stmt;
   sqlite3_int64 now_ms;
   int rc;
 
-  if ((db == NULL) || (arguments == NULL) || (arguments->fact == NULL)) {
+  if ((db == NULL) || (assistant_set_id == NULL) ||
+      (assistant_set_id[0] == '\0') || (arguments == NULL) ||
+      (arguments->fact == NULL)) {
     strappy_set_error(error_out,
                       "memory_save request is incomplete.");
     return NULL;
@@ -3551,15 +3590,20 @@ static char *strappy_tools_remember_user_info(
   now_ms = (sqlite3_int64)time(NULL) * 1000;
   if ((sqlite3_bind_text(stmt,
                          1,
+                         assistant_set_id,
+                         -1,
+                         SQLITE_TRANSIENT) != SQLITE_OK) ||
+      (sqlite3_bind_text(stmt,
+                         2,
                          arguments->fact,
                          -1,
                          SQLITE_TRANSIENT) != SQLITE_OK) ||
       ((source_item_id > 0LL) ?
-         (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)source_item_id) !=
+         (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)source_item_id) !=
           SQLITE_OK) :
-         (sqlite3_bind_null(stmt, 2) != SQLITE_OK)) ||
-      (sqlite3_bind_int64(stmt, 3, now_ms) != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 4, now_ms) != SQLITE_OK)) {
+         (sqlite3_bind_null(stmt, 3) != SQLITE_OK)) ||
+      (sqlite3_bind_int64(stmt, 4, now_ms) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 5, now_ms) != SQLITE_OK)) {
     sqlite3_finalize(stmt);
     if ((error_out != NULL) && (*error_out == NULL)) {
       strappy_set_formatted_error(error_out,
@@ -3583,14 +3627,17 @@ static char *strappy_tools_remember_user_info(
 }
 
 static char *strappy_tools_delete_user_fact(sqlite3 *db,
+                                            const char *assistant_set_id,
                                             long long id,
                                             char **error_out)
 {
-  static const char *sql = "DELETE FROM user_facts WHERE id = ?;";
+  static const char *sql =
+    "DELETE FROM user_facts WHERE id = ? AND assistant_set_id = ?;";
   sqlite3_stmt *stmt;
   int rc;
 
-  if ((db == NULL) || (id <= 0)) {
+  if ((db == NULL) || (assistant_set_id == NULL) ||
+      (assistant_set_id[0] == '\0') || (id <= 0)) {
     strappy_set_error(error_out, "memory_delete request is incomplete.");
     return NULL;
   }
@@ -3604,7 +3651,12 @@ static char *strappy_tools_delete_user_fact(sqlite3 *db,
     return NULL;
   }
 
-  if (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)id) != SQLITE_OK) {
+  if ((sqlite3_bind_int64(stmt, 1, (sqlite3_int64)id) != SQLITE_OK) ||
+      (sqlite3_bind_text(stmt,
+                         2,
+                         assistant_set_id,
+                         -1,
+                         SQLITE_TRANSIENT) != SQLITE_OK)) {
     strappy_set_formatted_error(error_out,
                                 "Could not bind memory_delete: %s",
                                 sqlite3_errmsg(db));
@@ -5780,9 +5832,11 @@ static char *strappy_tools_execute_fontawesome_confirm(
 
 static char *strappy_tools_execute_memory_read(
   const char *session_db_path,
+  long long active_session_id,
   const char *arguments_json,
   char **error_out)
 {
+  char *assistant_set_id;
   sqlite3 *db;
   char *json;
 
@@ -5793,15 +5847,26 @@ static char *strappy_tools_execute_memory_read(
     return NULL;
   }
 
+  assistant_set_id = NULL;
+  if (!strappy_tools_copy_active_assistant_set_id(
+        session_db_path,
+        active_session_id,
+        STRAPPY_TOOL_MEMORY_READ,
+        &assistant_set_id,
+        error_out)) {
+    return NULL;
+  }
   db = NULL;
   if (!strappy_tools_open_helper_info_database(session_db_path,
                                                &db,
                                                error_out)) {
+    free(assistant_set_id);
     return NULL;
   }
 
-  json = strappy_tools_read_user_info(db, error_out);
+  json = strappy_tools_read_user_info(db, assistant_set_id, error_out);
   sqlite3_close(db);
+  free(assistant_set_id);
   return json;
 }
 
@@ -5813,20 +5878,32 @@ static char *strappy_tools_execute_memory_save(
   char **error_out)
 {
   strappy_memory_save_arguments arguments;
+  char *assistant_set_id;
   sqlite3 *db;
   char *json;
   long long source_item_id;
 
   strappy_memory_save_arguments_init(&arguments);
   if (!strappy_tools_parse_memory_save_arguments(arguments_json,
-                                                               &arguments,
-                                                               error_out)) {
+                                                   &arguments,
+                                                   error_out)) {
+    return NULL;
+  }
+  assistant_set_id = NULL;
+  if (!strappy_tools_copy_active_assistant_set_id(
+        session_db_path,
+        active_session_id,
+        STRAPPY_TOOL_MEMORY_SAVE,
+        &assistant_set_id,
+        error_out)) {
+    strappy_memory_save_arguments_destroy(&arguments);
     return NULL;
   }
   db = NULL;
   if (!strappy_tools_open_helper_info_database(session_db_path,
                                                &db,
                                                error_out)) {
+    free(assistant_set_id);
     strappy_memory_save_arguments_destroy(&arguments);
     return NULL;
   }
@@ -5838,24 +5915,29 @@ static char *strappy_tools_execute_memory_save(
                                             &source_item_id,
                                             error_out)) {
     sqlite3_close(db);
+    free(assistant_set_id);
     strappy_memory_save_arguments_destroy(&arguments);
     return NULL;
   }
   json = strappy_tools_remember_user_info(db,
+                                          assistant_set_id,
                                           &arguments,
                                           source_item_id,
                                           error_out);
   sqlite3_close(db);
+  free(assistant_set_id);
   strappy_memory_save_arguments_destroy(&arguments);
   return json;
 }
 
 static char *strappy_tools_execute_memory_delete(
   const char *session_db_path,
+  long long active_session_id,
   const char *arguments_json,
   char **error_out)
 {
   strappy_memory_delete_arguments arguments;
+  char *assistant_set_id;
   sqlite3 *db;
   char *json;
 
@@ -5865,15 +5947,29 @@ static char *strappy_tools_execute_memory_delete(
     return NULL;
   }
 
+  assistant_set_id = NULL;
+  if (!strappy_tools_copy_active_assistant_set_id(
+        session_db_path,
+        active_session_id,
+        STRAPPY_TOOL_MEMORY_DELETE,
+        &assistant_set_id,
+        error_out)) {
+    return NULL;
+  }
   db = NULL;
   if (!strappy_tools_open_helper_info_database(session_db_path,
                                                &db,
                                                error_out)) {
+    free(assistant_set_id);
     return NULL;
   }
 
-  json = strappy_tools_delete_user_fact(db, arguments.id, error_out);
+  json = strappy_tools_delete_user_fact(db,
+                                        assistant_set_id,
+                                        arguments.id,
+                                        error_out);
   sqlite3_close(db);
+  free(assistant_set_id);
   return json;
 }
 
@@ -6237,22 +6333,24 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
 
   if (strcmp(tool_name, STRAPPY_TOOL_MEMORY_READ) == 0) {
     return strappy_tools_execute_memory_read(session_db_path,
-                                                       arguments_json,
-                                                       error_out);
+                                             active_session_id,
+                                             arguments_json,
+                                             error_out);
   }
 
   if (strcmp(tool_name, STRAPPY_TOOL_MEMORY_SAVE) == 0) {
     return strappy_tools_execute_memory_save(session_db_path,
-                                                           active_session_id,
-                                                           provider_call_id,
-                                                           arguments_json,
-                                                           error_out);
+                                             active_session_id,
+                                             provider_call_id,
+                                             arguments_json,
+                                             error_out);
   }
 
   if (strcmp(tool_name, STRAPPY_TOOL_MEMORY_DELETE) == 0) {
     return strappy_tools_execute_memory_delete(session_db_path,
-                                                         arguments_json,
-                                                         error_out);
+                                               active_session_id,
+                                               arguments_json,
+                                               error_out);
   }
 
   if (strcmp(tool_name, STRAPPY_TOOL_SESSION_RENAME) == 0) {
