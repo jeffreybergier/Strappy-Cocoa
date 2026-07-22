@@ -141,8 +141,11 @@ House style for Strappy source:
     saved; reads and deletes are limited to the active assistant set, while
     sessions using that same set share its facts. `database_study` stores
     reusable evidence-backed database hints, and
-    `session_rename` updates the active session name for every user
-    prompt and requires a non-empty string name. Do not store secrets,
+    `session_rename` updates the active session name for every user prompt in
+    user-selectable assistant sets and requires a non-empty string name. The
+    internal Database Study workflow does not expose this tool; the application
+    persists its fixed session name as `Database Study` before refreshing UI.
+    Do not store secrets,
     credentials, sensitive identifiers, long copied content, or private row
     contents in memory.
 16. Active assistant history uses the normalized Responses API ledger: each
@@ -156,10 +159,12 @@ House style for Strappy source:
     At every canonical, successful, tool-free final response, evaluate the
     code-owned ordered quality checks exactly once and persist one
     `answer_quality_audits` report with its `answer_quality_checks`. The first
-    check verifies that the response contains a non-whitespace assistant
-    answer. The next check scans the answer's UTF-8 text for Unicode emoji and
-    fails at the first match; ASCII keycap bases such as digits, `#`, and `*`
-    are allowed unless an emoji selector or keycap combining mark follows.
+    selected check verifies that the response contains a non-whitespace
+    assistant answer. User-selectable assistant sets next scan the answer's
+    UTF-8 text for Unicode emoji and fail at the first match; ASCII keycap bases
+    such as digits, `#`, and `*` are allowed unless an emoji selector or keycap
+    combining mark follows. The internal Database Study set does not select
+    this emoji check.
     Render that informational report in the visible timeline
     immediately before its assistant answer when present; an empty response
     leaves the failed report as the final timeline item. Track tool activity
@@ -168,8 +173,12 @@ House style for Strappy source:
     activity has occurred, scan the answer for a non-image inline Markdown HTTP
     or HTTPS link with a non-empty title and URL. Database inventory is an
     application-seeded preflight tool output rather than a quality rule. The
-    report always uses the universal set checks for
-    `session_rename` and `fontawesome_confirm`.
+    User-selectable assistant reports always use the universal set checks for
+    `session_rename` and `fontawesome_confirm`. The internal Database Study set
+    opts out of those checks and tools, retains only the `answer_non_empty` and
+    `database_context` checks, and its generated prompt must not mention Font
+    Awesome. Database Study exposes both datetime conversion tools in addition
+    to its four database tools.
     Personal Assistant additionally checks `database_context`; World
     Knowledge never runs that database-specific check. `database_context`
     requires an approved database id and may be skipped when it is not

@@ -1766,6 +1766,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   }
   sessionId = [[session sessionIdentifier] longLongValue];
   strappyError = NULL;
+  /* Database Study has no session_rename tool; persist its fixed name here. */
   if (!strappy_session_update_assistant_set(
         [databasePath UTF8String],
         sessionId,
@@ -1774,7 +1775,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
         &strappyError) ||
       !strappy_db_update_session_name([databasePath UTF8String],
                                       sessionId,
-                                      "Database Study",
+                                      STRAPPY_ASSISTANT_SET_DATABASE_STUDY_SESSION_NAME,
                                       &strappyError) ||
       !strappy_session_update_model([databasePath UTF8String],
                                     sessionId,

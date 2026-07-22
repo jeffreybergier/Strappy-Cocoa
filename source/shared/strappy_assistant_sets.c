@@ -656,6 +656,7 @@ int strappy_assistant_sets_load_profile(
   const char *availability;
   const char *goal;
   int inherits_universal_tools;
+  int inherits_universal_quality_checks;
   int user_selectable;
   size_t index;
   int ok;
@@ -706,6 +707,11 @@ int strappy_assistant_sets_load_profile(
                                                 "inherits_universal_tools",
                                                 &inherits_universal_tools,
                                                 error_out) ||
+      !strappy_assistant_sets_required_boolean(
+        set,
+        "inherits_universal_quality_checks",
+        &inherits_universal_quality_checks,
+        error_out) ||
       !strappy_assistant_sets_availability_is_valid(availability)) {
     if ((error_out == NULL) || (*error_out == NULL)) {
       strappy_set_error(error_out, "Assistant-set profile is invalid.");
@@ -742,11 +748,12 @@ int strappy_assistant_sets_load_profile(
                                         &profile->tool_name_count,
                                         error_out) &&
     strappy_assistant_sets_load_preflight(set, profile, error_out) &&
-    strappy_assistant_sets_append_array(universal,
-                                        "quality_checks",
-                                        &profile->quality_check_keys,
-                                        &profile->quality_check_key_count,
-                                        error_out) &&
+    (!inherits_universal_quality_checks ||
+     strappy_assistant_sets_append_array(universal,
+                                         "quality_checks",
+                                         &profile->quality_check_keys,
+                                         &profile->quality_check_key_count,
+                                         error_out)) &&
     strappy_assistant_sets_append_array(set,
                                         "additional_quality_checks",
                                         &profile->quality_check_keys,

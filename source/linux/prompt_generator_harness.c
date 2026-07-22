@@ -718,6 +718,22 @@ int main(int argc, char **argv)
         cJSON_Delete(system_prompt);
         return 1;
       }
+      if ((strcmp(profile.identifier,
+                  STRAPPY_ASSISTANT_SET_DATABASE_STUDY) == 0) &&
+          ((strstr(prompt, "Font Awesome") != NULL) ||
+           (strstr(prompt, "fontawesome") != NULL) ||
+           (strstr(prompt, STRAPPY_TOOL_SESSION_RENAME) != NULL) ||
+           (strstr(prompt, "unicode_emoji_absent") != NULL))) {
+        free(tools_json);
+        free(prompt);
+        free(without_web_prompt);
+        free(error);
+        strappy_assistant_set_profile_destroy(&profile);
+        cJSON_Delete(system_prompt);
+        (void)harness_fail(
+          "Database Study prompt includes an excluded tool or quality check.");
+        return 1;
+      }
       free(tools_json);
       free(error);
       if (web_provider == STRAPPY_WEB_PROVIDER_NONE) {

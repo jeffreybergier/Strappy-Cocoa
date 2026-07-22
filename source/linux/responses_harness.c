@@ -1642,8 +1642,11 @@ static int harness_database_study_tools_are_valid(cJSON *tools)
     harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_QUERY) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_CONTEXT) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_STUDY) &&
-    harness_has_tool_name(tools, STRAPPY_TOOL_SESSION_RENAME) &&
-    harness_has_tool_name(tools, STRAPPY_TOOL_FONTAWESOME_CONFIRM) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_DATETIME_TO_ISO8601) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_DATETIME_FROM_ISO8601) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_SESSION_RENAME) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_FONTAWESOME_SEARCH) &&
+    !harness_has_tool_name(tools, STRAPPY_TOOL_FONTAWESOME_CONFIRM) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_READ) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
@@ -4213,6 +4216,11 @@ static int harness_test_isolated_prompt_context(void)
         "../shared/Resources",
         STRAPPY_ASSISTANT_SET_DATABASE_STUDY,
         &error) ||
+      !strappy_db_update_session_name(
+        path,
+        session_id,
+        STRAPPY_ASSISTANT_SET_DATABASE_STUDY_SESSION_NAME,
+        &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_ISOLATED_PROMPTS,
                             endpoint,
                             sizeof(endpoint),
@@ -4294,7 +4302,29 @@ static int harness_test_isolated_prompt_context(void)
                         "SELECT COUNT(*) FROM item_text_parts WHERE text IN "
                         "('First isolated prompt','First isolated answer.',"
                         "'Second isolated prompt','Second isolated answer.');",
-                        &value) && (value == 4LL);
+                        &value) && (value == 4LL) &&
+      harness_query_int(
+        db,
+        "SELECT COUNT(*) FROM sessions WHERE name='"
+        STRAPPY_ASSISTANT_SET_DATABASE_STUDY_SESSION_NAME "';",
+        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_audits;",
+                        &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_checks;",
+                        &value) && (value == 4LL) &&
+      harness_query_int(
+        db,
+        "SELECT COUNT(*) FROM answer_quality_checks WHERE check_key IN ("
+        "'answer_non_empty','database_context');",
+        &value) && (value == 4LL) &&
+      harness_query_int(
+        db,
+        "SELECT COUNT(*) FROM answer_quality_checks WHERE check_key IN ("
+        "'unicode_emoji_absent','web_reference','session_rename',"
+        "'fontawesome_confirm');",
+        &value) && (value == 0LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;

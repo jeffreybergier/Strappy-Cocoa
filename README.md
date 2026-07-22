@@ -47,6 +47,11 @@ copy, audit guidance, invariant personality, and hard rules in
   child shell with a hard 120-second ceiling; both start in the per-session
   working directory. Bash results expose `output_truncated` so the model can
   distinguish complete output from a bounded tail.
+- Database Study is an internal assistant with `database_list`,
+  `database_context`, `database_query`, `database_study`, and both datetime
+  conversion tools. The application persists its fixed session name as
+  `Database Study`; the model does not receive session-renaming or Font Awesome
+  tools or guidance.
 
 An assistant set is selected per session and can be changed between prompts.
 User memories are shared by sessions using the same assistant set and isolated

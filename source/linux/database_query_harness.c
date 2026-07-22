@@ -2668,9 +2668,11 @@ static int harness_run_assistant_set_tests(void)
       &study,
       &error) &&
     strappy_assistant_set_profile_is_available(&study) &&
+    (strcmp(study.display_name,
+            STRAPPY_ASSISTANT_SET_DATABASE_STUDY_SESSION_NAME) == 0) &&
     (study.tool_name_count == 6U) &&
     (study.preflight_call_count == 1U) &&
-    (study.quality_check_key_count == 6U) &&
+    (study.quality_check_key_count == 2U) &&
     (strcmp(study.preflight_calls[0].tool_name,
             STRAPPY_TOOL_DATABASE_LIST) == 0) &&
     strappy_assistant_set_profile_allows_tool(
@@ -2685,18 +2687,42 @@ static int harness_run_assistant_set_tests(void)
     strappy_assistant_set_profile_allows_tool(
       &study,
       STRAPPY_TOOL_DATABASE_STUDY) &&
+    strappy_assistant_set_profile_allows_tool(
+      &study,
+      STRAPPY_TOOL_DATETIME_TO_ISO8601) &&
+    strappy_assistant_set_profile_allows_tool(
+      &study,
+      STRAPPY_TOOL_DATETIME_FROM_ISO8601) &&
     !strappy_assistant_set_profile_allows_tool(
       &study,
       STRAPPY_TOOL_MEMORY_READ) &&
-    strappy_assistant_set_profile_allows_tool(
+    !strappy_assistant_set_profile_allows_tool(
       &study,
       STRAPPY_TOOL_SESSION_RENAME) &&
-    strappy_assistant_set_profile_allows_tool(
+    !strappy_assistant_set_profile_allows_tool(
       &study,
       STRAPPY_TOOL_FONTAWESOME_CONFIRM) &&
     !strappy_assistant_set_profile_allows_tool(
       &study,
       STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    strappy_assistant_set_profile_has_quality_check(
+      &study,
+      "answer_non_empty") &&
+    !strappy_assistant_set_profile_has_quality_check(
+      &study,
+      "unicode_emoji_absent") &&
+    strappy_assistant_set_profile_has_quality_check(
+      &study,
+      "database_context") &&
+    !strappy_assistant_set_profile_has_quality_check(
+      &study,
+      "web_reference") &&
+    !strappy_assistant_set_profile_has_quality_check(
+      &study,
+      "session_rename") &&
+    !strappy_assistant_set_profile_has_quality_check(
+      &study,
+      "fontawesome_confirm") &&
     strappy_assistant_sets_load_profile(
       HARNESS_RESOURCE_DIR,
       STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
