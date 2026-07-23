@@ -207,6 +207,10 @@
 "Waiting for response..." = "Waiting for response...";
 "No HTTP response" = "No HTTP response";
 "Retry" = "Retry";
+"[fa:solid:spinner] Pondering" = "[fa:solid:spinner] Pondering";
+"Tools" = "Tools";
+"Autoscroll on" = "Autoscroll on";
+"Autoscroll off" = "Autoscroll off";
 "Save" = "Save";
 "Scan path is empty." = "Scan path is empty.";
 "Scan your home folder for SQLite databases." = "Scan your home folder for SQLite databases.";

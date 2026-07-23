@@ -517,7 +517,8 @@ char *strappy_session_webview_batched_js(const char *java_script)
 static char *strappy_session_webview_messages_page_html_with_content(
   const char *messages_html,
   const char *resource_dir,
-  const char *error_text)
+  const char *error_text,
+  const char *processing_status_json)
 {
   char *display_registry_json;
   char *display_error;
@@ -529,7 +530,8 @@ static char *strappy_session_webview_messages_page_html_with_content(
   page_html = strappy_webview_messages_page_html(
     messages_html,
     (display_registry_json != NULL) ? display_registry_json : "{}",
-    error_text);
+    error_text,
+    processing_status_json);
   strappy_free_string(display_registry_json);
   strappy_free_string(display_error);
   return page_html;
@@ -660,6 +662,7 @@ char *strappy_session_webview_messages_page_html_for_session(
   long long session_id,
   const char *resource_dir,
   const char *error_text,
+  const char *processing_status_json,
   size_t *message_count_out,
   char **error_out)
 {
@@ -684,7 +687,8 @@ char *strappy_session_webview_messages_page_html_for_session(
     page_html = strappy_session_webview_messages_page_html_with_content(
       "",
       resource_dir,
-      display_error);
+      display_error,
+      processing_status_json);
     if (page_html == NULL) {
       strappy_set_error(error_out,
                         (list_error != NULL) ? list_error :
@@ -711,7 +715,8 @@ char *strappy_session_webview_messages_page_html_for_session(
   page_html = strappy_session_webview_messages_page_html_with_content(
     messages_html,
     resource_dir,
-    error_text);
+    error_text,
+    processing_status_json);
   free(messages_html);
   if (page_html == NULL) {
     strappy_set_error(error_out, "Could not render the WebView page.");

@@ -26,6 +26,7 @@ extern NSString * const StrappyWebProviderParallel;
   NSNumber     *sessionIdentifier_;
   NSDictionary *cachedSummary_;
   NSString     *webProvider_;
+  NSString     *processingStatusJSON_;
   BOOL          bashEnabled_;
   BOOL          streamingEnabled_;
   BOOL          promptInFlight_;

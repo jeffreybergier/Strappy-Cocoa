@@ -74,6 +74,13 @@ static int harness_check_localized_labels(void)
        harness_expect_equal(labels->harness, "Harness") &&
        harness_expect_equal(labels->developer, "Developer") &&
        harness_expect_equal(labels->thinking, "Thinking") &&
+       harness_expect_equal(labels->processing_pondering,
+                            "[fa:solid:spinner] Pondering") &&
+       harness_expect_equal(labels->processing_tools, "Tools") &&
+       harness_expect_equal(labels->processing_autoscroll_on,
+                            "Autoscroll on") &&
+       harness_expect_equal(labels->processing_autoscroll_off,
+                            "Autoscroll off") &&
        harness_expect_equal(labels->response_metadata, "Response Metadata") &&
        harness_expect_equal(labels->waiting_for_response,
                             "Waiting for response...") &&
@@ -198,7 +205,8 @@ static int harness_check_page_scripts(void)
   page_html = strappy_webview_messages_page_html(
     message_html,
     harness_tool_display_registry_json,
-    "");
+    "",
+    NULL);
   strappy_webview_free(message_html);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate messages page HTML.\n");
@@ -1068,6 +1076,35 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function clearProcessingStatus") &&
        harness_expect_contains(page_html, "function clearProcessingStatusNode") &&
        harness_expect_contains(page_html, "function initProcessingStatusFromRenderState") &&
+       harness_expect_contains(page_html,
+                               "data-processing-pondering-label="
+                               "\"[fa:solid:spinner] Pondering\"") &&
+       harness_expect_contains(page_html,
+                               "data-processing-tools-label=\"Tools\"") &&
+       harness_expect_contains(page_html,
+                               "data-processing-retry-label=\"Retry\"") &&
+       harness_expect_contains(
+         page_html,
+         "data-processing-autoscroll-on-label=\"Autoscroll on\"") &&
+       harness_expect_contains(
+         page_html,
+         "data-processing-autoscroll-off-label=\"Autoscroll off\"") &&
+       harness_expect_contains(page_html, "function faTextHTML") &&
+       harness_expect_contains(page_html,
+                               "t.innerHTML=faTextHTML("
+                               "processingStatusText(s));") &&
+       harness_expect_contains(page_html,
+                               "return a+'/'+max;") &&
+       harness_expect_contains(page_html,
+                               "processingLabel('pondering',"
+                               "'[fa:solid:spinner] Pondering')") &&
+       harness_expect_contains(page_html,
+                               "processingLabel('tools','Tools')") &&
+       harness_expect_contains(page_html,
+                               "processingLabel('retry','Retry')") &&
+       harness_expect_not_contains(page_html, "Retrying in ") &&
+       harness_expect_not_contains(page_html, "Using tools - ") &&
+       harness_expect_not_contains(page_html, "+' elapsed'") &&
        harness_expect_not_contains(page_html,
                                    "setTimeout(initProcessingStatusFromRenderState") &&
        harness_expect_contains(page_html,
@@ -1140,8 +1177,14 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function toggleAutoScroll") &&
        harness_expect_contains(page_html, "function updateAutoScrollButton") &&
        harness_expect_contains(page_html, "aria-pressed") &&
-       harness_expect_contains(page_html, "Disable autoscroll") &&
-       harness_expect_contains(page_html, "Enable autoscroll") &&
+       harness_expect_contains(page_html,
+                               "processingLabel('autoscroll-on',"
+                               "'Autoscroll on')") &&
+       harness_expect_contains(page_html,
+                               "processingLabel('autoscroll-off',"
+                               "'Autoscroll off')") &&
+       harness_expect_not_contains(page_html, "Disable autoscroll") &&
+       harness_expect_not_contains(page_html, "Enable autoscroll") &&
        harness_expect_contains(page_html,
                                "if(!strappyAutoScrollEnabled)"
                                "cancelScrollBottomAnimation();") &&
@@ -1271,7 +1314,7 @@ static int harness_check_timeline_error_state(void)
   char *page_html;
   int ok;
 
-  empty_page_html = strappy_webview_messages_page_html("", "{}", "");
+  empty_page_html = strappy_webview_messages_page_html("", "{}", "", NULL);
   if (empty_page_html == NULL) {
     fprintf(stderr, "Could not generate blank timeline page HTML.\n");
     return 0;
@@ -1279,7 +1322,8 @@ static int harness_check_timeline_error_state(void)
   page_html = strappy_webview_messages_page_html(
     "",
     "{}",
-    "Timeline failed <retry> & \"later\"");
+    "Timeline failed <retry> & \"later\"",
+    NULL);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate timeline error page HTML.\n");
     strappy_webview_free(empty_page_html);
@@ -1325,7 +1369,11 @@ static int harness_check_fontawesome_rendering(void)
     return 0;
   }
 
-  page_html = strappy_webview_messages_page_html(message_html, "{}", "");
+  page_html = strappy_webview_messages_page_html(
+    message_html,
+    "{}",
+    "",
+    NULL);
   strappy_webview_free(message_html);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate Font Awesome page HTML.\n");
@@ -1578,6 +1626,7 @@ static int harness_check_processing_status_scripts(void)
 {
   char *set_script;
   char *clear_script;
+  char *page_html;
   int ok;
 
   set_script = strappy_webview_set_processing_status_js(
@@ -1596,10 +1645,36 @@ static int harness_check_processing_status_scripts(void)
     return 0;
   }
 
+  page_html = strappy_webview_messages_page_html(
+    "",
+    "{}",
+    "",
+    "{\"active\":true,\"message_key\":\"prompt-group-initial\","
+    "\"status_kind\":\"thinking\",\"started_ms\":1000,"
+    "\"retry_reason\":\"wait </script> & continue\"}");
+  if (page_html == NULL) {
+    fprintf(stderr, "Could not generate initial processing status HTML.\n");
+    strappy_webview_free(clear_script);
+    strappy_webview_free(set_script);
+    return 0;
+  }
+
   ok = harness_expect_contains(set_script, "setProcessingStatus('{\"active\":true") &&
        harness_expect_contains(set_script, "\"status_kind\":\"retry_wait\"") &&
-       harness_expect_contains(clear_script, "clearProcessingStatus();");
+       harness_expect_contains(clear_script, "clearProcessingStatus();") &&
+       harness_expect_contains(
+         page_html,
+         "initProcessingStatusFromRenderState();"
+         "setProcessingStatus({\"active\":true,"
+         "\"message_key\":\"prompt-group-initial\","
+         "\"status_kind\":\"thinking\",\"started_ms\":1000,") &&
+       harness_expect_contains(
+         page_html,
+         "\"retry_reason\":\"wait \\u003c/script\\u003e "
+         "\\u0026 continue\"});renderMessageDecorations(document);") &&
+       harness_expect_not_contains(page_html, "wait </script>");
 
+  strappy_webview_free(page_html);
   strappy_webview_free(clear_script);
   strappy_webview_free(set_script);
   return ok;
@@ -1724,7 +1799,11 @@ static int harness_check_harness_prompt_group_collapse(void)
            harness_prompt_html,
            harness_assistant_html);
 
-  page_html = strappy_webview_messages_page_html(messages_html, "{}", "");
+  page_html = strappy_webview_messages_page_html(
+    messages_html,
+    "{}",
+    "",
+    NULL);
   free(messages_html);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate prompt group collapse page HTML.\n");

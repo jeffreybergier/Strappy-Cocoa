@@ -207,6 +207,10 @@
 "Waiting for response..." = "レスポンスを待機中...";
 "No HTTP response" = "HTTP レスポンスなし";
 "Retry" = "再試行";
+"[fa:solid:spinner] Pondering" = "[fa:solid:spinner] ポンデリング";
+"Tools" = "ツール";
+"Autoscroll on" = "自動スクロール オン";
+"Autoscroll off" = "自動スクロール オフ";
 "Save" = "保存";
 "Scan path is empty." = "スキャンパスが空です。";
 "Scan your home folder for SQLite databases." = "ホームフォルダ内の SQLite データベースをスキャンします。";

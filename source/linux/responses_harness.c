@@ -4121,6 +4121,7 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
         session_id,
         "../shared/Resources",
         NULL,
+        NULL,
         &first_message_count,
         &error);
     if ((first_page_html != NULL) &&
@@ -6738,6 +6739,8 @@ static int harness_test_session_webview_rendering(void)
     session_id,
     "../shared/Resources",
     NULL,
+    "{\"active\":true,\"message_key\":\"session-processing\","
+    "\"status_kind\":\"thinking\",\"started_ms\":1000}",
     &message_count,
     &error);
   first_position = (page_html != NULL) ?
@@ -6746,7 +6749,11 @@ static int harness_test_session_webview_rendering(void)
     strstr(page_html, second_text) : NULL;
   ok = (page_html != NULL) && (message_count == 3U) &&
        (first_position != NULL) && (second_position != NULL) &&
-       (first_position < second_position);
+       (first_position < second_position) &&
+       (strstr(page_html,
+               "setProcessingStatus({\"active\":true,"
+               "\"message_key\":\"session-processing\","
+               "\"status_kind\":\"thinking\",\"started_ms\":1000});") != NULL);
   if (!ok) {
     fprintf(stderr,
             "Could not render the stored WebView page: %s "

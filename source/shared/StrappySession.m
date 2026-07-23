@@ -85,6 +85,8 @@ static NSString *StrappySessionStringFromCString(char *value)
 + (void)refreshOpenRouterModelCatalogInBackground:(id)ignored;
 + (void)openRouterModelCatalogRefreshDidFinish:(NSDictionary *)result;
 - (void)updateCachedSummary:(NSDictionary *)summary;
+- (NSString *)currentProcessingStatusJSON;
+- (void)updateProcessingStatusJSON:(NSString *)statusJSON;
 - (int)handleResponsesEvent:(const strappy_responses_event *)event
                     context:(NSDictionary *)context;
 - (void)postStreamEventAndRelease:(NSDictionary *)event;
@@ -212,6 +214,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
                     context:(NSDictionary *)contextDictionary
 {
   NSMutableDictionary *notification;
+  NSString *statusJSON;
 
   if (event == NULL) {
     return 1;
@@ -225,6 +228,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   }
 
   notification = [[NSMutableDictionary alloc] init];
+  statusJSON = nil;
   if (contextDictionary != nil) {
     [notification setObject:contextDictionary forKey:@"context"];
   }
@@ -237,12 +241,13 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
     }
   }
   if (event->status_json != NULL) {
-    NSString *statusJSON;
-
     statusJSON = [NSString stringWithUTF8String:event->status_json];
     if (statusJSON != nil) {
       [notification setObject:statusJSON forKey:@"status_json"];
     }
+  }
+  if (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) {
+    [self updateProcessingStatusJSON:statusJSON];
   }
   [notification setObject:
     (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) ?
@@ -420,6 +425,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   [sessionIdentifier_ release];
   [cachedSummary_ release];
   [webProvider_ release];
+  [processingStatusJSON_ release];
   [super dealloc];
 }
 
@@ -448,6 +454,31 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
     webProvider_ = [StrappySessionWebProviderFromSummary(summary) retain];
     bashEnabled_ = StrappySessionBashEnabledFromSummary(summary);
     streamingEnabled_ = StrappySessionStreamingEnabledFromSummary(summary);
+  }
+}
+
+- (NSString *)currentProcessingStatusJSON
+{
+  NSString *statusJSON;
+
+  @synchronized(self) {
+    statusJSON = [processingStatusJSON_ retain];
+  }
+  return [statusJSON autorelease];
+}
+
+- (void)updateProcessingStatusJSON:(NSString *)statusJSON
+{
+  if (![statusJSON isKindOfClass:[NSString class]] ||
+      ([statusJSON length] == 0U)) {
+    statusJSON = nil;
+  }
+
+  @synchronized(self) {
+    if (processingStatusJSON_ != statusJSON) {
+      [processingStatusJSON_ release];
+      processingStatusJSON_ = [statusJSON copy];
+    }
   }
 }
 
@@ -1956,6 +1987,8 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
                   nil]];
 
   @synchronized(session) {
+    [session->processingStatusJSON_ release];
+    session->processingStatusJSON_ = nil;
     session->promptInFlight_ = YES;
     session->promptCancellationRequested_ = NO;
   }
@@ -2253,6 +2286,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
                                              error:(NSError **)error
 {
   NSString *databasePath;
+  NSString *processingStatusJSON;
   NSString *resourcePath;
   const char *displayErrorText;
   char *pageHTML;
@@ -2274,6 +2308,11 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   displayErrorText =
     ([errorText isKindOfClass:[NSString class]] && ([errorText length] > 0U)) ?
       [errorText UTF8String] : NULL;
+  processingStatusJSON = [self currentProcessingStatusJSON];
+  if (([processingStatusJSON length] == 0U) && [self isPromptInFlight]) {
+    processingStatusJSON =
+      @"{\"active\":true,\"status_kind\":\"thinking\"}";
+  }
   sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
     [sessionIdentifier_ longLongValue] : 0LL;
   storedMessageCount = 0U;
@@ -2283,6 +2322,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
     sessionId,
     [resourcePath fileSystemRepresentation],
     displayErrorText,
+    StrappySessionOptionalCString(processingStatusJSON),
     &storedMessageCount,
     &strappyError);
   if (messageCount != NULL) {
@@ -3214,6 +3254,8 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
       return NO;
     }
 
+    [processingStatusJSON_ release];
+    processingStatusJSON_ = nil;
     promptInFlight_ = YES;
     promptCancellationRequested_ = NO;
   }
@@ -3472,6 +3514,8 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   @synchronized(self) {
     promptInFlight_ = NO;
     promptCancellationRequested_ = NO;
+    [processingStatusJSON_ release];
+    processingStatusJSON_ = nil;
   }
   [StrappySession unregisterInFlightSession:self];
 

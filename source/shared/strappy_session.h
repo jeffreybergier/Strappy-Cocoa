@@ -152,6 +152,7 @@ char *strappy_session_webview_messages_page_html_for_session(
   long long session_id,
   const char *resource_dir,
   const char *error_text,
+  const char *processing_status_json,
   size_t *message_count_out,
   char **error_out);
 char *strappy_session_webview_append_messages_js_for_session(

@@ -28,6 +28,10 @@ typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_HARNESS,
   STRAPPY_WEBVIEW_LABEL_DEVELOPER,
   STRAPPY_WEBVIEW_LABEL_THINKING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_PONDERING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_TOOLS,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_AUTOSCROLL_ON,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_AUTOSCROLL_OFF,
   STRAPPY_WEBVIEW_LABEL_RESPONSE_METADATA,
   STRAPPY_WEBVIEW_LABEL_WAITING_FOR_RESPONSE,
   STRAPPY_WEBVIEW_LABEL_NO_HTTP_RESPONSE,
@@ -67,6 +71,10 @@ static const char * const g_strappy_webview_label_keys[
   "Harness",
   "Developer",
   "Thinking",
+  "[fa:solid:spinner] Pondering",
+  "Tools",
+  "Autoscroll on",
+  "Autoscroll off",
   "Response Metadata",
   "Waiting for response...",
   "No HTTP response",
@@ -115,6 +123,14 @@ static void strappy_webview_assign_localized_labels(
   labels->harness = values[STRAPPY_WEBVIEW_LABEL_HARNESS];
   labels->developer = values[STRAPPY_WEBVIEW_LABEL_DEVELOPER];
   labels->thinking = values[STRAPPY_WEBVIEW_LABEL_THINKING];
+  labels->processing_pondering =
+    values[STRAPPY_WEBVIEW_LABEL_PROCESSING_PONDERING];
+  labels->processing_tools =
+    values[STRAPPY_WEBVIEW_LABEL_PROCESSING_TOOLS];
+  labels->processing_autoscroll_on =
+    values[STRAPPY_WEBVIEW_LABEL_PROCESSING_AUTOSCROLL_ON];
+  labels->processing_autoscroll_off =
+    values[STRAPPY_WEBVIEW_LABEL_PROCESSING_AUTOSCROLL_OFF];
   labels->response_metadata = values[STRAPPY_WEBVIEW_LABEL_RESPONSE_METADATA];
   labels->waiting_for_response =
     values[STRAPPY_WEBVIEW_LABEL_WAITING_FOR_RESPONSE];
@@ -648,6 +664,50 @@ static const char *strappy_webview_thinking_label(
     return labels->thinking;
   }
   return "Thinking";
+}
+
+static const char *strappy_webview_processing_pondering_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->processing_pondering != NULL) &&
+      (labels->processing_pondering[0] != '\0')) {
+    return labels->processing_pondering;
+  }
+  return "[fa:solid:spinner] Pondering";
+}
+
+static const char *strappy_webview_processing_tools_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->processing_tools != NULL) &&
+      (labels->processing_tools[0] != '\0')) {
+    return labels->processing_tools;
+  }
+  return "Tools";
+}
+
+static const char *strappy_webview_processing_autoscroll_on_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->processing_autoscroll_on != NULL) &&
+      (labels->processing_autoscroll_on[0] != '\0')) {
+    return labels->processing_autoscroll_on;
+  }
+  return "Autoscroll on";
+}
+
+static const char *strappy_webview_processing_autoscroll_off_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->processing_autoscroll_off != NULL) &&
+      (labels->processing_autoscroll_off[0] != '\0')) {
+    return labels->processing_autoscroll_off;
+  }
+  return "Autoscroll off";
 }
 
 static const char *strappy_webview_response_metadata_label(
@@ -1766,6 +1826,9 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "cls=/^[a-z0-9-]+$/.test(k)?' fa-'+k:'';c=faIconCode(s,name);",
     "if(c==='')return escHTML(raw);",
     "return '<i class=\"fa fa-'+s+cls+'\" aria-hidden=\"true\">&#x'+c+';</i>';}",
+    "function faTextHTML(t){return escHTML(t).replace(",
+    "/\\[fa(?::(solid|regular|brands))?:([A-Za-z0-9_-]+|0x[0-9A-Fa-f]{3,6}|[0-9A-Fa-f]{3,6})\\]/g,",
+    "function(m,st,n){return faIconHTML(st,n,m);});}",
     "function disclosureIconHTML(collapsed){return faIconHTML('solid',",
     "collapsed?'angle-right':'angle-down',collapsed?'>':'v');}",
     "function toolErrorIconHTML(){return '<span class=\"tool-error-icon\" role=\"img\" ",
@@ -1897,24 +1960,31 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(s<0)s=0;if(s<60)return s+'s';m=Math.floor(s/60);s=s%60;",
     "if(m<60)return m+'m '+(s<10?'0':'')+s+'s';h=Math.floor(m/60);",
     "m=m%60;return h+'h '+(m<10?'0':'')+m+'m';}",
+    "function processingLabel(name,fallback){var b=document.body;var v=b&&b.getAttribute?",
+    "b.getAttribute('data-processing-'+name+'-label')||'':'';return v||fallback;}",
     "function processingAttemptText(s){var a=processingNumber(s.retry_attempt);",
-    "var max=processingNumber(s.retry_max_attempts);if(a>0&&max>0)return 'attempt '+a+' of '+max;",
-    "if(a>0)return 'attempt '+a;return '';}",
+    "var max=processingNumber(s.retry_max_attempts);if(a>0&&max>0)return a+'/'+max;",
+    "if(a>0)return String(a);return '';}",
     "function processingStatusText(s){var now=(new Date()).getTime();var started=processingNumber(s.started_ms);",
-    "var elapsed=started>0?Math.floor((now-started)/1000):0;var kind=s.status_kind||'thinking';",
-    "var attempt=processingAttemptText(s);var reason=s.retry_reason||'';var remaining;",
+    "var elapsed=started>0?processingDuration(Math.floor((now-started)/1000)):'';",
+    "var kind=s.status_kind||'thinking';var attempt=processingAttemptText(s);var remaining,label;",
     "if(kind=='retry_wait'){remaining=processingNumber(s.retry_until_ms)>0?",
     "Math.ceil((processingNumber(s.retry_until_ms)-now)/1000):processingNumber(s.retry_after_seconds);",
-    "if(remaining<0)remaining=0;return 'Retrying in '+processingDuration(remaining)",
-    "+(reason?' - '+reason:'')+(attempt?' - '+attempt:'');}",
-    "if(kind=='retrying')return 'Retrying'+(attempt?' - '+attempt:'')+' - '+processingDuration(elapsed)+' elapsed';",
-    "if(kind=='tools')return 'Using tools - '+processingDuration(elapsed);",
-    "return 'Thinking - '+processingDuration(elapsed);}",
+    "if(remaining<0)remaining=0;label=processingLabel('retry','Retry');",
+    "return label+' '+processingDuration(remaining)+(attempt?' \\u00b7 '+attempt:'');}",
+    "if(kind=='retrying'){label=processingLabel('retry','Retry')+(attempt?' '+attempt:'');",
+    "return label+(elapsed?' \\u00b7 '+elapsed:'');}",
+    "if(kind=='tools'){label=processingLabel('tools','Tools');",
+    "return label+(elapsed?' \\u00b7 '+elapsed:'');}",
+    "label=processingLabel('pondering','[fa:solid:spinner] Pondering');",
+    "return label+(elapsed?' \\u00b7 '+elapsed:'');}",
     "var strappyAutoScrollEnabled=1;",
     "function updateAutoScrollButton(n){var b;if(!n)return;b=firstByClass(n,'processing-autoscroll');",
     "if(!b)return;b.className='processing-autoscroll'+(strappyAutoScrollEnabled?' processing-autoscroll-on':'');",
     "b.setAttribute('aria-pressed',strappyAutoScrollEnabled?'true':'false');",
-    "b.title=strappyAutoScrollEnabled?'Disable autoscroll':'Enable autoscroll';",
+    "b.title=strappyAutoScrollEnabled?",
+    "processingLabel('autoscroll-on','Autoscroll on'):",
+    "processingLabel('autoscroll-off','Autoscroll off');",
     "b.setAttribute('aria-label',b.title);}",
     "function setAutoScrollEnabled(v){var n;strappyAutoScrollEnabled=v?1:0;",
     "if(!strappyAutoScrollEnabled)cancelScrollBottomAnimation();",
@@ -1936,7 +2006,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function updateProcessingStatus(){var s=strappyProcessingStatus;var n,t;",
     "if(!s||!s.active){clearProcessingStatusNode();return;}n=processingStatusNode();",
     "n.className='processing-status processing-status-'+(s.status_kind||'thinking');",
-    "t=processingStatusTextNode(n);setNodeText(t,processingStatusText(s));processingAutoScrollButton(n);",
+    "t=processingStatusTextNode(n);t.innerHTML=faTextHTML(processingStatusText(s));",
+    "processingAutoScrollButton(n);",
     "syncProcessingInteractionState(1,strappyProcessingPromptGroupKey);}",
     "function setProcessingStatus(raw){var s=processingStatusObject(raw);var group;",
     "if(!s||!s.active){clearProcessingStatus();return;}strappyProcessingStatus=s;",
@@ -3677,14 +3748,17 @@ char *strappy_webview_message_html_with_reasoning(
 char *strappy_webview_messages_page_html(
   const char *messages_html,
   const char *tool_display_registry_json,
-  const char *error_text)
+  const char *error_text,
+  const char *processing_status_json)
 {
   strappy_webview_buffer buffer;
+  const strappy_webview_labels *labels;
   int ok;
 
   if (messages_html == NULL) {
     messages_html = "";
   }
+  labels = strappy_webview_localized_labels();
   strappy_webview_buffer_init(&buffer);
   ok = strappy_webview_buffer_append_cstring(
          &buffer,
@@ -3703,7 +3777,30 @@ char *strappy_webview_messages_page_html(
        strappy_webview_append_scripts(&buffer) &&
        strappy_webview_buffer_append_cstring(
          &buffer,
-         "</head><body><div class=\"page\">");
+         "</head><body") &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "processing-pondering-label",
+         strappy_webview_processing_pondering_label(labels)) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "processing-tools-label",
+         strappy_webview_processing_tools_label(labels)) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "processing-retry-label",
+         strappy_webview_retry_label(labels)) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "processing-autoscroll-on-label",
+         strappy_webview_processing_autoscroll_on_label(labels)) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "processing-autoscroll-off-label",
+         strappy_webview_processing_autoscroll_off_label(labels)) &&
+       strappy_webview_buffer_append_cstring(
+         &buffer,
+         "><div class=\"page\">");
 
   if (ok && (messages_html[0] == '\0') &&
       (error_text != NULL) && (error_text[0] != '\0')) {
@@ -3723,7 +3820,22 @@ char *strappy_webview_messages_page_html(
        strappy_webview_buffer_append_cstring(
          &buffer,
          "</div></div><div id=\"tool-sources\" class=\"tool-source-bin\"></div>"
-         "</div></div><script>initProcessingStatusFromRenderState();"
+         "</div></div><script>initProcessingStatusFromRenderState();");
+
+  if (ok &&
+      (processing_status_json != NULL) &&
+      (processing_status_json[0] != '\0')) {
+    ok = strappy_webview_buffer_append_cstring(
+           &buffer,
+           "setProcessingStatus(") &&
+         strappy_webview_append_inline_json(&buffer,
+                                            processing_status_json) &&
+         strappy_webview_buffer_append_cstring(&buffer, ");");
+  }
+
+  ok = ok &&
+       strappy_webview_buffer_append_cstring(
+         &buffer,
          "renderMessageDecorations(document);scrollBottomNow();"
          "</script></body></html>");
 

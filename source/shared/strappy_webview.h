@@ -13,6 +13,10 @@ typedef struct strappy_webview_labels {
   const char *harness;
   const char *developer;
   const char *thinking;
+  const char *processing_pondering;
+  const char *processing_tools;
+  const char *processing_autoscroll_on;
+  const char *processing_autoscroll_off;
   const char *response_metadata;
   const char *waiting_for_response;
   const char *no_http_response;
@@ -148,7 +152,8 @@ char *strappy_webview_message_html_with_reasoning(
 char *strappy_webview_messages_page_html(
   const char *messages_html,
   const char *tool_display_registry_json,
-  const char *error_text);
+  const char *error_text,
+  const char *processing_status_json);
 
 char *strappy_webview_append_message_js(const char *message_html);
 char *strappy_webview_replace_message_js(const char *element_id,
