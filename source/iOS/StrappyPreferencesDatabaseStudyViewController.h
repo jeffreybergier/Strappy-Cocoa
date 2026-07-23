@@ -1,9 +1,14 @@
 #import <UIKit/UIKit.h>
 
-@interface StrappyPreferencesDatabaseStudyViewController : UIViewController
-  <UIAlertViewDelegate> {
+@interface StrappyPreferencesDatabaseStudyViewController : UITableViewController
+  <UIAlertViewDelegate, UIActionSheetDelegate> {
  @private
-  UITextView *jsonTextView_;
+  NSArray *allStudyRows_;
+  NSArray *studySections_;
+  BOOL showsUnstudiedOnly_;
+  UIBarButtonItem *filterButton_;
+  UILabel *statusLabel_;
+  NSDateFormatter *studyDateFormatter_;
 }
 
 @end

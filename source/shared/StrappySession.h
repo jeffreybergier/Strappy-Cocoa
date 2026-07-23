@@ -69,7 +69,11 @@ extern NSString * const StrappyWebProviderParallel;
                              error:(NSError **)error;
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error;
 + (NSString *)databaseStudyJSONWithError:(NSError **)error;
++ (NSArray *)databaseStudyRowsWithError:(NSError **)error;
 + (BOOL)resetDatabaseStudyWithError:(NSError **)error;
++ (BOOL)databaseStudyProgressWithStudiedCount:(NSUInteger *)studiedCount
+                                approvedCount:(NSUInteger *)approvedCount
+                                        error:(NSError **)error;
 + (NSUInteger)databaseStudyPendingDatabaseCountWithError:(NSError **)error;
 + (StrappySession *)beginDatabaseStudyWithError:(NSError **)error;
 + (NSString *)webViewBatchedJavaScriptForJavaScript:(NSString *)javaScript;

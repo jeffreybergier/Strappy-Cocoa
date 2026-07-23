@@ -5995,6 +5995,55 @@ static int harness_study_status_matches(
   return ok;
 }
 
+static int harness_study_status_rows_match(
+  const char *catalog_path,
+  const strappy_study_database_id_list *expected,
+  size_t expected_studied_count)
+{
+  strappy_study_database_status_record_list list;
+  char *error;
+  size_t index;
+  size_t studied_count;
+  int ok;
+
+  if ((catalog_path == NULL) || (expected == NULL)) {
+    return 0;
+  }
+  strappy_study_database_status_record_list_init(&list);
+  error = NULL;
+  ok = strappy_study_list_database_status_records(catalog_path,
+                                                   &list,
+                                                   &error) &&
+    (list.count == expected->count);
+  studied_count = 0U;
+  for (index = 0U; ok && (index < list.count); index++) {
+    const strappy_study_database_status_record *record;
+
+    record = &list.records[index];
+    ok = (record->database_id != NULL) &&
+      (strcmp(record->database_id, expected->database_ids[index]) == 0) &&
+      (record->path != NULL) && (record->path[0] != '\0') &&
+      (record->app_group_key != NULL) && (record->app_name != NULL) &&
+      (record->app_bundle_id != NULL) &&
+      ((record->studied && (record->studied_at_ms > 0LL)) ||
+       (!record->studied && (record->studied_at_ms == 0LL)));
+    if (ok && record->studied) {
+      studied_count++;
+    }
+  }
+  ok = ok && (studied_count == expected_studied_count);
+  if (!ok) {
+    fprintf(stderr,
+            "Database Study status rows did not match %u of %u studied: %s\n",
+            (unsigned int)expected_studied_count,
+            (unsigned int)expected->count,
+            (error != NULL) ? error : "row mismatch");
+  }
+  strappy_study_database_status_record_list_destroy(&list);
+  free(error);
+  return ok;
+}
+
 static int harness_write_study_value(const char *catalog_path,
                                      const char *database_id,
                                      const char *key,
@@ -6043,8 +6092,10 @@ static int harness_run_database_study_coverage_tests(
   char freshness_sql[512];
   char *batch_prompt;
   char *error;
+  size_t approved_count;
   size_t batch_count;
   size_t index;
+  size_t studied_count;
   int written;
   int ok;
 
@@ -6056,12 +6107,21 @@ static int harness_run_database_study_coverage_tests(
   error = NULL;
   batch_prompt = NULL;
   batch_ids = NULL;
+  approved_count = 0U;
+  studied_count = 0U;
   ok = strappy_study_reset(context->catalog_path, &error) &&
     strappy_study_list_unstudied_database_ids(context->catalog_path,
                                                &pending,
                                                &error) &&
+    strappy_study_progress(context->catalog_path,
+                            &studied_count,
+                            &approved_count,
+                            &error) &&
     (pending.count > 0U) &&
-    harness_study_status_matches(context->catalog_path, &pending, 0, NULL);
+    (studied_count == 0U) &&
+    (approved_count == pending.count) &&
+    harness_study_status_matches(context->catalog_path, &pending, 0, NULL) &&
+    harness_study_status_rows_match(context->catalog_path, &pending, 0U);
   if (!ok) {
     fprintf(stderr,
             "Could not initialize Database Study coverage: %s\n",
@@ -6155,8 +6215,17 @@ static int harness_run_database_study_coverage_tests(
   ok = strappy_study_list_unstudied_database_ids(context->catalog_path,
                                                   &remaining,
                                                   &error) &&
+    strappy_study_progress(context->catalog_path,
+                            &studied_count,
+                            &approved_count,
+                            &error) &&
     (remaining.count == 0U) &&
+    (studied_count == pending.count) &&
+    (approved_count == pending.count) &&
     harness_study_status_matches(context->catalog_path, &pending, 1, NULL) &&
+    harness_study_status_rows_match(context->catalog_path,
+                                    &pending,
+                                    pending.count) &&
     harness_expect_catalog_integer(
       context->catalog_path,
       "SELECT COUNT(*) FROM database_hints;",
@@ -6207,7 +6276,16 @@ static int harness_run_database_study_coverage_tests(
       !strappy_study_list_unstudied_database_ids(context->catalog_path,
                                                   &remaining,
                                                   &error) ||
+      !strappy_study_progress(context->catalog_path,
+                              &studied_count,
+                              &approved_count,
+                              &error) ||
       (remaining.count != 1U) ||
+      (studied_count + 1U != approved_count) ||
+      (approved_count != pending.count) ||
+      !harness_study_status_rows_match(context->catalog_path,
+                                       &pending,
+                                       pending.count - 1U) ||
       (strcmp(remaining.database_ids[0], pending.database_ids[0]) != 0)) {
     fprintf(stderr,
             "Database Study did not treat an mtime change as stale: %s\n",
@@ -6227,7 +6305,10 @@ static int harness_run_database_study_coverage_tests(
       !strappy_study_list_unstudied_database_ids(context->catalog_path,
                                                   &remaining,
                                                   &error) ||
-      (remaining.count != 0U)) {
+      (remaining.count != 0U) ||
+      !harness_study_status_rows_match(context->catalog_path,
+                                       &pending,
+                                       pending.count)) {
     fprintf(stderr,
             "Database Study did not refresh values after an mtime change: %s\n",
             (error != NULL) ? error : "unexpected pending database");
@@ -6261,8 +6342,15 @@ static int harness_run_database_study_coverage_tests(
     strappy_study_list_unstudied_database_ids(context->catalog_path,
                                                &remaining,
                                                &error) &&
+    strappy_study_progress(context->catalog_path,
+                            &studied_count,
+                            &approved_count,
+                            &error) &&
     (remaining.count == pending.count) &&
-    harness_study_status_matches(context->catalog_path, &pending, 0, NULL);
+    (studied_count == 0U) &&
+    (approved_count == pending.count) &&
+    harness_study_status_matches(context->catalog_path, &pending, 0, NULL) &&
+    harness_study_status_rows_match(context->catalog_path, &pending, 0U);
   if (!ok) {
     fprintf(stderr,
             "Database Study reset did not restore all approved targets: %s\n",

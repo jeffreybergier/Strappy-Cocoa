@@ -289,31 +289,27 @@ titleForFooterInSection:(NSInteger)section
     return cell;
   }
 
-  cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1
+  cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
                                 reuseIdentifier:nil];
   [cell setAccessoryType:UITableViewCellAccessoryDisclosureIndicator];
   [cell setAccessoryView:nil];
   [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
   if ([indexPath row] == kStrappyPaneRowModels) {
     [[cell textLabel] setText:NSLocalizedString(@"Models", nil)];
-    [[cell detailTextLabel] setText:NSLocalizedString(@"Fetch, search, use", nil)];
     if ([StrappySession isModelCatalogRefreshInFlight]) {
       [cell setAccessoryType:UITableViewCellAccessoryNone];
       [cell setAccessoryView:StrappyActivityAccessoryView([UIColor grayColor])];
     }
   } else if ([indexPath row] == kStrappyPaneRowDatabases) {
     [[cell textLabel] setText:NSLocalizedString(@"Databases", nil)];
-    [[cell detailTextLabel] setText:NSLocalizedString(@"Scan, search, use", nil)];
     if ([FileScanner isDatabaseCatalogScanInFlight]) {
       [cell setAccessoryType:UITableViewCellAccessoryNone];
       [cell setAccessoryView:StrappyActivityAccessoryView([UIColor grayColor])];
     }
   } else if ([indexPath row] == kStrappyPaneRowStudy) {
     [[cell textLabel] setText:NSLocalizedString(@"Study", nil)];
-    [[cell detailTextLabel] setText:NSLocalizedString(@"Database hints", nil)];
   } else {
     [[cell textLabel] setText:NSLocalizedString(@"Prompts", nil)];
-    [[cell detailTextLabel] setText:NSLocalizedString(@"System prompt", nil)];
   }
   return cell;
 }

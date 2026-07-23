@@ -18,10 +18,29 @@ typedef struct strappy_study_database_id_list {
   size_t count;
 } strappy_study_database_id_list;
 
+typedef struct strappy_study_database_status_record {
+  char *database_id;
+  char *path;
+  char *app_group_key;
+  char *app_name;
+  char *app_bundle_id;
+  int studied;
+  long long studied_at_ms;
+} strappy_study_database_status_record;
+
+typedef struct strappy_study_database_status_record_list {
+  strappy_study_database_status_record *records;
+  size_t count;
+} strappy_study_database_status_record_list;
+
 void strappy_study_database_id_list_init(
   strappy_study_database_id_list *list);
 void strappy_study_database_id_list_destroy(
   strappy_study_database_id_list *list);
+void strappy_study_database_status_record_list_init(
+  strappy_study_database_status_record_list *list);
+void strappy_study_database_status_record_list_destroy(
+  strappy_study_database_status_record_list *list);
 
 int strappy_study_key_is_valid(const char *key);
 int strappy_study_copy_fresh_value(
@@ -40,6 +59,14 @@ char *strappy_study_save_value(
 
 char *strappy_study_status_json(const char *db_path, char **error_out);
 int strappy_study_reset(const char *db_path, char **error_out);
+int strappy_study_progress(const char *db_path,
+                           size_t *studied_count_out,
+                           size_t *approved_count_out,
+                           char **error_out);
+int strappy_study_list_database_status_records(
+  const char *db_path,
+  strappy_study_database_status_record_list *list,
+  char **error_out);
 int strappy_study_list_unstudied_database_ids(
   const char *db_path,
   strappy_study_database_id_list *list,

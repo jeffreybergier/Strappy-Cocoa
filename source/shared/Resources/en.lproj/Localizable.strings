@@ -95,6 +95,9 @@
 "System Prompt" = "System Prompt";
 "Scan Databases" = "Scan Databases";
 "Study" = "Study";
+"Reset" = "Reset";
+"Show All Databases" = "Show All Databases";
+"Show Unstudied Databases" = "Show Unstudied Databases";
 "Database hints" = "Database hints";
 "APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set." = "APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set.";
 "API credentials saved to keychain." = "API credentials saved to keychain.";
