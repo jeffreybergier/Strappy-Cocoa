@@ -45,6 +45,15 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   return NSLocalizedString(@"None", nil);
 }
 
+static NSArray *StrappyPromptWorkingDirectoryTitles(void)
+{
+  return [NSArray arrayWithObjects:
+    NSLocalizedString(@"~/Developer", nil),
+    NSLocalizedString(@"~/", nil),
+    NSLocalizedString(@"~/Library/...", nil),
+    nil];
+}
+
 @interface StrappyPromptFieldInnerShadowView : UIView
 @end
 
@@ -363,6 +372,8 @@ enum {
 - (BOOL)setSelectedModelIdentifierFromOptions:(NSString *)modelIdentifier;
 - (BOOL)setWebProviderFromOptions:(NSString *)webProvider;
 - (BOOL)setBashEnabledFromOptions:(BOOL)enabled;
+- (NSString *)currentWorkingDirectory;
+- (BOOL)setWorkingDirectoryFromOptions:(NSString *)workingDirectory;
 - (UIViewController *)containingViewController;
 - (void)dismissOptionsControllerAnimated:(BOOL)animated;
 - (void)dismissTapped:(id)sender;
@@ -379,6 +390,8 @@ enum {
 @property (nonatomic, copy) NSString *webProvider;
 @property (nonatomic, strong) UISwitch *bashSwitch;
 @property (nonatomic, assign) BOOL bashEnabled;
+@property (nonatomic, copy) NSArray *workingDirectories;
+@property (nonatomic, copy) NSString *workingDirectory;
 - (instancetype)initWithPromptSendViewController:
     (PromptSendViewController *)promptSendViewController;
 - (void)reloadOptionsFromPrompt;
@@ -447,6 +460,11 @@ enum {
     (promptSendViewController != nil)
       ? [promptSendViewController bashEnabled]
       : NO];
+  [self setWorkingDirectories:[StrappySession codingWorkingDirectoryPaths]];
+  [self setWorkingDirectory:
+    (promptSendViewController != nil)
+      ? [promptSendViewController currentWorkingDirectory]
+      : @""];
 }
 
 - (void)reloadOptionsFromPrompt
@@ -505,7 +523,7 @@ enum {
     return (NSInteger)[StrappyPromptWebProviders() count];
   }
   if (section == kStrappyPromptOptionsSectionAvailableTools) {
-    return 1;
+    return 1 + (NSInteger)[[self workingDirectories] count];
   }
   return 0;
 }
@@ -544,6 +562,11 @@ titleForFooterInSection:(NSInteger)section
   }
   if (section == kStrappyPromptOptionsSectionWebSearch) {
     return NSLocalizedString(@"Using web search incurs extra costs", nil);
+  }
+  if (section == kStrappyPromptOptionsSectionAvailableTools) {
+    return NSLocalizedString(
+      @"Relative file paths and Bash commands use the selected working directory.",
+      nil);
   }
   return nil;
 }
@@ -609,25 +632,56 @@ titleForFooterInSection:(NSInteger)section
   }
 
   if ([indexPath section] == kStrappyPromptOptionsSectionAvailableTools) {
+    NSUInteger workingDirectoryIndex;
 
-    cell = [tableView dequeueReusableCellWithIdentifier:@"BashCell"];
-    if (cell == nil) {
-      cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
-                                    reuseIdentifier:@"BashCell"];
-      [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-      [[cell textLabel] setNumberOfLines:1];
-      [[cell detailTextLabel] setNumberOfLines:1];
+    if ([indexPath row] == 0) {
+      cell = [tableView dequeueReusableCellWithIdentifier:@"BashCell"];
+      if (cell == nil) {
+        cell = [[UITableViewCell alloc]
+          initWithStyle:UITableViewCellStyleSubtitle
+         reuseIdentifier:@"BashCell"];
+        [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+        [[cell textLabel] setNumberOfLines:1];
+        [[cell detailTextLabel] setNumberOfLines:1];
+      }
+      [[cell textLabel] setText:NSLocalizedString(@"Enable Bash", nil)];
+      [[cell textLabel] setTextColor:[self bashAvailable] ?
+        [UIColor blackColor] : [UIColor grayColor]];
+      [[cell detailTextLabel] setText:NSLocalizedString(
+        @"Allows command execution in this session", nil)];
+      [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+      [[self bashSwitch] setOn:([self bashAvailable] && [self bashEnabled])
+                        animated:NO];
+      [[self bashSwitch] setEnabled:[self bashAvailable]];
+      [cell setAccessoryView:[self bashSwitch]];
+      return cell;
     }
-    [[cell textLabel] setText:NSLocalizedString(@"Enable Bash", nil)];
+
+    workingDirectoryIndex = (NSUInteger)([indexPath row] - 1);
+    cell =
+      [tableView dequeueReusableCellWithIdentifier:@"WorkingDirectoryCell"];
+    if (cell == nil) {
+      cell = [[UITableViewCell alloc]
+        initWithStyle:UITableViewCellStyleDefault
+       reuseIdentifier:@"WorkingDirectoryCell"];
+      [[cell textLabel] setNumberOfLines:1];
+    }
+    [[cell textLabel] setText:
+      (workingDirectoryIndex < [StrappyPromptWorkingDirectoryTitles() count])
+        ? [StrappyPromptWorkingDirectoryTitles()
+            objectAtIndex:workingDirectoryIndex]
+        : @""];
     [[cell textLabel] setTextColor:[self bashAvailable] ?
       [UIColor blackColor] : [UIColor grayColor]];
-    [[cell detailTextLabel] setText:NSLocalizedString(
-      @"Allows command execution in this session", nil)];
-    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
-    [[self bashSwitch] setOn:([self bashAvailable] && [self bashEnabled])
-                      animated:NO];
-    [[self bashSwitch] setEnabled:[self bashAvailable]];
-    [cell setAccessoryView:[self bashSwitch]];
+    [cell setSelectionStyle:[self bashAvailable] ?
+      UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone];
+    [cell setAccessoryView:nil];
+    [cell setAccessoryType:
+      (workingDirectoryIndex < [[self workingDirectories] count]) &&
+      [[[self workingDirectories] objectAtIndex:workingDirectoryIndex]
+        isEqualToString:[self workingDirectory]]
+        ? UITableViewCellAccessoryCheckmark
+        : UITableViewCellAccessoryNone];
     return cell;
   }
 
@@ -677,6 +731,17 @@ titleForFooterInSection:(NSInteger)section
       ? indexPath
       : nil;
   }
+  if ([indexPath section] == kStrappyPromptOptionsSectionAvailableTools) {
+    NSUInteger workingDirectoryIndex;
+
+    if (([indexPath row] <= 0) || ![self bashAvailable]) {
+      return nil;
+    }
+    workingDirectoryIndex = (NSUInteger)([indexPath row] - 1);
+    return (workingDirectoryIndex < [[self workingDirectories] count])
+      ? indexPath
+      : nil;
+  }
   if ([indexPath section] != kStrappyPromptOptionsSectionModels) {
     return nil;
   }
@@ -690,6 +755,31 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   NSString *modelIdentifier;
 
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
+  if ([indexPath section] == kStrappyPromptOptionsSectionAvailableTools) {
+    NSString *workingDirectory;
+    NSUInteger workingDirectoryIndex;
+
+    if (([indexPath row] <= 0) || ![self bashAvailable]) {
+      return;
+    }
+    workingDirectoryIndex = (NSUInteger)([indexPath row] - 1);
+    if (workingDirectoryIndex >= [[self workingDirectories] count]) {
+      return;
+    }
+    workingDirectory =
+      [[self workingDirectories] objectAtIndex:workingDirectoryIndex];
+    if ([[self promptSendViewController]
+          setWorkingDirectoryFromOptions:workingDirectory]) {
+      [self setWorkingDirectory:workingDirectory];
+      [[self tableView] reloadSections:
+        [NSIndexSet indexSetWithIndex:
+          kStrappyPromptOptionsSectionAvailableTools]
+                    withRowAnimation:UITableViewRowAnimationNone];
+    } else {
+      [self reloadOptionsFromPrompt];
+    }
+    return;
+  }
   if ([indexPath section] == kStrappyPromptOptionsSectionWebSearch) {
     NSString *webProvider;
 
@@ -1335,6 +1425,33 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     [self setBashEnabled:enabled];
   }
   return changed;
+}
+
+- (NSString *)currentWorkingDirectory
+{
+  NSString *workingDirectory;
+
+  workingDirectory = @"";
+  if ([[self delegate] respondsToSelector:
+        @selector(workingDirectoryForPromptSendViewController:)]) {
+    workingDirectory = [[self delegate]
+      workingDirectoryForPromptSendViewController:self];
+  }
+  return [workingDirectory isKindOfClass:[NSString class]]
+    ? workingDirectory
+    : @"";
+}
+
+- (BOOL)setWorkingDirectoryFromOptions:(NSString *)workingDirectory
+{
+  if (![workingDirectory isKindOfClass:[NSString class]] ||
+      ([workingDirectory length] == 0U) ||
+      ![[self delegate] respondsToSelector:
+        @selector(promptSendViewController:setWorkingDirectory:)]) {
+    return NO;
+  }
+  return [[self delegate] promptSendViewController:self
+                               setWorkingDirectory:workingDirectory];
 }
 
 - (UIViewController *)containingViewController

@@ -44,9 +44,13 @@ copy, audit guidance, invariant personality, and hard rules in
   variables, disk/header roots, relevant C and jailbroken-device tool paths and
   versions, and `ls -al`; it does not dump the full environment. `file_read`
   reads bounded UTF-8 text ranges, while `bash` runs a fresh non-interactive
-  child shell with a hard 120-second ceiling; both start in the per-session
-  working directory. Bash results expose `output_truncated` so the model can
-  distinguish complete output from a bounded tail.
+  child shell with a hard 120-second ceiling. The Coding Assistant file tools
+  and Bash share a per-session working directory. New sessions default to
+  `~/Developer`; the iOS prompt options can instead select `~/` or
+  `~/Library/Application Support/Strappy/Developer`. Selecting a missing
+  directory creates it before the database setting is changed. Bash results
+  expose `output_truncated` so the model can distinguish complete output from a
+  bounded tail.
 - Database Study is an internal assistant with `database_list`,
   `database_context`, `database_query`, `database_study`, and both datetime
   conversion tools. The application persists its fixed session name as

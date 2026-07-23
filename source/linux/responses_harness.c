@@ -12,6 +12,7 @@
 #include <strings.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -6430,6 +6431,164 @@ static int harness_test_ledger(void)
   return 1;
 }
 
+static int harness_test_working_directory_selection(void)
+{
+  char root[] = "/tmp/strappy-working-directory-XXXXXX";
+  char database_path[1024];
+  char developer_path[1024];
+  char library_path[1024];
+  char application_support_path[1024];
+  char strappy_path[1024];
+  char nested_developer_path[1024];
+  char collision_path[1024];
+  char *working_directory;
+  char *error;
+  struct stat directory_stat;
+  FILE *collision;
+  long long session_id;
+  int written;
+  int ok;
+
+  if (mkdtemp(root) == NULL) {
+    return harness_fail("Could not create working-directory test root.");
+  }
+  written = snprintf(database_path,
+                     sizeof(database_path),
+                     "%s/strappy.sqlite",
+                     root);
+  ok = (written > 0) && ((size_t)written < sizeof(database_path));
+  written = snprintf(developer_path,
+                     sizeof(developer_path),
+                     "%s/Developer",
+                     root);
+  ok = ok && (written > 0) &&
+    ((size_t)written < sizeof(developer_path));
+  written = snprintf(library_path,
+                     sizeof(library_path),
+                     "%s/Library",
+                     root);
+  ok = ok && (written > 0) &&
+    ((size_t)written < sizeof(library_path));
+  written = snprintf(application_support_path,
+                     sizeof(application_support_path),
+                     "%s/Application Support",
+                     library_path);
+  ok = ok && (written > 0) &&
+    ((size_t)written < sizeof(application_support_path));
+  written = snprintf(strappy_path,
+                     sizeof(strappy_path),
+                     "%s/Strappy",
+                     application_support_path);
+  ok = ok && (written > 0) &&
+    ((size_t)written < sizeof(strappy_path));
+  written = snprintf(nested_developer_path,
+                     sizeof(nested_developer_path),
+                     "%s/Developer",
+                     strappy_path);
+  ok = ok && (written > 0) &&
+    ((size_t)written < sizeof(nested_developer_path));
+  written = snprintf(collision_path,
+                     sizeof(collision_path),
+                     "%s/not-a-directory",
+                     root);
+  ok = ok && (written > 0) &&
+    ((size_t)written < sizeof(collision_path));
+  if (!ok) {
+    rmdir(root);
+    return harness_fail("Could not build working-directory test paths.");
+  }
+
+  working_directory = NULL;
+  error = NULL;
+  session_id = 0LL;
+  ok = strappy_session_create_with_working_directory(database_path,
+                                                     developer_path,
+                                                     &session_id,
+                                                     &error) &&
+    (session_id > 0LL) &&
+    (stat(developer_path, &directory_stat) == 0) &&
+    S_ISDIR(directory_stat.st_mode) &&
+    strappy_session_get_working_directory(database_path,
+                                          session_id,
+                                          &working_directory,
+                                          &error) &&
+    (working_directory != NULL) &&
+    (strcmp(working_directory, developer_path) == 0);
+  free(working_directory);
+  working_directory = NULL;
+  if (!ok) {
+    fprintf(stderr,
+            "Default working-directory creation failed: %s\n",
+            (error != NULL) ? error : "unexpected path");
+    goto cleanup;
+  }
+
+  ok = strappy_session_update_working_directory(database_path,
+                                                session_id,
+                                                nested_developer_path,
+                                                &error) &&
+    (stat(nested_developer_path, &directory_stat) == 0) &&
+    S_ISDIR(directory_stat.st_mode) &&
+    strappy_session_get_working_directory(database_path,
+                                          session_id,
+                                          &working_directory,
+                                          &error) &&
+    (working_directory != NULL) &&
+    (strcmp(working_directory, nested_developer_path) == 0);
+  free(working_directory);
+  working_directory = NULL;
+  if (!ok) {
+    fprintf(stderr,
+            "Nested working-directory selection failed: %s\n",
+            (error != NULL) ? error : "unexpected path");
+    goto cleanup;
+  }
+
+  collision = fopen(collision_path, "wb");
+  if (collision == NULL) {
+    ok = 0;
+    fprintf(stderr, "Could not create working-directory collision file.\n");
+    goto cleanup;
+  }
+  fclose(collision);
+  strappy_session_free_string(error);
+  error = NULL;
+  ok = !strappy_session_update_working_directory(database_path,
+                                                 session_id,
+                                                 collision_path,
+                                                 &error) &&
+    (error != NULL);
+  strappy_session_free_string(error);
+  error = NULL;
+  ok = ok &&
+    strappy_session_get_working_directory(database_path,
+                                          session_id,
+                                          &working_directory,
+                                          &error) &&
+    (working_directory != NULL) &&
+    (strcmp(working_directory, nested_developer_path) == 0);
+  free(working_directory);
+  working_directory = NULL;
+  if (!ok) {
+    fprintf(stderr,
+            "Invalid working-directory selection changed stored state: %s\n",
+            (error != NULL) ? error : "unexpected path");
+  }
+
+cleanup:
+  free(working_directory);
+  strappy_session_free_string(error);
+  unlink(collision_path);
+  unlink(database_path);
+  rmdir(nested_developer_path);
+  rmdir(strappy_path);
+  rmdir(application_support_path);
+  rmdir(library_path);
+  rmdir(developer_path);
+  rmdir(root);
+  return ok;
+}
+
 static int harness_test_session_webview_rendering(void)
 {
   static const char *first_text = "First stored WebView message";
@@ -6631,6 +6790,7 @@ cleanup:
 int main(void)
 {
   if (harness_test_unicode_emoji_scan() &&
+      harness_test_working_directory_selection() &&
       harness_test_request_surfaces() &&
       harness_test_ledger() &&
       harness_test_cumulative_session_usage_cost() &&

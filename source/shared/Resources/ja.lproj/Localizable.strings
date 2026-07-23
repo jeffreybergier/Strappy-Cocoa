@@ -216,6 +216,12 @@
 "Web search provider is invalid." = "Web 検索プロバイダーが無効です。";
 "Enable Bash" = "Bash を有効にする";
 "Allows command execution in this session" = "このセッションでコマンド実行を許可します";
+"~/Developer" = "~/Developer";
+"~/" = "~/";
+"~/Library/..." = "~/Library/...";
+"Relative file paths and Bash commands use the selected working directory." = "相対ファイルパスと Bash コマンドは、選択した作業ディレクトリを使用します。";
+"Working directory selection is invalid." = "作業ディレクトリの選択が無効です。";
+"Working directory is available only for Coding Assistant sessions." = "作業ディレクトリはコーディングアシスタントのセッションでのみ利用できます。";
 "Services" = "サービス";
 "Session path is not a directory." = "セッションパスがディレクトリではありません。";
 "Show Chat Window" = "チャットウインドウを表示";

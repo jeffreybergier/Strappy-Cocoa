@@ -21,6 +21,10 @@
                   setWebProvider:(NSString *)webProvider;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
                   setBashEnabled:(BOOL)enabled;
+- (NSString *)workingDirectoryForPromptSendViewController:
+    (PromptSendViewController *)controller;
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
+             setWorkingDirectory:(NSString *)workingDirectory;
 - (void)promptSendViewControllerDidCancelPrompt:
     (PromptSendViewController *)controller;
 - (void)promptSendViewControllerDidChangeHeight:

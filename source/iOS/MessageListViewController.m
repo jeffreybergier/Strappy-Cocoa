@@ -958,6 +958,47 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   return YES;
 }
 
+- (NSString *)workingDirectoryForPromptSendViewController:
+    (PromptSendViewController *)controller
+{
+  NSString *workingDirectory;
+
+  (void)controller;
+  workingDirectory = ([self session] != nil) ?
+    [[self session] workingDirectoryWithError:nil] : nil;
+  return [workingDirectory isKindOfClass:[NSString class]]
+    ? workingDirectory
+    : @"";
+}
+
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
+             setWorkingDirectory:(NSString *)workingDirectory
+{
+  NSError *error;
+
+  (void)controller;
+  if (![self canSelectModel]) {
+    return NO;
+  }
+
+  error = nil;
+  if (![[self session] setWorkingDirectory:workingDirectory error:&error]) {
+    NSString *message;
+
+    message = [error localizedDescription];
+    if ([message length] == 0U) {
+      message = NSLocalizedString(@"Your changes could not be saved.", nil);
+    }
+    [self setStatusText:message];
+    [self showMessage:message
+                title:NSLocalizedString(@"Failed to Save Changes", nil)];
+    return NO;
+  }
+
+  [self setStatusText:nil];
+  return YES;
+}
+
 - (void)reloadContent
 {
   NSString *path;

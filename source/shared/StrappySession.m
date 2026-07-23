@@ -28,6 +28,8 @@ NSString * const StrappySessionChangeKindModel = @"model";
 NSString * const StrappySessionChangeKindStreaming = @"streaming";
 NSString * const StrappySessionChangeKindWebProvider = @"web_provider";
 NSString * const StrappySessionChangeKindBash = @"bash";
+NSString * const StrappySessionChangeKindWorkingDirectory =
+  @"working_directory";
 NSString * const StrappySessionChangeKindAssistantSet = @"assistant_set";
 NSString * const StrappyWebProviderNone = @"none";
 NSString * const StrappyWebProviderAuto = @"auto";
@@ -1100,6 +1102,31 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   return [strappyDirectoryPath stringByAppendingPathComponent:@"strappy.sqlite"];
 }
 
++ (NSArray *)codingWorkingDirectoryPaths
+{
+  NSString *homeDirectory;
+  NSString *developerDirectory;
+  NSString *strappyDeveloperDirectory;
+
+  homeDirectory = NSHomeDirectory();
+  if (![homeDirectory isKindOfClass:[NSString class]] ||
+      ([homeDirectory length] == 0U)) {
+    return [NSArray array];
+  }
+  developerDirectory =
+    [homeDirectory stringByAppendingPathComponent:@"Developer"];
+  strappyDeveloperDirectory =
+    [[[[homeDirectory stringByAppendingPathComponent:@"Library"]
+       stringByAppendingPathComponent:@"Application Support"]
+      stringByAppendingPathComponent:@"Strappy"]
+     stringByAppendingPathComponent:@"Developer"];
+  return [NSArray arrayWithObjects:
+    developerDirectory,
+    homeDirectory,
+    strappyDeveloperDirectory,
+    nil];
+}
+
 + (BOOL)initializeSessionStoreWithError:(NSError **)error
 {
   NSString *databasePath;
@@ -1581,6 +1608,8 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
 + (StrappySession *)createSessionWithError:(NSError **)error
 {
   NSString *databasePath;
+  NSString *workingDirectory;
+  NSArray *workingDirectories;
   char *strappyError;
   long long sessionId;
   NSNumber *sessionIdentifier;
@@ -1592,11 +1621,16 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
     return nil;
   }
 
+  workingDirectories = [StrappySession codingWorkingDirectoryPaths];
+  workingDirectory = ([workingDirectories count] > 0U) ?
+    [workingDirectories objectAtIndex:0U] : @"";
   sessionId = 0;
   strappyError = NULL;
-  if (!strappy_session_create([databasePath UTF8String],
-                                 &sessionId,
-                                 &strappyError)) {
+  if (!strappy_session_create_with_working_directory(
+        [databasePath UTF8String],
+        [workingDirectory fileSystemRepresentation],
+        &sessionId,
+        &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
@@ -2573,6 +2607,151 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
                 userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
                   notificationSession, @"session",
                   StrappySessionChangeKindBash,
+                  StrappySessionChangeKindKey,
+                  nil]];
+  [notificationSession release];
+  return YES;
+}
+
+- (NSString *)workingDirectoryWithError:(NSError **)error
+{
+  NSString *databasePath;
+  char *strappyError;
+  char *workingDirectory;
+  long long sessionId;
+
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  if (sessionId <= 0LL) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:
+          NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return nil;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+
+  workingDirectory = NULL;
+  strappyError = NULL;
+  if (!strappy_session_get_working_directory([databasePath UTF8String],
+                                              sessionId,
+                                              &workingDirectory,
+                                              &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return nil;
+  }
+  return StrappySessionStringFromCString(workingDirectory);
+}
+
+- (BOOL)setWorkingDirectory:(NSString *)workingDirectory
+                      error:(NSError **)error
+{
+  NSString *databasePath;
+  NSDictionary *notificationSession;
+  char *strappyError;
+  long long sessionId;
+
+  if (![workingDirectory isKindOfClass:[NSString class]] ||
+      ![[StrappySession codingWorkingDirectoryPaths]
+        containsObject:workingDirectory]) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:
+          NSLocalizedString(@"Working directory selection is invalid.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:15
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+  if (![[self assistantSetIdentifier] isEqualToString:
+        [NSString stringWithUTF8String:
+          STRAPPY_ASSISTANT_SET_CODING_ASSISTANT]]) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:NSLocalizedString(
+          @"Working directory is available only for Coding Assistant sessions.",
+          nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:15
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  if (sessionId <= 0LL) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:
+          NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+  strappyError = NULL;
+  if (!strappy_session_update_working_directory(
+        [databasePath UTF8String],
+        sessionId,
+        [workingDirectory fileSystemRepresentation],
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return NO;
+  }
+
+  notificationSession = nil;
+  @synchronized(self) {
+    NSMutableDictionary *summary;
+
+    if (cachedSummary_ != nil) {
+      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
+      [summary setObject:workingDirectory forKey:@"working_directory"];
+      [cachedSummary_ release];
+      cachedSummary_ = summary;
+      notificationSession = [cachedSummary_ retain];
+    } else {
+      notificationSession =
+        [[NSDictionary alloc] initWithObjectsAndKeys:
+          sessionIdentifier_, @"id",
+          workingDirectory, @"working_directory",
+          nil];
+    }
+  }
+
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionDidUpdateNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  notificationSession, @"session",
+                  StrappySessionChangeKindWorkingDirectory,
                   StrappySessionChangeKindKey,
                   nil]];
   [notificationSession release];

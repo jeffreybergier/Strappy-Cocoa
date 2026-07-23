@@ -46,6 +46,11 @@ int strappy_session_refresh_openrouter_user_models(
 int strappy_session_create(const char *db_path,
                            long long *session_id_out,
                            char **error_out);
+int strappy_session_create_with_working_directory(
+  const char *db_path,
+  const char *working_directory,
+  long long *session_id_out,
+  char **error_out);
 int strappy_session_list_records(const char *db_path,
                                  strappy_session_record_list *list,
                                  char **error_out);
@@ -90,6 +95,16 @@ int strappy_session_update_bash_enabled(const char *db_path,
                                         long long session_id,
                                         int bash_enabled,
                                         char **error_out);
+int strappy_session_get_working_directory(
+  const char *db_path,
+  long long session_id,
+  char **working_directory_out,
+  char **error_out);
+int strappy_session_update_working_directory(
+  const char *db_path,
+  long long session_id,
+  const char *working_directory,
+  char **error_out);
 int strappy_session_list_assistant_sets(
   const char *resource_dir,
   strappy_assistant_set_record_list *list,

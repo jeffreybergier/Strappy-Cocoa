@@ -6,8 +6,99 @@
 #include "strappy_responses.h"
 #include "strappy_tools.h"
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+
+static int strappy_session_ensure_directory_component(const char *path,
+                                                      char **error_out)
+{
+  struct stat directory_stat;
+
+  errno = 0;
+  if (mkdir(path, 0755) == 0) {
+    return 1;
+  }
+  if (errno != EEXIST) {
+    strappy_set_formatted_error(error_out,
+                                "Could not create working directory %s: %s.",
+                                path,
+                                strerror(errno));
+    return 0;
+  }
+  errno = 0;
+  if (stat(path, &directory_stat) != 0) {
+    strappy_set_formatted_error(error_out,
+                                "Could not inspect working directory %s: %s.",
+                                path,
+                                strerror(errno));
+    return 0;
+  }
+  if (!S_ISDIR(directory_stat.st_mode)) {
+    strappy_set_formatted_error(error_out,
+                                "Working directory path is not a directory: %s.",
+                                path);
+    return 0;
+  }
+  return 1;
+}
+
+static int strappy_session_ensure_working_directory(
+  const char *working_directory,
+  char **error_out)
+{
+  char *path;
+  char *cursor;
+  size_t length;
+  int ok;
+
+  if ((working_directory == NULL) || (working_directory[0] == '\0')) {
+    strappy_set_error(error_out, "Session working directory is empty.");
+    return 0;
+  }
+  if (working_directory[0] != '/') {
+    strappy_set_error(error_out,
+                      "Session working directory must be an absolute path.");
+    return 0;
+  }
+
+  path = strappy_string_duplicate(working_directory);
+  if (path == NULL) {
+    strappy_set_error(error_out,
+                      "Could not allocate the session working directory.");
+    return 0;
+  }
+  length = strlen(path);
+  while ((length > 1U) && (path[length - 1U] == '/')) {
+    path[--length] = '\0';
+  }
+
+  ok = 1;
+  cursor = path + 1;
+  while (ok) {
+    char saved;
+
+    while ((*cursor != '\0') && (*cursor != '/')) {
+      cursor++;
+    }
+    saved = *cursor;
+    *cursor = '\0';
+    if (path[1] != '\0') {
+      ok = strappy_session_ensure_directory_component(path, error_out);
+    }
+    *cursor = saved;
+    if (saved == '\0') {
+      break;
+    }
+    cursor++;
+    while (*cursor == '/') {
+      cursor++;
+    }
+  }
+  free(path);
+  return ok;
+}
 
 void strappy_session_free_string(char *value)
 {
@@ -101,6 +192,25 @@ int strappy_session_create(const char *db_path,
                            char **error_out)
 {
   return strappy_db_create_session(db_path, session_id_out, error_out);
+}
+
+int strappy_session_create_with_working_directory(
+  const char *db_path,
+  const char *working_directory,
+  long long *session_id_out,
+  char **error_out)
+{
+  if (session_id_out != NULL) {
+    *session_id_out = 0LL;
+  }
+  if (!strappy_session_ensure_working_directory(working_directory,
+                                                error_out)) {
+    return 0;
+  }
+  return strappy_db_create_session_with_working_directory(db_path,
+                                                          working_directory,
+                                                          session_id_out,
+                                                          error_out);
 }
 
 int strappy_session_list_records(const char *db_path,
@@ -209,6 +319,34 @@ int strappy_session_update_bash_enabled(const char *db_path,
                                                session_id,
                                                bash_enabled,
                                                error_out);
+}
+
+int strappy_session_get_working_directory(
+  const char *db_path,
+  long long session_id,
+  char **working_directory_out,
+  char **error_out)
+{
+  return strappy_db_get_session_working_directory(db_path,
+                                                  session_id,
+                                                  working_directory_out,
+                                                  error_out);
+}
+
+int strappy_session_update_working_directory(
+  const char *db_path,
+  long long session_id,
+  const char *working_directory,
+  char **error_out)
+{
+  if (!strappy_session_ensure_working_directory(working_directory,
+                                                error_out)) {
+    return 0;
+  }
+  return strappy_db_update_session_working_directory(db_path,
+                                                     session_id,
+                                                     working_directory,
+                                                     error_out);
 }
 
 int strappy_session_list_assistant_sets(

@@ -13,6 +13,7 @@ extern NSString * const StrappySessionChangeKindModel;
 extern NSString * const StrappySessionChangeKindStreaming;
 extern NSString * const StrappySessionChangeKindWebProvider;
 extern NSString * const StrappySessionChangeKindBash;
+extern NSString * const StrappySessionChangeKindWorkingDirectory;
 extern NSString * const StrappySessionChangeKindAssistantSet;
 extern NSString * const StrappyWebProviderNone;
 extern NSString * const StrappyWebProviderAuto;
@@ -35,6 +36,7 @@ extern NSString * const StrappyWebProviderParallel;
 + (NSString *)sessionsDatabasePath;
 + (BOOL)initializeSessionStoreWithError:(NSError **)error;
 + (StrappySession *)createSessionWithError:(NSError **)error;
++ (NSArray *)codingWorkingDirectoryPaths;
 + (BOOL)deleteSessionWithIdentifier:(NSNumber *)sessionIdentifier
                                error:(NSError **)error;
 + (StrappySession *)sessionWithIdentifier:(NSNumber *)sessionIdentifier;
@@ -90,6 +92,9 @@ extern NSString * const StrappyWebProviderParallel;
 - (BOOL)setWebProvider:(NSString *)webProvider error:(NSError **)error;
 - (BOOL)bashEnabled;
 - (BOOL)setBashEnabled:(BOOL)enabled error:(NSError **)error;
+- (NSString *)workingDirectoryWithError:(NSError **)error;
+- (BOOL)setWorkingDirectory:(NSString *)workingDirectory
+                      error:(NSError **)error;
 - (NSString *)assistantSetIdentifier;
 - (BOOL)setAssistantSetIdentifier:(NSString *)assistantSetIdentifier
                             error:(NSError **)error;
