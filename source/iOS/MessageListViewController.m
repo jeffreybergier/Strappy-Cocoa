@@ -161,7 +161,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)relayoutComposeBarAnimated:(BOOL)animated
                               curve:(UIViewAnimationCurve)curve
                            duration:(NSTimeInterval)duration;
-- (void)scrollWebViewToBottom;
 - (void)setWebViewScrollsToTop:(BOOL)scrollsToTop;
 - (void)sessionStreamEvent:(NSNotification *)notification;
 - (void)sessionPromptDidStart:(NSNotification *)notification;
@@ -530,7 +529,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self relayoutComposeBarAnimated:YES
                               curve:[self keyboardCurve:userInfo]
                            duration:[self keyboardDuration:userInfo]];
-  [self scrollWebViewToBottom];
 }
 
 - (void)keyboardWillHide:(NSNotification *)notification
@@ -578,15 +576,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   if (animated && (duration > 0.0)) {
     [UIView commitAnimations];
   }
-}
-
-- (void)scrollWebViewToBottom
-{
-  if ([self tearingDown] || ([self webView] == nil)) {
-    return;
-  }
-  [[self webView] stringByEvaluatingJavaScriptFromString:
-    @"window.scrollTo(0, document.body.scrollHeight);"];
 }
 
 - (void)setWebViewScrollsToTop:(BOOL)scrollsToTop
@@ -1081,7 +1070,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self relayoutComposeBarAnimated:YES
                               curve:UIViewAnimationCurveEaseInOut
                            duration:0.2];
-  [self scrollWebViewToBottom];
 }
 
 - (void)setPromptCancellationRequested:(BOOL)requested
@@ -1410,7 +1398,6 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
   [self logLifecycleEvent:@"webViewDidFinishLoad"];
   [[self webView] XP_setBackgroundTransparent];
   [self setWebViewScrollsToTop:YES];
-  [self scrollWebViewToBottom];
 }
 
 - (void)showError:(NSError *)error title:(NSString *)title

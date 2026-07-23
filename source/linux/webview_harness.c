@@ -212,12 +212,9 @@ static int harness_check_page_scripts(void)
                                "font:12px/1.38 -apple-system,'Helvetica Neue',"
                                "Helvetica,Arial,sans-serif;") &&
        harness_expect_contains(page_html, "letter-spacing:0;") &&
-       harness_expect_contains(page_html,
-                               "@-webkit-keyframes strappy-round-fade{"
-                               "from{opacity:0;}to{opacity:1;}}") &&
-       harness_expect_contains(page_html,
-                               ".row-inserting{-webkit-animation:"
-                               "strappy-round-fade .3s ease-out both;}") &&
+       harness_expect_not_contains(page_html,
+                                   "@-webkit-keyframes strappy-round-fade") &&
+       harness_expect_not_contains(page_html, ".row-inserting") &&
        harness_expect_not_contains(page_html,
                                    "@-webkit-keyframes strappy-row-rise") &&
        harness_expect_not_contains(page_html, "translateY(") &&
@@ -974,6 +971,21 @@ static int harness_check_page_scripts(void)
                                "var strappyStatusInterval=1000;") &&
        harness_expect_contains(page_html, "function scrollBottomNow") &&
        harness_expect_contains(page_html,
+                               "var strappyScrollAnimationDuration=500;") &&
+       harness_expect_contains(page_html,
+                               "function scrollBottomAnimationStep") &&
+       harness_expect_contains(page_html,
+                               "eased=1-Math.pow(1-progress,3);") &&
+       harness_expect_contains(page_html,
+                               "scrollBottomAnimationStep("
+                               "g,start,target,started);},16);") &&
+       harness_expect_contains(page_html,
+                               "function scrollBottomAnimated()") &&
+       harness_expect_contains(page_html,
+                               "window.scrollTo(0,p);") &&
+       harness_expect_not_contains(page_html, "scrollTo({") &&
+       harness_expect_not_contains(page_html, "behavior:'smooth'") &&
+       harness_expect_contains(page_html,
                                "html,body{margin:0;padding:0;"
                                "background:#fff;") &&
        harness_expect_contains(page_html, ".page{padding:0;}") &&
@@ -1060,7 +1072,8 @@ static int harness_check_page_scripts(void)
                                    "setTimeout(initProcessingStatusFromRenderState") &&
        harness_expect_contains(page_html,
                                "<script>initProcessingStatusFromRenderState();"
-                               "renderMessageDecorations(document);") &&
+                               "renderMessageDecorations(document);"
+                               "scrollBottomNow();") &&
        harness_expect_contains(page_html,
                                "var strappyProcessingPromptGroupKey='';") &&
        harness_expect_contains(page_html,
@@ -1129,6 +1142,12 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "aria-pressed") &&
        harness_expect_contains(page_html, "Disable autoscroll") &&
        harness_expect_contains(page_html, "Enable autoscroll") &&
+       harness_expect_contains(page_html,
+                               "if(!strappyAutoScrollEnabled)"
+                               "cancelScrollBottomAnimation();") &&
+       harness_expect_not_contains(page_html,
+                                   "if(strappyAutoScrollEnabled)"
+                                   "scrollBottomNow();") &&
        harness_expect_contains(page_html, "function shouldRenderMarkdownBubble") &&
        harness_expect_contains(page_html, "function shouldRenderMarkdownReasoning") &&
        harness_expect_contains(page_html, "ancestorHasClass(n,'assistant')") &&
@@ -1154,38 +1173,46 @@ static int harness_check_page_scripts(void)
                                "if(strappyStreamingMarkdownNeedsFlush)"
                                "flushStreamingMarkdown();") &&
        harness_expect_contains(page_html,
-                               "strappyBatchShouldScroll=strappyAutoScrollEnabled?1:0") &&
+                               "function beginMessageBatch(){"
+                               "if(strappyBatchDepth===0)"
+                               "strappyBatchShouldScroll=0;") &&
        harness_expect_contains(page_html,
-                               "if(strappyAutoScrollEnabled)"
-                               "strappyUpdateShouldScroll=1") &&
-       harness_expect_contains(page_html,
-                               "function scrollBottom(){"
+                               "function scrollBottomAnimated(){"
+                               "var start,target,started,g;"
                                "if(!strappyAutoScrollEnabled)return;"
                                "if(strappyBatchDepth>0){"
                                "strappyBatchShouldScroll=1;return;}") &&
+       harness_expect_contains(page_html,
+                               "shouldScroll=strappyBatchShouldScroll;"
+                               "strappyBatchShouldScroll=0;"
+                               "if(shouldScroll)scrollBottomAnimated();") &&
+       harness_expect_not_contains(page_html, "strappyUpdateShouldScroll") &&
        harness_expect_contains(page_html, "function preserveLiveMessageText") &&
+       harness_expect_not_contains(page_html, "prepareInsertedRow") &&
+       harness_expect_not_contains(page_html, "row-inserting") &&
+       harness_expect_not_contains(page_html, "strappy-round-fade") &&
+       harness_expect_not_contains(page_html, "webkitAnimationEnd") &&
        harness_expect_contains(page_html,
-                               "function prepareInsertedRow(n)") &&
+                               "m.appendChild(n);added=1;") &&
        harness_expect_contains(page_html,
-                               "setClass(n,'row-inserting',1);"
-                               "scheduleInsertedRowCleanup(n)") &&
-       harness_expect_contains(page_html,
-                               "setTimeout(function(){"
-                               "clearInsertedRowAnimation(n);},400)") &&
-       harness_expect_contains(page_html,
-                               "e.animationName!='strappy-round-fade'") &&
-       harness_expect_contains(page_html,
-                               "addEventListener('webkitAnimationEnd',"
-                               "finishInsertedRowAnimation,false)") &&
-       harness_expect_contains(page_html,
-                               "removeEventListener('webkitAnimationEnd',"
-                               "finishInsertedRowAnimation,false)") &&
-       harness_expect_contains(page_html,
-                               "m.appendChild(n);prepareInsertedRow(n);"
-                               "added=1;") &&
+                               "renderAfterMutation(m);"
+                               "scrollBottomAnimated();") &&
        harness_expect_contains(page_html,
                                "while(d.firstChild){n=d.firstChild;"
-                               "prepareInsertedRow(n);m.insertBefore(n,before);}") &&
+                               "m.insertBefore(n,before);"
+                               "added=1;}") &&
+       harness_expect_contains(page_html,
+                               "if(!added)return;renderAfterMutation(m);"
+                               "scrollBottomAnimated();") &&
+       harness_expect_contains(page_html,
+                               "renderAfterMutation(document);}"
+                               "function insertMessageBefore") &&
+       harness_expect_contains(page_html,
+                               "s.parentNode.removeChild(s);}"
+                               "function setMessageThinking") &&
+       harness_expect_contains(page_html,
+                               "setMessageToolColumnCollapsed(id,1);}"
+                               "function moveMessageTextToReasoningByMessageKey") &&
        harness_expect_contains(page_html,
                                "if(isAssistantRow(old)&&isAssistantRow(next))"
                                "preserveLiveMessageText(old,next)") &&
