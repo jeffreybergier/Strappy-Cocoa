@@ -734,6 +734,50 @@ int main(int argc, char **argv)
           "Database Study prompt includes an excluded tool or quality check.");
         return 1;
       }
+      if ((strcmp(profile.identifier,
+                  STRAPPY_ASSISTANT_SET_DATABASE_STUDY) == 0) &&
+          ((strstr(prompt, "You are Strappy. An expert database sleuth.") ==
+            NULL) ||
+           (strstr(prompt,
+                   "ALWAYS Study exactly the database_ids in the user "
+                   "prompt.") == NULL) ||
+           (strstr(prompt, "FOR EVERY DATABASE:") == NULL) ||
+           (strstr(prompt,
+                   "ALWAYS call database_context to learn about the "
+                   "database.") == NULL) ||
+           (strstr(prompt,
+                   "ALWAYS call database_query to look for useful user "
+                   "data.") == NULL) ||
+           (strstr(prompt,
+                   "ALWAYS study reusable table, column, and timestamp "
+                   "information after finding user data.") == NULL) ||
+           (strstr(prompt,
+                   "ALWAYS call database_query to confirm SQL joins.") ==
+            NULL) ||
+           (strstr(prompt,
+                   "ALWAYS call  datetime_to_iso8601 to confirm timestamp "
+                   "formats") == NULL) ||
+           (strstr(prompt,
+                   "NEVER store private or sampled row values, secrets, "
+                   "sensitive identifiers") == NULL) ||
+           (strstr(prompt,
+                   "ALWAYS call database_study exactly twice:") == NULL) ||
+           (strstr(prompt,
+                   "**description** is for describing the kind of user data") ==
+            NULL) ||
+           (strstr(prompt,
+                   "**context** is for describing how to access the user "
+                   "data via SQL queries.") == NULL))) {
+        free(tools_json);
+        free(prompt);
+        free(without_web_prompt);
+        free(error);
+        strappy_assistant_set_profile_destroy(&profile);
+        cJSON_Delete(system_prompt);
+        (void)harness_fail(
+          "Database Study prompt is missing workflow guidance.");
+        return 1;
+      }
       free(tools_json);
       free(error);
       if (web_provider == STRAPPY_WEB_PROVIDER_NONE) {

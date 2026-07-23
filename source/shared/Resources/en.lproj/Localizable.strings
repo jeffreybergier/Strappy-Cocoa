@@ -94,6 +94,8 @@
 "Database scan failed." = "Database scan failed.";
 "System Prompt" = "System Prompt";
 "Scan Databases" = "Scan Databases";
+"Study" = "Study";
+"Database hints" = "Database hints";
 "APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set." = "APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set.";
 "API credentials saved to keychain." = "API credentials saved to keychain.";
 "API credentials are available." = "API credentials are available.";

@@ -607,11 +607,16 @@ static int harness_run_fresh_catalog_schema_tests(
            "user_facts columns") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
-           "SELECT id, database_id, kind, title, content, "
-           "confidence_basis_points, observed_size_bytes, "
-           "observed_modified_at_s, source_item_id FROM database_hints "
-           "LIMIT 0;",
+           "SELECT id, database_id, kind, content, observed_modified_at_s, "
+           "source_item_id FROM database_hints LIMIT 0;",
            "database_hints columns") &&
+         harness_expect_catalog_integer(
+           context->catalog_path,
+           "SELECT COUNT(*) FROM pragma_table_info('database_hints') "
+           "WHERE name IN ('title', 'evidence', "
+             "'confidence_basis_points', 'observed_size_bytes');",
+           0LL,
+           "removed database_hints column count") &&
          harness_expect_catalog_integer(
            context->catalog_path,
            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' "
@@ -2326,9 +2331,20 @@ static int harness_run_tool_registry_tests(void)
                 "information.") !=
          NULL) &&
         (strstr(tools_json,
-                "Write exactly one studied value for an approved database. "
-                "Use key description for a high-level overview of what the "
-                "database contains.") !=
+                "- NEVER store private or sampled row values, secrets, "
+                "sensitive identifiers") !=
+         NULL) &&
+        (strstr(tools_json,
+                "- ALWAYS call database_study exactly twice:") !=
+         NULL) &&
+        (strstr(tools_json,
+                "**description** is for describing the kind of user data that "
+                "the database includes such as email, text messages, "
+                "contacts, etc.") !=
+         NULL) &&
+        (strstr(tools_json,
+                "**context** is for describing how to access the user data "
+                "via SQL queries.") !=
          NULL) &&
         (strstr(tools_json,
                 "ALWAYS call this tool with the relevant approved database_id "
@@ -6024,6 +6040,7 @@ static int harness_run_database_study_coverage_tests(
   cJSON *batch_ids;
   char description[128];
   char study_context[128];
+  char freshness_sql[512];
   char *batch_prompt;
   char *error;
   size_t batch_count;
@@ -6150,6 +6167,71 @@ static int harness_run_database_study_coverage_tests(
             "Database Study did not reach 100%% approved-database coverage: "
             "%s\n",
             (error != NULL) ? error : "coverage mismatch");
+    goto cleanup;
+  }
+
+  written = snprintf(
+    freshness_sql,
+    sizeof(freshness_sql),
+    "UPDATE database_locations SET size_bytes = size_bytes + 1 "
+    "WHERE active = 1 AND database_id = "
+    "(SELECT id FROM databases WHERE assistant_database_id = '%s');",
+    pending.database_ids[0]);
+  if ((written <= 0) || ((size_t)written >= sizeof(freshness_sql)) ||
+      !harness_expect_catalog_sql_ok(context->catalog_path,
+                                     freshness_sql,
+                                     "size-only Database Study freshness") ||
+      !strappy_study_list_unstudied_database_ids(context->catalog_path,
+                                                  &remaining,
+                                                  &error) ||
+      (remaining.count != 0U)) {
+    fprintf(stderr,
+            "Database Study incorrectly treated a size-only change as stale: "
+            "%s\n",
+            (error != NULL) ? error : "unexpected pending database");
+    ok = 0;
+    goto cleanup;
+  }
+
+  written = snprintf(
+    freshness_sql,
+    sizeof(freshness_sql),
+    "UPDATE database_locations SET modified_at_s = modified_at_s + 1 "
+    "WHERE active = 1 AND database_id = "
+    "(SELECT id FROM databases WHERE assistant_database_id = '%s');",
+    pending.database_ids[0]);
+  if ((written <= 0) || ((size_t)written >= sizeof(freshness_sql)) ||
+      !harness_expect_catalog_sql_ok(context->catalog_path,
+                                     freshness_sql,
+                                     "mtime Database Study freshness") ||
+      !strappy_study_list_unstudied_database_ids(context->catalog_path,
+                                                  &remaining,
+                                                  &error) ||
+      (remaining.count != 1U) ||
+      (strcmp(remaining.database_ids[0], pending.database_ids[0]) != 0)) {
+    fprintf(stderr,
+            "Database Study did not treat an mtime change as stale: %s\n",
+            (error != NULL) ? error : "pending database mismatch");
+    ok = 0;
+    goto cleanup;
+  }
+  strappy_study_database_id_list_destroy(&remaining);
+  if (!harness_write_study_value(context->catalog_path,
+                                  pending.database_ids[0],
+                                  STRAPPY_STUDY_KEY_DESCRIPTION,
+                                  replacement_description) ||
+      !harness_write_study_value(context->catalog_path,
+                                  pending.database_ids[0],
+                                  STRAPPY_STUDY_KEY_CONTEXT,
+                                  "Replacement coverage context") ||
+      !strappy_study_list_unstudied_database_ids(context->catalog_path,
+                                                  &remaining,
+                                                  &error) ||
+      (remaining.count != 0U)) {
+    fprintf(stderr,
+            "Database Study did not refresh values after an mtime change: %s\n",
+            (error != NULL) ? error : "unexpected pending database");
+    ok = 0;
     goto cleanup;
   }
 

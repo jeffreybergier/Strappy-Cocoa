@@ -124,7 +124,7 @@ int strappy_study_copy_fresh_value(
   static const char *sql =
     "SELECT content FROM database_hints "
     "WHERE database_id = ?1 AND kind = ?2 "
-    "AND observed_size_bytes = ?3 AND observed_modified_at_s = ?4 "
+    "AND observed_modified_at_s = ?3 "
     "ORDER BY updated_at_ms DESC, id DESC LIMIT 1;";
   sqlite3_stmt *stmt;
   const unsigned char *text;
@@ -148,9 +148,6 @@ int strappy_study_copy_fresh_value(
       (sqlite3_bind_text(stmt, 2, key, -1, SQLITE_TRANSIENT) != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt,
                           3,
-                          (sqlite3_int64)record->size) != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt,
-                          4,
                           (sqlite3_int64)record->modified_at) != SQLITE_OK)) {
     strappy_set_formatted_error(error_out,
                                 "Could not prepare Database Study value: %s",
@@ -213,20 +210,16 @@ char *strappy_study_save_value(
     "SELECT id FROM database_hints WHERE database_id = ?1 AND kind = ?2 "
     "ORDER BY id LIMIT 1;";
   static const char *update_sql =
-    "UPDATE database_hints SET title = ?1, content = ?2, evidence = NULL, "
-    "confidence_basis_points = 7500, observed_size_bytes = ?3, "
-    "observed_modified_at_s = ?4, source_item_id = ?5, updated_at_ms = ?6 "
-    "WHERE id = ?7;";
+    "UPDATE database_hints SET content = ?1, observed_modified_at_s = ?2, "
+    "source_item_id = ?3, updated_at_ms = ?4 WHERE id = ?5;";
   static const char *insert_sql =
     "INSERT INTO database_hints "
-    "(database_id, kind, title, content, evidence, confidence_basis_points, "
-    "observed_size_bytes, observed_modified_at_s, source_item_id, "
+    "(database_id, kind, content, observed_modified_at_s, source_item_id, "
     "created_at_ms, updated_at_ms) "
-    "VALUES (?1, ?2, ?3, ?4, NULL, 7500, ?5, ?6, ?7, ?8, ?8);";
+    "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6);";
   static const char *delete_duplicates_sql =
     "DELETE FROM database_hints WHERE database_id = ?1 AND kind = ?2 "
     "AND id <> ?3;";
-  const char *title;
   sqlite3_stmt *stmt;
   sqlite3_int64 row_id;
   sqlite3_int64 now_ms;
@@ -242,8 +235,6 @@ char *strappy_study_save_value(
     return NULL;
   }
 
-  title = (strcmp(key, STRAPPY_STUDY_KEY_DESCRIPTION) == 0) ?
-    "Description" : "Context";
   now_ms = (sqlite3_int64)time(NULL) * 1000;
   row_id = 0;
   if (sqlite3_exec(db, "BEGIN IMMEDIATE;", NULL, NULL, NULL) != SQLITE_OK) {
@@ -274,21 +265,17 @@ char *strappy_study_save_value(
   if (ok && (row_id > 0)) {
     rc = sqlite3_prepare_v2(db, update_sql, -1, &stmt, NULL);
     ok = (rc == SQLITE_OK) &&
-      (sqlite3_bind_text(stmt, 1, title, -1, SQLITE_STATIC) == SQLITE_OK) &&
-      (sqlite3_bind_text(stmt, 2, value, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 1, value, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
       (sqlite3_bind_int64(stmt,
-                          3,
-                          (sqlite3_int64)record->size) == SQLITE_OK) &&
-      (sqlite3_bind_int64(stmt,
-                          4,
+                          2,
                           (sqlite3_int64)record->modified_at) == SQLITE_OK) &&
       ((source_item_id > 0LL) ?
          (sqlite3_bind_int64(stmt,
-                             5,
+                             3,
                              (sqlite3_int64)source_item_id) == SQLITE_OK) :
-         (sqlite3_bind_null(stmt, 5) == SQLITE_OK)) &&
-      (sqlite3_bind_int64(stmt, 6, now_ms) == SQLITE_OK) &&
-      (sqlite3_bind_int64(stmt, 7, row_id) == SQLITE_OK) &&
+         (sqlite3_bind_null(stmt, 3) == SQLITE_OK)) &&
+      (sqlite3_bind_int64(stmt, 4, now_ms) == SQLITE_OK) &&
+      (sqlite3_bind_int64(stmt, 5, row_id) == SQLITE_OK) &&
       (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
   } else if (ok) {
@@ -298,20 +285,16 @@ char *strappy_study_save_value(
                           1,
                           (sqlite3_int64)record->catalog_id) == SQLITE_OK) &&
       (sqlite3_bind_text(stmt, 2, key, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
-      (sqlite3_bind_text(stmt, 3, title, -1, SQLITE_STATIC) == SQLITE_OK) &&
-      (sqlite3_bind_text(stmt, 4, value, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 3, value, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
       (sqlite3_bind_int64(stmt,
-                          5,
-                          (sqlite3_int64)record->size) == SQLITE_OK) &&
-      (sqlite3_bind_int64(stmt,
-                          6,
+                          4,
                           (sqlite3_int64)record->modified_at) == SQLITE_OK) &&
       ((source_item_id > 0LL) ?
          (sqlite3_bind_int64(stmt,
-                             7,
+                             5,
                              (sqlite3_int64)source_item_id) == SQLITE_OK) :
-         (sqlite3_bind_null(stmt, 7) == SQLITE_OK)) &&
-      (sqlite3_bind_int64(stmt, 8, now_ms) == SQLITE_OK) &&
+         (sqlite3_bind_null(stmt, 5) == SQLITE_OK)) &&
+      (sqlite3_bind_int64(stmt, 6, now_ms) == SQLITE_OK) &&
       (sqlite3_step(stmt) == SQLITE_DONE);
     if (ok) {
       row_id = sqlite3_last_insert_rowid(db);

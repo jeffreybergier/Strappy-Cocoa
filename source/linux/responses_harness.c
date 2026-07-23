@@ -74,13 +74,13 @@
   "NEVER use unicode emoji."
 
 #define HARNESS_MEMORY_DATABASE_HINT_REMEMBER_DESCRIPTION \
-  "Write exactly one studied value for an approved database. Use key " \
-  "description for a high-level overview of what the database contains. Use " \
-  "key context for concise, evidence-backed instructions for accessing that " \
-  "data. A later write with the same database_id and key overwrites the " \
-  "earlier value. The result is only a write acknowledgement. NEVER store " \
-  "private row values, secrets, sensitive identifiers, guesses, or one-off " \
-  "query results."
+  "- NEVER store private or sampled row values, secrets, sensitive " \
+  "identifiers\n" \
+  "- ALWAYS call database_study exactly twice:\n" \
+  "   - **description** is for describing the kind of user data that the " \
+  "database includes such as email, text messages, contacts, etc.\n" \
+  "   - **context** is for describing how to access the user data via SQL " \
+  "queries."
 
 #define HARNESS_DATETIME_FROM_ISO8601_DESCRIPTION \
   "ALWAYS call this tool when converting ISO 8601 datetimes to numeric " \
@@ -1761,9 +1761,37 @@ static int harness_database_study_request_is_valid(
       !cJSON_IsString(instructions) ||
       (instructions->valuestring == NULL) ||
       (strstr(instructions->valuestring,
-              "internal Database Study assistant") == NULL) ||
+              "You are Strappy. An expert database sleuth.") == NULL) ||
+      (strstr(instructions->valuestring,
+              "ALWAYS Study exactly the database_ids in the user prompt.") ==
+       NULL) ||
+      (strstr(instructions->valuestring,
+              "FOR EVERY DATABASE:") == NULL) ||
       (strstr(instructions->valuestring,
               "call database_study exactly twice") == NULL) ||
+      (strstr(instructions->valuestring,
+              "ALWAYS call database_context to learn about the database.") ==
+       NULL) ||
+      (strstr(instructions->valuestring,
+              "ALWAYS call database_query to look for useful user data.") ==
+       NULL) ||
+      (strstr(instructions->valuestring,
+              "ALWAYS study reusable table, column, and timestamp information "
+              "after finding user data.") == NULL) ||
+      (strstr(instructions->valuestring,
+              "ALWAYS call database_query to confirm SQL joins.") == NULL) ||
+      (strstr(instructions->valuestring,
+              "ALWAYS call  datetime_to_iso8601 to confirm timestamp "
+              "formats") == NULL) ||
+      (strstr(instructions->valuestring,
+              "NEVER store private or sampled row values, secrets, sensitive "
+              "identifiers") == NULL) ||
+      (strstr(instructions->valuestring,
+              "**description** is for describing the kind of user data") ==
+       NULL) ||
+      (strstr(instructions->valuestring,
+              "**context** is for describing how to access the user data via "
+              "SQL queries.") == NULL) ||
       !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
       !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
       !cJSON_IsArray(input) || (cJSON_GetArraySize(input) != 4) ||
