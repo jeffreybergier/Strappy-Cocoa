@@ -93,6 +93,13 @@ extern NSString * const StrappyWebProviderParallel;
                                                  error:(NSError **)error;
 - (NSString *)webViewJavaScriptForStreamEvent:(NSDictionary *)event
                                         error:(NSError **)error;
+- (NSString *)webViewJavaScriptForModelRequestIdentifier:
+                (NSNumber *)modelRequestIdentifier
+                                      includedInContext:(BOOL)includedInContext
+                                                animated:(BOOL)animated;
+- (BOOL)setModelRequestIdentifier:(NSNumber *)modelRequestIdentifier
+                includedInContext:(BOOL)includedInContext
+                            error:(NSError **)error;
 - (NSString *)webProvider;
 - (BOOL)setWebProvider:(NSString *)webProvider error:(NSError **)error;
 - (BOOL)bashEnabled;

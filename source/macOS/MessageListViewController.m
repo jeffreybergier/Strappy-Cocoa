@@ -77,6 +77,59 @@ static BOOL StrappyEnsureDirectory(NSString *path)
   return NO;
 }
 
+static BOOL StrappyContextRoundActionValues(
+  NSURL *url,
+  NSNumber **identifier,
+  BOOL *includedInContext)
+{
+  NSString *host;
+  NSString *identifierText;
+  NSString *includedText;
+  NSArray *components;
+  NSUInteger index;
+  long long identifierValue;
+
+  if ((identifier == NULL) || (includedInContext == NULL)) {
+    return NO;
+  }
+  *identifier = nil;
+  *includedInContext = NO;
+  host = [url host];
+  if (![host isEqualToString:@"context-round"]) {
+    return NO;
+  }
+
+  components = [[url path] componentsSeparatedByString:@"/"];
+  if ([components count] != 3U) {
+    return NO;
+  }
+  identifierText = [components objectAtIndex:1U];
+  includedText = [components objectAtIndex:2U];
+  if (([identifierText length] == 0U) ||
+      ([identifierText characterAtIndex:0U] == '0')) {
+    return NO;
+  }
+  for (index = 0U; index < [identifierText length]; index++) {
+    unichar character;
+
+    character = [identifierText characterAtIndex:index];
+    if ((character < '0') || (character > '9')) {
+      return NO;
+    }
+  }
+  identifierValue = [identifierText longLongValue];
+  if (identifierValue <= 0LL) {
+    return NO;
+  }
+  if ([includedText isEqualToString:@"1"]) {
+    *includedInContext = YES;
+  } else if (![includedText isEqualToString:@"0"]) {
+    return NO;
+  }
+  *identifier = [NSNumber numberWithLongLong:identifierValue];
+  return YES;
+}
+
 @interface MessageListViewController ()
 - (void)sessionStreamEvent:(NSNotification *)notification;
 - (void)sessionPromptDidStart:(NSNotification *)notification;
@@ -519,7 +572,51 @@ static BOOL StrappyEnsureDirectory(NSString *path)
 
 - (void)handleActionURL:(NSURL *)url
 {
-  (void)url;
+  NSNumber *identifier;
+  NSError *error;
+  NSString *errorMessage;
+  NSString *javaScript;
+  BOOL includedInContext;
+  BOOL saved;
+
+  if (!StrappyContextRoundActionValues(url,
+                                       &identifier,
+                                       &includedInContext)) {
+    return;
+  }
+  if ((session_ == nil) || [self sessionPromptIsInFlight]) {
+    [self reloadContent];
+    return;
+  }
+
+  error = nil;
+  saved = [session_
+    setModelRequestIdentifier:identifier
+            includedInContext:includedInContext
+                        error:&error];
+  if (saved) {
+    [statusText_ release];
+    statusText_ = nil;
+    javaScript = [session_
+      webViewJavaScriptForModelRequestIdentifier:identifier
+                               includedInContext:includedInContext
+                                         animated:YES];
+    if ([javaScript length] > 0U) {
+      [self flushPendingStreamEvents];
+      [self pushJavaScript:javaScript];
+      return;
+    }
+  } else {
+    errorMessage = [error localizedDescription];
+    if ([errorMessage length] == 0U) {
+      errorMessage =
+        NSLocalizedString(@"Your changes could not be saved.", nil);
+    }
+    [statusText_ release];
+    statusText_ = [errorMessage retain];
+    NSBeep();
+  }
+  [self reloadContent];
 }
 
 - (NSURL *)contentURL

@@ -34,6 +34,59 @@ static BOOL StrappyEnsureDirectory(NSString *path)
                                       error:nil];
 }
 
+static BOOL StrappyContextRoundActionValues(
+  NSURL *url,
+  NSNumber **identifier,
+  BOOL *includedInContext)
+{
+  NSString *host;
+  NSString *identifierText;
+  NSString *includedText;
+  NSArray *components;
+  NSUInteger index;
+  long long identifierValue;
+
+  if ((identifier == NULL) || (includedInContext == NULL)) {
+    return NO;
+  }
+  *identifier = nil;
+  *includedInContext = NO;
+  host = [url host];
+  if (![host isEqualToString:@"context-round"]) {
+    return NO;
+  }
+
+  components = [[url path] componentsSeparatedByString:@"/"];
+  if ([components count] != 3U) {
+    return NO;
+  }
+  identifierText = [components objectAtIndex:1U];
+  includedText = [components objectAtIndex:2U];
+  if (([identifierText length] == 0U) ||
+      ([identifierText characterAtIndex:0U] == '0')) {
+    return NO;
+  }
+  for (index = 0U; index < [identifierText length]; index++) {
+    unichar character;
+
+    character = [identifierText characterAtIndex:index];
+    if ((character < '0') || (character > '9')) {
+      return NO;
+    }
+  }
+  identifierValue = [identifierText longLongValue];
+  if (identifierValue <= 0LL) {
+    return NO;
+  }
+  if ([includedText isEqualToString:@"1"]) {
+    *includedInContext = YES;
+  } else if (![includedText isEqualToString:@"0"]) {
+    return NO;
+  }
+  *identifier = [NSNumber numberWithLongLong:identifierValue];
+  return YES;
+}
+
 static NSString *StrappyStringForSessionSummary(NSDictionary *summary,
                                                 NSString *key)
 {
@@ -179,6 +232,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)setPromptCancellationRequested:(BOOL)requested;
 - (BOOL)promptCancellationRequested;
 - (BOOL)appendNewMessagesToWebView;
+- (void)handleActionURL:(NSURL *)url;
 - (void)reloadContent;
 - (NSString *)writeCurrentHTML;
 - (void)clearRequestState;
@@ -1384,9 +1438,57 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
   url = [request URL];
   scheme = [url scheme];
   if ([scheme isEqualToString:@"strappy-action"]) {
+    [self handleActionURL:url];
     return NO;
   }
   return YES;
+}
+
+- (void)handleActionURL:(NSURL *)url
+{
+  NSNumber *identifier;
+  NSError *error;
+  NSString *javaScript;
+  NSString *message;
+  BOOL includedInContext;
+  BOOL saved;
+
+  if (!StrappyContextRoundActionValues(url,
+                                       &identifier,
+                                       &includedInContext)) {
+    return;
+  }
+  if (([self session] == nil) || [self sessionPromptIsInFlight]) {
+    [self reloadContent];
+    return;
+  }
+
+  error = nil;
+  saved = [[self session]
+    setModelRequestIdentifier:identifier
+            includedInContext:includedInContext
+                        error:&error];
+  if (saved) {
+    javaScript = [[self session]
+      webViewJavaScriptForModelRequestIdentifier:identifier
+                               includedInContext:includedInContext
+                                         animated:YES];
+    if ([javaScript length] > 0U) {
+      [self flushPendingStreamEvents];
+      [[self webView] stringByEvaluatingJavaScriptFromString:javaScript];
+      return;
+    }
+    [self reloadContent];
+    return;
+  }
+
+  [self reloadContent];
+  message = [error localizedDescription];
+  if ([message length] == 0U) {
+    message = NSLocalizedString(@"Your changes could not be saved.", nil);
+  }
+  [self showMessage:message
+              title:NSLocalizedString(@"Failed to Save Changes", nil)];
 }
 
 - (void)webViewDidFinishLoad:(UIWebView *)webView

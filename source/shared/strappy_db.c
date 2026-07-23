@@ -56,6 +56,17 @@
   STRAPPY_CONFIG_DEFAULT_API_MODEL "', '" \
   STRAPPY_DB_BUILTIN_DEFAULT_MODEL_DESCRIPTION "', 1, " \
   "CAST(strftime('%s','now') AS INTEGER) * 1000);"
+#define STRAPPY_DB_CONTEXT_ELIGIBLE_ATTEMPT_SQL \
+  "a.http_status BETWEEN 200 AND 299 " \
+  "AND a.state IN('completed','response_error') " \
+  "AND IFNULL(a.transport_error,'')='' " \
+  "AND ar.attempt_id IS NOT NULL AND ar.parse_error IS NULL " \
+  "AND COALESCE(ar.error_type,ar.error_code,ar.error_message," \
+    "ar.error_parameter) IS NULL " \
+  "AND IFNULL(ar.provider_status,'') NOT IN('failed','cancelled') " \
+  "AND NOT EXISTS(SELECT 1 FROM http_attempts later " \
+    "WHERE later.request_id=a.request_id " \
+    "AND later.attempt_index>a.attempt_index)"
 
 typedef enum strappy_response_field_type {
   STRAPPY_RESPONSE_FIELD_TEXT = 0,
@@ -408,6 +419,7 @@ void strappy_session_message_record_init(strappy_session_message_record *record)
   record->request_endpoint = NULL;
   record->created_at = NULL;
   record->attempt_state = NULL;
+  record->can_include_in_context = 0;
   record->include_in_context = 0;
   record->is_error = 0;
   record->http_status = 0L;
@@ -17042,7 +17054,7 @@ static int strappy_db_semantic_list_response_timeline(
     "1 AS group_phase, 0 AS attempt_phase, -1 AS item_index, "
     "a.method, a.endpoint, ar.provider_status, a.transport_error, "
     "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason, "
-    "r.model_id "
+    "r.model_id, 0 AS can_include_in_context "
     "FROM http_attempts a JOIN model_requests r ON r.id = a.request_id "
     "JOIN turns t ON t.id = r.turn_id "
     "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
@@ -17055,7 +17067,7 @@ static int strappy_db_semantic_list_response_timeline(
     "strftime('%Y-%m-%dT%H:%M:%fZ', i.created_at_ms / 1000.0, 'unixepoch'), "
     "i.is_error, i.include_in_context, NULL, "
     "0, 0, i.source_item_index, NULL, NULL, NULL, NULL, NULL, NULL, "
-    "r.model_id "
+    "r.model_id, 1 "
     "FROM conversation_items i "
     "JOIN model_requests r ON r.id = i.introduced_request_id "
     "JOIN turns t ON t.id = r.turn_id "
@@ -17079,7 +17091,7 @@ static int strappy_db_semantic_list_response_timeline(
       "2147483647), "
     "a.method, a.endpoint, ar.provider_status, a.transport_error, "
     "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason, "
-    "r.model_id "
+    "r.model_id, 0 "
     "FROM answer_quality_audits q "
     "JOIN http_attempts a ON a.id = q.response_attempt_id "
     "JOIN model_requests r ON r.id = a.request_id "
@@ -17095,7 +17107,9 @@ static int strappy_db_semantic_list_response_timeline(
     "1, 1, i.source_item_index, "
     "a.method, a.endpoint, ar.provider_status, a.transport_error, "
     "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason, "
-    "r.model_id "
+    "r.model_id, CASE WHEN i.include_in_context = 1 OR (" \
+      STRAPPY_DB_CONTEXT_ELIGIBLE_ATTEMPT_SQL \
+    ") THEN 1 ELSE 0 END "
     "FROM conversation_items i "
     "JOIN http_attempts a ON a.id = i.source_attempt_id "
     "JOIN model_requests r ON r.id = a.request_id "
@@ -17238,6 +17252,8 @@ static int strappy_db_semantic_list_response_timeline(
     record->http_status = (long)sqlite3_column_int64(stmt, 12);
     record->attempt_state = strappy_db_column_string(stmt, 11);
     record->is_error = sqlite3_column_int(stmt, 15) ? 1 : 0;
+    record->can_include_in_context =
+      sqlite3_column_int(stmt, 28) ? 1 : 0;
     record->include_in_context = sqlite3_column_int(stmt, 16) ? 1 : 0;
     if (entry_type == 0) {
       record->request_method = strappy_db_column_string(stmt, 21);
@@ -17345,6 +17361,107 @@ int strappy_db_list_response_timeline_range(
                                                     list,
                                                     total_count_out,
                                                     error_out);
+}
+
+int strappy_db_update_model_request_include_in_context(
+  const char *db_path,
+  long long session_id,
+  long long model_request_id,
+  int include_in_context,
+  char **error_out)
+{
+  static const char *sql =
+    "UPDATE conversation_items SET include_in_context = ? "
+    "WHERE session_id = ? AND (introduced_request_id = ? OR ("
+      "source_attempt_id IS NOT NULL AND EXISTS ("
+        "SELECT 1 FROM http_attempts a "
+        "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
+        "WHERE a.id = conversation_items.source_attempt_id "
+        "AND a.request_id = ? AND ("
+          "conversation_items.include_in_context = 1 OR (" \
+            STRAPPY_DB_CONTEXT_ELIGIBLE_ATTEMPT_SQL \
+          ")"
+        ")"
+      ")"
+    ")) AND EXISTS ("
+      "SELECT 1 FROM model_requests r "
+      "JOIN turns t ON t.id = r.turn_id "
+      "WHERE r.id = ? AND t.session_id = ?"
+    ");";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+  int ok;
+
+  if ((session_id <= 0LL) || (model_request_id <= 0LL) ||
+      ((include_in_context != 0) && (include_in_context != 1))) {
+    strappy_set_error(error_out,
+                      "Context round inclusion update is not valid.");
+    return 0;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not prepare context round inclusion update: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  ok =
+    (sqlite3_bind_int(stmt, 1, include_in_context) == SQLITE_OK) &&
+    (sqlite3_bind_int64(stmt,
+                        2,
+                        (sqlite3_int64)session_id) == SQLITE_OK) &&
+    (sqlite3_bind_int64(stmt,
+                        3,
+                        (sqlite3_int64)model_request_id) == SQLITE_OK) &&
+    (sqlite3_bind_int64(stmt,
+                        4,
+                        (sqlite3_int64)model_request_id) == SQLITE_OK) &&
+    (sqlite3_bind_int64(stmt,
+                        5,
+                        (sqlite3_int64)model_request_id) == SQLITE_OK) &&
+    (sqlite3_bind_int64(stmt,
+                        6,
+                        (sqlite3_int64)session_id) == SQLITE_OK);
+  if (!ok) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not bind context round inclusion update: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not update context round inclusion: %s",
+      sqlite3_errmsg(db));
+    ok = 0;
+  } else if (sqlite3_changes(db) <= 0) {
+    strappy_set_error(
+      error_out,
+      "Context round was not found or has no context-eligible items.");
+    ok = 0;
+  } else {
+    ok = 1;
+  }
+  sqlite3_finalize(stmt);
+  strappy_db_release(db);
+  return ok;
 }
 
 int strappy_db_list_response_timeline(

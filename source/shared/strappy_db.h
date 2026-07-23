@@ -70,6 +70,7 @@ typedef struct strappy_session_message_record {
   char *request_endpoint;
   char *created_at;
   char *attempt_state;
+  int can_include_in_context;
   int include_in_context;
   int is_error;
   long http_status;
@@ -553,6 +554,12 @@ int strappy_db_list_response_timeline_range(
   size_t start_index,
   strappy_session_message_record_list *list,
   size_t *total_count_out,
+  char **error_out);
+int strappy_db_update_model_request_include_in_context(
+  const char *db_path,
+  long long session_id,
+  long long model_request_id,
+  int include_in_context,
   char **error_out);
 int strappy_db_save_openrouter_models_json(const char *db_path,
                                            const char *json,

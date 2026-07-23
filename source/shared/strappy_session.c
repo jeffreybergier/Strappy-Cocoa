@@ -288,6 +288,21 @@ int strappy_session_load_message_record_by_key(
                                                error_out);
 }
 
+int strappy_session_update_model_request_include_in_context(
+  const char *db_path,
+  long long session_id,
+  long long model_request_id,
+  int include_in_context,
+  char **error_out)
+{
+  return strappy_db_update_model_request_include_in_context(
+    db_path,
+    session_id,
+    model_request_id,
+    include_in_context,
+    error_out);
+}
+
 int strappy_session_update_streaming_enabled(const char *db_path,
                                              long long session_id,
                                              int streaming_enabled,
@@ -543,6 +558,17 @@ char *strappy_session_webview_set_processing_status_js(
   return strappy_webview_set_processing_status_js(status_json);
 }
 
+char *strappy_session_webview_set_round_context_inclusion_js(
+  long long model_request_id,
+  int include_in_context,
+  int animated)
+{
+  return strappy_webview_set_round_context_inclusion_js(
+    model_request_id,
+    include_in_context,
+    animated);
+}
+
 static void strappy_session_webview_message_from_record(
   const strappy_session_message_record *record,
   strappy_webview_message *message)
@@ -592,6 +618,9 @@ static void strappy_session_webview_message_from_record(
   message->metadata_json = record->metadata_json;
   message->render_state_json = record->render_state_json;
   message->created_at = record->created_at;
+  message->can_include_in_context =
+    record->can_include_in_context ? 1 : 0;
+  message->include_in_context = record->include_in_context ? 1 : 0;
   message->is_error = record->is_error ? 1 : 0;
 }
 

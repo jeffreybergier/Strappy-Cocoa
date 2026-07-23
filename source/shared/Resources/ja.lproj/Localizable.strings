@@ -20,6 +20,7 @@
 "Response" = "レスポンス";
 "Round" = "ラウンド";
 "Attempt" = "試行";
+"Included in Future Context" = "今後のコンテキストに含まれる";
 "Answer Quality" = "回答の品質";
 "Passed" = "合格";
 "Failed" = "不合格";

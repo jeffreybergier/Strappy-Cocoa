@@ -2449,6 +2449,60 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   return StrappySessionStringFromCString(js);
 }
 
+- (BOOL)setModelRequestIdentifier:(NSNumber *)modelRequestIdentifier
+                includedInContext:(BOOL)includedInContext
+                            error:(NSError **)error
+{
+  NSString *databasePath;
+  char *strappyError;
+  long long modelRequestId;
+  long long sessionId;
+
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  modelRequestId =
+    [modelRequestIdentifier isKindOfClass:[NSNumber class]] ?
+      [modelRequestIdentifier longLongValue] : 0LL;
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+
+  strappyError = NULL;
+  if (!strappy_session_update_model_request_include_in_context(
+        [databasePath fileSystemRepresentation],
+        sessionId,
+        modelRequestId,
+        includedInContext ? 1 : 0,
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return NO;
+  }
+  strappy_session_free_string(strappyError);
+  return YES;
+}
+
+- (NSString *)webViewJavaScriptForModelRequestIdentifier:
+                (NSNumber *)modelRequestIdentifier
+                                      includedInContext:(BOOL)includedInContext
+                                                animated:(BOOL)animated
+{
+  long long modelRequestId;
+
+  modelRequestId =
+    [modelRequestIdentifier isKindOfClass:[NSNumber class]] ?
+      [modelRequestIdentifier longLongValue] : 0LL;
+  return StrappySessionStringFromCString(
+    strappy_session_webview_set_round_context_inclusion_js(
+      modelRequestId,
+      includedInContext ? 1 : 0,
+      animated ? 1 : 0));
+}
+
 - (BOOL)streamingEnabled
 {
   BOOL enabled;

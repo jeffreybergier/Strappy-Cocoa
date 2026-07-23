@@ -5914,6 +5914,57 @@ static int harness_timeline_attempt_metadata_matches(
   return 0;
 }
 
+static int harness_context_selection_matches(
+  const char *path,
+  long long session_id,
+  long long model_request_id,
+  size_t expected_context_count,
+  size_t expected_eligible_count,
+  size_t expected_included_count,
+  char **error_out)
+{
+  strappy_response_item_raw_record_list context;
+  strappy_session_message_record_list timeline;
+  size_t eligible_count;
+  size_t included_count;
+  size_t index;
+  int ok;
+
+  strappy_response_item_raw_record_list_init(&context);
+  strappy_session_message_record_list_init(&timeline);
+  eligible_count = 0U;
+  included_count = 0U;
+  ok = strappy_db_list_canonical_response_items(path,
+                                                session_id,
+                                                &context,
+                                                error_out) &&
+    (context.count == expected_context_count) &&
+    strappy_db_list_response_timeline(path,
+                                      session_id,
+                                      &timeline,
+                                      error_out);
+  if (ok) {
+    for (index = 0U; index < timeline.count; index++) {
+      const strappy_session_message_record *record;
+
+      record = &timeline.records[index];
+      if ((record->model_request_id != model_request_id) ||
+          !record->can_include_in_context) {
+        continue;
+      }
+      eligible_count++;
+      if (record->include_in_context) {
+        included_count++;
+      }
+    }
+    ok = (eligible_count == expected_eligible_count) &&
+      (included_count == expected_included_count);
+  }
+  strappy_response_item_raw_record_list_destroy(&context);
+  strappy_session_message_record_list_destroy(&timeline);
+  return ok;
+}
+
 static int harness_append_usage_cost_call(
   const char *path,
   long long session_id,
@@ -6194,6 +6245,7 @@ static int harness_test_ledger(void)
   char *error;
   long long session_id;
   long long call_id;
+  long long model_request_id;
   long long value;
   int fd;
   int ok;
@@ -6208,6 +6260,7 @@ static int harness_test_ledger(void)
   error = NULL;
   session_id = 0LL;
   call_id = 0LL;
+  model_request_id = 0LL;
   strappy_response_item_raw_record_list_init(&context);
   strappy_session_message_record_list_init(&timeline);
   ok = strappy_db_create_session(path, &session_id, &error);
@@ -6343,11 +6396,13 @@ static int harness_test_ledger(void)
     (timeline.count == 7U) &&
     (strcmp(timeline.records[0].role, "user") == 0) &&
     (strcmp(timeline.records[0].direction, "request") == 0) &&
+    timeline.records[0].can_include_in_context &&
     (timeline.records[0].round_index == 0L) &&
     (timeline.records[0].attempt_index == -1L) &&
     (timeline.records[0].model_request_id > 0LL) &&
     (timeline.records[0].http_attempt_id == 0LL) &&
     (strcmp(timeline.records[1].role, "api_call") == 0) &&
+    !timeline.records[1].can_include_in_context &&
     (timeline.records[1].direction == NULL) &&
     (timeline.records[1].model_request_id ==
      timeline.records[0].model_request_id) &&
@@ -6368,11 +6423,14 @@ static int harness_test_ledger(void)
     (strstr(timeline.records[1].content, "HTTP 200") == NULL) &&
     (strstr(timeline.records[1].content, "completed") == NULL) &&
     (strcmp(timeline.records[2].role, "api_reasoning") == 0) &&
+    timeline.records[2].can_include_in_context &&
     (strcmp(timeline.records[2].direction, "response") == 0) &&
     (timeline.records[2].http_attempt_id == call_id) &&
     (strcmp(timeline.records[3].role, "api_function_call") == 0) &&
+    timeline.records[3].can_include_in_context &&
     (strcmp(timeline.records[3].direction, "response") == 0) &&
     (strcmp(timeline.records[4].role, "api_item") == 0) &&
+    timeline.records[4].can_include_in_context &&
     (strcmp(timeline.records[4].kind,
             STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) &&
     (strcmp(timeline.records[4].response_item_action_json,
@@ -6380,6 +6438,7 @@ static int harness_test_ledger(void)
             "\"sources\":[{\"type\":\"url\","
             "\"url\":\"https://example.com/search\"}]}") == 0) &&
     (strcmp(timeline.records[5].role, "api_item") == 0) &&
+    timeline.records[5].can_include_in_context &&
     (strcmp(timeline.records[5].kind,
             STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0) &&
     (strcmp(timeline.records[5].response_item_url,
@@ -6391,6 +6450,7 @@ static int harness_test_ledger(void)
     (strstr(timeline.records[5].response_item_title,
             "Fetched page body") == NULL) &&
     (strcmp(timeline.records[6].role, "assistant") == 0) &&
+    timeline.records[6].can_include_in_context &&
     (strcmp(timeline.records[6].direction, "response") == 0) &&
     (strcmp(timeline.records[6].content, "Done") == 0);
   if (!ok) {
@@ -6421,7 +6481,58 @@ static int harness_test_ledger(void)
     unlink(path);
     return 0;
   }
+  model_request_id = timeline.records[0].model_request_id;
   strappy_session_message_record_list_destroy(&timeline);
+
+  ok = strappy_session_update_model_request_include_in_context(
+         path,
+         session_id,
+         model_request_id,
+         0,
+         &error) &&
+    harness_context_selection_matches(path,
+                                      session_id,
+                                      model_request_id,
+                                      0U,
+                                      6U,
+                                      0U,
+                                      &error) &&
+    strappy_session_update_model_request_include_in_context(path,
+                                                            session_id,
+                                                            model_request_id,
+                                                            1,
+                                                            &error) &&
+    harness_context_selection_matches(path,
+                                      session_id,
+                                      model_request_id,
+                                      6U,
+                                      6U,
+                                      6U,
+                                      &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Context inclusion persistence failed: %s\n",
+            (error != NULL) ? error : "unexpected context state");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  ok = !strappy_session_update_model_request_include_in_context(
+    path,
+    session_id + 1LL,
+    model_request_id,
+    0,
+    &error);
+  if (!ok || (error == NULL)) {
+    fprintf(stderr,
+            "Cross-session context round update unexpectedly succeeded.\n");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+  free(error);
+  error = NULL;
 
   memset(&execution, 0, sizeof(execution));
   execution.session_id = session_id;
@@ -6750,6 +6861,11 @@ static int harness_test_session_webview_rendering(void)
   ok = (page_html != NULL) && (message_count == 3U) &&
        (first_position != NULL) && (second_position != NULL) &&
        (first_position < second_position) &&
+       (strstr(page_html, "data-context-item-id=\"") == NULL) &&
+       (strstr(page_html, "data-include-in-context=\"1\"") != NULL) &&
+       (strstr(page_html,
+               "data-include-in-context-label="
+               "\"Included in Future Context\"") != NULL) &&
        (strstr(page_html,
                "setProcessingStatus({\"active\":true,"
                "\"message_key\":\"session-processing\","

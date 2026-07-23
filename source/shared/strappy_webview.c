@@ -46,6 +46,7 @@ typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_RESPONSE,
   STRAPPY_WEBVIEW_LABEL_ROUND,
   STRAPPY_WEBVIEW_LABEL_ATTEMPT,
+  STRAPPY_WEBVIEW_LABEL_INCLUDED_IN_FUTURE_CONTEXT,
   STRAPPY_WEBVIEW_LABEL_ANSWER_QUALITY,
   STRAPPY_WEBVIEW_LABEL_PASSED,
   STRAPPY_WEBVIEW_LABEL_FAILED,
@@ -89,6 +90,7 @@ static const char * const g_strappy_webview_label_keys[
   "Response",
   "Round",
   "Attempt",
+  "Included in Future Context",
   "Answer Quality",
   "Passed",
   "Failed",
@@ -147,6 +149,8 @@ static void strappy_webview_assign_localized_labels(
   labels->response = values[STRAPPY_WEBVIEW_LABEL_RESPONSE];
   labels->round = values[STRAPPY_WEBVIEW_LABEL_ROUND];
   labels->attempt = values[STRAPPY_WEBVIEW_LABEL_ATTEMPT];
+  labels->included_in_future_context =
+    values[STRAPPY_WEBVIEW_LABEL_INCLUDED_IN_FUTURE_CONTEXT];
   labels->answer_quality = values[STRAPPY_WEBVIEW_LABEL_ANSWER_QUALITY];
   labels->passed = values[STRAPPY_WEBVIEW_LABEL_PASSED];
   labels->failed = values[STRAPPY_WEBVIEW_LABEL_FAILED];
@@ -845,6 +849,17 @@ static const char *strappy_webview_attempt_label(
   return "Attempt";
 }
 
+static const char *strappy_webview_included_in_future_context_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->included_in_future_context != NULL) &&
+      (labels->included_in_future_context[0] != '\0')) {
+    return labels->included_in_future_context;
+  }
+  return "Included in Future Context";
+}
+
 static const char *strappy_webview_answer_quality_label(
   const strappy_webview_labels *labels)
 {
@@ -1460,6 +1475,15 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".row:first-child{border-top:0;}",
     ".row:last-child{margin-bottom:0;}",
     ".role{font-size:12px;font-weight:bold;color:#606970;margin:0 0 4px;}",
+    ".context-inclusion-host{position:relative;padding-right:32px!important;}",
+    ".context-inclusion-checkbox{position:absolute;right:10px;top:50%;",
+    "box-sizing:border-box;width:14px;height:14px;margin:-7px 0 0;",
+    "padding:0;cursor:pointer;opacity:1;",
+    "-webkit-appearance:checkbox;appearance:checkbox;}",
+    ".context-inclusion-checkbox:disabled{cursor:default;}",
+    ".context-round-excluded{opacity:0.7;}",
+    ".context-round-opacity-transition{-webkit-transition:opacity 0.3s ease;",
+    "transition:opacity 0.3s ease;}",
     ".prompt-group-toggle{color:#4e5961;text-decoration:none;}",
     ".prompt-group-hidden{display:none;}",
     ".prompt-group-harness{box-sizing:border-box;margin-left:8px;",
@@ -2133,6 +2157,30 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function apiExchangeId(row){return row&&row.getAttribute?row.getAttribute('data-api-call-id')||'':'';}",
     "function apiExchangeDirection(row){return row&&row.getAttribute?row.getAttribute('data-direction')||'':'';}",
     "function apiExchangeKind(row){return row&&row.getAttribute?row.getAttribute('data-kind')||'':'';}",
+    "function contextInclusionValue(row){var value=row&&row.getAttribute?row.getAttribute('data-include-in-context'):null;",
+    "return value=='1'?1:(value=='0'?0:-1);}",
+    "function contextInclusionLabel(row){return row&&row.getAttribute?",
+    "row.getAttribute('data-include-in-context-label')||'Included in Future Context':'Included in Future Context';}",
+    "function contextInclusionState(rows){var count=0,included=0,label='',i,value;for(i=0;i<rows.length;i++){",
+    "value=contextInclusionValue(rows[i]);if(value<0)continue;count++;if(value)included++;if(label==='')label=contextInclusionLabel(rows[i]);}",
+    "return {count:count,checked:count>0&&included==count,indeterminate:included>0&&included<count,label:label};}",
+    "function requestContextInclusionChange(box,event){var current,mixed,next,id;if(event){",
+    "if(event.stopPropagation)event.stopPropagation();event.cancelBubble=true;if(event.preventDefault)event.preventDefault();event.returnValue=false;}",
+    "if(!box||box.disabled||processingInteractionsLocked())return false;current=box.getAttribute('data-context-current')=='1';",
+    "mixed=box.getAttribute('data-context-mixed')=='1';id=box.getAttribute('data-context-id')||'';",
+    "if(!(/^[1-9][0-9]*$/).test(id))return false;",
+    "next=(mixed||!current)?1:0;box.checked=current;box.indeterminate=mixed;",
+    "box.setAttribute('aria-checked',mixed?'mixed':(current?'true':'false'));box.disabled=true;",
+    "window.location.href='strappy-action://context-round/'+id+'/'+next;return false;}",
+    "function contextInclusionCheckbox(label,checked,indeterminate,id,locked){var box=document.createElement('input');",
+    "box.type='checkbox';box.className='context-inclusion-checkbox context-round-checkbox';",
+    "box.setAttribute('aria-label',label||'Included in Future Context');box.title=label||'Included in Future Context';",
+    "box.checked=checked?true:false;box.indeterminate=indeterminate?true:false;",
+    "box.setAttribute('aria-checked',indeterminate?'mixed':(checked?'true':'false'));",
+    "box.setAttribute('data-context-current',checked?'1':'0');box.setAttribute('data-context-mixed',indeterminate?'1':'0');",
+    "box.setAttribute('data-context-id',id);",
+    "if(locked){box.disabled=true;box.setAttribute('disabled','disabled');}",
+    "box.onclick=function(event){return requestContextInclusionChange(this,event||window.event);};return box;}",
     "function apiExchangeCumulativeUsageCost(rows){var i,value;for(i=0;i<rows.length;i++){",
     "value=rows[i].getAttribute?rows[i].getAttribute('data-cumulative-usage-cost')||'':'';if(value!=='')return value;}return '';}",
     "function formatCumulativeUsageCost(value){return '$'+(value!==''?value:'-');}",
@@ -2144,6 +2192,16 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function rowIsAPIExchangeAnswer(row){return hasClass(row,'assistant')&&apiExchangeDirection(row)=='response';}",
     "function rowIsAPIExchangeConversation(row){return hasClass(row,'user')||hasClass(row,'harness')||",
     "hasClass(row,'developer')||hasClass(row,'assistant');}",
+    "function setContextRoundOpacity(rows,included){var i;for(i=0;i<rows.length;i++){",
+    "setRowClass(rows[i],'context-round-excluded',included?0:1);}}",
+    "function setRoundContextInclusion(id,included,animated){var rows=messageRows();var targets=[];var i,row,value;",
+    "id=jsonText(id);included=included?1:0;if(!(/^[1-9][0-9]*$/).test(id))return;",
+    "for(i=0;i<rows.length;i++){row=rows[i];if(apiRoundId(row)!=id||",
+    "(!rowIsResponseStatus(row)&&!rowIsAPIExchangeItem(row)))continue;targets[targets.length]=row;",
+    "value=contextInclusionValue(row);if(value>=0)row.setAttribute('data-include-in-context',included?'1':'0');}",
+    "if(animated){for(i=0;i<targets.length;i++)setRowClass(targets[i],'context-round-opacity-transition',1);",
+    "if(targets.length)i=targets[0].offsetWidth;}setContextRoundOpacity(targets,included);",
+    "decorateAPIExchanges(document);decorateAPIToolGroups(document);decoratePromptGroups(document);}",
     "function rowIsAPIExchangeError(row){return hasClass(row,'api_error')||hasClass(row,'state-error');}",
     "function rowIsFailedAnswerQuality(row){return hasClass(row,'answer_quality')&&rowIsAPIExchangeError(row);}",
     "function apiRoundEndedInError(rows,id){var i,row,last=null;for(i=0;i<rows.length;i++){row=rows[i];if(apiRoundId(row)!=id)continue;",
@@ -2191,7 +2249,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "while((n=firstByClass(row,'api-exchange-section-label'))&&n.parentNode===row)row.removeChild(n);}",
     "function removeAPIExchangeTurnHeader(row){var n=firstByClass(row,'api-exchange-turn-header');",
     "if(n&&n.parentNode)n.parentNode.removeChild(n);}",
-    "function ensureAPIExchangeTurnHeader(row,id,collapsed,active,cumulativeUsageCost){var h,a,d,title,titleText,roundNumber,roundLabel;",
+    "function ensureAPIExchangeTurnHeader(row,id,collapsed,active,cumulativeUsageCost,context){var h,a,d,title,titleText,roundNumber,roundLabel,box;",
     "if(!row)return;roundNumber=row.getAttribute('data-round-number')||'1';roundLabel=row.getAttribute('data-round-label')||'Round';",
     "h=document.createElement('div');h.className='api-exchange-turn-header';if(!active){h.className+=' disclosure-title';a=document.createElement('a');",
     "a.className='api-exchange-toggle';a.href='#';a.setAttribute('data-round-id',id);a.setAttribute('data-prompt-group-key',promptGroupKey(row));",
@@ -2200,6 +2258,9 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "title=document.createElement('span');title.className='api-exchange-turn-title';titleText=roundLabel+' '+roundNumber;",
     "titleText+=' \\u00b7 '+formatCumulativeUsageCost(cumulativeUsageCost);",
     "setNodeText(title,titleText);h.appendChild(title);",
+    "if(!active&&context&&context.count>0){h.className+=' context-inclusion-host';box=contextInclusionCheckbox(",
+    "context.label,context.checked,context.indeterminate,id,",
+    "processingInteractionsLocked());h.appendChild(box);}",
     "row.insertBefore(h,row.firstChild);}",
     "function apiExchangeSectionLabel(row,direction){var attr='data-'+direction+'-label';var fallback=direction=='request'?'Request':'Response';",
     "return row&&row.getAttribute?(row.getAttribute(attr)||fallback):fallback;}",
@@ -2241,7 +2302,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "role.onclick=function(){return toggleAPIReasoning(a);};}summary=document.createElement('span');",
     "summary.className='api-reasoning-summary';setNodeText(summary,row.getAttribute('data-thinking-label')||'Thinking');role.appendChild(summary);}}",
     "function decorateAPIExchanges(root){var rows=messageRows();var groups={};var keys=[];var i,j,row,id,roundId,key,g,anchor,collapsed,last,d;",
-    "var answer,conversation,active,attempt,attemptKeys,attemptRows,statusRow,responseRows,attemptStartRow;",
+    "var answer,conversation,active,attempt,attemptKeys,attemptRows,statusRow,responseRows,attemptStartRow,context;",
     "for(i=0;i<rows.length;i++){removeAPIExchangeDecoration(rows[i]);removeAPIExchangeTurnHeader(rows[i]);",
     "roundId=apiRoundId(rows[i]);if(roundId===''||(!rowIsResponseStatus(rows[i])&&!rowIsAPIExchangeItem(rows[i])))continue;",
     "key='$'+roundId;if(!groups[key]){groups[key]={id:roundId,promptKey:promptGroupKey(rows[i]),rows:[],requestRows:[],attempts:{},attemptKeys:[]};keys[keys.length]=key;}",
@@ -2267,7 +2328,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(attemptRows.length)setRowClass(attemptRows[attemptRows.length-1],'api-exchange-attempt-end',1);",
     "if(responseRows.length)ensureResponseAttemptLabel(responseRows[0]);else if(statusRow)ensureResponseAttemptLabel(statusRow);",
     "decorateAPIReasoningGroup(attemptRows,active);}",
-    "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed,active,apiExchangeCumulativeUsageCost(g.rows));}}",
+    "context=contextInclusionState(g.rows);setContextRoundOpacity(g.rows,context.count==0||context.checked);",
+    "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed,active,apiExchangeCumulativeUsageCost(g.rows),context);}}",
     "function toggleAPIExchange(a){var id=a&&a.getAttribute?a.getAttribute('data-round-id'):'';var group=a&&a.getAttribute?a.getAttribute('data-prompt-group-key'):'';var current;",
     "if(id===''||promptGroupIsProcessing(group))return false;current=a.getAttribute('aria-expanded')=='false'?1:0;strappyAPIRoundCollapsed[id]=current?0:1;",
     "decorateAPIExchanges(document);decorateAPIToolGroups(document);decoratePromptGroups(document);return false;}",
@@ -3020,6 +3082,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   char round_number_text[64];
   char attempt_number_text[64];
   char cumulative_usage_cost_text[64];
+  char include_in_context_text[2];
   int has_state;
   int render_created_at;
   int render_streaming;
@@ -3062,6 +3125,12 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   attempt_number_text[0] = '\0';
   http_status_value[0] = '\0';
   cumulative_usage_cost_text[0] = '\0';
+  include_in_context_text[0] = '\0';
+  include_in_context_text[1] = '\0';
+  if ((message != NULL) && message->can_include_in_context) {
+    include_in_context_text[0] =
+      message->include_in_context ? '1' : '0';
+  }
   if ((message != NULL) && (message->round_id > 0LL)) {
     snprintf(round_id_text,
              sizeof(round_id_text),
@@ -3193,6 +3262,15 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                              "kind",
                                              (message != NULL) ?
                                                message->kind : NULL) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "include-in-context",
+         include_in_context_text) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "include-in-context-label",
+         (include_in_context_text[0] != '\0') ?
+           strappy_webview_included_in_future_context_label(labels) : NULL) &&
        strappy_webview_append_data_attribute(&buffer,
                                              "actor",
                                              (message != NULL) ?
@@ -4081,6 +4159,38 @@ char *strappy_webview_set_processing_status_js(const char *status_json)
   if (!strappy_webview_buffer_append_cstring(&buffer, "setProcessingStatus(") ||
       !strappy_webview_append_js_string(&buffer, status_json) ||
       !strappy_webview_buffer_append_cstring(&buffer, ");")) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_set_round_context_inclusion_js(
+  long long round_id,
+  int include_in_context,
+  int animated)
+{
+  strappy_webview_buffer buffer;
+  char script[128];
+  int written;
+
+  if ((round_id <= 0LL) ||
+      ((include_in_context != 0) && (include_in_context != 1)) ||
+      ((animated != 0) && (animated != 1))) {
+    return NULL;
+  }
+  written = snprintf(script,
+                     sizeof(script),
+                     "setRoundContextInclusion(%lld,%d,%d);",
+                     round_id,
+                     include_in_context,
+                     animated);
+  if ((written < 0) || ((size_t)written >= sizeof(script))) {
+    return NULL;
+  }
+
+  strappy_webview_buffer_init(&buffer);
+  if (!strappy_webview_buffer_append_cstring(&buffer, script)) {
     strappy_webview_buffer_destroy(&buffer);
     return NULL;
   }

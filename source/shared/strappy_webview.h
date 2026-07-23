@@ -31,6 +31,7 @@ typedef struct strappy_webview_labels {
   const char *response;
   const char *round;
   const char *attempt;
+  const char *included_in_future_context;
   const char *answer_quality;
   const char *passed;
   const char *failed;
@@ -82,6 +83,8 @@ typedef struct strappy_webview_message {
   const char *metadata_json;
   const char *render_state_json;
   const char *created_at;
+  int can_include_in_context;
+  int include_in_context;
   int is_error;
 } strappy_webview_message;
 
@@ -177,6 +180,10 @@ char *strappy_webview_move_message_text_to_reasoning_js(const char *element_id);
 char *strappy_webview_move_message_text_to_reasoning_by_key_js(
   const char *message_key);
 char *strappy_webview_set_processing_status_js(const char *status_json);
+char *strappy_webview_set_round_context_inclusion_js(
+  long long round_id,
+  int include_in_context,
+  int animated);
 char *strappy_webview_clear_processing_status_js(void);
 char *strappy_webview_tool_event_text(const char *event_type,
                                       const char *tool_call_id,

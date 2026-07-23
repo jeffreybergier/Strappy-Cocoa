@@ -97,6 +97,8 @@ static int harness_check_localized_labels(void)
        harness_expect_equal(labels->response, "Response") &&
        harness_expect_equal(labels->round, "Round") &&
        harness_expect_equal(labels->attempt, "Attempt") &&
+       harness_expect_equal(labels->included_in_future_context,
+                            "Included in Future Context") &&
        harness_expect_equal(labels->answer_quality, "Answer Quality") &&
        harness_expect_equal(labels->passed, "Passed") &&
        harness_expect_equal(labels->failed, "Failed") &&
@@ -185,6 +187,7 @@ static int harness_check_message_batch(void)
 static int harness_check_page_scripts(void)
 {
   strappy_webview_message message;
+  char *context_js;
   char *message_html;
   char *page_html;
   int ok;
@@ -212,7 +215,10 @@ static int harness_check_page_scripts(void)
     fprintf(stderr, "Could not generate messages page HTML.\n");
     return 0;
   }
-  ok = harness_expect_contains(page_html, "@font-face") &&
+  context_js = strappy_webview_set_round_context_inclusion_js(42LL, 0, 1);
+  ok = (context_js != NULL) &&
+       (strcmp(context_js, "setRoundContextInclusion(42,0,1);") == 0) &&
+       harness_expect_contains(page_html, "@font-face") &&
        harness_expect_contains(page_html,
                                "<meta name=\"viewport\" "
                                "content=\"width=device-width,initial-scale=1.0\">") &&
@@ -257,6 +263,20 @@ static int harness_check_page_scripts(void)
                                "monospace;") &&
        harness_expect_contains(page_html,
                                "-webkit-text-size-adjust:none;") &&
+       harness_expect_contains(
+         page_html,
+         ".context-inclusion-host{position:relative;"
+         "padding-right:32px!important;}") &&
+       harness_expect_contains(
+         page_html,
+         ".context-inclusion-checkbox{position:absolute;right:10px;"
+         "top:50%;") &&
+       harness_expect_contains(page_html,
+                               ".context-round-excluded{opacity:0.7;}") &&
+       harness_expect_contains(
+         page_html,
+         ".context-round-opacity-transition{-webkit-transition:"
+         "opacity 0.3s ease;transition:opacity 0.3s ease;}") &&
        harness_expect_contains(page_html,
                                ".tool-panel{line-height:1.3;") &&
        harness_expect_contains(page_html, "function faIconHTML") &&
@@ -294,8 +314,51 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function decorateAPIExchanges") &&
        harness_expect_contains(page_html, "function toggleAPIExchange") &&
        harness_expect_contains(page_html,
+                               "function contextInclusionValue(row)") &&
+       harness_expect_contains(page_html,
+                               "function contextInclusionState(rows)") &&
+       harness_expect_contains(
+         page_html,
+         "indeterminate:included>0&&included<count") &&
+       harness_expect_contains(
+         page_html,
+         "function requestContextInclusionChange(box,event)") &&
+       harness_expect_contains(
+         page_html,
+         "window.location.href='strappy-action://context-round/'+id+'/'+next") &&
+       harness_expect_contains(
+         page_html,
+         "if(locked){box.disabled=true;"
+         "box.setAttribute('disabled','disabled');}") &&
+       harness_expect_contains(
+         page_html,
+         "box.onclick=function(event){return "
+         "requestContextInclusionChange(this,event||window.event);}") &&
+       harness_expect_not_contains(page_html, "aria-readonly") &&
+       harness_expect_contains(
+         page_html,
+         "function setRoundContextInclusion(id,included,animated)") &&
+       harness_expect_contains(page_html,
+                               "'context-round-excluded',included?0:1") &&
+       harness_expect_contains(
+         page_html,
+         "'context-round-opacity-transition',1") &&
+       harness_expect_contains(page_html, "targets[0].offsetWidth") &&
+       harness_expect_not_contains(page_html, "context-item") &&
+       harness_expect_not_contains(page_html,
+                                   "decorateContextInclusionRows") &&
+       harness_expect_contains(page_html, "context-round-checkbox") &&
+       harness_expect_contains(page_html,
                                "h.className='api-exchange-turn-header';"
                                "if(!active){h.className+=' disclosure-title'") &&
+       harness_expect_contains(
+         page_html,
+         "if(!active&&context&&context.count>0){"
+         "h.className+=' context-inclusion-host';") &&
+       harness_expect_not_contains(
+         page_html,
+         "if(context&&context.count>0){"
+         "h.className+=' context-inclusion-host';") &&
        harness_expect_contains(page_html,
                                "h.onclick=function(){return "
                                "toggleAPIExchange(a);};") &&
@@ -922,9 +985,13 @@ static int harness_check_page_scripts(void)
                                "cumulativeUsageCost);") &&
        harness_expect_contains(
          page_html,
-         "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed,"
-         "active,"
-         "apiExchangeCumulativeUsageCost(g.rows));") &&
+         "context=contextInclusionState(g.rows);"
+         "setContextRoundOpacity(g.rows,"
+         "context.count==0||context.checked);") &&
+       harness_expect_contains(
+         page_html,
+         "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed,active,"
+         "apiExchangeCumulativeUsageCost(g.rows),context);") &&
        harness_expect_contains(page_html,
                                "setNodeText(title,titleText);") &&
        harness_expect_not_contains(page_html,
@@ -1304,6 +1371,7 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "data-prompt-group-key=\"prompt-group-page\"") &&
        harness_expect_contains(page_html, "reasoning-collapsed .reasoning-label");
 
+  strappy_webview_free(context_js);
   strappy_webview_free(page_html);
   return ok;
 }
@@ -2116,6 +2184,8 @@ static int harness_check_responses_items(void)
   labels.tool = "Localized Tool";
   labels.tool_call = "Localized Tool Request";
   labels.tool_result = "Localized Tool Response";
+  labels.included_in_future_context =
+    "Localized Included in Future Context";
   labels.answer_quality = "Localized Answer Quality";
   labels.passed = "Localized Passed";
   labels.failed = "Localized Failed";
@@ -2163,6 +2233,8 @@ static int harness_check_responses_items(void)
   message.direction = "response";
   message.role = "api_reasoning";
   message.kind = "reasoning";
+  message.can_include_in_context = 1;
+  message.include_in_context = 1;
   message.text = "Checked the available evidence.";
   message.created_at = "2026-07-10T12:34:56.000Z";
   reasoning_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
@@ -2174,6 +2246,8 @@ static int harness_check_responses_items(void)
   message.direction = "response";
   message.role = "api_function_call";
   message.kind = "function_call";
+  message.can_include_in_context = 1;
+  message.include_in_context = 1;
   message.tool_call_id = "call-database-query";
   message.tool_name = "database_query";
   message.arguments_json =
@@ -2188,6 +2262,8 @@ static int harness_check_responses_items(void)
   message.direction = "response";
   message.role = "api_function_call";
   message.kind = "function_call";
+  message.can_include_in_context = 1;
+  message.include_in_context = 1;
   message.tool_call_id = "call-bash";
   message.tool_name = "bash";
   message.arguments_json = "{\"command\":\"pwd\"}";
@@ -2202,6 +2278,8 @@ static int harness_check_responses_items(void)
   message.direction = "request";
   message.role = "api_function_output";
   message.kind = "function_call_output";
+  message.can_include_in_context = 1;
+  message.include_in_context = 0;
   message.tool_call_id = "call-database-query";
   message.result_json =
     "{\"columns\":[\"value\"],\"rows\":[[1]],"
@@ -2216,6 +2294,8 @@ static int harness_check_responses_items(void)
   message.direction = "request";
   message.role = "api_function_output";
   message.kind = "function_call_output";
+  message.can_include_in_context = 1;
+  message.include_in_context = 1;
   message.tool_call_id = "call-bash";
   message.tool_name = "bash";
   message.result_json =
@@ -2232,6 +2312,8 @@ static int harness_check_responses_items(void)
   message.direction = "request";
   message.role = "api_function_output";
   message.kind = "function_call_output";
+  message.can_include_in_context = 1;
+  message.include_in_context = 1;
   message.tool_call_id = "call-database-query-error";
   message.result_json = "Error: Tool failed.";
   message.text = "Error: Tool failed.";
@@ -2246,6 +2328,8 @@ static int harness_check_responses_items(void)
   message.direction = "response";
   message.role = "api_item";
   message.kind = "openrouter:web_search";
+  message.can_include_in_context = 1;
+  message.include_in_context = 1;
   message.response_item_action_json =
     "{\"type\":\"search\",\"query\":\"Strappy Cocoa\","
     "\"sources\":[{\"type\":\"url\","
@@ -2261,6 +2345,8 @@ static int harness_check_responses_items(void)
   message.direction = "response";
   message.role = "api_item";
   message.kind = "openrouter:web_fetch";
+  message.can_include_in_context = 1;
+  message.include_in_context = 1;
   message.response_item_url = "https://example.com/article";
   message.response_item_title = "Example Article";
   message.response_item_status = "completed";
@@ -2274,6 +2360,8 @@ static int harness_check_responses_items(void)
   message.direction = "request";
   message.role = "developer";
   message.kind = "message";
+  message.can_include_in_context = 1;
+  message.include_in_context = 1;
   message.text = "Audit the available tools.";
   developer_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
 
@@ -2315,6 +2403,8 @@ static int harness_check_responses_items(void)
                                "data-request-endpoint=\"/responses\"") &&
        harness_expect_contains(call_html,
                                "data-cumulative-usage-cost=\"0.02392002\"") &&
+       harness_expect_not_contains(call_html,
+                                   "data-include-in-context=") &&
        harness_expect_contains(call_html,
                                "<div class=\"role\">Response Status</div>") &&
        harness_expect_contains(call_html, "response-metadata") &&
@@ -2327,6 +2417,11 @@ static int harness_check_responses_items(void)
                                "api-reasoning-collapsed\"") &&
        harness_expect_contains(reasoning_html,
                                "data-direction=\"response\"") &&
+       harness_expect_contains(reasoning_html,
+                               "data-include-in-context=\"1\"") &&
+       harness_expect_contains(
+         reasoning_html,
+         "data-include-in-context-label=\"Included in Future Context\"") &&
        harness_expect_contains(reasoning_html,
                                "data-direction-label=\"Response\"") &&
        harness_expect_contains(reasoning_html,
@@ -2354,6 +2449,12 @@ static int harness_check_responses_items(void)
                                "data-tool-call-id=\"call-database-query\"") &&
        harness_expect_contains(function_html,
                                "data-tool-name=\"database_query\"") &&
+       harness_expect_contains(function_html,
+                               "data-include-in-context=\"1\"") &&
+       harness_expect_contains(
+         function_html,
+         "data-include-in-context-label=\"Localized Included in Future "
+         "Context\"") &&
        harness_expect_contains(function_html,
                                "data-tool-label=\"Localized Tool Request\"") &&
        harness_expect_contains(function_html,
@@ -2395,6 +2496,8 @@ static int harness_check_responses_items(void)
                                    "data-api-call-id=") &&
        harness_expect_contains(output_html,
                                "data-direction=\"request\"") &&
+       harness_expect_contains(output_html,
+                               "data-include-in-context=\"0\"") &&
        harness_expect_contains(output_html,
                                "data-direction-label=\"Request\"") &&
        harness_expect_not_contains(output_html,
@@ -2479,6 +2582,8 @@ static int harness_check_responses_items(void)
                                "data-kind=\"answer_quality\"") &&
        harness_expect_contains(quality_html,
                                "data-direction=\"response\"") &&
+       harness_expect_not_contains(quality_html,
+                                   "data-include-in-context=") &&
        harness_expect_contains(quality_html,
                                "data-answer-quality-json=\"{&quot;outcome&quot;:"
                                "&quot;failed&quot;") &&

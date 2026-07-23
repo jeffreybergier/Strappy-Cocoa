@@ -20,6 +20,7 @@
 "Response" = "Response";
 "Round" = "Round";
 "Attempt" = "Attempt";
+"Included in Future Context" = "Included in Future Context";
 "Answer Quality" = "Answer Quality";
 "Passed" = "Passed";
 "Failed" = "Failed";

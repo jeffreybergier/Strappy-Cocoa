@@ -83,6 +83,12 @@ int strappy_session_load_message_record_by_key(
   const char *message_key,
   strappy_session_message_record *record,
   char **error_out);
+int strappy_session_update_model_request_include_in_context(
+  const char *db_path,
+  long long session_id,
+  long long model_request_id,
+  int include_in_context,
+  char **error_out);
 int strappy_session_update_streaming_enabled(const char *db_path,
                                              long long session_id,
                                              int streaming_enabled,
@@ -163,6 +169,10 @@ char *strappy_session_webview_append_messages_js_for_session(
   char **error_out);
 char *strappy_session_webview_set_processing_status_js(
   const char *status_json);
+char *strappy_session_webview_set_round_context_inclusion_js(
+  long long model_request_id,
+  int include_in_context,
+  int animated);
 char *strappy_session_webview_message_update_js_for_key(
   const char *db_path,
   long long session_id,
