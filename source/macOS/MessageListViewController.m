@@ -636,7 +636,7 @@ static BOOL StrappyContextRoundActionValues(
   NSString *path;
   NSString *html;
   NSString *errorText;
-  NSUInteger count;
+  NSString *timelineCursor;
 
   path = [htmlDirectoryPath_ stringByAppendingPathComponent:@"session.html"];
   if (!StrappyEnsureDirectory(htmlDirectoryPath_)) {
@@ -647,11 +647,13 @@ static BOOL StrappyContextRoundActionValues(
   }
 
   errorText = ([statusText_ length] > 0U) ? statusText_ : nil;
-  count = 0U;
+  timelineCursor = nil;
   html = [session_ webViewMessagesPageHTMLWithErrorText:errorText
-                                           messageCount:&count
+                                           messageCount:NULL
+                                         timelineCursor:&timelineCursor
                                                   error:nil];
-  newestRenderedMessageCount_ = count;
+  [newestRenderedTimelineCursor_ release];
+  newestRenderedTimelineCursor_ = [timelineCursor copy];
   if (![html writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil]) {
     return nil;
   }
@@ -938,25 +940,27 @@ static BOOL StrappyContextRoundActionValues(
 
 - (BOOL)appendNewMessagesToWebView
 {
-  NSUInteger count;
-  NSUInteger start;
+  NSUInteger appendedCount;
   NSString *js;
+  NSString *nextCursor;
 
   if (session_ == nil) {
     return NO;
   }
-  start = newestRenderedMessageCount_;
-  count = 0U;
-  js = [session_ webViewAppendMessagesJavaScriptFromIndex:start
-                                             messageCount:&count
-                                                    error:nil];
+  appendedCount = 0U;
+  nextCursor = nil;
+  js = [session_
+    webViewAppendMessagesJavaScriptAfterTimelineCursor:
+      newestRenderedTimelineCursor_
+                                    nextTimelineCursor:&nextCursor
+                                  appendedMessageCount:&appendedCount
+                                                 error:nil];
   if (![js isKindOfClass:[NSString class]]) {
     return NO;
   }
-  if (start > count) {
-    return NO;
-  }
-  if (start == count) {
+  if (appendedCount == 0U) {
+    [newestRenderedTimelineCursor_ release];
+    newestRenderedTimelineCursor_ = [nextCursor copy];
     return YES;
   }
 
@@ -965,7 +969,8 @@ static BOOL StrappyContextRoundActionValues(
   }
   [self flushPendingStreamEvents];
   [self pushJavaScript:js];
-  newestRenderedMessageCount_ = count;
+  [newestRenderedTimelineCursor_ release];
+  newestRenderedTimelineCursor_ = [nextCursor copy];
   return YES;
 }
 
@@ -977,6 +982,7 @@ static BOOL StrappyContextRoundActionValues(
   [session_ release];
   [sendController_ release];
   [statusText_ release];
+  [newestRenderedTimelineCursor_ release];
   [super dealloc];
 }
 

@@ -87,10 +87,15 @@ extern NSString * const StrappyWebProviderParallel;
 - (NSArray *)messagesWithError:(NSError **)error;
 - (NSString *)webViewMessagesPageHTMLWithErrorText:(NSString *)errorText
                                       messageCount:(NSUInteger *)messageCount
+                                    timelineCursor:(NSString **)timelineCursor
                                              error:(NSError **)error;
-- (NSString *)webViewAppendMessagesJavaScriptFromIndex:(NSUInteger)startIndex
-                                          messageCount:(NSUInteger *)messageCount
-                                                 error:(NSError **)error;
+- (NSString *)webViewAppendMessagesJavaScriptAfterTimelineCursor:
+                (NSString *)timelineCursor
+                                      nextTimelineCursor:
+                (NSString **)nextTimelineCursor
+                                    appendedMessageCount:
+                (NSUInteger *)appendedMessageCount
+                                                   error:(NSError **)error;
 - (NSString *)webViewJavaScriptForStreamEvent:(NSDictionary *)event
                                         error:(NSError **)error;
 - (NSString *)webViewJavaScriptForModelRequestIdentifier:

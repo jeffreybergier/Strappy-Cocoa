@@ -70,12 +70,12 @@ int strappy_session_list_message_records(
   long long session_id,
   strappy_session_message_record_list *list,
   char **error_out);
-int strappy_session_list_message_records_from_index(
+int strappy_session_list_message_records_after(
   const char *db_path,
   long long session_id,
-  size_t start_index,
+  const strappy_response_timeline_cursor *after_cursor,
   strappy_session_message_record_list *list,
-  size_t *total_count_out,
+  strappy_response_timeline_cursor *next_cursor_out,
   char **error_out);
 int strappy_session_load_message_record_by_key(
   const char *db_path,
@@ -160,12 +160,14 @@ char *strappy_session_webview_messages_page_html_for_session(
   const char *error_text,
   const char *processing_status_json,
   size_t *message_count_out,
+  char **timeline_cursor_out,
   char **error_out);
 char *strappy_session_webview_append_messages_js_for_session(
   const char *db_path,
   long long session_id,
-  size_t start_index,
-  size_t *message_count_out,
+  const char *timeline_cursor,
+  size_t *appended_message_count_out,
+  char **next_timeline_cursor_out,
   char **error_out);
 char *strappy_session_webview_set_processing_status_js(
   const char *status_json);

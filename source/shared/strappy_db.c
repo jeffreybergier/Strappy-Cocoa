@@ -375,6 +375,24 @@ void strappy_session_record_list_destroy(strappy_session_record_list *list)
   strappy_session_record_list_init(list);
 }
 
+void strappy_response_timeline_cursor_init(
+  strappy_response_timeline_cursor *cursor)
+{
+  if (cursor == NULL) {
+    return;
+  }
+
+  cursor->session_id = 0LL;
+  cursor->request_id = 0LL;
+  cursor->group_phase = 0LL;
+  cursor->attempt_index = 0LL;
+  cursor->attempt_phase = 0LL;
+  cursor->item_index = 0LL;
+  cursor->entry_type = 0LL;
+  cursor->row_id = 0LL;
+  cursor->valid = 0;
+}
+
 void strappy_session_message_record_init(strappy_session_message_record *record)
 {
   if (record == NULL) {
@@ -423,6 +441,7 @@ void strappy_session_message_record_init(strappy_session_message_record *record)
   record->include_in_context = 0;
   record->is_error = 0;
   record->http_status = 0L;
+  strappy_response_timeline_cursor_init(&record->timeline_cursor);
 }
 
 void strappy_session_message_record_destroy(strappy_session_message_record *record)
@@ -17177,32 +17196,13 @@ static int strappy_db_semantic_populate_timeline_item(
 static int strappy_db_semantic_list_response_timeline(
   const char *db_path,
   long long session_id,
-  size_t start_index,
+  const strappy_response_timeline_cursor *after_cursor,
   strappy_session_message_record_list *list,
-  size_t *total_count_out,
+  strappy_response_timeline_cursor *next_cursor_out,
   char **error_out)
 {
-  static const char *count_sql =
-    "SELECT "
-    "(SELECT COUNT(*) FROM http_attempts a "
-      "JOIN model_requests r ON r.id = a.request_id "
-      "JOIN turns t ON t.id = r.turn_id "
-      "WHERE t.session_id = ? AND a.state NOT IN ('pending','running')) + "
-    "(SELECT COUNT(*) FROM conversation_items i "
-      "JOIN model_requests r ON r.id = i.introduced_request_id "
-      "JOIN turns t ON t.id = r.turn_id "
-      "WHERE i.session_id = ? AND i.timeline_visible = 1) + "
-    "(SELECT COUNT(*) FROM conversation_items i "
-      "JOIN http_attempts a ON a.id = i.source_attempt_id "
-      "WHERE i.session_id = ? AND i.timeline_visible = 1 "
-      "AND a.state NOT IN ('pending','running')) + "
-    "(SELECT COUNT(*) FROM answer_quality_audits q "
-      "JOIN http_attempts a ON a.id = q.response_attempt_id "
-      "JOIN model_requests r ON r.id = a.request_id "
-      "JOIN turns t ON t.id = r.turn_id "
-      "WHERE t.session_id = ? "
-      "AND a.state NOT IN ('pending','running'));";
-  static const char *sql =
+  static const char *sql_part_one =
+    "SELECT * FROM ("
     "SELECT 0 AS entry_type, a.id AS row_id, t.id AS turn_id, "
     "r.id AS request_id, a.id AS attempt_id, NULL AS item_id, "
     "NULL AS direction, t.prompt_group_key, r.request_kind, "
@@ -17220,7 +17220,8 @@ static int strappy_db_semantic_list_response_timeline(
     "JOIN turns t ON t.id = r.turn_id "
     "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
     "LEFT JOIN api_usage u ON u.attempt_id = a.id "
-    "WHERE t.session_id = ? AND a.state NOT IN ('pending','running') "
+    "WHERE t.session_id = ?1 AND a.state NOT IN ('pending','running') "
+    "AND (?5 = 0 OR r.id >= ?6) "
     "UNION ALL "
     "SELECT 2, i.id, t.id, r.id, NULL, i.id, 'request', "
     "t.prompt_group_key, r.request_kind, r.round_index, -1, NULL, 0, "
@@ -17232,7 +17233,9 @@ static int strappy_db_semantic_list_response_timeline(
     "FROM conversation_items i "
     "JOIN model_requests r ON r.id = i.introduced_request_id "
     "JOIN turns t ON t.id = r.turn_id "
-    "WHERE i.session_id = ? AND i.timeline_visible = 1 "
+    "WHERE i.session_id = ?2 AND i.timeline_visible = 1 "
+    "AND (?5 = 0 OR r.id >= ?6) ";
+  static const char *sql_part_two =
     "UNION ALL "
     "SELECT 1, q.id, t.id, r.id, a.id, "
     "(SELECT ci.id FROM conversation_items ci "
@@ -17256,7 +17259,8 @@ static int strappy_db_semantic_list_response_timeline(
     "JOIN model_requests r ON r.id = a.request_id "
     "JOIN turns t ON t.id = r.turn_id "
     "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
-    "WHERE t.session_id = ? AND a.state NOT IN ('pending','running') "
+    "WHERE t.session_id = ?3 AND a.state NOT IN ('pending','running') "
+    "AND (?5 = 0 OR r.id >= ?6) "
     "UNION ALL "
     "SELECT 2, i.id, t.id, r.id, a.id, i.id, 'response', "
     "t.prompt_group_key, r.request_kind, r.round_index, a.attempt_index, a.state, "
@@ -17274,18 +17278,38 @@ static int strappy_db_semantic_list_response_timeline(
     "JOIN model_requests r ON r.id = a.request_id "
     "JOIN turns t ON t.id = r.turn_id "
     "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
-    "WHERE i.session_id = ? AND i.timeline_visible = 1 "
+    "WHERE i.session_id = ?4 AND i.timeline_visible = 1 "
     "AND a.state NOT IN ('pending','running') "
-    "ORDER BY request_id, 19, attempt_index, 20, 21, entry_type "
-    "LIMIT -1 OFFSET ?;";
+    "AND (?5 = 0 OR r.id >= ?6)"
+    ") AS timeline "
+    "WHERE ?5 = 0 "
+    "OR request_id > ?6 "
+    "OR (request_id = ?6 AND group_phase > ?7) "
+    "OR (request_id = ?6 AND group_phase = ?7 "
+      "AND attempt_index > ?8) "
+    "OR (request_id = ?6 AND group_phase = ?7 "
+      "AND attempt_index = ?8 AND attempt_phase > ?9) "
+    "OR (request_id = ?6 AND group_phase = ?7 "
+      "AND attempt_index = ?8 AND attempt_phase = ?9 "
+      "AND item_index > ?10) "
+    "OR (request_id = ?6 AND group_phase = ?7 "
+      "AND attempt_index = ?8 AND attempt_phase = ?9 "
+      "AND item_index = ?10 AND entry_type > ?11) "
+    "OR (request_id = ?6 AND group_phase = ?7 "
+      "AND attempt_index = ?8 AND attempt_phase = ?9 "
+      "AND item_index = ?10 AND entry_type = ?11 AND row_id > ?12) "
+    "ORDER BY request_id, group_phase, attempt_index, attempt_phase, "
+    "item_index, entry_type, row_id;";
   sqlite3 *db;
-  sqlite3_stmt *count_stmt;
   sqlite3_stmt *stmt;
-  sqlite3_int64 total_count;
+  char *sql;
+  strappy_response_timeline_cursor cursor;
   int rc;
 
-  if (total_count_out != NULL) {
-    *total_count_out = 0U;
+  strappy_response_timeline_cursor_init(&cursor);
+  cursor.session_id = session_id;
+  if (next_cursor_out != NULL) {
+    *next_cursor_out = cursor;
   }
   if (list == NULL) {
     strappy_set_error(error_out, "Responses timeline has no output.");
@@ -17296,9 +17320,24 @@ static int strappy_db_semantic_list_response_timeline(
     strappy_set_error(error_out, "Session id is not valid.");
     return 0;
   }
-  if (start_index > (size_t)LLONG_MAX) {
-    strappy_set_error(error_out, "Responses timeline range is too large.");
-    return 0;
+  if (after_cursor != NULL) {
+    if (!after_cursor->valid ||
+        (after_cursor->session_id != session_id) ||
+        (after_cursor->request_id <= 0LL) ||
+        (after_cursor->group_phase < 0LL) ||
+        (after_cursor->attempt_index < -1LL) ||
+        (after_cursor->attempt_phase < 0LL) ||
+        (after_cursor->item_index < -1LL) ||
+        (after_cursor->entry_type < 0LL) ||
+        (after_cursor->entry_type > 2LL) ||
+        (after_cursor->row_id <= 0LL)) {
+      strappy_set_error(error_out, "Responses timeline cursor is not valid.");
+      return 0;
+    }
+    cursor = *after_cursor;
+    if (next_cursor_out != NULL) {
+      *next_cursor_out = cursor;
+    }
   }
   if (!strappy_db_open(db_path, &db, error_out)) {
     return 0;
@@ -17307,64 +17346,37 @@ static int strappy_db_semantic_list_response_timeline(
     strappy_db_release(db);
     return 0;
   }
-  count_stmt = NULL;
-  rc = sqlite3_prepare_v2(db, count_sql, -1, &count_stmt, NULL);
-  if ((rc != SQLITE_OK) ||
-      (sqlite3_bind_int64(count_stmt, 1,
-                          (sqlite3_int64)session_id) != SQLITE_OK) ||
-      (sqlite3_bind_int64(count_stmt, 2,
-                          (sqlite3_int64)session_id) != SQLITE_OK) ||
-      (sqlite3_bind_int64(count_stmt, 3,
-                          (sqlite3_int64)session_id) != SQLITE_OK) ||
-      (sqlite3_bind_int64(count_stmt, 4,
-                          (sqlite3_int64)session_id) != SQLITE_OK)) {
-    strappy_set_formatted_error(error_out,
-                                "Could not count semantic Responses timeline: %s",
-                                sqlite3_errmsg(db));
-    sqlite3_finalize(count_stmt);
-    strappy_db_release(db);
-    return 0;
-  }
-  rc = sqlite3_step(count_stmt);
-  if (rc != SQLITE_ROW) {
-    strappy_set_formatted_error(error_out,
-                                "Could not count semantic Responses timeline: %s",
-                                sqlite3_errmsg(db));
-    sqlite3_finalize(count_stmt);
-    strappy_db_release(db);
-    return 0;
-  }
-  total_count = sqlite3_column_int64(count_stmt, 0);
-  sqlite3_finalize(count_stmt);
-  if ((total_count < 0) ||
-      ((unsigned long long)total_count > (unsigned long long)((size_t)-1))) {
-    strappy_set_error(error_out, "Responses timeline is too large.");
-    strappy_db_release(db);
-    return 0;
-  }
-  if (total_count_out != NULL) {
-    *total_count_out = (size_t)total_count;
-  }
-  if (start_index > (size_t)total_count) {
+  sql = sqlite3_mprintf("%s%s", sql_part_one, sql_part_two);
+  if (sql == NULL) {
     strappy_set_error(error_out,
-                      "Responses timeline range exceeds stored messages.");
+                      "Could not allocate semantic Responses timeline query.");
     strappy_db_release(db);
     return 0;
-  }
-  if (start_index == (size_t)total_count) {
-    strappy_db_release(db);
-    return 1;
   }
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  sqlite3_free(sql);
   if ((rc != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)session_id) != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 4,
                           (sqlite3_int64)session_id) != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 5,
-                          (sqlite3_int64)start_index) != SQLITE_OK)) {
+      (sqlite3_bind_int(stmt, 5, cursor.valid ? 1 : 0) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 6,
+                          (sqlite3_int64)cursor.request_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 7,
+                          (sqlite3_int64)cursor.group_phase) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 8,
+                          (sqlite3_int64)cursor.attempt_index) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 9,
+                          (sqlite3_int64)cursor.attempt_phase) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 10,
+                          (sqlite3_int64)cursor.item_index) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 11,
+                          (sqlite3_int64)cursor.entry_type) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 12,
+                          (sqlite3_int64)cursor.row_id) != SQLITE_OK)) {
     strappy_set_formatted_error(error_out,
                                 "Could not prepare semantic Responses timeline: %s",
                                 sqlite3_errmsg(db));
@@ -17398,6 +17410,19 @@ static int strappy_db_semantic_list_response_timeline(
     record->round_index = (long)sqlite3_column_int64(stmt, 9);
     record->attempt_index = (sqlite3_column_type(stmt, 10) != SQLITE_NULL) ?
       (long)sqlite3_column_int64(stmt, 10) : 0L;
+    record->timeline_cursor.session_id = session_id;
+    record->timeline_cursor.request_id = record->model_request_id;
+    record->timeline_cursor.group_phase =
+      (long long)sqlite3_column_int64(stmt, 18);
+    record->timeline_cursor.attempt_index =
+      (long long)sqlite3_column_int64(stmt, 10);
+    record->timeline_cursor.attempt_phase =
+      (long long)sqlite3_column_int64(stmt, 19);
+    record->timeline_cursor.item_index =
+      (long long)sqlite3_column_int64(stmt, 20);
+    record->timeline_cursor.entry_type = (long long)entry_type;
+    record->timeline_cursor.row_id = row_id;
+    record->timeline_cursor.valid = 1;
     if ((entry_type == 0) &&
         (sqlite3_column_type(stmt, 17) != SQLITE_NULL)) {
       record->cumulative_usage_cost =
@@ -17483,6 +17508,10 @@ static int strappy_db_semantic_list_response_timeline(
       strappy_session_message_record_list_destroy(list);
       return 0;
     }
+    cursor = record->timeline_cursor;
+    if (next_cursor_out != NULL) {
+      *next_cursor_out = cursor;
+    }
     list->count++;
   }
   sqlite3_finalize(stmt);
@@ -17492,7 +17521,7 @@ static int strappy_db_semantic_list_response_timeline(
     strappy_set_error(error_out, "Could not read semantic Responses timeline.");
     return 0;
   }
-  if (start_index == 0U) {
+  if (after_cursor == NULL) {
     strappy_db_semantic_finalize_timeline_costs(list);
   } else if (!strappy_db_semantic_finalize_ranged_timeline_costs(db,
                                                                  session_id,
@@ -17506,19 +17535,19 @@ static int strappy_db_semantic_list_response_timeline(
   return 1;
 }
 
-int strappy_db_list_response_timeline_range(
+int strappy_db_list_response_timeline_after(
   const char *db_path,
   long long session_id,
-  size_t start_index,
+  const strappy_response_timeline_cursor *after_cursor,
   strappy_session_message_record_list *list,
-  size_t *total_count_out,
+  strappy_response_timeline_cursor *next_cursor_out,
   char **error_out)
 {
   return strappy_db_semantic_list_response_timeline(db_path,
                                                     session_id,
-                                                    start_index,
+                                                    after_cursor,
                                                     list,
-                                                    total_count_out,
+                                                    next_cursor_out,
                                                     error_out);
 }
 
@@ -17668,9 +17697,9 @@ int strappy_db_list_response_timeline(
   int has_cumulative_usage_cost;
   int rc;
 
-  return strappy_db_list_response_timeline_range(db_path,
+  return strappy_db_list_response_timeline_after(db_path,
                                                  session_id,
-                                                 0U,
+                                                 NULL,
                                                  list,
                                                  NULL,
                                                  error_out);

@@ -358,6 +358,36 @@ static int harness_check_page_scripts(void)
                                "function appendMessage(html){"
                                "clearTimelineError();") &&
        harness_expect_contains(page_html,
+                               "var strappyRowByMessageKeyIndex={};"
+                               "var strappyAssistantByMessageKeyIndex={};") &&
+       harness_expect_contains(page_html,
+                               "var strappyToolRowsByTarget={};") &&
+       harness_expect_contains(page_html,
+                               "function initializeMessageIndexes()") &&
+       harness_expect_contains(page_html,
+                               "function indexAddBefore(a,row,before){"
+                               "var i;if(!a)return;if(before)") &&
+       harness_expect_not_contains(page_html,
+                                   "function indexAddBefore(a,row,before){"
+                                   "var i;if(!a)return;indexRemove(a,row)") &&
+       harness_expect_contains(page_html,
+                               "function rowByMessageKeyAny(key){"
+                               "return key?(strappyRowByMessageKeyIndex["
+                               "indexKey(key)]||null):null;}") &&
+       harness_expect_contains(page_html,
+                               "rows=copyIndex(bucketRows("
+                               "strappyToolRowsByTarget,oldId));") &&
+       harness_expect_contains(page_html,
+                               "function renderMessageDecorationsForRows(rows)") &&
+       harness_expect_contains(page_html,
+                               "renderMessageDecorationsForRows("
+                               "takeDirtyRows())") &&
+       harness_expect_not_contains(page_html, "strappyNeedsRender") &&
+       harness_expect_contains(page_html,
+                               "function rebuildToolCardsForTarget(target)") &&
+       harness_expect_contains(page_html,
+                               "function renderToolsForRows(rows)") &&
+       harness_expect_contains(page_html,
                                "key=rowMessageKey(n);") &&
        harness_expect_contains(page_html,
                                "key!==''&&rowByMessageKeyAny(key)") &&
@@ -678,7 +708,7 @@ static int harness_check_page_scripts(void)
                                ".api-exchange-item.answer_quality>"
                                ".bubble.tool-card-open{padding-bottom:4px;}") &&
        harness_expect_contains(page_html,
-                               "function renderAnswerQualityRows()") &&
+                               "function renderAnswerQualityRows(rows)") &&
        harness_expect_contains(page_html,
                                "function answerQualityStatusIconHTML(status)") &&
        harness_expect_contains(
@@ -1047,7 +1077,8 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "'api-round-'+round+'-'+direction+'-'+kind") &&
        harness_expect_contains(page_html,
-                               "groups[key]={rows:[]}") &&
+                               "rows=copyIndex(bucketRows("
+                               "strappyAPIToolRowsByGroup,key))") &&
        harness_expect_contains(page_html,
                                "setRowClass(row,'api-tool-group-anchor',j===0)") &&
        harness_expect_contains(page_html,
@@ -1390,7 +1421,8 @@ static int harness_check_page_scripts(void)
        harness_expect_not_contains(page_html,
                                    "setTimeout(initProcessingStatusFromRenderState") &&
        harness_expect_contains(page_html,
-                               "<script>initProcessingStatusFromRenderState();"
+                               "<script>initializeMessageIndexes();"
+                               "initProcessingStatusFromRenderState();"
                                "renderMessageDecorations(document);"
                                "scrollBottomNow();") &&
        harness_expect_contains(page_html,
@@ -1398,7 +1430,7 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "function processingNodePromptGroup") &&
        harness_expect_contains(page_html,
-                               "if(processingNodePromptGroup(e)!=group)continue;") &&
+                               "n=rowsForPromptGroup(group);") &&
        harness_expect_contains(page_html,
                                "function setProcessingThinkingCollapsed") &&
        harness_expect_contains(page_html,
@@ -1416,15 +1448,19 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "strappyProcessingPromptGroupKey=group;"
                                "syncProcessingInteractionState(1,group);"
-                               "decorateAPIExchanges(document);"
-                               "decorateAPIToolGroups(document);") &&
+                               "decorateAPIExchangesForRows("
+                               "rowsForPromptGroup(group));"
+                               "decorateAPIToolGroupsForRows("
+                               "rowsForPromptGroup(group));") &&
        harness_expect_contains(page_html,
                                "collapseAPIRoundsForPrompt(group);"
                                "strappyProcessingStatus=null;"
                                "syncProcessingInteractionState(0,group);"
                                "strappyProcessingStatusDirty=1;"
-                               "decorateAPIExchanges(document);"
-                               "decorateAPIToolGroups(document);") &&
+                               "decorateAPIExchangesForRows("
+                               "rowsForPromptGroup(group));"
+                               "decorateAPIToolGroupsForRows("
+                               "rowsForPromptGroup(group));") &&
        harness_expect_contains(page_html,
                                "function toggleAPIExchange(a){"
                                "var id=a&&a.getAttribute?") &&
@@ -1522,19 +1558,22 @@ static int harness_check_page_scripts(void)
        harness_expect_not_contains(page_html, "strappy-round-fade") &&
        harness_expect_not_contains(page_html, "webkitAnimationEnd") &&
        harness_expect_contains(page_html,
-                               "m.appendChild(n);added=1;") &&
+                               "m.appendChild(n);if(hasClass(n,'row')){"
+                               "indexMessageRow(n,null);") &&
        harness_expect_contains(page_html,
-                               "renderAfterMutation(m);"
+                               "renderAfterMutation(added);"
                                "scrollBottomAnimated();") &&
        harness_expect_contains(page_html,
                                "while(d.firstChild){n=d.firstChild;"
-                               "m.insertBefore(n,before);"
-                               "added=1;}") &&
+                               "key=rowMessageKey(n);"
+                               "rowIdentifier=rowId(n);") &&
        harness_expect_contains(page_html,
-                               "if(!added)return;renderAfterMutation(m);"
+                               "if(!added.length)return;"
+                               "flushPendingToolTargets();"
+                               "renderAfterMutation(added);"
                                "scrollBottomAnimated();") &&
        harness_expect_contains(page_html,
-                               "renderAfterMutation(document);}"
+                               "renderAfterMutation([old,next]);}}"
                                "function insertMessageBefore") &&
        harness_expect_contains(page_html,
                                "s.parentNode.removeChild(s);}"
@@ -2173,7 +2212,8 @@ static int harness_check_harness_prompt_group_collapse(void)
        harness_expect_contains(page_html,
                                "id=\"collapse-harness-assistant\"") &&
        harness_expect_contains(page_html,
-                               "renderMessageDecorations(document);") &&
+                               "initializeMessageIndexes();"
+                               "initProcessingStatusFromRenderState();") &&
        harness_expect_contains(streaming_harness_html,
                                "row assistant streaming-active state-pending") &&
        harness_expect_contains(streaming_harness_html,

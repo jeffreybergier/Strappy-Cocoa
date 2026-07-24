@@ -2283,6 +2283,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
 
 - (NSString *)webViewMessagesPageHTMLWithErrorText:(NSString *)errorText
                                       messageCount:(NSUInteger *)messageCount
+                                    timelineCursor:(NSString **)timelineCursor
                                              error:(NSError **)error
 {
   NSString *databasePath;
@@ -2291,11 +2292,15 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   const char *displayErrorText;
   char *pageHTML;
   char *strappyError;
+  char *storedTimelineCursor;
   long long sessionId;
   size_t storedMessageCount;
 
   if (messageCount != NULL) {
     *messageCount = 0U;
+  }
+  if (timelineCursor != NULL) {
+    *timelineCursor = nil;
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
@@ -2316,6 +2321,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
     [sessionIdentifier_ longLongValue] : 0LL;
   storedMessageCount = 0U;
+  storedTimelineCursor = NULL;
   strappyError = NULL;
   pageHTML = strappy_session_webview_messages_page_html_for_session(
     [databasePath fileSystemRepresentation],
@@ -2324,6 +2330,7 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
     displayErrorText,
     StrappySessionOptionalCString(processingStatusJSON),
     &storedMessageCount,
+    &storedTimelineCursor,
     &strappyError);
   if (messageCount != NULL) {
     *messageCount = (NSUInteger)storedMessageCount;
@@ -2332,26 +2339,40 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
+    strappy_session_free_string(storedTimelineCursor);
     strappy_session_free_string(strappyError);
     return nil;
   }
 
+  if (timelineCursor != NULL) {
+    *timelineCursor = StrappySessionStringFromCString(storedTimelineCursor);
+  } else {
+    strappy_session_free_string(storedTimelineCursor);
+  }
   strappy_session_free_string(strappyError);
   return StrappySessionStringFromCString(pageHTML);
 }
 
-- (NSString *)webViewAppendMessagesJavaScriptFromIndex:(NSUInteger)startIndex
-                                          messageCount:(NSUInteger *)messageCount
-                                                 error:(NSError **)error
+- (NSString *)webViewAppendMessagesJavaScriptAfterTimelineCursor:
+                (NSString *)timelineCursor
+                                      nextTimelineCursor:
+                (NSString **)nextTimelineCursor
+                                    appendedMessageCount:
+                (NSUInteger *)appendedMessageCount
+                                                   error:(NSError **)error
 {
   NSString *databasePath;
   char *javaScript;
+  char *storedNextTimelineCursor;
   char *strappyError;
   long long sessionId;
-  size_t storedMessageCount;
+  size_t storedAppendedMessageCount;
 
-  if (messageCount != NULL) {
-    *messageCount = 0U;
+  if (appendedMessageCount != NULL) {
+    *appendedMessageCount = 0U;
+  }
+  if (nextTimelineCursor != NULL) {
+    *nextTimelineCursor = nil;
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
@@ -2362,25 +2383,34 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
 
   sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
     [sessionIdentifier_ longLongValue] : 0LL;
-  storedMessageCount = 0U;
+  storedAppendedMessageCount = 0U;
+  storedNextTimelineCursor = NULL;
   strappyError = NULL;
   javaScript = strappy_session_webview_append_messages_js_for_session(
     [databasePath fileSystemRepresentation],
     sessionId,
-    (size_t)startIndex,
-    &storedMessageCount,
+    StrappySessionOptionalCString(timelineCursor),
+    &storedAppendedMessageCount,
+    &storedNextTimelineCursor,
     &strappyError);
-  if (messageCount != NULL) {
-    *messageCount = (NSUInteger)storedMessageCount;
+  if (appendedMessageCount != NULL) {
+    *appendedMessageCount = (NSUInteger)storedAppendedMessageCount;
   }
   if (javaScript == NULL) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
+    strappy_session_free_string(storedNextTimelineCursor);
     strappy_session_free_string(strappyError);
     return nil;
   }
 
+  if (nextTimelineCursor != NULL) {
+    *nextTimelineCursor =
+      StrappySessionStringFromCString(storedNextTimelineCursor);
+  } else {
+    strappy_session_free_string(storedNextTimelineCursor);
+  }
   strappy_session_free_string(strappyError);
   return StrappySessionStringFromCString(javaScript);
 }

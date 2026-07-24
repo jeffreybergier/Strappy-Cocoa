@@ -3819,9 +3819,9 @@ static int harness_test_answer_quality_report(void)
   char *result;
   char *seed_output;
   sqlite3 *db;
+  strappy_response_timeline_cursor tail_cursor;
   strappy_session_message_record_list timeline;
   strappy_session_message_record_list timeline_tail;
-  size_t timeline_total;
   long long session_id;
   long long value;
   harness_ledger_event_recorder events;
@@ -3847,7 +3847,7 @@ static int harness_test_answer_quality_report(void)
   session_id = 0LL;
   strappy_session_message_record_list_init(&timeline);
   strappy_session_message_record_list_init(&timeline_tail);
-  timeline_total = 0U;
+  strappy_response_timeline_cursor_init(&tail_cursor);
   if (!harness_create_session_database(path, &session_id, &error) ||
       !harness_create_approved_preflight_database(path,
                                                    database_path,
@@ -4035,14 +4035,17 @@ static int harness_test_answer_quality_report(void)
       harness_answer_quality_precedes_assistant(&timeline,
                                                 HARNESS_UNICODE_EMOJI_ANSWER,
                                                 "\"outcome\":\"failed\"") &&
-      (timeline.count >= 2U) &&
-      strappy_db_list_response_timeline_range(path,
-                                              session_id,
-                                              timeline.count - 2U,
-                                              &timeline_tail,
-                                              &timeline_total,
-                                              &error) &&
-      (timeline_total == timeline.count) && (timeline_tail.count == 2U) &&
+      (timeline.count >= 3U);
+  }
+  if (ok) {
+    tail_cursor = timeline.records[timeline.count - 3U].timeline_cursor;
+    ok = strappy_db_list_response_timeline_after(path,
+                                                 session_id,
+                                                 &tail_cursor,
+                                                 &timeline_tail,
+                                                 NULL,
+                                                 &error) &&
+      (timeline_tail.count == 2U) &&
       harness_answer_quality_precedes_assistant(&timeline_tail,
                                                 HARNESS_UNICODE_EMOJI_ANSWER,
                                                 "\"outcome\":\"failed\"");
@@ -4229,13 +4232,15 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
   char endpoint[128];
   char *error;
   char *first_page_html;
+  char *first_timeline_cursor;
   char *first_result;
   char *followup_append_script;
+  char *next_timeline_cursor;
   char *second_result;
   sqlite3 *db;
   strappy_session_record session;
   size_t first_message_count;
-  size_t total_message_count;
+  size_t appended_message_count;
   long long session_id;
   long long value;
   pid_t server_pid;
@@ -4250,11 +4255,13 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
   close(fd);
   error = NULL;
   first_page_html = NULL;
+  first_timeline_cursor = NULL;
   first_result = NULL;
   followup_append_script = NULL;
+  next_timeline_cursor = NULL;
   second_result = NULL;
   first_message_count = 0U;
-  total_message_count = 0U;
+  appended_message_count = 0U;
   session_id = 0LL;
   strappy_session_record_init(&session);
   if (!harness_create_session_database(path, &session_id, &error) ||
@@ -4303,6 +4310,7 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
         NULL,
         NULL,
         &first_message_count,
+        &first_timeline_cursor,
         &error);
     if ((first_page_html != NULL) &&
         (strstr(first_page_html,
@@ -4335,11 +4343,15 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
       strappy_session_webview_append_messages_js_for_session(
         path,
         session_id,
-        first_message_count,
-        &total_message_count,
+        first_timeline_cursor,
+        &appended_message_count,
+        &next_timeline_cursor,
         &error);
     ok = (followup_append_script != NULL) &&
-      (total_message_count > first_message_count) &&
+      (first_message_count > 0U) &&
+      (appended_message_count > 0U) &&
+      (next_timeline_cursor != NULL) &&
+      (strcmp(next_timeline_cursor, first_timeline_cursor) != 0) &&
       (strstr(followup_append_script,
               HARNESS_WORLD_PREFLIGHT_ASSISTANT_TEXT) == NULL) &&
       (strstr(followup_append_script, "call_pf_0_") == NULL) &&
@@ -4390,6 +4402,8 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
   strappy_session_record_destroy(&session);
   free(followup_append_script);
   free(first_page_html);
+  free(first_timeline_cursor);
+  free(next_timeline_cursor);
   free(error);
   unlink(path);
   return ok;
@@ -6226,12 +6240,12 @@ static int harness_test_cumulative_session_usage_cost(void)
     "\"model\":\"test/model\",\"output\":[],"
     "\"usage\":{\"cost\":0.0005}}";
   char path[] = "/tmp/strappy-cumulative-cost-XXXXXX";
+  strappy_response_timeline_cursor range_cursor;
   strappy_session_message_record_list ranged_timeline;
   strappy_session_message_record_list timeline;
   char *error;
   long long session_id;
   long long previous_call_id;
-  size_t total_count;
   int fd;
   int ok;
 
@@ -6245,6 +6259,7 @@ static int harness_test_cumulative_session_usage_cost(void)
   error = NULL;
   session_id = 0LL;
   previous_call_id = 0LL;
+  strappy_response_timeline_cursor_init(&range_cursor);
   strappy_session_message_record_list_init(&timeline);
   strappy_session_message_record_list_init(&ranged_timeline);
   ok = strappy_db_create_session(path, &session_id, &error) &&
@@ -6333,15 +6348,14 @@ static int harness_test_cumulative_session_usage_cost(void)
     harness_double_matches(timeline.records[3].cumulative_usage_cost, 0.0075) &&
     harness_double_matches(timeline.records[4].cumulative_usage_cost, 0.008);
 
-  total_count = 0U;
   if (ok) {
-    ok = strappy_db_list_response_timeline_range(path,
+    range_cursor = timeline.records[1].timeline_cursor;
+    ok = strappy_db_list_response_timeline_after(path,
                                                  session_id,
-                                                 2U,
+                                                 &range_cursor,
                                                  &ranged_timeline,
-                                                 &total_count,
+                                                 NULL,
                                                  &error) &&
-      (total_count == 5U) &&
       (ranged_timeline.count == 3U) &&
       harness_double_matches(
         ranged_timeline.records[0].cumulative_usage_cost, 0.0075) &&
@@ -6943,36 +6957,52 @@ static int harness_test_session_webview_rendering(void)
   strappy_discovered_database_input pending_database;
   strappy_response_call_begin_input begin;
   strappy_response_call_finish_input finish;
+  strappy_response_timeline_cursor final_cursor;
+  strappy_response_timeline_cursor request_cursor;
   strappy_session_message_record_list range;
   const char *first_position;
   const char *second_position;
   char *append_script;
+  char *append_timeline_cursor;
   char *empty_script;
+  char *empty_timeline_cursor;
   char *error;
+  char *initial_cursor;
+  char *initial_page_html;
   char *invalid_script;
+  char *invalid_timeline_cursor;
   char *page_html;
+  char *page_timeline_cursor;
   char *request_script;
+  char *request_timeline_cursor;
   long long call_id;
   long long session_id;
   size_t message_count;
   size_t request_message_count;
-  size_t total_count;
   int ok;
 
   unlink(path);
   unlink(database_path);
   unlink(pending_database_path);
   append_script = NULL;
+  append_timeline_cursor = NULL;
   call_id = 0LL;
   empty_script = NULL;
+  empty_timeline_cursor = NULL;
   error = NULL;
+  initial_cursor = NULL;
+  initial_page_html = NULL;
   invalid_script = NULL;
+  invalid_timeline_cursor = NULL;
   page_html = NULL;
+  page_timeline_cursor = NULL;
   request_script = NULL;
+  request_timeline_cursor = NULL;
   session_id = 0LL;
   message_count = 0U;
   request_message_count = 0U;
-  total_count = 0U;
+  strappy_response_timeline_cursor_init(&final_cursor);
+  strappy_response_timeline_cursor_init(&request_cursor);
   strappy_session_message_record_list_init(&range);
   ok = strappy_webview_configure_localized_labels(&error) &&
        strappy_db_create_session(path, &session_id, &error) &&
@@ -7003,6 +7033,24 @@ static int harness_test_session_webview_rendering(void)
     goto cleanup;
   }
 
+  initial_page_html =
+    strappy_session_webview_messages_page_html_for_session(
+      path,
+      session_id,
+      "../shared/Resources",
+      NULL,
+      NULL,
+      &message_count,
+      &initial_cursor,
+      &error);
+  if ((initial_page_html == NULL) || (message_count != 0U) ||
+      (initial_cursor == NULL)) {
+    fprintf(stderr,
+            "Could not capture the empty WebView timeline cursor: %s\n",
+            (error != NULL) ? error : "unexpected output");
+    goto cleanup;
+  }
+
   memset(&begin, 0, sizeof(begin));
   begin.session_id = session_id;
   begin.prompt_group_key = "webview-group";
@@ -7022,13 +7070,12 @@ static int harness_test_session_webview_rendering(void)
     goto cleanup;
   }
 
-  ok = strappy_db_list_response_timeline_range(path,
-                                                session_id,
-                                                0U,
-                                                &range,
-                                                &total_count,
-                                                &error) &&
-    (total_count == 1U) &&
+  ok = strappy_db_list_response_timeline_after(path,
+                                               session_id,
+                                               NULL,
+                                               &range,
+                                               &request_cursor,
+                                               &error) &&
     (range.count == 1U) &&
     (range.records[0].direction != NULL) &&
     (strcmp(range.records[0].direction, "request") == 0) &&
@@ -7046,10 +7093,12 @@ static int harness_test_session_webview_rendering(void)
   request_script = strappy_session_webview_append_messages_js_for_session(
     path,
     session_id,
-    0U,
+    initial_cursor,
     &request_message_count,
+    &request_timeline_cursor,
     &error);
   ok = (request_script != NULL) && (request_message_count == 1U) &&
+       (request_timeline_cursor != NULL) &&
        (strstr(request_script, "appendMessage(") != NULL) &&
        (strstr(request_script, first_text) != NULL) &&
        (strstr(request_script, second_text) == NULL) &&
@@ -7083,13 +7132,13 @@ static int harness_test_session_webview_rendering(void)
     goto cleanup;
   }
 
-  ok = strappy_db_list_response_timeline_range(path,
-                                                session_id,
-                                                request_message_count,
-                                                &range,
-                                                &total_count,
-                                                &error);
-  ok = ok && (total_count == 3U) && (range.count == 2U) &&
+  ok = strappy_db_list_response_timeline_after(path,
+                                               session_id,
+                                               &request_cursor,
+                                               &range,
+                                               &final_cursor,
+                                               &error);
+  ok = ok && (range.count == 2U) &&
        (range.records[0].role != NULL) &&
        (strcmp(range.records[0].role, "api_call") == 0) &&
        (range.records[0].direction == NULL) &&
@@ -7114,12 +7163,14 @@ static int harness_test_session_webview_rendering(void)
     "{\"active\":true,\"message_key\":\"session-processing\","
     "\"status_kind\":\"thinking\",\"started_ms\":1000}",
     &message_count,
+    &page_timeline_cursor,
     &error);
   first_position = (page_html != NULL) ?
     strstr(page_html, first_text) : NULL;
   second_position = (page_html != NULL) ?
     strstr(page_html, second_display_text) : NULL;
   ok = (page_html != NULL) && (message_count == 3U) &&
+       (page_timeline_cursor != NULL) &&
        (first_position != NULL) && (second_position != NULL) &&
        (first_position < second_position) &&
        (strstr(page_html, "data-context-item-id=\"") == NULL) &&
@@ -7146,10 +7197,13 @@ static int harness_test_session_webview_rendering(void)
   append_script = strappy_session_webview_append_messages_js_for_session(
     path,
     session_id,
-    request_message_count,
+    request_timeline_cursor,
     &message_count,
+    &append_timeline_cursor,
     &error);
-  ok = (append_script != NULL) && (message_count == 3U) &&
+  ok = (append_script != NULL) && (message_count == 2U) &&
+       (append_timeline_cursor != NULL) &&
+       (strcmp(append_timeline_cursor, page_timeline_cursor) == 0) &&
        (strstr(append_script, "appendMessage(") != NULL) &&
        (strstr(append_script, first_text) == NULL) &&
        (strstr(append_script, second_text) == NULL) &&
@@ -7165,10 +7219,13 @@ static int harness_test_session_webview_rendering(void)
   empty_script = strappy_session_webview_append_messages_js_for_session(
     path,
     session_id,
-    3U,
+    page_timeline_cursor,
     &message_count,
+    &empty_timeline_cursor,
     &error);
-  ok = (empty_script != NULL) && (message_count == 3U) &&
+  ok = (empty_script != NULL) && (message_count == 0U) &&
+       (empty_timeline_cursor != NULL) &&
+       (strcmp(empty_timeline_cursor, page_timeline_cursor) == 0) &&
        (strcmp(empty_script, "") == 0);
   if (!ok) {
     fprintf(stderr,
@@ -7182,10 +7239,12 @@ static int harness_test_session_webview_rendering(void)
   invalid_script = strappy_session_webview_append_messages_js_for_session(
     path,
     session_id,
-    4U,
+    "not-a-timeline-cursor",
     &message_count,
+    &invalid_timeline_cursor,
     &error);
-  ok = (invalid_script == NULL) && (message_count == 3U) && (error != NULL);
+  ok = (invalid_script == NULL) && (message_count == 0U) &&
+       (invalid_timeline_cursor == NULL) && (error != NULL);
   if (!ok) {
     fprintf(stderr,
             "Invalid stored WebView append range unexpectedly succeeded.\n");
@@ -7194,10 +7253,17 @@ static int harness_test_session_webview_rendering(void)
 cleanup:
   strappy_session_message_record_list_destroy(&range);
   strappy_session_free_string(page_html);
+  strappy_session_free_string(page_timeline_cursor);
   strappy_session_free_string(append_script);
+  strappy_session_free_string(append_timeline_cursor);
   strappy_session_free_string(empty_script);
+  strappy_session_free_string(empty_timeline_cursor);
+  strappy_session_free_string(initial_cursor);
+  strappy_session_free_string(initial_page_html);
   strappy_session_free_string(invalid_script);
+  strappy_session_free_string(invalid_timeline_cursor);
   strappy_session_free_string(request_script);
+  strappy_session_free_string(request_timeline_cursor);
   strappy_session_free_string(error);
   unlink(pending_database_path);
   unlink(database_path);

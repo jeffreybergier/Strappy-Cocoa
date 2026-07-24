@@ -7,6 +7,7 @@
 #include "strappy_tools.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -258,19 +259,19 @@ int strappy_session_list_message_records(
                                           error_out);
 }
 
-int strappy_session_list_message_records_from_index(
+int strappy_session_list_message_records_after(
   const char *db_path,
   long long session_id,
-  size_t start_index,
+  const strappy_response_timeline_cursor *after_cursor,
   strappy_session_message_record_list *list,
-  size_t *total_count_out,
+  strappy_response_timeline_cursor *next_cursor_out,
   char **error_out)
 {
-  return strappy_db_list_response_timeline_range(db_path,
+  return strappy_db_list_response_timeline_after(db_path,
                                                  session_id,
-                                                 start_index,
+                                                 after_cursor,
                                                  list,
-                                                 total_count_out,
+                                                 next_cursor_out,
                                                  error_out);
 }
 
@@ -778,6 +779,93 @@ static char *strappy_session_webview_messages_html_for_record_range(
   return messages_html;
 }
 
+static char *strappy_session_timeline_cursor_string(
+  const strappy_response_timeline_cursor *cursor,
+  char **error_out)
+{
+  char buffer[256];
+  int written;
+
+  if ((cursor == NULL) || (cursor->session_id <= 0LL)) {
+    strappy_set_error(error_out, "WebView timeline cursor is not valid.");
+    return NULL;
+  }
+  written = snprintf(buffer,
+                     sizeof(buffer),
+                     "v1:%lld:%d:%lld:%lld:%lld:%lld:%lld:%lld:%lld",
+                     cursor->session_id,
+                     cursor->valid ? 1 : 0,
+                     cursor->request_id,
+                     cursor->group_phase,
+                     cursor->attempt_index,
+                     cursor->attempt_phase,
+                     cursor->item_index,
+                     cursor->entry_type,
+                     cursor->row_id);
+  if ((written < 0) || ((size_t)written >= sizeof(buffer))) {
+    strappy_set_error(error_out, "Could not encode WebView timeline cursor.");
+    return NULL;
+  }
+  return strappy_string_duplicate(buffer);
+}
+
+static int strappy_session_parse_timeline_cursor(
+  const char *value,
+  long long session_id,
+  strappy_response_timeline_cursor *cursor,
+  char **error_out)
+{
+  int consumed;
+  int valid;
+
+  if (cursor == NULL) {
+    strappy_set_error(error_out, "WebView timeline cursor has no output.");
+    return 0;
+  }
+  strappy_response_timeline_cursor_init(cursor);
+  if ((value == NULL) || (value[0] == '\0')) {
+    strappy_set_error(error_out, "WebView timeline cursor is empty.");
+    return 0;
+  }
+  consumed = 0;
+  valid = 0;
+  if ((sscanf(value,
+              "v1:%lld:%d:%lld:%lld:%lld:%lld:%lld:%lld:%lld%n",
+              &cursor->session_id,
+              &valid,
+              &cursor->request_id,
+              &cursor->group_phase,
+              &cursor->attempt_index,
+              &cursor->attempt_phase,
+              &cursor->item_index,
+              &cursor->entry_type,
+              &cursor->row_id,
+              &consumed) != 9) ||
+      (value[consumed] != '\0') ||
+      ((valid != 0) && (valid != 1)) ||
+      (cursor->session_id != session_id)) {
+    strappy_response_timeline_cursor_init(cursor);
+    strappy_set_error(error_out, "WebView timeline cursor is not valid.");
+    return 0;
+  }
+  cursor->valid = valid;
+  if ((!cursor->valid &&
+       ((cursor->request_id != 0LL) || (cursor->group_phase != 0LL) ||
+        (cursor->attempt_index != 0LL) || (cursor->attempt_phase != 0LL) ||
+        (cursor->item_index != 0LL) || (cursor->entry_type != 0LL) ||
+        (cursor->row_id != 0LL))) ||
+      (cursor->valid &&
+       ((cursor->request_id <= 0LL) || (cursor->group_phase < 0LL) ||
+        (cursor->attempt_index < -1LL) || (cursor->attempt_phase < 0LL) ||
+        (cursor->item_index < -1LL) || (cursor->entry_type < 0LL) ||
+        (cursor->entry_type > 2LL) || (cursor->row_id <= 0LL)))) {
+    strappy_response_timeline_cursor_init(cursor);
+    strappy_set_error(error_out, "WebView timeline cursor is not valid.");
+    return 0;
+  }
+  return 1;
+}
+
 char *strappy_session_webview_messages_page_html_for_session(
   const char *db_path,
   long long session_id,
@@ -785,6 +873,7 @@ char *strappy_session_webview_messages_page_html_for_session(
   const char *error_text,
   const char *processing_status_json,
   size_t *message_count_out,
+  char **timeline_cursor_out,
   char **error_out)
 {
   strappy_session_database_display_context database_display;
@@ -793,10 +882,16 @@ char *strappy_session_webview_messages_page_html_for_session(
   char *list_error;
   char *messages_html;
   char *page_html;
+  strappy_response_timeline_cursor timeline_cursor;
 
   if (message_count_out != NULL) {
     *message_count_out = 0U;
   }
+  if (timeline_cursor_out != NULL) {
+    *timeline_cursor_out = NULL;
+  }
+  strappy_response_timeline_cursor_init(&timeline_cursor);
+  timeline_cursor.session_id = session_id;
 
   strappy_session_database_display_context_init(&database_display);
   strappy_session_message_record_list_init(&list);
@@ -828,10 +923,26 @@ char *strappy_session_webview_messages_page_html_for_session(
   if (message_count_out != NULL) {
     *message_count_out = list.count;
   }
+  if (list.count > 0U) {
+    timeline_cursor = list.records[list.count - 1U].timeline_cursor;
+  }
+  if (timeline_cursor_out != NULL) {
+    *timeline_cursor_out =
+      strappy_session_timeline_cursor_string(&timeline_cursor, error_out);
+    if (*timeline_cursor_out == NULL) {
+      strappy_session_message_record_list_destroy(&list);
+      strappy_session_database_display_context_destroy(&database_display);
+      return NULL;
+    }
+  }
   if (!strappy_session_database_display_context_load(
         db_path,
         &database_display,
         error_out)) {
+    if (timeline_cursor_out != NULL) {
+      free(*timeline_cursor_out);
+      *timeline_cursor_out = NULL;
+    }
     strappy_session_message_record_list_destroy(&list);
     return NULL;
   }
@@ -844,6 +955,10 @@ char *strappy_session_webview_messages_page_html_for_session(
     error_out);
   strappy_session_message_record_list_destroy(&list);
   if (messages_html == NULL) {
+    if (timeline_cursor_out != NULL) {
+      free(*timeline_cursor_out);
+      *timeline_cursor_out = NULL;
+    }
     strappy_session_database_display_context_destroy(&database_display);
     return NULL;
   }
@@ -858,6 +973,10 @@ char *strappy_session_webview_messages_page_html_for_session(
   free(messages_html);
   strappy_session_database_display_context_destroy(&database_display);
   if (page_html == NULL) {
+    if (timeline_cursor_out != NULL) {
+      free(*timeline_cursor_out);
+      *timeline_cursor_out = NULL;
+    }
     strappy_set_error(error_out, "Could not render the WebView page.");
   }
   return page_html;
@@ -866,45 +985,66 @@ char *strappy_session_webview_messages_page_html_for_session(
 char *strappy_session_webview_append_messages_js_for_session(
   const char *db_path,
   long long session_id,
-  size_t start_index,
-  size_t *message_count_out,
+  const char *timeline_cursor,
+  size_t *appended_message_count_out,
+  char **next_timeline_cursor_out,
   char **error_out)
 {
   strappy_session_database_display_context database_display;
   strappy_session_message_record_list list;
+  strappy_response_timeline_cursor after_cursor;
+  strappy_response_timeline_cursor next_cursor;
   char *messages_html;
   char *script;
-  size_t total_count;
 
-  if (message_count_out != NULL) {
-    *message_count_out = 0U;
+  if (appended_message_count_out != NULL) {
+    *appended_message_count_out = 0U;
+  }
+  if (next_timeline_cursor_out != NULL) {
+    *next_timeline_cursor_out = NULL;
   }
 
   strappy_session_database_display_context_init(&database_display);
   strappy_session_message_record_list_init(&list);
-  total_count = 0U;
-  if (!strappy_session_list_message_records_from_index(db_path,
-                                                       session_id,
-                                                       start_index,
-                                                       &list,
-                                                       &total_count,
-                                                       error_out)) {
-    if (message_count_out != NULL) {
-      *message_count_out = total_count;
-    }
+  strappy_response_timeline_cursor_init(&after_cursor);
+  strappy_response_timeline_cursor_init(&next_cursor);
+  if (!strappy_session_parse_timeline_cursor(timeline_cursor,
+                                             session_id,
+                                             &after_cursor,
+                                             error_out) ||
+      !strappy_session_list_message_records_after(
+        db_path,
+        session_id,
+        after_cursor.valid ? &after_cursor : NULL,
+        &list,
+        &next_cursor,
+        error_out)) {
     strappy_session_message_record_list_destroy(&list);
     strappy_session_database_display_context_destroy(&database_display);
     return NULL;
   }
 
-  if (message_count_out != NULL) {
-    *message_count_out = total_count;
+  if (appended_message_count_out != NULL) {
+    *appended_message_count_out = list.count;
+  }
+  if (next_timeline_cursor_out != NULL) {
+    *next_timeline_cursor_out =
+      strappy_session_timeline_cursor_string(&next_cursor, error_out);
+    if (*next_timeline_cursor_out == NULL) {
+      strappy_session_message_record_list_destroy(&list);
+      strappy_session_database_display_context_destroy(&database_display);
+      return NULL;
+    }
   }
   if (list.count == 0U) {
     strappy_session_message_record_list_destroy(&list);
     strappy_session_database_display_context_destroy(&database_display);
     script = strappy_string_duplicate("");
     if (script == NULL) {
+      if (next_timeline_cursor_out != NULL) {
+        free(*next_timeline_cursor_out);
+        *next_timeline_cursor_out = NULL;
+      }
       strappy_set_error(error_out, "Could not allocate empty WebView JavaScript.");
     }
     return script;
@@ -914,6 +1054,10 @@ char *strappy_session_webview_append_messages_js_for_session(
         db_path,
         &database_display,
         error_out)) {
+    if (next_timeline_cursor_out != NULL) {
+      free(*next_timeline_cursor_out);
+      *next_timeline_cursor_out = NULL;
+    }
     strappy_session_message_record_list_destroy(&list);
     return NULL;
   }
@@ -927,12 +1071,20 @@ char *strappy_session_webview_append_messages_js_for_session(
   strappy_session_message_record_list_destroy(&list);
   strappy_session_database_display_context_destroy(&database_display);
   if (messages_html == NULL) {
+    if (next_timeline_cursor_out != NULL) {
+      free(*next_timeline_cursor_out);
+      *next_timeline_cursor_out = NULL;
+    }
     return NULL;
   }
 
   script = strappy_webview_append_message_js(messages_html);
   free(messages_html);
   if (script == NULL) {
+    if (next_timeline_cursor_out != NULL) {
+      free(*next_timeline_cursor_out);
+      *next_timeline_cursor_out = NULL;
+    }
     strappy_set_error(error_out, "Could not render WebView append JavaScript.");
   }
   return script;

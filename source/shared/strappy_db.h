@@ -31,6 +31,18 @@ typedef struct strappy_session_record_list {
   size_t count;
 } strappy_session_record_list;
 
+typedef struct strappy_response_timeline_cursor {
+  long long session_id;
+  long long request_id;
+  long long group_phase;
+  long long attempt_index;
+  long long attempt_phase;
+  long long item_index;
+  long long entry_type;
+  long long row_id;
+  int valid;
+} strappy_response_timeline_cursor;
+
 typedef struct strappy_session_message_record {
   long long message_id;
   long long session_id;
@@ -74,6 +86,7 @@ typedef struct strappy_session_message_record {
   int include_in_context;
   int is_error;
   long http_status;
+  strappy_response_timeline_cursor timeline_cursor;
 } strappy_session_message_record;
 
 typedef struct strappy_session_message_record_list {
@@ -307,6 +320,8 @@ void strappy_session_record_init(strappy_session_record *record);
 void strappy_session_record_destroy(strappy_session_record *record);
 void strappy_session_record_list_init(strappy_session_record_list *list);
 void strappy_session_record_list_destroy(strappy_session_record_list *list);
+void strappy_response_timeline_cursor_init(
+  strappy_response_timeline_cursor *cursor);
 void strappy_session_message_record_init(strappy_session_message_record *record);
 void strappy_session_message_record_destroy(strappy_session_message_record *record);
 void strappy_session_message_record_list_init(strappy_session_message_record_list *list);
@@ -566,12 +581,12 @@ int strappy_db_list_response_timeline(
   long long session_id,
   strappy_session_message_record_list *list,
   char **error_out);
-int strappy_db_list_response_timeline_range(
+int strappy_db_list_response_timeline_after(
   const char *db_path,
   long long session_id,
-  size_t start_index,
+  const strappy_response_timeline_cursor *after_cursor,
   strappy_session_message_record_list *list,
-  size_t *total_count_out,
+  strappy_response_timeline_cursor *next_cursor_out,
   char **error_out);
 int strappy_db_update_model_request_include_in_context(
   const char *db_path,

@@ -192,7 +192,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 @property (nonatomic, copy) NSString *statusText;
 @property (nonatomic, strong) NSMutableString *pendingStreamJavaScript;
 @property (nonatomic, strong) NSTimer *streamEventFlushTimer;
-@property (nonatomic, assign) NSUInteger newestRenderedMessageCount;
+@property (nonatomic, copy) NSString *newestRenderedTimelineCursor;
 @property (nonatomic, assign) BOOL webViewContentLoaded;
 @property (nonatomic, assign) BOOL sending;
 @property (nonatomic, assign) BOOL cancelPromptRequested;
@@ -1066,8 +1066,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   NSString *path;
   NSString *html;
   NSString *errorText;
+  NSString *timelineCursor;
   NSNumber *identifier;
-  NSUInteger count;
 
   if (!StrappyEnsureDirectory([self htmlDirectoryPath])) {
     return nil;
@@ -1082,12 +1082,13 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   path = [[self htmlDirectoryPath] stringByAppendingPathComponent:filename];
 
   errorText = ([[self statusText] length] > 0U) ? [self statusText] : nil;
-  count = 0U;
+  timelineCursor = nil;
   html = [[self session]
     webViewMessagesPageHTMLWithErrorText:errorText
-                            messageCount:&count
+                            messageCount:NULL
+                          timelineCursor:&timelineCursor
                                    error:nil];
-  [self setNewestRenderedMessageCount:count];
+  [self setNewestRenderedTimelineCursor:timelineCursor];
   if (![html isKindOfClass:[NSString class]] ||
       ![html writeToFile:path
               atomically:YES
@@ -1389,27 +1390,28 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
 - (BOOL)appendNewMessagesToWebView
 {
-  NSUInteger count;
-  NSUInteger start;
+  NSUInteger appendedCount;
+  NSString *cursor;
   NSString *javaScript;
+  NSString *nextCursor;
 
   if ([self session] == nil) {
     return NO;
   }
 
-  start = [self newestRenderedMessageCount];
-  count = 0U;
+  cursor = [self newestRenderedTimelineCursor];
+  appendedCount = 0U;
+  nextCursor = nil;
   javaScript = [[self session]
-    webViewAppendMessagesJavaScriptFromIndex:start
-                                messageCount:&count
-                                       error:nil];
+    webViewAppendMessagesJavaScriptAfterTimelineCursor:cursor
+                                    nextTimelineCursor:&nextCursor
+                                  appendedMessageCount:&appendedCount
+                                                 error:nil];
   if (![javaScript isKindOfClass:[NSString class]]) {
     return NO;
   }
-  if (start > count) {
-    return NO;
-  }
-  if (start == count) {
+  if (appendedCount == 0U) {
+    [self setNewestRenderedTimelineCursor:nextCursor];
     return YES;
   }
 
@@ -1419,7 +1421,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
   [self flushPendingStreamEvents];
   [[self webView] stringByEvaluatingJavaScriptFromString:javaScript];
-  [self setNewestRenderedMessageCount:count];
+  [self setNewestRenderedTimelineCursor:nextCursor];
   return YES;
 }
 

@@ -20,7 +20,7 @@
   NSString                 *statusText_;
   NSMutableString          *pendingStreamJavaScript_;
   NSTimer                  *streamEventFlushTimer_;
-  NSUInteger                newestRenderedMessageCount_;
+  NSString                 *newestRenderedTimelineCursor_;
   BOOL                      sending_;
   BOOL                      cancelPromptRequested_;
 }
