@@ -1961,6 +1961,38 @@ static void strappy_responses_log_call_started(
          (unsigned long)((request_json != NULL) ? strlen(request_json) : 0U));
 }
 
+static void strappy_responses_call_did_begin(
+  long long call_id,
+  const char *prompt_group_key,
+  strappy_responses_event_callback callback,
+  void *callback_data)
+{
+  strappy_responses_event event;
+  char message_key[64];
+  long long now_ms;
+
+  if (callback == NULL) {
+    return;
+  }
+
+  now_ms = strappy_responses_now_ms();
+  snprintf(message_key,
+           sizeof(message_key),
+           "response-call-%lld",
+           call_id);
+  memset(&event, 0, sizeof(event));
+  event.type = STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED;
+  event.prompt_group_key = prompt_group_key;
+  event.actor = "api";
+  event.kind = "response_api_call";
+  event.message_key = message_key;
+  event.render_role = "api_call";
+  event.status_kind = "running";
+  event.status_started_ms = now_ms;
+  event.status_updated_ms = now_ms;
+  (void)callback(&event, callback_data);
+}
+
 static void strappy_responses_call_did_finish(
   long long session_id,
   long long call_id,
@@ -2302,6 +2334,10 @@ static int strappy_responses_send_round(
 
     strappy_responses_http_result_init(&http);
     strappy_responses_analysis_init(&analysis);
+    strappy_responses_call_did_begin(call_id,
+                                     prompt_group_key,
+                                     callback,
+                                     callback_data);
     client_ok = strappy_client_send_responses_json(
       &runtime->config,
       request_json,

@@ -843,11 +843,14 @@ static int harness_query_int(sqlite3 *db, const char *sql, long long *value_out)
 typedef struct harness_ledger_event_recorder {
   const char *db_path;
   long long count;
+  long long started_count;
   long long processing_count;
   long long processing_started_ms;
   long long answer_quality_count;
+  size_t timeline_count;
   long clear_count;
   int valid;
+  int saw_timeline;
   int saw_thinking;
   int saw_tools;
   int saw_retry_wait;
@@ -858,6 +861,107 @@ typedef struct harness_ledger_event_recorder {
   long long first_poll_ms;
   unsigned int retry_after_seconds;
 } harness_ledger_event_recorder;
+
+static int harness_verify_timeline_hierarchy(
+  const strappy_session_message_record_list *timeline,
+  int require_retry);
+
+static int harness_ledger_timeline_matches(
+  harness_ledger_event_recorder *recorder,
+  long long session_id,
+  long long request_id,
+  long long call_id,
+  long long attempt_index,
+  int running)
+{
+  strappy_session_message_record_list timeline;
+  char *error;
+  size_t current_request_count;
+  size_t current_attempt_count;
+  size_t suffix_start;
+  size_t index;
+  int ok;
+
+  strappy_session_message_record_list_init(&timeline);
+  error = NULL;
+  current_request_count = 0U;
+  current_attempt_count = 0U;
+  suffix_start = recorder->timeline_count;
+  ok = strappy_db_list_response_timeline(recorder->db_path,
+                                         session_id,
+                                         &timeline,
+                                         &error) &&
+    harness_verify_timeline_hierarchy(&timeline, 0);
+  if (!ok) {
+    strappy_session_free_string(error);
+    strappy_session_message_record_list_destroy(&timeline);
+    return 0;
+  }
+
+  if (!recorder->saw_timeline) {
+    suffix_start = timeline.count;
+    for (index = 0U; index < timeline.count; index++) {
+      if (timeline.records[index].model_request_id == request_id) {
+        suffix_start = index;
+        break;
+      }
+    }
+  } else if (timeline.count < suffix_start) {
+    ok = 0;
+  }
+
+  for (index = 0U; index < timeline.count; index++) {
+    const strappy_session_message_record *record;
+
+    record = &timeline.records[index];
+    if ((record->model_request_id == request_id) &&
+        (record->direction != NULL) &&
+        (strcmp(record->direction, "request") == 0)) {
+      current_request_count++;
+    }
+    if (record->http_attempt_id == call_id) {
+      current_attempt_count++;
+    }
+  }
+
+  if (running) {
+    ok = ok && (current_request_count > 0U) &&
+      (current_attempt_count == 0U);
+    if (attempt_index == 0LL) {
+      ok = ok && (suffix_start < timeline.count);
+      for (index = suffix_start; ok && (index < timeline.count); index++) {
+        const strappy_session_message_record *record;
+
+        record = &timeline.records[index];
+        ok = (record->model_request_id == request_id) &&
+          (record->http_attempt_id == 0LL) &&
+          (record->direction != NULL) &&
+          (strcmp(record->direction, "request") == 0);
+      }
+    } else {
+      ok = ok && recorder->saw_timeline &&
+        (timeline.count == suffix_start);
+    }
+  } else {
+    ok = ok && recorder->saw_timeline &&
+      (current_attempt_count > 0U) &&
+      (suffix_start < timeline.count);
+    for (index = suffix_start; ok && (index < timeline.count); index++) {
+      const strappy_session_message_record *record;
+
+      record = &timeline.records[index];
+      ok = (record->http_attempt_id == call_id) &&
+        ((record->direction == NULL) ||
+         (strcmp(record->direction, "request") != 0));
+    }
+  }
+
+  recorder->timeline_count = timeline.count;
+  recorder->saw_timeline = 1;
+  strappy_session_free_string(error);
+  strappy_session_message_record_list_destroy(&timeline);
+  return ok;
+}
 
 static long long harness_now_ms(void)
 {
@@ -876,10 +980,19 @@ static int harness_record_ledger_event(
 {
   harness_ledger_event_recorder *recorder;
   sqlite3 *db;
+  sqlite3_stmt *stmt;
+  const unsigned char *state;
+  char extra;
+  long long call_id;
   long long call_count;
   long long pending_count;
   long long answer_quality_count;
+  long long request_id;
+  long long attempt_index;
+  long long session_id;
+  int event_ok;
   int opened;
+  int running;
 
   recorder = (harness_ledger_event_recorder *)user_data;
   if ((recorder == NULL) || (event == NULL)) {
@@ -921,6 +1034,9 @@ static int harness_record_ledger_event(
       return 1;
     }
     if (cJSON_IsFalse(active)) {
+      if (recorder->started_count != recorder->count) {
+        recorder->valid = 0;
+      }
       recorder->clear_count++;
       recorder->processing_count++;
       cJSON_Delete(root);
@@ -956,37 +1072,101 @@ static int harness_record_ledger_event(
     return 1;
   }
 
+  call_id = 0LL;
+  extra = '\0';
+  running = (event->status_kind != NULL) &&
+    (strcmp(event->status_kind, "running") == 0);
   db = NULL;
   opened = sqlite3_open(recorder->db_path, &db) == SQLITE_OK;
+  stmt = NULL;
   call_count = 0LL;
   pending_count = 0LL;
   answer_quality_count = 0LL;
-  if ((event->type != STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED) ||
-      (event->kind == NULL) ||
-      (strcmp(event->kind, "response_api_call") != 0) ||
-      (event->message_key == NULL) ||
-      (strncmp(event->message_key, "response-call-", 14U) != 0) ||
-      (event->status_kind == NULL) ||
-      !opened ||
-      !harness_query_int(db,
-                         "SELECT COUNT(*) FROM http_attempts;",
-                         &call_count) ||
-      !harness_query_int(db,
-                         "SELECT COUNT(*) FROM http_attempts "
-                         "WHERE state IN ('pending','running');",
-                         &pending_count) ||
-      !harness_query_int(db,
-                         "SELECT COUNT(*) FROM answer_quality_audits;",
-                         &answer_quality_count) ||
-      (call_count != (recorder->count + 1LL)) ||
-      (pending_count != 0LL)) {
+  request_id = 0LL;
+  attempt_index = -1LL;
+  session_id = 0LL;
+  event_ok =
+    (event->type == STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED) &&
+    (event->kind != NULL) &&
+    (strcmp(event->kind, "response_api_call") == 0) &&
+    (event->message_key != NULL) &&
+    (sscanf(event->message_key,
+            "response-call-%lld%c",
+            &call_id,
+            &extra) == 1) &&
+    (call_id > 0LL) &&
+    (event->status_kind != NULL) &&
+    opened;
+  if (event_ok) {
+    int rc;
+
+    rc = sqlite3_prepare_v2(
+      db,
+      "SELECT a.request_id, a.attempt_index, a.state, t.session_id "
+      "FROM http_attempts a "
+      "JOIN model_requests r ON r.id = a.request_id "
+      "JOIN turns t ON t.id = r.turn_id WHERE a.id = ?;",
+      -1,
+      &stmt,
+      NULL);
+    if ((rc != SQLITE_OK) ||
+        (sqlite3_bind_int64(stmt,
+                            1,
+                            (sqlite3_int64)call_id) != SQLITE_OK) ||
+        (sqlite3_step(stmt) != SQLITE_ROW)) {
+      event_ok = 0;
+    } else {
+      request_id = (long long)sqlite3_column_int64(stmt, 0);
+      attempt_index = (long long)sqlite3_column_int64(stmt, 1);
+      state = sqlite3_column_text(stmt, 2);
+      session_id = (long long)sqlite3_column_int64(stmt, 3);
+      event_ok = (state != NULL) &&
+        (strcmp((const char *)state, event->status_kind) == 0);
+    }
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+  }
+  event_ok = event_ok &&
+    harness_query_int(db,
+                      "SELECT COUNT(*) FROM http_attempts;",
+                      &call_count) &&
+    harness_query_int(db,
+                      "SELECT COUNT(*) FROM http_attempts "
+                      "WHERE state IN ('pending','running');",
+                      &pending_count) &&
+    harness_query_int(db,
+                      "SELECT COUNT(*) FROM answer_quality_audits;",
+                      &answer_quality_count);
+  if (event_ok && running) {
+    event_ok = (recorder->started_count == recorder->count) &&
+      (call_count == (recorder->started_count + 1LL)) &&
+      (pending_count == 1LL) &&
+      harness_ledger_timeline_matches(recorder,
+                                      session_id,
+                                      request_id,
+                                      call_id,
+                                      attempt_index,
+                                      1);
+    recorder->started_count++;
+  } else if (event_ok) {
+    event_ok = (recorder->started_count == (recorder->count + 1LL)) &&
+      (call_count == (recorder->count + 1LL)) &&
+      (pending_count == 0LL) &&
+      harness_ledger_timeline_matches(recorder,
+                                      session_id,
+                                      request_id,
+                                      call_id,
+                                      attempt_index,
+                                      0);
+    recorder->count++;
+  }
+  if (!event_ok) {
     recorder->valid = 0;
   }
   recorder->answer_quality_count = answer_quality_count;
   if (db != NULL) {
     sqlite3_close(db);
   }
-  recorder->count++;
   return 1;
 }
 
@@ -5459,9 +5639,6 @@ static int harness_test_bash_tool_cancellation(void)
   return ok;
 }
 
-static int harness_verify_timeline_hierarchy(
-  const strappy_session_message_record_list *timeline,
-  int require_retry);
 static int harness_timeline_attempt_metadata_matches(
   const strappy_session_message_record_list *timeline,
   const char *state,
@@ -6294,11 +6471,15 @@ static int harness_test_ledger(void)
                                          session_id,
                                          &timeline,
                                          &error) &&
-    (timeline.count == 0U);
+    (timeline.count == 1U) &&
+    (strcmp(timeline.records[0].role, "user") == 0) &&
+    (strcmp(timeline.records[0].direction, "request") == 0) &&
+    (timeline.records[0].model_request_id > 0LL) &&
+    (timeline.records[0].http_attempt_id == 0LL);
   strappy_session_message_record_list_destroy(&timeline);
   if (!ok) {
     fprintf(stderr,
-            "Pending Responses call leaked into the UI timeline: %s\n",
+            "Running Responses request was not isolated in the UI timeline: %s\n",
             (error != NULL) ? error : "unexpected timeline row");
     free(error);
     unlink(path);
@@ -6761,9 +6942,11 @@ static int harness_test_session_webview_rendering(void)
   char *error;
   char *invalid_script;
   char *page_html;
+  char *request_script;
   long long call_id;
   long long session_id;
   size_t message_count;
+  size_t request_message_count;
   size_t total_count;
   int ok;
 
@@ -6774,8 +6957,10 @@ static int harness_test_session_webview_rendering(void)
   error = NULL;
   invalid_script = NULL;
   page_html = NULL;
+  request_script = NULL;
   session_id = 0LL;
   message_count = 0U;
+  request_message_count = 0U;
   total_count = 0U;
   strappy_session_message_record_list_init(&range);
   ok = strappy_webview_configure_localized_labels(&error) &&
@@ -6806,6 +6991,45 @@ static int harness_test_session_webview_rendering(void)
     goto cleanup;
   }
 
+  ok = strappy_db_list_response_timeline_range(path,
+                                                session_id,
+                                                0U,
+                                                &range,
+                                                &total_count,
+                                                &error) &&
+    (total_count == 1U) &&
+    (range.count == 1U) &&
+    (range.records[0].direction != NULL) &&
+    (strcmp(range.records[0].direction, "request") == 0) &&
+    (range.records[0].http_attempt_id == 0LL) &&
+    (range.records[0].content != NULL) &&
+    (strcmp(range.records[0].content, first_text) == 0);
+  strappy_session_message_record_list_destroy(&range);
+  if (!ok) {
+    fprintf(stderr,
+            "Running request was not independently visible: %s\n",
+            (error != NULL) ? error : "unexpected output");
+    goto cleanup;
+  }
+
+  request_script = strappy_session_webview_append_messages_js_for_session(
+    path,
+    session_id,
+    0U,
+    &request_message_count,
+    &error);
+  ok = (request_script != NULL) && (request_message_count == 1U) &&
+       (strstr(request_script, "appendMessage(") != NULL) &&
+       (strstr(request_script, first_text) != NULL) &&
+       (strstr(request_script, second_text) == NULL) &&
+       (strstr(request_script, "response-call-") == NULL);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not render the running request independently: %s\n",
+            (error != NULL) ? error : "unexpected output");
+    goto cleanup;
+  }
+
   memset(&finish, 0, sizeof(finish));
   finish.call_id = call_id;
   finish.state = "completed";
@@ -6830,13 +7054,19 @@ static int harness_test_session_webview_rendering(void)
 
   ok = strappy_db_list_response_timeline_range(path,
                                                 session_id,
-                                                2U,
+                                                request_message_count,
                                                 &range,
                                                 &total_count,
                                                 &error);
-  ok = ok && (total_count == 3U) && (range.count == 1U) &&
-       (range.records[0].content != NULL) &&
-       (strcmp(range.records[0].content, second_text) == 0);
+  ok = ok && (total_count == 3U) && (range.count == 2U) &&
+       (range.records[0].role != NULL) &&
+       (strcmp(range.records[0].role, "api_call") == 0) &&
+       (range.records[0].direction == NULL) &&
+       (range.records[0].http_attempt_id == call_id) &&
+       (range.records[1].direction != NULL) &&
+       (strcmp(range.records[1].direction, "response") == 0) &&
+       (range.records[1].content != NULL) &&
+       (strcmp(range.records[1].content, second_text) == 0);
   strappy_session_message_record_list_destroy(&range);
   if (!ok) {
     fprintf(stderr,
@@ -6884,13 +7114,14 @@ static int harness_test_session_webview_rendering(void)
   append_script = strappy_session_webview_append_messages_js_for_session(
     path,
     session_id,
-    2U,
+    request_message_count,
     &message_count,
     &error);
   ok = (append_script != NULL) && (message_count == 3U) &&
        (strstr(append_script, "appendMessage(") != NULL) &&
        (strstr(append_script, first_text) == NULL) &&
-       (strstr(append_script, second_text) != NULL);
+       (strstr(append_script, second_text) != NULL) &&
+       (strstr(append_script, "response-call-") != NULL);
   if (!ok) {
     fprintf(stderr,
             "Could not render stored WebView append JavaScript: %s\n",
@@ -6933,6 +7164,7 @@ cleanup:
   strappy_session_free_string(append_script);
   strappy_session_free_string(empty_script);
   strappy_session_free_string(invalid_script);
+  strappy_session_free_string(request_script);
   strappy_session_free_string(error);
   unlink(path);
   return ok;
