@@ -953,7 +953,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [self setDismissButton:dismiss];
 
   options = [[StrappyPromptBorderedIconButton alloc] initWithFrame:CGRectZero];
-  [options setImage:[self iconImageForIcon:AIFAMicrochip
+  [options setImage:[self iconImageForIcon:AIFANonBinary
                                      style:AIFontAwesomeStyleSolid
                                  pointSize:18.0f
                                      color:[UIColor darkGrayColor]]
@@ -996,8 +996,8 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [self setPlaceholderLabel:placeholder];
 
   send = [[StrappyPromptSendButton alloc] initWithFrame:CGRectZero];
-  [send setImage:[self iconImageForIcon:AIFAPaperPlane
-                                  style:AIFontAwesomeStyleRegular
+  [send setImage:[self iconImageForIcon:AIFAMarsStroke
+                                  style:AIFontAwesomeStyleSolid
                               pointSize:18.0f
                                   color:[UIColor whiteColor]]
          forState:UIControlStateNormal];
@@ -1201,8 +1201,8 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
                                  color:[UIColor whiteColor]];
     [[self sendButton] setAccessibilityLabel:NSLocalizedString(@"Cancel Prompt", nil)];
   } else {
-    sendImage = [self iconImageForIcon:AIFAPaperPlane
-                                 style:AIFontAwesomeStyleRegular
+    sendImage = [self iconImageForIcon:AIFAMarsStroke
+                                 style:AIFontAwesomeStyleSolid
                              pointSize:18.0f
                                  color:[UIColor whiteColor]];
     [[self sendButton] setAccessibilityLabel:NSLocalizedString(@"Send Prompt", nil)];

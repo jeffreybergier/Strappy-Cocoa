@@ -7,14 +7,17 @@
 extern "C" {
 #endif
 
+#define STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT 16U
+
 typedef struct strappy_webview_labels {
   const char *agent;
   const char *you;
   const char *harness;
   const char *developer;
   const char *thinking;
-  const char *processing_pondering;
   const char *processing_tools;
+  const char *processing_waiting[
+    STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT];
   const char *processing_autoscroll_on;
   const char *processing_autoscroll_off;
   const char *response_metadata;
@@ -37,6 +40,7 @@ typedef struct strappy_webview_labels {
   const char *failed;
   const char *not_applicable;
   const char *check;
+  const char *answer_provided;
   const char *no_unicode_emoji;
   const char *source_link_included;
   const char *database_context_checked;

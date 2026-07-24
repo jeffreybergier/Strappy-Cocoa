@@ -28,8 +28,23 @@ typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_HARNESS,
   STRAPPY_WEBVIEW_LABEL_DEVELOPER,
   STRAPPY_WEBVIEW_LABEL_THINKING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_PONDERING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_TOOLS,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_FONDLING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_PEGGING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_THRUSTING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_CHOKING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_BLOWING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_STROKING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_RIDING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_SPANKING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_HYDRATING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_FANTASIZING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_UNDRESSING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_EDGING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_SPOONING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_FISTING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_JUDGING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_DOMINATING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_AUTOSCROLL_ON,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_AUTOSCROLL_OFF,
   STRAPPY_WEBVIEW_LABEL_RESPONSE_METADATA,
@@ -52,6 +67,7 @@ typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_FAILED,
   STRAPPY_WEBVIEW_LABEL_NOT_APPLICABLE,
   STRAPPY_WEBVIEW_LABEL_CHECK,
+  STRAPPY_WEBVIEW_LABEL_ANSWER_PROVIDED,
   STRAPPY_WEBVIEW_LABEL_NO_UNICODE_EMOJI,
   STRAPPY_WEBVIEW_LABEL_SOURCE_LINK_INCLUDED,
   STRAPPY_WEBVIEW_LABEL_DATABASE_CONTEXT_CHECKED,
@@ -67,13 +83,28 @@ typedef enum strappy_webview_label_index {
 
 static const char * const g_strappy_webview_label_keys[
   STRAPPY_WEBVIEW_LABEL_COUNT] = {
-  "Agent",
+  "Strappy",
   "You",
   "Harness",
-  "Developer",
+  "Harness",
   "Thinking",
-  "[fa:solid:spinner] Pondering",
-  "Tools",
+  "[fa:gears] Grinding",
+  "[fa:hands-holding-circle] Fondling",
+  "[fa:thumbtack] Pegging",
+  "[fa:bore-hole] Thrusting",
+  "[fa:hands-bound] Choking",
+  "[fa:wind] Blowing",
+  "[fa:hand-holding-droplet] Stroking",
+  "[fa:horse] Riding",
+  "[fa:table-tennis-paddle-ball] Spanking",
+  "[fa:martini-glass] Hydrating",
+  "[fa:bed-pulse] Fantasizing",
+  "[fa:socks] Undressing",
+  "[fa:ring] Edging",
+  "[fa:spoon] Spooning",
+  "[fa:hand-back-fist] Fisting",
+  "[fa:hand-lizard] Judging",
+  "[fa:shoe-prints] Dominating",
   "Autoscroll on",
   "Autoscroll off",
   "Response Metadata",
@@ -96,6 +127,7 @@ static const char * const g_strappy_webview_label_keys[
   "Failed",
   "Not Applicable",
   "Check",
+  "Answer provided",
   "No emoji",
   "Source link included",
   "Database context checked",
@@ -116,6 +148,8 @@ static void strappy_webview_assign_localized_labels(
   strappy_webview_labels *labels,
   char * const *values)
 {
+  size_t index;
+
   if ((labels == NULL) || (values == NULL)) {
     return;
   }
@@ -125,10 +159,15 @@ static void strappy_webview_assign_localized_labels(
   labels->harness = values[STRAPPY_WEBVIEW_LABEL_HARNESS];
   labels->developer = values[STRAPPY_WEBVIEW_LABEL_DEVELOPER];
   labels->thinking = values[STRAPPY_WEBVIEW_LABEL_THINKING];
-  labels->processing_pondering =
-    values[STRAPPY_WEBVIEW_LABEL_PROCESSING_PONDERING];
   labels->processing_tools =
     values[STRAPPY_WEBVIEW_LABEL_PROCESSING_TOOLS];
+  for (index = 0U;
+       index < STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT;
+       index++) {
+    labels->processing_waiting[index] =
+      values[(size_t)STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_FONDLING +
+             index];
+  }
   labels->processing_autoscroll_on =
     values[STRAPPY_WEBVIEW_LABEL_PROCESSING_AUTOSCROLL_ON];
   labels->processing_autoscroll_off =
@@ -156,6 +195,8 @@ static void strappy_webview_assign_localized_labels(
   labels->failed = values[STRAPPY_WEBVIEW_LABEL_FAILED];
   labels->not_applicable = values[STRAPPY_WEBVIEW_LABEL_NOT_APPLICABLE];
   labels->check = values[STRAPPY_WEBVIEW_LABEL_CHECK];
+  labels->answer_provided =
+    values[STRAPPY_WEBVIEW_LABEL_ANSWER_PROVIDED];
   labels->no_unicode_emoji =
     values[STRAPPY_WEBVIEW_LABEL_NO_UNICODE_EMOJI];
   labels->source_link_included =
@@ -625,7 +666,7 @@ static const char *strappy_webview_agent_label(
   if ((labels != NULL) && (labels->agent != NULL) && (labels->agent[0] != '\0')) {
     return labels->agent;
   }
-  return "Agent";
+  return "Strappy";
 }
 
 static const char *strappy_webview_you_label(
@@ -656,7 +697,7 @@ static const char *strappy_webview_developer_label(
       (labels->developer[0] != '\0')) {
     return labels->developer;
   }
-  return "Developer";
+  return "Harness";
 }
 
 static const char *strappy_webview_thinking_label(
@@ -670,15 +711,20 @@ static const char *strappy_webview_thinking_label(
   return "Thinking";
 }
 
-static const char *strappy_webview_processing_pondering_label(
-  const strappy_webview_labels *labels)
+static const char *strappy_webview_processing_waiting_label(
+  const strappy_webview_labels *labels,
+  size_t index)
 {
-  if ((labels != NULL) &&
-      (labels->processing_pondering != NULL) &&
-      (labels->processing_pondering[0] != '\0')) {
-    return labels->processing_pondering;
+  if (index >= STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT) {
+    return "";
   }
-  return "[fa:solid:spinner] Pondering";
+  if ((labels != NULL) &&
+      (labels->processing_waiting[index] != NULL) &&
+      (labels->processing_waiting[index][0] != '\0')) {
+    return labels->processing_waiting[index];
+  }
+  return g_strappy_webview_label_keys[
+    (size_t)STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_FONDLING + index];
 }
 
 static const char *strappy_webview_processing_tools_label(
@@ -689,7 +735,7 @@ static const char *strappy_webview_processing_tools_label(
       (labels->processing_tools[0] != '\0')) {
     return labels->processing_tools;
   }
-  return "Tools";
+  return "[fa:gears] Grinding";
 }
 
 static const char *strappy_webview_processing_autoscroll_on_label(
@@ -908,6 +954,16 @@ static const char *strappy_webview_check_label(
     return labels->check;
   }
   return "Check";
+}
+
+static const char *strappy_webview_answer_provided_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->answer_provided != NULL) &&
+      (labels->answer_provided[0] != '\0')) {
+    return labels->answer_provided;
+  }
+  return "Answer provided";
 }
 
 static const char *strappy_webview_source_link_included_label(
@@ -1171,6 +1227,45 @@ static int strappy_webview_append_data_attribute(strappy_webview_buffer *buffer,
          strappy_webview_buffer_append_cstring(buffer, "\"");
 }
 
+static int strappy_webview_append_processing_waiting_label_attributes(
+  strappy_webview_buffer *buffer,
+  const strappy_webview_labels *labels)
+{
+  char count[32];
+  char name[64];
+  size_t index;
+  int written;
+
+  written = snprintf(
+    count,
+    sizeof(count),
+    "%lu",
+    (unsigned long)STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT);
+  if ((written <= 0) || ((size_t)written >= sizeof(count)) ||
+      !strappy_webview_append_data_attribute(buffer,
+                                             "processing-waiting-count",
+                                             count)) {
+    return 0;
+  }
+
+  for (index = 0U;
+       index < STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT;
+       index++) {
+    written = snprintf(name,
+                       sizeof(name),
+                       "processing-waiting-%lu-label",
+                       (unsigned long)index);
+    if ((written <= 0) || ((size_t)written >= sizeof(name)) ||
+        !strappy_webview_append_data_attribute(
+          buffer,
+          name,
+          strappy_webview_processing_waiting_label(labels, index))) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int strappy_webview_format_usage_cost(double value,
                                              char *buffer,
                                              size_t buffer_size)
@@ -1409,12 +1504,30 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "z-index:20;box-sizing:border-box;max-width:90%;",
     "-webkit-transform:translateX(-50%);transform:translateX(-50%);",
     "border:1px solid #959fa7;border-radius:17px;",
-    "background:#b2bbc2;color:#30363b;padding:0 36px 0 12px;",
+    "background:#dfe4e8;color:#30363b;padding:0 42px 0 7px;",
     "box-shadow:0 2px 8px rgba(0,0,0,.16);font-size:12px;",
     "font-weight:bold;line-height:32px;height:34px;}",
     ".processing-status-text{display:block;white-space:nowrap;",
-    "overflow:hidden;text-overflow:ellipsis;}",
-    ".processing-autoscroll{position:absolute;right:3px;top:3px;bottom:3px;",
+    "overflow:hidden;text-overflow:ellipsis;",
+    "-webkit-font-feature-settings:'tnum';font-feature-settings:'tnum';",
+    "font-variant-numeric:tabular-nums;}",
+    ".processing-status-text>.fa{margin:0 3px;font-size:14.4px;",
+    "-webkit-transform-origin:50% 50%;transform-origin:50% 50%;}",
+    ".processing-status-text>.processing-status-icon-build{",
+    "-webkit-animation:strappy-processing-icon-build .55s ease-out;",
+    "animation:strappy-processing-icon-build .55s ease-out;}",
+    "@-webkit-keyframes strappy-processing-icon-build{",
+    "0%{opacity:0;-webkit-transform:scale(3) rotate(-360deg);}",
+    "70%{opacity:1;-webkit-transform:scale(.82) rotate(18deg);}",
+    "100%{opacity:1;-webkit-transform:scale(1) rotate(0);}}",
+    "@keyframes strappy-processing-icon-build{",
+    "0%{opacity:0;transform:scale(3) rotate(-360deg);}",
+    "70%{opacity:1;transform:scale(.82) rotate(18deg);}",
+    "100%{opacity:1;transform:scale(1) rotate(0);}}",
+    "@media (prefers-reduced-motion:reduce){",
+    ".processing-status-text>.processing-status-icon-build{",
+    "-webkit-animation:none;animation:none;}}",
+    ".processing-autoscroll{position:absolute;right:6px;top:3px;bottom:3px;",
     "width:26px;box-sizing:border-box;display:block;border-radius:13px;",
     "border:1px solid #959fa7;background:#dfe4e8;color:#4e5961;",
     "font-size:12px;line-height:24px;-webkit-appearance:none;appearance:none;",
@@ -1980,28 +2093,44 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(b)setClass(b,'processing-status-active',active?1:0);",
     "setProcessingThinkingCollapsed(group,active?0:1);}",
     "function processingNumber(v){var n=parseInt(v,10);return isNaN(n)?0:n;}",
-    "function processingDuration(seconds){var s=processingNumber(seconds);var m,h;",
-    "if(s<0)s=0;if(s<60)return s+'s';m=Math.floor(s/60);s=s%60;",
-    "if(m<60)return m+'m '+(s<10?'0':'')+s+'s';h=Math.floor(m/60);",
-    "m=m%60;return h+'h '+(m<10?'0':'')+m+'m';}",
+    "function processingDuration(seconds){var s=processingNumber(seconds);var m;",
+    "if(s<0)s=0;if(s>5999)s=5999;m=Math.floor(s/60);s=s%60;",
+    "return (m<10?'0':'')+m+':'+(s<10?'0':'')+s;}",
     "function processingLabel(name,fallback){var b=document.body;var v=b&&b.getAttribute?",
     "b.getAttribute('data-processing-'+name+'-label')||'':'';return v||fallback;}",
+    "var strappyProcessingWaitingIndex=-1;",
+    "var strappyProcessingWaitingLabel='';",
+    "function advanceProcessingWaitingLabel(){var b=document.body;var count=processingNumber(",
+    "b&&b.getAttribute?b.getAttribute('data-processing-waiting-count'):0);",
+    "var index,label;if(count<1){strappyProcessingWaitingIndex=-1;",
+    "strappyProcessingWaitingLabel=",
+    "'[fa:hands-holding-circle] Fondling';return strappyProcessingWaitingLabel;}",
+    "index=strappyProcessingWaitingIndex+1;if(index<0||index>=count)index=0;",
+    "strappyProcessingWaitingIndex=index;",
+    "label=processingLabel('waiting-'+index,'');",
+    "strappyProcessingWaitingLabel=label||'[fa:hands-holding-circle] Fondling';",
+    "return strappyProcessingWaitingLabel;}",
+    "function processingWaitingLabel(){return strappyProcessingWaitingLabel||",
+    "advanceProcessingWaitingLabel();}",
     "function processingAttemptText(s){var a=processingNumber(s.retry_attempt);",
     "var max=processingNumber(s.retry_max_attempts);if(a>0&&max>0)return a+'/'+max;",
     "if(a>0)return String(a);return '';}",
     "function processingStatusText(s){var now=(new Date()).getTime();var started=processingNumber(s.started_ms);",
-    "var elapsed=started>0?processingDuration(Math.floor((now-started)/1000)):'';",
+    "var elapsed=processingDuration(started>0?",
+    "Math.floor((now-started)/1000):0);",
     "var kind=s.status_kind||'thinking';var attempt=processingAttemptText(s);var remaining,label;",
+    "if(kind=='tools'){label=processingLabel('tools','[fa:gears] Grinding');",
+    "return label+' \\u00b7 '+elapsed;}",
+    "label=processingWaitingLabel();",
     "if(kind=='retry_wait'){remaining=processingNumber(s.retry_until_ms)>0?",
     "Math.ceil((processingNumber(s.retry_until_ms)-now)/1000):processingNumber(s.retry_after_seconds);",
-    "if(remaining<0)remaining=0;label=processingLabel('retry','Retry');",
-    "return label+' '+processingDuration(remaining)+(attempt?' \\u00b7 '+attempt:'');}",
-    "if(kind=='retrying'){label=processingLabel('retry','Retry')+(attempt?' '+attempt:'');",
-    "return label+(elapsed?' \\u00b7 '+elapsed:'');}",
-    "if(kind=='tools'){label=processingLabel('tools','Tools');",
-    "return label+(elapsed?' \\u00b7 '+elapsed:'');}",
-    "label=processingLabel('pondering','[fa:solid:spinner] Pondering');",
-    "return label+(elapsed?' \\u00b7 '+elapsed:'');}",
+    "if(remaining<0)remaining=0;",
+    "return label+' \\u00b7 '+processingLabel('retry','Retry')+' '+",
+    "processingDuration(remaining)+(attempt?' \\u00b7 '+attempt:'');}",
+    "if(kind=='retrying'){label+=' \\u00b7 '+processingLabel('retry','Retry')+",
+    "(attempt?' '+attempt:'');",
+    "return label+' \\u00b7 '+elapsed;}",
+    "return label+' \\u00b7 '+elapsed;}",
     "var strappyAutoScrollEnabled=1;",
     "function updateAutoScrollButton(n){var b;if(!n)return;b=firstByClass(n,'processing-autoscroll');",
     "if(!b)return;b.className='processing-autoscroll'+(strappyAutoScrollEnabled?' processing-autoscroll-on':'');",
@@ -2012,7 +2141,9 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "b.setAttribute('aria-label',b.title);}",
     "function setAutoScrollEnabled(v){var n;strappyAutoScrollEnabled=v?1:0;",
     "if(!strappyAutoScrollEnabled)cancelScrollBottomAnimation();",
-    "n=byId('processing-status');if(n)updateAutoScrollButton(n);",
+    "n=byId('processing-status');if(n){updateAutoScrollButton(n);",
+    "if(strappyProcessingStatus&&strappyProcessingStatus.active)",
+    "updateProcessingStatus();}",
     "}",
     "function toggleAutoScroll(){setAutoScrollEnabled(!strappyAutoScrollEnabled);return false;}",
     "function processingStatusTextNode(n){var t;if(!n)return null;t=firstByClass(n,'processing-status-text');",
@@ -2027,14 +2158,19 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "n.setAttribute('role','status');n.setAttribute('aria-live','polite');",
     "processingStatusTextNode(n);processingAutoScrollButton(n);",
     "(document.body||document.documentElement).appendChild(n);return n;}",
-    "function updateProcessingStatus(){var s=strappyProcessingStatus;var n,t;",
+    "function animateProcessingStatusIcon(n){var icon=firstByClass(n,'fa');",
+    "if(icon&&!hasClass(icon,'processing-status-icon-build'))",
+    "icon.className+=' processing-status-icon-build';}",
+    "function updateProcessingStatus(animate){var s=strappyProcessingStatus;var n,t;",
     "if(!s||!s.active){clearProcessingStatusNode();return;}n=processingStatusNode();",
     "n.className='processing-status processing-status-'+(s.status_kind||'thinking');",
     "t=processingStatusTextNode(n);t.innerHTML=faTextHTML(processingStatusText(s));",
+    "if(animate)animateProcessingStatusIcon(t);",
     "processingAutoScrollButton(n);",
     "syncProcessingInteractionState(1,strappyProcessingPromptGroupKey);}",
     "function setProcessingStatus(raw){var s=processingStatusObject(raw);var group;",
     "if(!s||!s.active){clearProcessingStatus();return;}strappyProcessingStatus=s;",
+    "if((s.status_kind||'thinking')!='tools')advanceProcessingWaitingLabel();",
     "group=processingPromptGroup(s);if(group==='')group=strappyProcessingPromptGroupKey;",
     "if(strappyProcessingPromptGroupKey!==''&&group!==strappyProcessingPromptGroupKey){",
     "setProcessingThinkingCollapsed(strappyProcessingPromptGroupKey,1);",
@@ -2723,6 +2859,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "n=m.getElementsByTagName('*');for(i=0;i<n.length;i++){if(hasClass(n[i],'row')&&hasClass(n[i],'answer_quality'))out[out.length]=n[i];}return out;}",
     "function answerQualityAttr(row,name,fallback){var v=row&&row.getAttribute?row.getAttribute('data-'+name)||'':'';return v!==''?v:fallback;}",
     "function answerQualityCheckLabel(row,check){var key=jsonText(check&&check.key);",
+    "if(key=='answer_non_empty')return answerQualityAttr(row,'answer-provided-label',jsonText(check.label));",
     "if(key=='unicode_emoji_absent')return answerQualityAttr(row,'no-unicode-emoji-label',jsonText(check.label));",
     "if(key=='web_reference')return answerQualityAttr(row,'source-link-included-label',jsonText(check.label));",
     "if(key=='database_context')return answerQualityAttr(row,'database-context-checked-label',jsonText(check.label));",
@@ -2808,12 +2945,13 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(typeof delay!='number')delay=strappyUpdateInterval;if(delay<0)delay=0;now=(new Date()).getTime();due=now+delay;",
     "if(strappyUpdateTimer&&due>=strappyUpdateDue)return;if(strappyUpdateTimer)clearTimeout(strappyUpdateTimer);",
     "strappyUpdateDue=due;strappyUpdateTimer=setTimeout(flushWebViewUpdates,delay);}",
-    "function flushWebViewUpdates(){var now;if(strappyUpdateTimer){clearTimeout(strappyUpdateTimer);",
+    "function flushWebViewUpdates(){var now,animate;if(strappyUpdateTimer){clearTimeout(strappyUpdateTimer);",
     "strappyUpdateTimer=null;}strappyUpdateDue=0;strappyUpdateFlushing=1;now=(new Date()).getTime();",
     "if(strappyTextQueuesHaveEntries())flushTextQueues();",
     "if(strappyStreamingMarkdownNeedsFlush)flushStreamingMarkdown();",
     "if(strappyProcessingStatusDirty||(strappyProcessingStatus&&strappyProcessingStatus.active&&now>=strappyProcessingNextTick)){",
-    "strappyProcessingStatusDirty=0;updateProcessingStatus();strappyProcessingNextTick=now+strappyStatusInterval;}",
+    "animate=strappyProcessingStatusDirty?1:0;strappyProcessingStatusDirty=0;",
+    "updateProcessingStatus(animate);strappyProcessingNextTick=now+strappyStatusInterval;}",
     "else if(strappyProcessingStatus&&strappyProcessingStatus.active)strappyProcessingNextTick=now+strappyStatusInterval;",
     "strappyUpdateFlushing=0;",
     "if(strappyTextQueuesHaveEntries()||strappyStreamingMarkdownNeedsFlush||strappyProcessingStatusDirty)",
@@ -3432,6 +3570,10 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
            strappy_webview_check_label(labels)) &&
          strappy_webview_append_data_attribute(
            &buffer,
+           "answer-provided-label",
+           strappy_webview_answer_provided_label(labels)) &&
+         strappy_webview_append_data_attribute(
+           &buffer,
            "no-unicode-emoji-label",
            strappy_webview_no_unicode_emoji_label(labels)) &&
          strappy_webview_append_data_attribute(
@@ -3858,12 +4000,11 @@ char *strappy_webview_messages_page_html(
          "</head><body") &&
        strappy_webview_append_data_attribute(
          &buffer,
-         "processing-pondering-label",
-         strappy_webview_processing_pondering_label(labels)) &&
-       strappy_webview_append_data_attribute(
-         &buffer,
          "processing-tools-label",
          strappy_webview_processing_tools_label(labels)) &&
+       strappy_webview_append_processing_waiting_label_attributes(
+         &buffer,
+         labels) &&
        strappy_webview_append_data_attribute(
          &buffer,
          "processing-retry-label",

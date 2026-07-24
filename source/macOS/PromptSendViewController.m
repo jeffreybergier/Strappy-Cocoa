@@ -1,4 +1,5 @@
 #import "PromptSendViewController.h"
+#import "AIFontAwesome.h"
 #import "StrappyBottomToolbarView.h"
 #import "StrappySession.h"
 
@@ -6,6 +7,8 @@ static const CGFloat kPromptSendHeightCollapsed = 32.0;
 static const CGFloat kPromptSendHeightExpanded = 108.0;
 static const CGFloat kPromptSendPad = 4.0;
 static const CGFloat kPromptActionButtonHeight = 24.0;
+static const CGFloat kPromptSendGlyphSize = 14.0;
+static const CGFloat kPromptSendGlyphCanvasSize = 20.0;
 
 enum {
   kPromptActionSegmentOptions = 0,
@@ -113,6 +116,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 - (void)updateSendButtonAppearance;
 - (void)updateOptionsSegmentTitle:(NSString *)title;
 - (void)selectCurrentModelMenuItem;
+- (void)barDidMoveToWindow:(id)sender;
 - (void)barViewFrameDidChange:(NSNotification *)notification;
 - (void)modelMenuItemClicked:(id)sender;
 - (void)actionSegmentClicked:(id)sender;
@@ -150,6 +154,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
       initWithFrame:NSMakeRect(0.0, 0.0, 400.0, kPromptSendHeightCollapsed)];
   barView_ = bar;
   [barView_ setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
+  [bar setWindowChangeTarget:self action:@selector(barDidMoveToWindow:)];
   [self setView:barView_];
   [barView_ release];
 }
@@ -291,23 +296,49 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   [self updateExpansion];
 }
 
+- (void)barDidMoveToWindow:(id)sender
+{
+  (void)sender;
+  [self updateSendButtonAppearance];
+}
+
 - (void)updateSendButtonAppearance
 {
+  CGFloat scale;
+  AIFontAwesomeIcon icon;
+  NSImage *image;
+
   if (actionSegmented_ == nil) {
     return;
   }
 
+  scale = 1.0;
+  if ([[barView_ window] respondsToSelector:@selector(XP_backingScaleFactor)]) {
+    scale = [[barView_ window] XP_backingScaleFactor];
+  }
+  if (scale < 1.0) {
+    scale = 1.0;
+  }
+
   if (sending_) {
+    icon = AIFAStop;
     [actionSegmented_ setLabel:NSLocalizedString(@"Cancel", nil)
                     forSegment:kPromptActionSegmentSend];
     [actionSegmented_ XP_setToolTip:NSLocalizedString(@"Cancel Prompt", nil)
                          forSegment:kPromptActionSegmentSend];
   } else {
+    icon = AIFAMarsStroke;
     [actionSegmented_ setLabel:NSLocalizedString(@"Send", nil)
                     forSegment:kPromptActionSegmentSend];
     [actionSegmented_ XP_setToolTip:NSLocalizedString(@"Send Prompt", nil)
                          forSegment:kPromptActionSegmentSend];
   }
+  image = [AIFontAwesome imageForIcon:icon
+                                style:AIFontAwesomeStyleSolid
+                             iconSize:kPromptSendGlyphSize
+                           canvasSize:kPromptSendGlyphCanvasSize
+                                scale:scale];
+  [actionSegmented_ setImage:image forSegment:kPromptActionSegmentSend];
   [self sizeActionSegmentedControlToFit];
 }
 

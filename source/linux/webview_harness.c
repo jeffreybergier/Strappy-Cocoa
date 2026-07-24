@@ -16,6 +16,26 @@ static const char harness_tool_display_registry_json[] =
   "\"promoted_path\":[\"url\"],\"transform\":\"url\","
   "\"response_item\":true}}";
 
+static const char * const harness_processing_waiting_labels[
+  STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT] = {
+  "[fa:hands-holding-circle] Fondling",
+  "[fa:thumbtack] Pegging",
+  "[fa:bore-hole] Thrusting",
+  "[fa:hands-bound] Choking",
+  "[fa:wind] Blowing",
+  "[fa:hand-holding-droplet] Stroking",
+  "[fa:horse] Riding",
+  "[fa:table-tennis-paddle-ball] Spanking",
+  "[fa:martini-glass] Hydrating",
+  "[fa:bed-pulse] Fantasizing",
+  "[fa:socks] Undressing",
+  "[fa:ring] Edging",
+  "[fa:spoon] Spooning",
+  "[fa:hand-back-fist] Fisting",
+  "[fa:hand-lizard] Judging",
+  "[fa:shoe-prints] Dominating"
+};
+
 static int harness_expect_contains(const char *text, const char *needle)
 {
   if ((text != NULL) && (needle != NULL) && (strstr(text, needle) != NULL)) {
@@ -56,6 +76,7 @@ static int harness_check_localized_labels(void)
 {
   const strappy_webview_labels *labels;
   char *error;
+  size_t index;
   int ok;
 
   error = NULL;
@@ -69,14 +90,13 @@ static int harness_check_localized_labels(void)
 
   labels = strappy_webview_localized_labels();
   ok = (labels != NULL) &&
-       harness_expect_equal(labels->agent, "Agent") &&
+       harness_expect_equal(labels->agent, "Strappy") &&
        harness_expect_equal(labels->you, "You") &&
        harness_expect_equal(labels->harness, "Harness") &&
-       harness_expect_equal(labels->developer, "Developer") &&
+       harness_expect_equal(labels->developer, "Harness") &&
        harness_expect_equal(labels->thinking, "Thinking") &&
-       harness_expect_equal(labels->processing_pondering,
-                            "[fa:solid:spinner] Pondering") &&
-       harness_expect_equal(labels->processing_tools, "Tools") &&
+       harness_expect_equal(labels->processing_tools,
+                            "[fa:gears] Grinding") &&
        harness_expect_equal(labels->processing_autoscroll_on,
                             "Autoscroll on") &&
        harness_expect_equal(labels->processing_autoscroll_off,
@@ -104,6 +124,8 @@ static int harness_check_localized_labels(void)
        harness_expect_equal(labels->failed, "Failed") &&
        harness_expect_equal(labels->not_applicable, "Not Applicable") &&
        harness_expect_equal(labels->check, "Check") &&
+       harness_expect_equal(labels->answer_provided,
+                            "Answer provided") &&
        harness_expect_equal(labels->no_unicode_emoji,
                             "No emoji") &&
        harness_expect_equal(labels->source_link_included,
@@ -124,6 +146,12 @@ static int harness_check_localized_labels(void)
                             "This check did not apply to the answer.") &&
        harness_expect_equal(labels->required_tool_not_called,
                             "The required tool was not called.");
+  for (index = 0U;
+       ok && (index < STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT);
+       index++) {
+    ok = harness_expect_equal(labels->processing_waiting[index],
+                              harness_processing_waiting_labels[index]);
+  }
   strappy_webview_free(error);
   return ok;
 }
@@ -592,6 +620,10 @@ static int harness_check_page_scripts(void)
                                "function answerQualityCheckLabel(row,check)") &&
        harness_expect_contains(
          page_html,
+         "key=='answer_non_empty')return answerQualityAttr(row,"
+         "'answer-provided-label'") &&
+       harness_expect_contains(
+         page_html,
          "key=='unicode_emoji_absent')return answerQualityAttr(row,"
          "'no-unicode-emoji-label'") &&
        harness_expect_contains(
@@ -1044,6 +1076,11 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "var strappyUpdateInterval=300;"
                                "var strappyStatusInterval=1000;") &&
+       harness_expect_contains(
+         page_html,
+         "animate=strappyProcessingStatusDirty?1:0;"
+         "strappyProcessingStatusDirty=0;"
+         "updateProcessingStatus(animate);") &&
        harness_expect_contains(page_html, "function scrollBottomNow") &&
        harness_expect_contains(page_html,
                                "var strappyScrollAnimationDuration=500;") &&
@@ -1074,9 +1111,12 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "font-weight:bold;line-height:32px;height:34px;") &&
        harness_expect_contains(page_html,
-                               "background:#b2bbc2;color:#30363b;") &&
+                               "background:#dfe4e8;color:#30363b;") &&
        harness_expect_contains(page_html,
-                               ".processing-autoscroll{position:absolute") &&
+                               "padding:0 42px 0 7px;") &&
+       harness_expect_contains(page_html,
+                               ".processing-autoscroll{position:absolute;"
+                               "right:6px;top:3px;bottom:3px;") &&
        harness_expect_contains(page_html,
                                "width:26px;box-sizing:border-box;display:block;"
                                "border-radius:13px;") &&
@@ -1114,6 +1154,34 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                ".processing-status-text{display:block;"
                                "white-space:nowrap;") &&
+       harness_expect_contains(
+         page_html,
+         "-webkit-font-feature-settings:'tnum';"
+         "font-feature-settings:'tnum';"
+       "font-variant-numeric:tabular-nums;") &&
+       harness_expect_contains(page_html,
+                               ".processing-status-text>.fa{margin:0 3px;"
+                               "font-size:14.4px;") &&
+       harness_expect_contains(
+         page_html,
+         ".processing-status-text>.processing-status-icon-build{") &&
+       harness_expect_contains(
+         page_html,
+         "-webkit-animation:strappy-processing-icon-build .55s ease-out;"
+         "animation:strappy-processing-icon-build .55s ease-out;") &&
+       harness_expect_contains(
+         page_html,
+         "@-webkit-keyframes strappy-processing-icon-build{"
+         "0%{opacity:0;-webkit-transform:scale(3) rotate(-360deg);}") &&
+       harness_expect_contains(
+         page_html,
+         "@keyframes strappy-processing-icon-build{"
+         "0%{opacity:0;transform:scale(3) rotate(-360deg);}") &&
+       harness_expect_contains(
+         page_html,
+         "@media (prefers-reduced-motion:reduce){"
+         ".processing-status-text>.processing-status-icon-build{"
+         "-webkit-animation:none;animation:none;}}") &&
        harness_expect_contains(page_html,
                                "#tool-sources,.tool-source-bin,.row.tool_call,"
                                ".row.tool{display:none;}") &&
@@ -1144,10 +1212,24 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function clearProcessingStatusNode") &&
        harness_expect_contains(page_html, "function initProcessingStatusFromRenderState") &&
        harness_expect_contains(page_html,
-                               "data-processing-pondering-label="
-                               "\"[fa:solid:spinner] Pondering\"") &&
+                               "data-processing-tools-label="
+                               "\"[fa:gears] Grinding\"") &&
        harness_expect_contains(page_html,
-                               "data-processing-tools-label=\"Tools\"") &&
+                               "data-processing-waiting-count=\"16\"") &&
+       harness_expect_contains(
+         page_html,
+         "data-processing-waiting-0-label="
+         "\"[fa:hands-holding-circle] Fondling\"") &&
+       harness_expect_contains(
+         page_html,
+         "data-processing-waiting-4-label="
+         "\"[fa:wind] Blowing\"") &&
+       harness_expect_contains(
+         page_html,
+         "data-processing-waiting-15-label="
+         "\"[fa:shoe-prints] Dominating\"") &&
+       harness_expect_not_contains(page_html,
+                                   "data-processing-pondering-label") &&
        harness_expect_contains(page_html,
                                "data-processing-retry-label=\"Retry\"") &&
        harness_expect_contains(
@@ -1162,13 +1244,60 @@ static int harness_check_page_scripts(void)
                                "processingStatusText(s));") &&
        harness_expect_contains(page_html,
                                "return a+'/'+max;") &&
+       harness_expect_contains(
+         page_html,
+         "if(s<0)s=0;if(s>5999)s=5999;"
+         "m=Math.floor(s/60);s=s%60;") &&
+       harness_expect_contains(
+         page_html,
+         "return (m<10?'0':'')+m+':'+(s<10?'0':'')+s;") &&
+       harness_expect_contains(
+         page_html,
+         "var elapsed=processingDuration(started>0?"
+         "Math.floor((now-started)/1000):0);") &&
        harness_expect_contains(page_html,
-                               "processingLabel('pondering',"
-                               "'[fa:solid:spinner] Pondering')") &&
+                               "return label+' \\u00b7 '+elapsed;") &&
        harness_expect_contains(page_html,
-                               "processingLabel('tools','Tools')") &&
+                               "function processingWaitingLabel()") &&
+       harness_expect_contains(page_html,
+                               "function advanceProcessingWaitingLabel()") &&
+       harness_expect_contains(
+         page_html,
+         "var strappyProcessingWaitingIndex=-1;") &&
+       harness_expect_contains(
+         page_html,
+         "index=strappyProcessingWaitingIndex+1;"
+         "if(index<0||index>=count)index=0;") &&
+       harness_expect_contains(
+         page_html,
+         "strappyProcessingWaitingIndex=index;") &&
+       harness_expect_contains(
+         page_html,
+         "label=processingLabel('waiting-'+index,'');") &&
+       harness_expect_not_contains(page_html, "Math.random") &&
+       harness_expect_not_contains(
+         page_html,
+         "chooseProcessingWaitingLabel") &&
+       harness_expect_contains(page_html,
+                               "processingLabel('tools',"
+                               "'[fa:gears] Grinding')") &&
        harness_expect_contains(page_html,
                                "processingLabel('retry','Retry')") &&
+       harness_expect_contains(
+         page_html,
+         "label=processingWaitingLabel();"
+         "if(kind=='retry_wait')") &&
+       harness_expect_contains(
+         page_html,
+         "if((s.status_kind||'thinking')!='tools')"
+         "advanceProcessingWaitingLabel();") &&
+       harness_expect_contains(
+         page_html,
+         "function animateProcessingStatusIcon(n)") &&
+       harness_expect_contains(
+         page_html,
+         "if(animate)animateProcessingStatusIcon(t);") &&
+       harness_expect_not_contains(page_html, "Pondering") &&
        harness_expect_not_contains(page_html, "Retrying in ") &&
        harness_expect_not_contains(page_html, "Using tools - ") &&
        harness_expect_not_contains(page_html, "+' elapsed'") &&
@@ -1255,6 +1384,10 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "if(!strappyAutoScrollEnabled)"
                                "cancelScrollBottomAnimation();") &&
+       harness_expect_contains(
+         page_html,
+         "if(strappyProcessingStatus&&strappyProcessingStatus.active)"
+         "updateProcessingStatus();") &&
        harness_expect_not_contains(page_html,
                                    "if(strappyAutoScrollEnabled)"
                                    "scrollBottomNow();") &&
@@ -1454,6 +1587,26 @@ static int harness_check_fontawesome_rendering(void)
        harness_expect_contains(page_html, ".fa-regular{font-family:'FA7R';}") &&
        harness_expect_contains(page_html, "\"alarm-clock\":'F34E'") &&
        harness_expect_contains(page_html, "\"github\":'F09B'") &&
+       harness_expect_contains(page_html, "\"gears\":'F085'") &&
+       harness_expect_contains(page_html,
+                               "\"hands-holding-circle\":'E4FB'") &&
+       harness_expect_contains(page_html, "\"thumbtack\":'F08D'") &&
+       harness_expect_contains(page_html, "\"bore-hole\":'E4C3'") &&
+       harness_expect_contains(page_html, "\"hands-bound\":'E4F9'") &&
+       harness_expect_contains(page_html, "\"wind\":'F72E'") &&
+       harness_expect_contains(page_html,
+                               "\"hand-holding-droplet\":'F4C1'") &&
+       harness_expect_contains(page_html, "\"horse\":'F6F0'") &&
+       harness_expect_contains(page_html,
+                               "\"table-tennis-paddle-ball\":'F45D'") &&
+       harness_expect_contains(page_html, "\"martini-glass\":'F57B'") &&
+       harness_expect_contains(page_html, "\"bed-pulse\":'F487'") &&
+       harness_expect_contains(page_html, "\"socks\":'F696'") &&
+       harness_expect_contains(page_html, "\"ring\":'F70B'") &&
+       harness_expect_contains(page_html, "\"spoon\":'F1B1'") &&
+       harness_expect_contains(page_html, "\"hand-back-fist\":'F255'") &&
+       harness_expect_contains(page_html, "\"hand-lizard\":'F258'") &&
+       harness_expect_contains(page_html, "\"shoe-prints\":'F54B'") &&
        harness_expect_contains(page_html, "Ready [fa:heart]") &&
        harness_expect_contains(page_html, "faIconHTML(st,n,m)");
 
@@ -1603,7 +1756,7 @@ static int harness_check_tool_column_state(void)
                                "tool-rail-title disclosure-title\" "
                                "onclick=\"return toggleToolColumn(this)\"") &&
        harness_expect_contains(final_html,
-                               "<div class=\"role\">Agent</div>") &&
+                               "<div class=\"role\">Strappy</div>") &&
        harness_expect_contains(final_html,
                                "tool-column-disclosure\"><i class=\"fa fa-solid "
                                "fa-angle-right\"") &&
@@ -2191,6 +2344,7 @@ static int harness_check_responses_items(void)
   labels.failed = "Localized Failed";
   labels.not_applicable = "Localized Not Applicable";
   labels.check = "Localized Check";
+  labels.answer_provided = "Localized Answer Provided";
   labels.no_unicode_emoji = "Localized No Emoji";
   labels.source_link_included = "Localized Source Link Included";
   labels.database_context_checked = "Localized Database Context Checked";
@@ -2375,6 +2529,8 @@ static int harness_check_responses_items(void)
   message.text = "Answer Quality";
   message.metadata_json =
     "{\"outcome\":\"failed\",\"checks\":["
+    "{\"key\":\"answer_non_empty\","
+    "\"label\":\"Answer provided\",\"status\":\"passed\"},"
     "{\"key\":\"unicode_emoji_absent\","
     "\"label\":\"No emoji\",\"status\":\"failed\","
     "\"detail\":\"The response included emoji.\"},"
@@ -2574,7 +2730,7 @@ static int harness_check_responses_items(void)
        harness_expect_contains(developer_html,
                                "class=\"row developer\"") &&
        harness_expect_contains(developer_html,
-                               "<div class=\"role\">Developer</div>") &&
+                               "<div class=\"role\">Harness</div>") &&
        harness_expect_contains(quality_html,
                                "id=\"answer-quality-1\" class=\"row "
                                "answer_quality state-error\"") &&
@@ -2597,6 +2753,9 @@ static int harness_check_responses_items(void)
          "data-not-applicable-label=\"Localized Not Applicable\"") &&
        harness_expect_contains(quality_html,
                                "data-check-label=\"Localized Check\"") &&
+       harness_expect_contains(
+         quality_html,
+         "data-answer-provided-label=\"Localized Answer Provided\"") &&
        harness_expect_contains(
          quality_html,
          "data-no-unicode-emoji-label=\"Localized No Emoji\"") &&
