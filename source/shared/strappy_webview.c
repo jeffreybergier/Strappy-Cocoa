@@ -414,10 +414,105 @@ static int strappy_webview_append_url_path_escaped(
   return 1;
 }
 
+static int strappy_webview_append_html_escaped_range(
+  strappy_webview_buffer *buffer,
+  const char *text,
+  size_t length)
+{
+  const unsigned char *cursor;
+  size_t index;
+
+  if ((text == NULL) && (length > 0U)) {
+    return 0;
+  }
+  if (length == 0U) {
+    return 1;
+  }
+
+  cursor = (const unsigned char *)text;
+  for (index = 0U; index < length; index++) {
+    if (cursor[index] == '&') {
+      if (!strappy_webview_buffer_append_cstring(buffer, "&amp;")) {
+        return 0;
+      }
+    } else if (cursor[index] == '<') {
+      if (!strappy_webview_buffer_append_cstring(buffer, "&lt;")) {
+        return 0;
+      }
+    } else if (cursor[index] == '>') {
+      if (!strappy_webview_buffer_append_cstring(buffer, "&gt;")) {
+        return 0;
+      }
+    } else if (cursor[index] == '"') {
+      if (!strappy_webview_buffer_append_cstring(buffer, "&quot;")) {
+        return 0;
+      }
+    } else if (!strappy_webview_buffer_append_char(buffer,
+                                                   (char)cursor[index])) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
 static int strappy_webview_append_html_escaped(strappy_webview_buffer *buffer,
                                                const char *text)
 {
+  if (text == NULL) {
+    return 1;
+  }
+  return strappy_webview_append_html_escaped_range(buffer,
+                                                   text,
+                                                   strlen(text));
+}
+
+static int strappy_webview_database_reference_character(unsigned char value)
+{
+  return ((value >= 'A') && (value <= 'Z')) ||
+         ((value >= 'a') && (value <= 'z')) ||
+         ((value >= '0') && (value <= '9')) ||
+         (value == '_');
+}
+
+static const char *strappy_webview_database_display_filename(
+  const strappy_webview_database_display_name *database_display_names,
+  size_t database_display_name_count,
+  const char *database_id,
+  size_t database_id_length)
+{
+  size_t index;
+
+  if ((database_display_names == NULL) ||
+      (database_id == NULL) ||
+      (database_id_length == 0U)) {
+    return NULL;
+  }
+
+  for (index = 0U; index < database_display_name_count; index++) {
+    const char *candidate_id;
+    const char *filename;
+
+    candidate_id = database_display_names[index].database_id;
+    filename = database_display_names[index].filename;
+    if ((candidate_id != NULL) &&
+        (filename != NULL) &&
+        (filename[0] != '\0') &&
+        (strlen(candidate_id) == database_id_length) &&
+        (memcmp(candidate_id, database_id, database_id_length) == 0)) {
+      return filename;
+    }
+  }
+  return NULL;
+}
+
+static int strappy_webview_append_json_string_content_html_escaped(
+  strappy_webview_buffer *buffer,
+  const char *text)
+{
   const unsigned char *cursor;
+  const char *escaped;
+  char unicode_escape[8];
 
   if (text == NULL) {
     return 1;
@@ -425,29 +520,114 @@ static int strappy_webview_append_html_escaped(strappy_webview_buffer *buffer,
 
   cursor = (const unsigned char *)text;
   while (*cursor != '\0') {
-    if (*cursor == '&') {
-      if (!strappy_webview_buffer_append_cstring(buffer, "&amp;")) {
+    escaped = NULL;
+    if (*cursor == '"') {
+      escaped = "\\\"";
+    } else if (*cursor == '\\') {
+      escaped = "\\\\";
+    } else if (*cursor == '\b') {
+      escaped = "\\b";
+    } else if (*cursor == '\f') {
+      escaped = "\\f";
+    } else if (*cursor == '\n') {
+      escaped = "\\n";
+    } else if (*cursor == '\r') {
+      escaped = "\\r";
+    } else if (*cursor == '\t') {
+      escaped = "\\t";
+    } else if (*cursor < 32U) {
+      snprintf(unicode_escape,
+               sizeof(unicode_escape),
+               "\\u%04x",
+               (unsigned int)*cursor);
+      escaped = unicode_escape;
+    }
+
+    if (escaped != NULL) {
+      if (!strappy_webview_append_html_escaped(buffer, escaped)) {
         return 0;
       }
-    } else if (*cursor == '<') {
-      if (!strappy_webview_buffer_append_cstring(buffer, "&lt;")) {
-        return 0;
-      }
-    } else if (*cursor == '>') {
-      if (!strappy_webview_buffer_append_cstring(buffer, "&gt;")) {
-        return 0;
-      }
-    } else if (*cursor == '"') {
-      if (!strappy_webview_buffer_append_cstring(buffer, "&quot;")) {
-        return 0;
-      }
-    } else if (!strappy_webview_buffer_append_char(buffer, (char)*cursor)) {
+    } else if (!strappy_webview_append_html_escaped_range(
+                 buffer,
+                 (const char *)cursor,
+                 1U)) {
       return 0;
     }
     cursor++;
   }
-
   return 1;
+}
+
+static int strappy_webview_append_database_display_text_html(
+  strappy_webview_buffer *buffer,
+  const char *text,
+  const strappy_webview_database_display_name *database_display_names,
+  size_t database_display_name_count,
+  int json_string_content)
+{
+  const char *candidate;
+  const char *cursor;
+  const char *end;
+  const char *filename;
+  const char *literal;
+
+  if (text == NULL) {
+    return 1;
+  }
+  if ((database_display_names == NULL) ||
+      (database_display_name_count == 0U)) {
+    return strappy_webview_append_html_escaped(buffer, text);
+  }
+
+  cursor = text;
+  literal = text;
+  while ((candidate = strstr(cursor, "db_")) != NULL) {
+    end = candidate + 3;
+    if ((*end < '0') || (*end > '9')) {
+      cursor = end;
+      continue;
+    }
+    while ((*end >= '0') && (*end <= '9')) {
+      end++;
+    }
+    if (((candidate > text) &&
+         strappy_webview_database_reference_character(
+           (unsigned char)candidate[-1])) ||
+        strappy_webview_database_reference_character((unsigned char)*end)) {
+      cursor = end;
+      continue;
+    }
+
+    filename = strappy_webview_database_display_filename(
+      database_display_names,
+      database_display_name_count,
+      candidate,
+      (size_t)(end - candidate));
+    if (filename == NULL) {
+      cursor = end;
+      continue;
+    }
+
+    if (!strappy_webview_append_html_escaped_range(
+          buffer,
+          literal,
+          (size_t)(candidate - literal))) {
+      return 0;
+    }
+    if (json_string_content) {
+      if (!strappy_webview_append_json_string_content_html_escaped(
+            buffer,
+            filename)) {
+        return 0;
+      }
+    } else if (!strappy_webview_append_html_escaped(buffer, filename)) {
+      return 0;
+    }
+    cursor = end;
+    literal = end;
+  }
+
+  return strappy_webview_append_html_escaped(buffer, literal);
 }
 
 static int strappy_webview_append_js_string(strappy_webview_buffer *buffer,
@@ -1227,6 +1407,30 @@ static int strappy_webview_append_data_attribute(strappy_webview_buffer *buffer,
          strappy_webview_buffer_append_cstring(buffer, "\"");
 }
 
+static int strappy_webview_append_database_display_data_attribute(
+  strappy_webview_buffer *buffer,
+  const char *name,
+  const char *value,
+  const strappy_webview_database_display_name *database_display_names,
+  size_t database_display_name_count,
+  int json_string_content)
+{
+  if ((value == NULL) || (value[0] == '\0')) {
+    return 1;
+  }
+
+  return strappy_webview_buffer_append_cstring(buffer, " data-") &&
+         strappy_webview_buffer_append_cstring(buffer, name) &&
+         strappy_webview_buffer_append_cstring(buffer, "=\"") &&
+         strappy_webview_append_database_display_text_html(
+           buffer,
+           value,
+           database_display_names,
+           database_display_name_count,
+           json_string_content) &&
+         strappy_webview_buffer_append_cstring(buffer, "\"");
+}
+
 static int strappy_webview_append_processing_waiting_label_attributes(
   strappy_webview_buffer *buffer,
   const strappy_webview_labels *labels)
@@ -1318,6 +1522,8 @@ static int strappy_webview_append_reasoning_html(
   const char *reasoning,
   int render_when_empty,
   int collapsed,
+  const strappy_webview_database_display_name *database_display_names,
+  size_t database_display_name_count,
   const strappy_webview_labels *labels)
 {
   int collapse_reasoning;
@@ -1367,7 +1573,12 @@ static int strappy_webview_append_reasoning_html(
   }
   if (!strappy_webview_buffer_append_cstring(buffer,
                                             "</div><div class=\"reasoning-body\">") ||
-      !strappy_webview_append_html_escaped(buffer, reasoning) ||
+      !strappy_webview_append_database_display_text_html(
+        buffer,
+        reasoning,
+        database_display_names,
+        database_display_name_count,
+        0) ||
       !strappy_webview_buffer_append_cstring(buffer, "</div></div>")) {
     return 0;
   }
@@ -1379,6 +1590,8 @@ static int strappy_webview_append_response_metadata_html(
   strappy_webview_buffer *buffer,
   const char *role,
   const char *metadata_json,
+  const strappy_webview_database_display_name *database_display_names,
+  size_t database_display_name_count,
   const strappy_webview_labels *labels)
 {
   if ((!strappy_webview_is_api_call_role(role) &&
@@ -1392,7 +1605,12 @@ static int strappy_webview_append_response_metadata_html(
            buffer,
            "<div class=\"response-metadata response-metadata-collapsed\" "
            "data-metadata=\"") &&
-         strappy_webview_append_html_escaped(buffer, metadata_json) &&
+         strappy_webview_append_database_display_text_html(
+           buffer,
+           metadata_json,
+           database_display_names,
+           database_display_name_count,
+           1) &&
          strappy_webview_buffer_append_cstring(
            buffer,
            "\"><div class=\"response-metadata-label disclosure-title\" "
@@ -3202,6 +3420,8 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                    const char *status_html)
 {
   strappy_webview_buffer buffer;
+  const strappy_webview_database_display_name *database_display_names;
+  size_t database_display_name_count;
   const char *role;
   const char *text;
   const char *reasoning;
@@ -3234,8 +3454,13 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   int render_response_status_section;
   int answer_quality_expanded;
   int tool_card_expanded;
+  int text_is_tool_json;
   int ok;
 
+  database_display_names = (message != NULL) ?
+    message->database_display_names : NULL;
+  database_display_name_count = (message != NULL) ?
+    message->database_display_name_count : 0U;
   role = ((message != NULL) && (message->role != NULL) &&
           (message->role[0] != '\0')) ? message->role : "assistant";
   text = (message != NULL) ? strappy_webview_string_or_empty(message->text) : "";
@@ -3348,6 +3573,9 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   tool_card_expanded = answer_quality_expanded ||
     (render_api_tool_card &&
      (strcmp(tool_name, STRAPPY_TOOL_BASH) == 0));
+  text_is_tool_json =
+    strappy_webview_is_tool_call_role(role) ||
+    strappy_webview_is_tool_result_role(role);
   render_created_at =
     (created_at[0] != '\0') &&
     ((message == NULL) || (message->round_id <= 0LL)) &&
@@ -3511,43 +3739,67 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                              "tool-name",
                                              (message != NULL) ?
                                                message->tool_name : NULL) &&
-       strappy_webview_append_data_attribute(&buffer,
-                                             "arguments-json",
-                                             (message != NULL) ?
-                                               message->arguments_json : NULL) &&
-       strappy_webview_append_data_attribute(&buffer,
-                                             "result-json",
-                                             (message != NULL) ?
-                                               message->result_json : NULL) &&
-       strappy_webview_append_data_attribute(
+       strappy_webview_append_database_display_data_attribute(
+         &buffer,
+         "arguments-json",
+         (message != NULL) ? message->arguments_json : NULL,
+         database_display_names,
+         database_display_name_count,
+         1) &&
+       strappy_webview_append_database_display_data_attribute(
+         &buffer,
+         "result-json",
+         (message != NULL) ? message->result_json : NULL,
+         database_display_names,
+         database_display_name_count,
+         1) &&
+       strappy_webview_append_database_display_data_attribute(
          &buffer,
          "response-item-action-json",
-         (message != NULL) ? message->response_item_action_json : NULL) &&
-       strappy_webview_append_data_attribute(
+         (message != NULL) ? message->response_item_action_json : NULL,
+         database_display_names,
+         database_display_name_count,
+         1) &&
+       strappy_webview_append_database_display_data_attribute(
          &buffer,
          "response-item-url",
-         (message != NULL) ? message->response_item_url : NULL) &&
-       strappy_webview_append_data_attribute(
+         (message != NULL) ? message->response_item_url : NULL,
+         database_display_names,
+         database_display_name_count,
+         0) &&
+       strappy_webview_append_database_display_data_attribute(
          &buffer,
          "response-item-title",
-         (message != NULL) ? message->response_item_title : NULL) &&
-       strappy_webview_append_data_attribute(
+         (message != NULL) ? message->response_item_title : NULL,
+         database_display_names,
+         database_display_name_count,
+         0) &&
+       strappy_webview_append_database_display_data_attribute(
          &buffer,
          "response-item-status",
-         (message != NULL) ? message->response_item_status : NULL) &&
-       strappy_webview_append_data_attribute(
+         (message != NULL) ? message->response_item_status : NULL,
+         database_display_names,
+         database_display_name_count,
+         0) &&
+       strappy_webview_append_database_display_data_attribute(
          &buffer,
          "response-item-http-status",
-         (message != NULL) ? message->response_item_http_status : NULL) &&
+         (message != NULL) ? message->response_item_http_status : NULL,
+         database_display_names,
+         database_display_name_count,
+         0) &&
        strappy_webview_append_data_attribute(&buffer,
                                              "render-state",
                                              (message != NULL) ?
                                                message->render_state_json : NULL);
   if (ok && strappy_webview_is_answer_quality_role(role)) {
-    ok = strappy_webview_append_data_attribute(
+    ok = strappy_webview_append_database_display_data_attribute(
            &buffer,
            "answer-quality-json",
-           metadata_json) &&
+           metadata_json,
+           database_display_names,
+           database_display_name_count,
+           1) &&
          strappy_webview_append_data_attribute(
            &buffer,
            "answer-quality-label",
@@ -3657,6 +3909,8 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                                reasoning,
                                                reasoning_render_when_empty,
                                                reasoning_collapsed,
+                                               database_display_names,
+                                               database_display_name_count,
                                                labels);
     if (ok) {
       ok = strappy_webview_append_tool_column_html(&buffer,
@@ -3736,13 +3990,22 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
            &buffer,
            "</span></a><div class=\"tool-card-body\">"
            "<div class=\"api-tool-fallback\">") &&
-         strappy_webview_append_html_escaped(
+         strappy_webview_append_database_display_text_html(
            &buffer,
            strappy_webview_is_answer_quality_role(role) ?
-             strappy_webview_answer_quality_label(labels) : text) &&
+             strappy_webview_answer_quality_label(labels) : text,
+           database_display_names,
+           database_display_name_count,
+           strappy_webview_is_answer_quality_role(role) ? 0 : 1) &&
          strappy_webview_buffer_append_cstring(&buffer, "</div></div>");
   } else {
-    ok = ok && strappy_webview_append_html_escaped(&buffer, text);
+    ok = ok &&
+         strappy_webview_append_database_display_text_html(
+           &buffer,
+           text,
+           database_display_names,
+           database_display_name_count,
+           text_is_tool_json);
   }
   ok = ok && strappy_webview_buffer_append_cstring(&buffer, "</div>");
   if (ok && render_response_status_section) {
@@ -3752,6 +4015,8 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     ok = strappy_webview_append_response_metadata_html(&buffer,
                                                        role,
                                                        metadata_json,
+                                                       database_display_names,
+                                                       database_display_name_count,
                                                        labels);
   }
 
@@ -3968,6 +4233,8 @@ char *strappy_webview_message_html_with_reasoning(
 char *strappy_webview_messages_page_html(
   const char *messages_html,
   const char *tool_display_registry_json,
+  const strappy_webview_database_display_name *database_display_names,
+  size_t database_display_name_count,
   const char *error_text,
   const char *processing_status_json)
 {
@@ -4026,7 +4293,12 @@ char *strappy_webview_messages_page_html(
     ok = strappy_webview_buffer_append_cstring(
            &buffer,
            "<div id=\"timeline-error\" class=\"timeline-error\">") &&
-         strappy_webview_append_html_escaped(&buffer, error_text) &&
+         strappy_webview_append_database_display_text_html(
+           &buffer,
+           error_text,
+           database_display_names,
+           database_display_name_count,
+           0) &&
          strappy_webview_buffer_append_cstring(&buffer, "</div>");
   }
 

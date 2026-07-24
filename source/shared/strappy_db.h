@@ -251,6 +251,16 @@ typedef struct strappy_discovered_database_record_list {
   size_t count;
 } strappy_discovered_database_record_list;
 
+typedef struct strappy_database_display_name_record {
+  char *assistant_database_id;
+  char *filename;
+} strappy_database_display_name_record;
+
+typedef struct strappy_database_display_name_record_list {
+  strappy_database_display_name_record *records;
+  size_t count;
+} strappy_database_display_name_record_list;
+
 typedef struct strappy_openrouter_model_record {
   char *model_id;
   char *canonical_slug;
@@ -309,6 +319,10 @@ void strappy_discovered_database_record_init(strappy_discovered_database_record 
 void strappy_discovered_database_record_destroy(strappy_discovered_database_record *record);
 void strappy_discovered_database_record_list_init(strappy_discovered_database_record_list *list);
 void strappy_discovered_database_record_list_destroy(strappy_discovered_database_record_list *list);
+void strappy_database_display_name_record_list_init(
+  strappy_database_display_name_record_list *list);
+void strappy_database_display_name_record_list_destroy(
+  strappy_database_display_name_record_list *list);
 void strappy_openrouter_model_record_init(strappy_openrouter_model_record *record);
 void strappy_openrouter_model_record_destroy(strappy_openrouter_model_record *record);
 void strappy_openrouter_model_record_list_init(strappy_openrouter_model_record_list *list);
@@ -346,6 +360,10 @@ int strappy_db_replace_discovered_databases_for_scan_root(
 int strappy_db_list_discovered_databases(
   const char *db_path,
   strappy_discovered_database_record_list *list,
+  char **error_out);
+int strappy_db_list_approved_database_display_names(
+  const char *db_path,
+  strappy_database_display_name_record_list *list,
   char **error_out);
 int strappy_db_update_discovered_database_decision(
   const char *db_path,

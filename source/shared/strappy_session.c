@@ -529,9 +529,91 @@ char *strappy_session_webview_batched_js(const char *java_script)
   return script;
 }
 
+typedef struct strappy_session_database_display_context {
+  strappy_database_display_name_record_list records;
+  strappy_webview_database_display_name *names;
+  size_t count;
+} strappy_session_database_display_context;
+
+static void strappy_session_database_display_context_init(
+  strappy_session_database_display_context *context)
+{
+  if (context == NULL) {
+    return;
+  }
+  strappy_database_display_name_record_list_init(&context->records);
+  context->names = NULL;
+  context->count = 0U;
+}
+
+static void strappy_session_database_display_context_destroy(
+  strappy_session_database_display_context *context)
+{
+  if (context == NULL) {
+    return;
+  }
+  free(context->names);
+  strappy_database_display_name_record_list_destroy(&context->records);
+  strappy_session_database_display_context_init(context);
+}
+
+static int strappy_session_database_display_context_load(
+  const char *db_path,
+  strappy_session_database_display_context *context,
+  char **error_out)
+{
+  size_t index;
+
+  if (context == NULL) {
+    strappy_set_error(error_out,
+                      "Database display context output is missing.");
+    return 0;
+  }
+  strappy_session_database_display_context_init(context);
+  if (!strappy_db_list_approved_database_display_names(
+        db_path,
+        &context->records,
+        error_out)) {
+    strappy_session_database_display_context_destroy(context);
+    return 0;
+  }
+  if (context->records.count == 0U) {
+    return 1;
+  }
+  if (context->records.count >
+      (((size_t)-1) / sizeof(*context->names))) {
+    strappy_session_database_display_context_destroy(context);
+    strappy_set_error(error_out,
+                      "Database display name list is too large.");
+    return 0;
+  }
+  context->names = (strappy_webview_database_display_name *)calloc(
+    context->records.count,
+    sizeof(*context->names));
+  if (context->names == NULL) {
+    strappy_session_database_display_context_destroy(context);
+    strappy_set_error(error_out,
+                      "Could not allocate database display names.");
+    return 0;
+  }
+
+  for (index = 0U; index < context->records.count; index++) {
+    const strappy_database_display_name_record *record;
+
+    record = &context->records.records[index];
+    context->names[context->count].database_id =
+      record->assistant_database_id;
+    context->names[context->count].filename = record->filename;
+    context->count++;
+  }
+  return 1;
+}
+
 static char *strappy_session_webview_messages_page_html_with_content(
   const char *messages_html,
   const char *resource_dir,
+  const strappy_webview_database_display_name *database_display_names,
+  size_t database_display_name_count,
   const char *error_text,
   const char *processing_status_json)
 {
@@ -545,6 +627,8 @@ static char *strappy_session_webview_messages_page_html_with_content(
   page_html = strappy_webview_messages_page_html(
     messages_html,
     (display_registry_json != NULL) ? display_registry_json : "{}",
+    database_display_names,
+    database_display_name_count,
     error_text,
     processing_status_json);
   strappy_free_string(display_registry_json);
@@ -571,13 +655,17 @@ char *strappy_session_webview_set_round_context_inclusion_js(
 
 static void strappy_session_webview_message_from_record(
   const strappy_session_message_record *record,
-  strappy_webview_message *message)
+  strappy_webview_message *message,
+  const strappy_webview_database_display_name *database_display_names,
+  size_t database_display_name_count)
 {
   if (message == NULL) {
     return;
   }
 
   memset(message, 0, sizeof(*message));
+  message->database_display_names = database_display_names;
+  message->database_display_name_count = database_display_name_count;
   if (record == NULL) {
     return;
   }
@@ -628,6 +716,8 @@ static char *strappy_session_webview_messages_html_for_record_range(
   const strappy_session_message_record_list *list,
   size_t start_index,
   size_t end_index,
+  const strappy_webview_database_display_name *database_display_names,
+  size_t database_display_name_count,
   char **error_out)
 {
   strappy_webview_message *messages;
@@ -673,7 +763,9 @@ static char *strappy_session_webview_messages_html_for_record_range(
   for (index = 0U; index < count; index++) {
     strappy_session_webview_message_from_record(
       &list->records[start_index + index],
-      &messages[index]);
+      &messages[index],
+      database_display_names,
+      database_display_name_count);
   }
   messages_html = strappy_webview_messages_html(
     messages,
@@ -695,6 +787,7 @@ char *strappy_session_webview_messages_page_html_for_session(
   size_t *message_count_out,
   char **error_out)
 {
+  strappy_session_database_display_context database_display;
   strappy_session_message_record_list list;
   const char *display_error;
   char *list_error;
@@ -705,6 +798,7 @@ char *strappy_session_webview_messages_page_html_for_session(
     *message_count_out = 0U;
   }
 
+  strappy_session_database_display_context_init(&database_display);
   strappy_session_message_record_list_init(&list);
   list_error = NULL;
   if (!strappy_session_list_message_records(db_path,
@@ -716,6 +810,8 @@ char *strappy_session_webview_messages_page_html_for_session(
     page_html = strappy_session_webview_messages_page_html_with_content(
       "",
       resource_dir,
+      NULL,
+      0U,
       display_error,
       processing_status_json);
     if (page_html == NULL) {
@@ -725,28 +821,42 @@ char *strappy_session_webview_messages_page_html_for_session(
     }
     strappy_free_string(list_error);
     strappy_session_message_record_list_destroy(&list);
+    strappy_session_database_display_context_destroy(&database_display);
     return page_html;
   }
 
   if (message_count_out != NULL) {
     *message_count_out = list.count;
   }
+  if (!strappy_session_database_display_context_load(
+        db_path,
+        &database_display,
+        error_out)) {
+    strappy_session_message_record_list_destroy(&list);
+    return NULL;
+  }
   messages_html = strappy_session_webview_messages_html_for_record_range(
     &list,
     0U,
     list.count,
+    database_display.names,
+    database_display.count,
     error_out);
   strappy_session_message_record_list_destroy(&list);
   if (messages_html == NULL) {
+    strappy_session_database_display_context_destroy(&database_display);
     return NULL;
   }
 
   page_html = strappy_session_webview_messages_page_html_with_content(
     messages_html,
     resource_dir,
+    database_display.names,
+    database_display.count,
     error_text,
     processing_status_json);
   free(messages_html);
+  strappy_session_database_display_context_destroy(&database_display);
   if (page_html == NULL) {
     strappy_set_error(error_out, "Could not render the WebView page.");
   }
@@ -760,6 +870,7 @@ char *strappy_session_webview_append_messages_js_for_session(
   size_t *message_count_out,
   char **error_out)
 {
+  strappy_session_database_display_context database_display;
   strappy_session_message_record_list list;
   char *messages_html;
   char *script;
@@ -769,6 +880,7 @@ char *strappy_session_webview_append_messages_js_for_session(
     *message_count_out = 0U;
   }
 
+  strappy_session_database_display_context_init(&database_display);
   strappy_session_message_record_list_init(&list);
   total_count = 0U;
   if (!strappy_session_list_message_records_from_index(db_path,
@@ -781,6 +893,7 @@ char *strappy_session_webview_append_messages_js_for_session(
       *message_count_out = total_count;
     }
     strappy_session_message_record_list_destroy(&list);
+    strappy_session_database_display_context_destroy(&database_display);
     return NULL;
   }
 
@@ -789,6 +902,7 @@ char *strappy_session_webview_append_messages_js_for_session(
   }
   if (list.count == 0U) {
     strappy_session_message_record_list_destroy(&list);
+    strappy_session_database_display_context_destroy(&database_display);
     script = strappy_string_duplicate("");
     if (script == NULL) {
       strappy_set_error(error_out, "Could not allocate empty WebView JavaScript.");
@@ -796,12 +910,22 @@ char *strappy_session_webview_append_messages_js_for_session(
     return script;
   }
 
+  if (!strappy_session_database_display_context_load(
+        db_path,
+        &database_display,
+        error_out)) {
+    strappy_session_message_record_list_destroy(&list);
+    return NULL;
+  }
   messages_html = strappy_session_webview_messages_html_for_record_range(
     &list,
     0U,
     list.count,
+    database_display.names,
+    database_display.count,
     error_out);
   strappy_session_message_record_list_destroy(&list);
+  strappy_session_database_display_context_destroy(&database_display);
   if (messages_html == NULL) {
     return NULL;
   }
@@ -820,10 +944,12 @@ char *strappy_session_webview_message_update_js_for_key(
   const char *message_key,
   char **error_out)
 {
+  strappy_session_database_display_context database_display;
   strappy_session_message_record record;
   strappy_webview_message message;
   char *script;
 
+  strappy_session_database_display_context_init(&database_display);
   strappy_session_message_record_init(&record);
   if (!strappy_session_load_message_record_by_key(db_path,
                                                   session_id,
@@ -831,13 +957,26 @@ char *strappy_session_webview_message_update_js_for_key(
                                                   &record,
                                                   error_out)) {
     strappy_session_message_record_destroy(&record);
+    strappy_session_database_display_context_destroy(&database_display);
     return NULL;
   }
 
-  strappy_session_webview_message_from_record(&record, &message);
+  if (!strappy_session_database_display_context_load(
+        db_path,
+        &database_display,
+        error_out)) {
+    strappy_session_message_record_destroy(&record);
+    return NULL;
+  }
+  strappy_session_webview_message_from_record(
+    &record,
+    &message,
+    database_display.names,
+    database_display.count);
   script = strappy_webview_message_update_js(
     &message,
     strappy_webview_localized_labels());
+  strappy_session_database_display_context_destroy(&database_display);
   strappy_session_message_record_destroy(&record);
   return script;
 }

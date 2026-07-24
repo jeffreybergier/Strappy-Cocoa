@@ -53,6 +53,11 @@ typedef struct strappy_webview_labels {
   const char *required_tool_not_called;
 } strappy_webview_labels;
 
+typedef struct strappy_webview_database_display_name {
+  const char *database_id;
+  const char *filename;
+} strappy_webview_database_display_name;
+
 typedef struct strappy_webview_message {
   long long message_id;
   long long round_id;
@@ -90,6 +95,8 @@ typedef struct strappy_webview_message {
   int can_include_in_context;
   int include_in_context;
   int is_error;
+  const strappy_webview_database_display_name *database_display_names;
+  size_t database_display_name_count;
 } strappy_webview_message;
 
 typedef struct strappy_webview_script_batch strappy_webview_script_batch;
@@ -159,6 +166,8 @@ char *strappy_webview_message_html_with_reasoning(
 char *strappy_webview_messages_page_html(
   const char *messages_html,
   const char *tool_display_registry_json,
+  const strappy_webview_database_display_name *database_display_names,
+  size_t database_display_name_count,
   const char *error_text,
   const char *processing_status_json);
 

@@ -16,6 +16,16 @@ static const char harness_tool_display_registry_json[] =
   "\"promoted_path\":[\"url\"],\"transform\":\"url\","
   "\"response_item\":true}}";
 
+static const strappy_webview_database_display_name
+  harness_database_display_names[] = {
+    { "db_7", "Contacts & \"Notes\".sqlite" },
+    { "db_70", "Archive.sqlite" }
+  };
+
+#define HARNESS_DATABASE_DISPLAY_NAME_COUNT \
+  (sizeof(harness_database_display_names) / \
+   sizeof(harness_database_display_names[0]))
+
 static const char * const harness_processing_waiting_labels[
   STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT] = {
   "[fa:hands-holding-circle] Fondling",
@@ -212,6 +222,74 @@ static int harness_check_message_batch(void)
   return ok;
 }
 
+static int harness_check_database_display_names(void)
+{
+  strappy_webview_message message;
+  char *assistant_html;
+  char *error_page_html;
+  char *tool_html;
+  int ok;
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "database-display-assistant";
+  message.role = "assistant";
+  message.text =
+    "Use db_7, db_70; leave db_8, xdb_7, db_7x, and db_700.";
+  message.reasoning = "Review db_7 before answering.";
+  message.database_display_names = harness_database_display_names;
+  message.database_display_name_count =
+    HARNESS_DATABASE_DISPLAY_NAME_COUNT;
+  assistant_html =
+    strappy_webview_message_html(&message, NULL, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "database-display-tool";
+  message.role = "api_function_call";
+  message.tool_name = "database_query";
+  message.arguments_json =
+    "{\"database_id\":\"db_7\",\"note\":\"db_70 & db_8\"}";
+  message.text = message.arguments_json;
+  message.database_display_names = harness_database_display_names;
+  message.database_display_name_count =
+    HARNESS_DATABASE_DISPLAY_NAME_COUNT;
+  tool_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+
+  error_page_html = strappy_webview_messages_page_html(
+    "",
+    "{}",
+    harness_database_display_names,
+    HARNESS_DATABASE_DISPLAY_NAME_COUNT,
+    "Could not open db_7; leave db_8 unchanged.",
+    NULL);
+
+  ok = (assistant_html != NULL) &&
+       (tool_html != NULL) &&
+       (error_page_html != NULL) &&
+       harness_expect_contains(
+         assistant_html,
+         "Use Contacts &amp; &quot;Notes&quot;.sqlite, Archive.sqlite; "
+         "leave db_8, xdb_7, db_7x, and db_700.") &&
+       harness_expect_contains(
+         assistant_html,
+         "Review Contacts &amp; &quot;Notes&quot;.sqlite before answering.") &&
+       harness_expect_contains(
+         tool_html,
+         "data-arguments-json=\"{&quot;database_id&quot;:&quot;Contacts "
+         "&amp; \\&quot;Notes\\&quot;.sqlite&quot;,&quot;note&quot;:"
+         "&quot;Archive.sqlite &amp; db_8&quot;}\"") &&
+       harness_expect_not_contains(tool_html, "db_7") &&
+       harness_expect_not_contains(tool_html, "db_70") &&
+       harness_expect_contains(
+         error_page_html,
+         "Could not open Contacts &amp; &quot;Notes&quot;.sqlite; "
+         "leave db_8 unchanged.");
+
+  strappy_webview_free(error_page_html);
+  strappy_webview_free(tool_html);
+  strappy_webview_free(assistant_html);
+  return ok;
+}
+
 static int harness_check_page_scripts(void)
 {
   strappy_webview_message message;
@@ -236,6 +314,8 @@ static int harness_check_page_scripts(void)
   page_html = strappy_webview_messages_page_html(
     message_html,
     harness_tool_display_registry_json,
+    harness_database_display_names,
+    HARNESS_DATABASE_DISPLAY_NAME_COUNT,
     "",
     NULL);
   strappy_webview_free(message_html);
@@ -1515,7 +1595,13 @@ static int harness_check_timeline_error_state(void)
   char *page_html;
   int ok;
 
-  empty_page_html = strappy_webview_messages_page_html("", "{}", "", NULL);
+  empty_page_html = strappy_webview_messages_page_html(
+    "",
+    "{}",
+    NULL,
+    0U,
+    "",
+    NULL);
   if (empty_page_html == NULL) {
     fprintf(stderr, "Could not generate blank timeline page HTML.\n");
     return 0;
@@ -1523,6 +1609,8 @@ static int harness_check_timeline_error_state(void)
   page_html = strappy_webview_messages_page_html(
     "",
     "{}",
+    NULL,
+    0U,
     "Timeline failed <retry> & \"later\"",
     NULL);
   if (page_html == NULL) {
@@ -1573,6 +1661,8 @@ static int harness_check_fontawesome_rendering(void)
   page_html = strappy_webview_messages_page_html(
     message_html,
     "{}",
+    NULL,
+    0U,
     "",
     NULL);
   strappy_webview_free(message_html);
@@ -1869,6 +1959,8 @@ static int harness_check_processing_status_scripts(void)
   page_html = strappy_webview_messages_page_html(
     "",
     "{}",
+    NULL,
+    0U,
     "",
     "{\"active\":true,\"message_key\":\"prompt-group-initial\","
     "\"status_kind\":\"thinking\",\"started_ms\":1000,"
@@ -2023,6 +2115,8 @@ static int harness_check_harness_prompt_group_collapse(void)
   page_html = strappy_webview_messages_page_html(
     messages_html,
     "{}",
+    NULL,
+    0U,
     "",
     NULL);
   free(messages_html);
@@ -2828,6 +2922,9 @@ int main(void)
     return 1;
   }
   if (!harness_check_message_batch()) {
+    return 1;
+  }
+  if (!harness_check_database_display_names()) {
     return 1;
   }
   if (!harness_check_page_scripts()) {

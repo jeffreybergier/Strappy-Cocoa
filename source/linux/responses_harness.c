@@ -6913,7 +6913,11 @@ cleanup:
 static int harness_test_session_webview_rendering(void)
 {
   static const char *first_text = "First stored WebView message";
-  static const char *second_text = "Second stored WebView message";
+  static const char *second_text =
+    "Second stored WebView message from db_1; keep db_2 raw";
+  static const char *second_display_text =
+    "Second stored WebView message from "
+    "strappy_session_webview_Contacts &amp; Notes.sqlite; keep db_2 raw";
   static const char *request_json =
     "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
     "\"input\":[{\"type\":\"message\",\"role\":\"user\","
@@ -6926,12 +6930,17 @@ static int harness_test_session_webview_rendering(void)
     "\"output\":[{\"type\":\"message\",\"id\":\"msg-webview\","
     "\"role\":\"assistant\",\"status\":\"completed\","
     "\"content\":[{\"type\":\"output_text\","
-    "\"text\":\"Second stored WebView message\","
+    "\"text\":\"Second stored WebView message from db_1; keep db_2 raw\","
     "\"annotations\":[],\"logprobs\":[]}]}],"
-    "\"output_text\":\"Second stored WebView message\","
+    "\"output_text\":\"Second stored WebView message from db_1; keep db_2 raw\","
     "\"usage\":{\"input_tokens\":4,\"output_tokens\":5,"
     "\"total_tokens\":9}}";
   const char *path = "/tmp/strappy_session_webview_harness.sqlite";
+  const char *database_path =
+    "/tmp/strappy_session_webview_Contacts & Notes.sqlite";
+  const char *pending_database_path =
+    "/tmp/strappy_session_webview_Private.sqlite";
+  strappy_discovered_database_input pending_database;
   strappy_response_call_begin_input begin;
   strappy_response_call_finish_input finish;
   strappy_session_message_record_list range;
@@ -6951,6 +6960,8 @@ static int harness_test_session_webview_rendering(void)
   int ok;
 
   unlink(path);
+  unlink(database_path);
+  unlink(pending_database_path);
   append_script = NULL;
   call_id = 0LL;
   empty_script = NULL;
@@ -6964,10 +6975,30 @@ static int harness_test_session_webview_rendering(void)
   total_count = 0U;
   strappy_session_message_record_list_init(&range);
   ok = strappy_webview_configure_localized_labels(&error) &&
-       strappy_db_create_session(path, &session_id, &error);
+       strappy_db_create_session(path, &session_id, &error) &&
+       harness_create_approved_preflight_database(path,
+                                                  database_path,
+                                                  &error);
   if (!ok) {
     fprintf(stderr,
             "Could not create the session WebView fixture: %s\n",
+            (error != NULL) ? error : "unknown error");
+    goto cleanup;
+  }
+  memset(&pending_database, 0, sizeof(pending_database));
+  pending_database.path = pending_database_path;
+  pending_database.size = 4096LL;
+  pending_database.modified_at = 1LL;
+  pending_database.device = 8ULL;
+  pending_database.inode = 12ULL;
+  pending_database.is_valid_sqlite = 1;
+  pending_database.scan_root = "/tmp";
+  if (!strappy_db_save_discovered_databases(path,
+                                             &pending_database,
+                                             1U,
+                                             &error)) {
+    fprintf(stderr,
+            "Could not create the pending database display fixture: %s\n",
             (error != NULL) ? error : "unknown error");
     goto cleanup;
   }
@@ -7087,7 +7118,7 @@ static int harness_test_session_webview_rendering(void)
   first_position = (page_html != NULL) ?
     strstr(page_html, first_text) : NULL;
   second_position = (page_html != NULL) ?
-    strstr(page_html, second_text) : NULL;
+    strstr(page_html, second_display_text) : NULL;
   ok = (page_html != NULL) && (message_count == 3U) &&
        (first_position != NULL) && (second_position != NULL) &&
        (first_position < second_position) &&
@@ -7096,6 +7127,7 @@ static int harness_test_session_webview_rendering(void)
        (strstr(page_html,
                "data-include-in-context-label="
                "\"Included in Future Context\"") != NULL) &&
+       (strstr(page_html, second_text) == NULL) &&
        (strstr(page_html,
                "setProcessingStatus({\"active\":true,"
                "\"message_key\":\"session-processing\","
@@ -7120,7 +7152,8 @@ static int harness_test_session_webview_rendering(void)
   ok = (append_script != NULL) && (message_count == 3U) &&
        (strstr(append_script, "appendMessage(") != NULL) &&
        (strstr(append_script, first_text) == NULL) &&
-       (strstr(append_script, second_text) != NULL) &&
+       (strstr(append_script, second_text) == NULL) &&
+       (strstr(append_script, second_display_text) != NULL) &&
        (strstr(append_script, "response-call-") != NULL);
   if (!ok) {
     fprintf(stderr,
@@ -7166,6 +7199,8 @@ cleanup:
   strappy_session_free_string(invalid_script);
   strappy_session_free_string(request_script);
   strappy_session_free_string(error);
+  unlink(pending_database_path);
+  unlink(database_path);
   unlink(path);
   return ok;
 }

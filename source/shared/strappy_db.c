@@ -598,6 +598,32 @@ void strappy_discovered_database_record_list_destroy(
   strappy_discovered_database_record_list_init(list);
 }
 
+void strappy_database_display_name_record_list_init(
+  strappy_database_display_name_record_list *list)
+{
+  if (list == NULL) {
+    return;
+  }
+  list->records = NULL;
+  list->count = 0U;
+}
+
+void strappy_database_display_name_record_list_destroy(
+  strappy_database_display_name_record_list *list)
+{
+  size_t index;
+
+  if (list == NULL) {
+    return;
+  }
+  for (index = 0U; index < list->count; index++) {
+    free(list->records[index].assistant_database_id);
+    free(list->records[index].filename);
+  }
+  free(list->records);
+  strappy_database_display_name_record_list_init(list);
+}
+
 void strappy_openrouter_model_record_init(strappy_openrouter_model_record *record)
 {
   if (record == NULL) {
@@ -6687,6 +6713,144 @@ int strappy_db_list_discovered_databases(
     sqlite3_finalize(stmt);
     strappy_db_release(db);
     strappy_discovered_database_record_list_destroy(list);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  strappy_db_release(db);
+  return 1;
+}
+
+static char *strappy_db_copy_database_filename(const char *path)
+{
+  const char *backslash;
+  const char *filename;
+  const char *slash;
+
+  if (path == NULL) {
+    return NULL;
+  }
+  slash = strrchr(path, '/');
+  backslash = strrchr(path, '\\');
+  filename = path;
+  if ((slash != NULL) &&
+      ((backslash == NULL) || (slash > backslash))) {
+    filename = slash + 1;
+  } else if (backslash != NULL) {
+    filename = backslash + 1;
+  }
+  if (filename[0] == '\0') {
+    return NULL;
+  }
+  return strappy_string_duplicate(filename);
+}
+
+int strappy_db_list_approved_database_display_names(
+  const char *db_path,
+  strappy_database_display_name_record_list *list,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT d.assistant_database_id, l.path "
+    "FROM databases d "
+    "JOIN database_locations l ON l.database_id = d.id AND l.active = 1 "
+    "JOIN database_permissions p ON p.database_id = d.id "
+    "WHERE d.assistant_database_id IS NOT NULL "
+    "AND d.assistant_database_id <> '' "
+    "AND l.validation_state = 'valid' "
+    "AND p.decision = 'allowed' "
+    "ORDER BY d.id, l.path;";
+  strappy_database_display_name_record *record;
+  strappy_database_display_name_record *next_records;
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  char *path;
+  int rc;
+
+  if (list == NULL) {
+    strappy_set_error(
+      error_out,
+      "strappy_db_list_approved_database_display_names received no output.");
+    return 0;
+  }
+  strappy_database_display_name_record_list_init(list);
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not prepare approved database display names: %s",
+      sqlite3_errmsg(db));
+    strappy_db_release(db);
+    return 0;
+  }
+
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    if (list->count >=
+        (((size_t)-1) / sizeof(strappy_database_display_name_record))) {
+      strappy_set_error(error_out,
+                        "Approved database display name list is too large.");
+      sqlite3_finalize(stmt);
+      strappy_db_release(db);
+      strappy_database_display_name_record_list_destroy(list);
+      return 0;
+    }
+
+    next_records = (strappy_database_display_name_record *)realloc(
+      list->records,
+      (list->count + 1U) * sizeof(*next_records));
+    if (next_records == NULL) {
+      strappy_set_error(
+        error_out,
+        "Could not allocate approved database display names.");
+      sqlite3_finalize(stmt);
+      strappy_db_release(db);
+      strappy_database_display_name_record_list_destroy(list);
+      return 0;
+    }
+    list->records = next_records;
+    record = &list->records[list->count];
+    record->assistant_database_id = strappy_db_column_string(stmt, 0);
+    record->filename = NULL;
+    path = strappy_db_column_string(stmt, 1);
+    if (path != NULL) {
+      record->filename = strappy_db_copy_database_filename(path);
+    }
+    free(path);
+    if ((record->assistant_database_id == NULL) ||
+        (record->filename == NULL)) {
+      free(record->assistant_database_id);
+      free(record->filename);
+      record->assistant_database_id = NULL;
+      record->filename = NULL;
+      strappy_set_error(
+        error_out,
+        "Could not copy an approved database display name.");
+      sqlite3_finalize(stmt);
+      strappy_db_release(db);
+      strappy_database_display_name_record_list_destroy(list);
+      return 0;
+    }
+    list->count++;
+  }
+
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not read approved database display names: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    strappy_database_display_name_record_list_destroy(list);
     return 0;
   }
 
