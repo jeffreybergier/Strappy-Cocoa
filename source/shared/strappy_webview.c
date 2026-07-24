@@ -29,22 +29,24 @@ typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_DEVELOPER,
   STRAPPY_WEBVIEW_LABEL_THINKING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_TOOLS,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_HYDRATING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_FONDLING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_PEGGING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_THRUSTING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_CHOKING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_BLOWING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_SPOONING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_STROKING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_UNDRESSING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_JUDGING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_BLOWING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_EDGING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_FANTASIZING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_RIDING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_SPANKING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_HYDRATING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_FANTASIZING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_UNDRESSING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_EDGING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_SPOONING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_THRUSTING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_PEGGING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_FISTING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_JUDGING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_CHOKING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_DOMINATING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_FINISHING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_REGRETTING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_AUTOSCROLL_ON,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_AUTOSCROLL_OFF,
   STRAPPY_WEBVIEW_LABEL_RESPONSE_METADATA,
@@ -89,22 +91,24 @@ static const char * const g_strappy_webview_label_keys[
   "Harness",
   "Thinking",
   "[fa:gears] Grinding",
+  "[fa:martini-glass] Hydrating",
   "[fa:hands-holding-circle] Fondling",
-  "[fa:thumbtack] Pegging",
-  "[fa:bore-hole] Thrusting",
-  "[fa:hands-bound] Choking",
-  "[fa:wind] Blowing",
+  "[fa:spoon] Spooning",
   "[fa:hand-holding-droplet] Stroking",
+  "[fa:socks] Undressing",
+  "[fa:hand-lizard] Judging",
+  "[fa:wind] Blowing",
+  "[fa:ring] Edging",
+  "[fa:bed-pulse] Fantasizing",
   "[fa:horse] Riding",
   "[fa:table-tennis-paddle-ball] Spanking",
-  "[fa:martini-glass] Hydrating",
-  "[fa:bed-pulse] Fantasizing",
-  "[fa:socks] Undressing",
-  "[fa:ring] Edging",
-  "[fa:spoon] Spooning",
+  "[fa:bore-hole] Thrusting",
+  "[fa:thumbtack] Pegging",
   "[fa:hand-back-fist] Fisting",
-  "[fa:hand-lizard] Judging",
+  "[fa:hands-bound] Choking",
   "[fa:shoe-prints] Dominating",
+  "[fa:droplet] Finishing",
+  "[fa:shower] Regretting",
   "Autoscroll on",
   "Autoscroll off",
   "Response Metadata",
@@ -165,7 +169,7 @@ static void strappy_webview_assign_localized_labels(
        index < STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT;
        index++) {
     labels->processing_waiting[index] =
-      values[(size_t)STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_FONDLING +
+      values[(size_t)STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_HYDRATING +
              index];
   }
   labels->processing_autoscroll_on =
@@ -904,7 +908,7 @@ static const char *strappy_webview_processing_waiting_label(
     return labels->processing_waiting[index];
   }
   return g_strappy_webview_label_keys[
-    (size_t)STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_FONDLING + index];
+    (size_t)STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_HYDRATING + index];
 }
 
 static const char *strappy_webview_processing_tools_label(
@@ -2322,11 +2326,11 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "b&&b.getAttribute?b.getAttribute('data-processing-waiting-count'):0);",
     "var index,label;if(count<1){strappyProcessingWaitingIndex=-1;",
     "strappyProcessingWaitingLabel=",
-    "'[fa:hands-holding-circle] Fondling';return strappyProcessingWaitingLabel;}",
+    "'[fa:martini-glass] Hydrating';return strappyProcessingWaitingLabel;}",
     "index=strappyProcessingWaitingIndex+1;if(index<0||index>=count)index=0;",
     "strappyProcessingWaitingIndex=index;",
     "label=processingLabel('waiting-'+index,'');",
-    "strappyProcessingWaitingLabel=label||'[fa:hands-holding-circle] Fondling';",
+    "strappyProcessingWaitingLabel=label||'[fa:martini-glass] Hydrating';",
     "return strappyProcessingWaitingLabel;}",
     "function processingWaitingLabel(){return strappyProcessingWaitingLabel||",
     "advanceProcessingWaitingLabel();}",

@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT 16U
+#define STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT 18U
 
 typedef struct strappy_webview_labels {
   const char *agent;

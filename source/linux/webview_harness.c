@@ -28,22 +28,24 @@ static const strappy_webview_database_display_name
 
 static const char * const harness_processing_waiting_labels[
   STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT] = {
+  "[fa:martini-glass] Hydrating",
   "[fa:hands-holding-circle] Fondling",
-  "[fa:thumbtack] Pegging",
-  "[fa:bore-hole] Thrusting",
-  "[fa:hands-bound] Choking",
-  "[fa:wind] Blowing",
+  "[fa:spoon] Spooning",
   "[fa:hand-holding-droplet] Stroking",
+  "[fa:socks] Undressing",
+  "[fa:hand-lizard] Judging",
+  "[fa:wind] Blowing",
+  "[fa:ring] Edging",
+  "[fa:bed-pulse] Fantasizing",
   "[fa:horse] Riding",
   "[fa:table-tennis-paddle-ball] Spanking",
-  "[fa:martini-glass] Hydrating",
-  "[fa:bed-pulse] Fantasizing",
-  "[fa:socks] Undressing",
-  "[fa:ring] Edging",
-  "[fa:spoon] Spooning",
+  "[fa:bore-hole] Thrusting",
+  "[fa:thumbtack] Pegging",
   "[fa:hand-back-fist] Fisting",
-  "[fa:hand-lizard] Judging",
-  "[fa:shoe-prints] Dominating"
+  "[fa:hands-bound] Choking",
+  "[fa:shoe-prints] Dominating",
+  "[fa:droplet] Finishing",
+  "[fa:shower] Regretting"
 };
 
 static int harness_expect_contains(const char *text, const char *needle)
@@ -1295,19 +1297,23 @@ static int harness_check_page_scripts(void)
                                "data-processing-tools-label="
                                "\"[fa:gears] Grinding\"") &&
        harness_expect_contains(page_html,
-                               "data-processing-waiting-count=\"16\"") &&
+                               "data-processing-waiting-count=\"18\"") &&
        harness_expect_contains(
          page_html,
          "data-processing-waiting-0-label="
-         "\"[fa:hands-holding-circle] Fondling\"") &&
+         "\"[fa:martini-glass] Hydrating\"") &&
        harness_expect_contains(
          page_html,
-         "data-processing-waiting-4-label="
+         "data-processing-waiting-6-label="
          "\"[fa:wind] Blowing\"") &&
        harness_expect_contains(
          page_html,
-         "data-processing-waiting-15-label="
-         "\"[fa:shoe-prints] Dominating\"") &&
+         "data-processing-waiting-16-label="
+         "\"[fa:droplet] Finishing\"") &&
+       harness_expect_contains(
+         page_html,
+         "data-processing-waiting-17-label="
+         "\"[fa:shower] Regretting\"") &&
        harness_expect_not_contains(page_html,
                                    "data-processing-pondering-label") &&
        harness_expect_contains(page_html,

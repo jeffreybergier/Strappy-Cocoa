@@ -1195,7 +1195,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [[self sendButton] setEnabled:sendEnabled];
 
   if ([self sending]) {
-    sendImage = [self iconImageForIcon:AIFAStop
+    sendImage = [self iconImageForIcon:AIFAHandMiddleFinger
                                  style:AIFontAwesomeStyleSolid
                              pointSize:16.0f
                                  color:[UIColor whiteColor]];

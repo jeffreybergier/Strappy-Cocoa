@@ -321,7 +321,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   }
 
   if (sending_) {
-    icon = AIFAStop;
+    icon = AIFAHandMiddleFinger;
     [actionSegmented_ setLabel:NSLocalizedString(@"Cancel", nil)
                     forSegment:kPromptActionSegmentSend];
     [actionSegmented_ XP_setToolTip:NSLocalizedString(@"Cancel Prompt", nil)
