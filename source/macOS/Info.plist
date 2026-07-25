@@ -11,6 +11,8 @@
 	</array>
 	<key>CFBundleExecutable</key>
 	<string>Strappy</string>
+	<key>CFBundleIconFile</key>
+	<string>Strappy</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.altivecintelligence.Strappy</string>
 	<key>CFBundleInfoDictionaryVersion</key>
