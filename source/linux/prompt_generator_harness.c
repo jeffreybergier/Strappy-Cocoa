@@ -857,25 +857,46 @@ int main(int argc, char **argv)
            (strstr(prompt,
                    "Study only the database_ids in the user prompt.") ==
             NULL) ||
+           (strstr(prompt,
+                   "A durable description says what useful user data "
+                   "exists.") == NULL) ||
+           (strstr(prompt,
+                   "Durable context tells a future assistant exactly how to "
+                   "retrieve it; context is not a schema inventory.") ==
+            NULL) ||
            (strstr(prompt, "1. Call database_context.") == NULL) ||
            (strstr(prompt,
-                   "2. Use database_query to inspect its schema.") == NULL) ||
+                   "2. Use targeted database_query schema inspection to find "
+                   "the user-data entry points") == NULL) ||
            (strstr(prompt,
-                   "3. Use database_query on at least one real table. A "
-                   "sqlite_schema query does not count.") == NULL) ||
+                   "3. Design one to three common user-data access recipes.") ==
+            NULL) ||
            (strstr(prompt,
-                   "4. If useful tables must be joined, execute the join. "
-                   "Otherwise record that no join is needed.") == NULL) ||
+                   "4. Execute every final recipe exactly as it will be "
+                   "saved.") == NULL) ||
            (strstr(prompt,
-                   "5. If a useful numeric timestamp exists, query one value "
-                   "and verify its unit with datetime_to_iso8601. Otherwise "
-                   "record that none was found.") == NULL) ||
+                   "Copy saved SQL verbatim from a successful database_query "
+                   "call; never add ?, :name, @name, or $name bind "
+                   "placeholders.") == NULL) ||
            (strstr(prompt,
-                   "6. Call database_study once for description and once for "
+                   "5. If an executed recipe returns a useful numeric "
+                   "timestamp, verify one returned value with "
+                   "datetime_to_iso8601") == NULL) ||
+           (strstr(prompt,
+                   "6. After the investigation is complete, call "
+                   "database_study exactly once with both description and "
                    "context.") == NULL) ||
            (strstr(prompt,
-                   "Do not save either study value until that database's "
-                   "investigation is complete.") == NULL) ||
+                   "In context, give each recipe's purpose and exact verified "
+                   "SQL") == NULL) ||
+           (strstr(prompt,
+                   "Do not restate table or view lists or column inventories "
+                   "available from database_context or sqlite_schema.") ==
+            NULL) ||
+           (strstr(prompt,
+                   "If no useful user-facing data exists, say so and explain "
+                   "the access limitation without substituting a schema "
+                   "summary.") == NULL) ||
            (strstr(prompt,
                    "Never put sampled values, secrets, or sensitive "
                    "identifiers in saved study values.") == NULL))) {

@@ -1706,10 +1706,17 @@ static int harness_database_study_schema_matches(cJSON *tools)
     cJSON *name;
     cJSON *parameters;
     cJSON *properties;
-    cJSON *key;
     cJSON *database_id;
-    cJSON *value;
-    cJSON *key_enum;
+    cJSON *description;
+    cJSON *context;
+    cJSON *description_type;
+    cJSON *description_min_length;
+    cJSON *description_max_length;
+    cJSON *description_pattern;
+    cJSON *context_type;
+    cJSON *context_min_length;
+    cJSON *context_max_length;
+    cJSON *context_pattern;
     cJSON *required;
     cJSON *additional_properties;
 
@@ -1723,14 +1730,28 @@ static int harness_database_study_schema_matches(cJSON *tools)
     parameters = cJSON_GetObjectItemCaseSensitive(function, "parameters");
     properties = cJSON_IsObject(parameters) ?
       cJSON_GetObjectItemCaseSensitive(parameters, "properties") : NULL;
-    key = cJSON_IsObject(properties) ?
-      cJSON_GetObjectItemCaseSensitive(properties, "key") : NULL;
     database_id = cJSON_IsObject(properties) ?
       cJSON_GetObjectItemCaseSensitive(properties, "database_id") : NULL;
-    value = cJSON_IsObject(properties) ?
-      cJSON_GetObjectItemCaseSensitive(properties, "value") : NULL;
-    key_enum = cJSON_IsObject(key) ?
-      cJSON_GetObjectItemCaseSensitive(key, "enum") : NULL;
+    description = cJSON_IsObject(properties) ?
+      cJSON_GetObjectItemCaseSensitive(properties, "description") : NULL;
+    context = cJSON_IsObject(properties) ?
+      cJSON_GetObjectItemCaseSensitive(properties, "context") : NULL;
+    description_type = cJSON_IsObject(description) ?
+      cJSON_GetObjectItemCaseSensitive(description, "type") : NULL;
+    description_min_length = cJSON_IsObject(description) ?
+      cJSON_GetObjectItemCaseSensitive(description, "minLength") : NULL;
+    description_max_length = cJSON_IsObject(description) ?
+      cJSON_GetObjectItemCaseSensitive(description, "maxLength") : NULL;
+    description_pattern = cJSON_IsObject(description) ?
+      cJSON_GetObjectItemCaseSensitive(description, "pattern") : NULL;
+    context_type = cJSON_IsObject(context) ?
+      cJSON_GetObjectItemCaseSensitive(context, "type") : NULL;
+    context_min_length = cJSON_IsObject(context) ?
+      cJSON_GetObjectItemCaseSensitive(context, "minLength") : NULL;
+    context_max_length = cJSON_IsObject(context) ?
+      cJSON_GetObjectItemCaseSensitive(context, "maxLength") : NULL;
+    context_pattern = cJSON_IsObject(context) ?
+      cJSON_GetObjectItemCaseSensitive(context, "pattern") : NULL;
     required = cJSON_IsObject(parameters) ?
       cJSON_GetObjectItemCaseSensitive(parameters, "required") : NULL;
     additional_properties = cJSON_IsObject(parameters) ?
@@ -1739,14 +1760,27 @@ static int harness_database_study_schema_matches(cJSON *tools)
 
     return cJSON_IsObject(properties) &&
       (cJSON_GetArraySize(properties) == 3) &&
-      cJSON_IsArray(key_enum) && (cJSON_GetArraySize(key_enum) == 2) &&
-      harness_json_array_contains_string(key_enum, "description") &&
-      harness_json_array_contains_string(key_enum, "context") &&
-      cJSON_IsObject(database_id) && cJSON_IsObject(value) &&
+      cJSON_IsObject(database_id) &&
+      cJSON_IsString(description_type) &&
+      (strcmp(description_type->valuestring, "string") == 0) &&
+      cJSON_IsNumber(description_min_length) &&
+      (description_min_length->valuedouble == 1.0) &&
+      cJSON_IsNumber(description_max_length) &&
+      (description_max_length->valuedouble == 4096.0) &&
+      cJSON_IsString(description_pattern) &&
+      (strcmp(description_pattern->valuestring, "\\S") == 0) &&
+      cJSON_IsString(context_type) &&
+      (strcmp(context_type->valuestring, "string") == 0) &&
+      cJSON_IsNumber(context_min_length) &&
+      (context_min_length->valuedouble == 1.0) &&
+      cJSON_IsNumber(context_max_length) &&
+      (context_max_length->valuedouble == 4096.0) &&
+      cJSON_IsString(context_pattern) &&
+      (strcmp(context_pattern->valuestring, "\\S") == 0) &&
       cJSON_IsArray(required) && (cJSON_GetArraySize(required) == 3) &&
-      harness_json_array_contains_string(required, "key") &&
       harness_json_array_contains_string(required, "database_id") &&
-      harness_json_array_contains_string(required, "value") &&
+      harness_json_array_contains_string(required, "description") &&
+      harness_json_array_contains_string(required, "context") &&
       cJSON_IsFalse(additional_properties);
   }
   return 0;
@@ -2301,6 +2335,11 @@ static int harness_run_tool_registry_tests(void)
                 "Use it whenever an answer depends on personal data.") !=
          NULL) &&
         (strstr(tools_json,
+                "In Database Study, use schema queries to design access "
+                "recipes, then execute every final recipe exactly as it will "
+                "be saved. A sqlite_schema query or generic SELECT * sampling "
+                "query is not a recipe.") != NULL) &&
+        (strstr(tools_json,
                 "Convert numeric timestamp strings to ISO 8601 before "
                 "displaying them. In Database Study, use a queried timestamp "
                 "to verify its unit before recording the unit; never copy the "
@@ -2334,17 +2373,35 @@ static int harness_run_tool_registry_tests(void)
                 "information.") !=
          NULL) &&
         (strstr(tools_json,
-                "Save one completed Database Study value after "
+                "Save one completed Database Study result after "
                 "investigation.") !=
          NULL) &&
         (strstr(tools_json,
-                "description is one sentence describing useful user data "
-                "found.") !=
+                "Provide description and context together in the same call.") !=
          NULL) &&
         (strstr(tools_json,
-                "context records verified tables, columns, join keys, "
-                "timestamp units, and a reusable read-only SQL pattern; write "
-                "none for joins or timestamps that do not exist.") !=
+                "description is one sentence explaining what useful user data "
+                "exists.") !=
+         NULL) &&
+        (strstr(tools_json,
+                "context is compact how-to retrieval guidance, not a schema "
+                "inventory.") !=
+         NULL) &&
+        (strstr(tools_json,
+                "include its purpose and exact read-only SQL copied verbatim "
+                "from a successful database_query in the current study "
+                "batch.") !=
+         NULL) &&
+        (strstr(tools_json,
+                "SQL must run as written, use literal limits, and contain no "
+                "bind placeholders.") !=
+         NULL) &&
+        (strstr(tools_json,
+                "mention only tables and columns used by the patterns.") !=
+         NULL) &&
+        (strstr(tools_json,
+                "If no useful user-facing data exists, say so instead of "
+                "listing schema.") !=
          NULL) &&
         (strstr(tools_json,
                 "Never include sampled values, secrets, or sensitive "
@@ -2353,8 +2410,10 @@ static int harness_run_tool_registry_tests(void)
         (strstr(tools_json,
                 "Call this first for a relevant approved database_id. Returns "
                 "the studied context value (or null), bounded table and view "
-                "names, and exploration guidance. This result alone is not a "
-                "completed Database Study.") !=
+                "names, and exploration guidance. The table and view names "
+                "are generated on demand; do not copy their inventory into "
+                "studied context. This result alone is not a completed "
+                "Database Study.") !=
          NULL) &&
         (strstr(tools_json,
                 "Call this tool to forget durable facts that are no longer "
@@ -5291,7 +5350,7 @@ static int harness_run_helper_info_tests(const harness_context *context)
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_STUDY,
         NULL,
-        "requires a non-empty key string") ||
+        "requires a non-empty database_id string") ||
       !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_STUDY,
@@ -5306,81 +5365,139 @@ static int harness_run_helper_info_tests(const harness_context *context)
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_STUDY,
         "{}",
-        "requires a non-empty key string") ||
-      !harness_expect_error_contains(
-        context->catalog_path,
-        STRAPPY_TOOL_DATABASE_STUDY,
-        "{\"key\":null,\"database_id\":\"unused\","
-        "\"value\":\"Useful\"}",
-        "key must be a string") ||
-      !harness_expect_error_contains(
-        context->catalog_path,
-        STRAPPY_TOOL_DATABASE_STUDY,
-        "{\"key\":\"null\",\"database_id\":\"unused\","
-        "\"value\":\"Useful\"}",
-        "key must not be blank or null") ||
-      !harness_expect_error_contains(
-        context->catalog_path,
-        STRAPPY_TOOL_DATABASE_STUDY,
-        "{\"key\":\"other\",\"database_id\":\"unused\","
-        "\"value\":\"Useful\"}",
-        "key must be description or context") ||
-      !harness_expect_error_contains(
-        context->catalog_path,
-        STRAPPY_TOOL_DATABASE_STUDY,
-        "{\"key\":\"context\"}",
         "requires a non-empty database_id string") ||
       !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_STUDY,
-        "{\"key\":\"context\",\"database_id\":null,"
-        "\"value\":\"Useful\"}",
+        "{\"database_id\":null,\"description\":\"Useful\","
+        "\"context\":\"Useful\"}",
         "database_id must be a string") ||
       !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_STUDY,
-        "{\"key\":\"context\",\"database_id\":\"null\","
-        "\"value\":\"Useful\"}",
-        "database_id must not be blank or null")) {
+        "{\"database_id\":\"null\",\"description\":\"Useful\","
+        "\"context\":\"Useful\"}",
+        "database_id must not be blank or null") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_STUDY,
+        "{\"database_id\":\"\",\"description\":\"Useful\","
+        "\"context\":\"Useful\"}",
+        "requires a non-empty database_id string") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_STUDY,
+        "{\"database_id\":\"unused\"}",
+        "requires a non-empty description string") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_STUDY,
+        "{\"database_id\":\"unused\",\"description\":null,"
+        "\"context\":\"Useful\"}",
+        "description must be a string") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_STUDY,
+        "{\"database_id\":\"unused\",\"description\":\" NULL \","
+        "\"context\":\"Useful\"}",
+        "description must not be blank or null") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_STUDY,
+        "{\"database_id\":\"unused\",\"description\":\"\","
+        "\"context\":\"Useful\"}",
+        "requires a non-empty description string")) {
     return 0;
   }
 
   if (!harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_STUDY,
-        "{\"key\":\"context\",\"database_id\":\"unused\"}",
-        "requires a non-empty value string") ||
+        "{\"database_id\":\"unused\",\"description\":\"Useful\"}",
+        "requires a non-empty context string") ||
       !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_STUDY,
-        "{\"key\":\"context\",\"database_id\":\"unused\","
-        "\"value\":null}",
-        "value must be a string") ||
+        "{\"database_id\":\"unused\",\"description\":\"Useful\","
+        "\"context\":null}",
+        "context must be a string") ||
       !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_STUDY,
-        "{\"key\":\"context\",\"database_id\":\"unused\","
-        "\"value\":\" NULL \"}",
-        "value must not be blank or null") ||
+        "{\"database_id\":\"unused\",\"description\":\"Useful\","
+        "\"context\":\" NULL \"}",
+        "context must not be blank or null") ||
       !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_STUDY,
-        "{\"key\":\"context\",\"database_id\":\"unused\","
-        "\"value\":\"\"}",
-        "requires a non-empty value string") ||
+        "{\"database_id\":\"unused\",\"description\":\"Useful\","
+        "\"context\":\"\"}",
+        "requires a non-empty context string") ||
       !harness_expect_error_contains(
         context->catalog_path,
         STRAPPY_TOOL_DATABASE_STUDY,
-        "{\"database_id\":\"unused\",\"hint\":\"Useful\"}",
+        "{\"database_id\":\"unused\",\"description\":\"Useful\","
+        "\"context\":\"Useful\",\"key\":\"context\"}",
+        "does not accept argument 'key'") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_STUDY,
+        "{\"database_id\":\"unused\",\"description\":\"Useful\","
+        "\"context\":\"Useful\",\"value\":\"Legacy\"}",
+        "does not accept argument 'value'") ||
+      !harness_expect_error_contains(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_STUDY,
+        "{\"database_id\":\"unused\",\"description\":\"Useful\","
+        "\"context\":\"Useful\",\"hint\":\"Legacy\"}",
         "does not accept argument 'hint'")) {
+    return 0;
+  }
+
+  if (!harness_expect_catalog_sql_ok(
+        context->catalog_path,
+        "CREATE TRIGGER database_study_context_failure "
+        "BEFORE INSERT ON database_hints "
+        "WHEN NEW.kind = 'context' "
+        "BEGIN SELECT RAISE(ABORT, 'forced context failure'); END;",
+        "Database Study atomic-write trigger")) {
+    return 0;
+  }
+  written = snprintf(
+    arguments,
+    sizeof(arguments),
+    "{\"database_id\":\"%s\","
+    "\"description\":\"Atomic description.\","
+    "\"context\":\"Atomic context.\"}",
+    context->database_id);
+  if ((written <= 0) || ((size_t)written >= sizeof(arguments)) ||
+      !harness_expect_error_contains(context->catalog_path,
+                                     STRAPPY_TOOL_DATABASE_STUDY,
+                                     arguments,
+                                     "forced context failure") ||
+      !harness_expect_catalog_integer(context->catalog_path,
+                                      "SELECT COUNT(*) FROM database_hints;",
+                                      0LL,
+                                      "atomic Database Study rollback")) {
+    (void)harness_expect_catalog_sql_ok(
+      context->catalog_path,
+      "DROP TRIGGER IF EXISTS database_study_context_failure;",
+      "Database Study atomic-write trigger cleanup");
+    return 0;
+  }
+  if (!harness_expect_catalog_sql_ok(
+        context->catalog_path,
+        "DROP TRIGGER database_study_context_failure;",
+        "Database Study atomic-write trigger cleanup")) {
     return 0;
   }
 
   written = snprintf(
     arguments,
     sizeof(arguments),
-    "{\"key\":\"description\",\"database_id\":\"%s\","
-    "\"value\":\"Messages and identifier serialization test data.\"}",
+    "{\"database_id\":\"%s\","
+    "\"description\":\"Messages and identifier serialization test data.\","
+    "\"context\":\"Inspect messages and identifiers with targeted SQL.\"}",
     context->database_id);
   if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
     fprintf(stderr, "Could not build database study arguments.\n");
@@ -5398,22 +5515,9 @@ static int harness_run_helper_info_tests(const harness_context *context)
   written = snprintf(
     arguments,
     sizeof(arguments),
-    "{\"key\":\"context\",\"database_id\":\"%s\","
-    "\"value\":\"Inspect messages and identifiers with targeted SQL.\"}",
-    context->database_id);
-  if ((written <= 0) || ((size_t)written >= sizeof(arguments)) ||
-      !harness_expect_output_equals(context->catalog_path,
-                                    STRAPPY_TOOL_DATABASE_STUDY,
-                                    arguments,
-                                    "{}")) {
-    return 0;
-  }
-
-  written = snprintf(
-    arguments,
-    sizeof(arguments),
-    "{\"key\":\"context\",\"database_id\":\"%s\","
-    "\"value\":\"Join messages to identifiers only when needed.\"}",
+    "{\"database_id\":\"%s\","
+    "\"description\":\"Messages and identifier serialization test data.\","
+    "\"context\":\"Join messages to identifiers only when needed.\"}",
     context->database_id);
   if ((written <= 0) || ((size_t)written >= sizeof(arguments)) ||
       !harness_expect_output_equals(context->catalog_path,
@@ -5462,8 +5566,9 @@ static int harness_run_helper_info_tests(const harness_context *context)
 
   written = snprintf(arguments,
                      sizeof(arguments),
-                     "{\"key\":\"context\",\"database_id\":\"%s\","
-                     "\"value\":\"Useful\","
+                     "{\"database_id\":\"%s\","
+                     "\"description\":\"Useful description\","
+                     "\"context\":\"Useful context\","
                      "\"title\":\"Old title\"}",
                      context->database_id);
   if ((written <= 0) || ((size_t)written >= sizeof(arguments))) {
@@ -5551,8 +5656,9 @@ static int harness_run_assistant_scoped_memory_tests(
 
   written = snprintf(study_arguments,
                      sizeof(study_arguments),
-                     "{\"key\":\"description\",\"database_id\":\"%s\","
-                     "\"value\":\"Disallowed Personal write.\"}",
+                     "{\"database_id\":\"%s\","
+                     "\"description\":\"Disallowed Personal write.\","
+                     "\"context\":\"Disallowed Personal context.\"}",
                      context->database_id);
   if ((written <= 0) || ((size_t)written >= sizeof(study_arguments)) ||
       !harness_expect_session_error_contains(
@@ -5780,8 +5886,9 @@ static int harness_run_database_context_limit_tests(
 
   written = snprintf(arguments,
                      sizeof(arguments),
-                     "{\"key\":\"context\",\"database_id\":\"%s\","
-                     "\"value\":\"Use bounded schema and row queries.\"}",
+                     "{\"database_id\":\"%s\","
+                     "\"description\":\"Expanded context fixture.\","
+                     "\"context\":\"Use bounded schema and row queries.\"}",
                      context->database_id);
   if ((written <= 0) || ((size_t)written >= sizeof(arguments)) ||
       !harness_expect_output_equals(context->catalog_path,
@@ -6065,10 +6172,10 @@ static int harness_study_status_rows_match(
   return ok;
 }
 
-static int harness_write_study_value(const char *catalog_path,
-                                     const char *database_id,
-                                     const char *key,
-                                     const char *value)
+static int harness_write_study_values(const char *catalog_path,
+                                      const char *database_id,
+                                      const char *description,
+                                      const char *context)
 {
   cJSON *arguments;
   char *arguments_json;
@@ -6076,11 +6183,13 @@ static int harness_write_study_value(const char *catalog_path,
 
   arguments = cJSON_CreateObject();
   if ((arguments == NULL) ||
-      (cJSON_AddStringToObject(arguments, "key", key) == NULL) ||
       (cJSON_AddStringToObject(arguments,
                               "database_id",
                               database_id) == NULL) ||
-      (cJSON_AddStringToObject(arguments, "value", value) == NULL)) {
+      (cJSON_AddStringToObject(arguments,
+                               "description",
+                               description) == NULL) ||
+      (cJSON_AddStringToObject(arguments, "context", context) == NULL)) {
     cJSON_Delete(arguments);
     return 0;
   }
@@ -6123,8 +6232,8 @@ static void harness_study_research_calls_destroy(
 
 static char *harness_study_arguments_json(const char *database_id,
                                           const char *sql,
-                                          const char *key,
-                                          const char *value)
+                                          const char *description,
+                                          const char *context)
 {
   cJSON *arguments;
   char *json;
@@ -6136,10 +6245,12 @@ static char *harness_study_arguments_json(const char *database_id,
                                database_id) == NULL) ||
       ((sql != NULL) &&
        (cJSON_AddStringToObject(arguments, "sql", sql) == NULL)) ||
-      ((key != NULL) &&
-       (cJSON_AddStringToObject(arguments, "key", key) == NULL)) ||
-      ((value != NULL) &&
-       (cJSON_AddStringToObject(arguments, "value", value) == NULL))) {
+      ((description != NULL) &&
+       (cJSON_AddStringToObject(arguments,
+                                "description",
+                                description) == NULL)) ||
+      ((context != NULL) &&
+       (cJSON_AddStringToObject(arguments, "context", context) == NULL))) {
     cJSON_Delete(arguments);
     return NULL;
   }
@@ -6560,8 +6671,8 @@ static int harness_run_database_study_same_batch_guard_tests(
   study_arguments = harness_study_arguments_json(
     context->database_id,
     NULL,
-    STRAPPY_STUDY_KEY_DESCRIPTION,
-    "Messages contain senders and text.");
+    "Messages contain senders and text.",
+    "Read messages with a targeted, verified query.");
   error = NULL;
   session_id = 0LL;
   research_call_id = 0LL;
@@ -6730,7 +6841,7 @@ static int harness_run_database_study_same_batch_guard_tests(
       NULL) &&
     harness_expect_catalog_integer(context->catalog_path,
                                    "SELECT COUNT(*) FROM database_hints;",
-                                   1LL,
+                                   2LL,
                                    "same-batch accepted study values");
   if (!ok) {
     fprintf(stderr,
@@ -6886,14 +6997,10 @@ static int harness_run_database_study_coverage_tests(
                        "Coverage access context %u",
                        (unsigned int)index);
     if ((written <= 0) || ((size_t)written >= sizeof(study_context)) ||
-        !harness_write_study_value(context->catalog_path,
-                                   pending.database_ids[index],
-                                   STRAPPY_STUDY_KEY_DESCRIPTION,
-                                   description) ||
-        !harness_write_study_value(context->catalog_path,
-                                   pending.database_ids[index],
-                                   STRAPPY_STUDY_KEY_CONTEXT,
-                                   study_context)) {
+        !harness_write_study_values(context->catalog_path,
+                                    pending.database_ids[index],
+                                    description,
+                                    study_context)) {
       ok = 0;
       goto cleanup;
     }
@@ -6981,13 +7088,9 @@ static int harness_run_database_study_coverage_tests(
     goto cleanup;
   }
   strappy_study_database_id_list_destroy(&remaining);
-  if (!harness_write_study_value(context->catalog_path,
+  if (!harness_write_study_values(context->catalog_path,
                                   pending.database_ids[0],
-                                  STRAPPY_STUDY_KEY_DESCRIPTION,
-                                  replacement_description) ||
-      !harness_write_study_value(context->catalog_path,
-                                  pending.database_ids[0],
-                                  STRAPPY_STUDY_KEY_CONTEXT,
+                                  replacement_description,
                                   "Replacement coverage context") ||
       !strappy_study_list_unstudied_database_ids(context->catalog_path,
                                                   &remaining,
@@ -7003,10 +7106,10 @@ static int harness_run_database_study_coverage_tests(
     goto cleanup;
   }
 
-  if (!harness_write_study_value(context->catalog_path,
+  if (!harness_write_study_values(context->catalog_path,
                                   pending.database_ids[0],
-                                  STRAPPY_STUDY_KEY_DESCRIPTION,
-                                  replacement_description) ||
+                                  replacement_description,
+                                  "Replacement coverage context") ||
       !harness_expect_catalog_integer(
         context->catalog_path,
         "SELECT COUNT(*) FROM database_hints;",

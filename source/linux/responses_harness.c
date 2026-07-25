@@ -44,10 +44,11 @@
 
 #define HARNESS_DATABASE_QUERY_DESCRIPTION \
   "Run one read-only SQLite query against an approved database. Use it " \
-  "whenever an answer depends on personal data. In Database Study, a " \
-  "sqlite_schema query only inspects structure; also query a real table and " \
-  "execute any join before recommending it. Returns ordered column names and " \
-  "positional rows, limited to 100 rows and 64 columns."
+  "whenever an answer depends on personal data. In Database Study, use " \
+  "schema queries to design access recipes, then execute every final recipe " \
+  "exactly as it will be saved. A sqlite_schema query or generic SELECT * " \
+  "sampling query is not a recipe. Returns ordered column names and positional " \
+  "rows, limited to 100 rows and 64 columns."
 #define HARNESS_DATABASE_QUERY_DATABASE_ID_DESCRIPTION \
   "Approved database ID returned by database_list."
 #define HARNESS_DATABASE_QUERY_SQL_DESCRIPTION \
@@ -59,7 +60,9 @@
 #define HARNESS_DATABASE_CONTEXT_READ_DESCRIPTION \
   "Call this first for a relevant approved database_id. Returns the studied " \
   "context value (or null), bounded table and view names, and exploration " \
-  "guidance. This result alone is not a completed Database Study."
+  "guidance. The table and view names are generated on demand; do not copy " \
+  "their inventory into studied context. This result alone is not a completed " \
+  "Database Study."
 
 #define HARNESS_SESSION_NAME_WRITE_DESCRIPTION \
   "ALWAYS call this tool before the final answer. Update the session with a " \
@@ -75,11 +78,17 @@
   "NEVER use unicode emoji."
 
 #define HARNESS_MEMORY_DATABASE_HINT_REMEMBER_DESCRIPTION \
-  "Save one completed Database Study value after investigation. description " \
-  "is one sentence describing useful user data found. context records " \
-  "verified tables, columns, join keys, timestamp units, and a reusable " \
-  "read-only SQL pattern; write none for joins or timestamps that do not " \
-  "exist. Never include sampled values, secrets, or sensitive identifiers."
+  "Save one completed Database Study result after investigation. Provide " \
+  "description and context together in the same call. description is one " \
+  "sentence explaining what useful user data exists. context is compact how-to " \
+  "retrieval guidance, not a schema inventory. For each useful access pattern, " \
+  "include its purpose and exact read-only SQL copied verbatim from a successful " \
+  "database_query in the current study batch. SQL must run as written, use " \
+  "literal limits, and contain no bind placeholders. Include required joins, " \
+  "filters, ordering, non-obvious field semantics, verified timestamp units, " \
+  "and caveats; mention only tables and columns used by the patterns. If no " \
+  "useful user-facing data exists, say so instead of listing schema. Never " \
+  "include sampled values, secrets, or sensitive identifiers."
 
 #define HARNESS_DATETIME_FROM_ISO8601_DESCRIPTION \
   "ALWAYS call this tool when converting ISO 8601 datetimes to numeric " \
@@ -321,35 +330,36 @@ static cJSON *harness_tool_parameter_schema(cJSON *tools,
 
 static int harness_database_study_parameters_match_contract(cJSON *tools)
 {
-  cJSON *key;
-  cJSON *key_enum;
   cJSON *database_id;
-  cJSON *value;
+  cJSON *description;
+  cJSON *context;
 
-  key = harness_tool_parameter_schema(tools,
-                                      STRAPPY_TOOL_DATABASE_STUDY,
-                                      "key");
   database_id = harness_tool_parameter_schema(tools,
                                               STRAPPY_TOOL_DATABASE_STUDY,
                                               "database_id");
-  value = harness_tool_parameter_schema(tools,
-                                        STRAPPY_TOOL_DATABASE_STUDY,
-                                        "value");
-  key_enum = cJSON_IsObject(key) ? cJSON_GetObjectItem(key, "enum") : NULL;
-  return cJSON_IsObject(key) && cJSON_IsArray(key_enum) &&
-    (cJSON_GetArraySize(key_enum) == 2) &&
-    harness_array_contains_string(key_enum, "description") &&
-    harness_array_contains_string(key_enum, "context") &&
-    cJSON_IsObject(database_id) && cJSON_IsObject(value) &&
-    harness_tool_has_required_string_parameter(tools,
-                                               STRAPPY_TOOL_DATABASE_STUDY,
-                                               "key") &&
+  description = harness_tool_parameter_schema(tools,
+                                              STRAPPY_TOOL_DATABASE_STUDY,
+                                              "description");
+  context = harness_tool_parameter_schema(tools,
+                                          STRAPPY_TOOL_DATABASE_STUDY,
+                                          "context");
+  return cJSON_IsObject(database_id) && cJSON_IsObject(description) &&
+    cJSON_IsObject(context) &&
     harness_tool_has_required_string_parameter(tools,
                                                STRAPPY_TOOL_DATABASE_STUDY,
                                                "database_id") &&
     harness_tool_has_required_string_parameter(tools,
                                                STRAPPY_TOOL_DATABASE_STUDY,
-                                               "value") &&
+                                               "description") &&
+    harness_tool_has_required_string_parameter(tools,
+                                               STRAPPY_TOOL_DATABASE_STUDY,
+                                               "context") &&
+    (harness_tool_parameter_schema(tools,
+                                   STRAPPY_TOOL_DATABASE_STUDY,
+                                   "key") == NULL) &&
+    (harness_tool_parameter_schema(tools,
+                                   STRAPPY_TOOL_DATABASE_STUDY,
+                                   "value") == NULL) &&
     (harness_tool_parameter_schema(tools,
                                    STRAPPY_TOOL_DATABASE_STUDY,
                                    "hint") == NULL);
@@ -1952,26 +1962,43 @@ static int harness_database_study_request_is_valid(
               "You are Strappy, an expert database sleuth.") == NULL) ||
       (strstr(instructions->valuestring,
               "Study only the database_ids in the user prompt.") == NULL) ||
+      (strstr(instructions->valuestring,
+              "A durable description says what useful user data exists.") ==
+       NULL) ||
+      (strstr(instructions->valuestring,
+              "Durable context tells a future assistant exactly how to "
+              "retrieve it; context is not a schema inventory.") == NULL) ||
       (strstr(instructions->valuestring, "1. Call database_context.") ==
        NULL) ||
       (strstr(instructions->valuestring,
-              "2. Use database_query to inspect its schema.") == NULL) ||
+              "2. Use targeted database_query schema inspection to find the "
+              "user-data entry points") == NULL) ||
       (strstr(instructions->valuestring,
-              "3. Use database_query on at least one real table. A "
-              "sqlite_schema query does not count.") == NULL) ||
+              "3. Design one to three common user-data access recipes.") ==
+       NULL) ||
       (strstr(instructions->valuestring,
-              "4. If useful tables must be joined, execute the join. "
-              "Otherwise record that no join is needed.") == NULL) ||
+              "4. Execute every final recipe exactly as it will be saved.") ==
+       NULL) ||
       (strstr(instructions->valuestring,
-              "5. If a useful numeric timestamp exists, query one value and "
-              "verify its unit with datetime_to_iso8601. Otherwise record "
-              "that none was found.") == NULL) ||
+              "Copy saved SQL verbatim from a successful database_query call; "
+              "never add ?, :name, @name, or $name bind placeholders.") ==
+       NULL) ||
       (strstr(instructions->valuestring,
-              "6. Call database_study once for description and once for "
-              "context.") == NULL) ||
+              "5. If an executed recipe returns a useful numeric timestamp, "
+              "verify one returned value with datetime_to_iso8601") == NULL) ||
       (strstr(instructions->valuestring,
-              "Do not save either study value until that database's "
-              "investigation is complete.") == NULL) ||
+              "6. After the investigation is complete, call database_study "
+              "exactly once with both description and context.") == NULL) ||
+      (strstr(instructions->valuestring,
+              "In context, give each recipe's purpose and exact verified "
+              "SQL") == NULL) ||
+      (strstr(instructions->valuestring,
+              "Do not restate table or view lists or column inventories "
+              "available from database_context or sqlite_schema.") == NULL) ||
+      (strstr(instructions->valuestring,
+              "If no useful user-facing data exists, say so and explain the "
+              "access limitation without substituting a schema summary.") ==
+       NULL) ||
       (strstr(instructions->valuestring,
               "Never put sampled values, secrets, or sensitive identifiers "
               "in saved study values.") == NULL) ||

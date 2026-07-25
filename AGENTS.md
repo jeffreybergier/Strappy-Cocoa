@@ -186,8 +186,9 @@ House style for Strappy source:
     applicable, in which case its informational quality check may fail. The
     memory-saving tools are optional and are not quality checks:
     `memory_save` requires a non-empty fact, and
-    `database_study` requires both an approved database id and a
-    non-empty hint. They do not accept empty or null no-ops. The session-name
+    `database_study` requires an approved database id plus non-empty description
+    and context values in one atomic call. They do not accept empty or null
+    no-ops. The session-name
     tool requires a non-empty string and updates the active session name. The
     Font Awesome confirmation tool requires a non-empty `shortcodes` array and
     does not accept a null or empty-array no-op.

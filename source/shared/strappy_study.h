@@ -51,11 +51,11 @@ int strappy_study_copy_fresh_value(
   const char *key,
   char **value_out,
   char **error_out);
-char *strappy_study_save_value(
+char *strappy_study_save_values(
   sqlite3 *db,
   const strappy_discovered_database_record *record,
-  const char *key,
-  const char *value,
+  const char *description,
+  const char *context,
   long long source_item_id,
   char **error_out);
 

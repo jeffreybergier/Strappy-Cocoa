@@ -108,9 +108,9 @@ typedef struct strappy_memory_delete_arguments {
 } strappy_memory_delete_arguments;
 
 typedef struct strappy_database_study_arguments {
-  char *key;
   char *database_id;
-  char *value;
+  char *description;
+  char *context;
 } strappy_database_study_arguments;
 
 typedef struct strappy_database_context_arguments {
@@ -344,9 +344,9 @@ static void strappy_database_study_arguments_init(
     return;
   }
 
-  arguments->key = NULL;
   arguments->database_id = NULL;
-  arguments->value = NULL;
+  arguments->description = NULL;
+  arguments->context = NULL;
 }
 
 static void strappy_database_study_arguments_destroy(
@@ -356,9 +356,9 @@ static void strappy_database_study_arguments_destroy(
     return;
   }
 
-  free(arguments->key);
   free(arguments->database_id);
-  free(arguments->value);
+  free(arguments->description);
+  free(arguments->context);
   strappy_database_study_arguments_init(arguments);
 }
 
@@ -2961,9 +2961,9 @@ static int strappy_tools_parse_database_study_arguments(
   char **error_out)
 {
   static const char *const allowed_names[] = {
-    "key",
     "database_id",
-    "value"
+    "description",
+    "context"
   };
   cJSON *root;
   int ok;
@@ -2993,13 +2993,6 @@ static int strappy_tools_parse_database_study_arguments(
        strappy_tools_copy_required_action_string_argument(
          STRAPPY_TOOL_DATABASE_STUDY,
          root,
-         "key",
-         STRAPPY_HELPER_INFO_MAX_SHORT_BYTES,
-         &arguments->key,
-         error_out) &&
-       strappy_tools_copy_required_action_string_argument(
-         STRAPPY_TOOL_DATABASE_STUDY,
-         root,
          "database_id",
          STRAPPY_HELPER_INFO_MAX_SHORT_BYTES,
          &arguments->database_id,
@@ -3007,20 +3000,20 @@ static int strappy_tools_parse_database_study_arguments(
        strappy_tools_copy_required_action_string_argument(
          STRAPPY_TOOL_DATABASE_STUDY,
          root,
-         "value",
+         "description",
          STRAPPY_HELPER_INFO_MAX_CONTENT_BYTES,
-         &arguments->value,
+         &arguments->description,
+         error_out) &&
+       strappy_tools_copy_required_action_string_argument(
+         STRAPPY_TOOL_DATABASE_STUDY,
+         root,
+         "context",
+         STRAPPY_HELPER_INFO_MAX_CONTENT_BYTES,
+         &arguments->context,
          error_out);
   cJSON_Delete(root);
   if (!ok) {
     strappy_database_study_arguments_destroy(arguments);
-    return 0;
-  }
-  if (!strappy_study_key_is_valid(arguments->key)) {
-    strappy_database_study_arguments_destroy(arguments);
-    strappy_set_error(
-      error_out,
-      "database_study key must be description or context.");
     return 0;
   }
   return 1;
@@ -6238,12 +6231,12 @@ static char *strappy_tools_execute_database_study(
     strappy_database_study_arguments_destroy(&arguments);
     return NULL;
   }
-  json = strappy_study_save_value(db,
-                                  record,
-                                  arguments.key,
-                                  arguments.value,
-                                  source_item_id,
-                                  error_out);
+  json = strappy_study_save_values(db,
+                                   record,
+                                   arguments.description,
+                                   arguments.context,
+                                   source_item_id,
+                                   error_out);
   sqlite3_close(db);
   strappy_discovered_database_record_list_destroy(&list);
   strappy_database_study_arguments_destroy(&arguments);

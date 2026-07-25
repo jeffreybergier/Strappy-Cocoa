@@ -46,7 +46,7 @@
       "type": "function",
       "function": {
         "name": "database_query",
-        "description": "Run one read-only SQLite query against an approved database. Use it whenever an answer depends on personal data. In Database Study, a sqlite_schema query only inspects structure; also query a real table and execute any join before recommending it. Returns ordered column names and positional rows, limited to 100 rows and 64 columns.",
+        "description": "Run one read-only SQLite query against an approved database. Use it whenever an answer depends on personal data. In Database Study, use schema queries to design access recipes, then execute every final recipe exactly as it will be saved. A sqlite_schema query or generic SELECT * sampling query is not a recipe. Returns ordered column names and positional rows, limited to 100 rows and 64 columns.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -440,7 +440,7 @@
       "type": "function",
       "function": {
         "name": "database_context",
-        "description": "Call this first for a relevant approved database_id. Returns the studied context value (or null), bounded table and view names, and exploration guidance. This result alone is not a completed Database Study.",
+        "description": "Call this first for a relevant approved database_id. Returns the studied context value (or null), bounded table and view names, and exploration guidance. The table and view names are generated on demand; do not copy their inventory into studied context. This result alone is not a completed Database Study.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -466,23 +466,22 @@
       "type": "function",
       "function": {
         "name": "database_study",
-        "description": "Save one completed Database Study value after investigation. description is one sentence describing useful user data found. context records verified tables, columns, join keys, timestamp units, and a reusable read-only SQL pattern; write none for joins or timestamps that do not exist. Never include sampled values, secrets, or sensitive identifiers.",
+        "description": "Save one completed Database Study result after investigation. Provide description and context together in the same call. description is one sentence explaining what useful user data exists. context is compact how-to retrieval guidance, not a schema inventory. For each useful access pattern, include its purpose and exact read-only SQL copied verbatim from a successful database_query in the current study batch. SQL must run as written, use literal limits, and contain no bind placeholders. Include required joins, filters, ordering, non-obvious field semantics, verified timestamp units, and caveats; mention only tables and columns used by the patterns. If no useful user-facing data exists, say so instead of listing schema. Never include sampled values, secrets, or sensitive identifiers.",
         "parameters": {
           "type": "object",
           "properties": {
-            "key": {
-              "type": "string",
-              "enum": [
-                "description",
-                "context"
-              ]
-            },
             "database_id": {
               "type": "string",
               "minLength": 1,
               "maxLength": 128
             },
-            "value": {
+            "description": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "\\S"
+            },
+            "context": {
               "type": "string",
               "minLength": 1,
               "maxLength": 4096,
@@ -490,9 +489,9 @@
             }
           },
           "required": [
-            "key",
             "database_id",
-            "value"
+            "description",
+            "context"
           ],
           "additionalProperties": false
         }

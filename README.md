@@ -62,9 +62,12 @@ and hard rules in
   `Database Study`; the model does not receive session-renaming or Font Awesome
   tools or guidance. A study save requires successful database context and
   real-table query results from the same isolated study batch; schema-only or
-  earlier-batch queries do not satisfy that guard. After a study batch ends,
-  its rounds are excluded through the same context-inclusion state used by
-  normal sessions.
+  earlier-batch queries do not satisfy that guard. Study guidance preserves
+  compact retrieval recipes with exact successfully executed SQL rather than
+  table or column inventories that can be generated on demand. Each database's
+  description and context are required together and saved atomically by one
+  `database_study` call. After a study batch ends, its rounds are excluded
+  through the same context-inclusion state used by normal sessions.
 
 An assistant set is selected per session and can be changed between prompts.
 User memories are shared by sessions using the same assistant set and isolated

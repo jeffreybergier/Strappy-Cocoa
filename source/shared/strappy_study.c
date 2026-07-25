@@ -278,13 +278,13 @@ static int strappy_study_add_nullable_string(cJSON *object,
   return 1;
 }
 
-char *strappy_study_save_value(
+static int strappy_study_upsert_value(
   sqlite3 *db,
   const strappy_discovered_database_record *record,
   const char *key,
   const char *value,
   long long source_item_id,
-  char **error_out)
+  sqlite3_int64 now_ms)
 {
   static const char *select_sql =
     "SELECT id FROM database_hints WHERE database_id = ?1 AND kind = ?2 "
@@ -302,28 +302,16 @@ char *strappy_study_save_value(
     "AND id <> ?3;";
   sqlite3_stmt *stmt;
   sqlite3_int64 row_id;
-  sqlite3_int64 now_ms;
   int rc;
   int ok;
-  char *json;
-  cJSON *result;
 
   if ((db == NULL) || !strappy_study_record_is_available(record) ||
       !strappy_study_key_is_valid(key) ||
       !strappy_study_string_has_non_whitespace(value)) {
-    strappy_set_error(error_out, "database_study request is incomplete.");
-    return NULL;
+    return 0;
   }
 
-  now_ms = (sqlite3_int64)time(NULL) * 1000;
   row_id = 0;
-  if (sqlite3_exec(db, "BEGIN IMMEDIATE;", NULL, NULL, NULL) != SQLITE_OK) {
-    strappy_set_formatted_error(error_out,
-                                "Could not begin database_study: %s",
-                                sqlite3_errmsg(db));
-    return NULL;
-  }
-
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, select_sql, -1, &stmt, NULL);
   ok = (rc == SQLITE_OK) &&
@@ -395,11 +383,69 @@ char *strappy_study_save_value(
     sqlite3_finalize(stmt);
   }
 
+  return ok;
+}
+
+char *strappy_study_save_values(
+  sqlite3 *db,
+  const strappy_discovered_database_record *record,
+  const char *description,
+  const char *context,
+  long long source_item_id,
+  char **error_out)
+{
+  sqlite3_int64 now_ms;
+  char *json;
+  int ok;
+
+  if ((db == NULL) || !strappy_study_record_is_available(record)) {
+    strappy_set_error(error_out, "database_study request is incomplete.");
+    return NULL;
+  }
+  if (!strappy_study_string_has_non_whitespace(description)) {
+    strappy_set_error(error_out,
+                      "database_study description must not be blank.");
+    return NULL;
+  }
+  if (!strappy_study_string_has_non_whitespace(context)) {
+    strappy_set_error(error_out, "database_study context must not be blank.");
+    return NULL;
+  }
+
+  json = strappy_string_duplicate("{}");
+  if (json == NULL) {
+    strappy_set_error(error_out,
+                      "Could not serialize database_study acknowledgement.");
+    return NULL;
+  }
+
+  if (sqlite3_exec(db, "BEGIN IMMEDIATE;", NULL, NULL, NULL) != SQLITE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not begin database_study: %s",
+                                sqlite3_errmsg(db));
+    free(json);
+    return NULL;
+  }
+
+  now_ms = (sqlite3_int64)time(NULL) * 1000;
+  ok = strappy_study_upsert_value(db,
+                                  record,
+                                  STRAPPY_STUDY_KEY_DESCRIPTION,
+                                  description,
+                                  source_item_id,
+                                  now_ms) &&
+    strappy_study_upsert_value(db,
+                               record,
+                               STRAPPY_STUDY_KEY_CONTEXT,
+                               context,
+                               source_item_id,
+                               now_ms);
   if (!ok) {
     strappy_set_formatted_error(error_out,
                                 "Could not save database_study: %s",
                                 sqlite3_errmsg(db));
     sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+    free(json);
     return NULL;
   }
   if (sqlite3_exec(db, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK) {
@@ -407,15 +453,8 @@ char *strappy_study_save_value(
                                 "Could not commit database_study: %s",
                                 sqlite3_errmsg(db));
     sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+    free(json);
     return NULL;
-  }
-
-  result = cJSON_CreateObject();
-  json = (result != NULL) ? cJSON_PrintUnformatted(result) : NULL;
-  cJSON_Delete(result);
-  if (json == NULL) {
-    strappy_set_error(error_out,
-                      "Could not serialize database_study acknowledgement.");
   }
   return json;
 }
