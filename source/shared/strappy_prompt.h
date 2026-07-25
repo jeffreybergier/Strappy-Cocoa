@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 #define STRAPPY_SYSTEM_PROMPT_RESOURCE_NAME "SystemPrompt.json"
-#define STRAPPY_SYSTEM_PROMPT_SCHEMA_VERSION 2
+#define STRAPPY_SYSTEM_PROMPT_SCHEMA_VERSION 3
 
 char *strappy_prompt_build(
   const char *resource_dir,

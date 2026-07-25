@@ -302,15 +302,21 @@ static int harness_verify_prompt(
   cJSON *audit_section;
   cJSON *goal_section;
   cJSON *invariant_prompt_section;
+  cJSON *assistant_set_guidance;
+  cJSON *assistant_guidance_section;
+  cJSON *assistant_guidance;
   cJSON *audit_guidance;
   char *tools_heading;
   char *audit_heading;
   char *goal_heading;
+  char *assistant_guidance_heading;
   char *invariant_heading;
   const char *prompt_end;
   const char *tools_start;
   const char *audit_start;
   const char *goal_start;
+  const char *goal_section_end;
+  const char *assistant_guidance_start;
   const char *invariant_start;
   const char *tools_content_start;
   const char *tools_content_end;
@@ -318,6 +324,8 @@ static int harness_verify_prompt(
   const char *audit_content_end;
   const char *goal_content_start;
   const char *goal_content_end;
+  const char *assistant_guidance_content_start;
+  const char *assistant_guidance_content_end;
   const char *invariant_content_start;
   const char *invariant_content_end;
   cJSON *tools;
@@ -334,6 +342,10 @@ static int harness_verify_prompt(
   audit_section = harness_json_object(sections, "audit");
   goal_section = harness_json_object(sections, "goal");
   invariant_prompt_section = harness_json_object(sections, "invariant");
+  assistant_set_guidance = harness_json_object(system_prompt,
+                                               "assistant_set_guidance");
+  assistant_guidance_section = harness_json_object(assistant_set_guidance,
+                                                   profile->identifier);
   audit_guidance = harness_json_object(system_prompt, "audit_guidance");
   tools_heading = harness_heading_marker(
     1U,
@@ -344,12 +356,20 @@ static int harness_verify_prompt(
   goal_heading = harness_heading_marker(
     1U,
     harness_json_string(goal_section, "heading"));
+  assistant_guidance_heading = (assistant_guidance_section != NULL) ?
+    harness_heading_marker(
+      1U,
+      harness_json_string(assistant_guidance_section, "heading")) : NULL;
   invariant_heading = harness_heading_marker(
     1U,
     harness_json_string(invariant_prompt_section, "heading"));
   if ((tools_heading == NULL) || (audit_heading == NULL) ||
-      (goal_heading == NULL) || (invariant_heading == NULL)) {
+      (goal_heading == NULL) || (assistant_set_guidance == NULL) ||
+      ((assistant_guidance_section != NULL) &&
+       (assistant_guidance_heading == NULL)) ||
+      (invariant_heading == NULL)) {
     free(invariant_heading);
+    free(assistant_guidance_heading);
     free(goal_heading);
     free(audit_heading);
     free(tools_heading);
@@ -361,17 +381,45 @@ static int harness_verify_prompt(
   tools_start = strstr(prompt, tools_heading);
   audit_start = strstr(prompt, audit_heading);
   goal_start = strstr(prompt, goal_heading);
+  assistant_guidance_start = (assistant_guidance_heading != NULL) ?
+    strstr(prompt, assistant_guidance_heading) : NULL;
   invariant_start = strstr(prompt, invariant_heading);
   if ((tools_start == NULL) || (audit_start == NULL) ||
       (goal_start == NULL) || (invariant_start == NULL) ||
       !(tools_start < audit_start) || !(audit_start < goal_start) ||
       !(goal_start < invariant_start) ||
+      ((assistant_guidance_section != NULL) &&
+       ((assistant_guidance_start == NULL) ||
+        !(goal_start < assistant_guidance_start) ||
+        !(assistant_guidance_start < invariant_start))) ||
       (harness_count_occurrences(prompt, tools_heading) != 1U) ||
       (harness_count_occurrences(prompt, audit_heading) != 1U) ||
       (harness_count_occurrences(prompt, goal_heading) != 1U) ||
       (harness_count_occurrences(prompt, invariant_heading) != 1U)) {
     (void)harness_fail("Generated prompt section contract is invalid.");
     goto cleanup;
+  }
+
+  for (assistant_guidance = assistant_set_guidance->child;
+       assistant_guidance != NULL;
+       assistant_guidance = assistant_guidance->next) {
+    char *heading;
+    size_t expected_count;
+
+    heading = harness_heading_marker(
+      1U,
+      harness_json_string(assistant_guidance, "heading"));
+    expected_count = ((assistant_guidance->string != NULL) &&
+                      (strcmp(assistant_guidance->string,
+                              profile->identifier) == 0)) ? 1U : 0U;
+    if ((heading == NULL) ||
+        (harness_count_occurrences(prompt, heading) != expected_count)) {
+      free(heading);
+      (void)harness_fail(
+        "Generated prompt assistant-set guidance is invalid.");
+      goto cleanup;
+    }
+    free(heading);
   }
 
   tools_content_start = strstr(tools_start, "\n- `");
@@ -391,6 +439,14 @@ static int harness_verify_prompt(
   goal_content_start = strstr(goal_start, profile->goal);
   goal_content_end = (goal_content_start != NULL) ?
     goal_content_start + strlen(profile->goal) : NULL;
+  goal_section_end = (assistant_guidance_start != NULL) ?
+    assistant_guidance_start : invariant_start;
+  assistant_guidance_content_start =
+    (assistant_guidance_section != NULL) ?
+      harness_section_content_end(assistant_guidance_section,
+                                  assistant_guidance_start,
+                                  invariant_start) : NULL;
+  assistant_guidance_content_end = assistant_guidance_content_start;
   invariant_content_start = harness_section_content_end(
     invariant_prompt_section,
     invariant_start,
@@ -412,7 +468,15 @@ static int harness_verify_prompt(
                                               goal_start,
                                               goal_content_start,
                                               goal_content_end,
-                                              invariant_start) ||
+                                              goal_section_end) ||
+      ((assistant_guidance_section != NULL) &&
+       ((assistant_guidance_content_end == NULL) ||
+        !harness_section_copy_surrounds_content(
+          assistant_guidance_section,
+          assistant_guidance_start,
+          assistant_guidance_content_start,
+          assistant_guidance_content_end,
+          invariant_start))) ||
       !harness_section_copy_surrounds_content(invariant_prompt_section,
                                               invariant_start,
                                               invariant_content_start,
@@ -553,10 +617,61 @@ static int harness_verify_prompt(
 
 cleanup:
   free(invariant_heading);
+  free(assistant_guidance_heading);
   free(goal_heading);
   free(audit_heading);
   free(tools_heading);
   return result;
+}
+
+static int harness_verify_assistant_set_guidance(
+  const strappy_assistant_set_profile *profile,
+  const char *prompt)
+{
+  int is_coding_assistant;
+
+  is_coding_assistant =
+    strcmp(profile->identifier, STRAPPY_ASSISTANT_SET_CODING_ASSISTANT) == 0;
+  if (!is_coding_assistant) {
+    if ((strstr(prompt, "# Coding Assistant Conduct\n\n") != NULL) ||
+        (strstr(prompt, "NEVER commit or push changes.") != NULL)) {
+      return harness_fail(
+        "Coding guidance leaked into another assistant-set prompt.");
+    }
+    return 1;
+  }
+
+  if ((strstr(prompt, "# Coding Assistant Conduct\n\n") == NULL) ||
+      (strstr(prompt, "gay, sassy, irreverent personality") == NULL) ||
+      (strstr(prompt,
+              "personality must never reduce technical accuracy") == NULL) ||
+      (strstr(prompt,
+              "source code, identifiers, code comments, and repository "
+              "documentation") == NULL) ||
+      (strstr(prompt,
+              "proposed commit messages, pull request titles and summaries, "
+              "and issue comments") == NULL) ||
+      (strstr(prompt,
+              "Do not invent APIs, project behavior, command results, or "
+              "other facts.") == NULL) ||
+      (strstr(prompt,
+              "verify uncertain or current API assumptions against "
+              "authoritative documentation.") == NULL) ||
+      (strstr(prompt, "read the applicable project instructions") == NULL) ||
+      (strstr(prompt, "preserve unrelated work.") == NULL) ||
+      (strstr(prompt, "update or add relevant tests.") == NULL) ||
+      (strstr(prompt, "compile every affected buildable target") == NULL) ||
+      (strstr(prompt,
+              "run the project when the current system supports it.") ==
+       NULL) ||
+      (strstr(prompt,
+              "Double-check the final diff and verification results.") ==
+       NULL) ||
+      (strstr(prompt, "NEVER commit or push changes.") == NULL)) {
+    return harness_fail(
+      "Coding Assistant prompt is missing merged conduct guidance.");
+  }
+  return 1;
 }
 
 static const char *harness_web_provider_name(strappy_web_provider provider)
@@ -704,7 +819,8 @@ int main(int argc, char **argv)
                                  web_provider,
                                  prompt,
                                  system_prompt,
-                                 tools_json)) {
+                                 tools_json) ||
+          !harness_verify_assistant_set_guidance(&profile, prompt)) {
         fprintf(stderr,
                 "Could not generate %s with web search %s: %s\n",
                 profile.identifier,

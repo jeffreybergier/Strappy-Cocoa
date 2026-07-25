@@ -27,7 +27,8 @@ from `/osxcross`.
 preflight calls, and answer-quality checks for each assistant set. The shared C
 prompt builder combines those selections with the matching descriptions from
 `GuidanceTools.json`, the code-owned audit behavior, and the structured section
-copy, audit guidance, invariant personality, and hard rules in
+copy, audit guidance, optional assistant-set guidance, invariant personality,
+and hard rules in
 `SystemPrompt.json`:
 
 - World Knowledge exposes only universal web, user-memory, date, Font Awesome,
@@ -50,7 +51,10 @@ copy, audit guidance, invariant personality, and hard rules in
   `~/Library/Application Support/Strappy/Developer`. Selecting a missing
   directory creates it before the database setting is changed. Bash results
   expose `output_truncated` so the model can distinguish complete output from a
-  bounded tail.
+  bounded tail. Its assistant-set guidance also keeps source artifacts
+  professionally neutral, requires evidence-backed API and command claims,
+  requires relevant tests/builds/runtime checks after changes, and prohibits
+  commits and pushes.
 - Database Study is an internal assistant with `database_list`,
   `database_context`, `database_query`, `database_study`, and both datetime
   conversion tools. The application persists its fixed session name as

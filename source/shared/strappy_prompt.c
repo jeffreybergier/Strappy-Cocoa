@@ -479,6 +479,41 @@ static int strappy_prompt_json_validate_guidance(cJSON *guidance,
   return 1;
 }
 
+static int strappy_prompt_json_validate_assistant_set_guidance(
+  cJSON *guidance,
+  char **error_out)
+{
+  cJSON *item;
+
+  if (!cJSON_IsObject(guidance) ||
+      !strappy_prompt_json_validate_unique_keys(
+        guidance,
+        "assistant_set_guidance",
+        error_out)) {
+    if ((error_out == NULL) || (*error_out == NULL)) {
+      strappy_set_error(
+        error_out,
+        "System prompt assistant-set guidance must be an object.");
+    }
+    return 0;
+  }
+  for (item = guidance->child; item != NULL; item = item->next) {
+    if (!cJSON_IsObject(item) ||
+        !strappy_prompt_json_validate_section(item,
+                                              item->string,
+                                              error_out)) {
+      if ((error_out == NULL) || (*error_out == NULL)) {
+        strappy_set_formatted_error(
+          error_out,
+          "System prompt assistant-set guidance is invalid: %s.",
+          (item->string != NULL) ? item->string : "(unknown)");
+      }
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int strappy_prompt_json_validate_root(cJSON *root, char **error_out)
 {
   cJSON *schema_version;
@@ -487,6 +522,7 @@ static int strappy_prompt_json_validate_root(cJSON *root, char **error_out)
   cJSON *audit;
   cJSON *goal;
   cJSON *invariant_section;
+  cJSON *assistant_set_guidance;
   cJSON *guidance;
 
   if (!cJSON_IsObject(root) ||
@@ -531,13 +567,18 @@ static int strappy_prompt_json_validate_root(cJSON *root, char **error_out)
                                         "invariant",
                                         "sections",
                                         error_out) : NULL;
+  assistant_set_guidance = strappy_prompt_json_required_object(
+    root,
+    "assistant_set_guidance",
+    "root",
+    error_out);
   guidance = strappy_prompt_json_required_object(root,
                                                  "audit_guidance",
                                                  "root",
                                                  error_out);
   if ((sections == NULL) || (tools == NULL) || (audit == NULL) ||
       (goal == NULL) || (invariant_section == NULL) ||
-      (guidance == NULL)) {
+      (assistant_set_guidance == NULL) || (guidance == NULL)) {
     return 0;
   }
   if (!strappy_prompt_json_validate_unique_keys(sections,
@@ -555,6 +596,9 @@ static int strappy_prompt_json_validate_root(cJSON *root, char **error_out)
       !strappy_prompt_json_validate_section(invariant_section,
                                             "sections.invariant",
                                             error_out) ||
+      !strappy_prompt_json_validate_assistant_set_guidance(
+        assistant_set_guidance,
+        error_out) ||
       !strappy_prompt_json_validate_guidance(guidance, error_out)) {
     return 0;
   }
@@ -611,6 +655,8 @@ char *strappy_prompt_build(
   cJSON *audit_section;
   cJSON *goal_section;
   cJSON *invariant_section;
+  cJSON *assistant_set_guidance;
+  cJSON *assistant_guidance_section;
   cJSON *guidance;
   size_t index;
   int ok;
@@ -649,6 +695,12 @@ char *strappy_prompt_build(
   audit_section = cJSON_GetObjectItemCaseSensitive(sections, "audit");
   goal_section = cJSON_GetObjectItemCaseSensitive(sections, "goal");
   invariant_section = cJSON_GetObjectItemCaseSensitive(sections, "invariant");
+  assistant_set_guidance = cJSON_GetObjectItemCaseSensitive(
+    root,
+    "assistant_set_guidance");
+  assistant_guidance_section = cJSON_GetObjectItemCaseSensitive(
+    assistant_set_guidance,
+    profile->identifier);
   guidance = cJSON_GetObjectItemCaseSensitive(root, "audit_guidance");
 
   ok = strappy_prompt_buffer_append_section_open(&buffer,
@@ -732,7 +784,22 @@ char *strappy_prompt_build(
       strappy_prompt_buffer_append_section_footer(&buffer,
                                                    goal_section,
                                                    "sections.goal",
-                                                   error_out) &&
+                                                   error_out);
+  }
+  if (ok && (assistant_guidance_section != NULL)) {
+    ok = strappy_prompt_buffer_append_section_open(
+      &buffer,
+      assistant_guidance_section,
+      profile->identifier,
+      error_out) &&
+      strappy_prompt_buffer_append_section_footer(
+        &buffer,
+        assistant_guidance_section,
+        profile->identifier,
+        error_out);
+  }
+  if (ok) {
+    ok =
       strappy_prompt_buffer_append_section_open(&buffer,
                                                  invariant_section,
                                                  "sections.invariant",
