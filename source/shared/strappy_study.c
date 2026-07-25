@@ -548,11 +548,9 @@ char *strappy_study_batch_prompt(const char * const *database_ids,
                                  char **error_out)
 {
   static const char *prefix =
-    "Study exactly these database_ids in this isolated batch: ";
+    "Study these database_ids: ";
   static const char *suffix =
-    ". For each database_id, call database_study exactly twice: once with "
-    "key description and once with key context. Complete both writes for "
-    "every database_id.";
+    ". Complete the Database Study workflow for each.";
   cJSON *array;
   char *array_json;
   char *prompt;

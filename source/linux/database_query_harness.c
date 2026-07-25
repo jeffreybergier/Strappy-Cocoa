@@ -2297,11 +2297,14 @@ static int harness_run_tool_registry_tests(void)
                 "When no databases are approved, the array is empty and "
                 "guidance explains why.") != NULL) &&
         (strstr(tools_json,
-                "ALWAYS call this tool before finalizing when the request "
-                "depends on personal data.") !=
+                "Run one read-only SQLite query against an approved database. "
+                "Use it whenever an answer depends on personal data.") !=
          NULL) &&
         (strstr(tools_json,
-                "ALWAYS call this tool when displaying numeric timestamps.") !=
+                "Convert numeric timestamp strings to ISO 8601 before "
+                "displaying them. In Database Study, use a queried timestamp "
+                "to verify its unit before recording the unit; never copy the "
+                "sampled value into saved context.") !=
          NULL) &&
         (strstr(tools_json,
                 "ALWAYS call this tool when converting ISO 8601 datetimes to "
@@ -2331,33 +2334,34 @@ static int harness_run_tool_registry_tests(void)
                 "information.") !=
          NULL) &&
         (strstr(tools_json,
-                "- NEVER store private or sampled row values, secrets, "
-                "sensitive identifiers") !=
+                "Save one completed Database Study value after "
+                "investigation.") !=
          NULL) &&
         (strstr(tools_json,
-                "- ALWAYS call database_study exactly twice:") !=
+                "description is one sentence describing useful user data "
+                "found.") !=
          NULL) &&
         (strstr(tools_json,
-                "**description** is for describing the kind of user data that "
-                "the database includes such as email, text messages, "
-                "contacts, etc.") !=
+                "context records verified tables, columns, join keys, "
+                "timestamp units, and a reusable read-only SQL pattern; write "
+                "none for joins or timestamps that do not exist.") !=
          NULL) &&
         (strstr(tools_json,
-                "**context** is for describing how to access the user data "
-                "via SQL queries.") !=
+                "Never include sampled values, secrets, or sensitive "
+                "identifiers.") !=
          NULL) &&
         (strstr(tools_json,
-                "ALWAYS call this tool with the relevant approved database_id "
-                "before database_query. Returns the studied context value "
-                "(or null), table names, view names, and guidance for "
-                "exploring them.") !=
+                "Call this first for a relevant approved database_id. Returns "
+                "the studied context value (or null), bounded table and view "
+                "names, and exploration guidance. This result alone is not a "
+                "completed Database Study.") !=
          NULL) &&
         (strstr(tools_json,
                 "Call this tool to forget durable facts that are no longer "
                 "correct or useful.") != NULL) &&
         (strstr(filtered_json,
-                "ALWAYS call this tool before finalizing when the request "
-                "depends on personal data.") !=
+                "Run one read-only SQLite query against an approved database. "
+                "Use it whenever an answer depends on personal data.") !=
          NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_LIST) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_QUERY) != NULL) &&
@@ -6085,6 +6089,672 @@ static int harness_write_study_value(const char *catalog_path,
   return ok;
 }
 
+typedef struct harness_study_research_call {
+  const char *call_id;
+  const char *tool_name;
+  char *arguments_json;
+  char *output_json;
+} harness_study_research_call;
+
+static void harness_study_research_calls_destroy(
+  harness_study_research_call *calls,
+  size_t call_count)
+{
+  size_t index;
+
+  if (calls == NULL) {
+    return;
+  }
+  for (index = 0U; index < call_count; index++) {
+    free(calls[index].arguments_json);
+    calls[index].arguments_json = NULL;
+    free(calls[index].output_json);
+    calls[index].output_json = NULL;
+  }
+}
+
+static char *harness_study_arguments_json(const char *database_id,
+                                          const char *sql,
+                                          const char *key,
+                                          const char *value)
+{
+  cJSON *arguments;
+  char *json;
+
+  arguments = cJSON_CreateObject();
+  if ((arguments == NULL) ||
+      (cJSON_AddStringToObject(arguments,
+                               "database_id",
+                               database_id) == NULL) ||
+      ((sql != NULL) &&
+       (cJSON_AddStringToObject(arguments, "sql", sql) == NULL)) ||
+      ((key != NULL) &&
+       (cJSON_AddStringToObject(arguments, "key", key) == NULL)) ||
+      ((value != NULL) &&
+       (cJSON_AddStringToObject(arguments, "value", value) == NULL))) {
+    cJSON_Delete(arguments);
+    return NULL;
+  }
+  json = cJSON_PrintUnformatted(arguments);
+  cJSON_Delete(arguments);
+  return json;
+}
+
+static cJSON *harness_study_user_input(void)
+{
+  cJSON *items;
+  cJSON *message;
+
+  items = cJSON_CreateArray();
+  message = cJSON_CreateObject();
+  if ((items == NULL) || (message == NULL) ||
+      (cJSON_AddStringToObject(message, "type", "message") == NULL) ||
+      (cJSON_AddStringToObject(message, "role", "user") == NULL) ||
+      (cJSON_AddStringToObject(message,
+                               "content",
+                               "Study guard harness") == NULL) ||
+      !cJSON_AddItemToArray(items, message)) {
+    cJSON_Delete(message);
+    cJSON_Delete(items);
+    return NULL;
+  }
+  return items;
+}
+
+static cJSON *harness_study_function_call_items(
+  const harness_study_research_call *calls,
+  size_t call_count)
+{
+  cJSON *items;
+  size_t index;
+
+  items = cJSON_CreateArray();
+  if (items == NULL) {
+    return NULL;
+  }
+  for (index = 0U; index < call_count; index++) {
+    cJSON *item;
+
+    item = cJSON_CreateObject();
+    if ((item == NULL) ||
+        (cJSON_AddStringToObject(item, "type", "function_call") == NULL) ||
+        (cJSON_AddStringToObject(item,
+                                 "call_id",
+                                 calls[index].call_id) == NULL) ||
+        (cJSON_AddStringToObject(item,
+                                 "name",
+                                 calls[index].tool_name) == NULL) ||
+        (cJSON_AddStringToObject(item,
+                                 "arguments",
+                                 calls[index].arguments_json) == NULL) ||
+        (cJSON_AddStringToObject(item, "status", "completed") == NULL) ||
+        !cJSON_AddItemToArray(items, item)) {
+      cJSON_Delete(item);
+      cJSON_Delete(items);
+      return NULL;
+    }
+  }
+  return items;
+}
+
+static cJSON *harness_study_function_output_items(
+  const harness_study_research_call *calls,
+  size_t call_count)
+{
+  cJSON *items;
+  size_t index;
+
+  items = cJSON_CreateArray();
+  if (items == NULL) {
+    return NULL;
+  }
+  for (index = 0U; index < call_count; index++) {
+    cJSON *item;
+
+    item = cJSON_CreateObject();
+    if ((item == NULL) ||
+        (cJSON_AddStringToObject(item,
+                                 "type",
+                                 "function_call_output") == NULL) ||
+        (cJSON_AddStringToObject(item,
+                                 "call_id",
+                                 calls[index].call_id) == NULL) ||
+        (cJSON_AddStringToObject(item,
+                                 "output",
+                                 calls[index].output_json) == NULL) ||
+        !cJSON_AddItemToArray(items, item)) {
+      cJSON_Delete(item);
+      cJSON_Delete(items);
+      return NULL;
+    }
+  }
+  return items;
+}
+
+static int harness_study_append_round(
+  const char *catalog_path,
+  long long session_id,
+  long long previous_call_id,
+  const char *prompt_group_key,
+  const char *request_kind,
+  long round_index,
+  cJSON *request_items,
+  cJSON *response_items,
+  long long *call_id_out,
+  char **error_out)
+{
+  strappy_response_call_begin_input begin;
+  strappy_response_call_finish_input finish;
+  cJSON *request;
+  cJSON *response;
+  cJSON *request_items_copy;
+  cJSON *response_items_copy;
+  char *request_json;
+  char *response_json;
+  long long call_id;
+  int ok;
+
+  if (call_id_out != NULL) {
+    *call_id_out = 0LL;
+  }
+  if (!cJSON_IsArray(request_items) || !cJSON_IsArray(response_items)) {
+    return 0;
+  }
+
+  request = cJSON_CreateObject();
+  response = cJSON_CreateObject();
+  request_items_copy = cJSON_Duplicate(request_items, 1);
+  response_items_copy = cJSON_Duplicate(response_items, 1);
+  if ((request == NULL) || (response == NULL) ||
+      (request_items_copy == NULL) || (response_items_copy == NULL) ||
+      (cJSON_AddStringToObject(request, "model", "test/model") == NULL) ||
+      (cJSON_AddFalseToObject(request, "stream") == NULL) ||
+      (cJSON_AddFalseToObject(request, "store") == NULL) ||
+      !cJSON_AddItemToObject(request, "input", request_items_copy)) {
+    cJSON_Delete(request_items_copy);
+    cJSON_Delete(response_items_copy);
+    cJSON_Delete(request);
+    cJSON_Delete(response);
+    return 0;
+  }
+  request_items_copy = NULL;
+  if ((cJSON_AddStringToObject(response,
+                               "id",
+                               "study-guard-response") == NULL) ||
+      (cJSON_AddStringToObject(response, "status", "completed") == NULL) ||
+      (cJSON_AddStringToObject(response, "model", "test/model") == NULL) ||
+      !cJSON_AddItemToObject(response, "output", response_items_copy)) {
+    cJSON_Delete(response_items_copy);
+    cJSON_Delete(request);
+    cJSON_Delete(response);
+    return 0;
+  }
+  response_items_copy = NULL;
+  request_json = cJSON_PrintUnformatted(request);
+  response_json = cJSON_PrintUnformatted(response);
+  cJSON_Delete(request);
+  cJSON_Delete(response);
+  if ((request_json == NULL) || (response_json == NULL)) {
+    free(request_json);
+    free(response_json);
+    return 0;
+  }
+
+  memset(&begin, 0, sizeof(begin));
+  begin.session_id = session_id;
+  begin.previous_call_id = previous_call_id;
+  begin.prompt_group_key = prompt_group_key;
+  begin.request_kind = request_kind;
+  begin.round_index = round_index;
+  begin.attempt_index = 0L;
+  begin.new_input_start_index = 0L;
+  begin.input_from_current_turn = (round_index > 0L) ? 1 : 0;
+  begin.request_method = "POST";
+  begin.request_url = "https://openrouter.ai/api/v1/responses";
+  begin.request_headers_json = "{}";
+  begin.request_json = request_json;
+  call_id = 0LL;
+  ok = strappy_db_begin_response_call(catalog_path,
+                                      &begin,
+                                      &call_id,
+                                      error_out);
+  if (ok) {
+    memset(&finish, 0, sizeof(finish));
+    finish.call_id = call_id;
+    finish.state = "completed";
+    finish.output_is_canonical = 1;
+    finish.http_status = 200L;
+    finish.started_at_ms = call_id * 1000LL;
+    finish.completed_at_ms = finish.started_at_ms + 100LL;
+    finish.request_bytes = (long long)strlen(request_json);
+    finish.response_bytes = (long long)strlen(response_json);
+    finish.total_seconds = 0.1;
+    finish.effective_url = begin.request_url;
+    finish.content_type = "application/json";
+    finish.response_headers = "";
+    finish.response_json = response_json;
+    ok = strappy_db_finish_response_call(catalog_path, &finish, error_out);
+  }
+  free(request_json);
+  free(response_json);
+  if (ok && (call_id_out != NULL)) {
+    *call_id_out = call_id;
+  }
+  return ok;
+}
+
+static int harness_study_execute_research_calls(
+  const harness_context *context,
+  long long session_id,
+  long long response_call_id,
+  harness_study_research_call *calls,
+  size_t call_count,
+  char **error_out)
+{
+  strappy_response_tool_execution_input execution;
+  size_t index;
+
+  for (index = 0U; index < call_count; index++) {
+    calls[index].output_json = strappy_tools_execute_for_function_call(
+      context->catalog_path,
+      session_id,
+      HARNESS_RESOURCE_DIR,
+      calls[index].call_id,
+      calls[index].tool_name,
+      calls[index].arguments_json,
+      error_out);
+    if (calls[index].output_json == NULL) {
+      return 0;
+    }
+
+    memset(&execution, 0, sizeof(execution));
+    execution.session_id = session_id;
+    execution.response_call_id = response_call_id;
+    execution.output_index = (long)index;
+    execution.call_id = calls[index].call_id;
+    execution.tool_name = calls[index].tool_name;
+    execution.arguments_json = calls[index].arguments_json;
+    execution.status = "completed";
+    execution.output_json = calls[index].output_json;
+    execution.started_at_ms = 1000LL + (long long)index;
+    execution.completed_at_ms = 1100LL + (long long)index;
+    if (!strappy_db_save_response_tool_execution(context->catalog_path,
+                                                  &execution,
+                                                  error_out)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int harness_study_record_research(
+  const harness_context *context,
+  long long session_id,
+  long long previous_call_id,
+  const char *prompt_group_key,
+  const char *context_call_id,
+  const char *query_call_id,
+  const char *query_sql,
+  harness_study_research_call calls[2],
+  long long *response_call_id_out,
+  char **error_out)
+{
+  cJSON *request_items;
+  cJSON *response_items;
+  int ok;
+
+  memset(calls, 0, 2U * sizeof(*calls));
+  calls[0].call_id = context_call_id;
+  calls[0].tool_name = STRAPPY_TOOL_DATABASE_CONTEXT;
+  calls[0].arguments_json = harness_study_arguments_json(
+    context->database_id, NULL, NULL, NULL);
+  calls[1].call_id = query_call_id;
+  calls[1].tool_name = STRAPPY_TOOL_DATABASE_QUERY;
+  calls[1].arguments_json = harness_study_arguments_json(
+    context->database_id, query_sql, NULL, NULL);
+  request_items = harness_study_user_input();
+  response_items = harness_study_function_call_items(calls, 2U);
+  if ((calls[0].arguments_json == NULL) ||
+      (calls[1].arguments_json == NULL) ||
+      (request_items == NULL) ||
+      (response_items == NULL)) {
+    cJSON_Delete(request_items);
+    cJSON_Delete(response_items);
+    return 0;
+  }
+
+  ok = harness_study_append_round(context->catalog_path,
+                                  session_id,
+                                  previous_call_id,
+                                  prompt_group_key,
+                                  "user",
+                                  0L,
+                                  request_items,
+                                  response_items,
+                                  response_call_id_out,
+                                  error_out);
+  cJSON_Delete(request_items);
+  cJSON_Delete(response_items);
+  return ok && harness_study_execute_research_calls(
+    context,
+    session_id,
+    *response_call_id_out,
+    calls,
+    2U,
+    error_out);
+}
+
+static int harness_study_append_save_call(
+  const harness_context *context,
+  long long session_id,
+  long long previous_call_id,
+  const char *prompt_group_key,
+  const harness_study_research_call calls[2],
+  const char *study_call_id,
+  const char *study_arguments_json,
+  long long *response_call_id_out,
+  char **error_out)
+{
+  harness_study_research_call study_call;
+  cJSON *request_items;
+  cJSON *response_items;
+  int ok;
+
+  memset(&study_call, 0, sizeof(study_call));
+  study_call.call_id = study_call_id;
+  study_call.tool_name = STRAPPY_TOOL_DATABASE_STUDY;
+  study_call.arguments_json = (char *)study_arguments_json;
+  request_items = harness_study_function_output_items(calls, 2U);
+  response_items = harness_study_function_call_items(&study_call, 1U);
+  if ((request_items == NULL) || (response_items == NULL)) {
+    cJSON_Delete(request_items);
+    cJSON_Delete(response_items);
+    return 0;
+  }
+  ok = harness_study_append_round(context->catalog_path,
+                                  session_id,
+                                  previous_call_id,
+                                  prompt_group_key,
+                                  "tool_continuation",
+                                  1L,
+                                  request_items,
+                                  response_items,
+                                  response_call_id_out,
+                                  error_out);
+  cJSON_Delete(request_items);
+  cJSON_Delete(response_items);
+  return ok;
+}
+
+static int harness_study_save_result_matches(
+  const harness_context *context,
+  long long session_id,
+  const char *study_call_id,
+  const char *study_arguments_json,
+  int expect_success,
+  const char *expected_error)
+{
+  char *error;
+  char *output;
+  int ok;
+
+  error = NULL;
+  output = strappy_tools_execute_for_function_call(
+    context->catalog_path,
+    session_id,
+    HARNESS_RESOURCE_DIR,
+    study_call_id,
+    STRAPPY_TOOL_DATABASE_STUDY,
+    study_arguments_json,
+    &error);
+  if (expect_success) {
+    ok = (output != NULL) && (strcmp(output, "{}") == 0) && (error == NULL);
+  } else {
+    ok = (output == NULL) && (error != NULL) &&
+      (expected_error != NULL) && (strstr(error, expected_error) != NULL);
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Database Study guard result did not match: output=%s error=%s\n",
+            (output != NULL) ? output : "(null)",
+            (error != NULL) ? error : "(null)");
+  }
+  free(output);
+  free(error);
+  return ok;
+}
+
+static int harness_run_database_study_same_batch_guard_tests(
+  const harness_context *context)
+{
+  static const char schema_sql[] =
+    "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name;";
+  static const char real_table_sql[] =
+    "SELECT id, sender FROM messages ORDER BY id LIMIT 1;";
+  harness_study_research_call calls[2];
+  cJSON *empty_items;
+  cJSON *old_outputs;
+  cJSON *prior_study_response;
+  harness_study_research_call prior_study_call;
+  char *study_arguments;
+  char *error;
+  long long session_id;
+  long long research_call_id;
+  long long save_call_id;
+  int ok;
+
+  if ((context == NULL) || (context->database_id == NULL)) {
+    return 0;
+  }
+
+  memset(calls, 0, sizeof(calls));
+  memset(&prior_study_call, 0, sizeof(prior_study_call));
+  study_arguments = harness_study_arguments_json(
+    context->database_id,
+    NULL,
+    STRAPPY_STUDY_KEY_DESCRIPTION,
+    "Messages contain senders and text.");
+  error = NULL;
+  session_id = 0LL;
+  research_call_id = 0LL;
+  save_call_id = 0LL;
+  ok = (study_arguments != NULL) &&
+    strappy_study_reset(context->catalog_path, &error) &&
+    strappy_db_create_session(context->catalog_path, &session_id, &error) &&
+    strappy_db_update_session_assistant_set(
+      context->catalog_path,
+      session_id,
+      STRAPPY_ASSISTANT_SET_DATABASE_STUDY,
+      &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not prepare Database Study guard tests: %s\n",
+            (error != NULL) ? error : "allocation failed");
+    goto cleanup;
+  }
+
+  ok = harness_study_record_research(
+         context,
+         session_id,
+         0LL,
+         "study-schema-batch",
+         "study-schema-context",
+         "study-schema-query",
+         schema_sql,
+         calls,
+         &research_call_id,
+         &error) &&
+    harness_study_append_save_call(
+      context,
+      session_id,
+      research_call_id,
+      "study-schema-batch",
+      calls,
+      "study-schema-save",
+      study_arguments,
+      &save_call_id,
+      &error) &&
+    harness_study_save_result_matches(
+      context,
+      session_id,
+      "study-schema-save",
+      study_arguments,
+      0,
+      "real table") &&
+    harness_expect_catalog_integer(context->catalog_path,
+                                   "SELECT COUNT(*) FROM database_hints;",
+                                   0LL,
+                                   "schema-only rejected study values");
+  harness_study_research_calls_destroy(calls, 2U);
+  memset(calls, 0, sizeof(calls));
+  if (!ok) {
+    fprintf(stderr,
+            "Database Study schema-only guard failed: %s\n",
+            (error != NULL) ? error : "unexpected result");
+    goto cleanup;
+  }
+
+  ok = harness_study_record_research(
+    context,
+    session_id,
+    save_call_id,
+    "study-prior-research-batch",
+    "study-prior-context",
+    "study-prior-query",
+    real_table_sql,
+    calls,
+    &research_call_id,
+    &error);
+  old_outputs = ok ? harness_study_function_output_items(calls, 2U) : NULL;
+  empty_items = cJSON_CreateArray();
+  if (!ok || (old_outputs == NULL) || (empty_items == NULL) ||
+      !harness_study_append_round(
+        context->catalog_path,
+        session_id,
+        research_call_id,
+        "study-prior-research-batch",
+        "tool_continuation",
+        1L,
+        old_outputs,
+        empty_items,
+        &save_call_id,
+        &error)) {
+    cJSON_Delete(old_outputs);
+    cJSON_Delete(empty_items);
+    ok = 0;
+    goto cleanup;
+  }
+  cJSON_Delete(old_outputs);
+  cJSON_Delete(empty_items);
+
+  prior_study_call.call_id = "study-prior-save";
+  prior_study_call.tool_name = STRAPPY_TOOL_DATABASE_STUDY;
+  prior_study_call.arguments_json = study_arguments;
+  old_outputs = harness_study_user_input();
+  prior_study_response =
+    harness_study_function_call_items(&prior_study_call, 1U);
+  if ((old_outputs == NULL) || (prior_study_response == NULL) ||
+      !harness_study_append_round(
+        context->catalog_path,
+        session_id,
+        save_call_id,
+        "study-new-batch",
+        "user",
+        0L,
+        old_outputs,
+        prior_study_response,
+        &save_call_id,
+        &error)) {
+    cJSON_Delete(old_outputs);
+    cJSON_Delete(prior_study_response);
+    ok = 0;
+    goto cleanup;
+  }
+  cJSON_Delete(old_outputs);
+  cJSON_Delete(prior_study_response);
+  ok = harness_study_save_result_matches(
+         context,
+         session_id,
+         "study-prior-save",
+         study_arguments,
+         0,
+         "current study batch") &&
+    harness_expect_catalog_integer(context->catalog_path,
+                                   "SELECT COUNT(*) FROM database_hints;",
+                                   0LL,
+                                   "prior-batch rejected study values");
+  harness_study_research_calls_destroy(calls, 2U);
+  memset(calls, 0, sizeof(calls));
+  if (!ok) {
+    fprintf(stderr,
+            "Database Study prior-batch query guard failed: %s\n",
+            (error != NULL) ? error : "unexpected result");
+    goto cleanup;
+  }
+
+  ok = harness_study_record_research(
+         context,
+         session_id,
+         save_call_id,
+         "study-valid-batch",
+         "study-valid-context",
+         "study-valid-query",
+         real_table_sql,
+         calls,
+         &research_call_id,
+         &error) &&
+    harness_study_append_save_call(
+      context,
+      session_id,
+      research_call_id,
+      "study-valid-batch",
+      calls,
+      "study-valid-save",
+      study_arguments,
+      &save_call_id,
+      &error) &&
+    harness_study_save_result_matches(
+      context,
+      session_id,
+      "study-valid-save",
+      study_arguments,
+      1,
+      NULL) &&
+    harness_expect_catalog_integer(context->catalog_path,
+                                   "SELECT COUNT(*) FROM database_hints;",
+                                   1LL,
+                                   "same-batch accepted study values");
+  if (!ok) {
+    fprintf(stderr,
+            "Database Study same-batch query guard failed: %s\n",
+            (error != NULL) ? error : "unexpected result");
+  }
+
+cleanup:
+  harness_study_research_calls_destroy(calls, 2U);
+  if (session_id > 0LL) {
+    char *delete_error;
+
+    delete_error = NULL;
+    if (!strappy_db_delete_session(context->catalog_path,
+                                   session_id,
+                                   &delete_error) &&
+        ok) {
+      fprintf(stderr,
+              "Could not delete Database Study guard session: %s\n",
+              (delete_error != NULL) ? delete_error : "unknown");
+      ok = 0;
+    }
+    free(delete_error);
+  }
+  if (!strappy_study_reset(context->catalog_path, &error) && ok) {
+    ok = 0;
+  }
+  free(study_arguments);
+  free(error);
+  return ok;
+}
+
 static int harness_run_database_study_coverage_tests(
   const harness_context *context)
 {
@@ -6178,10 +6848,10 @@ static int harness_run_database_study_coverage_tests(
         batch_ids,
         (const char * const *)pending.database_ids,
         batch_count) ||
+      (strstr(batch_prompt, "Study these database_ids:") == NULL) ||
       (strstr(batch_prompt,
-              "call database_study exactly twice") == NULL) ||
-      (strstr(batch_prompt, "key description") == NULL) ||
-      (strstr(batch_prompt, "key context") == NULL)) {
+              "Complete the Database Study workflow for each.") == NULL) ||
+      (strstr(batch_prompt, "database_study exactly twice") != NULL)) {
     fprintf(stderr,
             "Database Study batch prompt did not contain the exact next "
             "five-or-fewer IDs: %s\n",
@@ -8897,6 +9567,7 @@ int main(void)
        harness_run_openrouter_model_catalog_tests(&context) &&
        harness_run_sms_context_tests(&context) &&
        harness_run_mail_context_tests(&context) &&
+       harness_run_database_study_same_batch_guard_tests(&context) &&
        harness_run_database_study_coverage_tests(&context) &&
        harness_run_file_read_tests(&context) &&
        harness_run_file_mutation_tests(&context);

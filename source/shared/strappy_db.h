@@ -594,6 +594,11 @@ int strappy_db_update_model_request_include_in_context(
   long long model_request_id,
   int include_in_context,
   char **error_out);
+int strappy_db_exclude_prompt_group_from_context(
+  const char *db_path,
+  long long session_id,
+  const char *prompt_group_key,
+  char **error_out);
 int strappy_db_save_openrouter_models_json(const char *db_path,
                                            const char *json,
                                            char **error_out);

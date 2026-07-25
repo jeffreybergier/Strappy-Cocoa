@@ -2259,7 +2259,6 @@ static int strappy_responses_send_round(
   const char *request_kind,
   const char *request_json,
   long new_input_start_index,
-  int input_from_current_turn,
   long long *previous_call_id_io,
   long long *successful_call_id_out,
   long long processing_started_ms,
@@ -2314,7 +2313,7 @@ static int strappy_responses_send_round(
     begin.attempt_index = attempt_index;
     begin.new_input_start_index = (attempt_index == 0L) ?
       new_input_start_index : -1L;
-    begin.input_from_current_turn = input_from_current_turn;
+    begin.input_from_current_turn = 0;
     begin.request_method = "POST";
     begin.request_url = runtime->request_url;
     begin.request_headers_json = request_headers_json;
@@ -2577,7 +2576,7 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
   const char *guidance_resource_dir,
   const char *session_db_path,
   long long session_id,
-  int input_from_current_turn,
+  int exclude_prompt_group_after_completion,
   strappy_responses_event_callback callback,
   void *callback_data,
   char **error_out)
@@ -2667,17 +2666,10 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
     strappy_response_item_raw_record_list_init(&history);
     strappy_responses_http_result_init(&http);
     strappy_responses_analysis_init(&analysis);
-    if (!(input_from_current_turn ?
-          strappy_db_list_canonical_response_items_for_prompt_group(
-            session_db_path,
-            session_id,
-            prompt_group_key,
-            &history,
-            error_out) :
-          strappy_db_list_canonical_response_items(session_db_path,
-                                                   session_id,
-                                                   &history,
-                                                   error_out))) {
+    if (!strappy_db_list_canonical_response_items(session_db_path,
+                                                  session_id,
+                                                  &history,
+                                                  error_out)) {
       strappy_responses_update_failure_summary(
         session_db_path,
         session_id,
@@ -2719,7 +2711,6 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
                                       next_request_kind,
                                       request_json,
                                       new_input_start_index,
-                                      input_from_current_turn,
                                       &previous_call_id,
                                       &successful_call_id,
                                       processing_started_ms,
@@ -2796,6 +2787,11 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
     strappy_responses_analysis_destroy(&analysis);
     strappy_responses_http_result_destroy(&http);
     if ((final_text == NULL) ||
+        (exclude_prompt_group_after_completion &&
+         !strappy_db_exclude_prompt_group_from_context(session_db_path,
+                                                       session_id,
+                                                       prompt_group_key,
+                                                       error_out)) ||
         !strappy_db_update_response_session_summary(session_db_path,
                                                     session_id,
                                                     prompt,
@@ -2843,6 +2839,22 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
       (limit_message != NULL) ? limit_message :
         "Responses tool round limit was reached.");
     free(limit_message);
+  }
+
+  if (exclude_prompt_group_after_completion) {
+    char *ignored_error;
+
+    ignored_error = NULL;
+    if (!strappy_db_exclude_prompt_group_from_context(session_db_path,
+                                                      session_id,
+                                                      prompt_group_key,
+                                                      &ignored_error) &&
+        ((error_out == NULL) || (*error_out == NULL))) {
+      strappy_set_error(error_out,
+                        (ignored_error != NULL) ? ignored_error :
+                          "Could not exclude isolated prompt context.");
+    }
+    free(ignored_error);
   }
 
   free(final_text);

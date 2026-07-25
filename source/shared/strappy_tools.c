@@ -128,6 +128,7 @@ typedef struct strappy_fontawesome_confirm_arguments {
 
 typedef struct strappy_database_query_authorizer_context {
   int denied_action;
+  int read_real_table;
 } strappy_database_query_authorizer_context;
 
 typedef struct strappy_database_query_progress_context {
@@ -4088,7 +4089,6 @@ static int strappy_tools_database_query_authorizer(void *data,
 {
   strappy_database_query_authorizer_context *context;
 
-  (void)detail1;
   (void)source;
 
   context = (strappy_database_query_authorizer_context *)data;
@@ -4099,6 +4099,10 @@ static int strappy_tools_database_query_authorizer(void *data,
 
   if (action == SQLITE_READ) {
     if (strappy_tools_database_query_database_is_allowed(database_name)) {
+      if ((context != NULL) && (detail1 != NULL) &&
+          !strappy_tools_ascii_starts_with_ignore_case(detail1, "sqlite_")) {
+        context->read_real_table = 1;
+      }
       return SQLITE_OK;
     }
   } else if (action == SQLITE_FUNCTION) {
@@ -4662,6 +4666,7 @@ static int strappy_tools_prepare_database_query_statement(
   }
 
   authorizer_context->denied_action = 0;
+  authorizer_context->read_real_table = 0;
   rc = sqlite3_set_authorizer(db,
                               strappy_tools_database_query_authorizer,
                               authorizer_context);
@@ -5150,6 +5155,189 @@ static int strappy_tools_ascii_contains_length_ignore_case(
   }
 
   return 0;
+}
+
+static int strappy_tools_database_study_query_reads_real_table(
+  const char *database_path,
+  const char *sql)
+{
+  strappy_database_query_authorizer_context authorizer_context;
+  sqlite3 *database;
+  sqlite3_stmt *stmt;
+  char *error;
+  int reads_real_table;
+
+  if ((database_path == NULL) || (database_path[0] == '\0') ||
+      (sql == NULL) || (sql[0] == '\0')) {
+    return 0;
+  }
+
+  memset(&authorizer_context, 0, sizeof(authorizer_context));
+  database = NULL;
+  stmt = NULL;
+  error = NULL;
+  reads_real_table =
+    strappy_tools_open_readonly_database(database_path, &database, &error) &&
+    strappy_tools_prepare_database_query_statement(database,
+                                                   sql,
+                                                   &authorizer_context,
+                                                   &stmt,
+                                                   &error) &&
+    authorizer_context.read_real_table;
+  if (stmt != NULL) {
+    sqlite3_finalize(stmt);
+  }
+  if (database != NULL) {
+    sqlite3_set_authorizer(database, NULL, NULL);
+    sqlite3_close(database);
+  }
+  free(error);
+  return reads_real_table ? 1 : 0;
+}
+
+static int strappy_tools_database_study_has_same_turn_research(
+  sqlite3 *db,
+  long long session_id,
+  long long source_item_id,
+  const char *database_id,
+  const char *database_path,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT f.tool_name, query_sql.text_value "
+    "FROM conversation_items current_item "
+    "JOIN conversation_items prior_item "
+      "ON prior_item.session_id = current_item.session_id "
+      "AND prior_item.turn_id = current_item.turn_id "
+      "AND prior_item.sequence < current_item.sequence "
+    "JOIN function_calls f ON f.item_id = prior_item.id "
+    "JOIN tool_executions e ON e.function_call_item_id = f.item_id "
+      "AND e.state = 'completed' "
+    "JOIN function_outputs o ON o.function_call_item_id = f.item_id "
+      "AND o.execution_state = 'completed' "
+    "JOIN conversation_items output_item ON output_item.id = o.item_id "
+      "AND output_item.session_id = current_item.session_id "
+      "AND output_item.turn_id = current_item.turn_id "
+      "AND output_item.sequence < current_item.sequence "
+    "JOIN structured_documents arguments_document "
+      "ON arguments_document.owner_item_id = f.item_id "
+      "AND arguments_document.purpose = 'arguments' "
+    "JOIN structured_nodes database_id_node "
+      "ON database_id_node.document_id = arguments_document.id "
+      "AND database_id_node.parent_node_id = 0 "
+      "AND database_id_node.member_name = 'database_id' "
+      "AND database_id_node.value_type = 'string' "
+    "LEFT JOIN structured_nodes query_sql "
+      "ON query_sql.document_id = arguments_document.id "
+      "AND query_sql.parent_node_id = 0 "
+      "AND query_sql.member_name = 'sql' "
+      "AND query_sql.value_type = 'string' "
+    "WHERE current_item.id = ?1 AND current_item.session_id = ?2 "
+      "AND database_id_node.text_value = ?3 "
+      "AND f.tool_name IN (?4, ?5) "
+    "ORDER BY prior_item.sequence;";
+  sqlite3_stmt *stmt;
+  int has_context;
+  int has_real_table_query;
+  int rc;
+
+  if ((db == NULL) || (session_id <= 0LL) || (source_item_id <= 0LL) ||
+      (database_id == NULL) || (database_id[0] == '\0') ||
+      (database_path == NULL) || (database_path[0] == '\0')) {
+    strappy_set_error(
+      error_out,
+      "Database Study research validation is incomplete.");
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt,
+                          1,
+                          (sqlite3_int64)source_item_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt,
+                          2,
+                          (sqlite3_int64)session_id) != SQLITE_OK) ||
+      (sqlite3_bind_text(stmt,
+                         3,
+                         database_id,
+                         -1,
+                         SQLITE_TRANSIENT) != SQLITE_OK) ||
+      (sqlite3_bind_text(stmt,
+                         4,
+                         STRAPPY_TOOL_DATABASE_CONTEXT,
+                         -1,
+                         SQLITE_STATIC) != SQLITE_OK) ||
+      (sqlite3_bind_text(stmt,
+                         5,
+                         STRAPPY_TOOL_DATABASE_QUERY,
+                         -1,
+                         SQLITE_STATIC) != SQLITE_OK)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not prepare Database Study research validation: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  has_context = 0;
+  has_real_table_query = 0;
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    const unsigned char *tool_name;
+    const unsigned char *query_sql;
+
+    tool_name = sqlite3_column_text(stmt, 0);
+    query_sql = sqlite3_column_text(stmt, 1);
+    if ((tool_name != NULL) &&
+        (strcmp((const char *)tool_name,
+                STRAPPY_TOOL_DATABASE_CONTEXT) == 0)) {
+      has_context = 1;
+    } else if ((tool_name != NULL) &&
+               (strcmp((const char *)tool_name,
+                       STRAPPY_TOOL_DATABASE_QUERY) == 0) &&
+               (query_sql != NULL) &&
+               strappy_tools_database_study_query_reads_real_table(
+                 database_path,
+                 (const char *)query_sql)) {
+      has_real_table_query = 1;
+    }
+  }
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not read Database Study research validation: %s",
+      sqlite3_errmsg(db));
+    return 0;
+  }
+
+  if (!has_context && !has_real_table_query) {
+    strappy_set_error(
+      error_out,
+      "database_study requires successful database_context and a real-table "
+      "database_query for this database in the current study batch; "
+      "sqlite_schema queries do not count.");
+    return 0;
+  }
+  if (!has_context) {
+    strappy_set_error(
+      error_out,
+      "database_study requires successful database_context for this database "
+      "in the current study batch.");
+    return 0;
+  }
+  if (!has_real_table_query) {
+    strappy_set_error(
+      error_out,
+      "database_study requires a successful database_query against a real "
+      "table for this database in the current study batch; sqlite_schema "
+      "queries do not count.");
+    return 0;
+  }
+
+  return 1;
 }
 
 static int strappy_tools_fontawesome_query_char(char value)
@@ -6023,6 +6211,28 @@ static char *strappy_tools_execute_database_study(
                                             provider_call_id,
                                             &source_item_id,
                                             error_out)) {
+    sqlite3_close(db);
+    strappy_discovered_database_record_list_destroy(&list);
+    strappy_database_study_arguments_destroy(&arguments);
+    return NULL;
+  }
+  if ((active_session_id > 0LL) && (source_item_id <= 0LL)) {
+    sqlite3_close(db);
+    strappy_discovered_database_record_list_destroy(&list);
+    strappy_database_study_arguments_destroy(&arguments);
+    strappy_set_error(
+      error_out,
+      "database_study requires model function-call provenance.");
+    return NULL;
+  }
+  if ((active_session_id > 0LL) &&
+      !strappy_tools_database_study_has_same_turn_research(
+        db,
+        active_session_id,
+        source_item_id,
+        arguments.database_id,
+        record->path,
+        error_out)) {
     sqlite3_close(db);
     strappy_discovered_database_record_list_destroy(&list);
     strappy_database_study_arguments_destroy(&arguments);

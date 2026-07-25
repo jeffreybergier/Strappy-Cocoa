@@ -46,7 +46,7 @@
       "type": "function",
       "function": {
         "name": "database_query",
-        "description": "ALWAYS call this tool before finalizing when the request depends on personal data. Run one read-only SQLite query against an approved database; do not guess the user's data. Returns ordered column names and positional rows. At most 100 rows and 64 columns are returned.",
+        "description": "Run one read-only SQLite query against an approved database. Use it whenever an answer depends on personal data. In Database Study, a sqlite_schema query only inspects structure; also query a real table and execute any join before recommending it. Returns ordered column names and positional rows, limited to 100 rows and 64 columns.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -225,7 +225,7 @@
       "type": "function",
       "function": {
         "name": "datetime_to_iso8601",
-        "description": "ALWAYS call this tool when displaying numeric timestamps. Convert numeric timestamp strings to ISO 8601 datetimes. Returns a JSON array in input order.",
+        "description": "Convert numeric timestamp strings to ISO 8601 before displaying them. In Database Study, use a queried timestamp to verify its unit before recording the unit; never copy the sampled value into saved context. Returns a JSON array in input order.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -440,7 +440,7 @@
       "type": "function",
       "function": {
         "name": "database_context",
-        "description": "ALWAYS call this tool with the relevant approved database_id before database_query. Returns the studied context value (or null), table names, view names, and guidance for exploring them.",
+        "description": "Call this first for a relevant approved database_id. Returns the studied context value (or null), bounded table and view names, and exploration guidance. This result alone is not a completed Database Study.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -466,7 +466,7 @@
       "type": "function",
       "function": {
         "name": "database_study",
-        "description": "- NEVER store private or sampled row values, secrets, sensitive identifiers\n- ALWAYS call database_study exactly twice:\n   - **description** is for describing the kind of user data that the database includes such as email, text messages, contacts, etc.\n   - **context** is for describing how to access the user data via SQL queries.",
+        "description": "Save one completed Database Study value after investigation. description is one sentence describing useful user data found. context records verified tables, columns, join keys, timestamp units, and a reusable read-only SQL pattern; write none for joins or timestamps that do not exist. Never include sampled values, secrets, or sensitive identifiers.",
         "parameters": {
           "type": "object",
           "properties": {

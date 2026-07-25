@@ -835,7 +835,11 @@ static BOOL StrappyContextRoundActionValues(
 
   [self clearRequestState];
   [self updateSendingStateFromSession];
-  [self appendNewMessagesToWebView];
+  if ([[result objectForKey:@"database_study"] boolValue]) {
+    [self reloadContent];
+  } else {
+    [self appendNewMessagesToWebView];
+  }
 }
 
 - (NSString *)javaScriptForStreamEvent:(NSDictionary *)event

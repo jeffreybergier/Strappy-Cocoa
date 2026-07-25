@@ -17652,6 +17652,70 @@ int strappy_db_update_model_request_include_in_context(
   return ok;
 }
 
+int strappy_db_exclude_prompt_group_from_context(
+  const char *db_path,
+  long long session_id,
+  const char *prompt_group_key,
+  char **error_out)
+{
+  static const char *sql =
+    "UPDATE conversation_items SET include_in_context = 0 "
+    "WHERE session_id = ?1 AND include_in_context = 1 AND turn_id IN ("
+      "SELECT id FROM turns "
+      "WHERE session_id = ?1 AND prompt_group_key = ?2"
+    ");";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if ((session_id <= 0LL) || (prompt_group_key == NULL) ||
+      (prompt_group_key[0] == '\0')) {
+    strappy_set_error(error_out,
+                      "Context prompt group exclusion is not valid.");
+    return 0;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt,
+                          1,
+                          (sqlite3_int64)session_id) != SQLITE_OK) ||
+      (sqlite3_bind_text(stmt,
+                         2,
+                         prompt_group_key,
+                         -1,
+                         SQLITE_TRANSIENT) != SQLITE_OK)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not prepare context prompt group exclusion: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not exclude context prompt group: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+  strappy_db_release(db);
+  return 1;
+}
+
 int strappy_db_list_response_timeline(
   const char *db_path,
   long long session_id,

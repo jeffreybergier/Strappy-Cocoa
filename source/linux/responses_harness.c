@@ -43,10 +43,11 @@
   "approved, the array is empty and guidance explains why."
 
 #define HARNESS_DATABASE_QUERY_DESCRIPTION \
-  "ALWAYS call this tool before finalizing when the request depends on " \
-  "personal data. Run one read-only SQLite query against an approved " \
-  "database; do not guess the user's data. Returns ordered column names and " \
-  "positional rows. At most 100 rows and 64 columns are returned."
+  "Run one read-only SQLite query against an approved database. Use it " \
+  "whenever an answer depends on personal data. In Database Study, a " \
+  "sqlite_schema query only inspects structure; also query a real table and " \
+  "execute any join before recommending it. Returns ordered column names and " \
+  "positional rows, limited to 100 rows and 64 columns."
 #define HARNESS_DATABASE_QUERY_DATABASE_ID_DESCRIPTION \
   "Approved database ID returned by database_list."
 #define HARNESS_DATABASE_QUERY_SQL_DESCRIPTION \
@@ -56,9 +57,9 @@
   "parameters are not allowed."
 
 #define HARNESS_DATABASE_CONTEXT_READ_DESCRIPTION \
-  "ALWAYS call this tool with the relevant approved database_id before " \
-  "database_query. Returns the studied context value (or null), table names, " \
-  "view names, and guidance for exploring them."
+  "Call this first for a relevant approved database_id. Returns the studied " \
+  "context value (or null), bounded table and view names, and exploration " \
+  "guidance. This result alone is not a completed Database Study."
 
 #define HARNESS_SESSION_NAME_WRITE_DESCRIPTION \
   "ALWAYS call this tool before the final answer. Update the session with a " \
@@ -74,13 +75,11 @@
   "NEVER use unicode emoji."
 
 #define HARNESS_MEMORY_DATABASE_HINT_REMEMBER_DESCRIPTION \
-  "- NEVER store private or sampled row values, secrets, sensitive " \
-  "identifiers\n" \
-  "- ALWAYS call database_study exactly twice:\n" \
-  "   - **description** is for describing the kind of user data that the " \
-  "database includes such as email, text messages, contacts, etc.\n" \
-  "   - **context** is for describing how to access the user data via SQL " \
-  "queries."
+  "Save one completed Database Study value after investigation. description " \
+  "is one sentence describing useful user data found. context records " \
+  "verified tables, columns, join keys, timestamp units, and a reusable " \
+  "read-only SQL pattern; write none for joins or timestamps that do not " \
+  "exist. Never include sampled values, secrets, or sensitive identifiers."
 
 #define HARNESS_DATETIME_FROM_ISO8601_DESCRIPTION \
   "ALWAYS call this tool when converting ISO 8601 datetimes to numeric " \
@@ -1950,37 +1949,32 @@ static int harness_database_study_request_is_valid(
       !cJSON_IsString(instructions) ||
       (instructions->valuestring == NULL) ||
       (strstr(instructions->valuestring,
-              "You are Strappy. An expert database sleuth.") == NULL) ||
+              "You are Strappy, an expert database sleuth.") == NULL) ||
       (strstr(instructions->valuestring,
-              "ALWAYS Study exactly the database_ids in the user prompt.") ==
+              "Study only the database_ids in the user prompt.") == NULL) ||
+      (strstr(instructions->valuestring, "1. Call database_context.") ==
        NULL) ||
       (strstr(instructions->valuestring,
-              "FOR EVERY DATABASE:") == NULL) ||
+              "2. Use database_query to inspect its schema.") == NULL) ||
       (strstr(instructions->valuestring,
-              "call database_study exactly twice") == NULL) ||
+              "3. Use database_query on at least one real table. A "
+              "sqlite_schema query does not count.") == NULL) ||
       (strstr(instructions->valuestring,
-              "ALWAYS call database_context to learn about the database.") ==
-       NULL) ||
+              "4. If useful tables must be joined, execute the join. "
+              "Otherwise record that no join is needed.") == NULL) ||
       (strstr(instructions->valuestring,
-              "ALWAYS call database_query to look for useful user data.") ==
-       NULL) ||
+              "5. If a useful numeric timestamp exists, query one value and "
+              "verify its unit with datetime_to_iso8601. Otherwise record "
+              "that none was found.") == NULL) ||
       (strstr(instructions->valuestring,
-              "ALWAYS study reusable table, column, and timestamp information "
-              "after finding user data.") == NULL) ||
+              "6. Call database_study once for description and once for "
+              "context.") == NULL) ||
       (strstr(instructions->valuestring,
-              "ALWAYS call database_query to confirm SQL joins.") == NULL) ||
+              "Do not save either study value until that database's "
+              "investigation is complete.") == NULL) ||
       (strstr(instructions->valuestring,
-              "ALWAYS call  datetime_to_iso8601 to confirm timestamp "
-              "formats") == NULL) ||
-      (strstr(instructions->valuestring,
-              "NEVER store private or sampled row values, secrets, sensitive "
-              "identifiers") == NULL) ||
-      (strstr(instructions->valuestring,
-              "**description** is for describing the kind of user data") ==
-       NULL) ||
-      (strstr(instructions->valuestring,
-              "**context** is for describing how to access the user data via "
-              "SQL queries.") == NULL) ||
+              "Never put sampled values, secrets, or sensitive identifiers "
+              "in saved study values.") == NULL) ||
       !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
       !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
       !cJSON_IsArray(input) || (cJSON_GetArraySize(input) != 4) ||
@@ -2761,6 +2755,18 @@ static int harness_run_first_prompt_preflight_server(int listener_fd)
 
 static int harness_run_isolated_prompts_server(int listener_fd)
 {
+  static const char *tool_response =
+    "{\"id\":\"resp-isolated-tool\",\"object\":\"response\","
+    "\"created_at\":1700000039,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{"
+    "\"type\":\"function_call\",\"id\":\"fc-isolated-datetime\","
+    "\"call_id\":\"call-isolated-datetime\","
+    "\"name\":\"datetime_to_iso8601\","
+    "\"arguments\":\"{\\\"timestamps\\\":[\\\"0\\\"],"
+    "\\\"unit\\\":\\\"unix_seconds\\\"}\","
+    "\"status\":\"completed\"}],"
+    "\"usage\":{\"input_tokens\":4,\"output_tokens\":3,"
+    "\"total_tokens\":7}}";
   static const char *first_response =
     "{\"id\":\"resp-isolated-first\",\"object\":\"response\","
     "\"created_at\":1700000040,\"model\":\"test/model\","
@@ -2799,6 +2805,31 @@ static int harness_run_isolated_prompts_server(int listener_fd)
                                             "First isolated prompt",
                                             &session_key,
                                             &prompt_group) &&
+    harness_send_json_response(client_fd, 200L, tool_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_named_function_output_request_is_valid(
+      root,
+      session_key,
+      prompt_group,
+      STRAPPY_TOOL_DATETIME_TO_ISO8601,
+      "call-isolated-datetime",
+      "[\"1970-01-01T00:00:00Z\"]") &&
     harness_send_json_response(client_fd, 200L, first_response);
   cJSON_Delete(root);
   close(client_fd);
@@ -4430,6 +4461,7 @@ static int harness_test_isolated_prompt_context(void)
   long long value;
   pid_t server_pid;
   int fd;
+  int first_context_excluded;
   int server_ok;
   int ok;
 
@@ -4441,6 +4473,7 @@ static int harness_test_isolated_prompt_context(void)
   error = NULL;
   first_result = NULL;
   second_result = NULL;
+  first_context_excluded = 0;
   session_id = 0LL;
   if (!harness_create_session_database(path, &session_id, &error) ||
       !strappy_session_update_assistant_set(
@@ -4481,24 +4514,39 @@ static int harness_test_isolated_prompt_context(void)
   if ((first_result != NULL) &&
       (strcmp(first_result, "First isolated answer.") == 0) &&
       (error == NULL)) {
-    second_result =
-      strappy_responses_send_isolated_prompt_for_session_and_store_with_events(
-        "Second isolated prompt",
-        "/dev/null",
-        endpoint,
-        "test-token",
-        "../shared/Resources",
-        path,
-        session_id,
-        NULL,
-        NULL,
-        &error);
+    if (sqlite3_open(path, &db) == SQLITE_OK) {
+      first_context_excluded =
+        harness_query_int(db,
+                          "SELECT COUNT(*) FROM conversation_items "
+                          "WHERE include_in_context=1;",
+                          &value) && (value == 0LL) &&
+        harness_query_int(db,
+                          "SELECT COUNT(*) FROM conversation_items "
+                          "WHERE include_in_context=0;",
+                          &value) && (value > 0LL);
+      sqlite3_close(db);
+    }
+    if (first_context_excluded) {
+      second_result =
+        strappy_responses_send_isolated_prompt_for_session_and_store_with_events(
+          "Second isolated prompt",
+          "/dev/null",
+          endpoint,
+          "test-token",
+          "../shared/Resources",
+          path,
+          session_id,
+          NULL,
+          NULL,
+          &error);
+    }
   }
   server_ok = harness_wait_for_server(
     server_pid,
     (first_result == NULL) || (second_result == NULL));
   ok = (first_result != NULL) &&
     (strcmp(first_result, "First isolated answer.") == 0) &&
+    first_context_excluded &&
     (second_result != NULL) &&
     (strcmp(second_result, "Second isolated answer.") == 0) &&
     server_ok && (error == NULL);
@@ -4510,6 +4558,9 @@ static int harness_test_isolated_prompt_context(void)
                            "SELECT COUNT(*) FROM turns;",
                            &value) && (value == 2LL) &&
       harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests;",
+                        &value) && (value == 3LL) &&
+      harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='user' AND previous_request_id IS NULL;",
                         &value) && (value == 2LL) &&
@@ -4519,18 +4570,35 @@ static int harness_test_isolated_prompt_context(void)
                         "input_through_sequence=4;",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests WHERE "
+                        "request_kind='tool_continuation' AND "
+                        "input_from_sequence=1 AND "
+                        "input_through_sequence=6 AND "
+                        "new_input_from_sequence=6;",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests r "
                         "JOIN conversation_items i ON "
-                        "i.sequence=r.input_from_sequence AND "
+                        "i.sequence=r.input_through_sequence AND "
                         "i.introduced_request_id=r.id "
                         "JOIN message_items m ON m.item_id=i.id "
                         "JOIN item_text_parts p ON p.item_id=i.id WHERE "
-                        "r.input_from_sequence=r.input_through_sequence AND "
+                        "r.input_from_sequence=1 AND "
+                        "r.input_through_sequence=8 AND "
+                        "r.new_input_from_sequence=8 AND "
                         "m.role='user' AND p.text='Second isolated prompt';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items;",
-                        &value) && (value == 7LL) &&
+                        &value) && (value == 9LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM conversation_items "
+                        "WHERE include_in_context=1;",
+                        &value) && (value == 0LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM conversation_items "
+                        "WHERE include_in_context=0;",
+                        &value) && (value == 9LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM item_text_parts WHERE text IN "
                         "('First isolated prompt','First isolated answer.',"

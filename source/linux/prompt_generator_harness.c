@@ -852,38 +852,33 @@ int main(int argc, char **argv)
       }
       if ((strcmp(profile.identifier,
                   STRAPPY_ASSISTANT_SET_DATABASE_STUDY) == 0) &&
-          ((strstr(prompt, "You are Strappy. An expert database sleuth.") ==
+          ((strstr(prompt, "You are Strappy, an expert database sleuth.") ==
             NULL) ||
            (strstr(prompt,
-                   "ALWAYS Study exactly the database_ids in the user "
-                   "prompt.") == NULL) ||
-           (strstr(prompt, "FOR EVERY DATABASE:") == NULL) ||
-           (strstr(prompt,
-                   "ALWAYS call database_context to learn about the "
-                   "database.") == NULL) ||
-           (strstr(prompt,
-                   "ALWAYS call database_query to look for useful user "
-                   "data.") == NULL) ||
-           (strstr(prompt,
-                   "ALWAYS study reusable table, column, and timestamp "
-                   "information after finding user data.") == NULL) ||
-           (strstr(prompt,
-                   "ALWAYS call database_query to confirm SQL joins.") ==
+                   "Study only the database_ids in the user prompt.") ==
             NULL) ||
+           (strstr(prompt, "1. Call database_context.") == NULL) ||
            (strstr(prompt,
-                   "ALWAYS call  datetime_to_iso8601 to confirm timestamp "
-                   "formats") == NULL) ||
+                   "2. Use database_query to inspect its schema.") == NULL) ||
            (strstr(prompt,
-                   "NEVER store private or sampled row values, secrets, "
-                   "sensitive identifiers") == NULL) ||
+                   "3. Use database_query on at least one real table. A "
+                   "sqlite_schema query does not count.") == NULL) ||
            (strstr(prompt,
-                   "ALWAYS call database_study exactly twice:") == NULL) ||
+                   "4. If useful tables must be joined, execute the join. "
+                   "Otherwise record that no join is needed.") == NULL) ||
            (strstr(prompt,
-                   "**description** is for describing the kind of user data") ==
-            NULL) ||
+                   "5. If a useful numeric timestamp exists, query one value "
+                   "and verify its unit with datetime_to_iso8601. Otherwise "
+                   "record that none was found.") == NULL) ||
            (strstr(prompt,
-                   "**context** is for describing how to access the user "
-                   "data via SQL queries.") == NULL))) {
+                   "6. Call database_study once for description and once for "
+                   "context.") == NULL) ||
+           (strstr(prompt,
+                   "Do not save either study value until that database's "
+                   "investigation is complete.") == NULL) ||
+           (strstr(prompt,
+                   "Never put sampled values, secrets, or sensitive "
+                   "identifiers in saved study values.") == NULL))) {
         free(tools_json);
         free(prompt);
         free(without_web_prompt);
