@@ -2498,8 +2498,6 @@ static int harness_coding_preflight_bash_arguments_are_valid(
 {
   static const char *required_fragments[] = {
     "uname -a",
-    "SystemVersion.plist",
-    "dpkg --print-architecture",
     "id",
     "PWD=$PWD",
     "HOME=$HOME",
@@ -2521,8 +2519,13 @@ static int harness_coding_preflight_bash_arguments_are_valid(
     "clang --version",
     "gcc --version",
     "make --version",
-    "git --version",
-    " && pwd && ls -al"
+    "git --version"
+  };
+  static const char *forbidden_fragments[] = {
+    "SystemVersion.plist",
+    "dpkg --print-architecture",
+    "=== Working directory ===",
+    "ls -al"
   };
   cJSON *root;
   cJSON *command;
@@ -2540,6 +2543,12 @@ static int harness_coding_preflight_bash_arguments_are_valid(
                        sizeof(required_fragments[0])));
        index++) {
     ok = (strstr(command->valuestring, required_fragments[index]) != NULL);
+  }
+  for (index = 0U;
+       ok && (index < (sizeof(forbidden_fragments) /
+                       sizeof(forbidden_fragments[0])));
+       index++) {
+    ok = (strstr(command->valuestring, forbidden_fragments[index]) == NULL);
   }
   cJSON_Delete(root);
   return ok;

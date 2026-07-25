@@ -126,8 +126,9 @@ House style for Strappy source:
     World Knowledge preflights only `memory_read`; Personal Assistant
     additionally preflights `database_list`. Coding Assistant preflights
     `memory_read` and an application-approved `bash` environment probe. The
-    probe reports the system and iOS version, identity, working environment,
-    disk and header roots, developer-tool locations and versions, and the
+    probe reports system information, identity, the working environment, disk
+    and header roots, and developer-tool locations and versions. It
+    intentionally omits the iOS system-version plist, package architecture, and
     working-directory listing. It runs even when model access to Bash is
     disabled for the session. Each assistant set owns its message, calls, and
     argument values independently.

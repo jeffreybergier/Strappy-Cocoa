@@ -41,14 +41,15 @@ and hard rules in
   assistants disables it again. This setting controls model access only: the
   application-owned first-prompt preflight always runs a bounded environment
   probe and seeds its result, even when model access to Bash is disabled. The
-  probe reports the iOS/system identity, current directory and safe shell-path
-  variables, disk/header roots, relevant C and jailbroken-device tool paths and
-  versions, and `ls -al`; it does not dump the full environment. `file_read`
-  reads bounded UTF-8 text ranges, while `bash` runs a fresh non-interactive
-  child shell with a hard 120-second ceiling. The Coding Assistant file tools
-  and Bash share a per-session working directory. New sessions default to
-  `~/Developer`; the iOS prompt options can instead select `~/` or
-  `~/Library/Application Support/Strappy/Developer`. Selecting a missing
+  probe reports system identity, the current directory and safe shell-path
+  variables, disk/header roots, and relevant C and jailbroken-device tool paths
+  and versions. It omits the iOS system-version plist, package architecture,
+  and working-directory listing, and it does not dump the full environment.
+  `file_read` reads bounded UTF-8 text ranges, while `bash` runs a fresh
+  non-interactive child shell with a hard 120-second ceiling. The Coding
+  Assistant file tools and Bash share a per-session working directory. New
+  sessions default to `~/Developer`; the iOS prompt options can instead select
+  `~/` or `~/Library/Application Support/Strappy/Developer`. Selecting a missing
   directory creates it before the database setting is changed. Bash results
   expose `output_truncated` so the model can distinguish complete output from a
   bounded tail. Its assistant-set guidance also keeps source artifacts
