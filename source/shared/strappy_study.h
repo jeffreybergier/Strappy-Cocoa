@@ -60,6 +60,9 @@ char *strappy_study_save_values(
   char **error_out);
 
 char *strappy_study_status_json(const char *db_path, char **error_out);
+int strappy_study_delete_database_values(const char *db_path,
+                                         const char *database_id,
+                                         char **error_out);
 int strappy_study_reset(const char *db_path, char **error_out);
 int strappy_study_progress(const char *db_path,
                            size_t *studied_count_out,

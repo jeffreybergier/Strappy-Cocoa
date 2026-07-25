@@ -264,6 +264,38 @@ static UITextField *XPUIKitFindTextField(UIView *view)
   return (scrollView != nil) ? scrollView : XPUIKitFindScrollView(self);
 }
 
+- (void)XP_setVisibleFrame:(CGRect)frame
+{
+  UIEdgeInsets contentInset;
+  UIEdgeInsets scrollIndicatorInsets;
+  UIScrollView *scrollView;
+  CGFloat bottomInset;
+
+  if (![self respondsToSelector:@selector(scrollView)]) {
+    [self setFrame:frame];
+    return;
+  }
+
+  scrollView = [self XP_scrollView];
+  if (scrollView == nil) {
+    [self setFrame:frame];
+    return;
+  }
+
+  bottomInset = CGRectGetMaxY([self frame]) - CGRectGetMaxY(frame);
+  if (bottomInset < 0.0f) {
+    bottomInset = 0.0f;
+  }
+
+  contentInset = [scrollView contentInset];
+  contentInset.bottom = bottomInset;
+  [scrollView setContentInset:contentInset];
+
+  scrollIndicatorInsets = [scrollView scrollIndicatorInsets];
+  scrollIndicatorInsets.bottom = bottomInset;
+  [scrollView setScrollIndicatorInsets:scrollIndicatorInsets];
+}
+
 @end
 
 @implementation UIViewController (XPUIKit)

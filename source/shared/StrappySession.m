@@ -1769,6 +1769,33 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   return rows;
 }
 
++ (BOOL)deleteDatabaseStudyValuesForDatabaseIdentifier:
+    (NSString *)databaseIdentifier
+                                                    error:(NSError **)error
+{
+  NSString *databasePath;
+  char *strappyError;
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+  strappyError = NULL;
+  if (!strappy_study_delete_database_values(
+        [databasePath UTF8String],
+        [databaseIdentifier UTF8String],
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return NO;
+  }
+  strappy_session_free_string(strappyError);
+  return YES;
+}
+
 + (BOOL)resetDatabaseStudyWithError:(NSError **)error
 {
   NSString *databasePath;

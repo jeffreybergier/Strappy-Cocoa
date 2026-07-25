@@ -98,8 +98,7 @@
 "Scan Databases" = "Scan Databases";
 "Study" = "Study";
 "Reset" = "Reset";
-"Show All Databases" = "Show All Databases";
-"Show Unstudied Databases" = "Show Unstudied Databases";
+"Could Not Delete Study" = "Could Not Delete Study";
 "Description" = "Description";
 "Shows the recorded description and context." = "Shows the recorded description and context.";
 "Hides the recorded description and context." = "Hides the recorded description and context.";

@@ -208,12 +208,14 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)updatePromptIdleTimerAssertion;
 - (void)setPromptIdleTimerAssertionEnabled:(BOOL)enabled;
 - (void)keyboardWillShow:(NSNotification *)notification;
+- (void)keyboardDidShow:(NSNotification *)notification;
 - (void)keyboardWillHide:(NSNotification *)notification;
 - (NSTimeInterval)keyboardDuration:(NSDictionary *)userInfo;
 - (UIViewAnimationCurve)keyboardCurve:(NSDictionary *)userInfo;
 - (void)relayoutComposeBarAnimated:(BOOL)animated
                               curve:(UIViewAnimationCurve)curve
-                           duration:(NSTimeInterval)duration;
+                           duration:(NSTimeInterval)duration
+                      resizeWebView:(BOOL)resizeWebView;
 - (void)setWebViewScrollsToTop:(BOOL)scrollsToTop;
 - (void)sessionStreamEvent:(NSNotification *)notification;
 - (void)sessionPromptDidStart:(NSNotification *)notification;
@@ -373,7 +375,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
   [self relayoutComposeBarAnimated:NO
                               curve:UIViewAnimationCurveEaseInOut
-                           duration:0.0];
+                           duration:0.0
+                      resizeWebView:YES];
   [self setWebViewScrollsToTop:YES];
   [self logLifecycleEvent:@"viewWillAppear end"];
 }
@@ -462,6 +465,10 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [notificationCenter addObserver:self
                          selector:@selector(keyboardWillShow:)
                              name:UIKeyboardWillShowNotification
+                           object:nil];
+  [notificationCenter addObserver:self
+                         selector:@selector(keyboardDidShow:)
+                             name:UIKeyboardDidShowNotification
                            object:nil];
   [notificationCenter addObserver:self
                          selector:@selector(keyboardWillHide:)
@@ -582,7 +589,20 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self setComposing:YES];
   [self relayoutComposeBarAnimated:YES
                               curve:[self keyboardCurve:userInfo]
-                           duration:[self keyboardDuration:userInfo]];
+                           duration:[self keyboardDuration:userInfo]
+                      resizeWebView:NO];
+}
+
+- (void)keyboardDidShow:(NSNotification *)notification
+{
+  (void)notification;
+  if (![self composing]) {
+    return;
+  }
+  [self relayoutComposeBarAnimated:NO
+                              curve:UIViewAnimationCurveEaseInOut
+                           duration:0.0
+                      resizeWebView:YES];
 }
 
 - (void)keyboardWillHide:(NSNotification *)notification
@@ -594,12 +614,14 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self setComposing:NO];
   [self relayoutComposeBarAnimated:YES
                               curve:[self keyboardCurve:userInfo]
-                           duration:[self keyboardDuration:userInfo]];
+                           duration:[self keyboardDuration:userInfo]
+                      resizeWebView:YES];
 }
 
 - (void)relayoutComposeBarAnimated:(BOOL)animated
                               curve:(UIViewAnimationCurve)curve
                            duration:(NSTimeInterval)duration
+                      resizeWebView:(BOOL)resizeWebView
 {
   CGFloat width;
   CGFloat height;
@@ -617,6 +639,11 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     barTop = 0.0f;
   }
 
+  if (resizeWebView) {
+    [[self webView] XP_setVisibleFrame:
+      CGRectMake(0.0f, 0.0f, width, barTop)];
+  }
+
   if (animated && (duration > 0.0)) {
     [UIView beginAnimations:nil context:NULL];
     [UIView setAnimationDuration:duration];
@@ -624,7 +651,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
 
   [[self sendBar] setFrame:CGRectMake(0.0f, barTop, width, height)];
-  [[self webView] setFrame:CGRectMake(0.0f, 0.0f, width, barTop)];
   [[self sendBar] layoutIfNeeded];
 
   if (animated && (duration > 0.0)) {
@@ -1124,7 +1150,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   (void)controller;
   [self relayoutComposeBarAnimated:YES
                               curve:UIViewAnimationCurveEaseInOut
-                           duration:0.2];
+                           duration:0.2
+                      resizeWebView:YES];
 }
 
 - (void)setPromptCancellationRequested:(BOOL)requested

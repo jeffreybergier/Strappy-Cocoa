@@ -98,8 +98,7 @@
 "Scan Databases" = "データベースをスキャン";
 "Study" = "調査";
 "Reset" = "リセット";
-"Show All Databases" = "すべてのデータベースを表示";
-"Show Unstudied Databases" = "未調査のデータベースのみ表示";
+"Could Not Delete Study" = "データベース調査を削除できませんでした";
 "Description" = "説明";
 "Shows the recorded description and context." = "記録された説明とコンテキストを表示します。";
 "Hides the recorded description and context." = "記録された説明とコンテキストを非表示にします。";

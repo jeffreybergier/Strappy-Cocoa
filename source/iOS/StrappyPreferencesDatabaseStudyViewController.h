@@ -3,10 +3,9 @@
 @interface StrappyPreferencesDatabaseStudyViewController : UITableViewController
   <UIAlertViewDelegate, UIActionSheetDelegate> {
  @private
-  NSArray *allStudyRows_;
+  NSArray *studyRows_;
   NSArray *studySections_;
-  BOOL showsUnstudiedOnly_;
-  UIBarButtonItem *filterButton_;
+  UIBarButtonItem *studyActionButton_;
   UILabel *statusLabel_;
   NSDateFormatter *studyDateFormatter_;
   NSString *expandedDatabaseIdentifier_;

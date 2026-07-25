@@ -4,8 +4,6 @@
 #import "StrappySession.h"
 #import "XPUIKit.h"
 
-static const CGFloat kStrappyDatabaseStudyFilterIconSize = 18.0f;
-static const CGFloat kStrappyDatabaseStudyFilterCanvasSize = 28.0f;
 static const CGFloat kStrappyDatabaseStudyCompactRowHeight = 44.0f;
 static const CGFloat kStrappyDatabaseStudyCellInset = 8.0f;
 static const CGFloat kStrappyDatabaseStudyTextTop = 42.0f;
@@ -248,10 +246,9 @@ static NSComparisonResult StrappyStudyCompareRows(id left,
     StrappyStudyStringForRow(rightRow, @"path"));
 }
 
-static NSArray *StrappyStudySectionsForRows(NSArray *rows,
-                                            BOOL unstudiedOnly)
+static NSArray *StrappyStudySectionsForRows(NSArray *rows)
 {
-  NSMutableArray *filteredRows;
+  NSMutableArray *validRows;
   NSMutableArray *sections;
   NSMutableArray *sectionRows;
   NSArray *sortedRows;
@@ -259,19 +256,18 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows,
   NSString *currentTitle;
   NSUInteger index;
 
-  filteredRows = [NSMutableArray array];
+  validRows = [NSMutableArray array];
   for (index = 0U; index < [rows count]; index++) {
     NSDictionary *row;
 
     row = [rows objectAtIndex:index];
-    if (![row isKindOfClass:[NSDictionary class]] ||
-        (unstudiedOnly && StrappyStudyRowIsStudied(row))) {
+    if (![row isKindOfClass:[NSDictionary class]]) {
       continue;
     }
-    [filteredRows addObject:row];
+    [validRows addObject:row];
   }
   sortedRows =
-    [filteredRows sortedArrayUsingFunction:StrappyStudyCompareRows context:NULL];
+    [validRows sortedArrayUsingFunction:StrappyStudyCompareRows context:NULL];
 
   sections = [NSMutableArray array];
   sectionRows = nil;
@@ -308,9 +304,9 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows,
 
 @interface StrappyPreferencesDatabaseStudyViewController ()
 - (void)reloadStudyRows;
-- (void)applyStudyFilter;
-- (void)updateFilterButton;
+- (void)reloadStudySections;
 - (void)updateStudyProgress;
+- (void)updateStudyActionButtonForAllStudied:(BOOL)allStudied;
 - (NSDictionary *)studyRowAtIndexPath:(NSIndexPath *)indexPath;
 - (NSIndexPath *)indexPathForDatabaseIdentifier:(NSString *)databaseIdentifier;
 - (BOOL)studyRowIsExpanded:(NSDictionary *)row;
@@ -322,7 +318,6 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows,
 - (NSString *)expandedStudyDetailsForRow:(NSDictionary *)row
                                tableView:(UITableView *)tableView;
 - (NSString *)studyDateForRow:(NSDictionary *)row;
-- (void)filterAction:(id)sender;
 - (void)resetAction:(id)sender;
 - (void)studyAction:(id)sender;
 - (void)showError:(NSError *)error title:(NSString *)title;
@@ -334,9 +329,8 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows,
 {
   if ((self = [super initWithStyle:UITableViewStylePlain])) {
     [[self navigationItem] setTitle:NSLocalizedString(@"Study", nil)];
-    allStudyRows_ = [NSArray array];
+    studyRows_ = [NSArray array];
     studySections_ = [NSArray array];
-    showsUnstudiedOnly_ = NO;
     studyDateFormatter_ = [[NSDateFormatter alloc] init];
     [studyDateFormatter_ setFormatterBehavior:NSDateFormatterBehavior10_4];
     [studyDateFormatter_ setDateStyle:NSDateFormatterShortStyle];
@@ -353,40 +347,19 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows,
 - (void)viewDidLoad
 {
   UIBarButtonItem *leftSpace;
-  UIBarButtonItem *resetButton;
   UIBarButtonItem *rightSpace;
   UIBarButtonItem *statusItem;
-  UIBarButtonItem *studyButton;
   UILabel *statusLabel;
-  UIImage *filterImage;
 
   [super viewDidLoad];
   [[self tableView] setAllowsSelection:YES];
 
-  filterImage = [AIFontAwesome imageForIcon:AIFAFilter
-                                       style:AIFontAwesomeStyleSolid
-                                    iconSize:kStrappyDatabaseStudyFilterIconSize
-                                  canvasSize:kStrappyDatabaseStudyFilterCanvasSize
-                                       color:[UIColor whiteColor]
-                                       scale:0.0f];
-  filterButton_ = [[UIBarButtonItem alloc] initWithImage:filterImage
-                                                   style:UIBarButtonItemStyleBordered
-                                                  target:self
-                                                  action:@selector(filterAction:)];
-  [filterButton_ setEnabled:NO];
-  [[self navigationItem] setRightBarButtonItem:filterButton_];
-  [self updateFilterButton];
-
-  resetButton = [[UIBarButtonItem alloc]
-    initWithTitle:NSLocalizedString(@"Reset", nil)
-            style:UIBarButtonItemStyleBordered
-           target:self
-           action:@selector(resetAction:)];
-  studyButton = [[UIBarButtonItem alloc]
+  studyActionButton_ = [[UIBarButtonItem alloc]
     initWithTitle:NSLocalizedString(@"Study", nil)
             style:UIBarButtonItemStyleDone
            target:self
            action:@selector(studyAction:)];
+  [[self navigationItem] setRightBarButtonItem:studyActionButton_];
   leftSpace = [[UIBarButtonItem alloc]
     initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
                          target:nil
@@ -407,7 +380,7 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows,
   statusLabel_ = statusLabel;
   statusItem = [[UIBarButtonItem alloc] initWithCustomView:statusLabel];
   [self setToolbarItems:[NSArray arrayWithObjects:
-    resetButton, leftSpace, statusItem, rightSpace, studyButton, nil]
+    leftSpace, statusItem, rightSpace, nil]
               animated:NO];
 }
 
@@ -426,27 +399,24 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows,
   error = nil;
   rows = [StrappySession databaseStudyRowsWithError:&error];
   if (![rows isKindOfClass:[NSArray class]]) {
-    allStudyRows_ = [NSArray array];
-    showsUnstudiedOnly_ = NO;
-    [filterButton_ setEnabled:NO];
-    [self updateFilterButton];
+    studyRows_ = [NSArray array];
+    [self updateStudyActionButtonForAllStudied:NO];
     [statusLabel_ setText:NSLocalizedString(@"— of —", nil)];
-    [self applyStudyFilter];
+    [self reloadStudySections];
     [self showError:error title:NSLocalizedString(@"Could Not Load Study", nil)];
     return;
   }
-  allStudyRows_ = rows;
+  studyRows_ = rows;
   [self updateStudyProgress];
-  [self applyStudyFilter];
+  [self reloadStudySections];
 }
 
-- (void)applyStudyFilter
+- (void)reloadStudySections
 {
   NSDictionary *expandedRow;
   NSIndexPath *expandedIndexPath;
 
-  studySections_ =
-    StrappyStudySectionsForRows(allStudyRows_, showsUnstudiedOnly_);
+  studySections_ = StrappyStudySectionsForRows(studyRows_);
   expandedIndexPath =
     [self indexPathForDatabaseIdentifier:expandedDatabaseIdentifier_];
   expandedRow = (expandedIndexPath != nil) ?
@@ -466,42 +436,32 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows,
   NSUInteger studiedCount;
 
   studiedCount = 0U;
-  for (index = 0U; index < [allStudyRows_ count]; index++) {
+  for (index = 0U; index < [studyRows_ count]; index++) {
     NSDictionary *row;
 
-    row = [allStudyRows_ objectAtIndex:index];
+    row = [studyRows_ objectAtIndex:index];
     if ([row isKindOfClass:[NSDictionary class]] &&
         StrappyStudyRowIsStudied(row)) {
       studiedCount++;
     }
   }
-  allStudied = (studiedCount == [allStudyRows_ count]) ? YES : NO;
-  if (allStudied) {
-    showsUnstudiedOnly_ = NO;
-  }
-  [filterButton_ setEnabled:allStudied ? NO : YES];
-  [self updateFilterButton];
+  allStudied = ([studyRows_ count] > 0U) &&
+    (studiedCount == [studyRows_ count]);
+  [self updateStudyActionButtonForAllStudied:allStudied];
   [statusLabel_ setText:[NSString stringWithFormat:
     NSLocalizedString(@"%lu of %lu", nil),
     (unsigned long)studiedCount,
-    (unsigned long)[allStudyRows_ count]]];
+    (unsigned long)[studyRows_ count]]];
 }
 
-- (void)updateFilterButton
+- (void)updateStudyActionButtonForAllStudied:(BOOL)allStudied
 {
-  [filterButton_ setStyle:showsUnstudiedOnly_ ?
-    UIBarButtonItemStyleDone : UIBarButtonItemStyleBordered];
-  [filterButton_ setAccessibilityLabel:showsUnstudiedOnly_ ?
-    NSLocalizedString(@"Show All Databases", nil) :
-    NSLocalizedString(@"Show Unstudied Databases", nil)];
-}
-
-- (void)filterAction:(id)sender
-{
-  (void)sender;
-  showsUnstudiedOnly_ = showsUnstudiedOnly_ ? NO : YES;
-  [self updateFilterButton];
-  [self applyStudyFilter];
+  [studyActionButton_ setTitle:allStudied ?
+    NSLocalizedString(@"Reset", nil) : NSLocalizedString(@"Study", nil)];
+  [studyActionButton_ setStyle:allStudied ?
+    UIBarButtonItemStyleBordered : UIBarButtonItemStyleDone];
+  [studyActionButton_ setAction:allStudied ?
+    @selector(resetAction:) : @selector(studyAction:)];
 }
 
 - (NSDictionary *)studyRowAtIndexPath:(NSIndexPath *)indexPath
@@ -744,6 +704,60 @@ titleForHeaderInSection:(NSInteger)section
   }
   [cell setAccessibilityHint:accessibilityHint];
   return cell;
+}
+
+- (BOOL)tableView:(UITableView *)tableView
+canEditRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  (void)tableView;
+  return StrappyStudyRowIsStudied([self studyRowAtIndexPath:indexPath]);
+}
+
+- (UITableViewCellEditingStyle)tableView:(UITableView *)tableView
+ editingStyleForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  (void)tableView;
+  return StrappyStudyRowIsStudied([self studyRowAtIndexPath:indexPath])
+    ? UITableViewCellEditingStyleDelete
+    : UITableViewCellEditingStyleNone;
+}
+
+- (NSString *)tableView:(UITableView *)tableView
+titleForDeleteConfirmationButtonForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  (void)tableView;
+  (void)indexPath;
+  return NSLocalizedString(@"Delete", nil);
+}
+
+- (void)tableView:(UITableView *)tableView
+commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
+forRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  NSString *databaseIdentifier;
+  NSDictionary *row;
+  NSError *error;
+
+  if (editingStyle != UITableViewCellEditingStyleDelete) {
+    return;
+  }
+
+  row = [self studyRowAtIndexPath:indexPath];
+  if (!StrappyStudyRowIsStudied(row)) {
+    [tableView setEditing:NO animated:YES];
+    return;
+  }
+  databaseIdentifier = StrappyStudyStringForRow(row, @"database_id");
+  error = nil;
+  if (![StrappySession deleteDatabaseStudyValuesForDatabaseIdentifier:
+        databaseIdentifier
+                                                               error:&error]) {
+    [tableView setEditing:NO animated:YES];
+    [self showError:error
+              title:NSLocalizedString(@"Could Not Delete Study", nil)];
+    return;
+  }
+  [self reloadStudyRows];
 }
 
 - (NSIndexPath *)tableView:(UITableView *)tableView

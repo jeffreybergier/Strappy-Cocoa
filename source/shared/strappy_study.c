@@ -566,6 +566,66 @@ char *strappy_study_status_json(const char *db_path, char **error_out)
   return json;
 }
 
+int strappy_study_delete_database_values(const char *db_path,
+                                         const char *database_id,
+                                         char **error_out)
+{
+  static const char *delete_sql =
+    "DELETE FROM database_hints "
+    "WHERE database_id = "
+      "(SELECT id FROM databases WHERE assistant_database_id = ?1) "
+    "AND kind IN (?2, ?3);";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (!strappy_study_string_has_non_whitespace(database_id)) {
+    strappy_set_error(error_out, "Database Study database ID is missing.");
+    return 0;
+  }
+  if (!strappy_study_open_database(db_path, &db, error_out)) {
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, delete_sql, -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt,
+                           1,
+                           database_id,
+                           -1,
+                           SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt,
+                           2,
+                           STRAPPY_STUDY_KEY_DESCRIPTION,
+                           -1,
+                           SQLITE_STATIC);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt,
+                           3,
+                           STRAPPY_STUDY_KEY_CONTEXT,
+                           -1,
+                           SQLITE_STATIC);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not delete Database Study values: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  return 1;
+}
+
 int strappy_study_reset(const char *db_path, char **error_out)
 {
   sqlite3 *db;

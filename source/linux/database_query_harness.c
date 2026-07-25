@@ -7033,6 +7033,66 @@ static int harness_run_database_study_coverage_tests(
     goto cleanup;
   }
 
+  ok = strappy_study_delete_database_values(context->catalog_path,
+                                             pending.database_ids[0],
+                                             &error) &&
+    strappy_study_list_unstudied_database_ids(context->catalog_path,
+                                               &remaining,
+                                               &error) &&
+    strappy_study_progress(context->catalog_path,
+                            &studied_count,
+                            &approved_count,
+                            &error) &&
+    (remaining.count == 1U) &&
+    (strcmp(remaining.database_ids[0], pending.database_ids[0]) == 0) &&
+    (studied_count + 1U == approved_count) &&
+    (approved_count == pending.count) &&
+    harness_study_status_rows_match(context->catalog_path,
+                                    &pending,
+                                    pending.count - 1U) &&
+    harness_expect_catalog_integer(
+      context->catalog_path,
+      "SELECT COUNT(*) FROM database_hints;",
+      (long long)((pending.count * 2U) - 2U),
+      "deleted Database Study values for one database");
+  if (!ok) {
+    fprintf(stderr,
+            "Database Study did not delete only the selected database's "
+            "values: %s\n",
+            (error != NULL) ? error : "delete mismatch");
+    goto cleanup;
+  }
+
+  strappy_study_database_id_list_destroy(&remaining);
+  if (!harness_write_study_values(context->catalog_path,
+                                  pending.database_ids[0],
+                                  "Restored coverage description",
+                                  "Restored coverage context") ||
+      !strappy_study_list_unstudied_database_ids(context->catalog_path,
+                                                  &remaining,
+                                                  &error) ||
+      (remaining.count != 0U) ||
+      !harness_study_status_matches(context->catalog_path,
+                                    &pending,
+                                    1,
+                                    NULL) ||
+      !harness_study_status_rows_match(context->catalog_path,
+                                       &pending,
+                                       pending.count) ||
+      !harness_expect_catalog_integer(
+        context->catalog_path,
+        "SELECT COUNT(*) FROM database_hints;",
+        (long long)(pending.count * 2U),
+        "restored Database Study values after deleting one database")) {
+    fprintf(stderr,
+            "Database Study did not restore the deleted database's values: "
+            "%s\n",
+            (error != NULL) ? error : "restore mismatch");
+    ok = 0;
+    goto cleanup;
+  }
+  strappy_study_database_id_list_destroy(&remaining);
+
   written = snprintf(
     freshness_sql,
     sizeof(freshness_sql),

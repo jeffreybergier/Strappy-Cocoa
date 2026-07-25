@@ -71,6 +71,9 @@ extern NSString * const StrappyWebProviderParallel;
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error;
 + (NSString *)databaseStudyJSONWithError:(NSError **)error;
 + (NSArray *)databaseStudyRowsWithError:(NSError **)error;
++ (BOOL)deleteDatabaseStudyValuesForDatabaseIdentifier:
+    (NSString *)databaseIdentifier
+                                                    error:(NSError **)error;
 + (BOOL)resetDatabaseStudyWithError:(NSError **)error;
 + (BOOL)databaseStudyProgressWithStudiedCount:(NSUInteger *)studiedCount
                                 approvedCount:(NSUInteger *)approvedCount

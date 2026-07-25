@@ -23,6 +23,7 @@
 
 @interface UIWebView (XPUIKit)
 - (UIScrollView *)XP_scrollView;
+- (void)XP_setVisibleFrame:(CGRect)frame;
 @end
 
 @interface UIViewController (XPUIKit)
