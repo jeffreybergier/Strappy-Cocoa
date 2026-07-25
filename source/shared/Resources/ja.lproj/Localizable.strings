@@ -100,6 +100,9 @@
 "Reset" = "リセット";
 "Show All Databases" = "すべてのデータベースを表示";
 "Show Unstudied Databases" = "未調査のデータベースのみ表示";
+"Description" = "説明";
+"Shows the recorded description and context." = "記録された説明とコンテキストを表示します。";
+"Hides the recorded description and context." = "記録された説明とコンテキストを非表示にします。";
 "Database hints" = "データベースのヒント";
 "APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set." = ".env またはプロセス環境の APIENDPOINT / APITOKEN が設定されている間はキーチェーンより優先されます。";
 "API credentials saved to keychain." = "API 認証情報をキーチェーンに保存しました。";

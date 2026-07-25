@@ -1720,6 +1720,9 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
     [StrappySession stringFromCStringOrEmpty:record->app_name], @"app_name",
     [StrappySession stringFromCStringOrEmpty:record->app_bundle_id],
     @"app_bundle_id",
+    [StrappySession stringFromCStringOrEmpty:record->description],
+    @"description",
+    [StrappySession stringFromCStringOrEmpty:record->context], @"context",
     [NSNumber numberWithBool:(record->studied ? YES : NO)], @"studied",
     [NSNumber numberWithLongLong:record->studied_at_ms], @"studied_at_ms",
     nil];

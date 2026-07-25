@@ -1,5 +1,10 @@
 #import <UIKit/UIKit.h>
 
+@interface NSString (XPUIKit)
+- (CGSize)XP_sizeWithFont:(UIFont *)font
+        constrainedToSize:(CGSize)size;
+@end
+
 @interface UIColor (XPUIKit)
 + (UIColor *)messagesBackgroundColor;
 @end
@@ -26,4 +31,5 @@
 
 @interface UILabel (XPUIKit)
 - (void)XP_setTextAlignmentCenter;
+- (void)XP_setLineBreakModeWordWrapping;
 @end

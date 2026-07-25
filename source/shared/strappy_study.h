@@ -24,6 +24,8 @@ typedef struct strappy_study_database_status_record {
   char *app_group_key;
   char *app_name;
   char *app_bundle_id;
+  char *description;
+  char *context;
   int studied;
   long long studied_at_ms;
 } strappy_study_database_status_record;

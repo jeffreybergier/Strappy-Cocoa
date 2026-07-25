@@ -100,6 +100,9 @@
 "Reset" = "Reset";
 "Show All Databases" = "Show All Databases";
 "Show Unstudied Databases" = "Show Unstudied Databases";
+"Description" = "Description";
+"Shows the recorded description and context." = "Shows the recorded description and context.";
+"Hides the recorded description and context." = "Hides the recorded description and context.";
 "Database hints" = "Database hints";
 "APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set." = "APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set.";
 "API credentials saved to keychain." = "API credentials saved to keychain.";

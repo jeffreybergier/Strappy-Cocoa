@@ -1,5 +1,78 @@
 #import "XPUIKit.h"
 
+@implementation NSString (XPUIKit)
+
+- (CGSize)XP_sizeWithFont:(UIFont *)font constrainedToSize:(CGSize)size
+{
+  SEL selector;
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+  __unsafe_unretained UIFont *fontArgument;
+  CGSize measuredSize;
+
+  if ((font == nil) || (size.width <= 0.0f) || (size.height <= 0.0f)) {
+    return CGSizeZero;
+  }
+
+  selector =
+    NSSelectorFromString(@"boundingRectWithSize:options:attributes:context:");
+  signature = [self respondsToSelector:selector] ?
+    [self methodSignatureForSelector:selector] : nil;
+  if (signature != nil) {
+    CGRect measuredRect;
+    NSInteger options;
+    NSDictionary *attributes;
+    __unsafe_unretained NSDictionary *attributesArgument;
+    __unsafe_unretained id contextArgument;
+
+    invocation = [NSInvocation invocationWithMethodSignature:signature];
+    [invocation setTarget:self];
+    [invocation setSelector:selector];
+    /* UsesLineFragmentOrigin | UsesFontLeading. */
+    options = (NSInteger)((1U << 0) | (1U << 1));
+    attributes = [NSDictionary dictionaryWithObject:font forKey:@"NSFont"];
+    attributesArgument = attributes;
+    contextArgument = nil;
+    [invocation setArgument:&size atIndex:2];
+    [invocation setArgument:&options atIndex:3];
+    [invocation setArgument:&attributesArgument atIndex:4];
+    [invocation setArgument:&contextArgument atIndex:5];
+    [invocation invoke];
+    measuredRect = CGRectZero;
+    [invocation getReturnValue:&measuredRect];
+    return CGSizeMake(CGRectGetWidth(measuredRect),
+                      CGRectGetHeight(measuredRect));
+  }
+
+  selector = NSSelectorFromString(
+    @"sizeWithFont:constrainedToSize:lineBreakMode:");
+  signature = [self respondsToSelector:selector] ?
+    [self methodSignatureForSelector:selector] : nil;
+  if (signature == nil) {
+    return CGSizeZero;
+  }
+
+  invocation = [NSInvocation invocationWithMethodSignature:signature];
+  [invocation setTarget:self];
+  [invocation setSelector:selector];
+  fontArgument = font;
+  {
+    NSInteger lineBreakMode;
+
+    /* NSLineBreakByWordWrapping. */
+    lineBreakMode = 0;
+    [invocation setArgument:&fontArgument atIndex:2];
+    [invocation setArgument:&size atIndex:3];
+    [invocation setArgument:&lineBreakMode atIndex:4];
+  }
+  [invocation invoke];
+  measuredSize = CGSizeZero;
+  [invocation getReturnValue:&measuredSize];
+  return measuredSize;
+}
+
+@end
+
 static void XPUIKitInvokeIntegerSetter(id target, SEL selector, NSInteger value)
 {
   NSMethodSignature *signature;
@@ -210,6 +283,11 @@ static UITextField *XPUIKitFindTextField(UIView *view)
   XPUIKitInvokeIntegerSetter(self,
                              @selector(setTextAlignment:),
                              (NSInteger)UITextAlignmentCenter);
+}
+
+- (void)XP_setLineBreakModeWordWrapping
+{
+  XPUIKitInvokeIntegerSetter(self, @selector(setLineBreakMode:), 0);
 }
 
 @end

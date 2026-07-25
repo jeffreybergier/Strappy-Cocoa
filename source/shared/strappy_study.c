@@ -118,6 +118,8 @@ static void strappy_study_database_status_record_init(
   record->app_group_key = NULL;
   record->app_name = NULL;
   record->app_bundle_id = NULL;
+  record->description = NULL;
+  record->context = NULL;
   record->studied = 0;
   record->studied_at_ms = 0LL;
 }
@@ -133,6 +135,8 @@ static void strappy_study_database_status_record_destroy(
   free(record->app_group_key);
   free(record->app_name);
   free(record->app_bundle_id);
+  free(record->description);
+  free(record->context);
   strappy_study_database_status_record_init(record);
 }
 
@@ -635,6 +639,8 @@ static int strappy_study_list_append(strappy_study_database_id_list *list,
 static int strappy_study_status_list_append(
   strappy_study_database_status_record_list *list,
   const strappy_discovered_database_record *source,
+  const char *description,
+  const char *context,
   int studied,
   long long studied_at_ms,
   char **error_out)
@@ -674,9 +680,15 @@ static int strappy_study_status_list_append(
     (source->app_name != NULL) ? source->app_name : "");
   record->app_bundle_id = strappy_string_duplicate(
     (source->app_bundle_id != NULL) ? source->app_bundle_id : "");
+  record->description = (description != NULL) ?
+    strappy_string_duplicate(description) : NULL;
+  record->context = (context != NULL) ?
+    strappy_string_duplicate(context) : NULL;
   if ((record->database_id == NULL) || (record->path == NULL) ||
       (record->app_group_key == NULL) || (record->app_name == NULL) ||
-      (record->app_bundle_id == NULL)) {
+      (record->app_bundle_id == NULL) ||
+      ((description != NULL) && (record->description == NULL)) ||
+      ((context != NULL) && (record->context == NULL))) {
     strappy_study_database_status_record_destroy(record);
     strappy_set_error(error_out,
                       "Could not allocate a Database Study status row.");
@@ -782,6 +794,8 @@ static int strappy_study_collect_progress(
     if ((status_list != NULL) &&
         !strappy_study_status_list_append(status_list,
                                           record,
+                                          description,
+                                          context,
                                           studied,
                                           studied_at_ms,
                                           error_out)) {

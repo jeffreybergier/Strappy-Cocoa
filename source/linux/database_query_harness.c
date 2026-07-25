@@ -6038,8 +6038,16 @@ static int harness_study_status_rows_match(
       (record->path != NULL) && (record->path[0] != '\0') &&
       (record->app_group_key != NULL) && (record->app_name != NULL) &&
       (record->app_bundle_id != NULL) &&
-      ((record->studied && (record->studied_at_ms > 0LL)) ||
-       (!record->studied && (record->studied_at_ms == 0LL)));
+      ((record->studied &&
+        (record->description != NULL) &&
+        (record->description[0] != '\0') &&
+        (record->context != NULL) &&
+        (record->context[0] != '\0') &&
+        (record->studied_at_ms > 0LL)) ||
+       (!record->studied &&
+        (record->description == NULL) &&
+        (record->context == NULL) &&
+        (record->studied_at_ms == 0LL)));
     if (ok && record->studied) {
       studied_count++;
     }
