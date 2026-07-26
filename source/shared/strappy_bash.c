@@ -1175,6 +1175,7 @@ static int strappy_bash_supervise(const char *shell_path,
   if (pid == 0) {
     char *const child_arguments[] = {
       (char *)shell_name,
+      (char *)"-l",
       (char *)"-c",
       arguments->command,
       NULL

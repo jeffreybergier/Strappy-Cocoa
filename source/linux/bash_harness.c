@@ -410,6 +410,13 @@ static int harness_run(void)
         "{\"command\":\"printf 'stdout\\\\n'; printf 'stderr\\\\n' >&2\"}",
         "stdout\nstderr\n",
         0) ||
+      !harness_execute_matches(
+        catalog_path,
+        session_id,
+        "{\"command\":\"if shopt -q login_shell; then printf 'login\\\\n'; "
+        "else printf 'non-login\\\\n'; fi\"}",
+        "login\n",
+        0) ||
       !harness_execute_matches(catalog_path,
                                session_id,
                                "{\"command\":\"pwd\"}",
