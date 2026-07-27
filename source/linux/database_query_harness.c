@@ -2568,27 +2568,39 @@ static int harness_coding_preflight_bash_arguments_are_valid(
     "PATH=$PATH",
     "df -h .",
     "/usr/include",
-    "which clang",
-    "which gcc",
-    "command -v cc",
-    "command -v make",
-    "command -v ld",
-    "command -v ar",
-    "command -v git",
-    "command -v ldid",
-    "command -v dpkg-deb",
-    "command -v curl",
-    "command -v sqlite3",
+    "=== PATH directory contents (resolution order) ===",
+    "Earlier directories win.",
+    "Shell builtins are not PATH entries.",
+    "old_ifs=$IFS",
+    "IFS=:",
+    "path_listing_budget=30000",
+    "for path_dir in $PATH",
+    "COLUMNS=160 LC_ALL=C /bin/ls -mA",
+    "[directory missing]",
+    "[empty]",
+    "[listing failed]",
+    "30000-byte inventory limit reached",
+    "report_version()",
     "clang --version",
     "gcc --version",
+    "cc --version",
     "make --version",
-    "git --version"
+    "git --version",
+    "curl --version",
+    "openssl version",
+    "sqlite3 --version",
+    "magick -version"
   };
   static const char *forbidden_fragments[] = {
     "SystemVersion.plist",
     "dpkg --print-architecture",
     "=== Working directory ===",
-    "ls -al"
+    "ls -al",
+    "which clang",
+    "which gcc",
+    "report_group",
+    "dpkg-query -W",
+    "com.altivecintelligence.toolchain"
   };
   cJSON *root;
   cJSON *command;
