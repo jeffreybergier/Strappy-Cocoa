@@ -634,7 +634,10 @@ static int harness_verify_assistant_set_guidance(
     strcmp(profile->identifier, STRAPPY_ASSISTANT_SET_CODING_ASSISTANT) == 0;
   if (!is_coding_assistant) {
     if ((strstr(prompt, "# Coding Assistant Conduct\n\n") != NULL) ||
-        (strstr(prompt, "NEVER commit or push changes.") != NULL)) {
+        (strstr(prompt, "NEVER commit or push changes.") != NULL) ||
+        (strstr(prompt, "## Altivec on-device iOS toolchain\n\n") != NULL) ||
+        (strstr(prompt, "altivec-sdk install 8.4") != NULL) ||
+        (strstr(prompt, "appinst build-release/MyApp.ipa") != NULL)) {
       return harness_fail(
         "Coding guidance leaked into another assistant-set prompt.");
     }
@@ -667,7 +670,29 @@ static int harness_verify_assistant_set_guidance(
       (strstr(prompt,
               "Double-check the final diff and verification results.") ==
        NULL) ||
-      (strstr(prompt, "NEVER commit or push changes.") == NULL)) {
+      (strstr(prompt, "NEVER commit or push changes.") == NULL) ||
+      (strstr(prompt, "## Altivec on-device iOS toolchain\n\n") == NULL) ||
+      (strstr(prompt, "command -v altivec-sdk") == NULL) ||
+      (strstr(prompt,
+              "Unless the user requests a specific version, use iPhoneOS "
+              "SDK 8.4.") == NULL) ||
+      (strstr(prompt, "altivec-sdk install 8.4") == NULL) ||
+      (strstr(prompt, "altivec-sdk select 8.4") == NULL) ||
+      (strstr(prompt, "altivec-sdk verify 8.4") == NULL) ||
+      (strstr(prompt,
+              "cp /var/altivec/share/altivec/templates/ios-app/Makefile "
+              "./Makefile") == NULL) ||
+      (strstr(prompt,
+              "include /var/altivec/share/altivec/make/ios-app.mk") == NULL) ||
+      (strstr(prompt, "make release") == NULL) ||
+      (strstr(prompt, "build-release/MyApp.ipa") == NULL) ||
+      (strstr(prompt, "appinst build-release/MyApp.ipa") == NULL) ||
+      (strstr(prompt, "ipainstaller build-release/MyApp.ipa") == NULL) ||
+      (strstr(prompt,
+              "The `-i` option does not install an IPA") == NULL) ||
+      (strstr(prompt, "Do not use `ipainstaller -c`") == NULL) ||
+      (strstr(prompt, "Do not use `-f` unless explicitly requested") == NULL) ||
+      (strstr(prompt, "Do not use `-d`") == NULL)) {
     return harness_fail(
       "Coding Assistant prompt is missing merged conduct guidance.");
   }
