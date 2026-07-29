@@ -953,7 +953,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [self setDismissButton:dismiss];
 
   options = [[StrappyPromptBorderedIconButton alloc] initWithFrame:CGRectZero];
-  [options setImage:[self iconImageForIcon:AIFANonBinary
+  [options setImage:[self iconImageForIcon:AIFAGear
                                      style:AIFontAwesomeStyleSolid
                                  pointSize:18.0f
                                      color:[UIColor darkGrayColor]]

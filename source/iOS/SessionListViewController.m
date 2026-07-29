@@ -120,10 +120,14 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 {
   [super viewDidLoad];
 
-  self.addButton =
-    [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd
-                                                  target:self
-                                                  action:@selector(addSession:)];
+  [self setAddButton:
+    [[UIBarButtonItem alloc]
+      initWithImage:[self whiteBarIconForIcon:AIFAMarsStroke]
+              style:UIBarButtonItemStyleBordered
+             target:self
+             action:@selector(addSession:)]];
+  [[self addButton]
+    setAccessibilityLabel:NSLocalizedString(@"New Session", nil)];
   [self setSettingsButton:
     [[UIBarButtonItem alloc] initWithImage:[self whiteBarIconForIcon:AIFAGear]
                                      style:UIBarButtonItemStyleBordered
