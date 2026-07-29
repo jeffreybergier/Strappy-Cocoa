@@ -419,13 +419,25 @@ static int harness_check_page_scripts(void)
          "opacity 0.3s ease;transition:opacity 0.3s ease;}") &&
        harness_expect_contains(page_html,
                                ".tool-panel{line-height:1.3;") &&
+       harness_expect_contains(page_html,
+                               "function toolPanel(body,raw,cls)") &&
+       harness_expect_not_contains(page_html, "tool-heading") &&
        harness_expect_contains(page_html, "function faIconHTML") &&
        harness_expect_contains(page_html, "function disclosureIconHTML") &&
        harness_expect_contains(page_html,
                                "collapsed?'angle-right':'angle-down'") &&
+       harness_expect_contains(page_html,
+                               "function itemErrorIconHTML(label)") &&
        harness_expect_contains(page_html, "function toolErrorIconHTML") &&
+       harness_expect_contains(
+         page_html,
+         "function toolErrorIconHTML(){return "
+         "itemErrorIconHTML('Tool error');}") &&
+       harness_expect_contains(page_html,
+                               "function setItemTitle(n,text,error,label)") &&
        harness_expect_contains(page_html, "triangle-exclamation") &&
        harness_expect_contains(page_html, ".tool-error-icon{") &&
+       harness_expect_contains(page_html, "vertical-align:0;}") &&
        harness_expect_not_contains(page_html,
                                    ".tool-column-error{border-top-color:#d99") &&
        harness_expect_not_contains(page_html,
@@ -436,8 +448,27 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "[fa(?::(solid|regular|brands))?") &&
        harness_expect_contains(page_html, "function toolJSONHTML") &&
        harness_expect_contains(page_html, "function toolObjectArrayTable") &&
+       harness_expect_contains(page_html, "function toolInputBodyHTML") &&
        harness_expect_contains(page_html, "function toolOutputHasError") &&
        harness_expect_contains(page_html, "function renderAPIToolRows") &&
+       harness_expect_contains(
+         page_html,
+         "body.innerHTML=toolPanel(toolInputBodyHTML("
+         "name,raw,strappyDatabaseNames),raw,'')") &&
+       harness_expect_contains(
+         page_html,
+         "body.innerHTML=toolOutputBody(raw,name,error)") &&
+       harness_expect_not_contains(
+         page_html,
+         "body.innerHTML=toolPanel(toolInputHTML(") &&
+       harness_expect_not_contains(
+         page_html,
+         "body.innerHTML=toolOutputHTML(") &&
+       harness_expect_contains(
+         page_html,
+         "if(!card.outputOnly)h+=toolInputHTML(") &&
+       harness_expect_contains(page_html,
+                               "h+=toolOutputHTML(card.output,name,card.error)") &&
        harness_expect_contains(page_html,
                                "error=hasClass(row,'state-error')||"
                                "toolOutputHasError(raw)") &&
@@ -630,6 +661,14 @@ static int harness_check_page_scripts(void)
                                    ".api-tool-card>.tool-card-body{display:block;}") &&
        harness_expect_contains(page_html,
                                ".tool-card-body{display:none;") &&
+       harness_expect_contains(
+         page_html,
+         ".tool-card-body{display:none;max-height:320px;overflow:auto;"
+         "border:0;background:transparent;padding:2px 0 0;"
+         "margin:0 0 8px;}") &&
+       harness_expect_contains(
+         page_html,
+         ".tool-panel>.tool-table-wrap:first-child{margin-top:0;}") &&
        harness_expect_contains(page_html,
                                ".tool-card-open .tool-card-body{display:block;}") &&
        harness_expect_contains(page_html,
@@ -717,13 +756,9 @@ static int harness_check_page_scripts(void)
                                "function renderAnswerQualityRows(rows)") &&
        harness_expect_contains(page_html,
                                "function answerQualityStatusIconHTML(status)") &&
-       harness_expect_contains(
+       harness_expect_not_contains(
          page_html,
          "function answerQualitySummaryErrorIconHTML(row)") &&
-       harness_expect_contains(
-         page_html,
-         "aria-label=\"'+escHTML(label)+'\">'+"
-         "answerQualityStatusIconHTML('failed')") &&
        harness_expect_contains(page_html,
                                "faIconHTML('solid','check','')") &&
        harness_expect_contains(page_html,
@@ -770,8 +805,8 @@ static int harness_check_page_scripts(void)
          "'Answer Quality')") &&
        harness_expect_contains(
          page_html,
-         "summary.innerHTML=(error?answerQualitySummaryErrorIconHTML(row):"
-         "'')+escHTML(summaryText)") &&
+         "setItemTitle(summary,summaryText,error,"
+         "answerQualityAttr(row,'failed-label','Failed'))") &&
        harness_expect_contains(page_html,
                                ".answer-quality-check-status{flex:0 0 12px;"
                                "width:12px;margin-right:8px;") &&
@@ -799,7 +834,12 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                ".api-exchange-status>"
                                ".response-status-section>.bubble{"
-                               "margin:2px 0 0;") &&
+                               "margin:0;padding:2px 0 0;border:0;"
+                               "background:transparent;}") &&
+       harness_expect_not_contains(
+         page_html,
+         ".api-exchange-row.api-exchange-status>"
+         ".response-status-section>.bubble{border:1px") &&
        harness_expect_contains(page_html,
                                ".response-metadata{max-width:none;"
                                "box-sizing:border-box;border:0;"
@@ -810,8 +850,8 @@ static int harness_check_page_scripts(void)
                                "padding-bottom:0;}") &&
        harness_expect_contains(page_html,
                                ".response-metadata-body{white-space:pre-wrap;"
-                               "border:1px solid #959fa7;background:#dfe4e8;"
-                               "padding:4px 6px;margin:2px 0 0;}") &&
+                               "border:0;background:transparent;"
+                               "padding:2px 0 0;margin:0;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row>.role,"
                                ".api-exchange-row>"
@@ -829,11 +869,14 @@ static int harness_check_page_scripts(void)
                                ".api-exchange-row>.tool-column{"
                                "background:#dfe4e8;}") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-row .tool-card-body,"
                                ".api-exchange-row .tool-table-wrap,"
                                ".api-exchange-row .tool-pill,"
                                ".api-exchange-row .tool-raw{"
                                "background:#dfe4e8;border-color:#959fa7;}") &&
+       harness_expect_not_contains(
+         page_html,
+         ".api-exchange-row .tool-card-body,"
+         ".api-exchange-row .tool-table-wrap") &&
        harness_expect_contains(page_html,
                                ".state-error .bubble{"
                                "border-top-color:#959fa7;"
@@ -1002,6 +1045,10 @@ static int harness_check_page_scripts(void)
                                "function decorateResponseStatusRow(row)") &&
        harness_expect_contains(page_html,
                                "collapsed=responseStatusCollapsed(row)") &&
+       harness_expect_contains(
+         page_html,
+         "setItemTitle(summary,responseStatusSummary(row),"
+         "rowIsAPIExchangeError(row),'Response error')") &&
        harness_expect_contains(page_html,
                                "decorateResponseStatusRow(statusRow);") &&
        harness_expect_not_contains(page_html,
@@ -1309,6 +1356,10 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function metadataFinishStatus") &&
        harness_expect_contains(page_html, "native_finish_reason") &&
        harness_expect_contains(page_html, "function renderResponseMetadata") &&
+       harness_expect_contains(
+         page_html,
+         "slot.innerHTML=status=='error'?"
+         "itemErrorIconHTML('Response metadata error'):''") &&
        harness_expect_contains(page_html, "function formatResponseMetadata") &&
        harness_expect_not_contains(page_html,
                                    "addMetaLine(lines,'HTTP status',"
@@ -2428,7 +2479,8 @@ static int harness_check_api_exchange_status_states(void)
        harness_expect_contains(success_html,
                                "fa-angle-right") &&
        harness_expect_contains(success_html,
-                               "</span></a>Response Metadata</div>") &&
+                               "</span></a><span class=\"response-metadata-"
+                               "error-slot\"></span>Response Metadata</div>") &&
        harness_expect_contains(success_html,
                                "class=\"response-metadata-body\"></div>") &&
        harness_expect_not_contains(success_html,
