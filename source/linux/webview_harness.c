@@ -529,8 +529,8 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "tool-card-toggle disclosure-title") &&
        harness_expect_not_contains(page_html, "function toggleAPIExchangeSection") &&
-       harness_expect_contains(page_html, "function toggleAPIReasoning") &&
-       harness_expect_contains(page_html, ".api-reasoning-collapsed>.bubble{") &&
+       harness_expect_not_contains(page_html, "function toggleAPIReasoning") &&
+       harness_expect_not_contains(page_html, ".api-reasoning-collapsed") &&
        harness_expect_contains(page_html, ".api-exchange-turn-header{") &&
        harness_expect_contains(page_html,
                                ".api-exchange-turn-header{margin:0 -10px;"
@@ -542,7 +542,6 @@ static int harness_check_page_scripts(void)
                                ".tool-column-disclosure,"
                                ".prompt-group-disclosure,.tool-disclosure,"
                                ".reasoning-disclosure,"
-                               ".api-reasoning-disclosure,"
                                ".response-metadata-disclosure{"
                                "display:inline-block;"
                                "box-sizing:border-box;width:12px;"
@@ -589,7 +588,17 @@ static int harness_check_page_scripts(void)
        harness_expect_not_contains(page_html,
                                    "API Attempt Details") &&
        harness_expect_contains(page_html,
+                               ".tool-card-toggle{display:block;"
+                               "box-sizing:border-box;width:100%;"
+                               "padding:4px 0;background:#dfe4e8;"
+                               "color:#30363b;text-decoration:none;"
+                               "font-weight:bold;white-space:nowrap;"
+                               "overflow:hidden;text-overflow:ellipsis;}") &&
+       harness_expect_contains(page_html,
                                ".tool-card-summary{vertical-align:baseline;}") &&
+       harness_expect_contains(page_html,
+                               ".api-reasoning-body{white-space:pre-wrap;"
+                               "word-wrap:break-word;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-turn-title{"
                                "vertical-align:baseline;}") &&
@@ -682,15 +691,7 @@ static int harness_check_page_scripts(void)
                                ".api-exchange-item>.tool-column."
                                "tool-column-collapsed{padding-bottom:3px;}") &&
        harness_expect_contains(page_html,
-                               ".api-exchange-item.api_reasoning>.bubble{"
-                               "padding:3px 10px;}") &&
-       harness_expect_contains(page_html,
-                               ".api-exchange-item.api-reasoning-group-end{"
-                               "padding-bottom:4px;}") &&
-       harness_expect_contains(page_html,
-                               ".api-exchange-item.api-reasoning-group-end."
-                               "api-reasoning-collapsed{padding-bottom:0;}") &&
-       harness_expect_contains(page_html,
+                               ".api-exchange-item.api_reasoning>.bubble,"
                                ".api-exchange-item.api_function_call>.bubble,"
                                ".api-exchange-item.api_function_output>.bubble,"
                                ".api-exchange-item.api_server_tool>.bubble,"
@@ -702,6 +703,11 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                ".api-exchange-item .tool-card-body{"
                                "margin-bottom:0;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-item.api_reasoning>"
+                               ".bubble.tool-card-open,"
+                               ".api-exchange-item.api_function_call>"
+                               ".bubble.tool-card-open,") &&
        harness_expect_contains(page_html,
                                ".api-exchange-item.api_server_tool>"
                                ".bubble.tool-card-open,"
@@ -811,9 +817,8 @@ static int harness_check_page_scripts(void)
                                ".api-exchange-row>"
                                ".response-status-section>.role{"
                                "background:#dfe4e8;}") &&
-       harness_expect_contains(page_html,
-                               ".api-exchange-row.api_reasoning>.role{"
-                               "background:#dfe4e8;}") &&
+       harness_expect_not_contains(page_html,
+                                   ".api-exchange-row.api_reasoning>.role{") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row>.bubble,"
                                ".api-exchange-row>.reasoning,"
@@ -916,8 +921,8 @@ static int harness_check_page_scripts(void)
                                "var strappyAPIRoundSettled={};") &&
        harness_expect_contains(page_html,
                                "var strappyResponseStatusCollapsed={};") &&
-       harness_expect_contains(page_html,
-                               "var strappyAPIReasoningCollapsed={};") &&
+       harness_expect_not_contains(page_html,
+                                   "strappyAPIReasoningCollapsed") &&
        harness_expect_not_contains(page_html,
                                    "strappyAPIExchangeSectionCollapsed") &&
        harness_expect_contains(page_html,
@@ -1054,14 +1059,12 @@ static int harness_check_page_scripts(void)
                                    "moveResponseStatusesToAttemptEnds") &&
        harness_expect_contains(page_html,
                                "row.insertBefore(n,before)") &&
-       harness_expect_contains(page_html,
-                               "function decorateAPIReasoningGroup(rows,"
-                               "active)") &&
-       harness_expect_contains(page_html,
-                               "api-reasoning-group-secondary") &&
-       harness_expect_contains(page_html,
-                               "setRowClass(row,'api-reasoning-group-end',"
-                               "i===reasoning.length-1)") &&
+       harness_expect_not_contains(page_html,
+                                   "function decorateAPIReasoningGroup") &&
+       harness_expect_not_contains(page_html,
+                                   "api-reasoning-group-secondary") &&
+       harness_expect_not_contains(page_html,
+                                   "api-reasoning-group-end") &&
        harness_expect_contains(page_html,
                                ".api-exchange-collapsed-conversation>"
                                ".api-exchange-section-label{display:none;}") &&
@@ -1249,7 +1252,7 @@ static int harness_check_page_scripts(void)
                                    ".processing-status-active "
                                    ".api-tool-group-toggle") &&
        harness_expect_contains(page_html,
-                               ".processing-status-active .api-reasoning-toggle,"
+                               ".processing-status-active .reasoning-toggle,"
                                ".processing-status-active "
                                ".response-metadata-toggle{display:none;}") &&
        harness_expect_not_contains(page_html,
@@ -1481,9 +1484,10 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "function toggleReasoning(a){"
                                "if(processingInteractionsLocked())return false;") &&
-       harness_expect_contains(page_html,
-                               "function toggleAPIReasoning(a){"
-                               "if(processingInteractionsLocked())return false;") &&
+       harness_expect_not_contains(page_html,
+                                   "function toggleAPIReasoning(a)") &&
+       harness_expect_not_contains(page_html,
+                                   "setAPIReasoningCollapsed") &&
        harness_expect_contains(page_html,
                                "function toggleToolColumn(a){"
                                "if(processingInteractionsLocked())return false;") &&
@@ -2462,6 +2466,8 @@ static int harness_check_responses_items(void)
   strappy_webview_labels labels;
   char *call_html;
   char *reasoning_html;
+  char *secondary_reasoning_html;
+  char *request_reasoning_html;
   char *function_html;
   char *bash_function_html;
   char *output_html;
@@ -2477,6 +2483,7 @@ static int harness_check_responses_items(void)
   labels.tool = "Localized Tool";
   labels.tool_call = "Localized Tool Request";
   labels.tool_result = "Localized Tool Response";
+  labels.thinking = "Localized Thinking";
   labels.included_in_future_context =
     "Localized Included in Future Context";
   labels.answer_quality = "Localized Answer Quality";
@@ -2532,6 +2539,21 @@ static int harness_check_responses_items(void)
   message.text = "Checked the available evidence.";
   message.created_at = "2026-07-10T12:34:56.000Z";
   reasoning_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+
+  message.element_id = "response-reasoning-2";
+  message.text = "Compared the next candidate.";
+  secondary_reasoning_html =
+    strappy_webview_message_html(&message, &labels, NULL, NULL);
+
+  message.element_id = "request-reasoning-1";
+  message.round_id = 4LL;
+  message.api_call_id = 0LL;
+  message.round_number = 4L;
+  message.attempt_number = 0L;
+  message.direction = "request";
+  message.text = "Retained prior reasoning.";
+  request_reasoning_html =
+    strappy_webview_message_html(&message, &labels, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
   message.element_id = "response-function-1";
@@ -2682,6 +2704,8 @@ static int harness_check_responses_items(void)
   quality_html = strappy_webview_message_html(&message, &labels, NULL, NULL);
 
   ok = (call_html != NULL) && (reasoning_html != NULL) &&
+       (secondary_reasoning_html != NULL) &&
+       (request_reasoning_html != NULL) &&
        (function_html != NULL) && (bash_function_html != NULL) &&
        (output_html != NULL) && (bash_output_html != NULL) &&
        (error_output_html != NULL) &&
@@ -2709,8 +2733,7 @@ static int harness_check_responses_items(void)
        harness_expect_contains(call_html,
                                "data-http-status=\"200\"") &&
        harness_expect_contains(reasoning_html,
-                               "class=\"row api_reasoning "
-                               "api-reasoning-collapsed\"") &&
+                               "class=\"row api_reasoning\"") &&
        harness_expect_contains(reasoning_html,
                                "data-direction=\"response\"") &&
        harness_expect_contains(reasoning_html,
@@ -2722,21 +2745,71 @@ static int harness_check_responses_items(void)
                                "data-direction-label=\"Response\"") &&
        harness_expect_contains(reasoning_html,
                                "data-thinking-label=\"Thinking\"") &&
+       harness_expect_not_contains(reasoning_html,
+                                   "<div class=\"role") &&
        harness_expect_contains(reasoning_html,
-                               "<div class=\"role disclosure-title\" "
-                               "onclick=\"return toggleAPIReasoning(this)\">") &&
+                               "class=\"bubble api-tool-card tool-card "
+                               "api-reasoning-card\"") &&
        harness_expect_contains(reasoning_html,
-                               "class=\"api-reasoning-toggle\"") &&
+                               "class=\"tool-card-toggle disclosure-title\"") &&
        harness_expect_contains(reasoning_html,
                                "aria-expanded=\"false\"") &&
        harness_expect_contains(reasoning_html,
-                               "api-reasoning-disclosure\"><i class=\"fa fa-solid "
+                               "class=\"tool-disclosure\"><i class=\"fa fa-solid "
                                "fa-angle-right\"") &&
        harness_expect_contains(reasoning_html,
-                               "</span></a>Thinking</div>") &&
+                               "class=\"tool-card-summary\">Thinking: "
+                               "Checked the available evidence.</span>") &&
+       harness_expect_contains(reasoning_html,
+                               "class=\"tool-card-body api-reasoning-body\">"
+                               "Checked the available evidence.</div>") &&
+       harness_expect_not_contains(reasoning_html,
+                                   "tool-card-open") &&
+       harness_expect_not_contains(reasoning_html,
+                                   "api-reasoning-group-") &&
        harness_expect_not_contains(reasoning_html,
                                    "2026-07-10T12:34:56.000Z") &&
        harness_expect_not_contains(reasoning_html, "tool-column") &&
+       harness_expect_contains(
+         secondary_reasoning_html,
+         "id=\"response-reasoning-2\" class=\"row api_reasoning\"") &&
+       harness_expect_contains(
+         secondary_reasoning_html,
+         "data-thinking-label=\"Localized Thinking\"") &&
+       harness_expect_contains(
+         secondary_reasoning_html,
+         "class=\"bubble api-tool-card tool-card api-reasoning-card\"") &&
+       harness_expect_contains(
+         secondary_reasoning_html,
+         "class=\"tool-card-summary\">Localized Thinking: "
+         "Compared the next candidate.</span>") &&
+       harness_expect_contains(
+         secondary_reasoning_html,
+         "class=\"tool-card-body api-reasoning-body\">"
+         "Compared the next candidate.</div>") &&
+       harness_expect_not_contains(secondary_reasoning_html,
+                                   "<div class=\"role") &&
+       harness_expect_not_contains(secondary_reasoning_html,
+                                   "tool-card-open") &&
+       harness_expect_contains(
+         request_reasoning_html,
+         "id=\"request-reasoning-1\" class=\"row api_reasoning\"") &&
+       harness_expect_contains(request_reasoning_html,
+                               "data-direction=\"request\"") &&
+       harness_expect_not_contains(request_reasoning_html,
+                                   "data-api-call-id=") &&
+       harness_expect_contains(
+         request_reasoning_html,
+         "class=\"tool-card-summary\">Localized Thinking: "
+         "Retained prior reasoning.</span>") &&
+       harness_expect_contains(
+         request_reasoning_html,
+         "class=\"tool-card-body api-reasoning-body\">"
+         "Retained prior reasoning.</div>") &&
+       harness_expect_not_contains(request_reasoning_html,
+                                   "<div class=\"role") &&
+       harness_expect_not_contains(request_reasoning_html,
+                                   "tool-card-open") &&
        harness_expect_contains(function_html,
                                "class=\"row api_function_call\"") &&
        harness_expect_not_contains(function_html,
@@ -2956,6 +3029,8 @@ static int harness_check_responses_items(void)
   strappy_webview_free(output_html);
   strappy_webview_free(bash_function_html);
   strappy_webview_free(function_html);
+  strappy_webview_free(request_reasoning_html);
+  strappy_webview_free(secondary_reasoning_html);
   strappy_webview_free(reasoning_html);
   strappy_webview_free(call_html);
   return ok;

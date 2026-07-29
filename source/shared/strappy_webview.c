@@ -1780,7 +1780,7 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "line-height:1.3;color:#606970;}",
     ".tool-column-toggle{color:#4e5961;text-decoration:none;}",
     ".tool-column-disclosure,.prompt-group-disclosure,.tool-disclosure,",
-    ".reasoning-disclosure,.api-reasoning-disclosure,",
+    ".reasoning-disclosure,",
     ".response-metadata-disclosure{",
     "display:inline-block;box-sizing:border-box;width:12px;margin-right:4px;",
     "font-size:12px;line-height:1;vertical-align:baseline;text-align:center;}",
@@ -1796,7 +1796,6 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".processing-status-active .tool-column-toggle,",
     ".processing-status-active .prompt-group-toggle,",
     ".processing-status-active .reasoning-toggle,",
-    ".processing-status-active .api-reasoning-toggle,",
     ".processing-status-active .response-metadata-toggle{display:none;}",
     ".processing-status-active .tool-disclosure{display:none;}",
     ".processing-status-active .tool-card-toggle{pointer-events:none;",
@@ -1854,16 +1853,18 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".api_reasoning .role,.api_function_call .role,",
     ".api_function_output .role,.api_item .role,",
     ".api_server_tool .role,.answer_quality .role{color:#30363b;}",
-    ".api_reasoning .bubble,.api_item .bubble{background:#dfe4e8;",
+    ".api_item .bubble{background:#dfe4e8;",
     "color:#30363b;border-top-color:#959fa7;",
     "border-bottom-color:#959fa7;}",
-    ".api_function_call .bubble,.api_function_output .bubble,",
+    ".api_reasoning .bubble,.api_function_call .bubble,",
+    ".api_function_output .bubble,",
     ".api_server_tool .bubble,.answer_quality .bubble{",
     "background:#dfe4e8;color:#30363b;border-top-color:#959fa7;",
     "border-bottom-color:#959fa7;",
     "white-space:normal;font-size:12px;padding:4px 12px;}",
     ".api-tool-card .tool-card-body{font-family:inherit;",
     "font-size:12px;white-space:normal;}",
+    ".api-reasoning-body{white-space:pre-wrap;word-wrap:break-word;}",
     ".api-tool-group-secondary>.role{display:none;}",
     ".api-tool-fallback{font-family:Menlo,Monaco,'Courier New',monospace;",
     "white-space:pre-wrap;word-wrap:break-word;}",
@@ -1973,8 +1974,6 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".reasoning-toggle{color:#4e5961;text-decoration:none;}",
     ".reasoning-collapsed .reasoning-body{display:none;}",
     ".reasoning-body{white-space:normal;}",
-    ".api-reasoning-toggle{color:#4e5961;text-decoration:none;}",
-    ".api-reasoning-collapsed>.bubble{display:none;}",
     ".response-metadata{max-width:none;box-sizing:border-box;",
     "border:0;background:#dfe4e8;color:#30363b;padding:0 0 4px;",
     "margin:0;line-height:1.3;",
@@ -2039,14 +2038,12 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".api-exchange-item>.tool-column .tool-rail-title{margin-bottom:3px;}",
     ".api-exchange-item.user .bubble,.api-exchange-item.harness .bubble,",
     ".api-exchange-item.developer .bubble{padding:3px 10px 5px;}",
-    ".api-exchange-item.api_reasoning>.bubble{padding:3px 10px;}",
-    ".api-exchange-item.api-reasoning-group-end{padding-bottom:4px;}",
-    ".api-exchange-item.api-reasoning-group-end.api-reasoning-collapsed{",
-    "padding-bottom:0;}",
+    ".api-exchange-item.api_reasoning>.bubble,",
     ".api-exchange-item.api_function_call>.bubble,",
     ".api-exchange-item.api_function_output>.bubble,",
     ".api-exchange-item.api_server_tool>.bubble,",
     ".api-exchange-item.answer_quality>.bubble{padding:0 10px;}",
+    ".api-exchange-item.api_reasoning>.bubble.tool-card-open,",
     ".api-exchange-item.api_function_call>.bubble.tool-card-open,",
     ".api-exchange-item.api_function_output>.bubble.tool-card-open,",
     ".api-exchange-item.api_server_tool>.bubble.tool-card-open,",
@@ -2070,7 +2067,6 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".api-exchange-row,.api-exchange-row *{color:#30363b;}",
     ".api-exchange-row>.role,",
     ".api-exchange-row>.response-status-section>.role{background:#dfe4e8;}",
-    ".api-exchange-row.api_reasoning>.role{background:#dfe4e8;}",
     ".api-exchange-row>.bubble,.api-exchange-row>.reasoning,",
     ".api-exchange-row>.response-status-section,",
     ".api-exchange-row>.response-metadata{background:#dfe4e8;}",
@@ -2101,7 +2097,6 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".api-exchange-row .reasoning-toggle,",
     ".api-exchange-row .api-exchange-toggle,",
     ".api-exchange-row .response-status-toggle,",
-    ".api-exchange-row .api-reasoning-toggle,",
     ".api-exchange-row .tool-toggle,",
     ".api-exchange-row .tool-output-toggle,",
     ".api-exchange-row .status a{color:#4e5961;}",
@@ -2121,7 +2116,6 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".api-exchange-row.state-error>.status{font-weight:bold;}",
     ".response-status-collapsed>.response-status-section>.bubble,",
     ".response-status-collapsed>.meta{display:none;}",
-    ".api-reasoning-group-secondary>.role{display:none;}",
     ".api-exchange-row.user>.bubble,",
     ".api-exchange-row.harness>.bubble,",
     ".api-exchange-row.developer>.bubble,",
@@ -2306,8 +2300,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function setProcessingThinkingCollapsed(group,collapsed){var n,e,i;",
     "if(group==='')return;n=rowsForPromptGroup(group);for(i=0;i<n.length;i++){e=n[i];",
     "if(hasClass(e,'reasoning'))setReasoningCollapsed(e,collapsed);",
-    "else{e=firstByClass(e,'reasoning');if(e)setReasoningCollapsed(e,collapsed);",
-    "if(hasClass(n[i],'api_reasoning'))setAPIReasoningCollapsed(n[i],collapsed);}}}",
+    "else{e=firstByClass(e,'reasoning');if(e)setReasoningCollapsed(e,collapsed);}}}",
     "function processingInteractionsLocked(){var b=document.body;return !!(",
     "(strappyProcessingStatus&&strappyProcessingStatus.active)||",
     "hasClass(b,'processing-status-active'));}",
@@ -2510,7 +2503,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "setClass(n[i],'response-metadata-warning',metadataFinishStatus(parsed)=='warning');setNodeText(body,formatResponseMetadata(parsed));}",
     "catch(e){setNodeText(body,raw);}}}",
     "var strappyAPIRoundCollapsed={};var strappyAPIRoundSettled={};",
-    "var strappyResponseStatusCollapsed={};var strappyAPIReasoningCollapsed={};",
+    "var strappyResponseStatusCollapsed={};",
     "function apiRoundId(row){return row&&row.getAttribute?row.getAttribute('data-round-id')||'':'';}",
     "function apiExchangeId(row){return row&&row.getAttribute?row.getAttribute('data-api-call-id')||'':'';}",
     "function apiExchangeDirection(row){return row&&row.getAttribute?row.getAttribute('data-direction')||'':'';}",
@@ -2602,8 +2595,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function removeAPIExchangeDecoration(row){var names=['api-exchange-row','api-exchange-start','api-exchange-end',",
     "'api-exchange-turn-anchor','api-exchange-status','api-exchange-item','api-exchange-request','api-exchange-response',",
     "'api-exchange-answer','api-exchange-section-start','api-exchange-collapsed-anchor','api-exchange-collapsed-row',",
-    "'api-exchange-collapsed-conversation','api-exchange-attempt-start','api-exchange-attempt-end',",
-    "'api-reasoning-group-anchor','api-reasoning-group-secondary','api-reasoning-group-end'];",
+    "'api-exchange-collapsed-conversation','api-exchange-attempt-start','api-exchange-attempt-end'];",
     "var i,n;for(i=0;i<names.length;i++)setRowClass(row,names[i],0);",
     "while((n=firstByClass(row,'api-exchange-section-label'))&&n.parentNode===row)row.removeChild(n);}",
     "function removeAPIExchangeTurnHeader(row){var n=firstByClass(row,'api-exchange-turn-header');",
@@ -2647,19 +2639,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function moveResponseStatusesBeforeAnswers(g){var keys=g.attemptKeys;var i,attempt;for(i=0;i<keys.length;i++){",
     "attempt=g.attempts[keys[i]];moveResponseStatusBeforeAnswer(attempt.statusRow,attempt.responseRows);}refreshAPIExchangeGroupRows(g);",
     "indexAPIExchangeGroup(g);}",
-    "function apiReasoningGroupCollapsed(id,active){if(active)return 0;return typeof strappyAPIReasoningCollapsed[id]=='undefined'?1:(strappyAPIReasoningCollapsed[id]?1:0);}",
-    "function decorateAPIReasoningGroup(rows,active){var reasoning=[],i,row,role,a,d,summary,id,collapsed;",
-    "for(i=0;i<rows.length;i++){if(hasClass(rows[i],'api_reasoning'))reasoning[reasoning.length]=rows[i];}if(!reasoning.length)return;",
-    "id=apiExchangeId(reasoning[0]);collapsed=apiReasoningGroupCollapsed(id,active);for(i=0;i<reasoning.length;i++){row=reasoning[i];",
-    "setRowClass(row,'api-reasoning-group-anchor',i===0);setRowClass(row,'api-reasoning-group-secondary',i>0);",
-    "setRowClass(row,'api-reasoning-group-end',i===reasoning.length-1);",
-    "setRowClass(row,'api-reasoning-collapsed',collapsed);role=firstByClass(row,'role');if(!role)continue;role.onclick=null;",
-    "role.style.display=i>0?'none':'';setClass(role,'disclosure-title',0);if(i>0)continue;role.innerHTML='';",
-    "if(!active){a=document.createElement('a');a.className='api-reasoning-toggle';a.href='#';a.setAttribute('data-api-call-id',id);",
-    "a.setAttribute('aria-expanded',collapsed?'false':'true');d=document.createElement('span');d.className='api-reasoning-disclosure';",
-    "d.innerHTML=disclosureIconHTML(collapsed);a.appendChild(d);role.appendChild(a);setClass(role,'disclosure-title',1);",
-    "role.onclick=function(){return toggleAPIReasoning(a);};}summary=document.createElement('span');",
-    "summary.className='api-reasoning-summary';setNodeText(summary,row.getAttribute('data-thinking-label')||'Thinking');role.appendChild(summary);}}",
     "function decorateAPIExchangesForRows(seedRows){var rows,groups={};var keys=[];var seen={};var i,j,k,row,id,roundId,key,g,anchor,collapsed,last,d;",
     "var answer,conversation,active,attempt,attemptKeys,attemptRows,statusRow,responseRows,attemptStartRow,context;",
     "for(i=0;i<seedRows.length;i++){roundId=apiRoundId(seedRows[i]);if(roundId===''||seen[indexKey(roundId)])continue;",
@@ -2688,8 +2667,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "attemptStartRow=responseRows.length?responseRows[0]:statusRow;if(attemptStartRow)setRowClass(attemptStartRow,'api-exchange-attempt-start',1);",
     "if(statusRow)decorateResponseStatusRow(statusRow);",
     "if(attemptRows.length)setRowClass(attemptRows[attemptRows.length-1],'api-exchange-attempt-end',1);",
-    "if(responseRows.length)ensureResponseAttemptLabel(responseRows[0]);else if(statusRow)ensureResponseAttemptLabel(statusRow);",
-    "decorateAPIReasoningGroup(attemptRows,active);}",
+    "if(responseRows.length)ensureResponseAttemptLabel(responseRows[0]);else if(statusRow)ensureResponseAttemptLabel(statusRow);}",
     "context=contextInclusionState(g.rows);setContextRoundOpacity(g.rows,context.count==0||context.checked);",
     "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed,active,apiExchangeCumulativeUsageCost(g.rows),context);}}",
     "function decorateAPIExchanges(root){decorateAPIExchangesForRows(messageRows());}",
@@ -2763,15 +2741,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function setMessageReasoningCollapsed(id,collapsed){var r=byId(id);var box,body;",
     "if(!r)return;box=firstByClass(r,'reasoning');body=firstByClass(r,'reasoning-body');",
     "if(!box||!body||nodeText(body)==='')return;setReasoningCollapsed(box,collapsed);}",
-    "function setAPIReasoningCollapsed(row,collapsed){var id=apiExchangeId(row);var rows=id!==''?rowsForAPICall(id):[row];var i,r,d,a;",
-    "if(id!=='')strappyAPIReasoningCollapsed[id]=collapsed?1:0;for(i=0;i<rows.length;i++){r=rows[i];",
-    "if(!hasClass(r,'api_reasoning')||(id!==''&&apiExchangeId(r)!==id)||(id===''&&r!==row))continue;",
-    "setRowClass(r,'api-reasoning-collapsed',collapsed);if(!hasClass(r,'api-reasoning-group-anchor')&&id!=='')continue;",
-    "d=firstByClass(r,'api-reasoning-disclosure');a=firstByClass(r,'api-reasoning-toggle');",
-    "if(d)d.innerHTML=disclosureIconHTML(collapsed);if(a)a.setAttribute('aria-expanded',collapsed?'false':'true');}}",
-    "function toggleAPIReasoning(a){if(processingInteractionsLocked())return false;var id=a&&a.getAttribute?a.getAttribute('data-api-call-id'):'';",
-    "var rows=id!==''?rowsForAPICall(id):[];var i,row=null;for(i=0;i<rows.length;i++){if(hasClass(rows[i],'api_reasoning')){row=rows[i];break;}}",
-    "if(!row)return false;setAPIReasoningCollapsed(row,hasClass(row,'api-reasoning-collapsed')?0:1);return false;}",
     "function setToolColumnCollapsed(box,collapsed){var d=firstByClass(box,'tool-column-disclosure');",
     "var a=firstByClass(box,'tool-column-toggle');",
     "if(collapsed){if(!hasClass(box,'tool-column-collapsed'))box.className+=' tool-column-collapsed';",
@@ -3567,6 +3536,7 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   int render_bubble_status;
   int hide_empty_answer_bubble;
   int suppress_status_meta;
+  int render_api_reasoning_card;
   int render_api_tool_card;
   int render_response_status_section;
   int answer_quality_expanded;
@@ -3677,7 +3647,9 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     (render_streaming &&
      (state != NULL) &&
      (strcmp(state, "pending") == 0));
+  render_api_reasoning_card = strappy_webview_is_api_reasoning_role(role);
   render_api_tool_card =
+    render_api_reasoning_card ||
     strappy_webview_is_api_function_call_role(role) ||
     strappy_webview_is_api_function_output_role(role) ||
     strappy_webview_is_answer_quality_role(role);
@@ -3688,7 +3660,8 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     strappy_webview_is_answer_quality_role(role) &&
     (message != NULL) && message->is_error;
   tool_card_expanded = answer_quality_expanded ||
-    (render_api_tool_card &&
+    (!render_api_reasoning_card &&
+     render_api_tool_card &&
      (strcmp(tool_name, STRAPPY_TOOL_BASH) == 0));
   text_is_tool_json =
     strappy_webview_is_tool_call_role(role) ||
@@ -3726,12 +3699,6 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
 
   if (ok && render_streaming) {
     ok = strappy_webview_buffer_append_cstring(&buffer, " streaming-active");
-  }
-
-  if (ok && strappy_webview_is_api_reasoning_role(role)) {
-    ok = strappy_webview_buffer_append_cstring(
-      &buffer,
-      " api-reasoning-collapsed");
   }
 
   if (ok && has_state) {
@@ -3998,23 +3965,9 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
       "<div class=\"response-status-section\">");
   }
   if (ok && !render_api_tool_card) {
-    ok = strappy_webview_buffer_append_cstring(&buffer, "<div class=\"role");
-    if (ok && strappy_webview_is_api_reasoning_role(role)) {
-      ok = strappy_webview_buffer_append_cstring(
-        &buffer,
-        " disclosure-title\" "
-        "onclick=\"return toggleAPIReasoning(this)\">"
-        "<a class=\"api-reasoning-toggle\" href=\"#\" "
-        "aria-expanded=\"false\">"
-        "<span class=\"api-reasoning-disclosure\">") &&
-        strappy_webview_buffer_append_cstring(
-          &buffer,
-          strappy_webview_disclosure_icon_html(1)) &&
-        strappy_webview_buffer_append_cstring(&buffer, "</span></a>");
-    } else if (ok) {
-      ok = strappy_webview_buffer_append_cstring(&buffer, "\">");
-    }
-    ok = ok &&
+    ok = strappy_webview_buffer_append_cstring(
+           &buffer,
+           "<div class=\"role\">") &&
          strappy_webview_append_html_escaped(
            &buffer,
            strappy_webview_role_label(role, labels)) &&
@@ -4041,6 +3994,11 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     ok = strappy_webview_buffer_append_cstring(
       &buffer,
       " api-tool-card tool-card");
+    if (ok && render_api_reasoning_card) {
+      ok = strappy_webview_buffer_append_cstring(
+        &buffer,
+        " api-reasoning-card");
+    }
     if (ok && answer_quality_expanded) {
       ok = strappy_webview_buffer_append_cstring(
         &buffer,
@@ -4089,13 +4047,29 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
          strappy_webview_buffer_append_cstring(
            &buffer,
            "</span>"
-           "<span class=\"tool-card-summary\">") &&
-         strappy_webview_append_html_escaped(
-           &buffer,
-           strappy_webview_is_answer_quality_role(role) ?
-             strappy_webview_answer_quality_label(labels) :
-             strappy_webview_tool_activity_label(role, labels));
-    if (ok && !strappy_webview_is_answer_quality_role(role)) {
+           "<span class=\"tool-card-summary\">");
+    if (ok && render_api_reasoning_card) {
+      ok = strappy_webview_append_html_escaped(
+        &buffer,
+        strappy_webview_thinking_label(labels));
+      if (ok && (text[0] != '\0')) {
+        ok = strappy_webview_buffer_append_cstring(&buffer, ": ") &&
+             strappy_webview_append_database_display_text_html(
+               &buffer,
+               text,
+               database_display_names,
+               database_display_name_count,
+               0);
+      }
+    } else if (ok) {
+      ok = strappy_webview_append_html_escaped(
+        &buffer,
+        strappy_webview_is_answer_quality_role(role) ?
+          strappy_webview_answer_quality_label(labels) :
+          strappy_webview_tool_activity_label(role, labels));
+    }
+    if (ok && !render_api_reasoning_card &&
+        !strappy_webview_is_answer_quality_role(role)) {
       ok = strappy_webview_buffer_append_cstring(&buffer, ": ") &&
            strappy_webview_append_html_escaped(
              &buffer,
@@ -4105,16 +4079,35 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
     ok = ok &&
          strappy_webview_buffer_append_cstring(
            &buffer,
-           "</span></a><div class=\"tool-card-body\">"
-           "<div class=\"api-tool-fallback\">") &&
-         strappy_webview_append_database_display_text_html(
-           &buffer,
-           strappy_webview_is_answer_quality_role(role) ?
-             strappy_webview_answer_quality_label(labels) : text,
-           database_display_names,
-           database_display_name_count,
-           strappy_webview_is_answer_quality_role(role) ? 0 : 1) &&
-         strappy_webview_buffer_append_cstring(&buffer, "</div></div>");
+           "</span></a><div class=\"tool-card-body");
+    if (ok && render_api_reasoning_card) {
+      ok = strappy_webview_buffer_append_cstring(
+        &buffer,
+        " api-reasoning-body");
+    }
+    ok = ok && strappy_webview_buffer_append_cstring(&buffer, "\">");
+    if (ok && render_api_reasoning_card) {
+      ok = strappy_webview_append_database_display_text_html(
+        &buffer,
+        text,
+        database_display_names,
+        database_display_name_count,
+        0);
+    } else {
+      ok = ok &&
+           strappy_webview_buffer_append_cstring(
+             &buffer,
+             "<div class=\"api-tool-fallback\">") &&
+           strappy_webview_append_database_display_text_html(
+             &buffer,
+             strappy_webview_is_answer_quality_role(role) ?
+               strappy_webview_answer_quality_label(labels) : text,
+             database_display_names,
+             database_display_name_count,
+             strappy_webview_is_answer_quality_role(role) ? 0 : 1) &&
+           strappy_webview_buffer_append_cstring(&buffer, "</div>");
+    }
+    ok = ok && strappy_webview_buffer_append_cstring(&buffer, "</div>");
   } else {
     ok = ok &&
          strappy_webview_append_database_display_text_html(
