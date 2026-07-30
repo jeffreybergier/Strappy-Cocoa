@@ -97,10 +97,18 @@ int strappy_session_update_web_provider(const char *db_path,
                                         long long session_id,
                                         strappy_web_provider web_provider,
                                         char **error_out);
+int strappy_session_update_web_search_enabled(const char *db_path,
+                                              long long session_id,
+                                              int web_search_enabled,
+                                              char **error_out);
 int strappy_session_update_bash_enabled(const char *db_path,
                                         long long session_id,
                                         int bash_enabled,
                                         char **error_out);
+int strappy_session_update_limit_to_one_tool(const char *db_path,
+                                             long long session_id,
+                                             int limit_to_one_tool,
+                                             char **error_out);
 int strappy_session_get_working_directory(
   const char *db_path,
   long long session_id,

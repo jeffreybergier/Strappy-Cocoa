@@ -490,8 +490,8 @@ static int harness_run_fresh_catalog_schema_tests(
            "sessions columns") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
-           "SELECT session_id, web_provider, bash_enabled, "
-           "streaming_enabled, updated_at_ms "
+           "SELECT session_id, web_provider, web_search_enabled, bash_enabled, "
+           "limit_to_one_tool, streaming_enabled, updated_at_ms "
          "FROM session_settings LIMIT 0;",
            "session settings columns") &&
          harness_expect_catalog_integer(
@@ -503,9 +503,15 @@ static int harness_run_fresh_catalog_schema_tests(
            "automatic session web-provider default") &&
          harness_expect_catalog_integer(
            context->catalog_path,
+           "SELECT COUNT(*) FROM pragma_table_info('session_settings') "
+           "WHERE name = 'web_search_enabled' AND dflt_value = '1';",
+           1LL,
+           "enabled session web-search default") &&
+         harness_expect_catalog_integer(
+           context->catalog_path,
            "SELECT COUNT(*) FROM pragma_table_info('sessions') "
-           "WHERE name IN ('web_provider','bash_enabled',"
-           "'streaming_enabled');",
+           "WHERE name IN ('web_provider','web_search_enabled','bash_enabled',"
+           "'limit_to_one_tool','streaming_enabled');",
            0LL,
            "session toggle columns remaining in sessions") &&
          harness_expect_catalog_sql_ok(
@@ -523,7 +529,8 @@ static int harness_run_fresh_catalog_schema_tests(
            "SELECT id, turn_id, previous_request_id, round_index, "
            "request_kind, model_id, instruction_revision_id, "
            "toolset_revision_id, input_from_sequence, "
-           "input_through_sequence, new_input_from_sequence, state "
+           "input_through_sequence, new_input_from_sequence, "
+           "parallel_tool_calls, state "
            "FROM model_requests LIMIT 0;",
            "model_requests columns") &&
          harness_expect_catalog_sql_ok(
@@ -635,6 +642,131 @@ static int harness_run_fresh_catalog_schema_tests(
              "'helper_database_info');",
            0LL,
            "legacy table count");
+}
+
+static int harness_run_session_settings_upgrade_test(
+  const harness_context *context)
+{
+  static const char *old_schema_sql =
+    "CREATE TABLE sessions ("
+    "id INTEGER PRIMARY KEY,"
+    "name TEXT NOT NULL DEFAULT '',"
+    "model_id TEXT,"
+    "created_at_ms INTEGER NOT NULL,"
+    "updated_at_ms INTEGER NOT NULL"
+    ");"
+    "CREATE TABLE session_settings ("
+    "session_id INTEGER PRIMARY KEY,"
+    "web_provider TEXT NOT NULL DEFAULT 'auto',"
+    "bash_enabled INTEGER NOT NULL DEFAULT 0,"
+    "streaming_enabled INTEGER NOT NULL DEFAULT 0,"
+    "updated_at_ms INTEGER NOT NULL"
+    ");"
+    "CREATE TABLE model_requests ("
+    "id INTEGER PRIMARY KEY,"
+    "turn_id INTEGER NOT NULL,"
+    "round_index INTEGER NOT NULL"
+    ");"
+    "INSERT INTO sessions "
+    "(id, name, created_at_ms, updated_at_ms) VALUES (1, '', 1, 1);"
+    "INSERT INTO sessions "
+    "(id, name, created_at_ms, updated_at_ms) VALUES (2, '', 1, 1);"
+    "INSERT INTO session_settings "
+    "(session_id, web_provider, bash_enabled, streaming_enabled, "
+     "updated_at_ms) VALUES (1, 'auto', 0, 0, 1);"
+    "INSERT INTO session_settings "
+    "(session_id, web_provider, bash_enabled, streaming_enabled, "
+     "updated_at_ms) VALUES (2, 'none', 0, 0, 1);"
+    "PRAGMA user_version = 1;";
+  char path[1200];
+  char *error;
+  char *sqlite_error;
+  sqlite3 *db;
+  int ok;
+  int rc;
+
+  if ((context == NULL) ||
+      !harness_join_path(path,
+                         sizeof(path),
+                         context->temp_dir,
+                         "session-settings-v1.sqlite")) {
+    return 0;
+  }
+  harness_unlink_sqlite_files(path);
+  db = NULL;
+  sqlite_error = NULL;
+  rc = sqlite3_open(path, &db);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_exec(db, old_schema_sql, NULL, NULL, &sqlite_error);
+  }
+  if (db != NULL) {
+    sqlite3_close(db);
+  }
+  if (rc != SQLITE_OK) {
+    fprintf(stderr,
+            "Could not create the old session settings fixture: %s\n",
+            (sqlite_error != NULL) ? sqlite_error : "unknown");
+    sqlite3_free(sqlite_error);
+    harness_unlink_sqlite_files(path);
+    return 0;
+  }
+  sqlite3_free(sqlite_error);
+
+  error = NULL;
+  ok = strappy_db_initialize(path, &error) &&
+    harness_expect_catalog_integer(
+      path,
+      "SELECT COUNT(*) FROM pragma_table_info('session_settings') "
+      "WHERE name='limit_to_one_tool' AND dflt_value='0';",
+      1LL,
+      "upgraded single-tool column") &&
+    harness_expect_catalog_integer(
+      path,
+      "SELECT COUNT(*) FROM pragma_table_info('session_settings') "
+      "WHERE name='web_search_enabled' AND dflt_value='1';",
+      1LL,
+      "upgraded web-search column") &&
+    harness_expect_catalog_integer(
+      path,
+      "SELECT COUNT(*) FROM pragma_table_info('model_requests') "
+      "WHERE name='parallel_tool_calls' AND dflt_value='1';",
+      1LL,
+      "upgraded model request parallel-tool column") &&
+    harness_expect_catalog_integer(
+      path,
+      "SELECT limit_to_one_tool FROM session_settings WHERE session_id=1;",
+      0LL,
+      "upgraded single-tool default") &&
+    harness_expect_catalog_integer(
+      path,
+      "SELECT web_search_enabled FROM session_settings WHERE session_id=1;",
+      1LL,
+      "migrated enabled web search") &&
+    harness_expect_catalog_integer(
+      path,
+      "SELECT web_search_enabled FROM session_settings WHERE session_id=2;",
+      0LL,
+      "migrated disabled web search") &&
+    harness_expect_catalog_integer(
+      path,
+      "SELECT COUNT(*) FROM session_settings "
+      "WHERE session_id=2 AND web_provider='auto';",
+      1LL,
+      "migrated selected web provider") &&
+    strappy_db_update_session_limit_to_one_tool(path, 1LL, 1, &error) &&
+    harness_expect_catalog_integer(
+      path,
+      "SELECT limit_to_one_tool FROM session_settings WHERE session_id=1;",
+      1LL,
+      "upgraded single-tool value");
+  if (!ok) {
+    fprintf(stderr,
+            "Session settings in-place upgrade failed: %s\n",
+            (error != NULL) ? error : "unexpected schema");
+  }
+  strappy_free_string(error);
+  harness_unlink_sqlite_files(path);
+  return ok;
 }
 
 static int harness_create_user_database(const char *database_path)
@@ -7304,7 +7436,9 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (strcmp(session.assistant_set_id,
                STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT) == 0) &&
        (session.web_provider == STRAPPY_WEB_PROVIDER_AUTO) &&
+       (session.web_search_enabled == 1) &&
        (session.bash_enabled == 0) &&
+       (session.limit_to_one_tool == 0) &&
        (session.streaming_enabled == 0) &&
        (session.http_status == 0L);
   strappy_session_record_destroy(&session);
@@ -7343,28 +7477,26 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   free(assistant_set_id);
 
   error = NULL;
-  if (strappy_db_update_session_bash_enabled(context->catalog_path,
-                                             session_id,
-                                             1,
-                                             &error) ||
-      (error == NULL) ||
-      (strstr(error, "only for Coding Assistant sessions") == NULL)) {
+  if (!strappy_db_update_session_bash_enabled(context->catalog_path,
+                                              session_id,
+                                              1,
+                                              &error) ||
+      !strappy_db_get_session_bash_enabled(context->catalog_path,
+                                           session_id,
+                                           &bash_enabled,
+                                           &error) ||
+      !bash_enabled) {
     fprintf(stderr,
-            "Bash could be enabled outside the Coding Assistant.\n");
+            "Bash could not be enabled outside the Coding Assistant: %s\n",
+            (error != NULL) ? error : "unknown");
     strappy_free_string(error);
     return 0;
   }
-  strappy_free_string(error);
-  error = NULL;
   if (!strappy_db_update_session_assistant_set(
         context->catalog_path,
         session_id,
         STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
         &error) ||
-      !strappy_db_update_session_bash_enabled(context->catalog_path,
-                                              session_id,
-                                              1,
-                                              &error) ||
       !strappy_db_get_session_bash_enabled(context->catalog_path,
                                            session_id,
                                            &bash_enabled,
@@ -7379,26 +7511,53 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
                                            session_id,
                                            &bash_enabled,
                                            &error) ||
-      bash_enabled ||
-      !strappy_db_update_session_assistant_set(
-        context->catalog_path,
-        session_id,
-        STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
-        &error) ||
+      !bash_enabled ||
+      !strappy_db_update_session_bash_enabled(context->catalog_path,
+                                              session_id,
+                                              0,
+                                              &error) ||
       !strappy_db_get_session_bash_enabled(context->catalog_path,
                                            session_id,
                                            &bash_enabled,
                                            &error) ||
-      bash_enabled ||
-      !strappy_db_update_session_assistant_set(
-        context->catalog_path,
-        session_id,
-        STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE,
-        &error)) {
+      bash_enabled) {
     fprintf(stderr,
-            "Session Bash opt-in did not follow assistant selection: %s\n",
+            "Session Bash setting did not survive assistant selection: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
+    return 0;
+  }
+
+  error = NULL;
+  ok = strappy_db_update_session_limit_to_one_tool(context->catalog_path,
+                                                   session_id,
+                                                   1,
+                                                   &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not update session single-tool setting: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  strappy_session_record_init(&session);
+  ok = strappy_db_load_session(context->catalog_path,
+                               session_id,
+                               &session,
+                               &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not reload session single-tool setting: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_session_record_destroy(&session);
+    return 0;
+  }
+  ok = (session.limit_to_one_tool == 1);
+  strappy_session_record_destroy(&session);
+  if (!ok) {
+    fprintf(stderr, "Session single-tool setting was not stored.\n");
     return 0;
   }
 
@@ -7432,6 +7591,17 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   strappy_session_record_destroy(&session);
   if (!ok) {
     fprintf(stderr, "Session streaming setting was not stored.\n");
+    return 0;
+  }
+
+  if (!strappy_db_update_session_web_search_enabled(context->catalog_path,
+                                                     session_id,
+                                                     0,
+                                                     &error)) {
+    fprintf(stderr,
+            "Could not disable session web search: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
     return 0;
   }
 
@@ -7478,10 +7648,22 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
     strappy_session_record_destroy(&session);
     return 0;
   }
-  ok = (session.web_provider == STRAPPY_WEB_PROVIDER_PARALLEL);
+  ok = (session.web_provider == STRAPPY_WEB_PROVIDER_PARALLEL) &&
+       (session.web_search_enabled == 0);
   strappy_session_record_destroy(&session);
   if (!ok) {
-    fprintf(stderr, "Session web provider was not stored.\n");
+    fprintf(stderr,
+            "Provider selection unexpectedly enabled session web search.\n");
+    return 0;
+  }
+  if (!strappy_db_update_session_web_search_enabled(context->catalog_path,
+                                                     session_id,
+                                                     1,
+                                                     &error)) {
+    fprintf(stderr,
+            "Could not enable session web search: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
     return 0;
   }
 
@@ -7733,7 +7915,9 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (session.model != NULL) &&
        (strcmp(session.model, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0) &&
        (session.web_provider == STRAPPY_WEB_PROVIDER_PARALLEL) &&
+       (session.web_search_enabled == 1) &&
        (session.bash_enabled == 0) &&
+       (session.limit_to_one_tool == 1) &&
        (session.streaming_enabled == 1) &&
        (session.http_status == 200L);
   strappy_session_record_destroy(&session);
@@ -9731,6 +9915,7 @@ int main(void)
        harness_run_helper_fontawesome_tests() &&
        harness_make_temp_dir(&context) &&
        harness_run_fresh_catalog_schema_tests(&context) &&
+       harness_run_session_settings_upgrade_test(&context) &&
        harness_run_discovered_database_replacement_tests(&context) &&
        harness_run_file_scanner_batch_catalog_tests(&context) &&
        harness_run_file_scanner_hidden_tests(&context) &&

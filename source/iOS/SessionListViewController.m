@@ -350,7 +350,9 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 
   changeKind = [[notification userInfo] objectForKey:StrappySessionChangeKindKey];
   if ([changeKind isEqualToString:StrappySessionChangeKindWebProvider] ||
+      [changeKind isEqualToString:StrappySessionChangeKindWebSearch] ||
       [changeKind isEqualToString:StrappySessionChangeKindBash] ||
+      [changeKind isEqualToString:StrappySessionChangeKindLimitToOneTool] ||
       [changeKind isEqualToString:StrappySessionChangeKindWorkingDirectory] ||
       [changeKind isEqualToString:StrappySessionChangeKindStreaming]) {
     return;

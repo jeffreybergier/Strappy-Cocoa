@@ -1408,6 +1408,7 @@ static char *strappy_responses_build_request_json(
   const char *prompt_group_key,
   long round_index,
   const char *tools_json,
+  int parallel_tool_calls,
   const strappy_response_item_raw_record_list *history,
   const strappy_responses_owned_items *new_items,
   long *new_input_start_index_out,
@@ -1511,7 +1512,11 @@ static char *strappy_responses_build_request_json(
     &buffer,
     "],\"include\":[\"reasoning.encrypted_content\"],"
     "\"reasoning\":{\"enabled\":true,\"summary\":\"auto\"},"
-    "\"parallel_tool_calls\":true,\"tool_choice\":\"") &&
+    "\"parallel_tool_calls\":") &&
+    strappy_responses_buffer_append_string(
+      &buffer,
+      parallel_tool_calls ? "true" : "false") &&
+    strappy_responses_buffer_append_string(&buffer, ",\"tool_choice\":\"") &&
     strappy_responses_buffer_append_string(
       &buffer,
       "auto") &&
@@ -1535,6 +1540,7 @@ typedef struct strappy_responses_runtime {
   strappy_responses_audit audit;
   char *request_url;
   int is_first_user_prompt;
+  int parallel_tool_calls;
 } strappy_responses_runtime;
 
 static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
@@ -1549,6 +1555,7 @@ static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
   strappy_responses_audit_reset(&runtime->audit);
   runtime->request_url = NULL;
   runtime->is_first_user_prompt = 0;
+  runtime->parallel_tool_calls = 1;
 }
 
 static void strappy_responses_runtime_destroy(
@@ -1565,6 +1572,50 @@ static void strappy_responses_runtime_destroy(
   strappy_responses_runtime_init(runtime);
 }
 
+static int strappy_responses_profile_add_tool(
+  strappy_assistant_set_profile *profile,
+  const char *tool_name,
+  char **error_out)
+{
+  char **tool_names;
+  char *tool_name_copy;
+  size_t index;
+
+  if ((profile == NULL) || (tool_name == NULL) || (tool_name[0] == '\0')) {
+    strappy_set_error(error_out, "Assistant-set tool is missing.");
+    return 0;
+  }
+  for (index = 0U; index < profile->tool_name_count; index++) {
+    if ((profile->tool_names[index] != NULL) &&
+        (strcmp(profile->tool_names[index], tool_name) == 0)) {
+      return 1;
+    }
+  }
+  if (profile->tool_name_count >=
+      ((((size_t)-1) / sizeof(profile->tool_names[0])) - 1U)) {
+    strappy_set_error(error_out, "Assistant-set tool list is too large.");
+    return 0;
+  }
+  tool_name_copy = strappy_string_duplicate(tool_name);
+  if (tool_name_copy == NULL) {
+    strappy_set_error(error_out, "Could not allocate assistant-set tool.");
+    return 0;
+  }
+  tool_names = (char **)realloc(
+    profile->tool_names,
+    (profile->tool_name_count + 2U) * sizeof(profile->tool_names[0]));
+  if (tool_names == NULL) {
+    free(tool_name_copy);
+    strappy_set_error(error_out, "Could not grow assistant-set tool list.");
+    return 0;
+  }
+  profile->tool_names = tool_names;
+  profile->tool_names[profile->tool_name_count] = tool_name_copy;
+  profile->tool_name_count++;
+  profile->tool_names[profile->tool_name_count] = NULL;
+  return 1;
+}
+
 static void strappy_responses_profile_remove_tool(
   strappy_assistant_set_profile *profile,
   const char *tool_name)
@@ -1575,7 +1626,8 @@ static void strappy_responses_profile_remove_tool(
     return;
   }
   for (index = 0U; index < profile->tool_name_count; index++) {
-    if (strcmp(profile->tool_names[index], tool_name) == 0) {
+    if ((profile->tool_names[index] != NULL) &&
+        (strcmp(profile->tool_names[index], tool_name) == 0)) {
       free(profile->tool_names[index]);
       if ((index + 1U) < profile->tool_name_count) {
         memmove(&profile->tool_names[index],
@@ -1587,6 +1639,37 @@ static void strappy_responses_profile_remove_tool(
       profile->tool_names[profile->tool_name_count] = NULL;
       return;
     }
+  }
+}
+
+static void strappy_responses_profile_remove_preflight_tool(
+  strappy_assistant_set_profile *profile,
+  const char *tool_name)
+{
+  size_t index;
+
+  if ((profile == NULL) || (tool_name == NULL)) {
+    return;
+  }
+  index = 0U;
+  while (index < profile->preflight_call_count) {
+    if ((profile->preflight_calls[index].tool_name == NULL) ||
+        (strcmp(profile->preflight_calls[index].tool_name, tool_name) != 0)) {
+      index++;
+      continue;
+    }
+    free(profile->preflight_calls[index].tool_name);
+    free(profile->preflight_calls[index].arguments_json);
+    if ((index + 1U) < profile->preflight_call_count) {
+      memmove(&profile->preflight_calls[index],
+              &profile->preflight_calls[index + 1U],
+              (profile->preflight_call_count - index - 1U) *
+                sizeof(profile->preflight_calls[0]));
+    }
+    profile->preflight_call_count--;
+    profile->preflight_calls[profile->preflight_call_count].tool_name = NULL;
+    profile->preflight_calls[profile->preflight_call_count].arguments_json =
+      NULL;
   }
 }
 
@@ -1694,8 +1777,11 @@ static int strappy_responses_prepare_runtime(
     strappy_responses_runtime_destroy(runtime);
     return 0;
   }
-  runtime->config.web_provider = session.web_provider;
+  runtime->config.web_provider = session.web_search_enabled
+    ? session.web_provider
+    : STRAPPY_WEB_PROVIDER_NONE;
   bash_enabled = session.bash_enabled ? 1 : 0;
+  runtime->parallel_tool_calls = session.limit_to_one_tool ? 0 : 1;
   runtime->is_first_user_prompt =
     (session.prompt == NULL) || (session.prompt[0] == '\0');
   assistant_set_id = strappy_string_duplicate(session.assistant_set_id);
@@ -1737,13 +1823,22 @@ static int strappy_responses_prepare_runtime(
     return 0;
   }
   free(assistant_set_id);
+  if (bash_enabled) {
+    if (!strappy_responses_profile_add_tool(&runtime->assistant_set,
+                                            STRAPPY_TOOL_BASH,
+                                            error_out)) {
+      strappy_responses_runtime_destroy(runtime);
+      return 0;
+    }
+  } else {
+    strappy_responses_profile_remove_preflight_tool(&runtime->assistant_set,
+                                                    STRAPPY_TOOL_BASH);
+    strappy_responses_profile_remove_tool(&runtime->assistant_set,
+                                          STRAPPY_TOOL_BASH);
+  }
   if (!strappy_responses_validate_assistant_set(runtime, error_out)) {
     strappy_responses_runtime_destroy(runtime);
     return 0;
-  }
-  if (!bash_enabled) {
-    strappy_responses_profile_remove_tool(&runtime->assistant_set,
-                                          STRAPPY_TOOL_BASH);
   }
   runtime->config.tool_allowlist =
     (const char * const *)runtime->assistant_set.tool_names;
@@ -2693,6 +2788,7 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
       prompt_group_key,
       round_index,
       runtime.tools_json,
+      runtime.parallel_tool_calls,
       &history,
       &new_items,
       &new_input_start_index,

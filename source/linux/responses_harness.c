@@ -1733,6 +1733,7 @@ static int harness_request_base_is_valid(cJSON *root,
 {
   cJSON *stream;
   cJSON *store;
+  cJSON *parallel_tool_calls;
   cJSON *instructions;
   cJSON *session_key;
   cJSON *metadata;
@@ -1750,6 +1751,7 @@ static int harness_request_base_is_valid(cJSON *root,
 
   stream = cJSON_GetObjectItem(root, "stream");
   store = cJSON_GetObjectItem(root, "store");
+  parallel_tool_calls = cJSON_GetObjectItem(root, "parallel_tool_calls");
   instructions = cJSON_GetObjectItem(root, "instructions");
   session_key = cJSON_GetObjectItem(root, "session_id");
   metadata = cJSON_GetObjectItem(root, "metadata");
@@ -1774,6 +1776,7 @@ static int harness_request_base_is_valid(cJSON *root,
             "titled inline Markdown HTTP or HTTPS link") != NULL);
   text = harness_message_text(cJSON_GetArrayItem(input, 0));
   if (!cJSON_IsFalse(stream) || !cJSON_IsFalse(store) ||
+      !cJSON_IsTrue(parallel_tool_calls) ||
       !cJSON_IsString(instructions) ||
       (instructions->valuestring == NULL) ||
       !harness_instructions_include_resource_sections(
@@ -1816,9 +1819,11 @@ static int harness_request_base_is_valid(cJSON *root,
   return 1;
 }
 
-static int harness_world_knowledge_tools_are_valid(cJSON *tools)
+static int harness_world_knowledge_tools_are_valid(cJSON *tools,
+                                                   int bash_enabled)
 {
-  return cJSON_IsArray(tools) && (cJSON_GetArraySize(tools) == 10) &&
+  return cJSON_IsArray(tools) &&
+    (cJSON_GetArraySize(tools) == (bash_enabled ? 11 : 10)) &&
     harness_server_tool_has_engine(
       tools,
       STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
@@ -1839,6 +1844,8 @@ static int harness_world_knowledge_tools_are_valid(cJSON *tools)
     harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_SAVE) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_DELETE) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_SESSION_RENAME) &&
+    (harness_has_tool_name(tools, STRAPPY_TOOL_BASH) ==
+      (bash_enabled ? 1 : 0)) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_LIST) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_QUERY) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_CONTEXT) &&
@@ -1867,6 +1874,7 @@ static int harness_database_study_tools_are_valid(cJSON *tools)
 static int harness_world_knowledge_request_is_valid(
   cJSON *root,
   const char *expected_prompt,
+  int bash_enabled,
   char **session_key_out,
   char **prompt_group_out)
 {
@@ -1919,7 +1927,7 @@ static int harness_world_knowledge_request_is_valid(
                                        memory_call,
                                        "[]") ||
       (text == NULL) || (strcmp(text, expected_prompt) != 0) ||
-      !harness_world_knowledge_tools_are_valid(tools)) {
+      !harness_world_knowledge_tools_are_valid(tools, bash_enabled)) {
     return 0;
   }
   if (session_key_out != NULL) {
@@ -2106,8 +2114,8 @@ static int harness_world_followup_request_is_valid(
     harness_message_role_is(cJSON_GetArrayItem(input, 5), "user") &&
     (second_prompt != NULL) &&
     (strcmp(second_prompt, "Second prompt") == 0) &&
-    harness_world_knowledge_tools_are_valid(cJSON_GetObjectItem(root,
-                                                                "tools"));
+    harness_world_knowledge_tools_are_valid(cJSON_GetObjectItem(root, "tools"),
+                                            0);
 }
 
 static int harness_isolated_followup_request_is_valid(
@@ -2142,7 +2150,8 @@ static int harness_isolated_followup_request_is_valid(
 static int harness_coding_assistant_request_is_valid(
   cJSON *root,
   const char *expected_prompt,
-  int bash_enabled)
+  int bash_enabled,
+  int parallel_tool_calls)
 {
   cJSON *instructions;
   cJSON *metadata;
@@ -2152,6 +2161,9 @@ static int harness_coding_assistant_request_is_valid(
   cJSON *bash_call;
   cJSON *bash_arguments;
   cJSON *tools;
+  cJSON *parallel_tool_calls_value;
+  int expected_input_count;
+  int memory_output_index;
   const char *text;
 
   instructions = cJSON_GetObjectItem(root, "instructions");
@@ -2160,17 +2172,22 @@ static int harness_coding_assistant_request_is_valid(
     cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
   input = cJSON_GetObjectItem(root, "input");
   memory_call = cJSON_GetArrayItem(input, 2);
-  bash_call = cJSON_GetArrayItem(input, 3);
+  bash_call = bash_enabled ? cJSON_GetArrayItem(input, 3) : NULL;
   bash_arguments = cJSON_IsObject(bash_call) ?
     cJSON_GetObjectItem(bash_call, "arguments") : NULL;
   tools = cJSON_GetObjectItem(root, "tools");
+  parallel_tool_calls_value =
+    cJSON_GetObjectItem(root, "parallel_tool_calls");
   text = harness_message_text(cJSON_GetArrayItem(input, 0));
+  expected_input_count = bash_enabled ? 6 : 4;
+  memory_output_index = bash_enabled ? 4 : 3;
   return cJSON_IsString(instructions) &&
     (instructions->valuestring != NULL) &&
     (strstr(instructions->valuestring,
             "You are an expert coding assistant.") != NULL) &&
     cJSON_IsString(prompt_group) && (prompt_group->valuestring != NULL) &&
-    cJSON_IsArray(input) && (cJSON_GetArraySize(input) == 6) &&
+    cJSON_IsArray(input) &&
+    (cJSON_GetArraySize(input) == expected_input_count) &&
     harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") &&
     harness_message_role_is(cJSON_GetArrayItem(input, 1), "assistant") &&
     (harness_message_text(cJSON_GetArrayItem(input, 1)) != NULL) &&
@@ -2183,20 +2200,27 @@ static int harness_coding_assistant_request_is_valid(
                                     "fc_pf_0_",
                                     "call_pf_0_",
                                     prompt_group->valuestring) &&
-    harness_preflight_call_is_valid(bash_call,
-                                    STRAPPY_TOOL_BASH,
-                                    NULL,
-                                    "fc_pf_1_",
-                                    "call_pf_1_",
-                                    prompt_group->valuestring) &&
-    harness_coding_preflight_bash_arguments_are_valid(
-      cJSON_IsString(bash_arguments) ? bash_arguments->valuestring : NULL) &&
-    harness_preflight_output_matches(cJSON_GetArrayItem(input, 4),
-                                     memory_call,
-                                     1) &&
-    harness_preflight_bash_output_is_valid(cJSON_GetArrayItem(input, 5),
-                                           bash_call) &&
+    (!bash_enabled ||
+      (harness_preflight_call_is_valid(bash_call,
+                                       STRAPPY_TOOL_BASH,
+                                       NULL,
+                                       "fc_pf_1_",
+                                       "call_pf_1_",
+                                       prompt_group->valuestring) &&
+       harness_coding_preflight_bash_arguments_are_valid(
+         cJSON_IsString(bash_arguments) ?
+           bash_arguments->valuestring : NULL))) &&
+    harness_preflight_output_matches(
+      cJSON_GetArrayItem(input, memory_output_index),
+      memory_call,
+      1) &&
+    (!bash_enabled ||
+      harness_preflight_bash_output_is_valid(cJSON_GetArrayItem(input, 5),
+                                             bash_call)) &&
     cJSON_IsArray(tools) &&
+    (parallel_tool_calls ?
+      cJSON_IsTrue(parallel_tool_calls_value) :
+      cJSON_IsFalse(parallel_tool_calls_value)) &&
     (cJSON_GetArraySize(tools) == (bash_enabled ? 12 : 11)) &&
     (harness_has_tool_name(tools, STRAPPY_TOOL_BASH) ==
       (bash_enabled ? 1 : 0)) &&
@@ -2707,6 +2731,7 @@ static int harness_run_world_knowledge_server(int listener_fd)
   ok = cJSON_IsObject(root) &&
     harness_world_knowledge_request_is_valid(root,
                                              "Use world knowledge",
+                                             1,
                                              &session_key,
                                              &prompt_group) &&
     harness_send_json_response(client_fd, 200L, final_response);
@@ -2758,6 +2783,7 @@ static int harness_run_first_prompt_preflight_server(int listener_fd)
   ok = cJSON_IsObject(root) &&
     harness_world_knowledge_request_is_valid(root,
                                              "First prompt",
+                                             0,
                                              &session_key,
                                              &prompt_group) &&
     harness_send_json_response(client_fd, 200L, first_response);
@@ -3220,6 +3246,7 @@ static int harness_run_bash_cancellation_server(int listener_fd)
   ok = cJSON_IsObject(root) &&
     harness_coding_assistant_request_is_valid(root,
                                               "Cancel bash tool",
+                                              1,
                                               1) &&
     harness_send_json_response(client_fd, 200L, tool_response);
   cJSON_Delete(root);
@@ -3273,6 +3300,7 @@ static int harness_run_bash_output_server(int listener_fd)
   if (cJSON_IsObject(root) &&
       harness_coding_assistant_request_is_valid(root,
                                                 "Report bash truncation",
+                                                1,
                                                 1)) {
     cJSON *request_session;
     cJSON *metadata;
@@ -3365,7 +3393,8 @@ static int harness_run_file_mutation_server(int listener_fd)
   if (cJSON_IsObject(root) &&
       harness_coding_assistant_request_is_valid(root,
                                                 "Mutate a file",
-                                                0)) {
+                                                0,
+                                                1)) {
     cJSON *request_session;
     cJSON *metadata;
     cJSON *request_group;
@@ -3437,6 +3466,7 @@ static int harness_run_coding_bash_disabled_server(int listener_fd)
   ok = cJSON_IsObject(root) &&
     harness_coding_assistant_request_is_valid(root,
                                               "Keep bash disabled",
+                                              0,
                                               0) &&
     harness_send_json_response(client_fd, 200L, final_response);
   cJSON_Delete(root);
@@ -4217,6 +4247,10 @@ static int harness_test_world_knowledge_assistant_set(void)
         session_id,
         STRAPPY_WEB_PROVIDER_PARALLEL,
         &error) ||
+      !strappy_db_update_session_bash_enabled(path,
+                                              session_id,
+                                              1,
+                                              &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_WORLD_KNOWLEDGE,
                             endpoint,
                             sizeof(endpoint),
@@ -5173,10 +5207,10 @@ static int harness_test_function_tool_continuation(void)
   session_id = 0LL;
   strappy_session_message_record_list_init(&timeline);
   if (!harness_create_session_database(path, &session_id, &error) ||
-      !strappy_db_update_session_web_provider(path,
-                                              session_id,
-                                              STRAPPY_WEB_PROVIDER_NONE,
-                                              &error) ||
+      !strappy_db_update_session_web_search_enabled(path,
+                                                    session_id,
+                                                    0,
+                                                    &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_FUNCTION_TOOL,
                             endpoint,
                             sizeof(endpoint),
@@ -5371,10 +5405,10 @@ static int harness_test_file_mutation_continuation(void)
                                                    session_id,
                                                    working_directory,
                                                    &error) ||
-      !strappy_db_update_session_web_provider(path,
-                                              session_id,
-                                              STRAPPY_WEB_PROVIDER_NONE,
-                                              &error) ||
+      !strappy_db_update_session_web_search_enabled(path,
+                                                    session_id,
+                                                    0,
+                                                    &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_FILE_MUTATION,
                             endpoint,
                             sizeof(endpoint),
@@ -5485,10 +5519,14 @@ static int harness_test_bash_disabled_request(void)
         session_id,
         STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
         &error) ||
-      !strappy_db_update_session_web_provider(path,
-                                              session_id,
-                                              STRAPPY_WEB_PROVIDER_NONE,
-                                              &error) ||
+      !strappy_db_update_session_web_search_enabled(path,
+                                                    session_id,
+                                                    0,
+                                                    &error) ||
+      !strappy_db_update_session_limit_to_one_tool(path,
+                                                   session_id,
+                                                   1,
+                                                   &error) ||
       !strappy_db_get_session_bash_enabled(path,
                                            session_id,
                                            &bash_enabled,
@@ -5530,8 +5568,13 @@ static int harness_test_bash_disabled_request(void)
                         "WHERE tool_name='file_read';",
                         &value) && (value == 1LL) &&
       harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests "
+                        "WHERE parallel_tool_calls=0;",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
                         "SELECT COUNT(*) FROM session_settings WHERE "
-                        "session_id > 0 AND bash_enabled=0;",
+                        "session_id > 0 AND bash_enabled=0 "
+                        "AND limit_to_one_tool=1;",
                         &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
@@ -5579,10 +5622,10 @@ static int harness_test_bash_output_truncation_flag(void)
                                               session_id,
                                               1,
                                               &error) ||
-      !strappy_db_update_session_web_provider(path,
-                                              session_id,
-                                              STRAPPY_WEB_PROVIDER_NONE,
-                                              &error) ||
+      !strappy_db_update_session_web_search_enabled(path,
+                                                    session_id,
+                                                    0,
+                                                    &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_BASH_OUTPUT,
                             endpoint,
                             sizeof(endpoint),
@@ -5683,10 +5726,10 @@ static int harness_test_bash_tool_cancellation(void)
                                               session_id,
                                               1,
                                               &error) ||
-      !strappy_db_update_session_web_provider(path,
-                                              session_id,
-                                              STRAPPY_WEB_PROVIDER_NONE,
-                                              &error) ||
+      !strappy_db_update_session_web_search_enabled(path,
+                                                    session_id,
+                                                    0,
+                                                    &error) ||
       !harness_start_server(HARNESS_RESPONSES_SERVER_BASH_CANCELLATION,
                             endpoint,
                             sizeof(endpoint),

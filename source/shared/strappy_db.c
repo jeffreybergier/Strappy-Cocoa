@@ -33,15 +33,22 @@
 #define STRAPPY_DB_SESSION_ASSISTANT_SET_SQL \
   "COALESCE((SELECT a.assistant_set_id FROM session_assistant_sets a " \
   "WHERE a.session_id = s.id), '" STRAPPY_ASSISTANT_SET_DEFAULT "')"
+#define STRAPPY_DB_DEFAULT_SESSION_WEB_PROVIDER "auto"
+#define STRAPPY_DB_DEFAULT_SESSION_WEB_SEARCH_ENABLED "1"
 #define STRAPPY_DB_SESSION_WEB_PROVIDER_SQL \
   "COALESCE((SELECT x.web_provider FROM session_settings x " \
-  "WHERE x.session_id = s.id), 'none')"
-#define STRAPPY_DB_DEFAULT_SESSION_WEB_PROVIDER "auto"
+  "WHERE x.session_id = s.id), '" \
+  STRAPPY_DB_DEFAULT_SESSION_WEB_PROVIDER "')"
+#define STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL \
+  "COALESCE((SELECT x.web_search_enabled FROM session_settings x " \
+  "WHERE x.session_id = s.id), " \
+  STRAPPY_DB_DEFAULT_SESSION_WEB_SEARCH_ENABLED ")"
 #define STRAPPY_DB_SESSION_BASH_ENABLED_SQL \
-  "CASE WHEN " STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " = '" \
-  STRAPPY_ASSISTANT_SET_CODING_ASSISTANT "' THEN " \
   "COALESCE((SELECT b.bash_enabled FROM session_settings b " \
-  "WHERE b.session_id = s.id), 0) ELSE 0 END"
+  "WHERE b.session_id = s.id), 0)"
+#define STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL \
+  "COALESCE((SELECT x.limit_to_one_tool FROM session_settings x " \
+  "WHERE x.session_id = s.id), 0)"
 #define STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL \
   "COALESCE((SELECT x.streaming_enabled FROM session_settings x " \
   "WHERE x.session_id = s.id), 0)"
@@ -327,8 +334,10 @@ void strappy_session_record_init(strappy_session_record *record)
   record->created_at = NULL;
   record->last_activity_at = NULL;
   record->last_activity_at_ms = 0LL;
-  record->web_provider = STRAPPY_WEB_PROVIDER_NONE;
+  record->web_provider = STRAPPY_WEB_PROVIDER_AUTO;
+  record->web_search_enabled = 0;
   record->bash_enabled = 0;
+  record->limit_to_one_tool = 0;
   record->streaming_enabled = 0;
   record->http_status = 0L;
 }
@@ -1310,6 +1319,196 @@ static int strappy_db_reset_legacy_schema(sqlite3 *db, char **error_out)
                          error_out);
 }
 
+static int strappy_db_ensure_session_settings_limit_column(
+  sqlite3 *db,
+  char **error_out)
+{
+  sqlite3_stmt *stmt;
+  int found;
+  int rc;
+
+  stmt = NULL;
+  found = 0;
+  rc = sqlite3_prepare_v2(
+    db,
+    "PRAGMA table_info(session_settings);",
+    -1,
+    &stmt,
+    NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not inspect session settings schema: %s",
+      sqlite3_errmsg(db));
+    return 0;
+  }
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    const unsigned char *name;
+
+    name = sqlite3_column_text(stmt, 1);
+    if ((name != NULL) &&
+        (strcmp((const char *)name, "limit_to_one_tool") == 0)) {
+      found = 1;
+      break;
+    }
+  }
+  if ((rc != SQLITE_ROW) && (rc != SQLITE_DONE)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not inspect session settings schema: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+  if (found) {
+    return 1;
+  }
+  return strappy_db_exec(
+    db,
+    "ALTER TABLE session_settings ADD COLUMN "
+      "limit_to_one_tool INTEGER NOT NULL DEFAULT 0 "
+      "CHECK(limit_to_one_tool IN (0,1));",
+    "Could not add the session single-tool setting",
+    error_out);
+}
+
+static int strappy_db_ensure_session_settings_web_search_column(
+  sqlite3 *db,
+  char **error_out)
+{
+  sqlite3_stmt *stmt;
+  int found;
+  int rc;
+
+  stmt = NULL;
+  found = 0;
+  rc = sqlite3_prepare_v2(
+    db,
+    "PRAGMA table_info(session_settings);",
+    -1,
+    &stmt,
+    NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not inspect session settings schema: %s",
+      sqlite3_errmsg(db));
+    return 0;
+  }
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    const unsigned char *name;
+
+    name = sqlite3_column_text(stmt, 1);
+    if ((name != NULL) &&
+        (strcmp((const char *)name, "web_search_enabled") == 0)) {
+      found = 1;
+      break;
+    }
+  }
+  if ((rc != SQLITE_ROW) && (rc != SQLITE_DONE)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not inspect session settings schema: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+  if (found) {
+    return 1;
+  }
+
+  if (!strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin the web-search setting migration",
+                       error_out)) {
+    return 0;
+  }
+  if (!strappy_db_exec(
+        db,
+        "ALTER TABLE session_settings ADD COLUMN "
+          "web_search_enabled INTEGER NOT NULL DEFAULT "
+          STRAPPY_DB_DEFAULT_SESSION_WEB_SEARCH_ENABLED " "
+          "CHECK(web_search_enabled IN (0,1));",
+        "Could not add the session web-search setting",
+        error_out) ||
+      !strappy_db_exec(
+        db,
+        "UPDATE session_settings "
+        "SET web_search_enabled = "
+          "CASE WHEN web_provider = 'none' THEN 0 ELSE 1 END, "
+          "web_provider = "
+          "CASE WHEN web_provider = 'none' THEN 'auto' ELSE web_provider END;",
+        "Could not migrate the session web-search setting",
+        error_out) ||
+      !strappy_db_exec(db,
+                       "COMMIT;",
+                       "Could not commit the web-search setting migration",
+                       error_out)) {
+    strappy_db_exec(db,
+                    "ROLLBACK;",
+                    "Could not roll back the web-search setting migration",
+                    NULL);
+    return 0;
+  }
+  return 1;
+}
+
+static int strappy_db_ensure_model_requests_parallel_tool_calls_column(
+  sqlite3 *db,
+  char **error_out)
+{
+  sqlite3_stmt *stmt;
+  int found;
+  int rc;
+
+  stmt = NULL;
+  found = 0;
+  rc = sqlite3_prepare_v2(
+    db,
+    "PRAGMA table_info(model_requests);",
+    -1,
+    &stmt,
+    NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not inspect model request schema: %s",
+      sqlite3_errmsg(db));
+    return 0;
+  }
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    const unsigned char *name;
+
+    name = sqlite3_column_text(stmt, 1);
+    if ((name != NULL) &&
+        (strcmp((const char *)name, "parallel_tool_calls") == 0)) {
+      found = 1;
+      break;
+    }
+  }
+  if ((rc != SQLITE_ROW) && (rc != SQLITE_DONE)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not inspect model request schema: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+  if (found) {
+    return 1;
+  }
+  return strappy_db_exec(
+    db,
+    "ALTER TABLE model_requests ADD COLUMN "
+      "parallel_tool_calls INTEGER NOT NULL DEFAULT 1 "
+      "CHECK(parallel_tool_calls IN (0,1));",
+    "Could not add the model request parallel-tool setting",
+    error_out);
+}
+
 static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
 {
   static const char schema_models_sql[] =
@@ -1399,8 +1598,13 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "web_provider TEXT NOT NULL DEFAULT '"
       STRAPPY_DB_DEFAULT_SESSION_WEB_PROVIDER "' "
       "CHECK(web_provider IN ('none','auto','native','exa','parallel')),"
+    "web_search_enabled INTEGER NOT NULL DEFAULT "
+      STRAPPY_DB_DEFAULT_SESSION_WEB_SEARCH_ENABLED " "
+      "CHECK(web_search_enabled IN (0,1)),"
     "bash_enabled INTEGER NOT NULL DEFAULT 0 "
       "CHECK(bash_enabled IN (0,1)),"
+    "limit_to_one_tool INTEGER NOT NULL DEFAULT 0 "
+      "CHECK(limit_to_one_tool IN (0,1)),"
     "streaming_enabled INTEGER NOT NULL DEFAULT 0 "
       "CHECK(streaming_enabled IN (0,1)),"
     "updated_at_ms INTEGER NOT NULL,"
@@ -1473,6 +1677,8 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "reasoning_enabled INTEGER NOT NULL DEFAULT 1 "
       "CHECK(reasoning_enabled IN (0,1)),"
     "reasoning_summary TEXT,"
+    "parallel_tool_calls INTEGER NOT NULL DEFAULT 1 "
+      "CHECK(parallel_tool_calls IN (0,1)),"
     "tool_calls_enabled INTEGER NOT NULL DEFAULT 1 "
       "CHECK(tool_calls_enabled IN (0,1)),"
     "state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN "
@@ -1902,6 +2108,17 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
                          error_out)) {
       return 0;
     }
+  }
+  if (!strappy_db_ensure_session_settings_limit_column(db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_session_settings_web_search_column(db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_model_requests_parallel_tool_calls_column(
+        db,
+        error_out)) {
+    return 0;
   }
   if (!strappy_db_exec(db,
                        STRAPPY_DB_INSERT_BUILTIN_DEFAULT_MODEL_SQL,
@@ -2387,14 +2604,16 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
     return 0;
   }
   record->bash_enabled = sqlite3_column_int(stmt, 11) ? 1 : 0;
-  record->streaming_enabled = sqlite3_column_int(stmt, 12) ? 1 : 0;
+  record->limit_to_one_tool = sqlite3_column_int(stmt, 12) ? 1 : 0;
+  record->streaming_enabled = sqlite3_column_int(stmt, 13) ? 1 : 0;
+  record->web_search_enabled = sqlite3_column_int(stmt, 15) ? 1 : 0;
 
   name = strappy_db_column_string(stmt, 1);
   prompt = strappy_db_column_string(stmt, 2);
   response = strappy_db_column_string(stmt, 3);
   model = strappy_db_column_string(stmt, 4);
   model_name = strappy_db_column_string(stmt, 5);
-  assistant_set_id = strappy_db_column_string(stmt, 13);
+  assistant_set_id = strappy_db_column_string(stmt, 14);
   created_at = strappy_db_column_string(stmt, 7);
   last_activity_at = strappy_db_column_string(stmt, 8);
 
@@ -7605,9 +7824,10 @@ static int strappy_db_save_session_settings(sqlite3 *db,
 {
   static const char *sql =
     "INSERT INTO session_settings "
-    "(session_id, web_provider, bash_enabled, streaming_enabled, "
-     "updated_at_ms) VALUES (?, '"
-       STRAPPY_DB_DEFAULT_SESSION_WEB_PROVIDER "', 0, 0, ?);";
+    "(session_id, web_provider, web_search_enabled, bash_enabled, "
+     "limit_to_one_tool, streaming_enabled, updated_at_ms) VALUES (?, '"
+       STRAPPY_DB_DEFAULT_SESSION_WEB_PROVIDER "', "
+       STRAPPY_DB_DEFAULT_SESSION_WEB_SEARCH_ENABLED ", 0, 0, 0, ?);";
   sqlite3_stmt *stmt;
   int rc;
 
@@ -8288,6 +8508,68 @@ int strappy_db_update_session_streaming_enabled(const char *db_path,
   return 1;
 }
 
+int strappy_db_update_session_limit_to_one_tool(const char *db_path,
+                                                long long session_id,
+                                                int limit_to_one_tool,
+                                                char **error_out)
+{
+  static const char *sql =
+    "UPDATE session_settings "
+    "SET limit_to_one_tool = ?, updated_at_ms = "
+      "CAST(strftime('%s','now') AS INTEGER) * 1000 "
+    "WHERE session_id = ?;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  if (!strappy_db_session_exists(db, session_id, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not prepare session single-tool update: %s",
+      sqlite3_errmsg(db));
+    strappy_db_release(db);
+    return 0;
+  }
+  if ((sqlite3_bind_int(stmt, 1, limit_to_one_tool ? 1 : 0) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) != SQLITE_OK)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not bind session single-tool update: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  rc = sqlite3_step(stmt);
+  if ((rc != SQLITE_DONE) || (sqlite3_changes(db) != 1)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not update session single-tool setting: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  strappy_db_release(db);
+  return 1;
+}
+
 int strappy_db_save_message_sequence_with_id(
   const char *db_path,
   const char *prompt,
@@ -8486,6 +8768,69 @@ int strappy_db_update_session_web_provider(
   return 1;
 }
 
+int strappy_db_update_session_web_search_enabled(
+  const char *db_path,
+  long long session_id,
+  int web_search_enabled,
+  char **error_out)
+{
+  static const char *sql =
+    "UPDATE session_settings "
+    "SET web_search_enabled = ?, updated_at_ms = "
+      "CAST(strftime('%s','now') AS INTEGER) * 1000 "
+    "WHERE session_id = ?;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  if (!strappy_db_session_exists(db, session_id, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not prepare session web-search update: %s",
+      sqlite3_errmsg(db));
+    strappy_db_release(db);
+    return 0;
+  }
+  if ((sqlite3_bind_int(stmt, 1, web_search_enabled ? 1 : 0) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) != SQLITE_OK)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not bind session web-search update: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  rc = sqlite3_step(stmt);
+  if ((rc != SQLITE_DONE) || (sqlite3_changes(db) != 1)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not update session web-search setting: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  strappy_db_release(db);
+  return 1;
+}
+
 static int strappy_db_save_session_bash_enabled(sqlite3 *db,
                                                 long long session_id,
                                                 int bash_enabled,
@@ -8666,7 +9011,6 @@ int strappy_db_update_session_bash_enabled(const char *db_path,
                                            char **error_out)
 {
   sqlite3 *db;
-  char *assistant_set_id;
 
   if (!strappy_db_open(db_path, &db, error_out)) {
     return 0;
@@ -8679,33 +9023,6 @@ int strappy_db_update_session_bash_enabled(const char *db_path,
     strappy_db_release(db);
     return 0;
   }
-  assistant_set_id = NULL;
-  if (!strappy_db_copy_session_assistant_set(db,
-                                             session_id,
-                                             &assistant_set_id,
-                                             error_out)) {
-    strappy_db_exec(db,
-                    "ROLLBACK;",
-                    "Could not roll back Bash-setting update",
-                    NULL);
-    strappy_db_release(db);
-    return 0;
-  }
-  if (bash_enabled &&
-      (strcmp(assistant_set_id,
-              STRAPPY_ASSISTANT_SET_CODING_ASSISTANT) != 0)) {
-    free(assistant_set_id);
-    strappy_set_error(
-      error_out,
-      "Bash can be enabled only for Coding Assistant sessions.");
-    strappy_db_exec(db,
-                    "ROLLBACK;",
-                    "Could not roll back Bash-setting update",
-                    NULL);
-    strappy_db_release(db);
-    return 0;
-  }
-  free(assistant_set_id);
   if (!strappy_db_save_session_bash_enabled(db,
                                             session_id,
                                             bash_enabled,
@@ -8764,20 +9081,6 @@ int strappy_db_update_session_assistant_set(const char *db_path,
                                              &current,
                                              error_out)) {
     strappy_db_exec(db, "ROLLBACK;", "Could not roll back assistant-set update", NULL);
-    strappy_db_release(db);
-    return 0;
-  }
-  if ((strcmp(assistant_set_id,
-              STRAPPY_ASSISTANT_SET_CODING_ASSISTANT) != 0) &&
-      !strappy_db_save_session_bash_enabled(db,
-                                            session_id,
-                                            0,
-                                            error_out)) {
-    free(current);
-    strappy_db_exec(db,
-                    "ROLLBACK;",
-                    "Could not roll back assistant-set update",
-                    NULL);
     strappy_db_release(db);
     return 0;
   }
@@ -8866,8 +9169,10 @@ int strappy_db_list_sessions(const char *db_path,
     STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
     STRAPPY_DB_SESSION_WEB_PROVIDER_SQL ", "
     STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
     STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
-    STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " "
+    STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
+    STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " "
     "ORDER BY " STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " DESC, s.id DESC;";
@@ -8981,8 +9286,10 @@ int strappy_db_load_session(const char *db_path,
     STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
     STRAPPY_DB_SESSION_WEB_PROVIDER_SQL ", "
     STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
     STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
-    STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " "
+    STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
+    STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " WHERE s.id = ?;";
   sqlite3 *db;
@@ -9072,8 +9379,10 @@ int strappy_db_load_session_list_record(const char *db_path,
     STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL ", "
     STRAPPY_DB_SESSION_WEB_PROVIDER_SQL ", "
     STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
     STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
-    STRAPPY_DB_SESSION_ASSISTANT_SET_SQL " "
+    STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
+    STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " WHERE s.id = ?;";
   sqlite3 *db;
@@ -13255,9 +13564,9 @@ static int strappy_db_semantic_begin_response_call(
      "instruction_revision_id, toolset_revision_id, input_from_sequence, "
      "input_through_sequence, new_input_from_sequence, max_output_tokens, "
      "temperature_millionths, web_provider, stream_enabled, "
-     "reasoning_enabled, reasoning_summary, tool_calls_enabled, state, "
-     "created_at_ms) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, "
+     "reasoning_enabled, reasoning_summary, parallel_tool_calls, "
+     "tool_calls_enabled, state, created_at_ms) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, "
      "'running', ?);";
   static const char *update_request_sql =
     "UPDATE model_requests SET input_from_sequence = ?, "
@@ -13280,6 +13589,7 @@ static int strappy_db_semantic_begin_response_call(
   cJSON *stream;
   cJSON *reasoning;
   cJSON *reasoning_summary;
+  cJSON *parallel_tool_calls;
   const char *model_id;
   const char *summary_text;
   const char *web_provider_name;
@@ -13366,6 +13676,8 @@ static int strappy_db_semantic_begin_response_call(
     reasoning = cJSON_GetObjectItem(root, "reasoning");
     reasoning_summary = cJSON_IsObject(reasoning) ?
       cJSON_GetObjectItem(reasoning, "summary") : NULL;
+    parallel_tool_calls =
+      cJSON_GetObjectItem(root, "parallel_tool_calls");
     model_id = (cJSON_IsString(model) && (model->valuestring != NULL) &&
                 (model->valuestring[0] != '\0')) ?
       model->valuestring : STRAPPY_CONFIG_DEFAULT_API_MODEL;
@@ -13479,9 +13791,11 @@ static int strappy_db_semantic_begin_response_call(
                            (reasoning == NULL || cJSON_IsNull(reasoning)) ? 0 : 1) == SQLITE_OK) &&
          strappy_db_bind_nullable_text_value(stmt, 15, summary_text) &&
          (sqlite3_bind_int(stmt, 16,
+                           cJSON_IsFalse(parallel_tool_calls) ? 0 : 1) == SQLITE_OK) &&
+         (sqlite3_bind_int(stmt, 17,
                            cJSON_IsArray(tools) &&
                            (cJSON_GetArraySize(tools) > 0) ? 1 : 0) == SQLITE_OK) &&
-         (sqlite3_bind_int64(stmt, 17, (sqlite3_int64)now_ms) == SQLITE_OK);
+         (sqlite3_bind_int64(stmt, 18, (sqlite3_int64)now_ms) == SQLITE_OK);
     if (!ok || (sqlite3_step(stmt) != SQLITE_DONE)) {
       strappy_set_formatted_error(error_out,
                                   "Could not save semantic Responses request: %s",

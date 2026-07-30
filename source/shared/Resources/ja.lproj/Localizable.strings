@@ -42,6 +42,19 @@
 "Assistant" = "アシスタント";
 "Different tools are available the model based on the selection" = "選択内容に応じてモデルが利用できるツールが異なります";
 "Available Tools" = "利用可能なツール";
+"Debug" = "デバッグ";
+"Advanced session options" = "高度なセッションオプション";
+"Enable Web Search" = "Web 検索を有効にする";
+"Allows internet searches in this session" = "このセッションでインターネット検索を許可します";
+"Using web search may incur extra costs." = "Web 検索を使用すると追加料金が発生する場合があります。";
+"Working Directory" = "作業ディレクトリ";
+"Tool Calls" = "ツール呼び出し";
+"Search Provider" = "検索プロバイダー";
+"Relative file paths and Bash commands use this directory." = "相対ファイルパスと Bash コマンドはこのディレクトリを使用します。";
+"Disables parallel tool calls in model requests." = "モデルリクエストで並列ツール呼び出しを無効にします。";
+"The selected provider is used only when web search is enabled." = "選択したプロバイダーは、Web 検索が有効な場合にのみ使用されます。";
+"Limit to 1 Tool" = "ツールを 1 つに制限";
+"Prevents parallel tool calls" = "並列ツール呼び出しを防ぎます";
 "World Knowledge" = "世界知識";
 "General knowledge and web research" = "一般知識と Web リサーチ";
 "Personal Assistant" = "パーソナルアシスタント";
@@ -251,7 +264,6 @@
 "~/Library/..." = "~/Library/...";
 "Relative file paths and Bash commands use the selected working directory." = "相対ファイルパスと Bash コマンドは、選択した作業ディレクトリを使用します。";
 "Working directory selection is invalid." = "作業ディレクトリの選択が無効です。";
-"Working directory is available only for Coding Assistant sessions." = "作業ディレクトリはコーディングアシスタントのセッションでのみ利用できます。";
 "Services" = "サービス";
 "Session path is not a directory." = "セッションパスがディレクトリではありません。";
 "Show Chat Window" = "チャットウインドウを表示";

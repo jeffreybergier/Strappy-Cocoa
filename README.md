@@ -49,10 +49,12 @@ and hard rules in
   omits the iOS system-version plist, package architecture, and
   working-directory listing, and it does not dump the full environment.
   `file_read` reads bounded UTF-8 text ranges, while `bash` runs a fresh
-  non-interactive child shell with a hard 120-second ceiling. The Coding
-  Assistant file tools and Bash share a per-session working directory. New
-  sessions default to `~/Developer`; the iOS prompt options can instead select
-  `~/` or `~/Library/Application Support/Strappy/Developer`. Selecting a missing
+  non-interactive child shell with a hard 120-second ceiling. File tools and
+  Bash share a per-session working directory. New
+  sessions default to `~/Developer`; the iOS prompt options' Debug submenu can
+  instead select `~/` or `~/Library/Application Support/Strappy/Developer`.
+  The same submenu can disable parallel tool calls for a session, asking the
+  model to make at most one tool call per response. Selecting a missing
   directory creates it before the database setting is changed. Bash results
   expose `output_truncated` so the model can distinguish complete output from a
   bounded tail. Its assistant-set guidance also keeps source artifacts

@@ -326,6 +326,17 @@ int strappy_session_update_web_provider(const char *db_path,
                                                 error_out);
 }
 
+int strappy_session_update_web_search_enabled(const char *db_path,
+                                              long long session_id,
+                                              int web_search_enabled,
+                                              char **error_out)
+{
+  return strappy_db_update_session_web_search_enabled(db_path,
+                                                      session_id,
+                                                      web_search_enabled,
+                                                      error_out);
+}
+
 int strappy_session_update_bash_enabled(const char *db_path,
                                         long long session_id,
                                         int bash_enabled,
@@ -335,6 +346,17 @@ int strappy_session_update_bash_enabled(const char *db_path,
                                                session_id,
                                                bash_enabled,
                                                error_out);
+}
+
+int strappy_session_update_limit_to_one_tool(const char *db_path,
+                                             long long session_id,
+                                             int limit_to_one_tool,
+                                             char **error_out)
+{
+  return strappy_db_update_session_limit_to_one_tool(db_path,
+                                                     session_id,
+                                                     limit_to_one_tool,
+                                                     error_out);
 }
 
 int strappy_session_get_working_directory(

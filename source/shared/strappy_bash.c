@@ -2,7 +2,6 @@
 
 #include "strappy_bash.h"
 
-#include "strappy_assistant_sets.h"
 #include "strappy_core.h"
 #include "strappy_db.h"
 
@@ -1654,7 +1653,6 @@ static char *strappy_bash_execute_internal(
 {
   strappy_bash_arguments arguments;
   strappy_bash_process_result process;
-  char *assistant_set_id;
   char *working_directory;
   char *shell_path;
   char *output;
@@ -1676,24 +1674,6 @@ static char *strappy_bash_execute_internal(
     strappy_set_error(error_out, "bash requires an active session.");
     return NULL;
   }
-
-  assistant_set_id = NULL;
-  if (!strappy_db_get_session_assistant_set(session_db_path,
-                                            session_id,
-                                            &assistant_set_id,
-                                            error_out)) {
-    return NULL;
-  }
-  if ((assistant_set_id == NULL) ||
-      (strcmp(assistant_set_id,
-              STRAPPY_ASSISTANT_SET_CODING_ASSISTANT) != 0)) {
-    free(assistant_set_id);
-    strappy_set_error(
-      error_out,
-      "bash is available only in Coding Assistant sessions.");
-    return NULL;
-  }
-  free(assistant_set_id);
 
   if (require_session_enablement) {
     bash_enabled = 0;
@@ -1859,6 +1839,6 @@ char *strappy_bash_execute_preflight(
                                        NULL,
                                        NULL,
                                        NULL,
-                                       0,
+                                       1,
                                        error_out);
 }

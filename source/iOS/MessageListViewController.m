@@ -743,8 +743,12 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self updatePromptIdleTimerAssertion];
   [[self sendBar] setWebProvider:(session != nil) ?
     [session webProvider] : StrappyWebProviderNone];
+  [[self sendBar] setWebSearchEnabled:(session != nil) ?
+    [session webSearchEnabled] : NO];
   [[self sendBar] setBashEnabled:(session != nil) ?
     [session bashEnabled] : NO];
+  [[self sendBar] setLimitToOneTool:(session != nil) ?
+    [session limitToOneTool] : NO];
   [[self sendBar] reloadOptionsMenu];
   if (([self webView] != nil) &&
       (sessionChanged || ![self webViewContentLoaded])) {
@@ -998,6 +1002,38 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 }
 
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
+              setWebSearchEnabled:(BOOL)enabled
+{
+  NSError *error;
+
+  (void)controller;
+  if (![self canSelectModel]) {
+    return NO;
+  }
+
+  error = nil;
+  if (![[self session] setWebSearchEnabled:enabled error:&error]) {
+    NSString *message;
+
+    message = [error localizedDescription];
+    if ([message length] == 0U) {
+      message = NSLocalizedString(@"Your changes could not be saved.", nil);
+    }
+    [self setStatusText:message];
+    [[self sendBar] setWebSearchEnabled:
+      [[self session] webSearchEnabled]];
+    [self showMessage:message
+                title:NSLocalizedString(@"Failed to Save Changes", nil)];
+    return NO;
+  }
+
+  [[self sendBar] setWebSearchEnabled:
+    [[self session] webSearchEnabled]];
+  [self setStatusText:nil];
+  return YES;
+}
+
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
                   setBashEnabled:(BOOL)enabled
 {
   NSError *error;
@@ -1023,6 +1059,36 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
 
   [[self sendBar] setBashEnabled:[[self session] bashEnabled]];
+  [self setStatusText:nil];
+  return YES;
+}
+
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
+                  setLimitToOneTool:(BOOL)enabled
+{
+  NSError *error;
+
+  (void)controller;
+  if (![self canSelectModel]) {
+    return NO;
+  }
+
+  error = nil;
+  if (![[self session] setLimitToOneTool:enabled error:&error]) {
+    NSString *message;
+
+    message = [error localizedDescription];
+    if ([message length] == 0U) {
+      message = NSLocalizedString(@"Your changes could not be saved.", nil);
+    }
+    [self setStatusText:message];
+    [[self sendBar] setLimitToOneTool:[[self session] limitToOneTool]];
+    [self showMessage:message
+                title:NSLocalizedString(@"Failed to Save Changes", nil)];
+    return NO;
+  }
+
+  [[self sendBar] setLimitToOneTool:[[self session] limitToOneTool]];
   [self setStatusText:nil];
   return YES;
 }

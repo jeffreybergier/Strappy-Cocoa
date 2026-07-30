@@ -20,7 +20,11 @@
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
                   setWebProvider:(NSString *)webProvider;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
+              setWebSearchEnabled:(BOOL)enabled;
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
                   setBashEnabled:(BOOL)enabled;
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
+                  setLimitToOneTool:(BOOL)enabled;
 - (NSString *)workingDirectoryForPromptSendViewController:
     (PromptSendViewController *)controller;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
@@ -42,7 +46,9 @@
 - (void)setSending:(BOOL)sending;
 - (void)setCancellationRequested:(BOOL)requested;
 - (void)setWebProvider:(NSString *)webProvider;
+- (void)setWebSearchEnabled:(BOOL)enabled;
 - (void)setBashEnabled:(BOOL)enabled;
+- (void)setLimitToOneTool:(BOOL)enabled;
 - (void)reloadOptionsMenu;
 - (BOOL)canSendCurrentPrompt;
 - (void)performSend:(id)sender;

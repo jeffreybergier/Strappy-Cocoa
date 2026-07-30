@@ -21,7 +21,9 @@ typedef struct strappy_session_record {
   char *last_activity_at;
   long long last_activity_at_ms;
   strappy_web_provider web_provider;
+  int web_search_enabled;
   int bash_enabled;
+  int limit_to_one_tool;
   int streaming_enabled;
   long http_status;
 } strappy_session_record;
@@ -439,6 +441,11 @@ int strappy_db_update_session_web_provider(
   long long session_id,
   strappy_web_provider web_provider,
   char **error_out);
+int strappy_db_update_session_web_search_enabled(
+  const char *db_path,
+  long long session_id,
+  int web_search_enabled,
+  char **error_out);
 int strappy_db_get_session_bash_enabled(const char *db_path,
                                         long long session_id,
                                         int *bash_enabled_out,
@@ -447,6 +454,10 @@ int strappy_db_update_session_bash_enabled(const char *db_path,
                                            long long session_id,
                                            int bash_enabled,
                                            char **error_out);
+int strappy_db_update_session_limit_to_one_tool(const char *db_path,
+                                                long long session_id,
+                                                int limit_to_one_tool,
+                                                char **error_out);
 int strappy_db_get_session_assistant_set(const char *db_path,
                                          long long session_id,
                                          char **assistant_set_id_out,

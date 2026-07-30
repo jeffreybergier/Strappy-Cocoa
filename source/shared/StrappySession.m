@@ -27,7 +27,10 @@ NSString * const StrappySessionChangeKindActivity = @"activity";
 NSString * const StrappySessionChangeKindModel = @"model";
 NSString * const StrappySessionChangeKindStreaming = @"streaming";
 NSString * const StrappySessionChangeKindWebProvider = @"web_provider";
+NSString * const StrappySessionChangeKindWebSearch = @"web_search";
 NSString * const StrappySessionChangeKindBash = @"bash";
+NSString * const StrappySessionChangeKindLimitToOneTool =
+  @"limit_to_one_tool";
 NSString * const StrappySessionChangeKindWorkingDirectory =
   @"working_directory";
 NSString * const StrappySessionChangeKindAssistantSet = @"assistant_set";
@@ -184,6 +187,19 @@ static NSString *StrappySessionWebProviderFromRecord(
     [NSString stringWithUTF8String:name]);
 }
 
+static BOOL StrappySessionWebSearchEnabledFromSummary(NSDictionary *summary)
+{
+  NSNumber *webSearchEnabled;
+
+  if (![summary isKindOfClass:[NSDictionary class]]) {
+    return YES;
+  }
+
+  webSearchEnabled = [summary objectForKey:@"web_search_enabled"];
+  return (![webSearchEnabled isKindOfClass:[NSNumber class]] ||
+          [webSearchEnabled boolValue]) ? YES : NO;
+}
+
 static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
 {
   NSNumber *bashEnabled;
@@ -195,6 +211,19 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   bashEnabled = [summary objectForKey:@"bash_enabled"];
   return ([bashEnabled isKindOfClass:[NSNumber class]] &&
           [bashEnabled boolValue]) ? YES : NO;
+}
+
+static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
+{
+  NSNumber *limitToOneTool;
+
+  if (![summary isKindOfClass:[NSDictionary class]]) {
+    return NO;
+  }
+
+  limitToOneTool = [summary objectForKey:@"limit_to_one_tool"];
+  return ([limitToOneTool isKindOfClass:[NSNumber class]] &&
+          [limitToOneTool boolValue]) ? YES : NO;
 }
 
 @implementation StrappySession
@@ -406,13 +435,18 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
 
   if ((self = [super init])) {
     sessionIdentifier_ = [sessionIdentifier retain];
-    webProvider_ = [StrappyWebProviderNone retain];
+    webProvider_ = [StrappyWebProviderAuto retain];
+    webSearchEnabled_ = YES;
     bashEnabled_ = NO;
+    limitToOneTool_ = NO;
     if ([summary isKindOfClass:[NSDictionary class]]) {
       cachedSummary_ = [summary retain];
       [webProvider_ release];
       webProvider_ = [StrappySessionWebProviderFromSummary(summary) retain];
+      webSearchEnabled_ =
+        StrappySessionWebSearchEnabledFromSummary(summary);
       bashEnabled_ = StrappySessionBashEnabledFromSummary(summary);
+      limitToOneTool_ = StrappySessionLimitToOneToolFromSummary(summary);
       streamingEnabled_ = StrappySessionStreamingEnabledFromSummary(summary);
     }
   }
@@ -452,7 +486,9 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
     }
     [webProvider_ release];
     webProvider_ = [StrappySessionWebProviderFromSummary(summary) retain];
+    webSearchEnabled_ = StrappySessionWebSearchEnabledFromSummary(summary);
     bashEnabled_ = StrappySessionBashEnabledFromSummary(summary);
+    limitToOneTool_ = StrappySessionLimitToOneToolFromSummary(summary);
     streamingEnabled_ = StrappySessionStreamingEnabledFromSummary(summary);
   }
 }
@@ -600,7 +636,9 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
 {
   NSNumber *sessionId;
   NSNumber *httpStatus;
+  NSNumber *webSearchEnabled;
   NSNumber *bashEnabled;
+  NSNumber *limitToOneTool;
   NSNumber *streamingEnabled;
   NSString *name;
   NSString *prompt;
@@ -619,7 +657,11 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   sessionId = [NSNumber numberWithLongLong:record->session_id];
   httpStatus = [NSNumber numberWithLong:record->http_status];
   webProvider = StrappySessionWebProviderFromRecord(record->web_provider);
+  webSearchEnabled =
+    [NSNumber numberWithBool:(record->web_search_enabled ? YES : NO)];
   bashEnabled = [NSNumber numberWithBool:(record->bash_enabled ? YES : NO)];
+  limitToOneTool =
+    [NSNumber numberWithBool:(record->limit_to_one_tool ? YES : NO)];
   streamingEnabled =
     [NSNumber numberWithBool:(record->streaming_enabled ? YES : NO)];
   name = [StrappySession stringFromCStringOrEmpty:record->name];
@@ -643,7 +685,9 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
     assistantSetIdentifier, @"assistant_set_id",
     httpStatus, @"http_status",
     webProvider, @"web_provider",
+    webSearchEnabled, @"web_search_enabled",
     bashEnabled, @"bash_enabled",
+    limitToOneTool, @"limit_to_one_tool",
     streamingEnabled, @"streaming_enabled",
     createdAt, @"created_at",
     lastActivityAt, @"last_message_at",
@@ -2583,12 +2627,32 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   return webProvider;
 }
 
+- (BOOL)webSearchEnabled
+{
+  BOOL enabled;
+
+  @synchronized(self) {
+    enabled = webSearchEnabled_;
+  }
+  return enabled;
+}
+
 - (BOOL)bashEnabled
 {
   BOOL enabled;
 
   @synchronized(self) {
     enabled = bashEnabled_;
+  }
+  return enabled;
+}
+
+- (BOOL)limitToOneTool
+{
+  BOOL enabled;
+
+  @synchronized(self) {
+    enabled = limitToOneTool_;
   }
   return enabled;
 }
@@ -2619,10 +2683,8 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   NSString *databasePath;
   NSString *resourcePath;
   NSDictionary *notificationSession;
-  NSNumber *bashEnabled;
   char *strappyError;
   long long sessionId;
-  BOOL codingAssistant;
 
   if (![assistantSetIdentifier isKindOfClass:[NSString class]] ||
       ([assistantSetIdentifier length] == 0U)) {
@@ -2637,8 +2699,6 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
     }
     return NO;
   }
-  codingAssistant = [assistantSetIdentifier isEqualToString:
-    [NSString stringWithUTF8String:STRAPPY_ASSISTANT_SET_CODING_ASSISTANT]];
   sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
     [sessionIdentifier_ longLongValue] : 0LL;
   if (sessionId <= 0LL) {
@@ -2680,18 +2740,12 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   }
 
   notificationSession = nil;
-  bashEnabled = nil;
   @synchronized(self) {
     NSMutableDictionary *summary;
 
-    if (!codingAssistant) {
-      bashEnabled_ = NO;
-    }
-    bashEnabled = [NSNumber numberWithBool:bashEnabled_];
     if (cachedSummary_ != nil) {
       summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
       [summary setObject:assistantSetIdentifier forKey:@"assistant_set_id"];
-      [summary setObject:bashEnabled forKey:@"bash_enabled"];
       [cachedSummary_ release];
       cachedSummary_ = summary;
       notificationSession = [cachedSummary_ retain];
@@ -2700,7 +2754,6 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
         [[NSDictionary alloc] initWithObjectsAndKeys:
           sessionIdentifier_, @"id",
           assistantSetIdentifier, @"assistant_set_id",
-          bashEnabled, @"bash_enabled",
           nil];
     }
   }
@@ -2806,6 +2859,81 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   return YES;
 }
 
+- (BOOL)setWebSearchEnabled:(BOOL)enabled error:(NSError **)error
+{
+  NSString *databasePath;
+  NSNumber *webSearchEnabled;
+  NSDictionary *notificationSession;
+  char *strappyError;
+  long long sessionId;
+
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  if (sessionId <= 0) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:
+          NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+
+  strappyError = NULL;
+  if (!strappy_session_update_web_search_enabled(
+        [databasePath UTF8String],
+        sessionId,
+        enabled ? 1 : 0,
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return NO;
+  }
+
+  webSearchEnabled = [NSNumber numberWithBool:(enabled ? YES : NO)];
+  notificationSession = nil;
+  @synchronized(self) {
+    NSMutableDictionary *summary;
+
+    webSearchEnabled_ = enabled ? YES : NO;
+    if (cachedSummary_ != nil) {
+      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
+      [summary setObject:webSearchEnabled forKey:@"web_search_enabled"];
+      [cachedSummary_ release];
+      cachedSummary_ = summary;
+      notificationSession = [cachedSummary_ retain];
+    } else {
+      notificationSession =
+        [[NSDictionary alloc] initWithObjectsAndKeys:
+          sessionIdentifier_, @"id",
+          webSearchEnabled, @"web_search_enabled",
+          nil];
+    }
+  }
+
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionDidUpdateNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  notificationSession, @"session",
+                  StrappySessionChangeKindWebSearch,
+                  StrappySessionChangeKindKey,
+                  nil]];
+  [notificationSession release];
+  return YES;
+}
+
 - (BOOL)setBashEnabled:(BOOL)enabled error:(NSError **)error
 {
   NSString *databasePath;
@@ -2880,6 +3008,81 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
   return YES;
 }
 
+- (BOOL)setLimitToOneTool:(BOOL)enabled error:(NSError **)error
+{
+  NSString *databasePath;
+  NSNumber *limitToOneTool;
+  NSDictionary *notificationSession;
+  char *strappyError;
+  long long sessionId;
+
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  if (sessionId <= 0) {
+    if (error != nil) {
+      NSDictionary *userInfo =
+        [NSDictionary dictionaryWithObject:
+          NSLocalizedString(@"Session is not selected.", nil)
+                                    forKey:NSLocalizedDescriptionKey];
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:userInfo];
+    }
+    return NO;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+
+  strappyError = NULL;
+  if (!strappy_session_update_limit_to_one_tool(
+        [databasePath UTF8String],
+        sessionId,
+        enabled ? 1 : 0,
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return NO;
+  }
+
+  limitToOneTool = [NSNumber numberWithBool:(enabled ? YES : NO)];
+  notificationSession = nil;
+  @synchronized(self) {
+    NSMutableDictionary *summary;
+
+    limitToOneTool_ = enabled ? YES : NO;
+    if (cachedSummary_ != nil) {
+      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
+      [summary setObject:limitToOneTool forKey:@"limit_to_one_tool"];
+      [cachedSummary_ release];
+      cachedSummary_ = summary;
+      notificationSession = [cachedSummary_ retain];
+    } else {
+      notificationSession =
+        [[NSDictionary alloc] initWithObjectsAndKeys:
+          sessionIdentifier_, @"id",
+          limitToOneTool, @"limit_to_one_tool",
+          nil];
+    }
+  }
+
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionDidUpdateNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  notificationSession, @"session",
+                  StrappySessionChangeKindLimitToOneTool,
+                  StrappySessionChangeKindKey,
+                  nil]];
+  [notificationSession release];
+  return YES;
+}
+
 - (NSString *)workingDirectoryWithError:(NSError **)error
 {
   NSString *databasePath;
@@ -2945,22 +3148,6 @@ static BOOL StrappySessionBashEnabledFromSummary(NSDictionary *summary)
     }
     return NO;
   }
-  if (![[self assistantSetIdentifier] isEqualToString:
-        [NSString stringWithUTF8String:
-          STRAPPY_ASSISTANT_SET_CODING_ASSISTANT]]) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(
-          @"Working directory is available only for Coding Assistant sessions.",
-          nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:15
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
   sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
     [sessionIdentifier_ longLongValue] : 0LL;
   if (sessionId <= 0LL) {

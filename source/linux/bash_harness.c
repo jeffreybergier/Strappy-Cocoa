@@ -1,6 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
 
-#include "strappy_assistant_sets.h"
 #include "strappy_bash.h"
 #include "strappy_db.h"
 
@@ -355,37 +354,6 @@ static int harness_run(void)
                                 &error);
   if ((output != NULL) || (error == NULL) ||
       (output_truncated != 0) ||
-      (strstr(error,
-              "bash is available only in Coding Assistant sessions") == NULL)) {
-    fprintf(stderr, "bash was not isolated to Coding Assistant sessions.\n");
-    goto cleanup;
-  }
-  free(output);
-  output = NULL;
-  free(error);
-  error = NULL;
-
-  if (!strappy_db_update_session_assistant_set(
-        catalog_path,
-        session_id,
-        STRAPPY_ASSISTANT_SET_CODING_ASSISTANT,
-        &error)) {
-    fprintf(stderr,
-            "Could not select Coding Assistant: %s\n",
-            (error != NULL) ? error : "unknown");
-    goto cleanup;
-  }
-
-  output = strappy_bash_execute(catalog_path,
-                                session_id,
-                                "{\"command\":\"true\"}",
-                                NULL,
-                                NULL,
-                                &output_truncated,
-                                &cancelled,
-                                &error);
-  if ((output != NULL) || (error == NULL) ||
-      (output_truncated != 0) ||
       (strstr(error, "bash is disabled for this session") == NULL)) {
     fprintf(stderr, "bash was not disabled by default.\n");
     goto cleanup;
@@ -394,12 +362,13 @@ static int harness_run(void)
   output = NULL;
   free(error);
   error = NULL;
+
   if (!strappy_db_update_session_bash_enabled(catalog_path,
                                               session_id,
                                               1,
                                               &error)) {
     fprintf(stderr,
-            "Could not enable Bash for the Coding Assistant: %s\n",
+            "Could not enable Bash independently of assistant type: %s\n",
             (error != NULL) ? error : "unknown");
     goto cleanup;
   }

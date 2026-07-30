@@ -42,6 +42,19 @@
 "Assistant" = "Assistant";
 "Different tools are available the model based on the selection" = "Different tools are available the model based on the selection";
 "Available Tools" = "Available Tools";
+"Debug" = "Debug";
+"Advanced session options" = "Advanced session options";
+"Enable Web Search" = "Enable Web Search";
+"Allows internet searches in this session" = "Allows internet searches in this session";
+"Using web search may incur extra costs." = "Using web search may incur extra costs.";
+"Working Directory" = "Working Directory";
+"Tool Calls" = "Tool Calls";
+"Search Provider" = "Search Provider";
+"Relative file paths and Bash commands use this directory." = "Relative file paths and Bash commands use this directory.";
+"Disables parallel tool calls in model requests." = "Disables parallel tool calls in model requests.";
+"The selected provider is used only when web search is enabled." = "The selected provider is used only when web search is enabled.";
+"Limit to 1 Tool" = "Limit to 1 Tool";
+"Prevents parallel tool calls" = "Prevents parallel tool calls";
 "World Knowledge" = "World Knowledge";
 "General knowledge and web research" = "General knowledge and web research";
 "Personal Assistant" = "Personal Assistant";
@@ -251,7 +264,6 @@
 "~/Library/..." = "~/Library/...";
 "Relative file paths and Bash commands use the selected working directory." = "Relative file paths and Bash commands use the selected working directory.";
 "Working directory selection is invalid." = "Working directory selection is invalid.";
-"Working directory is available only for Coding Assistant sessions." = "Working directory is available only for Coding Assistant sessions.";
 "Services" = "Services";
 "Session path is not a directory." = "Session path is not a directory.";
 "Show Chat Window" = "Show Chat Window";
