@@ -1139,6 +1139,15 @@ static int harness_check_page_scripts(void)
                                "function rowIsResponseStatus") &&
        harness_expect_contains(page_html,
                                "function apiExchangeCumulativeUsageCost") &&
+       harness_expect_contains(page_html,
+                               "for(i=rows.length-1;i>=0;i--)") &&
+       harness_expect_contains(
+         page_html,
+         "if(!rowIsResponseStatus(row)||"
+         "!responseStatusResolved(row))continue;") &&
+       harness_expect_contains(
+         page_html,
+         "if(active&&rowIsAPIExchangeError(row))return '';") &&
        harness_expect_not_contains(page_html,
                                    "function formatAPIExchangeHTTPStatus") &&
        harness_expect_contains(page_html,
@@ -1159,9 +1168,9 @@ static int harness_check_page_scripts(void)
                                "formatAPIExchangeAttemptState(state)") &&
        harness_expect_contains(page_html,
                                "function formatCumulativeUsageCost(value){"
-                               "return '$'+(value!==''?value:'-');}") &&
+                               "return value!==''?'$'+value:'';}") &&
        harness_expect_not_contains(page_html,
-                                   "(value!==''?value:'-')+' total'") &&
+                                   "value!==''?value:'-'") &&
        harness_expect_contains(page_html,
                                "titleText=roundLabel+' '+roundNumber;") &&
        harness_expect_not_contains(page_html,
@@ -1175,7 +1184,8 @@ static int harness_check_page_scripts(void)
                                    "formatAPIExchangeAttemptState("
                                    "attemptState)") &&
        harness_expect_contains(page_html,
-                               "titleText+=' \\u00b7 '+"
+                               "if(cumulativeUsageCost!=='')titleText+="
+                               "' \\u00b7 '+"
                                "formatCumulativeUsageCost("
                                "cumulativeUsageCost);") &&
        harness_expect_contains(
@@ -1186,7 +1196,7 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(
          page_html,
          "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed,active,"
-         "apiExchangeCumulativeUsageCost(g.rows),context);") &&
+         "apiExchangeCumulativeUsageCost(g.rows,active),context);") &&
        harness_expect_contains(page_html,
                                "setNodeText(title,titleText);") &&
        harness_expect_not_contains(page_html,
