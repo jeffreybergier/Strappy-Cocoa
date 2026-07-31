@@ -1284,6 +1284,8 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "font-weight:bold;line-height:32px;height:34px;") &&
        harness_expect_contains(page_html,
+                               "border:1px solid #959fa7;") &&
+       harness_expect_contains(page_html,
                                "background:#dfe4e8;color:#30363b;") &&
        harness_expect_contains(page_html,
                                "padding:0 42px 0 7px;") &&
@@ -1302,7 +1304,18 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "height:12px;margin-top:-6px;font-size:12px;"
                                "line-height:12px;") &&
-       harness_expect_contains(page_html, ".processing-autoscroll-on") &&
+       harness_expect_contains(
+         page_html,
+         "border:1px solid #959fa7;background:#dfe4e8;color:#4e5961;") &&
+       harness_expect_contains(
+         page_html,
+         ".processing-autoscroll-on{background:#a3adb5;"
+         "border-color:#68727a;") &&
+       harness_expect_contains(
+         page_html,
+         ".processing-status-retry_wait,.processing-status-retrying{"
+         "border-color:#959fa7;background:#c1c8ce;"
+         "color:#30363b;}") &&
        harness_expect_contains(page_html,
                                ".processing-status-active .tool-column-toggle,") &&
        harness_expect_not_contains(page_html,

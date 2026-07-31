@@ -201,6 +201,31 @@ static UITextField *XPUIKitFindTextField(UIView *view)
   [self setBackgroundColor:[UIColor clearColor]];
 }
 
+- (void)XP_setBarTintColorIfAvailable:(UIColor *)barTintColor
+{
+  if ([self respondsToSelector:@selector(setBarTintColor:)]) {
+    [self performSelector:@selector(setBarTintColor:) withObject:barTintColor];
+  }
+}
+
+- (void)XP_setTintColorIfAvailable:(UIColor *)tintColor
+{
+  if ([self respondsToSelector:@selector(setTintColor:)]) {
+    [self performSelector:@selector(setTintColor:) withObject:tintColor];
+  }
+}
+
+@end
+
+@implementation UIBarButtonItem (XPUIKit)
+
+- (void)XP_setTintColorIfAvailable:(UIColor *)tintColor
+{
+  if ([self respondsToSelector:@selector(setTintColor:)]) {
+    [self performSelector:@selector(setTintColor:) withObject:tintColor];
+  }
+}
+
 @end
 
 @implementation UIScrollView (XPUIKit)

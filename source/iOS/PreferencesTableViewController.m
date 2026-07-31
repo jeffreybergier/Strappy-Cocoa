@@ -1,6 +1,7 @@
 #import "PreferencesTableViewController.h"
 
 #import "FileScanner.h"
+#import "StrappyAppearance.h"
 #import "StrappyKeychain.h"
 #import "StrappyActivityAccessoryView.h"
 #import "StrappyPreferencesDatabaseWhitelistTableViewController.h"
@@ -132,6 +133,8 @@ enum {
     [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                   target:self
                                                   action:@selector(doneAction:)]];
+  [StrappyAppearance applyPrimaryTintToBarButtonItem:
+    [[self navigationItem] rightBarButtonItem]];
 
   [[NSNotificationCenter defaultCenter]
     addObserver:self

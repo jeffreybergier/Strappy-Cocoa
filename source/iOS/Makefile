@@ -1,6 +1,7 @@
 # Altivec Intelligence - Strappy (iPhone)
 APP_NAME = Strappy
 SOURCES = main.m AppDelegate.m StrappyRootCoordinator.m \
+          StrappyAppearance.m \
           SessionListViewController.m PreferencesTableViewController.m \
           MessageListViewController.m PromptSendViewController.m \
           StrappySessionOptionsTableViewController.m \

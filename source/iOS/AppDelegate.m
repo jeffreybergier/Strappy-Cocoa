@@ -1,6 +1,7 @@
 #import "AppDelegate.h"
 #import "AIFontAwesome.h"
 #import "FileScanner.h"
+#import "StrappyAppearance.h"
 #import "StrappyRootCoordinator.h"
 #import "StrappyIdleTimerAssertion.h"
 #import "StrappySession.h"
@@ -67,6 +68,7 @@ static void StrappyLogApplicationLifecycle(NSString *event,
   NSLog(@"StrappyLifecycle AppDelegate launchOptions=%@", launchOptions);
 
   self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+  [StrappyAppearance applyApplicationTintToWindow:[self window]];
 
   {
     NSString *cacert;

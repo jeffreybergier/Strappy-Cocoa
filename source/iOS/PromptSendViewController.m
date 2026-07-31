@@ -1,6 +1,7 @@
 #import "PromptSendViewController.h"
 
 #import "AIFontAwesome.h"
+#import "StrappyAppearance.h"
 #import "StrappySession.h"
 #import "StrappySessionOptionsTableViewController.h"
 #import "XPUIKit.h"
@@ -226,8 +227,8 @@ static const CGFloat kStrappySendFieldRadius = 8.0f;
       : [UIColor colorWithRed:0.72f green:0.18f blue:0.16f alpha:1.0f];
   } else {
     fillColor = [self isHighlighted]
-      ? [UIColor colorWithRed:0.0f green:0.40f blue:0.80f alpha:1.0f]
-      : [UIColor colorWithRed:0.0f green:0.52f blue:1.0f alpha:1.0f];
+      ? [StrappyAppearance highlightedPrimaryTintColor]
+      : [StrappyAppearance primaryTintColor];
   }
 
   discPath = [UIBezierPath bezierPathWithOvalInRect:bounds];
@@ -883,6 +884,8 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
            presentedModally:YES];
   navigationController =
     [[UINavigationController alloc] initWithRootViewController:optionsController];
+  [StrappyAppearance
+    applyBarAppearanceToNavigationController:navigationController];
   [self setOptionsController:optionsController];
   [self setOptionsNavigationController:navigationController];
   [presentingController presentModalViewController:navigationController

@@ -1,6 +1,7 @@
 #import "StrappyPreferencesDatabaseStudyViewController.h"
 
 #import "AIFontAwesome.h"
+#import "StrappyAppearance.h"
 #import "StrappyPreferencesStatusToolbarView.h"
 #import "StrappySession.h"
 #import "XPUIKit.h"
@@ -357,6 +358,7 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows)
            target:self
            action:@selector(studyAction:)];
   [[self navigationItem] setRightBarButtonItem:studyActionButton_];
+  [StrappyAppearance applyPrimaryTintToBarButtonItem:studyActionButton_];
   statusToolbarView_ = [[StrappyPreferencesStatusToolbarView alloc] init];
   statusToolbarItem_ = [[UIBarButtonItem alloc]
     initWithCustomView:statusToolbarView_];

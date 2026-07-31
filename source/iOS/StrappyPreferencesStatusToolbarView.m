@@ -1,5 +1,6 @@
 #import "StrappyPreferencesStatusToolbarView.h"
 
+#import "StrappyAppearance.h"
 #import "XPUIKit.h"
 
 static const CGFloat kStrappyPreferencesToolbarSideItemWidth = 44.0f;
@@ -156,10 +157,7 @@ static const CGFloat kStrappyPreferencesToolbarActionIconSize = 18.0f;
   if (usesIOS7Appearance) {
     actionColor = [toolbar tintColor];
     if (actionColor == nil) {
-      actionColor = [UIColor colorWithRed:0.0f
-                                    green:(122.0f / 255.0f)
-                                     blue:1.0f
-                                    alpha:1.0f];
+      actionColor = [StrappyAppearance primaryTintColor];
     }
     [[self statusLabel] setTextColor:[UIColor darkTextColor]];
     [[self statusLabel] setShadowColor:nil];

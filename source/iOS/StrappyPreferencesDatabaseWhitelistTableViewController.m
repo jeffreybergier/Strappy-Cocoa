@@ -2,6 +2,7 @@
 
 #import "AIFontAwesome.h"
 #import "FileScanner.h"
+#import "StrappyAppearance.h"
 
 static const CGFloat kStrappyDatabaseHiddenIconCanvasSize = 24.0f;
 static const CGFloat kStrappyDatabaseHiddenIconSize = 20.0f;
@@ -442,6 +443,7 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
                                     target:self
                                     action:@selector(hiddenModeButtonPressed:)]];
   [[self navigationItem] setRightBarButtonItem:[self hiddenModeButton]];
+  [StrappyAppearance applyPrimaryTintToBarButtonItem:[self hiddenModeButton]];
   [self updateHiddenModeButton];
   [self setScanning:[FileScanner isDatabaseCatalogScanInFlight]];
 }

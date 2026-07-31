@@ -1,5 +1,6 @@
 #import "StrappySessionOptionsTableViewController.h"
 
+#import "StrappyAppearance.h"
 #import "StrappyModelCellFormatter.h"
 #import "XPUIKit.h"
 
@@ -141,10 +142,8 @@ static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
 @property (nonatomic, strong) UISwitch *limitToOneToolSwitch;
 @property (nonatomic, strong) UITextField *toolCallLimitField;
 @property (nonatomic, strong) UITextField *roundLimitField;
-@property (nonatomic, assign) BOOL presentedModally;
 - (instancetype)initWithOptionsDelegate:
-    (id<StrappySessionOptionsTableViewControllerDelegate>)optionsDelegate
-                       presentedModally:(BOOL)presentedModally;
+    (id<StrappySessionOptionsTableViewControllerDelegate>)optionsDelegate;
 - (void)reloadOptionsSnapshot;
 - (void)reloadOptionsFromDelegate;
 @end
@@ -191,6 +190,8 @@ static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
         initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                              target:self
                              action:@selector(doneAction:)]];
+    [StrappyAppearance applyPrimaryTintToBarButtonItem:
+      [[self navigationItem] rightBarButtonItem]];
   }
 }
 
@@ -501,8 +502,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
     debugController =
       [[StrappySessionDebugOptionsTableViewController alloc]
-        initWithOptionsDelegate:[self optionsDelegate]
-             presentedModally:[self presentedModally]];
+        initWithOptionsDelegate:[self optionsDelegate]];
     [[self navigationController] pushViewController:debugController
                                            animated:YES];
     return;
@@ -565,11 +565,9 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
 - (instancetype)initWithOptionsDelegate:
     (id<StrappySessionOptionsTableViewControllerDelegate>)optionsDelegate
-                       presentedModally:(BOOL)presentedModally
 {
   if ((self = [super initWithStyle:UITableViewStyleGrouped])) {
     [self setOptionsDelegate:optionsDelegate];
-    [self setPresentedModally:presentedModally];
     [[self navigationItem] setTitle:NSLocalizedString(@"Debug", nil)];
     [self reloadOptionsSnapshot];
   }
@@ -632,13 +630,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
              forControlEvents:UIControlEventEditingDidEnd];
   [self setRoundLimitField:roundLimitField];
 
-  if ([self presentedModally]) {
-    [[self navigationItem] setRightBarButtonItem:
-      [[UIBarButtonItem alloc]
-        initWithBarButtonSystemItem:UIBarButtonSystemItemDone
-                             target:self
-                             action:@selector(doneAction:)]];
-  }
   [self reloadOptionsFromDelegate];
 }
 
@@ -669,13 +660,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [[self roundLimitField] setText:[NSString stringWithFormat:
     @"%lu", (unsigned long)[[self sessionOptions] roundLimit]]];
   [[self tableView] reloadData];
-}
-
-- (void)doneAction:(id)sender
-{
-  (void)sender;
-  [[self view] endEditing:YES];
-  [[self optionsDelegate] dismissOptionsControllerAnimated:YES];
 }
 
 - (void)limitFieldDoneAction:(id)sender

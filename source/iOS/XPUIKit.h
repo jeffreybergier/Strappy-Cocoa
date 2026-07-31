@@ -11,6 +11,12 @@
 
 @interface UIView (XPUIKit)
 - (void)XP_setBackgroundTransparent;
+- (void)XP_setBarTintColorIfAvailable:(UIColor *)barTintColor;
+- (void)XP_setTintColorIfAvailable:(UIColor *)tintColor;
+@end
+
+@interface UIBarButtonItem (XPUIKit)
+- (void)XP_setTintColorIfAvailable:(UIColor *)tintColor;
 @end
 
 @interface UIScrollView (XPUIKit)

@@ -2,6 +2,7 @@
 
 #import "MessageListViewController.h"
 #import "SessionListViewController.h"
+#import "StrappyAppearance.h"
 #import "StrappySession.h"
 
 @interface StrappyRootCoordinator () <SessionListViewControllerDelegate,
@@ -22,6 +23,8 @@
 
   if ((self = [super init])) {
     [self setNav:[[UINavigationController alloc] init]];
+    [StrappyAppearance
+      applyBarAppearanceToNavigationController:[self nav]];
     [window setRootViewController:[self nav]];
   }
   return self;
