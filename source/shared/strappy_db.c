@@ -59,9 +59,6 @@
   "COALESCE((SELECT x.round_limit FROM session_settings x " \
   "WHERE x.session_id = s.id), " \
   STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_ROUND_LIMIT) ")"
-#define STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL \
-  "COALESCE((SELECT x.streaming_enabled FROM session_settings x " \
-  "WHERE x.session_id = s.id), 0)"
 #define STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL \
   "COALESCE((SELECT i.created_at_ms FROM conversation_items i " \
   "WHERE i.session_id = s.id ORDER BY i.sequence DESC LIMIT 1), " \
@@ -274,6 +271,23 @@ strappy_response_item_fields[] = {
 static int strappy_db_copy_default_openrouter_model(sqlite3 *db,
                                                     char **model_id_out,
                                                     char **error_out);
+static int strappy_db_copy_default_session_options(
+  sqlite3 *db,
+  const char *fallback_working_directory,
+  strappy_session_options *options,
+  char **error_out);
+static int strappy_db_save_session_options_settings(
+  sqlite3 *db,
+  long long session_id,
+  const strappy_session_options *options,
+  long long now_ms,
+  char **error_out);
+static int strappy_db_save_session_options_assistant_set(
+  sqlite3 *db,
+  long long session_id,
+  const char *assistant_set_id,
+  long long now_ms,
+  char **error_out);
 
 static int strappy_db_enable_write_ahead_log(sqlite3 *db, char **error_out)
 {
@@ -350,7 +364,6 @@ void strappy_session_record_init(strappy_session_record *record)
   record->limit_to_one_tool = 0;
   record->tool_call_limit = STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT;
   record->round_limit = STRAPPY_SESSION_DEFAULT_ROUND_LIMIT;
-  record->streaming_enabled = 0;
   record->http_status = 0L;
 }
 
@@ -395,7 +408,6 @@ void strappy_session_options_init(strappy_session_options *options)
   options->limit_to_one_tool = 0;
   options->tool_call_limit = STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT;
   options->round_limit = STRAPPY_SESSION_DEFAULT_ROUND_LIMIT;
-  options->streaming_enabled = 0;
 }
 
 void strappy_session_options_destroy(strappy_session_options *options)
@@ -1617,6 +1629,34 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
       "(1, CAST(strftime('%s','now') AS INTEGER) * 1000);";
 
   static const char schema_sessions_sql[] =
+    "CREATE TABLE IF NOT EXISTS default_session_options ("
+    "id INTEGER PRIMARY KEY CHECK(id = 1),"
+    "assistant_set_id TEXT NOT NULL DEFAULT '"
+      STRAPPY_ASSISTANT_SET_DEFAULT "' CHECK(length(assistant_set_id) > 0),"
+    "web_provider TEXT NOT NULL DEFAULT '"
+      STRAPPY_DB_DEFAULT_SESSION_WEB_PROVIDER "' "
+      "CHECK(web_provider IN ('none','auto','native','exa','parallel')),"
+    "web_search_enabled INTEGER NOT NULL DEFAULT "
+      STRAPPY_DB_DEFAULT_SESSION_WEB_SEARCH_ENABLED " "
+      "CHECK(web_search_enabled IN (0,1)),"
+    "bash_enabled INTEGER NOT NULL DEFAULT 0 "
+      "CHECK(bash_enabled IN (0,1)),"
+    "limit_to_one_tool INTEGER NOT NULL DEFAULT 0 "
+      "CHECK(limit_to_one_tool IN (0,1)),"
+    "tool_call_limit INTEGER NOT NULL DEFAULT "
+      STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT) " "
+      "CHECK(tool_call_limit BETWEEN 1 AND "
+        STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_MAX_LIMIT) "),"
+    "round_limit INTEGER NOT NULL DEFAULT "
+      STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_ROUND_LIMIT) " "
+      "CHECK(round_limit BETWEEN 1 AND "
+        STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_MAX_LIMIT) "),"
+    "working_directory TEXT "
+      "CHECK(working_directory IS NULL OR length(working_directory) > 0),"
+    "updated_at_ms INTEGER NOT NULL"
+    ");"
+    "INSERT OR IGNORE INTO default_session_options (id, updated_at_ms) VALUES "
+      "(1, CAST(strftime('%s','now') AS INTEGER) * 1000);"
     "CREATE TABLE IF NOT EXISTS sessions ("
     "id INTEGER PRIMARY KEY,"
     "name TEXT NOT NULL DEFAULT '',"
@@ -1653,8 +1693,6 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
       STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_ROUND_LIMIT) " "
       "CHECK(round_limit BETWEEN 1 AND "
         STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_MAX_LIMIT) "),"
-    "streaming_enabled INTEGER NOT NULL DEFAULT 0 "
-      "CHECK(streaming_enabled IN (0,1)),"
     "updated_at_ms INTEGER NOT NULL,"
     "FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE"
     ");"
@@ -2205,7 +2243,6 @@ static int strappy_db_ensure_schema(sqlite3 *db, char **error_out)
     "model TEXT,"
     "http_status INTEGER NOT NULL DEFAULT 0,"
     "web_provider TEXT NOT NULL DEFAULT 'none',"
-    "streaming_enabled INTEGER NOT NULL DEFAULT 0,"
     "created_at TEXT NOT NULL DEFAULT "
     "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
     ");";
@@ -2657,8 +2694,7 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   record->limit_to_one_tool = sqlite3_column_int(stmt, 12) ? 1 : 0;
   record->tool_call_limit = (long)sqlite3_column_int64(stmt, 13);
   record->round_limit = (long)sqlite3_column_int64(stmt, 14);
-  record->streaming_enabled = sqlite3_column_int(stmt, 15) ? 1 : 0;
-  record->web_search_enabled = sqlite3_column_int(stmt, 17) ? 1 : 0;
+  record->web_search_enabled = sqlite3_column_int(stmt, 16) ? 1 : 0;
   if ((record->tool_call_limit < 1L) ||
       (record->tool_call_limit > STRAPPY_SESSION_MAX_LIMIT) ||
       (record->round_limit < 1L) ||
@@ -2672,7 +2708,7 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   response = strappy_db_column_string(stmt, 3);
   model = strappy_db_column_string(stmt, 4);
   model_name = strappy_db_column_string(stmt, 5);
-  assistant_set_id = strappy_db_column_string(stmt, 16);
+  assistant_set_id = strappy_db_column_string(stmt, 15);
   created_at = strappy_db_column_string(stmt, 7);
   last_activity_at = strappy_db_column_string(stmt, 8);
 
@@ -7879,39 +7915,14 @@ static int strappy_db_validate_working_directory(
 
 static int strappy_db_save_session_settings(sqlite3 *db,
                                             long long session_id,
+                                            const strappy_session_options *options,
                                             char **error_out)
 {
-  static const char *sql =
-    "INSERT INTO session_settings "
-    "(session_id, web_provider, web_search_enabled, bash_enabled, "
-     "limit_to_one_tool, tool_call_limit, round_limit, streaming_enabled, "
-     "updated_at_ms) VALUES (?, '"
-       STRAPPY_DB_DEFAULT_SESSION_WEB_PROVIDER "', "
-       STRAPPY_DB_DEFAULT_SESSION_WEB_SEARCH_ENABLED ", 0, 0, "
-       STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT) ", "
-       STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_ROUND_LIMIT) ", 0, ?);";
-  sqlite3_stmt *stmt;
-  int rc;
-
-  stmt = NULL;
-  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-  if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
-  }
-  if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_int64(stmt, 2, (sqlite3_int64)strappy_db_now_ms());
-  }
-  if (rc == SQLITE_OK) {
-    rc = sqlite3_step(stmt);
-  }
-  sqlite3_finalize(stmt);
-  if (rc != SQLITE_DONE) {
-    strappy_set_formatted_error(error_out,
-                                "Could not save session settings: %s",
-                                sqlite3_errmsg(db));
-    return 0;
-  }
-  return 1;
+  return strappy_db_save_session_options_settings(db,
+                                                  session_id,
+                                                  options,
+                                                  strappy_db_now_ms(),
+                                                  error_out);
 }
 
 static int strappy_db_save_session_working_directory(
@@ -7964,7 +7975,7 @@ int strappy_db_create_session_with_working_directory(
     "INSERT INTO sessions "
     "(model_id, created_at_ms, updated_at_ms) "
     "VALUES (?, ?, ?);";
-  char *default_model_id;
+  strappy_session_options defaults;
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;
@@ -7979,49 +7990,41 @@ int strappy_db_create_session_with_working_directory(
     return 0;
   }
 
+  strappy_session_options_init(&defaults);
+  stmt = NULL;
   if (!strappy_db_open(db_path, &db, error_out)) {
     return 0;
   }
-
   if (!strappy_db_ensure_schema(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
-
-  default_model_id = NULL;
-  if (!strappy_db_copy_default_openrouter_model(db,
-                                                &default_model_id,
-                                                error_out)) {
-    strappy_db_release(db);
-    return 0;
-  }
-
   if (!strappy_db_exec(db,
                        "BEGIN IMMEDIATE;",
                        "Could not begin session insert",
                        error_out)) {
-    free(default_model_id);
     strappy_db_release(db);
     return 0;
   }
+  if (!strappy_db_copy_default_session_options(db,
+                                               working_directory,
+                                               &defaults,
+                                               error_out) ||
+      !strappy_db_validate_working_directory(defaults.working_directory,
+                                             error_out)) {
+    goto rollback;
+  }
 
   now_ms = strappy_db_now_ms();
-  stmt = NULL;
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
                                 "Could not prepare session insert: %s",
                                 sqlite3_errmsg(db));
-    free(default_model_id);
-    strappy_db_exec(db,
-                    "ROLLBACK;",
-                    "Could not roll back session insert",
-                    NULL);
-    strappy_db_release(db);
-    return 0;
+    goto rollback;
   }
 
-  rc = sqlite3_bind_text(stmt, 1, default_model_id, -1, SQLITE_TRANSIENT);
+  rc = sqlite3_bind_text(stmt, 1, defaults.model_id, -1, SQLITE_TRANSIENT);
   if (rc == SQLITE_OK) {
     rc = sqlite3_bind_int64(stmt, 2, (sqlite3_int64)now_ms);
   }
@@ -8032,14 +8035,7 @@ int strappy_db_create_session_with_working_directory(
     strappy_set_formatted_error(error_out,
                                 "Could not bind session insert: %s",
                                 sqlite3_errmsg(db));
-    free(default_model_id);
-    sqlite3_finalize(stmt);
-    strappy_db_exec(db,
-                    "ROLLBACK;",
-                    "Could not roll back session insert",
-                    NULL);
-    strappy_db_release(db);
-    return 0;
+    goto rollback;
   }
 
   rc = sqlite3_step(stmt);
@@ -8047,47 +8043,50 @@ int strappy_db_create_session_with_working_directory(
     strappy_set_formatted_error(error_out,
                                 "Could not create session: %s",
                                 sqlite3_errmsg(db));
-    free(default_model_id);
-    sqlite3_finalize(stmt);
-    strappy_db_exec(db,
-                    "ROLLBACK;",
-                    "Could not roll back session insert",
-                    NULL);
-    strappy_db_release(db);
-    return 0;
+    goto rollback;
   }
 
   session_id = (long long)sqlite3_last_insert_rowid(db);
-  free(default_model_id);
   sqlite3_finalize(stmt);
-  if (!strappy_db_save_session_settings(db, session_id, error_out) ||
+  stmt = NULL;
+  if (!strappy_db_save_session_settings(db,
+                                        session_id,
+                                        &defaults,
+                                        error_out) ||
+      !strappy_db_save_session_options_assistant_set(
+        db,
+        session_id,
+        defaults.assistant_set_id,
+        now_ms,
+        error_out) ||
       !strappy_db_save_session_working_directory(db,
                                                   session_id,
-                                                  working_directory,
+                                                  defaults.working_directory,
                                                   error_out)) {
-    strappy_db_exec(db,
-                    "ROLLBACK;",
-                    "Could not roll back session insert",
-                    NULL);
-    strappy_db_release(db);
-    return 0;
+    goto rollback;
   }
   if (!strappy_db_exec(db,
                        "COMMIT;",
                        "Could not commit session insert",
                        error_out)) {
-    strappy_db_exec(db,
-                    "ROLLBACK;",
-                    "Could not roll back session insert",
-                    NULL);
-    strappy_db_release(db);
-    return 0;
+    goto rollback;
   }
   if (session_id_out != NULL) {
     *session_id_out = session_id;
   }
+  strappy_session_options_destroy(&defaults);
   strappy_db_release(db);
   return 1;
+
+rollback:
+  sqlite3_finalize(stmt);
+  strappy_db_exec(db,
+                  "ROLLBACK;",
+                  "Could not roll back session insert",
+                  NULL);
+  strappy_session_options_destroy(&defaults);
+  strappy_db_release(db);
+  return 0;
 }
 
 int strappy_db_create_session(const char *db_path,
@@ -8495,24 +8494,6 @@ int strappy_db_update_session_name(const char *db_path,
   return 1;
 }
 
-int strappy_db_update_session_streaming_enabled(const char *db_path,
-                                                long long session_id,
-                                                int streaming_enabled,
-                                                char **error_out)
-{
-  strappy_session_options options;
-
-  strappy_session_options_init(&options);
-  options.streaming_enabled = streaming_enabled ? 1 : 0;
-  return strappy_db_update_session_options(db_path,
-                                           session_id,
-                                           &options,
-                                           STRAPPY_SESSION_OPTION_STREAMING,
-                                           NULL,
-                                           NULL,
-                                           error_out);
-}
-
 int strappy_db_update_session_limit_to_one_tool(const char *db_path,
                                                 long long session_id,
                                                 int limit_to_one_tool,
@@ -8887,7 +8868,6 @@ int strappy_db_list_sessions(const char *db_path,
     STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
     STRAPPY_DB_SESSION_TOOL_CALL_LIMIT_SQL ", "
     STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
-    STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
@@ -9006,7 +8986,6 @@ int strappy_db_load_session(const char *db_path,
     STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
     STRAPPY_DB_SESSION_TOOL_CALL_LIMIT_SQL ", "
     STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
-    STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
@@ -9101,7 +9080,6 @@ int strappy_db_load_session_list_record(const char *db_path,
     STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
     STRAPPY_DB_SESSION_TOOL_CALL_LIMIT_SQL ", "
     STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
-    STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
@@ -11114,6 +11092,88 @@ static int strappy_db_copy_default_openrouter_model(sqlite3 *db,
   return 1;
 }
 
+static int strappy_db_copy_default_session_options(
+  sqlite3 *db,
+  const char *fallback_working_directory,
+  strappy_session_options *options,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL ", "
+    "assistant_set_id, web_provider, web_search_enabled, bash_enabled, "
+    "limit_to_one_tool, tool_call_limit, round_limit, working_directory "
+    "FROM default_session_options WHERE id = 1;";
+  strappy_session_options loaded;
+  const unsigned char *provider_text;
+  const unsigned char *working_directory_text;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if ((db == NULL) || (options == NULL) ||
+      (fallback_working_directory == NULL) ||
+      (fallback_working_directory[0] == '\0')) {
+    strappy_set_error(error_out, "Default session options request is incomplete.");
+    return 0;
+  }
+
+  strappy_session_options_init(&loaded);
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc == SQLITE_DONE) {
+    strappy_set_error(error_out, "Default session options were not found.");
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  if (rc != SQLITE_ROW) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read default session options: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  loaded.model_id = strappy_db_column_string(stmt, 0);
+  loaded.assistant_set_id = strappy_db_column_string(stmt, 1);
+  provider_text = sqlite3_column_text(stmt, 2);
+  loaded.web_search_enabled = sqlite3_column_int(stmt, 3) ? 1 : 0;
+  loaded.bash_enabled = sqlite3_column_int(stmt, 4) ? 1 : 0;
+  loaded.limit_to_one_tool = sqlite3_column_int(stmt, 5) ? 1 : 0;
+  loaded.tool_call_limit = (long)sqlite3_column_int64(stmt, 6);
+  loaded.round_limit = (long)sqlite3_column_int64(stmt, 7);
+  working_directory_text = sqlite3_column_text(stmt, 8);
+  if ((loaded.model_id == NULL) || (loaded.assistant_set_id == NULL) ||
+      (provider_text == NULL) ||
+      (loaded.tool_call_limit < 1L) ||
+      (loaded.tool_call_limit > STRAPPY_SESSION_MAX_LIMIT) ||
+      (loaded.round_limit < 1L) ||
+      (loaded.round_limit > STRAPPY_SESSION_MAX_LIMIT) ||
+      !strappy_web_provider_parse((const char *)provider_text,
+                                  &loaded.web_provider)) {
+    strappy_set_error(error_out, "Stored default session options are invalid.");
+    sqlite3_finalize(stmt);
+    strappy_session_options_destroy(&loaded);
+    return 0;
+  }
+  loaded.working_directory = strappy_string_duplicate(
+    ((working_directory_text != NULL) && (working_directory_text[0] != '\0'))
+      ? (const char *)working_directory_text
+      : fallback_working_directory);
+  sqlite3_finalize(stmt);
+  if (loaded.working_directory == NULL) {
+    strappy_set_error(error_out,
+                      "Could not allocate default session working directory.");
+    strappy_session_options_destroy(&loaded);
+    return 0;
+  }
+
+  strappy_session_options_destroy(options);
+  *options = loaded;
+  return 1;
+}
+
 static int strappy_db_model_is_effectively_allowed(sqlite3 *db,
                                                    const char *model_id,
                                                    int *allowed_out,
@@ -11452,8 +11512,7 @@ static int strappy_db_copy_session_options(sqlite3 *db,
     STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
     STRAPPY_DB_SESSION_TOOL_CALL_LIMIT_SQL ", "
-    STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
-    STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL " "
+    STRAPPY_DB_SESSION_ROUND_LIMIT_SQL " "
     "FROM sessions s WHERE s.id = ?;";
   strappy_session_options loaded;
   const unsigned char *provider_text;
@@ -11497,7 +11556,6 @@ static int strappy_db_copy_session_options(sqlite3 *db,
   loaded.limit_to_one_tool = sqlite3_column_int(stmt, 5) ? 1 : 0;
   loaded.tool_call_limit = (long)sqlite3_column_int64(stmt, 6);
   loaded.round_limit = (long)sqlite3_column_int64(stmt, 7);
-  loaded.streaming_enabled = sqlite3_column_int(stmt, 8) ? 1 : 0;
   if ((loaded.model_id == NULL) || (loaded.assistant_set_id == NULL) ||
       (provider_text == NULL) ||
       (loaded.tool_call_limit < 1L) ||
@@ -11598,7 +11656,6 @@ static int strappy_db_copy_options(const strappy_session_options *source,
   copy.limit_to_one_tool = source->limit_to_one_tool ? 1 : 0;
   copy.tool_call_limit = source->tool_call_limit;
   copy.round_limit = source->round_limit;
-  copy.streaming_enabled = source->streaming_enabled ? 1 : 0;
   strappy_session_options_destroy(destination);
   *destination = copy;
   return 1;
@@ -11614,8 +11671,8 @@ static int strappy_db_save_session_options_settings(
   static const char *sql =
     "INSERT OR REPLACE INTO session_settings "
     "(session_id, web_provider, web_search_enabled, bash_enabled, "
-     "limit_to_one_tool, tool_call_limit, round_limit, streaming_enabled, "
-     "updated_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);";
+     "limit_to_one_tool, tool_call_limit, round_limit, updated_at_ms) "
+     "VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
   const char *provider_name;
   sqlite3_stmt *stmt;
   int rc;
@@ -11653,10 +11710,7 @@ static int strappy_db_save_session_options_settings(
                             (sqlite3_int64)options->round_limit);
   }
   if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_int(stmt, 8, options->streaming_enabled ? 1 : 0);
-  }
-  if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_int64(stmt, 9, (sqlite3_int64)now_ms);
+    rc = sqlite3_bind_int64(stmt, 8, (sqlite3_int64)now_ms);
   }
   if (rc == SQLITE_OK) {
     rc = sqlite3_step(stmt);
@@ -11665,6 +11719,85 @@ static int strappy_db_save_session_options_settings(
   if (rc != SQLITE_DONE) {
     strappy_set_formatted_error(error_out,
                                 "Could not save session options: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+  return 1;
+}
+
+static int strappy_db_save_default_session_options(
+  sqlite3 *db,
+  const strappy_session_options *options,
+  long long now_ms,
+  char **error_out)
+{
+  static const char *sql =
+    "UPDATE default_session_options SET assistant_set_id = ?, "
+    "web_provider = ?, web_search_enabled = ?, bash_enabled = ?, "
+    "limit_to_one_tool = ?, tool_call_limit = ?, round_limit = ?, "
+    "working_directory = ?, updated_at_ms = ? WHERE id = 1;";
+  const char *provider_name;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  provider_name = strappy_web_provider_name(options->web_provider);
+  if ((options->assistant_set_id == NULL) ||
+      (options->assistant_set_id[0] == '\0') ||
+      (options->working_directory == NULL) ||
+      (options->working_directory[0] == '\0') ||
+      (provider_name == NULL)) {
+    strappy_set_error(error_out, "Default session options are invalid.");
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt,
+                           1,
+                           options->assistant_set_id,
+                           -1,
+                           SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 2, provider_name, -1, SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int(stmt, 3, options->web_search_enabled ? 1 : 0);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int(stmt, 4, options->bash_enabled ? 1 : 0);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int(stmt, 5, options->limit_to_one_tool ? 1 : 0);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt,
+                            6,
+                            (sqlite3_int64)options->tool_call_limit);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt,
+                            7,
+                            (sqlite3_int64)options->round_limit);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt,
+                           8,
+                           options->working_directory,
+                           -1,
+                           SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 9, (sqlite3_int64)now_ms);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  sqlite3_finalize(stmt);
+  if ((rc != SQLITE_DONE) || (sqlite3_changes(db) != 1)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save default session options: %s",
                                 sqlite3_errmsg(db));
     return 0;
   }
@@ -11800,6 +11933,34 @@ int strappy_db_load_session_options(
   return ok;
 }
 
+int strappy_db_load_default_session_options(
+  const char *db_path,
+  const char *fallback_working_directory,
+  strappy_session_options *options,
+  char **error_out)
+{
+  sqlite3 *db;
+  int ok;
+
+  if (options == NULL) {
+    strappy_set_error(error_out, "Default session options output is missing.");
+    return 0;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  ok = strappy_db_copy_default_session_options(db,
+                                               fallback_working_directory,
+                                               options,
+                                               error_out);
+  strappy_db_release(db);
+  return ok;
+}
+
 int strappy_db_update_session_options(
   const char *db_path,
   long long session_id,
@@ -11814,7 +11975,6 @@ int strappy_db_update_session_options(
     STRAPPY_SESSION_OPTION_WEB_SEARCH |
     STRAPPY_SESSION_OPTION_BASH |
     STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
-    STRAPPY_SESSION_OPTION_STREAMING |
     STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT |
     STRAPPY_SESSION_OPTION_ROUND_LIMIT;
   strappy_session_options current;
@@ -11938,10 +12098,6 @@ int strappy_db_update_session_options(
   if ((changed_fields & STRAPPY_SESSION_OPTION_ROUND_LIMIT) != 0U) {
     merged.round_limit = options->round_limit;
   }
-  if ((changed_fields & STRAPPY_SESSION_OPTION_STREAMING) != 0U) {
-    merged.streaming_enabled = options->streaming_enabled ? 1 : 0;
-  }
-
   actual_changed_fields = 0U;
   if (((changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) &&
       (strcmp(current.model_id, merged.model_id) != 0)) {
@@ -11979,11 +12135,6 @@ int strappy_db_update_session_options(
       (strcmp(current.working_directory, merged.working_directory) != 0)) {
     actual_changed_fields |= STRAPPY_SESSION_OPTION_WORKING_DIRECTORY;
   }
-  if (((changed_fields & STRAPPY_SESSION_OPTION_STREAMING) != 0U) &&
-      (current.streaming_enabled != merged.streaming_enabled)) {
-    actual_changed_fields |= STRAPPY_SESSION_OPTION_STREAMING;
-  }
-
   if ((actual_changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) {
     allowed = 0;
     if (!strappy_db_model_exists(db, merged.model_id, error_out) ||
@@ -12070,6 +12221,243 @@ rollback:
   strappy_db_exec(db,
                   "ROLLBACK;",
                   "Could not roll back session-options update",
+                  NULL);
+  strappy_session_options_destroy(&current);
+  strappy_session_options_destroy(&merged);
+  strappy_db_release(db);
+  return 0;
+}
+
+int strappy_db_update_default_session_options(
+  const char *db_path,
+  const char *fallback_working_directory,
+  const strappy_session_options *options,
+  strappy_session_option_mask changed_fields,
+  strappy_session_options *saved_options_out,
+  strappy_session_option_mask *actual_changed_fields_out,
+  char **error_out)
+{
+  const strappy_session_option_mask stored_fields =
+    STRAPPY_SESSION_OPTION_ASSISTANT_SET |
+    STRAPPY_SESSION_OPTION_WEB_PROVIDER |
+    STRAPPY_SESSION_OPTION_WEB_SEARCH |
+    STRAPPY_SESSION_OPTION_BASH |
+    STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
+    STRAPPY_SESSION_OPTION_WORKING_DIRECTORY |
+    STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT |
+    STRAPPY_SESSION_OPTION_ROUND_LIMIT;
+  strappy_session_options current;
+  strappy_session_options merged;
+  strappy_session_option_mask actual_changed_fields;
+  sqlite3 *db;
+  long long now_ms;
+  int ok;
+
+  if (actual_changed_fields_out != NULL) {
+    *actual_changed_fields_out = 0U;
+  }
+  if ((options == NULL) || (fallback_working_directory == NULL) ||
+      (fallback_working_directory[0] == '\0') ||
+      ((changed_fields &
+        ~(strappy_session_option_mask)STRAPPY_SESSION_OPTION_ALL) != 0U)) {
+    strappy_set_error(error_out, "Default session options update is invalid.");
+    return 0;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) &&
+      ((options->model_id == NULL) || (options->model_id[0] == '\0'))) {
+    strappy_set_error(error_out, "Default session model is not selected.");
+    return 0;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_ASSISTANT_SET) != 0U) &&
+      ((options->assistant_set_id == NULL) ||
+       (options->assistant_set_id[0] == '\0'))) {
+    strappy_set_error(error_out, "Default assistant set is not selected.");
+    return 0;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_WORKING_DIRECTORY) != 0U) &&
+      !strappy_db_validate_working_directory(options->working_directory,
+                                             error_out)) {
+    return 0;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_WEB_PROVIDER) != 0U) &&
+      (strappy_web_provider_name(options->web_provider) == NULL)) {
+    strappy_set_error(error_out, "Default web provider is invalid.");
+    return 0;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT) != 0U) &&
+      ((options->tool_call_limit < 1L) ||
+       (options->tool_call_limit > STRAPPY_SESSION_MAX_LIMIT))) {
+    strappy_set_error(error_out, "Default tool-call limit is invalid.");
+    return 0;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_ROUND_LIMIT) != 0U) &&
+      ((options->round_limit < 1L) ||
+       (options->round_limit > STRAPPY_SESSION_MAX_LIMIT))) {
+    strappy_set_error(error_out, "Default round limit is invalid.");
+    return 0;
+  }
+
+  strappy_session_options_init(&current);
+  strappy_session_options_init(&merged);
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out) ||
+      !strappy_db_exec(db,
+                       "BEGIN IMMEDIATE;",
+                       "Could not begin default-session-options update",
+                       error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  if (!strappy_db_copy_default_session_options(db,
+                                               fallback_working_directory,
+                                               &current,
+                                               error_out) ||
+      !strappy_db_copy_options(&current, &merged, error_out)) {
+    goto default_rollback;
+  }
+
+  if (((changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) &&
+      !strappy_db_copy_options_value(
+        &merged.model_id,
+        options->model_id,
+        "Could not allocate default session model option.",
+        error_out)) {
+    goto default_rollback;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_ASSISTANT_SET) != 0U) &&
+      !strappy_db_copy_options_value(
+        &merged.assistant_set_id,
+        options->assistant_set_id,
+        "Could not allocate default assistant-set option.",
+        error_out)) {
+    goto default_rollback;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_WORKING_DIRECTORY) != 0U) &&
+      !strappy_db_copy_options_value(
+        &merged.working_directory,
+        options->working_directory,
+        "Could not allocate default working-directory option.",
+        error_out)) {
+    goto default_rollback;
+  }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_WEB_PROVIDER) != 0U) {
+    merged.web_provider = options->web_provider;
+  }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_WEB_SEARCH) != 0U) {
+    merged.web_search_enabled = options->web_search_enabled ? 1 : 0;
+  }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_BASH) != 0U) {
+    merged.bash_enabled = options->bash_enabled ? 1 : 0;
+  }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL) != 0U) {
+    merged.limit_to_one_tool = options->limit_to_one_tool ? 1 : 0;
+  }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT) != 0U) {
+    merged.tool_call_limit = options->tool_call_limit;
+  }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_ROUND_LIMIT) != 0U) {
+    merged.round_limit = options->round_limit;
+  }
+
+  actual_changed_fields = 0U;
+  if (((changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) &&
+      (strcmp(current.model_id, merged.model_id) != 0)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_MODEL;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_ASSISTANT_SET) != 0U) &&
+      (strcmp(current.assistant_set_id, merged.assistant_set_id) != 0)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_ASSISTANT_SET;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_WEB_PROVIDER) != 0U) &&
+      (current.web_provider != merged.web_provider)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_WEB_PROVIDER;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_WEB_SEARCH) != 0U) &&
+      (current.web_search_enabled != merged.web_search_enabled)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_WEB_SEARCH;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_BASH) != 0U) &&
+      (current.bash_enabled != merged.bash_enabled)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_BASH;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL) != 0U) &&
+      (current.limit_to_one_tool != merged.limit_to_one_tool)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT) != 0U) &&
+      (current.tool_call_limit != merged.tool_call_limit)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_ROUND_LIMIT) != 0U) &&
+      (current.round_limit != merged.round_limit)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_ROUND_LIMIT;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_WORKING_DIRECTORY) != 0U) &&
+      (strcmp(current.working_directory, merged.working_directory) != 0)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_WORKING_DIRECTORY;
+  }
+
+  if (((actual_changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) &&
+      !strappy_db_model_exists(db, merged.model_id, error_out)) {
+    goto default_rollback;
+  }
+
+  now_ms = strappy_db_now_ms();
+  ok = 1;
+  if ((actual_changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) {
+    ok = strappy_db_upsert_app_setting(
+      db,
+      STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_KEY,
+      merged.model_id,
+      "default model",
+      error_out);
+    if (ok) {
+      ok = strappy_db_set_openrouter_model_allowed_in_db(db,
+                                                        merged.model_id,
+                                                        1,
+                                                        error_out);
+    }
+  }
+  if (ok && ((actual_changed_fields & stored_fields) != 0U)) {
+    ok = strappy_db_save_default_session_options(db,
+                                                &merged,
+                                                now_ms,
+                                                error_out);
+  }
+  if (!ok) {
+    goto default_rollback;
+  }
+
+  strappy_session_options_destroy(&current);
+  if (!strappy_db_copy_default_session_options(db,
+                                               fallback_working_directory,
+                                               &current,
+                                               error_out) ||
+      !strappy_db_exec(db,
+                       "COMMIT;",
+                       "Could not commit default-session-options update",
+                       error_out)) {
+    goto default_rollback;
+  }
+  strappy_db_release(db);
+  strappy_session_options_destroy(&merged);
+  if (saved_options_out != NULL) {
+    strappy_session_options_destroy(saved_options_out);
+    *saved_options_out = current;
+    strappy_session_options_init(&current);
+  }
+  strappy_session_options_destroy(&current);
+  if (actual_changed_fields_out != NULL) {
+    *actual_changed_fields_out = actual_changed_fields;
+  }
+  return 1;
+
+default_rollback:
+  strappy_db_exec(db,
+                  "ROLLBACK;",
+                  "Could not roll back default-session-options update",
                   NULL);
   strappy_session_options_destroy(&current);
   strappy_session_options_destroy(&merged);

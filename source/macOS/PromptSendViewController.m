@@ -122,7 +122,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 - (void)actionSegmentClicked:(id)sender;
 - (void)sendButtonClicked:(id)sender;
 - (void)webProviderMenuItemClicked:(id)sender;
-- (void)streamingMenuItemClicked:(id)sender;
 - (BOOL)updateSessionOptions:(StrappySessionOptions *)options
                changedFields:(StrappySessionOptionMask)changedFields;
 @end
@@ -142,8 +141,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
                limitToOneTool:NO
                 toolCallLimit:StrappySessionDefaultToolCallLimit
                    roundLimit:StrappySessionDefaultRoundLimit
-             workingDirectory:@""
-             streamingEnabled:NO];
+             workingDirectory:@""];
   }
   return self;
 }
@@ -401,8 +399,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   webProviderMenuItem_ = nil;
   [webProviderMenu_ release];
   webProviderMenu_ = nil;
-  [streamingMenuItem_ release];
-  streamingMenuItem_ = nil;
   while ([optionsMenu_ numberOfItems] > 0) {
     [optionsMenu_ removeItemAtIndex:0];
   }
@@ -479,12 +475,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
     [item setRepresentedObject:provider];
   }
   [webProviderMenuItem_ setSubmenu:webProviderMenu_];
-
-  streamingMenuItem_ = [[optionsMenu_
-      addItemWithTitle:NSLocalizedString(@"Stream Responses", nil)
-                action:@selector(streamingMenuItemClicked:)
-         keyEquivalent:@""] retain];
-  [streamingMenuItem_ setTarget:self];
   [self updateOptionsSegmentTitle:selectedTitle];
   [self updateActionControls];
 }
@@ -518,8 +508,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
         [representedObject isEqualToString:selectedModelIdentifier]) {
       [item setState:XPControlStateValueOn];
       selectedTitle = [item title];
-    } else if ((item != webProviderMenuItem_) &&
-               (item != streamingMenuItem_)) {
+    } else if (item != webProviderMenuItem_) {
       [item setState:XPControlStateValueOff];
     }
   }
@@ -552,12 +541,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
         isEqualToString:[sessionOptions_ webProvider]] ?
           XPControlStateValueOn : XPControlStateValueOff];
     }
-  }
-  if (streamingMenuItem_ != nil) {
-    [streamingMenuItem_ setEnabled:
-      (enabled_ && !studyLocked_ && !sending_)];
-    [streamingMenuItem_ setState:([sessionOptions_ streamingEnabled] ?
-      XPControlStateValueOn : XPControlStateValueOff)];
   }
   [actionSegmented_ setEnabled:(sending_ ?
     ((enabled_ || studyLocked_) && !cancellationRequested_) :
@@ -658,8 +641,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
                limitToOneTool:NO
                 toolCallLimit:StrappySessionDefaultToolCallLimit
                    roundLimit:StrappySessionDefaultRoundLimit
-             workingDirectory:@""
-             streamingEnabled:NO] autorelease];
+             workingDirectory:@""] autorelease];
   }
   valueCopy = [value copy];
   [sessionOptions_ release];
@@ -751,28 +733,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   } else {
     [self updateActionControls];
   }
-}
-
-- (void)streamingMenuItemClicked:(id)sender
-{
-  StrappySessionOptions *options;
-  BOOL changed;
-
-  (void)sender;
-  if (sending_) {
-    return;
-  }
-
-  options = [sessionOptions_ copy];
-  [options setStreamingEnabled:![sessionOptions_ streamingEnabled]];
-  changed = [self updateSessionOptions:options
-                         changedFields:StrappySessionOptionStreaming];
-  [options release];
-  (void)changed;
-  [self updateActionControls];
-  [self performSelector:@selector(selectCurrentModelMenuItem)
-             withObject:nil
-             afterDelay:0.0];
 }
 
 - (void)webProviderMenuItemClicked:(id)sender
@@ -882,7 +842,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   [webProviderMenuItem_ release];
   [webProviderMenu_ release];
   [sessionOptions_ release];
-  [streamingMenuItem_ release];
   [super dealloc];
 }
 

@@ -31,9 +31,8 @@ enum {
   StrappySessionOptionBash = 1U << 4,
   StrappySessionOptionLimitToOneTool = 1U << 5,
   StrappySessionOptionWorkingDirectory = 1U << 6,
-  StrappySessionOptionStreaming = 1U << 7,
-  StrappySessionOptionToolCallLimit = 1U << 8,
-  StrappySessionOptionRoundLimit = 1U << 9,
+  StrappySessionOptionToolCallLimit = 1U << 7,
+  StrappySessionOptionRoundLimit = 1U << 8,
   StrappySessionOptionAll =
     StrappySessionOptionModel |
     StrappySessionOptionAssistantSet |
@@ -42,7 +41,6 @@ enum {
     StrappySessionOptionBash |
     StrappySessionOptionLimitToOneTool |
     StrappySessionOptionWorkingDirectory |
-    StrappySessionOptionStreaming |
     StrappySessionOptionToolCallLimit |
     StrappySessionOptionRoundLimit
 };
@@ -58,7 +56,6 @@ enum {
   BOOL limitToOneTool_;
   NSUInteger toolCallLimit_;
   NSUInteger roundLimit_;
-  BOOL streamingEnabled_;
 }
 
 - (id)initWithModelIdentifier:(NSString *)modelIdentifier
@@ -69,8 +66,7 @@ enum {
                limitToOneTool:(BOOL)limitToOneTool
                 toolCallLimit:(NSUInteger)toolCallLimit
                     roundLimit:(NSUInteger)roundLimit
-             workingDirectory:(NSString *)workingDirectory
-             streamingEnabled:(BOOL)streamingEnabled;
+             workingDirectory:(NSString *)workingDirectory;
 - (NSString *)modelIdentifier;
 - (void)setModelIdentifier:(NSString *)modelIdentifier;
 - (NSString *)assistantSetIdentifier;
@@ -89,8 +85,6 @@ enum {
 - (void)setRoundLimit:(NSUInteger)roundLimit;
 - (NSString *)workingDirectory;
 - (void)setWorkingDirectory:(NSString *)workingDirectory;
-- (BOOL)streamingEnabled;
-- (void)setStreamingEnabled:(BOOL)enabled;
 
 @end
 
@@ -134,6 +128,10 @@ enum {
 + (NSString *)defaultOpenRouterModelIdentifierWithError:(NSError **)error;
 + (BOOL)setDefaultOpenRouterModelIdentifier:(NSString *)modelIdentifier
                                       error:(NSError **)error;
++ (StrappySessionOptions *)defaultSessionOptionsWithError:(NSError **)error;
++ (BOOL)updateDefaultSessionOptions:(StrappySessionOptions *)options
+                       changedFields:(StrappySessionOptionMask)changedFields
+                               error:(NSError **)error;
 + (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error;
 + (BOOL)setSelectedOpenRouterModelIdentifier:(NSString *)modelIdentifier
                                        error:(NSError **)error;
@@ -187,12 +185,6 @@ enum {
 - (BOOL)isPromptInFlight;
 - (BOOL)isDatabaseStudySession;
 - (BOOL)promptCancellationRequested;
-- (BOOL)beginStreamingPrompt:(NSString *)prompt
-                     context:(NSDictionary *)context
-                       error:(NSError **)error;
-- (BOOL)beginNonStreamingPrompt:(NSString *)prompt
-                         context:(NSDictionary *)context
-                           error:(NSError **)error;
 - (BOOL)beginResponsesPrompt:(NSString *)prompt
                      context:(NSDictionary *)context
                        error:(NSError **)error;

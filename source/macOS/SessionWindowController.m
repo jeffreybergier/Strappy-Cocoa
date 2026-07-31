@@ -111,25 +111,6 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
   [messagesController_ cancelCurrentPrompt:sender];
 }
 
-- (BOOL)canToggleStreaming
-{
-  return [messagesController_ canToggleStreaming];
-}
-
-- (BOOL)streamingEnabled
-{
-  return [messagesController_ streamingEnabled];
-}
-
-- (void)toggleStreaming:(id)sender
-{
-  [messagesController_ toggleStreaming:sender];
-  if ([sender isKindOfClass:[NSMenuItem class]]) {
-    [(NSMenuItem *)sender setState:([self streamingEnabled] ?
-      XPControlStateValueOn : XPControlStateValueOff)];
-  }
-}
-
 - (void)populateModelMenu:(NSMenu *)menu
 {
   NSArray *models;
@@ -294,10 +275,6 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
     return [self canSendCurrentPrompt];
   } else if (action == @selector(cancelCurrentPrompt:)) {
     return [self canCancelCurrentPrompt];
-  } else if (action == @selector(toggleStreaming:)) {
-    [item setState:([self streamingEnabled] ?
-      XPControlStateValueOn : XPControlStateValueOff)];
-    return [self canToggleStreaming];
   } else if (action == @selector(toggleSidebar:)) {
     [item setTitle:([self isSidebarCollapsed] ?
       NSLocalizedString(@"Show Sidebar", nil) :

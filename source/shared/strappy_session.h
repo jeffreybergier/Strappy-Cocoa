@@ -94,6 +94,11 @@ int strappy_session_load_options(
   long long session_id,
   strappy_session_options *options,
   char **error_out);
+int strappy_session_load_default_options(
+  const char *db_path,
+  const char *fallback_working_directory,
+  strappy_session_options *options,
+  char **error_out);
 int strappy_session_update_options(
   const char *db_path,
   long long session_id,
@@ -103,11 +108,16 @@ int strappy_session_update_options(
   strappy_session_options *saved_options_out,
   strappy_session_option_mask *actual_changed_fields_out,
   char **error_out);
+int strappy_session_update_default_options(
+  const char *db_path,
+  const char *fallback_working_directory,
+  const char *resource_dir,
+  const strappy_session_options *options,
+  strappy_session_option_mask changed_fields,
+  strappy_session_options *saved_options_out,
+  strappy_session_option_mask *actual_changed_fields_out,
+  char **error_out);
 /* Compatibility adapters; prefer the options snapshot API above. */
-int strappy_session_update_streaming_enabled(const char *db_path,
-                                             long long session_id,
-                                             int streaming_enabled,
-                                             char **error_out);
 int strappy_session_update_web_provider(const char *db_path,
                                         long long session_id,
                                         strappy_web_provider web_provider,

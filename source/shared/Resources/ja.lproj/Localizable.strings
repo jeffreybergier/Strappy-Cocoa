@@ -70,13 +70,11 @@
 "Your changes could not be saved." = "変更を保存できませんでした。";
 "Send" = "送信";
 "Send Prompt" = "プロンプトを送信";
-"Stream Responses" = "応答をストリーミング";
-"Stream Responses: On" = "応答をストリーミング: オン";
-"Stream Responses: Off" = "応答をストリーミング: オフ";
 "Sending prompt..." = "プロンプトを送信中...";
 "Prompt failed." = "プロンプトに失敗しました。";
 
 "Preferences" = "環境設定";
+"Session Defaults" = "セッションのデフォルト";
 "API Token" = "API トークン";
 "API Endpoint:" = "API エンドポイント:";
 "API Token:" = "API トークン:";
@@ -137,7 +135,6 @@
 
 "Chat" = "チャット";
 "Cancel Prompt" = "プロンプトをキャンセル";
-"Streaming" = "ストリーミング";
 
 "Edit" = "編集";
 "Undo" = "取り消す";

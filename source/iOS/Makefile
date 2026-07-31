@@ -3,6 +3,8 @@ APP_NAME = Strappy
 SOURCES = main.m AppDelegate.m StrappyRootCoordinator.m \
           SessionListViewController.m PreferencesTableViewController.m \
           MessageListViewController.m PromptSendViewController.m \
+          StrappySessionOptionsTableViewController.m \
+          StrappyModelCellFormatter.m \
           StrappyIdleTimerAssertion.m \
           StrappyActivityAccessoryView.m \
           StrappyPreferencesWhitelistTableViewController.m \

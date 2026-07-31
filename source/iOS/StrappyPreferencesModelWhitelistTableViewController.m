@@ -1,6 +1,7 @@
 #import "StrappyPreferencesModelWhitelistTableViewController.h"
 
 #import "AIFontAwesome.h"
+#import "StrappyModelCellFormatter.h"
 #import "StrappySession.h"
 
 static NSString * const kStrappyModelSearchTextKey =
@@ -37,51 +38,6 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
 
   name = StrappyStringForModelRow(row, @"name");
   return ([name length] > 0U) ? name : StrappyStringForModelRow(row, @"id");
-}
-
-static NSString *StrappyModelNumberString(NSDictionary *row, NSString *key)
-{
-  NSNumber *value;
-  unsigned long long count;
-
-  value = [row objectForKey:key];
-  if (![value isKindOfClass:[NSNumber class]] || ([value longLongValue] <= 0LL)) {
-    return @"";
-  }
-  count = [value unsignedLongLongValue];
-  return [NSString stringWithFormat:@"%lluk", (count + 500ULL) / 1000ULL];
-}
-
-static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
-{
-  static NSNumberFormatter *formatter = nil;
-  NSString *value;
-  double dollarsPerMillion;
-  NSString *formatted;
-
-  value = StrappyStringForModelRow(row, key);
-  if ([value length] == 0U) {
-    return @"";
-  }
-
-  if (formatter == nil) {
-    NSLocale *locale;
-
-    formatter = [[NSNumberFormatter alloc] init];
-    [formatter setFormatterBehavior:NSNumberFormatterBehavior10_4];
-    [formatter setNumberStyle:NSNumberFormatterCurrencyStyle];
-    locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
-    [formatter setLocale:locale];
-    [formatter setCurrencyCode:@"USD"];
-    [formatter setCurrencySymbol:@"$"];
-    [formatter setMinimumFractionDigits:0U];
-    [formatter setMaximumFractionDigits:6U];
-  }
-
-  dollarsPerMillion = [value doubleValue] * 1000000.0;
-  formatted =
-    [formatter stringFromNumber:[NSNumber numberWithDouble:dollarsPerMillion]];
-  return (formatted != nil) ? formatted : @"";
 }
 
 static NSArray *StrappyModelSearchKeys(void)
@@ -237,26 +193,6 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
     YES : NO;
 }
 
-static NSComparisonResult StrappyCompareModelNameRows(id left,
-                                                      id right,
-                                                      void *context)
-{
-  NSDictionary *leftRow;
-  NSDictionary *rightRow;
-  NSComparisonResult result;
-
-  (void)context;
-  leftRow = [left isKindOfClass:[NSDictionary class]] ? left : nil;
-  rightRow = [right isKindOfClass:[NSDictionary class]] ? right : nil;
-  result = StrappyCompareStrings(StrappyModelDisplayNameForRow(leftRow),
-                                 StrappyModelDisplayNameForRow(rightRow));
-  if (result != NSOrderedSame) {
-    return result;
-  }
-  return StrappyCompareStrings(StrappyStringForModelRow(leftRow, @"id"),
-                               StrappyStringForModelRow(rightRow, @"id"));
-}
-
 static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
                                                            id right,
                                                            void *context)
@@ -289,185 +225,9 @@ static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
     [StrappyStringForModelRow(rightRow, @"pricing_prompt") doubleValue]);
 }
 
-@class StrappyPreferencesDefaultModelTableViewController;
-
 @interface StrappyPreferencesModelWhitelistTableViewController ()
-@property (nonatomic, strong) UINavigationController *defaultModelNavigationController;
-@property (nonatomic, strong) StrappyPreferencesDefaultModelTableViewController *defaultModelController;
 @property (nonatomic, assign) BOOL refreshingModels;
-- (void)defaultModelButtonPressed:(id)sender;
-- (BOOL)setDefaultModelIdentifierFromDefaultPicker:(NSString *)modelIdentifier;
-- (void)dismissDefaultModelControllerAnimated:(BOOL)animated;
 @end
-
-@interface StrappyPreferencesDefaultModelTableViewController : UITableViewController
-@property (nonatomic, assign)
-  StrappyPreferencesModelWhitelistTableViewController *modelWhitelistViewController;
-@property (nonatomic, copy) NSArray *models;
-@property (nonatomic, copy) NSString *defaultModelIdentifier;
-- (instancetype)initWithModelWhitelistViewController:
-    (StrappyPreferencesModelWhitelistTableViewController *)viewController;
-- (void)reloadModels;
-@end
-
-@implementation StrappyPreferencesDefaultModelTableViewController
-
-- (instancetype)initWithModelWhitelistViewController:
-    (StrappyPreferencesModelWhitelistTableViewController *)viewController
-{
-  if ((self = [super initWithStyle:UITableViewStyleGrouped])) {
-    [self setModelWhitelistViewController:viewController];
-    [self setModels:[NSArray array]];
-    [self setDefaultModelIdentifier:@""];
-    [[self navigationItem] setTitle:NSLocalizedString(@"Default Model", nil)];
-  }
-  return self;
-}
-
-- (void)viewDidLoad
-{
-  [super viewDidLoad];
-
-  [[self navigationItem] setRightBarButtonItem:
-    [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
-                                                  target:self
-                                                  action:@selector(doneAction:)]];
-  [self reloadModels];
-}
-
-- (void)reloadModels
-{
-  NSError *error;
-  NSArray *models;
-  NSString *defaultModelIdentifier;
-
-  error = nil;
-  models = [StrappySession allowedOpenRouterModelCatalogWithError:&error];
-  if (![models isKindOfClass:[NSArray class]]) {
-    models = [NSArray array];
-    if (error != nil) {
-      [[self modelWhitelistViewController] showError:error
-        title:NSLocalizedString(@"Could not load models", nil)];
-    }
-  }
-
-  error = nil;
-  defaultModelIdentifier =
-    [StrappySession defaultOpenRouterModelIdentifierWithError:&error];
-  if (![defaultModelIdentifier isKindOfClass:[NSString class]]) {
-    defaultModelIdentifier = @"";
-    if (error != nil) {
-      [[self modelWhitelistViewController] showError:error
-        title:NSLocalizedString(@"Could not load default model", nil)];
-    }
-  }
-
-  [self setModels:
-    [models sortedArrayUsingFunction:StrappyCompareModelNameRows context:NULL]];
-  [self setDefaultModelIdentifier:defaultModelIdentifier];
-  [[self tableView] reloadData];
-}
-
-- (void)doneAction:(id)sender
-{
-  (void)sender;
-  [[self modelWhitelistViewController] dismissDefaultModelControllerAnimated:YES];
-}
-
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
-{
-  (void)tableView;
-  return 1;
-}
-
-- (NSInteger)tableView:(UITableView *)tableView
- numberOfRowsInSection:(NSInteger)section
-{
-  (void)tableView;
-  if (section != 0) {
-    return 0;
-  }
-  return (NSInteger)[[self models] count];
-}
-
-- (NSString *)tableView:(UITableView *)tableView
-titleForHeaderInSection:(NSInteger)section
-{
-  (void)tableView;
-  if ([[self models] count] == 0U) {
-    return nil;
-  }
-  return (section == 0) ? NSLocalizedString(@"Models", nil) : nil;
-}
-
-- (UITableViewCell *)tableView:(UITableView *)tableView
-         cellForRowAtIndexPath:(NSIndexPath *)indexPath
-{
-  UITableViewCell *cell;
-
-  cell = [tableView dequeueReusableCellWithIdentifier:@"DefaultModelCell"];
-  if (cell == nil) {
-    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
-                                  reuseIdentifier:@"DefaultModelCell"];
-    [[cell textLabel] setNumberOfLines:1];
-    [[cell detailTextLabel] setNumberOfLines:1];
-  }
-
-  {
-    NSDictionary *model;
-    NSString *identifier;
-
-    model = [[self models] objectAtIndex:(NSUInteger)[indexPath row]];
-    identifier = StrappyStringForModelRow(model, @"id");
-    [[cell textLabel] setText:StrappyModelDisplayNameForRow(model)];
-    [[cell detailTextLabel] setText:identifier];
-    [[cell textLabel] setTextColor:[UIColor blackColor]];
-    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
-    [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-    [cell setAccessoryType:
-      [identifier isEqualToString:[self defaultModelIdentifier]]
-        ? UITableViewCellAccessoryCheckmark
-        : UITableViewCellAccessoryNone];
-  }
-  return cell;
-}
-
-- (NSIndexPath *)tableView:(UITableView *)tableView
-  willSelectRowAtIndexPath:(NSIndexPath *)indexPath
-{
-  (void)tableView;
-  return ([[self models] count] > 0U) ? indexPath : nil;
-}
-
-- (void)tableView:(UITableView *)tableView
-didSelectRowAtIndexPath:(NSIndexPath *)indexPath
-{
-  NSDictionary *model;
-  NSString *modelIdentifier;
-
-  [tableView deselectRowAtIndexPath:indexPath animated:YES];
-  if ([[self models] count] == 0U) {
-    return;
-  }
-
-  model = [[self models] objectAtIndex:(NSUInteger)[indexPath row]];
-  modelIdentifier = StrappyStringForModelRow(model, @"id");
-  if ([modelIdentifier length] == 0U) {
-    return;
-  }
-
-  if ([[self modelWhitelistViewController]
-        setDefaultModelIdentifierFromDefaultPicker:modelIdentifier]) {
-    [self setDefaultModelIdentifier:modelIdentifier];
-    [[self tableView] reloadSections:[NSIndexSet indexSetWithIndex:0]
-                     withRowAnimation:UITableViewRowAnimationNone];
-  } else {
-    [self reloadModels];
-  }
-}
-
-@end
-
 @implementation StrappyPreferencesModelWhitelistTableViewController
 
 - (instancetype)init
@@ -480,12 +240,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 - (void)viewDidLoad
 {
   [super viewDidLoad];
-
-  [[self navigationItem] setRightBarButtonItem:
-    [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Default", nil)
-                                     style:UIBarButtonItemStyleBordered
-                                    target:self
-                                    action:@selector(defaultModelButtonPressed:)]];
 
   [[NSNotificationCenter defaultCenter]
     addObserver:self
@@ -567,32 +321,12 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
 - (void)configureCell:(UITableViewCell *)cell withRow:(NSDictionary *)row
 {
-  NSMutableArray *details;
-  NSString *context;
-  NSString *promptPrice;
-  NSString *completionPrice;
   BOOL defaultModel;
 
-  details = [NSMutableArray array];
   defaultModel = [self modelRowIsDefault:row];
-  context = StrappyModelNumberString(row, @"context_length");
-  if ([context length] > 0U) {
-    [details addObject:[NSString stringWithFormat:
-      NSLocalizedString(@"Context: %@", nil), context]];
-  }
-  promptPrice = StrappyModelPricingString(row, @"pricing_prompt");
-  completionPrice = StrappyModelPricingString(row, @"pricing_completion");
-  if ([promptPrice length] > 0U) {
-    [details addObject:[NSString stringWithFormat:
-      NSLocalizedString(@"In: %@", nil), promptPrice]];
-  }
-  if ([completionPrice length] > 0U) {
-    [details addObject:[NSString stringWithFormat:
-      NSLocalizedString(@"Out: %@", nil), completionPrice]];
-  }
 
   [[cell textLabel] setText:StrappyModelDisplayNameForRow(row)];
-  [[cell detailTextLabel] setText:[details componentsJoinedByString:@", "]];
+  [[cell detailTextLabel] setText:StrappyModelCellDetailText(row)];
   [[cell imageView] setContentMode:UIViewContentModeCenter];
   [[cell imageView] setImage:defaultModel ? StrappyModelDefaultIconImage() : nil];
   [cell setAccessoryType:[self allowedValueForModelRow:row]
@@ -655,56 +389,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
   (void)notification;
   [self reloadRows];
-  [[self defaultModelController] reloadModels];
-}
-
-- (void)defaultModelButtonPressed:(id)sender
-{
-  StrappyPreferencesDefaultModelTableViewController *controller;
-  UINavigationController *navigationController;
-
-  (void)sender;
-  if ([self defaultModelNavigationController] != nil) {
-    return;
-  }
-
-  [[self searchBar] resignFirstResponder];
-  controller =
-    [[StrappyPreferencesDefaultModelTableViewController alloc]
-      initWithModelWhitelistViewController:self];
-  navigationController =
-    [[UINavigationController alloc] initWithRootViewController:controller];
-  [self setDefaultModelController:controller];
-  [self setDefaultModelNavigationController:navigationController];
-  [self presentModalViewController:navigationController animated:YES];
-}
-
-- (BOOL)setDefaultModelIdentifierFromDefaultPicker:(NSString *)modelIdentifier
-{
-  NSError *error;
-
-  error = nil;
-  if (![StrappySession setDefaultOpenRouterModelIdentifier:modelIdentifier
-                                                     error:&error]) {
-    [self showError:error
-              title:NSLocalizedString(@"Failed to Save Changes", nil)];
-    return NO;
-  }
-
-  [self reloadRows];
-  return YES;
-}
-
-- (void)dismissDefaultModelControllerAnimated:(BOOL)animated
-{
-  UINavigationController *navigationController;
-
-  navigationController = [self defaultModelNavigationController];
-  [self setDefaultModelController:nil];
-  [self setDefaultModelNavigationController:nil];
-  if (navigationController != nil) {
-    [navigationController dismissModalViewControllerAnimated:animated];
-  }
 }
 
 - (void)useRow:(NSDictionary *)row atIndexPath:(NSIndexPath *)indexPath

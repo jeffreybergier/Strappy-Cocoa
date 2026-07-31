@@ -126,19 +126,6 @@ static int StrappySessionHandleResponsesEvent(
   return result;
 }
 
-static BOOL StrappySessionStreamingEnabledFromSummary(NSDictionary *summary)
-{
-  NSNumber *streamingEnabled;
-
-  if (![summary isKindOfClass:[NSDictionary class]]) {
-    return NO;
-  }
-
-  streamingEnabled = [summary objectForKey:@"streaming_enabled"];
-  return ([streamingEnabled isKindOfClass:[NSNumber class]] &&
-          [streamingEnabled boolValue]) ? YES : NO;
-}
-
 static NSString *StrappySessionWebProviderFromValue(NSString *value)
 {
   strappy_web_provider provider;
@@ -258,7 +245,6 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
                 toolCallLimit:(NSUInteger)toolCallLimit
                    roundLimit:(NSUInteger)roundLimit
              workingDirectory:(NSString *)workingDirectory
-             streamingEnabled:(BOOL)streamingEnabled
 {
   if ((self = [super init])) {
     [self setModelIdentifier:modelIdentifier];
@@ -270,7 +256,6 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
     [self setToolCallLimit:toolCallLimit];
     [self setRoundLimit:roundLimit];
     [self setWorkingDirectory:workingDirectory];
-    [self setStreamingEnabled:streamingEnabled];
   }
   return self;
 }
@@ -286,8 +271,7 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
              limitToOneTool:[self limitToOneTool]
               toolCallLimit:[self toolCallLimit]
                  roundLimit:[self roundLimit]
-           workingDirectory:[self workingDirectory]
-           streamingEnabled:[self streamingEnabled]];
+           workingDirectory:[self workingDirectory]];
 }
 
 - (NSString *)modelIdentifier
@@ -407,16 +391,6 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
   }
 }
 
-- (BOOL)streamingEnabled
-{
-  return streamingEnabled_;
-}
-
-- (void)setStreamingEnabled:(BOOL)enabled
-{
-  streamingEnabled_ = enabled ? YES : NO;
-}
-
 - (void)dealloc
 {
   [modelIdentifier_ release];
@@ -459,8 +433,7 @@ static StrappySessionOptions *StrappySessionOptionsFromSummary(
                 summary,
                 @"round_limit",
                 StrappySessionDefaultRoundLimit)
-           workingDirectory:workingDirectory
-           streamingEnabled:StrappySessionStreamingEnabledFromSummary(summary)]
+           workingDirectory:workingDirectory]
     autorelease];
 }
 
@@ -488,10 +461,9 @@ static StrappySessionOptions *StrappySessionOptionsFromRecord(
            webSearchEnabled:(options->web_search_enabled ? YES : NO)
                 bashEnabled:(options->bash_enabled ? YES : NO)
              limitToOneTool:(options->limit_to_one_tool ? YES : NO)
-              toolCallLimit:(NSUInteger)options->tool_call_limit
+             toolCallLimit:(NSUInteger)options->tool_call_limit
                  roundLimit:(NSUInteger)options->round_limit
-           workingDirectory:workingDirectory
-           streamingEnabled:(options->streaming_enabled ? YES : NO)]
+           workingDirectory:workingDirectory]
     autorelease];
 }
 
@@ -536,7 +508,6 @@ static BOOL StrappySessionRecordFromOptions(
   record->limit_to_one_tool = [options limitToOneTool] ? 1 : 0;
   record->tool_call_limit = (long)toolCallLimit;
   record->round_limit = (long)roundLimit;
-  record->streaming_enabled = [options streamingEnabled] ? 1 : 0;
   return YES;
 }
 
@@ -950,7 +921,6 @@ static BOOL StrappySessionRecordFromOptions(
   NSNumber *limitToOneTool;
   NSNumber *toolCallLimit;
   NSNumber *roundLimit;
-  NSNumber *streamingEnabled;
   NSString *name;
   NSString *prompt;
   NSString *response;
@@ -975,8 +945,6 @@ static BOOL StrappySessionRecordFromOptions(
     [NSNumber numberWithBool:(record->limit_to_one_tool ? YES : NO)];
   toolCallLimit = [NSNumber numberWithLong:record->tool_call_limit];
   roundLimit = [NSNumber numberWithLong:record->round_limit];
-  streamingEnabled =
-    [NSNumber numberWithBool:(record->streaming_enabled ? YES : NO)];
   name = [StrappySession stringFromCStringOrEmpty:record->name];
   prompt = [StrappySession stringFromCStringOrEmpty:record->prompt];
   response = [StrappySession stringFromCStringOrEmpty:record->response];
@@ -1003,7 +971,6 @@ static BOOL StrappySessionRecordFromOptions(
     limitToOneTool, @"limit_to_one_tool",
     toolCallLimit, @"tool_call_limit",
     roundLimit, @"round_limit",
-    streamingEnabled, @"streaming_enabled",
     createdAt, @"created_at",
     lastActivityAt, @"last_message_at",
     lastActivityAt, @"last_activity_at",
@@ -1820,6 +1787,167 @@ static BOOL StrappySessionRecordFromOptions(
   return YES;
 }
 
++ (StrappySessionOptions *)defaultSessionOptionsWithError:(NSError **)error
+{
+  NSString *databasePath;
+  NSString *workingDirectory;
+  NSArray *workingDirectories;
+  StrappySessionOptions *options;
+  char *strappyError;
+  strappy_session_options record;
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+  workingDirectories = [StrappySession codingWorkingDirectoryPaths];
+  workingDirectory = ([workingDirectories count] > 0U) ?
+    [workingDirectories objectAtIndex:0U] : @"";
+  if ([workingDirectory length] == 0U) {
+    if (error != nil) {
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:[NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"Default working directory is unavailable.", nil)
+                                                            forKey:NSLocalizedDescriptionKey]];
+    }
+    return nil;
+  }
+
+  strappy_session_options_init(&record);
+  strappyError = NULL;
+  if (!strappy_session_load_default_options(
+        [databasePath UTF8String],
+        [workingDirectory fileSystemRepresentation],
+        &record,
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    strappy_session_options_destroy(&record);
+    return nil;
+  }
+  options = StrappySessionOptionsFromRecord(&record);
+  strappy_session_options_destroy(&record);
+  if (options == nil && (error != nil)) {
+    *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                 code:6
+                             userInfo:[NSDictionary dictionaryWithObject:
+      NSLocalizedString(@"Default session options could not be loaded.", nil)
+                                                          forKey:NSLocalizedDescriptionKey]];
+  }
+  return options;
+}
+
++ (BOOL)updateDefaultSessionOptions:(StrappySessionOptions *)options
+                       changedFields:(StrappySessionOptionMask)changedFields
+                               error:(NSError **)error
+{
+  NSString *databasePath;
+  NSString *resourcePath;
+  NSString *workingDirectory;
+  NSArray *workingDirectories;
+  StrappySessionOptions *savedOptions;
+  char *strappyError;
+  strappy_session_option_mask actualChangedFields;
+  strappy_session_options input;
+  strappy_session_options saved;
+
+  if (![options isKindOfClass:[StrappySessionOptions class]] ||
+      ((changedFields & ~((StrappySessionOptionMask)StrappySessionOptionAll)) !=
+       0U)) {
+    if (error != nil) {
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:[NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"Default session options are invalid.", nil)
+                                                            forKey:NSLocalizedDescriptionKey]];
+    }
+    return NO;
+  }
+
+  workingDirectories = [StrappySession codingWorkingDirectoryPaths];
+  workingDirectory = ([workingDirectories count] > 0U) ?
+    [workingDirectories objectAtIndex:0U] : @"";
+  if (([workingDirectory length] == 0U) ||
+      (((changedFields & StrappySessionOptionWorkingDirectory) != 0U) &&
+       ![workingDirectories containsObject:[options workingDirectory]])) {
+    if (error != nil) {
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:15
+                               userInfo:[NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"Working directory selection is invalid.", nil)
+                                                            forKey:NSLocalizedDescriptionKey]];
+    }
+    return NO;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return NO;
+  }
+  resourcePath = nil;
+  if ((changedFields & StrappySessionOptionAssistantSet) != 0U) {
+    resourcePath = [StrappySession guidanceResourceDirectoryWithError:error];
+    if (resourcePath == nil) {
+      return NO;
+    }
+  }
+
+  strappy_session_options_init(&input);
+  if (!StrappySessionRecordFromOptions(options, &input, error)) {
+    return NO;
+  }
+  strappy_session_options_init(&saved);
+  actualChangedFields = 0U;
+  strappyError = NULL;
+  if (!strappy_session_update_default_options(
+        [databasePath UTF8String],
+        [workingDirectory fileSystemRepresentation],
+        StrappySessionOptionalCString(resourcePath),
+        &input,
+        (strappy_session_option_mask)changedFields,
+        &saved,
+        &actualChangedFields,
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    strappy_session_options_destroy(&saved);
+    return NO;
+  }
+
+  savedOptions = StrappySessionOptionsFromRecord(&saved);
+  strappy_session_options_destroy(&saved);
+  if (savedOptions == nil) {
+    if (error != nil) {
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:[NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"Saved default session options could not be loaded.", nil)
+                                                            forKey:NSLocalizedDescriptionKey]];
+    }
+    return NO;
+  }
+  if ((actualChangedFields & StrappySessionOptionModel) != 0U) {
+    NSString *modelIdentifier;
+
+    modelIdentifier = [savedOptions modelIdentifier];
+    [[NSNotificationCenter defaultCenter]
+      postNotificationName:StrappySessionModelCatalogDidChangeNotification
+                    object:self
+                  userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                    modelIdentifier, @"default_model_id",
+                    modelIdentifier, @"selected_model_id",
+                    nil]];
+  }
+  return YES;
+}
+
 + (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error
 {
   return [StrappySession defaultOpenRouterModelIdentifierWithError:error];
@@ -2260,6 +2388,8 @@ static BOOL StrappySessionRecordFromOptions(
 {
   NSString *databasePath;
   NSString *defaultModel;
+  NSString *studyWorkingDirectory;
+  NSArray *workingDirectories;
   StrappySession *session;
   StrappySessionOptions *studyOptions;
   strappy_study_database_id_list pending;
@@ -2325,6 +2455,19 @@ static BOOL StrappySessionRecordFromOptions(
   if (defaultModel == nil) {
     return nil;
   }
+  workingDirectories = [StrappySession codingWorkingDirectoryPaths];
+  studyWorkingDirectory = ([workingDirectories count] > 0U) ?
+    [workingDirectories objectAtIndex:0U] : @"";
+  if ([studyWorkingDirectory length] == 0U) {
+    if (error != nil) {
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:15
+                               userInfo:[NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"Database Study working directory is unavailable.", nil)
+                                                            forKey:NSLocalizedDescriptionKey]];
+    }
+    return nil;
+  }
   session = [StrappySession createSessionWithError:error];
   if (session == nil) {
     return nil;
@@ -2351,10 +2494,16 @@ static BOOL StrappySessionRecordFromOptions(
   [studyOptions setAssistantSetIdentifier:
     [NSString stringWithUTF8String:STRAPPY_ASSISTANT_SET_DATABASE_STUDY]];
   [studyOptions setModelIdentifier:defaultModel];
+  [studyOptions setWebProvider:StrappyWebProviderAuto];
+  [studyOptions setWebSearchEnabled:YES];
+  [studyOptions setBashEnabled:NO];
+  [studyOptions setLimitToOneTool:NO];
+  [studyOptions setToolCallLimit:StrappySessionDefaultToolCallLimit];
+  [studyOptions setRoundLimit:StrappySessionDefaultRoundLimit];
+  [studyOptions setWorkingDirectory:studyWorkingDirectory];
   if ((studyOptions == nil) ||
       ![session updateOptions:studyOptions
-                changedFields:(StrappySessionOptionAssistantSet |
-                               StrappySessionOptionModel)
+                changedFields:StrappySessionOptionAll
                         error:error]) {
     [studyOptions release];
     cleanupError = NULL;
@@ -3271,25 +3420,6 @@ static BOOL StrappySessionRecordFromOptions(
                          withObject:request];
   [request release];
   return YES;
-}
-
-- (BOOL)beginStreamingPrompt:(NSString *)prompt
-                     context:(NSDictionary *)context
-                       error:(NSError **)error
-{
-  (void)prompt;
-  (void)context;
-  (void)error;
-  [NSException raise:NSInternalInconsistencyException
-              format:@"Streaming Responses API support is intentionally disabled."];
-  return NO;
-}
-
-- (BOOL)beginNonStreamingPrompt:(NSString *)prompt
-                         context:(NSDictionary *)context
-                           error:(NSError **)error
-{
-  return [self beginResponsesPrompt:prompt context:context error:error];
 }
 
 - (void)sendPromptInBackground:(NSDictionary *)request

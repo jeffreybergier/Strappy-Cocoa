@@ -492,9 +492,16 @@ static int harness_run_fresh_catalog_schema_tests(
            context->catalog_path,
            "SELECT session_id, web_provider, web_search_enabled, bash_enabled, "
            "limit_to_one_tool, tool_call_limit, round_limit, "
-           "streaming_enabled, updated_at_ms "
+           "updated_at_ms "
          "FROM session_settings LIMIT 0;",
            "session settings columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT id, assistant_set_id, web_provider, web_search_enabled, "
+           "bash_enabled, limit_to_one_tool, tool_call_limit, round_limit, "
+           "working_directory, updated_at_ms "
+           "FROM default_session_options LIMIT 0;",
+           "default session options columns") &&
          harness_expect_catalog_integer(
            context->catalog_path,
            "SELECT COUNT(*) FROM pragma_table_info('session_settings') "
@@ -524,8 +531,7 @@ static int harness_run_fresh_catalog_schema_tests(
            context->catalog_path,
            "SELECT COUNT(*) FROM pragma_table_info('sessions') "
            "WHERE name IN ('web_provider','web_search_enabled','bash_enabled',"
-           "'limit_to_one_tool','tool_call_limit','round_limit',"
-           "'streaming_enabled');",
+           "'limit_to_one_tool','tool_call_limit','round_limit');",
            0LL,
            "session toggle columns remaining in sessions") &&
          harness_expect_catalog_sql_ok(
@@ -675,7 +681,6 @@ static int harness_run_session_settings_upgrade_test(
     "bash_enabled INTEGER NOT NULL DEFAULT 0,"
     "tool_call_limit INTEGER NOT NULL DEFAULT 25,"
     "round_limit INTEGER NOT NULL DEFAULT 50,"
-    "streaming_enabled INTEGER NOT NULL DEFAULT 0,"
     "updated_at_ms INTEGER NOT NULL"
     ");"
     "CREATE TABLE model_requests ("
@@ -688,11 +693,11 @@ static int harness_run_session_settings_upgrade_test(
     "INSERT INTO sessions "
     "(id, name, created_at_ms, updated_at_ms) VALUES (2, '', 1, 1);"
     "INSERT INTO session_settings "
-    "(session_id, web_provider, bash_enabled, streaming_enabled, "
-     "updated_at_ms) VALUES (1, 'auto', 0, 0, 1);"
+    "(session_id, web_provider, bash_enabled, updated_at_ms) "
+     "VALUES (1, 'auto', 0, 1);"
     "INSERT INTO session_settings "
-    "(session_id, web_provider, bash_enabled, streaming_enabled, "
-     "updated_at_ms) VALUES (2, 'none', 0, 0, 1);"
+    "(session_id, web_provider, bash_enabled, updated_at_ms) "
+     "VALUES (2, 'none', 0, 1);"
     "PRAGMA user_version = 1;";
   char path[1200];
   char *error;
@@ -7388,6 +7393,10 @@ cleanup:
 
 static int harness_run_session_options_tests(const harness_context *context)
 {
+  strappy_session_options default_patch;
+  strappy_session_options future_options;
+  strappy_session_options original_defaults;
+  strappy_session_options saved_defaults;
   strappy_session_options stale;
   strappy_session_options saved;
   strappy_session_options reloaded;
@@ -7398,22 +7407,40 @@ static int harness_run_session_options_tests(const harness_context *context)
     STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
     STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT |
     STRAPPY_SESSION_OPTION_ROUND_LIMIT |
-    STRAPPY_SESSION_OPTION_WORKING_DIRECTORY |
-    STRAPPY_SESSION_OPTION_STREAMING;
+    STRAPPY_SESSION_OPTION_WORKING_DIRECTORY;
+  const strappy_session_option_mask default_update_fields =
+    STRAPPY_SESSION_OPTION_ASSISTANT_SET |
+    STRAPPY_SESSION_OPTION_WEB_PROVIDER |
+    STRAPPY_SESSION_OPTION_WEB_SEARCH |
+    STRAPPY_SESSION_OPTION_BASH |
+    STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
+    STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT |
+    STRAPPY_SESSION_OPTION_ROUND_LIMIT |
+    STRAPPY_SESSION_OPTION_WORKING_DIRECTORY;
+  const char *fallback_working_directory;
+  long long future_session_id;
   long long session_id;
   char *error;
   char *working_directory;
+  int defaults_changed;
   int ok;
 
   if (context == NULL) {
     return 0;
   }
 
+  strappy_session_options_init(&default_patch);
+  strappy_session_options_init(&future_options);
+  strappy_session_options_init(&original_defaults);
+  strappy_session_options_init(&saved_defaults);
   strappy_session_options_init(&stale);
   strappy_session_options_init(&saved);
   strappy_session_options_init(&reloaded);
+  fallback_working_directory = getenv("HOME");
+  future_session_id = 0LL;
   session_id = 0LL;
   error = NULL;
+  defaults_changed = 0;
   ok = strappy_db_create_session(context->catalog_path,
                                  &session_id,
                                  &error) &&
@@ -7433,8 +7460,7 @@ static int harness_run_session_options_tests(const harness_context *context)
       !stale.web_search_enabled || stale.bash_enabled ||
       stale.limit_to_one_tool ||
       (stale.tool_call_limit != STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT) ||
-      (stale.round_limit != STRAPPY_SESSION_DEFAULT_ROUND_LIMIT) ||
-      stale.streaming_enabled) {
+      (stale.round_limit != STRAPPY_SESSION_DEFAULT_ROUND_LIMIT)) {
     fprintf(stderr, "Initial session-options snapshot did not match.\n");
     ok = 0;
     goto cleanup;
@@ -7498,7 +7524,6 @@ static int harness_run_session_options_tests(const harness_context *context)
   stale.limit_to_one_tool = 1;
   stale.tool_call_limit = 7L;
   stale.round_limit = 9L;
-  stale.streaming_enabled = 1;
   actual_changed_fields = 0U;
   ok = strappy_db_update_session_options(context->catalog_path,
                                          session_id,
@@ -7508,7 +7533,7 @@ static int harness_run_session_options_tests(const harness_context *context)
                                          &actual_changed_fields,
                                          &error);
   if (!ok || (actual_changed_fields != final_update_fields) ||
-      !saved.limit_to_one_tool || !saved.streaming_enabled ||
+      !saved.limit_to_one_tool ||
       (saved.tool_call_limit != 7L) || (saved.round_limit != 9L) ||
       (saved.working_directory == NULL) ||
       (strcmp(saved.working_directory, context->temp_dir) != 0) ||
@@ -7595,7 +7620,7 @@ static int harness_run_session_options_tests(const harness_context *context)
                                        &error);
   if (!ok || (reloaded.web_provider != STRAPPY_WEB_PROVIDER_PARALLEL) ||
       !reloaded.bash_enabled || reloaded.web_search_enabled ||
-      !reloaded.limit_to_one_tool || !reloaded.streaming_enabled ||
+      !reloaded.limit_to_one_tool ||
       (reloaded.tool_call_limit != 7L) || (reloaded.round_limit != 9L) ||
       (reloaded.working_directory == NULL) ||
       (strcmp(reloaded.working_directory, context->temp_dir) != 0)) {
@@ -7603,10 +7628,145 @@ static int harness_run_session_options_tests(const harness_context *context)
             "The rejected options patch changed persisted state: %s\n",
             (error != NULL) ? error : "snapshot mismatch");
     ok = 0;
+    goto cleanup;
+  }
+
+  if ((fallback_working_directory == NULL) ||
+      (fallback_working_directory[0] == '\0') ||
+      !strappy_db_load_default_session_options(context->catalog_path,
+                                               fallback_working_directory,
+                                               &original_defaults,
+                                               &error) ||
+      !strappy_db_load_default_session_options(context->catalog_path,
+                                               fallback_working_directory,
+                                               &default_patch,
+                                               &error)) {
+    fprintf(stderr,
+            "Could not load the default session-options fixture: %s\n",
+            (error != NULL) ? error : "unknown");
+    ok = 0;
+    goto cleanup;
+  }
+
+  free(default_patch.assistant_set_id);
+  default_patch.assistant_set_id =
+    strdup(STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE);
+  free(default_patch.working_directory);
+  default_patch.working_directory = strdup(context->temp_dir);
+  if ((default_patch.assistant_set_id == NULL) ||
+      (default_patch.working_directory == NULL)) {
+    fprintf(stderr, "Could not allocate the default-options patch.\n");
+    ok = 0;
+    goto cleanup;
+  }
+  default_patch.web_provider = STRAPPY_WEB_PROVIDER_NATIVE;
+  default_patch.web_search_enabled = 0;
+  default_patch.bash_enabled = 1;
+  default_patch.limit_to_one_tool = 1;
+  default_patch.tool_call_limit = 11L;
+  default_patch.round_limit = 13L;
+  actual_changed_fields = 0U;
+  ok = strappy_db_update_default_session_options(
+    context->catalog_path,
+    fallback_working_directory,
+    &default_patch,
+    default_update_fields,
+    &saved_defaults,
+    &actual_changed_fields,
+    &error);
+  if (ok) {
+    defaults_changed = 1;
+  }
+  if (!ok || (actual_changed_fields != default_update_fields) ||
+      (saved_defaults.model_id == NULL) ||
+      (strcmp(saved_defaults.model_id, original_defaults.model_id) != 0) ||
+      (saved_defaults.assistant_set_id == NULL) ||
+      (strcmp(saved_defaults.assistant_set_id,
+              STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE) != 0) ||
+      (saved_defaults.web_provider != STRAPPY_WEB_PROVIDER_NATIVE) ||
+      saved_defaults.web_search_enabled || !saved_defaults.bash_enabled ||
+      !saved_defaults.limit_to_one_tool ||
+      (saved_defaults.tool_call_limit != 11L) ||
+      (saved_defaults.round_limit != 13L) ||
+      (saved_defaults.working_directory == NULL) ||
+      (strcmp(saved_defaults.working_directory, context->temp_dir) != 0)) {
+    fprintf(stderr,
+            "Could not atomically save default session options: %s\n",
+            (error != NULL) ? error : "snapshot mismatch");
+    ok = 0;
+    goto cleanup;
+  }
+
+  ok = strappy_db_load_session_options(context->catalog_path,
+                                       session_id,
+                                       &reloaded,
+                                       &error);
+  if (!ok || (reloaded.web_provider != STRAPPY_WEB_PROVIDER_PARALLEL) ||
+      !reloaded.bash_enabled || reloaded.web_search_enabled ||
+      !reloaded.limit_to_one_tool ||
+      (reloaded.tool_call_limit != 7L) || (reloaded.round_limit != 9L)) {
+    fprintf(stderr,
+            "Changing defaults modified an existing session: %s\n",
+            (error != NULL) ? error : "snapshot mismatch");
+    ok = 0;
+    goto cleanup;
+  }
+
+  ok = strappy_db_create_session(context->catalog_path,
+                                 &future_session_id,
+                                 &error) &&
+    strappy_db_load_session_options(context->catalog_path,
+                                    future_session_id,
+                                    &future_options,
+                                    &error);
+  if (!ok || (future_options.model_id == NULL) ||
+      (strcmp(future_options.model_id, original_defaults.model_id) != 0) ||
+      (future_options.assistant_set_id == NULL) ||
+      (strcmp(future_options.assistant_set_id,
+              STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE) != 0) ||
+      (future_options.web_provider != STRAPPY_WEB_PROVIDER_NATIVE) ||
+      future_options.web_search_enabled || !future_options.bash_enabled ||
+      !future_options.limit_to_one_tool ||
+      (future_options.tool_call_limit != 11L) ||
+      (future_options.round_limit != 13L) ||
+      (future_options.working_directory == NULL) ||
+      (strcmp(future_options.working_directory, context->temp_dir) != 0)) {
+    fprintf(stderr,
+            "A new session did not copy the default options snapshot: %s\n",
+            (error != NULL) ? error : "snapshot mismatch");
+    ok = 0;
   }
 
 cleanup:
+  if (defaults_changed) {
+    free(error);
+    error = NULL;
+    if (!strappy_db_update_default_session_options(
+          context->catalog_path,
+          fallback_working_directory,
+          &original_defaults,
+          STRAPPY_SESSION_OPTION_ALL,
+          &saved_defaults,
+          &actual_changed_fields,
+          &error)) {
+      fprintf(stderr,
+              "Could not restore default session options: %s\n",
+              (error != NULL) ? error : "unknown");
+      ok = 0;
+    }
+    if (!harness_expect_catalog_sql_ok(
+          context->catalog_path,
+          "UPDATE default_session_options SET working_directory = NULL "
+          "WHERE id = 1;",
+          "restored default working-directory fallback")) {
+      ok = 0;
+    }
+  }
   free(error);
+  strappy_session_options_destroy(&saved_defaults);
+  strappy_session_options_destroy(&original_defaults);
+  strappy_session_options_destroy(&future_options);
+  strappy_session_options_destroy(&default_patch);
   strappy_session_options_destroy(&reloaded);
   strappy_session_options_destroy(&saved);
   strappy_session_options_destroy(&stale);
@@ -7694,7 +7854,6 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (session.limit_to_one_tool == 0) &&
        (session.tool_call_limit == STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT) &&
        (session.round_limit == STRAPPY_SESSION_DEFAULT_ROUND_LIMIT) &&
-       (session.streaming_enabled == 0) &&
        (session.http_status == 0L);
   strappy_session_record_destroy(&session);
   if (!ok) {
@@ -7815,39 +7974,6 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   strappy_session_record_destroy(&session);
   if (!ok) {
     fprintf(stderr, "Session single-tool setting was not stored.\n");
-    return 0;
-  }
-
-  error = NULL;
-  ok = strappy_db_update_session_streaming_enabled(context->catalog_path,
-                                                   session_id,
-                                                   1,
-                                                   &error);
-  if (!ok) {
-    fprintf(stderr,
-            "Could not update session streaming setting: %s\n",
-            (error != NULL) ? error : "unknown");
-    strappy_free_string(error);
-    return 0;
-  }
-
-  strappy_session_record_init(&session);
-  ok = strappy_db_load_session(context->catalog_path,
-                               session_id,
-                               &session,
-                               &error);
-  if (!ok) {
-    fprintf(stderr,
-            "Could not reload streaming session setting: %s\n",
-            (error != NULL) ? error : "unknown");
-    strappy_free_string(error);
-    strappy_session_record_destroy(&session);
-    return 0;
-  }
-  ok = (session.streaming_enabled == 1);
-  strappy_session_record_destroy(&session);
-  if (!ok) {
-    fprintf(stderr, "Session streaming setting was not stored.\n");
     return 0;
   }
 
@@ -8177,7 +8303,6 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
        (session.limit_to_one_tool == 1) &&
        (session.tool_call_limit == STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT) &&
        (session.round_limit == STRAPPY_SESSION_DEFAULT_ROUND_LIMIT) &&
-       (session.streaming_enabled == 1) &&
        (session.http_status == 200L);
   strappy_session_record_destroy(&session);
   if (!ok) {
@@ -8759,6 +8884,10 @@ static int harness_run_openrouter_model_catalog_tests(
     "}";
   strappy_openrouter_model_record_list list;
   strappy_session_record session_list_record;
+  strappy_session_options default_options;
+  strappy_session_options saved_default_options;
+  strappy_session_option_mask actual_changed_fields;
+  const char *fallback_working_directory;
   char *default_model;
   char *selected_model;
   char *session_model;
@@ -8989,16 +9118,49 @@ static int harness_run_openrouter_model_catalog_tests(
     return 0;
   }
 
+  fallback_working_directory = getenv("HOME");
+  strappy_session_options_init(&default_options);
+  strappy_session_options_init(&saved_default_options);
   error = NULL;
-  if (!strappy_db_set_default_openrouter_model(context->catalog_path,
-                                               "openai/gpt-4.1-mini",
-                                               &error)) {
+  if ((fallback_working_directory == NULL) ||
+      !strappy_db_load_default_session_options(
+        context->catalog_path,
+        fallback_working_directory,
+        &default_options,
+        &error)) {
     fprintf(stderr,
-            "Could not set default OpenRouter model: %s\n",
+            "Could not load default options before selecting a model: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
+    strappy_session_options_destroy(&saved_default_options);
+    strappy_session_options_destroy(&default_options);
     return 0;
   }
+  free(default_options.model_id);
+  default_options.model_id = strdup("openai/gpt-4.1-mini");
+  actual_changed_fields = 0U;
+  if ((default_options.model_id == NULL) ||
+      !strappy_db_update_default_session_options(
+        context->catalog_path,
+        fallback_working_directory,
+        &default_options,
+        STRAPPY_SESSION_OPTION_MODEL,
+        &saved_default_options,
+        &actual_changed_fields,
+        &error) ||
+      (actual_changed_fields != STRAPPY_SESSION_OPTION_MODEL) ||
+      (saved_default_options.model_id == NULL) ||
+      (strcmp(saved_default_options.model_id, "openai/gpt-4.1-mini") != 0)) {
+    fprintf(stderr,
+            "Could not set the model through default session options: %s\n",
+            (error != NULL) ? error : "snapshot mismatch");
+    strappy_free_string(error);
+    strappy_session_options_destroy(&saved_default_options);
+    strappy_session_options_destroy(&default_options);
+    return 0;
+  }
+  strappy_session_options_destroy(&saved_default_options);
+  strappy_session_options_destroy(&default_options);
 
   default_model = NULL;
   if (!strappy_db_get_default_openrouter_model(context->catalog_path,

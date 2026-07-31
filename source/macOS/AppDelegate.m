@@ -203,13 +203,6 @@
     _modelMenu = [modelMenu retain];
     [self populateModelMenu:modelMenu];
   }
-  {
-    NSMenuItem *streaming =
-      [chatMenu addItemWithTitle:NSLocalizedString(@"Streaming", nil)
-                          action:@selector(toggleStreaming:)
-                   keyEquivalent:@""];
-    [streaming setTarget:nil];
-  }
   [chatMenu addItem:[NSMenuItem separatorItem]];
   {
     NSMenuItem *pageSetup =

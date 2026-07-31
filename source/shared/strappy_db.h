@@ -30,7 +30,6 @@ typedef struct strappy_session_record {
   int limit_to_one_tool;
   long tool_call_limit;
   long round_limit;
-  int streaming_enabled;
   long http_status;
 } strappy_session_record;
 
@@ -49,9 +48,8 @@ enum {
   STRAPPY_SESSION_OPTION_BASH = 1U << 4,
   STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL = 1U << 5,
   STRAPPY_SESSION_OPTION_WORKING_DIRECTORY = 1U << 6,
-  STRAPPY_SESSION_OPTION_STREAMING = 1U << 7,
-  STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT = 1U << 8,
-  STRAPPY_SESSION_OPTION_ROUND_LIMIT = 1U << 9,
+  STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT = 1U << 7,
+  STRAPPY_SESSION_OPTION_ROUND_LIMIT = 1U << 8,
   STRAPPY_SESSION_OPTION_ALL =
     STRAPPY_SESSION_OPTION_MODEL |
     STRAPPY_SESSION_OPTION_ASSISTANT_SET |
@@ -60,7 +58,6 @@ enum {
     STRAPPY_SESSION_OPTION_BASH |
     STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
     STRAPPY_SESSION_OPTION_WORKING_DIRECTORY |
-    STRAPPY_SESSION_OPTION_STREAMING |
     STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT |
     STRAPPY_SESSION_OPTION_ROUND_LIMIT
 };
@@ -75,7 +72,6 @@ typedef struct strappy_session_options {
   int limit_to_one_tool;
   long tool_call_limit;
   long round_limit;
-  int streaming_enabled;
 } strappy_session_options;
 
 typedef struct strappy_response_timeline_cursor {
@@ -470,9 +466,22 @@ int strappy_db_load_session_options(
   long long session_id,
   strappy_session_options *options,
   char **error_out);
+int strappy_db_load_default_session_options(
+  const char *db_path,
+  const char *fallback_working_directory,
+  strappy_session_options *options,
+  char **error_out);
 int strappy_db_update_session_options(
   const char *db_path,
   long long session_id,
+  const strappy_session_options *options,
+  strappy_session_option_mask changed_fields,
+  strappy_session_options *saved_options_out,
+  strappy_session_option_mask *actual_changed_fields_out,
+  char **error_out);
+int strappy_db_update_default_session_options(
+  const char *db_path,
+  const char *fallback_working_directory,
   const strappy_session_options *options,
   strappy_session_option_mask changed_fields,
   strappy_session_options *saved_options_out,
@@ -497,10 +506,6 @@ int strappy_db_update_session_name(const char *db_path,
                                    long long session_id,
                                    const char *name,
                                    char **error_out);
-int strappy_db_update_session_streaming_enabled(const char *db_path,
-                                                long long session_id,
-                                                int streaming_enabled,
-                                                char **error_out);
 int strappy_db_update_session_web_provider(
   const char *db_path,
   long long session_id,

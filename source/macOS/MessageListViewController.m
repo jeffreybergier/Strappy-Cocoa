@@ -358,42 +358,6 @@ static BOOL StrappyContextRoundActionValues(
   [self promptSendViewControllerDidCancelPrompt:sendController_];
 }
 
-- (BOOL)canToggleStreaming
-{
-  if ((session_ == nil) || [session_ isDatabaseStudySession] || sending_ ||
-      [self sessionPromptIsInFlight]) {
-    return NO;
-  }
-  return YES;
-}
-
-- (BOOL)streamingEnabled
-{
-  StrappySessionOptions *options;
-
-  options = (session_ != nil) ? [session_ optionsWithError:nil] : nil;
-  return [options streamingEnabled];
-}
-
-- (void)toggleStreaming:(id)sender
-{
-  StrappySessionOptions *options;
-
-  (void)sender;
-  if (![self canToggleStreaming]) {
-    return;
-  }
-  options = [[session_ optionsWithError:nil] copy];
-  if (options == nil) {
-    return;
-  }
-  [options setStreamingEnabled:![options streamingEnabled]];
-  (void)[self promptSendViewController:sendController_
-                  updateSessionOptions:options
-                         changedFields:StrappySessionOptionStreaming];
-  [options release];
-}
-
 - (BOOL)canPrintCurrentChat
 {
   NSView *webView;
@@ -426,10 +390,6 @@ static BOOL StrappyContextRoundActionValues(
     return [self canSendCurrentPrompt];
   } else if (action == @selector(cancelCurrentPrompt:)) {
     return [self canCancelCurrentPrompt];
-  } else if (action == @selector(toggleStreaming:)) {
-    [item setState:([self streamingEnabled] ?
-      XPControlStateValueOn : XPControlStateValueOff)];
-    return [self canToggleStreaming];
   }
   return YES;
 }
@@ -673,9 +633,7 @@ static BOOL StrappyContextRoundActionValues(
 - (void)beginSendingPrompt:(NSString *)prompt
 {
   NSString *promptToSend;
-  StrappySessionOptions *options;
   NSError *startError;
-  BOOL shouldStream;
   BOOL didStartPrompt;
 
   if (sending_) {
@@ -703,17 +661,9 @@ static BOOL StrappyContextRoundActionValues(
   [self clearRequestState];
 
   startError = nil;
-  options = [session_ optionsWithError:nil];
-  shouldStream = [options streamingEnabled];
-  if (shouldStream) {
-    didStartPrompt = [session_ beginStreamingPrompt:promptToSend
-                                           context:nil
-                                             error:&startError];
-  } else {
-    didStartPrompt = [session_ beginNonStreamingPrompt:promptToSend
-                                              context:nil
-                                                error:&startError];
-  }
+  didStartPrompt = [session_ beginResponsesPrompt:promptToSend
+                                          context:nil
+                                            error:&startError];
   if (!didStartPrompt) {
     NSMutableDictionary *result;
     NSString *errorMessage;

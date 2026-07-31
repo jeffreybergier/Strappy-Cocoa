@@ -316,14 +316,22 @@ int strappy_session_load_options(
                                          error_out);
 }
 
-int strappy_session_update_options(
+int strappy_session_load_default_options(
   const char *db_path,
-  long long session_id,
+  const char *fallback_working_directory,
+  strappy_session_options *options,
+  char **error_out)
+{
+  return strappy_db_load_default_session_options(db_path,
+                                                 fallback_working_directory,
+                                                 options,
+                                                 error_out);
+}
+
+static int strappy_session_validate_options_update(
   const char *resource_dir,
   const strappy_session_options *options,
   strappy_session_option_mask changed_fields,
-  strappy_session_options *saved_options_out,
-  strappy_session_option_mask *actual_changed_fields_out,
   char **error_out)
 {
   strappy_assistant_set_profile profile;
@@ -365,6 +373,25 @@ int strappy_session_update_options(
     }
     strappy_assistant_set_profile_destroy(&profile);
   }
+  return 1;
+}
+
+int strappy_session_update_options(
+  const char *db_path,
+  long long session_id,
+  const char *resource_dir,
+  const strappy_session_options *options,
+  strappy_session_option_mask changed_fields,
+  strappy_session_options *saved_options_out,
+  strappy_session_option_mask *actual_changed_fields_out,
+  char **error_out)
+{
+  if (!strappy_session_validate_options_update(resource_dir,
+                                               options,
+                                               changed_fields,
+                                               error_out)) {
+    return 0;
+  }
   return strappy_db_update_session_options(db_path,
                                            session_id,
                                            options,
@@ -374,15 +401,30 @@ int strappy_session_update_options(
                                            error_out);
 }
 
-int strappy_session_update_streaming_enabled(const char *db_path,
-                                             long long session_id,
-                                             int streaming_enabled,
-                                             char **error_out)
+int strappy_session_update_default_options(
+  const char *db_path,
+  const char *fallback_working_directory,
+  const char *resource_dir,
+  const strappy_session_options *options,
+  strappy_session_option_mask changed_fields,
+  strappy_session_options *saved_options_out,
+  strappy_session_option_mask *actual_changed_fields_out,
+  char **error_out)
 {
-  return strappy_db_update_session_streaming_enabled(db_path,
-                                                    session_id,
-                                                    streaming_enabled,
-                                                    error_out);
+  if (!strappy_session_validate_options_update(resource_dir,
+                                               options,
+                                               changed_fields,
+                                               error_out)) {
+    return 0;
+  }
+  return strappy_db_update_default_session_options(
+    db_path,
+    fallback_working_directory,
+    options,
+    changed_fields,
+    saved_options_out,
+    actual_changed_fields_out,
+    error_out);
 }
 
 int strappy_session_update_web_provider(const char *db_path,

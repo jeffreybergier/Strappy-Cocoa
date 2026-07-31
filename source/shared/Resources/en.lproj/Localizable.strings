@@ -70,13 +70,11 @@
 "Your changes could not be saved." = "Your changes could not be saved.";
 "Send" = "Send";
 "Send Prompt" = "Send Prompt";
-"Stream Responses" = "Stream Responses";
-"Stream Responses: On" = "Stream Responses: On";
-"Stream Responses: Off" = "Stream Responses: Off";
 "Sending prompt..." = "Sending prompt...";
 "Prompt failed." = "Prompt failed.";
 
 "Preferences" = "Preferences";
+"Session Defaults" = "Session Defaults";
 "API Token" = "API Token";
 "API Endpoint:" = "API Endpoint:";
 "API Token:" = "API Token:";
@@ -137,7 +135,6 @@
 
 "Chat" = "Chat";
 "Cancel Prompt" = "Cancel Prompt";
-"Streaming" = "Streaming";
 
 "Edit" = "Edit";
 "Undo" = "Undo";

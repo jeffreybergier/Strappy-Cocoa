@@ -8,6 +8,7 @@
 #import "StrappyPreferencesModelWhitelistTableViewController.h"
 #import "StrappyPreferencesSystemPromptsTableViewController.h"
 #import "StrappySession.h"
+#import "StrappySessionOptionsTableViewController.h"
 
 static NSString *StrappyPreferencesTrimmedString(NSString *string)
 {
@@ -16,6 +17,53 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
   }
   return [string stringByTrimmingCharactersInSet:
     [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+
+static NSString *StrappyPreferencesModelStringForRow(NSDictionary *row,
+                                                     NSString *key)
+{
+  id value;
+
+  if (![row isKindOfClass:[NSDictionary class]]) {
+    return @"";
+  }
+  value = [row objectForKey:key];
+  return [value isKindOfClass:[NSString class]] ? value : @"";
+}
+
+static NSString *StrappyPreferencesModelDisplayNameForRow(NSDictionary *row)
+{
+  NSString *name;
+  NSString *modelIdentifier;
+
+  name = StrappyPreferencesModelStringForRow(row, @"name");
+  if ([name length] > 0U) {
+    return name;
+  }
+  modelIdentifier = StrappyPreferencesModelStringForRow(row, @"id");
+  return ([modelIdentifier length] > 0U)
+    ? modelIdentifier : NSLocalizedString(@"Model", nil);
+}
+
+static NSComparisonResult StrappyPreferencesCompareModelNameRows(
+  id left,
+  id right,
+  void *context)
+{
+  NSDictionary *leftRow;
+  NSDictionary *rightRow;
+  NSComparisonResult result;
+
+  (void)context;
+  leftRow = [left isKindOfClass:[NSDictionary class]] ? left : nil;
+  rightRow = [right isKindOfClass:[NSDictionary class]] ? right : nil;
+  result = [StrappyPreferencesModelDisplayNameForRow(leftRow)
+    caseInsensitiveCompare:StrappyPreferencesModelDisplayNameForRow(rightRow)];
+  if (result != NSOrderedSame) {
+    return result;
+  }
+  return [StrappyPreferencesModelStringForRow(leftRow, @"id")
+    caseInsensitiveCompare:StrappyPreferencesModelStringForRow(rightRow, @"id")];
 }
 
 enum {
@@ -31,22 +79,27 @@ enum {
 };
 
 enum {
-  kStrappyPaneRowModels = 0,
+  kStrappyPaneRowSessionDefaults = 0,
+  kStrappyPaneRowModels,
   kStrappyPaneRowDatabases,
   kStrappyPaneRowStudy,
   kStrappyPaneRowPrompts,
   kStrappyPaneRowCount
 };
 
-@interface PreferencesTableViewController () <UITextFieldDelegate>
+@interface PreferencesTableViewController ()
+  <UITextFieldDelegate, StrappySessionOptionsTableViewControllerDelegate>
 @property (nonatomic, strong) UITextField *apiEndpointField;
 @property (nonatomic, strong) UITextField *apiTokenField;
+@property (nonatomic, copy) StrappySessionOptions *defaultSessionOptions;
+@property (nonatomic, assign) BOOL defaultSessionOptionsLoaded;
 @property (nonatomic, assign) BOOL authenticationDirty;
 - (UITextField *)makeFieldSecure:(BOOL)secure placeholder:(NSString *)placeholder;
 - (void)loadAuthenticationFields;
 - (BOOL)saveAuthenticationIfNeeded;
 - (BOOL)saveAuthentication;
 - (void)showMessage:(NSString *)message title:(NSString *)title;
+- (void)showError:(NSError *)error title:(NSString *)title;
 - (void)fieldChanged:(id)sender;
 - (void)longRunningPreferenceWorkDidChange:(NSNotification *)notification;
 - (void)doneAction:(id)sender;
@@ -105,6 +158,8 @@ enum {
 - (void)viewWillAppear:(BOOL)animated
 {
   [super viewWillAppear:animated];
+  [self setDefaultSessionOptions:nil];
+  [self setDefaultSessionOptionsLoaded:NO];
   [[self navigationController] setToolbarHidden:YES animated:animated];
 }
 
@@ -118,6 +173,17 @@ enum {
                            cancelButtonTitle:NSLocalizedString(@"OK", nil)
                            otherButtonTitles:nil];
   [alert show];
+}
+
+- (void)showError:(NSError *)error title:(NSString *)title
+{
+  NSString *message;
+
+  message = [error localizedDescription];
+  if ([message length] == 0U) {
+    message = NSLocalizedString(@"Your changes could not be saved.", nil);
+  }
+  [self showMessage:message title:title];
 }
 
 - (UITextField *)makeFieldSecure:(BOOL)secure placeholder:(NSString *)placeholder
@@ -213,6 +279,81 @@ enum {
   return YES;
 }
 
+#pragma mark - StrappySessionOptionsTableViewControllerDelegate
+
+- (NSArray *)currentAllowedModels
+{
+  NSError *error;
+  NSArray *models;
+
+  error = nil;
+  models = [StrappySession allowedOpenRouterModelCatalogWithError:&error];
+  if (![models isKindOfClass:[NSArray class]]) {
+    [self showError:error
+              title:NSLocalizedString(@"Could not load models", nil)];
+    return [NSArray array];
+  }
+  return [models
+    sortedArrayUsingFunction:StrappyPreferencesCompareModelNameRows
+                     context:NULL];
+}
+
+- (NSArray *)currentAssistantSets
+{
+  NSArray *assistantSets;
+
+  assistantSets = [StrappySession assistantSetCatalog];
+  return [assistantSets isKindOfClass:[NSArray class]]
+    ? assistantSets : [NSArray array];
+}
+
+- (StrappySessionOptions *)sessionOptions
+{
+  NSError *error;
+  StrappySessionOptions *options;
+
+  if ([self defaultSessionOptionsLoaded]) {
+    return [self defaultSessionOptions];
+  }
+
+  error = nil;
+  options = [StrappySession defaultSessionOptionsWithError:&error];
+  [self setDefaultSessionOptionsLoaded:YES];
+  [self setDefaultSessionOptions:options];
+  if (options == nil) {
+    [self showError:error
+              title:NSLocalizedString(@"Could not load default options", nil)];
+  }
+  return [self defaultSessionOptions];
+}
+
+- (BOOL)updateSessionOptions:(StrappySessionOptions *)options
+               changedFields:(StrappySessionOptionMask)changedFields
+{
+  NSError *error;
+
+  error = nil;
+  if (![StrappySession updateDefaultSessionOptions:options
+                                      changedFields:changedFields
+                                              error:&error]) {
+    [self showError:error
+              title:NSLocalizedString(@"Failed to Save Changes", nil)];
+    return NO;
+  }
+
+  [self setDefaultSessionOptions:nil];
+  [self setDefaultSessionOptionsLoaded:NO];
+  (void)[self sessionOptions];
+  return YES;
+}
+
+- (void)dismissOptionsControllerAnimated:(BOOL)animated
+{
+  [self setDefaultSessionOptions:nil];
+  [self setDefaultSessionOptionsLoaded:NO];
+  [[self navigationController] popToViewController:self animated:animated];
+}
+
 #pragma mark - UITextFieldDelegate
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField
@@ -294,7 +435,9 @@ titleForFooterInSection:(NSInteger)section
   [cell setAccessoryType:UITableViewCellAccessoryDisclosureIndicator];
   [cell setAccessoryView:nil];
   [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-  if ([indexPath row] == kStrappyPaneRowModels) {
+  if ([indexPath row] == kStrappyPaneRowSessionDefaults) {
+    [[cell textLabel] setText:NSLocalizedString(@"Session Defaults", nil)];
+  } else if ([indexPath row] == kStrappyPaneRowModels) {
     [[cell textLabel] setText:NSLocalizedString(@"Models", nil)];
     if ([StrappySession isModelCatalogRefreshInFlight]) {
       [cell setAccessoryType:UITableViewCellAccessoryNone];
@@ -328,7 +471,15 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   }
 
   controller = nil;
-  if ([indexPath row] == kStrappyPaneRowModels) {
+  if ([indexPath row] == kStrappyPaneRowSessionDefaults) {
+    [self setDefaultSessionOptions:nil];
+    [self setDefaultSessionOptionsLoaded:NO];
+    controller =
+      [[StrappySessionOptionsTableViewController alloc]
+        initWithOptionsDelegate:self
+             presentedModally:NO];
+    [controller setTitle:NSLocalizedString(@"Session Defaults", nil)];
+  } else if ([indexPath row] == kStrappyPaneRowModels) {
     controller =
       [[StrappyPreferencesModelWhitelistTableViewController alloc] init];
   } else if ([indexPath row] == kStrappyPaneRowDatabases) {

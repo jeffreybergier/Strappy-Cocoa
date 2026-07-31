@@ -20,9 +20,6 @@
 - (void)sendCurrentPrompt:(id)sender;
 - (BOOL)canCancelCurrentPrompt;
 - (void)cancelCurrentPrompt:(id)sender;
-- (BOOL)canToggleStreaming;
-- (BOOL)streamingEnabled;
-- (void)toggleStreaming:(id)sender;
 - (void)populateModelMenu:(NSMenu *)menu;
 - (void)selectCurrentModel:(id)sender;
 - (BOOL)canPrintCurrentChat;

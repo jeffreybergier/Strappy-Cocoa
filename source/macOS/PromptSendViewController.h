@@ -29,7 +29,6 @@
   NSMenu       *optionsMenu_;
   NSMenuItem    *webProviderMenuItem_;
   NSMenu        *webProviderMenu_;
-  NSMenuItem    *streamingMenuItem_;
   id<PromptSendViewControllerDelegate> delegate_;
   BOOL          enabled_;
   BOOL          studyLocked_;
