@@ -1,12 +1,15 @@
 #import <UIKit/UIKit.h>
 
+@class StrappyPreferencesStatusToolbarView;
+
 @interface StrappyPreferencesDatabaseStudyViewController : UITableViewController
   <UIAlertViewDelegate, UIActionSheetDelegate> {
  @private
   NSArray *studyRows_;
   NSArray *studySections_;
   UIBarButtonItem *studyActionButton_;
-  UILabel *statusLabel_;
+  UIBarButtonItem *statusToolbarItem_;
+  StrappyPreferencesStatusToolbarView *statusToolbarView_;
   NSDateFormatter *studyDateFormatter_;
   NSString *expandedDatabaseIdentifier_;
   NSString *measuredDatabaseIdentifier_;

@@ -2,6 +2,7 @@
 
 #import "AIFontAwesome.h"
 #import "StrappyIdleTimerAssertion.h"
+#import "StrappyPreferencesStatusToolbarView.h"
 #import "XPUIKit.h"
 
 static NSString *StrappyPreferencesTrimmedString(NSString *string)
@@ -13,18 +14,11 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
     [NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
-static const CGFloat kStrappyPreferencesToolbarSideItemWidth = 44.0f;
-static const CGFloat kStrappyPreferencesToolbarLabelHeight = 30.0f;
-static const CGFloat kStrappyPreferencesToolbarFallbackHeight = 44.0f;
-
 @interface StrappyPreferencesWhitelistTableViewController ()
-@property (nonatomic, strong) UIView *toolbarContentView;
-@property (nonatomic, strong) UIBarButtonItem *toolbarContentItem;
-@property (nonatomic, strong) UIButton *actionToolbarButton;
-@property (nonatomic, strong) UIActivityIndicatorView *activityIndicatorView;
-@property (nonatomic, strong) UIImage *actionToolbarImage;
+@property (nonatomic, strong)
+  StrappyPreferencesStatusToolbarView *statusToolbarView;
+@property (nonatomic, strong) UIBarButtonItem *statusToolbarItem;
 - (void)layoutToolbarContentView;
-- (void)refreshToolbarItems;
 @end
 
 @implementation StrappyPreferencesWhitelistTableViewController
@@ -108,172 +102,43 @@ static const CGFloat kStrappyPreferencesToolbarFallbackHeight = 44.0f;
 
 - (void)buildStatusToolbar
 {
-  UIView *contentView;
-  UIBarButtonItem *contentItem;
-  UIButton *actionButton;
-  UIActivityIndicatorView *activityView;
-  UILabel *label;
-  UIImage *actionImage;
-  CGFloat width;
-  CGFloat height;
+  StrappyPreferencesStatusToolbarView *toolbarView;
+  UIBarButtonItem *toolbarItem;
 
-  width = CGRectGetWidth([[self view] bounds]);
-  if (width <= 0.0f) {
-    width = 320.0f;
-  }
-  height = kStrappyPreferencesToolbarFallbackHeight;
+  toolbarView = [[StrappyPreferencesStatusToolbarView alloc]
+    initWithActionIcon:AIFAArrowsRotate
+                target:self
+                action:@selector(actionButtonPressed:)];
+  [toolbarView
+    setActionAccessibilityLabel:[self actionButtonAccessibilityLabel]];
+  toolbarItem = [[UIBarButtonItem alloc] initWithCustomView:toolbarView];
 
-  contentView = [[UIView alloc] initWithFrame:
-    CGRectMake(0.0f, 0.0f, width, height)];
-  [contentView setBackgroundColor:[UIColor clearColor]];
-  [contentView setOpaque:NO];
-  [contentView setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
-
-  label = [[UILabel alloc] initWithFrame:CGRectZero];
-  [label setBackgroundColor:[UIColor clearColor]];
-  [label setTextColor:[UIColor whiteColor]];
-  [label setShadowColor:[UIColor colorWithWhite:0.0f alpha:0.5f]];
-  [label setShadowOffset:CGSizeMake(0.0f, -1.0f)];
-  [label setFont:[UIFont boldSystemFontOfSize:15.0f]];
-  [label setNumberOfLines:1];
-  [label XP_setTextAlignmentCenter];
-  [label setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
-  [contentView addSubview:label];
-  [self setStatusLabel:label];
-
-  actionImage = [AIFontAwesome imageForIcon:AIFAArrowsRotate
-                                      style:AIFontAwesomeStyleSolid
-                                   iconSize:18.0f
-                                 canvasSize:kStrappyPreferencesToolbarSideItemWidth
-                                      color:[UIColor whiteColor]
-                                      scale:0.0f];
-  actionButton = [UIButton buttonWithType:UIButtonTypeCustom];
-  [actionButton setImage:actionImage forState:UIControlStateNormal];
-  [actionButton setShowsTouchWhenHighlighted:YES];
-  [actionButton setAccessibilityLabel:[self actionButtonAccessibilityLabel]];
-  [actionButton addTarget:self
-                   action:@selector(actionButtonPressed:)
-         forControlEvents:UIControlEventTouchUpInside];
-  [contentView addSubview:actionButton];
-
-  activityView = [[UIActivityIndicatorView alloc]
-    initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhite];
-  [activityView setHidesWhenStopped:YES];
-  [contentView addSubview:activityView];
-
-  contentItem = [[UIBarButtonItem alloc] initWithCustomView:contentView];
-  [contentItem setWidth:width];
-
-  [self setToolbarContentView:contentView];
-  [self setToolbarContentItem:contentItem];
-  [self setActionToolbarButton:actionButton];
-  [self setActionToolbarImage:actionImage];
-  [self setActivityIndicatorView:activityView];
-  [self setToolbarItems:[NSArray arrayWithObject:contentItem]];
+  [self setStatusToolbarView:toolbarView];
+  [self setStatusToolbarItem:toolbarItem];
+  [self setToolbarItems:[NSArray arrayWithObject:toolbarItem]];
   [self refreshStatusToolbar];
 }
 
 - (void)refreshStatusToolbar
 {
-  [[self statusLabel] setText:[self statusText]];
+  [[self statusToolbarView] setText:[self statusText]];
+  [[self statusToolbarView] setWorking:[self working]];
   [self layoutToolbarContentView];
-  [self refreshToolbarItems];
 }
 
 - (void)layoutToolbarContentView
 {
   UIToolbar *toolbar;
-  UIView *contentView;
-  CGRect frame;
-  CGFloat width;
-  CGFloat contentWidth;
-  CGFloat contentX;
-  CGFloat height;
-  CGFloat sideWidth;
-  CGFloat labelX;
-  CGFloat labelHeight;
-  CGFloat labelWidth;
-  CGFloat buttonX;
-  CGFloat labelY;
 
-  contentView = [self toolbarContentView];
-  if (contentView == nil) {
+  if ([self statusToolbarView] == nil) {
     return;
   }
 
   toolbar = [[self navigationController] toolbar];
-  width = CGRectGetWidth([toolbar bounds]);
-  if (width <= 0.0f) {
-    width = CGRectGetWidth([[self view] bounds]);
-  }
-  if (width <= 0.0f) {
-    width = CGRectGetWidth([contentView bounds]);
-  }
-  if (width <= 0.0f) {
-    width = 320.0f;
-  }
-
-  height = CGRectGetHeight([toolbar bounds]);
-  if (height <= 0.0f) {
-    height = kStrappyPreferencesToolbarFallbackHeight;
-  }
-
-  frame = [contentView frame];
-  contentX = CGRectGetMinX(frame);
-  if ((contentX < 0.0f) || (contentX >= width)) {
-    contentX = 0.0f;
-  }
-  contentWidth = width - contentX;
-  if (contentWidth <= 0.0f) {
-    contentWidth = width;
-  }
-
-  frame.size.width = contentWidth;
-  frame.size.height = height;
-  [contentView setFrame:frame];
-  [[self toolbarContentItem] setWidth:contentWidth];
-
-  sideWidth = kStrappyPreferencesToolbarSideItemWidth;
-  if ((sideWidth * 2.0f) > width) {
-    sideWidth = width * 0.5f;
-  }
-  labelX = sideWidth - contentX;
-  if (labelX < 0.0f) {
-    labelX = 0.0f;
-  }
-  buttonX = contentWidth - sideWidth;
-  if (buttonX < 0.0f) {
-    buttonX = 0.0f;
-  }
-  labelWidth = buttonX - labelX;
-  if (labelWidth < 0.0f) {
-    labelWidth = 0.0f;
-  }
-  labelHeight = kStrappyPreferencesToolbarLabelHeight;
-  labelY = (CGFloat)floor((double)((height - labelHeight) * 0.5f));
-  [[self statusLabel] setFrame:
-    CGRectMake(labelX,
-               labelY,
-               labelWidth,
-               labelHeight)];
-  [[self actionToolbarButton] setFrame:
-    CGRectMake(buttonX, 0.0f, sideWidth, height)];
-  [[self activityIndicatorView] setFrame:
-    CGRectMake(buttonX, 0.0f, sideWidth, height)];
-  [toolbar setNeedsLayout];
-}
-
-- (void)refreshToolbarItems
-{
-  if ([self working]) {
-    [[self activityIndicatorView] startAnimating];
-    [[self actionToolbarButton] setHidden:YES];
-    [[self activityIndicatorView] setHidden:NO];
-  } else {
-    [[self activityIndicatorView] stopAnimating];
-    [[self activityIndicatorView] setHidden:YES];
-    [[self actionToolbarButton] setHidden:NO];
-  }
+  [[self statusToolbarView]
+    layoutForToolbar:toolbar
+      containingItem:[self statusToolbarItem]
+       fallbackWidth:CGRectGetWidth([[self view] bounds])];
 }
 
 - (NSArray *)loadAllRowsWithError:(NSError **)error

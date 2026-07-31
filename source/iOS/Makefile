@@ -7,6 +7,7 @@ SOURCES = main.m AppDelegate.m StrappyRootCoordinator.m \
           StrappyModelCellFormatter.m \
           StrappyIdleTimerAssertion.m \
           StrappyActivityAccessoryView.m \
+          StrappyPreferencesStatusToolbarView.m \
           StrappyPreferencesWhitelistTableViewController.m \
           StrappyPreferencesModelWhitelistTableViewController.m \
           StrappyPreferencesDatabaseWhitelistTableViewController.m \

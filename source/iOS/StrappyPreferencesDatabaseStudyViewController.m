@@ -1,6 +1,7 @@
 #import "StrappyPreferencesDatabaseStudyViewController.h"
 
 #import "AIFontAwesome.h"
+#import "StrappyPreferencesStatusToolbarView.h"
 #import "StrappySession.h"
 #import "XPUIKit.h"
 
@@ -305,6 +306,7 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows)
 @interface StrappyPreferencesDatabaseStudyViewController ()
 - (void)reloadStudyRows;
 - (void)reloadStudySections;
+- (void)layoutStatusToolbar;
 - (void)updateStudyProgress;
 - (void)updateStudyActionButtonForAllStudied:(BOOL)allStudied;
 - (NSDictionary *)studyRowAtIndexPath:(NSIndexPath *)indexPath;
@@ -346,11 +348,6 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows)
 
 - (void)viewDidLoad
 {
-  UIBarButtonItem *leftSpace;
-  UIBarButtonItem *rightSpace;
-  UIBarButtonItem *statusItem;
-  UILabel *statusLabel;
-
   [super viewDidLoad];
   [[self tableView] setAllowsSelection:YES];
 
@@ -360,35 +357,48 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows)
            target:self
            action:@selector(studyAction:)];
   [[self navigationItem] setRightBarButtonItem:studyActionButton_];
-  leftSpace = [[UIBarButtonItem alloc]
-    initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
-                         target:nil
-                         action:NULL];
-  rightSpace = [[UIBarButtonItem alloc]
-    initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
-                         target:nil
-                         action:NULL];
-  statusLabel = [[UILabel alloc] initWithFrame:
-    CGRectMake(0.0f, 0.0f, 120.0f, 30.0f)];
-  [statusLabel setBackgroundColor:[UIColor clearColor]];
-  [statusLabel setTextColor:[UIColor whiteColor]];
-  [statusLabel setShadowColor:[UIColor colorWithWhite:0.0f alpha:0.5f]];
-  [statusLabel setShadowOffset:CGSizeMake(0.0f, -1.0f)];
-  [statusLabel setFont:[UIFont boldSystemFontOfSize:15.0f]];
-  [statusLabel setNumberOfLines:1];
-  [statusLabel XP_setTextAlignmentCenter];
-  statusLabel_ = statusLabel;
-  statusItem = [[UIBarButtonItem alloc] initWithCustomView:statusLabel];
-  [self setToolbarItems:[NSArray arrayWithObjects:
-    leftSpace, statusItem, rightSpace, nil]
+  statusToolbarView_ = [[StrappyPreferencesStatusToolbarView alloc] init];
+  statusToolbarItem_ = [[UIBarButtonItem alloc]
+    initWithCustomView:statusToolbarView_];
+  [self setToolbarItems:[NSArray arrayWithObject:statusToolbarItem_]
               animated:NO];
+  [self layoutStatusToolbar];
 }
 
 - (void)viewWillAppear:(BOOL)animated
 {
   [super viewWillAppear:animated];
   [[self navigationController] setToolbarHidden:NO animated:animated];
+  [self layoutStatusToolbar];
   [self reloadStudyRows];
+}
+
+- (void)viewDidLayoutSubviews
+{
+  [super viewDidLayoutSubviews];
+  [self layoutStatusToolbar];
+}
+
+- (void)willAnimateRotationToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation
+                                        duration:(NSTimeInterval)duration
+{
+  [super willAnimateRotationToInterfaceOrientation:toInterfaceOrientation
+                                          duration:duration];
+  [self layoutStatusToolbar];
+}
+
+- (void)didRotateFromInterfaceOrientation:(UIInterfaceOrientation)fromInterfaceOrientation
+{
+  [super didRotateFromInterfaceOrientation:fromInterfaceOrientation];
+  [self layoutStatusToolbar];
+}
+
+- (void)layoutStatusToolbar
+{
+  [statusToolbarView_
+    layoutForToolbar:[[self navigationController] toolbar]
+      containingItem:statusToolbarItem_
+       fallbackWidth:CGRectGetWidth([[self view] bounds])];
 }
 
 - (void)reloadStudyRows
@@ -401,7 +411,7 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows)
   if (![rows isKindOfClass:[NSArray class]]) {
     studyRows_ = [NSArray array];
     [self updateStudyActionButtonForAllStudied:NO];
-    [statusLabel_ setText:NSLocalizedString(@"— of —", nil)];
+    [statusToolbarView_ setText:NSLocalizedString(@"— of —", nil)];
     [self reloadStudySections];
     [self showError:error title:NSLocalizedString(@"Could Not Load Study", nil)];
     return;
@@ -448,7 +458,7 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows)
   allStudied = ([studyRows_ count] > 0U) &&
     (studiedCount == [studyRows_ count]);
   [self updateStudyActionButtonForAllStudied:allStudied];
-  [statusLabel_ setText:[NSString stringWithFormat:
+  [statusToolbarView_ setText:[NSString stringWithFormat:
     NSLocalizedString(@"%lu of %lu", nil),
     (unsigned long)studiedCount,
     (unsigned long)[studyRows_ count]]];

@@ -30,6 +30,10 @@
 - (BOOL)XP_isMovingFromParentViewController;
 @end
 
+@interface UIDevice (XPUIKit)
+- (BOOL)XP_isOperatingSystemAtLeastMajorVersion:(NSInteger)majorVersion;
+@end
+
 @interface UILabel (XPUIKit)
 - (void)XP_setTextAlignmentCenter;
 - (void)XP_setLineBreakModeWordWrapping;

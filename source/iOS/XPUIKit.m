@@ -308,6 +308,18 @@ static UITextField *XPUIKitFindTextField(UIView *view)
 
 @end
 
+@implementation UIDevice (XPUIKit)
+
+- (BOOL)XP_isOperatingSystemAtLeastMajorVersion:(NSInteger)majorVersion
+{
+  NSString *systemVersion;
+
+  systemVersion = [self systemVersion];
+  return ([systemVersion integerValue] >= majorVersion) ? YES : NO;
+}
+
+@end
+
 @implementation UILabel (XPUIKit)
 
 - (void)XP_setTextAlignmentCenter

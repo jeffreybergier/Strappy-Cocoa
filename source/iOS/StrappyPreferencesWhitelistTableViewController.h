@@ -7,7 +7,6 @@
 @property (nonatomic, copy) NSArray *rows;
 @property (nonatomic, copy) NSString *statusMessage;
 @property (nonatomic, strong) UISearchBar *searchBar;
-@property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, assign) BOOL working;
 
 - (instancetype)initWithTitle:(NSString *)title;
