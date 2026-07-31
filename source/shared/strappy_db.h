@@ -5,6 +5,10 @@
 
 #include <stddef.h>
 
+#define STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT 25
+#define STRAPPY_SESSION_DEFAULT_ROUND_LIMIT 50
+#define STRAPPY_SESSION_MAX_LIMIT 2147483647
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -24,6 +28,8 @@ typedef struct strappy_session_record {
   int web_search_enabled;
   int bash_enabled;
   int limit_to_one_tool;
+  long tool_call_limit;
+  long round_limit;
   int streaming_enabled;
   long http_status;
 } strappy_session_record;
@@ -44,6 +50,8 @@ enum {
   STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL = 1U << 5,
   STRAPPY_SESSION_OPTION_WORKING_DIRECTORY = 1U << 6,
   STRAPPY_SESSION_OPTION_STREAMING = 1U << 7,
+  STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT = 1U << 8,
+  STRAPPY_SESSION_OPTION_ROUND_LIMIT = 1U << 9,
   STRAPPY_SESSION_OPTION_ALL =
     STRAPPY_SESSION_OPTION_MODEL |
     STRAPPY_SESSION_OPTION_ASSISTANT_SET |
@@ -52,7 +60,9 @@ enum {
     STRAPPY_SESSION_OPTION_BASH |
     STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
     STRAPPY_SESSION_OPTION_WORKING_DIRECTORY |
-    STRAPPY_SESSION_OPTION_STREAMING
+    STRAPPY_SESSION_OPTION_STREAMING |
+    STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT |
+    STRAPPY_SESSION_OPTION_ROUND_LIMIT
 };
 
 typedef struct strappy_session_options {
@@ -63,6 +73,8 @@ typedef struct strappy_session_options {
   int web_search_enabled;
   int bash_enabled;
   int limit_to_one_tool;
+  long tool_call_limit;
+  long round_limit;
   int streaming_enabled;
 } strappy_session_options;
 

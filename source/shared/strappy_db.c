@@ -35,6 +35,8 @@
   "WHERE a.session_id = s.id), '" STRAPPY_ASSISTANT_SET_DEFAULT "')"
 #define STRAPPY_DB_DEFAULT_SESSION_WEB_PROVIDER "auto"
 #define STRAPPY_DB_DEFAULT_SESSION_WEB_SEARCH_ENABLED "1"
+#define STRAPPY_DB_STRINGIFY_INNER(value) #value
+#define STRAPPY_DB_STRINGIFY(value) STRAPPY_DB_STRINGIFY_INNER(value)
 #define STRAPPY_DB_SESSION_WEB_PROVIDER_SQL \
   "COALESCE((SELECT x.web_provider FROM session_settings x " \
   "WHERE x.session_id = s.id), '" \
@@ -49,6 +51,14 @@
 #define STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL \
   "COALESCE((SELECT x.limit_to_one_tool FROM session_settings x " \
   "WHERE x.session_id = s.id), 0)"
+#define STRAPPY_DB_SESSION_TOOL_CALL_LIMIT_SQL \
+  "COALESCE((SELECT x.tool_call_limit FROM session_settings x " \
+  "WHERE x.session_id = s.id), " \
+  STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT) ")"
+#define STRAPPY_DB_SESSION_ROUND_LIMIT_SQL \
+  "COALESCE((SELECT x.round_limit FROM session_settings x " \
+  "WHERE x.session_id = s.id), " \
+  STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_ROUND_LIMIT) ")"
 #define STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL \
   "COALESCE((SELECT x.streaming_enabled FROM session_settings x " \
   "WHERE x.session_id = s.id), 0)"
@@ -338,6 +348,8 @@ void strappy_session_record_init(strappy_session_record *record)
   record->web_search_enabled = 0;
   record->bash_enabled = 0;
   record->limit_to_one_tool = 0;
+  record->tool_call_limit = STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT;
+  record->round_limit = STRAPPY_SESSION_DEFAULT_ROUND_LIMIT;
   record->streaming_enabled = 0;
   record->http_status = 0L;
 }
@@ -381,6 +393,8 @@ void strappy_session_options_init(strappy_session_options *options)
   options->web_search_enabled = 1;
   options->bash_enabled = 0;
   options->limit_to_one_tool = 0;
+  options->tool_call_limit = STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT;
+  options->round_limit = STRAPPY_SESSION_DEFAULT_ROUND_LIMIT;
   options->streaming_enabled = 0;
 }
 
@@ -1631,6 +1645,14 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
       "CHECK(bash_enabled IN (0,1)),"
     "limit_to_one_tool INTEGER NOT NULL DEFAULT 0 "
       "CHECK(limit_to_one_tool IN (0,1)),"
+    "tool_call_limit INTEGER NOT NULL DEFAULT "
+      STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT) " "
+      "CHECK(tool_call_limit BETWEEN 1 AND "
+        STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_MAX_LIMIT) "),"
+    "round_limit INTEGER NOT NULL DEFAULT "
+      STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_ROUND_LIMIT) " "
+      "CHECK(round_limit BETWEEN 1 AND "
+        STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_MAX_LIMIT) "),"
     "streaming_enabled INTEGER NOT NULL DEFAULT 0 "
       "CHECK(streaming_enabled IN (0,1)),"
     "updated_at_ms INTEGER NOT NULL,"
@@ -1696,6 +1718,8 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
       "CHECK(input_through_sequence >= 0),"
     "new_input_from_sequence INTEGER,"
     "max_output_tokens INTEGER,"
+    "max_tool_calls INTEGER CHECK(max_tool_calls BETWEEN 1 AND "
+      STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_MAX_LIMIT) "),"
     "temperature_millionths INTEGER,"
     "web_provider TEXT NOT NULL DEFAULT 'none' "
       "CHECK(web_provider IN ('none','auto','native','exa','parallel')),"
@@ -2631,15 +2655,24 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   }
   record->bash_enabled = sqlite3_column_int(stmt, 11) ? 1 : 0;
   record->limit_to_one_tool = sqlite3_column_int(stmt, 12) ? 1 : 0;
-  record->streaming_enabled = sqlite3_column_int(stmt, 13) ? 1 : 0;
-  record->web_search_enabled = sqlite3_column_int(stmt, 15) ? 1 : 0;
+  record->tool_call_limit = (long)sqlite3_column_int64(stmt, 13);
+  record->round_limit = (long)sqlite3_column_int64(stmt, 14);
+  record->streaming_enabled = sqlite3_column_int(stmt, 15) ? 1 : 0;
+  record->web_search_enabled = sqlite3_column_int(stmt, 17) ? 1 : 0;
+  if ((record->tool_call_limit < 1L) ||
+      (record->tool_call_limit > STRAPPY_SESSION_MAX_LIMIT) ||
+      (record->round_limit < 1L) ||
+      (record->round_limit > STRAPPY_SESSION_MAX_LIMIT)) {
+    strappy_set_error(error_out, "Stored session limits are invalid.");
+    return 0;
+  }
 
   name = strappy_db_column_string(stmt, 1);
   prompt = strappy_db_column_string(stmt, 2);
   response = strappy_db_column_string(stmt, 3);
   model = strappy_db_column_string(stmt, 4);
   model_name = strappy_db_column_string(stmt, 5);
-  assistant_set_id = strappy_db_column_string(stmt, 14);
+  assistant_set_id = strappy_db_column_string(stmt, 16);
   created_at = strappy_db_column_string(stmt, 7);
   last_activity_at = strappy_db_column_string(stmt, 8);
 
@@ -7851,9 +7884,12 @@ static int strappy_db_save_session_settings(sqlite3 *db,
   static const char *sql =
     "INSERT INTO session_settings "
     "(session_id, web_provider, web_search_enabled, bash_enabled, "
-     "limit_to_one_tool, streaming_enabled, updated_at_ms) VALUES (?, '"
+     "limit_to_one_tool, tool_call_limit, round_limit, streaming_enabled, "
+     "updated_at_ms) VALUES (?, '"
        STRAPPY_DB_DEFAULT_SESSION_WEB_PROVIDER "', "
-       STRAPPY_DB_DEFAULT_SESSION_WEB_SEARCH_ENABLED ", 0, 0, 0, ?);";
+       STRAPPY_DB_DEFAULT_SESSION_WEB_SEARCH_ENABLED ", 0, 0, "
+       STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT) ", "
+       STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_ROUND_LIMIT) ", 0, ?);";
   sqlite3_stmt *stmt;
   int rc;
 
@@ -8849,6 +8885,8 @@ int strappy_db_list_sessions(const char *db_path,
     STRAPPY_DB_SESSION_WEB_PROVIDER_SQL ", "
     STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
+    STRAPPY_DB_SESSION_TOOL_CALL_LIMIT_SQL ", "
+    STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
     STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL " "
@@ -8966,6 +9004,8 @@ int strappy_db_load_session(const char *db_path,
     STRAPPY_DB_SESSION_WEB_PROVIDER_SQL ", "
     STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
+    STRAPPY_DB_SESSION_TOOL_CALL_LIMIT_SQL ", "
+    STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
     STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL " "
@@ -9059,6 +9099,8 @@ int strappy_db_load_session_list_record(const char *db_path,
     STRAPPY_DB_SESSION_WEB_PROVIDER_SQL ", "
     STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
+    STRAPPY_DB_SESSION_TOOL_CALL_LIMIT_SQL ", "
+    STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
     STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL " "
@@ -11409,6 +11451,8 @@ static int strappy_db_copy_session_options(sqlite3 *db,
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
+    STRAPPY_DB_SESSION_TOOL_CALL_LIMIT_SQL ", "
+    STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
     STRAPPY_DB_SESSION_STREAMING_ENABLED_SQL " "
     "FROM sessions s WHERE s.id = ?;";
   strappy_session_options loaded;
@@ -11451,9 +11495,15 @@ static int strappy_db_copy_session_options(sqlite3 *db,
   loaded.web_search_enabled = sqlite3_column_int(stmt, 3) ? 1 : 0;
   loaded.bash_enabled = sqlite3_column_int(stmt, 4) ? 1 : 0;
   loaded.limit_to_one_tool = sqlite3_column_int(stmt, 5) ? 1 : 0;
-  loaded.streaming_enabled = sqlite3_column_int(stmt, 6) ? 1 : 0;
+  loaded.tool_call_limit = (long)sqlite3_column_int64(stmt, 6);
+  loaded.round_limit = (long)sqlite3_column_int64(stmt, 7);
+  loaded.streaming_enabled = sqlite3_column_int(stmt, 8) ? 1 : 0;
   if ((loaded.model_id == NULL) || (loaded.assistant_set_id == NULL) ||
       (provider_text == NULL) ||
+      (loaded.tool_call_limit < 1L) ||
+      (loaded.tool_call_limit > STRAPPY_SESSION_MAX_LIMIT) ||
+      (loaded.round_limit < 1L) ||
+      (loaded.round_limit > STRAPPY_SESSION_MAX_LIMIT) ||
       !strappy_web_provider_parse((const char *)provider_text,
                                   &loaded.web_provider)) {
     strappy_set_error(error_out, "Stored session options are invalid.");
@@ -11546,6 +11596,8 @@ static int strappy_db_copy_options(const strappy_session_options *source,
   copy.web_search_enabled = source->web_search_enabled ? 1 : 0;
   copy.bash_enabled = source->bash_enabled ? 1 : 0;
   copy.limit_to_one_tool = source->limit_to_one_tool ? 1 : 0;
+  copy.tool_call_limit = source->tool_call_limit;
+  copy.round_limit = source->round_limit;
   copy.streaming_enabled = source->streaming_enabled ? 1 : 0;
   strappy_session_options_destroy(destination);
   *destination = copy;
@@ -11562,8 +11614,8 @@ static int strappy_db_save_session_options_settings(
   static const char *sql =
     "INSERT OR REPLACE INTO session_settings "
     "(session_id, web_provider, web_search_enabled, bash_enabled, "
-     "limit_to_one_tool, streaming_enabled, updated_at_ms) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?);";
+     "limit_to_one_tool, tool_call_limit, round_limit, streaming_enabled, "
+     "updated_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);";
   const char *provider_name;
   sqlite3_stmt *stmt;
   int rc;
@@ -11591,10 +11643,20 @@ static int strappy_db_save_session_options_settings(
     rc = sqlite3_bind_int(stmt, 5, options->limit_to_one_tool ? 1 : 0);
   }
   if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_int(stmt, 6, options->streaming_enabled ? 1 : 0);
+    rc = sqlite3_bind_int64(stmt,
+                            6,
+                            (sqlite3_int64)options->tool_call_limit);
   }
   if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_int64(stmt, 7, (sqlite3_int64)now_ms);
+    rc = sqlite3_bind_int64(stmt,
+                            7,
+                            (sqlite3_int64)options->round_limit);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int(stmt, 8, options->streaming_enabled ? 1 : 0);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 9, (sqlite3_int64)now_ms);
   }
   if (rc == SQLITE_OK) {
     rc = sqlite3_step(stmt);
@@ -11752,7 +11814,9 @@ int strappy_db_update_session_options(
     STRAPPY_SESSION_OPTION_WEB_SEARCH |
     STRAPPY_SESSION_OPTION_BASH |
     STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
-    STRAPPY_SESSION_OPTION_STREAMING;
+    STRAPPY_SESSION_OPTION_STREAMING |
+    STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT |
+    STRAPPY_SESSION_OPTION_ROUND_LIMIT;
   strappy_session_options current;
   strappy_session_options merged;
   strappy_session_option_mask actual_changed_fields;
@@ -11789,6 +11853,18 @@ int strappy_db_update_session_options(
   if (((changed_fields & STRAPPY_SESSION_OPTION_WEB_PROVIDER) != 0U) &&
       (strappy_web_provider_name(options->web_provider) == NULL)) {
     strappy_set_error(error_out, "Session web provider is invalid.");
+    return 0;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT) != 0U) &&
+      ((options->tool_call_limit < 1L) ||
+       (options->tool_call_limit > STRAPPY_SESSION_MAX_LIMIT))) {
+    strappy_set_error(error_out, "Session tool-call limit is invalid.");
+    return 0;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_ROUND_LIMIT) != 0U) &&
+      ((options->round_limit < 1L) ||
+       (options->round_limit > STRAPPY_SESSION_MAX_LIMIT))) {
+    strappy_set_error(error_out, "Session round limit is invalid.");
     return 0;
   }
 
@@ -11856,6 +11932,12 @@ int strappy_db_update_session_options(
   if ((changed_fields & STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL) != 0U) {
     merged.limit_to_one_tool = options->limit_to_one_tool ? 1 : 0;
   }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT) != 0U) {
+    merged.tool_call_limit = options->tool_call_limit;
+  }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_ROUND_LIMIT) != 0U) {
+    merged.round_limit = options->round_limit;
+  }
   if ((changed_fields & STRAPPY_SESSION_OPTION_STREAMING) != 0U) {
     merged.streaming_enabled = options->streaming_enabled ? 1 : 0;
   }
@@ -11884,6 +11966,14 @@ int strappy_db_update_session_options(
   if (((changed_fields & STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL) != 0U) &&
       (current.limit_to_one_tool != merged.limit_to_one_tool)) {
     actual_changed_fields |= STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT) != 0U) &&
+      (current.tool_call_limit != merged.tool_call_limit)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_ROUND_LIMIT) != 0U) &&
+      (current.round_limit != merged.round_limit)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_ROUND_LIMIT;
   }
   if (((changed_fields & STRAPPY_SESSION_OPTION_WORKING_DIRECTORY) != 0U) &&
       (strcmp(current.working_directory, merged.working_directory) != 0)) {
@@ -13777,10 +13867,10 @@ static int strappy_db_semantic_begin_response_call(
     "(turn_id, previous_request_id, round_index, request_kind, model_id, "
      "instruction_revision_id, toolset_revision_id, input_from_sequence, "
      "input_through_sequence, new_input_from_sequence, max_output_tokens, "
-     "temperature_millionths, web_provider, stream_enabled, "
+     "max_tool_calls, temperature_millionths, web_provider, stream_enabled, "
      "reasoning_enabled, reasoning_summary, parallel_tool_calls, "
      "tool_calls_enabled, state, created_at_ms) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
      "'running', ?);";
   static const char *update_request_sql =
     "UPDATE model_requests SET input_from_sequence = ?, "
@@ -13799,6 +13889,7 @@ static int strappy_db_semantic_begin_response_call(
   cJSON *tools;
   cJSON *model;
   cJSON *max_output_tokens;
+  cJSON *max_tool_calls;
   cJSON *temperature;
   cJSON *stream;
   cJSON *reasoning;
@@ -13885,6 +13976,7 @@ static int strappy_db_semantic_begin_response_call(
     tools = cJSON_GetObjectItem(root, "tools");
     model = cJSON_GetObjectItem(root, "model");
     max_output_tokens = cJSON_GetObjectItem(root, "max_output_tokens");
+    max_tool_calls = cJSON_GetObjectItem(root, "max_tool_calls");
     temperature = cJSON_GetObjectItem(root, "temperature");
     stream = cJSON_GetObjectItem(root, "stream");
     reasoning = cJSON_GetObjectItem(root, "reasoning");
@@ -13989,27 +14081,31 @@ static int strappy_db_semantic_begin_response_call(
             (sqlite3_bind_int64(stmt, 10,
                                 (sqlite3_int64)max_output_tokens->valuedouble) == SQLITE_OK) :
             (sqlite3_bind_null(stmt, 10) == SQLITE_OK)) &&
-         (cJSON_IsNumber(temperature) ?
+         (cJSON_IsNumber(max_tool_calls) ?
             (sqlite3_bind_int64(stmt, 11,
+                                (sqlite3_int64)max_tool_calls->valuedouble) == SQLITE_OK) :
+            (sqlite3_bind_null(stmt, 11) == SQLITE_OK)) &&
+         (cJSON_IsNumber(temperature) ?
+            (sqlite3_bind_int64(stmt, 12,
                                 (sqlite3_int64)(temperature->valuedouble *
                                                 1000000.0)) == SQLITE_OK) :
-            (sqlite3_bind_null(stmt, 11) == SQLITE_OK)) &&
+            (sqlite3_bind_null(stmt, 12) == SQLITE_OK)) &&
          (sqlite3_bind_text(stmt,
-                            12,
+                            13,
                             web_provider_name,
                             -1,
                             SQLITE_TRANSIENT) == SQLITE_OK) &&
-         (sqlite3_bind_int(stmt, 13,
-                           cJSON_IsTrue(stream) ? 1 : 0) == SQLITE_OK) &&
          (sqlite3_bind_int(stmt, 14,
+                           cJSON_IsTrue(stream) ? 1 : 0) == SQLITE_OK) &&
+         (sqlite3_bind_int(stmt, 15,
                            (reasoning == NULL || cJSON_IsNull(reasoning)) ? 0 : 1) == SQLITE_OK) &&
-         strappy_db_bind_nullable_text_value(stmt, 15, summary_text) &&
-         (sqlite3_bind_int(stmt, 16,
-                           cJSON_IsFalse(parallel_tool_calls) ? 0 : 1) == SQLITE_OK) &&
+         strappy_db_bind_nullable_text_value(stmt, 16, summary_text) &&
          (sqlite3_bind_int(stmt, 17,
+                           cJSON_IsFalse(parallel_tool_calls) ? 0 : 1) == SQLITE_OK) &&
+         (sqlite3_bind_int(stmt, 18,
                            cJSON_IsArray(tools) &&
                            (cJSON_GetArraySize(tools) > 0) ? 1 : 0) == SQLITE_OK) &&
-         (sqlite3_bind_int64(stmt, 18, (sqlite3_int64)now_ms) == SQLITE_OK);
+         (sqlite3_bind_int64(stmt, 19, (sqlite3_int64)now_ms) == SQLITE_OK);
     if (!ok || (sqlite3_step(stmt) != SQLITE_DONE)) {
       strappy_set_formatted_error(error_out,
                                   "Could not save semantic Responses request: %s",

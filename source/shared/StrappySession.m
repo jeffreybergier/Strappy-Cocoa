@@ -32,6 +32,12 @@ NSString * const StrappyWebProviderAuto = @"auto";
 NSString * const StrappyWebProviderNative = @"native";
 NSString * const StrappyWebProviderExa = @"exa";
 NSString * const StrappyWebProviderParallel = @"parallel";
+const NSUInteger StrappySessionDefaultToolCallLimit =
+  (NSUInteger)STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT;
+const NSUInteger StrappySessionDefaultRoundLimit =
+  (NSUInteger)STRAPPY_SESSION_DEFAULT_ROUND_LIMIT;
+const NSUInteger StrappySessionMaximumLimit =
+  (NSUInteger)STRAPPY_SESSION_MAX_LIMIT;
 
 static NSMutableDictionary *StrappySessionInFlightSessions = nil;
 static BOOL StrappySessionModelCatalogRefreshInFlight = NO;
@@ -219,6 +225,28 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
           [limitToOneTool boolValue]) ? YES : NO;
 }
 
+static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
+                                                  NSString *key,
+                                                  NSUInteger defaultValue)
+{
+  NSNumber *value;
+  unsigned long long limit;
+
+  if (![summary isKindOfClass:[NSDictionary class]]) {
+    return defaultValue;
+  }
+  value = [summary objectForKey:key];
+  if (![value isKindOfClass:[NSNumber class]]) {
+    return defaultValue;
+  }
+  limit = [value unsignedLongLongValue];
+  if ((limit == 0ULL) ||
+      (limit > (unsigned long long)StrappySessionMaximumLimit)) {
+    return defaultValue;
+  }
+  return (NSUInteger)limit;
+}
+
 @implementation StrappySessionOptions
 
 - (id)initWithModelIdentifier:(NSString *)modelIdentifier
@@ -227,6 +255,8 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
              webSearchEnabled:(BOOL)webSearchEnabled
                   bashEnabled:(BOOL)bashEnabled
                limitToOneTool:(BOOL)limitToOneTool
+                toolCallLimit:(NSUInteger)toolCallLimit
+                   roundLimit:(NSUInteger)roundLimit
              workingDirectory:(NSString *)workingDirectory
              streamingEnabled:(BOOL)streamingEnabled
 {
@@ -237,6 +267,8 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
     [self setWebSearchEnabled:webSearchEnabled];
     [self setBashEnabled:bashEnabled];
     [self setLimitToOneTool:limitToOneTool];
+    [self setToolCallLimit:toolCallLimit];
+    [self setRoundLimit:roundLimit];
     [self setWorkingDirectory:workingDirectory];
     [self setStreamingEnabled:streamingEnabled];
   }
@@ -252,6 +284,8 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
            webSearchEnabled:[self webSearchEnabled]
                 bashEnabled:[self bashEnabled]
              limitToOneTool:[self limitToOneTool]
+              toolCallLimit:[self toolCallLimit]
+                 roundLimit:[self roundLimit]
            workingDirectory:[self workingDirectory]
            streamingEnabled:[self streamingEnabled]];
 }
@@ -336,6 +370,26 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
   limitToOneTool_ = enabled ? YES : NO;
 }
 
+- (NSUInteger)toolCallLimit
+{
+  return toolCallLimit_;
+}
+
+- (void)setToolCallLimit:(NSUInteger)toolCallLimit
+{
+  toolCallLimit_ = toolCallLimit;
+}
+
+- (NSUInteger)roundLimit
+{
+  return roundLimit_;
+}
+
+- (void)setRoundLimit:(NSUInteger)roundLimit
+{
+  roundLimit_ = roundLimit;
+}
+
 - (NSString *)workingDirectory
 {
   return workingDirectory_;
@@ -397,6 +451,14 @@ static StrappySessionOptions *StrappySessionOptionsFromSummary(
            webSearchEnabled:StrappySessionWebSearchEnabledFromSummary(summary)
                 bashEnabled:StrappySessionBashEnabledFromSummary(summary)
              limitToOneTool:StrappySessionLimitToOneToolFromSummary(summary)
+              toolCallLimit:StrappySessionLimitFromSummary(
+                summary,
+                @"tool_call_limit",
+                StrappySessionDefaultToolCallLimit)
+                 roundLimit:StrappySessionLimitFromSummary(
+                summary,
+                @"round_limit",
+                StrappySessionDefaultRoundLimit)
            workingDirectory:workingDirectory
            streamingEnabled:StrappySessionStreamingEnabledFromSummary(summary)]
     autorelease];
@@ -426,6 +488,8 @@ static StrappySessionOptions *StrappySessionOptionsFromRecord(
            webSearchEnabled:(options->web_search_enabled ? YES : NO)
                 bashEnabled:(options->bash_enabled ? YES : NO)
              limitToOneTool:(options->limit_to_one_tool ? YES : NO)
+              toolCallLimit:(NSUInteger)options->tool_call_limit
+                 roundLimit:(NSUInteger)options->round_limit
            workingDirectory:workingDirectory
            streamingEnabled:(options->streaming_enabled ? YES : NO)]
     autorelease];
@@ -437,9 +501,19 @@ static BOOL StrappySessionRecordFromOptions(
   NSError **error)
 {
   strappy_web_provider provider;
+  NSUInteger toolCallLimit;
+  NSUInteger roundLimit;
 
+  toolCallLimit = [options isKindOfClass:[StrappySessionOptions class]] ?
+    [options toolCallLimit] : 0U;
+  roundLimit = [options isKindOfClass:[StrappySessionOptions class]] ?
+    [options roundLimit] : 0U;
   if (![options isKindOfClass:[StrappySessionOptions class]] ||
       (record == NULL) ||
+      (toolCallLimit == 0U) ||
+      (toolCallLimit > StrappySessionMaximumLimit) ||
+      (roundLimit == 0U) ||
+      (roundLimit > StrappySessionMaximumLimit) ||
       !strappy_web_provider_parse([[options webProvider] UTF8String],
                                   &provider)) {
     if (error != nil) {
@@ -460,6 +534,8 @@ static BOOL StrappySessionRecordFromOptions(
   record->web_search_enabled = [options webSearchEnabled] ? 1 : 0;
   record->bash_enabled = [options bashEnabled] ? 1 : 0;
   record->limit_to_one_tool = [options limitToOneTool] ? 1 : 0;
+  record->tool_call_limit = (long)toolCallLimit;
+  record->round_limit = (long)roundLimit;
   record->streaming_enabled = [options streamingEnabled] ? 1 : 0;
   return YES;
 }
@@ -872,6 +948,8 @@ static BOOL StrappySessionRecordFromOptions(
   NSNumber *webSearchEnabled;
   NSNumber *bashEnabled;
   NSNumber *limitToOneTool;
+  NSNumber *toolCallLimit;
+  NSNumber *roundLimit;
   NSNumber *streamingEnabled;
   NSString *name;
   NSString *prompt;
@@ -895,6 +973,8 @@ static BOOL StrappySessionRecordFromOptions(
   bashEnabled = [NSNumber numberWithBool:(record->bash_enabled ? YES : NO)];
   limitToOneTool =
     [NSNumber numberWithBool:(record->limit_to_one_tool ? YES : NO)];
+  toolCallLimit = [NSNumber numberWithLong:record->tool_call_limit];
+  roundLimit = [NSNumber numberWithLong:record->round_limit];
   streamingEnabled =
     [NSNumber numberWithBool:(record->streaming_enabled ? YES : NO)];
   name = [StrappySession stringFromCStringOrEmpty:record->name];
@@ -921,6 +1001,8 @@ static BOOL StrappySessionRecordFromOptions(
     webSearchEnabled, @"web_search_enabled",
     bashEnabled, @"bash_enabled",
     limitToOneTool, @"limit_to_one_tool",
+    toolCallLimit, @"tool_call_limit",
+    roundLimit, @"round_limit",
     streamingEnabled, @"streaming_enabled",
     createdAt, @"created_at",
     lastActivityAt, @"last_message_at",

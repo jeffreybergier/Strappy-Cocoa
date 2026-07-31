@@ -140,6 +140,8 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
              webSearchEnabled:NO
                   bashEnabled:NO
                limitToOneTool:NO
+                toolCallLimit:StrappySessionDefaultToolCallLimit
+                   roundLimit:StrappySessionDefaultRoundLimit
              workingDirectory:@""
              streamingEnabled:NO];
   }
@@ -654,6 +656,8 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
              webSearchEnabled:NO
                   bashEnabled:NO
                limitToOneTool:NO
+                toolCallLimit:StrappySessionDefaultToolCallLimit
+                   roundLimit:StrappySessionDefaultRoundLimit
              workingDirectory:@""
              streamingEnabled:NO] autorelease];
   }

@@ -34,3 +34,7 @@
 - (void)XP_setTextAlignmentCenter;
 - (void)XP_setLineBreakModeWordWrapping;
 @end
+
+@interface UITextField (XPUIKit)
+- (void)XP_setTextAlignmentRight;
+@end

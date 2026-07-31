@@ -1197,7 +1197,8 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_BASH_OUTPUT = 13,
   HARNESS_RESPONSES_SERVER_FILE_MUTATION = 14,
   HARNESS_RESPONSES_SERVER_PREFLIGHT_FIRST_PROMPT_ONLY = 15,
-  HARNESS_RESPONSES_SERVER_ISOLATED_PROMPTS = 16
+  HARNESS_RESPONSES_SERVER_ISOLATED_PROMPTS = 16,
+  HARNESS_RESPONSES_SERVER_CONFIGURED_LIMITS = 17
 } harness_responses_server_scenario;
 
 static int harness_send_all(int socket_fd,
@@ -1726,10 +1727,22 @@ static int harness_request_preflight_contains(cJSON *root,
   return 0;
 }
 
-static int harness_request_base_is_valid(cJSON *root,
-                                         const char *expected_prompt,
-                                         char **session_key_out,
-                                         char **prompt_group_out)
+static int harness_request_max_tool_calls_is_valid(cJSON *root,
+                                                   long expected_limit)
+{
+  cJSON *max_tool_calls;
+
+  max_tool_calls = cJSON_GetObjectItem(root, "max_tool_calls");
+  return cJSON_IsNumber(max_tool_calls) &&
+    (max_tool_calls->valuedouble == (double)expected_limit);
+}
+
+static int harness_request_base_with_tool_call_limit_is_valid(
+  cJSON *root,
+  const char *expected_prompt,
+  long expected_tool_call_limit,
+  char **session_key_out,
+  char **prompt_group_out)
 {
   cJSON *stream;
   cJSON *store;
@@ -1777,6 +1790,9 @@ static int harness_request_base_is_valid(cJSON *root,
   text = harness_message_text(cJSON_GetArrayItem(input, 0));
   if (!cJSON_IsFalse(stream) || !cJSON_IsFalse(store) ||
       !cJSON_IsTrue(parallel_tool_calls) ||
+      !harness_request_max_tool_calls_is_valid(
+        root,
+        expected_tool_call_limit) ||
       !cJSON_IsString(instructions) ||
       (instructions->valuestring == NULL) ||
       !harness_instructions_include_resource_sections(
@@ -1817,6 +1833,19 @@ static int harness_request_base_is_valid(cJSON *root,
     }
   }
   return 1;
+}
+
+static int harness_request_base_is_valid(cJSON *root,
+                                         const char *expected_prompt,
+                                         char **session_key_out,
+                                         char **prompt_group_out)
+{
+  return harness_request_base_with_tool_call_limit_is_valid(
+    root,
+    expected_prompt,
+    STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT,
+    session_key_out,
+    prompt_group_out);
 }
 
 static int harness_world_knowledge_tools_are_valid(cJSON *tools,
@@ -2218,6 +2247,9 @@ static int harness_coding_assistant_request_is_valid(
       harness_preflight_bash_output_is_valid(cJSON_GetArrayItem(input, 5),
                                              bash_call)) &&
     cJSON_IsArray(tools) &&
+    harness_request_max_tool_calls_is_valid(
+      root,
+      STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT) &&
     (parallel_tool_calls ?
       cJSON_IsTrue(parallel_tool_calls_value) :
       cJSON_IsFalse(parallel_tool_calls_value)) &&
@@ -3221,6 +3253,89 @@ static int harness_run_function_tool_server(int listener_fd)
   return ok;
 }
 
+static int harness_run_configured_limits_server(int listener_fd)
+{
+  static const char *first_tool_response =
+    "{\"id\":\"resp-limit-first\",\"object\":\"response\","
+    "\"created_at\":1700000042,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{"
+    "\"type\":\"function_call\",\"id\":\"fc-limit-first\","
+    "\"call_id\":\"call-limit-first\","
+    "\"name\":\"database_context\","
+    "\"arguments\":\"{\\\"unexpected\\\":true}\","
+    "\"status\":\"completed\"}],"
+    "\"usage\":{\"input_tokens\":4,\"output_tokens\":4,"
+    "\"total_tokens\":8}}";
+  static const char *second_tool_response =
+    "{\"id\":\"resp-limit-second\",\"object\":\"response\","
+    "\"created_at\":1700000043,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{"
+    "\"type\":\"function_call\",\"id\":\"fc-limit-second\","
+    "\"call_id\":\"call-limit-second\","
+    "\"name\":\"database_context\","
+    "\"arguments\":\"{\\\"unexpected\\\":true}\","
+    "\"status\":\"completed\"}],"
+    "\"usage\":{\"input_tokens\":8,\"output_tokens\":4,"
+    "\"total_tokens\":12}}";
+  char *body;
+  char *session_key;
+  char *prompt_group;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  session_key = NULL;
+  prompt_group = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_request_base_with_tool_call_limit_is_valid(
+      root,
+      "Reach the configured round limit",
+      7L,
+      &session_key,
+      &prompt_group) &&
+    harness_send_json_response(client_fd, 200L, first_tool_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    free(session_key);
+    free(prompt_group);
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_request_max_tool_calls_is_valid(root, 7L) &&
+    harness_named_function_output_request_is_valid(
+      root,
+      session_key,
+      prompt_group,
+      STRAPPY_TOOL_DATABASE_CONTEXT,
+      "call-limit-first",
+      "Error: database_context does not accept argument 'unexpected'.") &&
+    harness_send_json_response(client_fd, 200L, second_tool_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  free(session_key);
+  free(prompt_group);
+  if (!ok) {
+    fprintf(stderr, "Configured-limits server rejected a request.\n");
+  }
+  return ok;
+}
+
 static int harness_run_bash_cancellation_server(int listener_fd)
 {
   static const char *tool_response =
@@ -3731,6 +3846,8 @@ static int harness_start_server(harness_responses_server_scenario scenario,
       ok = harness_run_valid_web_reference_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_FUNCTION_TOOL) {
       ok = harness_run_function_tool_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_CONFIGURED_LIMITS) {
+      ok = harness_run_configured_limits_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_BASH_CANCELLATION) {
       ok = harness_run_bash_cancellation_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_BASH_OUTPUT) {
@@ -5333,6 +5450,104 @@ static int harness_test_function_tool_continuation(void)
   return ok;
 }
 
+static int harness_test_configured_limits(void)
+{
+  char path[] = "/tmp/strappy-responses-configured-limits-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *result;
+  sqlite3 *db;
+  strappy_session_options options;
+  long long session_id;
+  long long value;
+  pid_t server_pid;
+  int fd;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create configured-limits database.");
+  }
+  close(fd);
+  error = NULL;
+  session_id = 0LL;
+  strappy_session_options_init(&options);
+  ok = harness_create_session_database(path, &session_id, &error) &&
+    strappy_db_load_session_options(path, session_id, &options, &error);
+  if (ok) {
+    options.tool_call_limit = 7L;
+    options.round_limit = 2L;
+    ok = strappy_db_update_session_options(
+      path,
+      session_id,
+      &options,
+      STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT |
+        STRAPPY_SESSION_OPTION_ROUND_LIMIT,
+      NULL,
+      NULL,
+      &error);
+  }
+  if (ok) {
+    ok = harness_start_server(HARNESS_RESPONSES_SERVER_CONFIGURED_LIMITS,
+                              endpoint,
+                              sizeof(endpoint),
+                              &server_pid);
+  }
+  strappy_session_options_destroy(&options);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not prepare configured-limits integration test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  result = strappy_responses_send_prompt_for_session_and_store(
+    "Reach the configured round limit",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources",
+    path,
+    session_id,
+    &error);
+  server_ok = harness_wait_for_server(server_pid, 0);
+  ok = (result == NULL) && (error != NULL) &&
+    (strcmp(error, "Response round limit reached.") == 0) && server_ok;
+  free(result);
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM model_requests;",
+                           &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests WHERE "
+                        "max_tool_calls=7 AND round_index IN (0,1);",
+                        &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM http_attempts WHERE "
+                        "state='completed';",
+                        &value) && (value == 2LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM session_settings WHERE "
+                        "session_id > 0 AND tool_call_limit=7 "
+                        "AND round_limit=2;",
+                        &value) && (value == 1LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Configured Responses limits failed: %s\n",
+            (error != NULL) ? error : "request or ledger mismatch");
+  }
+  free(error);
+  unlink(path);
+  return ok;
+}
+
 static int harness_file_content_equals(const char *path,
                                        const char *expected)
 {
@@ -6543,7 +6758,8 @@ static int harness_test_ledger(void)
     "\"instructions\":\"System\",\"input\":[{\"type\":\"message\","
     "\"role\":\"user\",\"content\":[{\"type\":\"input_text\","
     "\"text\":\"Hello\"}]}],\"max_output_tokens\":100,"
-    "\"parallel_tool_calls\":true,\"reasoning\":{\"enabled\":true},"
+    "\"max_tool_calls\":13,\"parallel_tool_calls\":true,"
+    "\"reasoning\":{\"enabled\":true},"
     "\"tools\":[],\"tool_choice\":\"auto\","
     "\"provider\":{\"require_parameters\":true},"
     "\"temperature\":0.2,\"top_p\":0.9}";
@@ -6689,6 +6905,10 @@ static int harness_test_ledger(void)
     return harness_fail("Could not inspect Responses harness database.");
   }
   ok = harness_verify_call_columns(db, request_json, response_json) &&
+    harness_query_int(db,
+                      "SELECT COUNT(*) FROM model_requests WHERE "
+                      "max_tool_calls=13;",
+                      &value) && (value == 1LL) &&
     harness_query_int(db,
                       "SELECT COUNT(*) FROM conversation_items;",
                       &value) && (value == 6LL) &&
@@ -7446,6 +7666,7 @@ int main(void)
       harness_test_web_search_requires_markdown_reference() &&
       harness_test_valid_web_reference_passes_content_check() &&
       harness_test_function_tool_continuation() &&
+      harness_test_configured_limits() &&
       harness_test_file_mutation_continuation() &&
       harness_test_bash_disabled_request() &&
       harness_test_bash_output_truncation_flag() &&

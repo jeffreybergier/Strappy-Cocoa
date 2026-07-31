@@ -1,6 +1,6 @@
 {
   "assistant_messages": {
-    "tool_round_limit": "Tool limit reached."
+    "round_limit": "Response round limit reached."
   },
   "server_tools": [
     {

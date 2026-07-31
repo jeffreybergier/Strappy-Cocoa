@@ -323,3 +323,14 @@ static UITextField *XPUIKitFindTextField(UIView *view)
 }
 
 @end
+
+@implementation UITextField (XPUIKit)
+
+- (void)XP_setTextAlignmentRight
+{
+  XPUIKitInvokeIntegerSetter(self,
+                             @selector(setTextAlignment:),
+                             (NSInteger)UITextAlignmentRight);
+}
+
+@end

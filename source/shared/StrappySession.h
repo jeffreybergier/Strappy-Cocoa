@@ -17,6 +17,9 @@ extern NSString * const StrappyWebProviderAuto;
 extern NSString * const StrappyWebProviderNative;
 extern NSString * const StrappyWebProviderExa;
 extern NSString * const StrappyWebProviderParallel;
+extern const NSUInteger StrappySessionDefaultToolCallLimit;
+extern const NSUInteger StrappySessionDefaultRoundLimit;
+extern const NSUInteger StrappySessionMaximumLimit;
 
 typedef NSUInteger StrappySessionOptionMask;
 
@@ -29,6 +32,8 @@ enum {
   StrappySessionOptionLimitToOneTool = 1U << 5,
   StrappySessionOptionWorkingDirectory = 1U << 6,
   StrappySessionOptionStreaming = 1U << 7,
+  StrappySessionOptionToolCallLimit = 1U << 8,
+  StrappySessionOptionRoundLimit = 1U << 9,
   StrappySessionOptionAll =
     StrappySessionOptionModel |
     StrappySessionOptionAssistantSet |
@@ -37,7 +42,9 @@ enum {
     StrappySessionOptionBash |
     StrappySessionOptionLimitToOneTool |
     StrappySessionOptionWorkingDirectory |
-    StrappySessionOptionStreaming
+    StrappySessionOptionStreaming |
+    StrappySessionOptionToolCallLimit |
+    StrappySessionOptionRoundLimit
 };
 
 @interface StrappySessionOptions : NSObject <NSCopying> {
@@ -49,6 +56,8 @@ enum {
   BOOL webSearchEnabled_;
   BOOL bashEnabled_;
   BOOL limitToOneTool_;
+  NSUInteger toolCallLimit_;
+  NSUInteger roundLimit_;
   BOOL streamingEnabled_;
 }
 
@@ -58,6 +67,8 @@ enum {
              webSearchEnabled:(BOOL)webSearchEnabled
                   bashEnabled:(BOOL)bashEnabled
                limitToOneTool:(BOOL)limitToOneTool
+                toolCallLimit:(NSUInteger)toolCallLimit
+                    roundLimit:(NSUInteger)roundLimit
              workingDirectory:(NSString *)workingDirectory
              streamingEnabled:(BOOL)streamingEnabled;
 - (NSString *)modelIdentifier;
@@ -72,6 +83,10 @@ enum {
 - (void)setBashEnabled:(BOOL)enabled;
 - (BOOL)limitToOneTool;
 - (void)setLimitToOneTool:(BOOL)enabled;
+- (NSUInteger)toolCallLimit;
+- (void)setToolCallLimit:(NSUInteger)toolCallLimit;
+- (NSUInteger)roundLimit;
+- (void)setRoundLimit:(NSUInteger)roundLimit;
 - (NSString *)workingDirectory;
 - (void)setWorkingDirectory:(NSString *)workingDirectory;
 - (BOOL)streamingEnabled;

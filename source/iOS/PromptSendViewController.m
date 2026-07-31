@@ -2,6 +2,7 @@
 
 #import "AIFontAwesome.h"
 #import "StrappySession.h"
+#import "XPUIKit.h"
 
 #import <QuartzCore/QuartzCore.h>
 
@@ -332,10 +333,43 @@ enum {
 
 enum {
   kStrappyPromptDebugSectionSearchProvider = 0,
-  kStrappyPromptDebugSectionToolCalls,
+  kStrappyPromptDebugSectionLimits,
   kStrappyPromptDebugSectionWorkingDirectory,
   kStrappyPromptDebugSectionCount
 };
+
+enum {
+  kStrappyPromptDebugLimitRowLimitToOneTool = 0,
+  kStrappyPromptDebugLimitRowToolCallLimit,
+  kStrappyPromptDebugLimitRowRoundLimit,
+  kStrappyPromptDebugLimitRowCount
+};
+
+static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
+{
+  NSString *trimmed;
+  NSCharacterSet *invalidCharacters;
+  long long value;
+
+  trimmed = [text stringByTrimmingCharactersInSet:
+    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  invalidCharacters = [[NSCharacterSet characterSetWithCharactersInString:
+    @"0123456789"] invertedSet];
+  if (([trimmed length] == 0U) ||
+      ([trimmed rangeOfCharacterFromSet:invalidCharacters].location !=
+       NSNotFound)) {
+    return NO;
+  }
+  value = [trimmed longLongValue];
+  if ((value < 1LL) ||
+      (value > (long long)StrappySessionMaximumLimit)) {
+    return NO;
+  }
+  if (limitOut != NULL) {
+    *limitOut = (NSUInteger)value;
+  }
+  return YES;
+}
 
 @interface PromptSendViewController () <UITextViewDelegate>
 @property (nonatomic, strong) UIView *topSeparator;
@@ -391,11 +425,14 @@ enum {
 - (void)reloadOptionsFromPrompt;
 @end
 
-@interface StrappyPromptDebugOptionsTableViewController : UITableViewController
+@interface StrappyPromptDebugOptionsTableViewController :
+  UITableViewController <UITextFieldDelegate>
 @property (nonatomic, assign) PromptSendViewController *promptSendViewController;
 @property (nonatomic, copy) StrappySessionOptions *sessionOptions;
 @property (nonatomic, copy) NSArray *workingDirectories;
 @property (nonatomic, strong) UISwitch *limitToOneToolSwitch;
+@property (nonatomic, strong) UITextField *toolCallLimitField;
+@property (nonatomic, strong) UITextField *roundLimitField;
 - (instancetype)initWithPromptSendViewController:
     (PromptSendViewController *)promptSendViewController;
 - (void)reloadOptionsSnapshot;
@@ -821,6 +858,11 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 - (void)viewDidLoad
 {
   UISwitch *limitToOneToolSwitch;
+  UITextField *toolCallLimitField;
+  UITextField *roundLimitField;
+  UIToolbar *keyboardToolbar;
+  UIBarButtonItem *flexibleItem;
+  UIBarButtonItem *doneItem;
 
   [super viewDidLoad];
 
@@ -829,6 +871,45 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
                            action:@selector(limitToOneToolSwitchChanged:)
                  forControlEvents:UIControlEventValueChanged];
   [self setLimitToOneToolSwitch:limitToOneToolSwitch];
+
+  keyboardToolbar = [[UIToolbar alloc]
+    initWithFrame:CGRectMake(0.0f, 0.0f, 320.0f, 44.0f)];
+  flexibleItem = [[UIBarButtonItem alloc]
+    initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
+                         target:nil
+                         action:nil];
+  doneItem = [[UIBarButtonItem alloc]
+    initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                         target:self
+                         action:@selector(limitFieldDoneAction:)];
+  [keyboardToolbar setItems:[NSArray arrayWithObjects:
+    flexibleItem, doneItem, nil]];
+
+  toolCallLimitField = [[UITextField alloc]
+    initWithFrame:CGRectMake(0.0f, 0.0f, 72.0f, 30.0f)];
+  [toolCallLimitField setKeyboardType:UIKeyboardTypeNumberPad];
+  [toolCallLimitField XP_setTextAlignmentRight];
+  [toolCallLimitField setContentVerticalAlignment:
+    UIControlContentVerticalAlignmentCenter];
+  [toolCallLimitField setDelegate:self];
+  [toolCallLimitField setInputAccessoryView:keyboardToolbar];
+  [toolCallLimitField addTarget:self
+                         action:@selector(toolCallLimitFieldEditingDidEnd:)
+               forControlEvents:UIControlEventEditingDidEnd];
+  [self setToolCallLimitField:toolCallLimitField];
+
+  roundLimitField = [[UITextField alloc]
+    initWithFrame:CGRectMake(0.0f, 0.0f, 72.0f, 30.0f)];
+  [roundLimitField setKeyboardType:UIKeyboardTypeNumberPad];
+  [roundLimitField XP_setTextAlignmentRight];
+  [roundLimitField setContentVerticalAlignment:
+    UIControlContentVerticalAlignmentCenter];
+  [roundLimitField setDelegate:self];
+  [roundLimitField setInputAccessoryView:keyboardToolbar];
+  [roundLimitField addTarget:self
+                       action:@selector(roundLimitFieldEditingDidEnd:)
+             forControlEvents:UIControlEventEditingDidEnd];
+  [self setRoundLimitField:roundLimitField];
 
   [[self navigationItem] setRightBarButtonItem:
     [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
@@ -859,13 +940,24 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [[self limitToOneToolSwitch]
     setOn:[[self sessionOptions] limitToOneTool]
   animated:NO];
+  [[self toolCallLimitField] setText:[NSString stringWithFormat:
+    @"%lu", (unsigned long)[[self sessionOptions] toolCallLimit]]];
+  [[self roundLimitField] setText:[NSString stringWithFormat:
+    @"%lu", (unsigned long)[[self sessionOptions] roundLimit]]];
   [[self tableView] reloadData];
 }
 
 - (void)doneAction:(id)sender
 {
   (void)sender;
+  [[self view] endEditing:YES];
   [[self promptSendViewController] dismissOptionsControllerAnimated:YES];
+}
+
+- (void)limitFieldDoneAction:(id)sender
+{
+  (void)sender;
+  [[self view] endEditing:YES];
 }
 
 - (void)limitToOneToolSwitchChanged:(UISwitch *)sender
@@ -885,6 +977,52 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [sender setOn:[[self sessionOptions] limitToOneTool] animated:YES];
 }
 
+- (void)toolCallLimitFieldEditingDidEnd:(UITextField *)sender
+{
+  PromptSendViewController *promptSendViewController;
+  StrappySessionOptions *options;
+  NSUInteger limit;
+
+  promptSendViewController = [self promptSendViewController];
+  if ((promptSendViewController != nil) &&
+      StrappyPromptParseLimit([sender text], &limit)) {
+    options = [[promptSendViewController sessionOptions] copy];
+    [options setToolCallLimit:limit];
+    (void)[promptSendViewController updateSessionOptions:options
+                                           changedFields:
+                                             StrappySessionOptionToolCallLimit];
+    [self setSessionOptions:[promptSendViewController sessionOptions]];
+  }
+  [sender setText:[NSString stringWithFormat:
+    @"%lu", (unsigned long)[[self sessionOptions] toolCallLimit]]];
+}
+
+- (void)roundLimitFieldEditingDidEnd:(UITextField *)sender
+{
+  PromptSendViewController *promptSendViewController;
+  StrappySessionOptions *options;
+  NSUInteger limit;
+
+  promptSendViewController = [self promptSendViewController];
+  if ((promptSendViewController != nil) &&
+      StrappyPromptParseLimit([sender text], &limit)) {
+    options = [[promptSendViewController sessionOptions] copy];
+    [options setRoundLimit:limit];
+    (void)[promptSendViewController updateSessionOptions:options
+                                           changedFields:
+                                             StrappySessionOptionRoundLimit];
+    [self setSessionOptions:[promptSendViewController sessionOptions]];
+  }
+  [sender setText:[NSString stringWithFormat:
+    @"%lu", (unsigned long)[[self sessionOptions] roundLimit]]];
+}
+
+- (BOOL)textFieldShouldReturn:(UITextField *)textField
+{
+  [textField resignFirstResponder];
+  return YES;
+}
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
   (void)tableView;
@@ -898,8 +1036,8 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   if (section == kStrappyPromptDebugSectionWorkingDirectory) {
     return (NSInteger)[[self workingDirectories] count];
   }
-  if (section == kStrappyPromptDebugSectionToolCalls) {
-    return 1;
+  if (section == kStrappyPromptDebugSectionLimits) {
+    return kStrappyPromptDebugLimitRowCount;
   }
   if (section == kStrappyPromptDebugSectionSearchProvider) {
     return (NSInteger)[StrappyPromptSearchProviders() count];
@@ -914,8 +1052,8 @@ titleForHeaderInSection:(NSInteger)section
   if (section == kStrappyPromptDebugSectionWorkingDirectory) {
     return NSLocalizedString(@"Working Directory", nil);
   }
-  if (section == kStrappyPromptDebugSectionToolCalls) {
-    return NSLocalizedString(@"Tool Calls", nil);
+  if (section == kStrappyPromptDebugSectionLimits) {
+    return NSLocalizedString(@"Limits", nil);
   }
   if (section == kStrappyPromptDebugSectionSearchProvider) {
     return NSLocalizedString(@"Search Provider", nil);
@@ -932,9 +1070,10 @@ titleForFooterInSection:(NSInteger)section
       @"Relative file paths and Bash commands use this directory.",
       nil);
   }
-  if (section == kStrappyPromptDebugSectionToolCalls) {
+  if (section == kStrappyPromptDebugSectionLimits) {
     return NSLocalizedString(
-      @"Disables parallel tool calls in model requests.",
+      @"Tool Call Limit applies to OpenRouter server tools in each response. "
+       @"Round Limit includes the first model request and excludes retries.",
       nil);
   }
   if (section == kStrappyPromptDebugSectionSearchProvider) {
@@ -979,12 +1118,13 @@ titleForFooterInSection:(NSInteger)section
     return cell;
   }
 
-  if ([indexPath section] == kStrappyPromptDebugSectionToolCalls) {
-    cell = [tableView dequeueReusableCellWithIdentifier:@"LimitToolCell"];
+  if (([indexPath section] == kStrappyPromptDebugSectionLimits) &&
+      ([indexPath row] == kStrappyPromptDebugLimitRowLimitToOneTool)) {
+    cell = [tableView dequeueReusableCellWithIdentifier:@"LimitOneToolCell"];
     if (cell == nil) {
       cell = [[UITableViewCell alloc]
         initWithStyle:UITableViewCellStyleSubtitle
-       reuseIdentifier:@"LimitToolCell"];
+       reuseIdentifier:@"LimitOneToolCell"];
       [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
       [[cell textLabel] setNumberOfLines:1];
       [[cell detailTextLabel] setNumberOfLines:1];
@@ -997,7 +1137,43 @@ titleForFooterInSection:(NSInteger)section
     [[self limitToOneToolSwitch]
       setOn:[[self sessionOptions] limitToOneTool]
     animated:NO];
+    [cell setAccessoryType:UITableViewCellAccessoryNone];
     [cell setAccessoryView:[self limitToOneToolSwitch]];
+    return cell;
+  }
+
+  if ([indexPath section] == kStrappyPromptDebugSectionLimits) {
+    UITextField *limitField;
+    NSString *title;
+    NSString *detail;
+
+    if ([indexPath row] == kStrappyPromptDebugLimitRowToolCallLimit) {
+      limitField = [self toolCallLimitField];
+      title = NSLocalizedString(@"Tool Call Limit", nil);
+      detail = NSLocalizedString(
+        @"Maximum server tool calls per response", nil);
+    } else {
+      limitField = [self roundLimitField];
+      title = NSLocalizedString(@"Round Limit", nil);
+      detail = NSLocalizedString(
+        @"Maximum model rounds per prompt", nil);
+    }
+    cell = [tableView dequeueReusableCellWithIdentifier:@"LimitValueCell"];
+    if (cell == nil) {
+      cell = [[UITableViewCell alloc]
+        initWithStyle:UITableViewCellStyleSubtitle
+       reuseIdentifier:@"LimitValueCell"];
+      [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+      [[cell textLabel] setNumberOfLines:1];
+      [[cell detailTextLabel] setNumberOfLines:1];
+    }
+    [[cell textLabel] setText:title];
+    [[cell textLabel] setTextColor:[UIColor blackColor]];
+    [[cell detailTextLabel] setText:detail];
+    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+    [limitField setAccessibilityLabel:title];
+    [cell setAccessoryType:UITableViewCellAccessoryNone];
+    [cell setAccessoryView:limitField];
     return cell;
   }
 
@@ -1397,6 +1573,8 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
              webSearchEnabled:NO
                   bashEnabled:NO
                limitToOneTool:NO
+                toolCallLimit:StrappySessionDefaultToolCallLimit
+                   roundLimit:StrappySessionDefaultRoundLimit
              workingDirectory:@""
              streamingEnabled:NO];
   }
