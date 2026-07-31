@@ -7360,6 +7360,188 @@ cleanup:
   return ok;
 }
 
+static int harness_run_session_options_tests(const harness_context *context)
+{
+  strappy_session_options stale;
+  strappy_session_options saved;
+  strappy_session_options reloaded;
+  strappy_session_option_mask actual_changed_fields;
+  const strappy_session_option_mask first_update_fields =
+    STRAPPY_SESSION_OPTION_WEB_PROVIDER | STRAPPY_SESSION_OPTION_BASH;
+  const strappy_session_option_mask final_update_fields =
+    STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
+    STRAPPY_SESSION_OPTION_WORKING_DIRECTORY |
+    STRAPPY_SESSION_OPTION_STREAMING;
+  long long session_id;
+  char *error;
+  char *working_directory;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  strappy_session_options_init(&stale);
+  strappy_session_options_init(&saved);
+  strappy_session_options_init(&reloaded);
+  session_id = 0LL;
+  error = NULL;
+  ok = strappy_db_create_session(context->catalog_path,
+                                 &session_id,
+                                 &error) &&
+    strappy_db_load_session_options(context->catalog_path,
+                                    session_id,
+                                    &stale,
+                                    &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not create the session-options fixture: %s\n",
+            (error != NULL) ? error : "unknown");
+    goto cleanup;
+  }
+  if ((stale.model_id == NULL) || (stale.assistant_set_id == NULL) ||
+      (stale.working_directory == NULL) ||
+      (stale.web_provider != STRAPPY_WEB_PROVIDER_AUTO) ||
+      !stale.web_search_enabled || stale.bash_enabled ||
+      stale.limit_to_one_tool || stale.streaming_enabled) {
+    fprintf(stderr, "Initial session-options snapshot did not match.\n");
+    ok = 0;
+    goto cleanup;
+  }
+
+  stale.web_provider = STRAPPY_WEB_PROVIDER_PARALLEL;
+  stale.bash_enabled = 1;
+  actual_changed_fields = 0U;
+  ok = strappy_db_update_session_options(context->catalog_path,
+                                         session_id,
+                                         &stale,
+                                         first_update_fields,
+                                         &saved,
+                                         &actual_changed_fields,
+                                         &error);
+  if (!ok || (actual_changed_fields != first_update_fields) ||
+      (saved.web_provider != STRAPPY_WEB_PROVIDER_PARALLEL) ||
+      !saved.bash_enabled || !saved.web_search_enabled) {
+    fprintf(stderr,
+            "Could not atomically save the first options patch: %s\n",
+            (error != NULL) ? error : "snapshot mismatch");
+    ok = 0;
+    goto cleanup;
+  }
+
+  /* Simulate an older UI snapshot. Only the masked field may be merged. */
+  stale.web_provider = STRAPPY_WEB_PROVIDER_AUTO;
+  stale.bash_enabled = 0;
+  stale.web_search_enabled = 0;
+  actual_changed_fields = 0U;
+  ok = strappy_db_update_session_options(context->catalog_path,
+                                         session_id,
+                                         &stale,
+                                         STRAPPY_SESSION_OPTION_WEB_SEARCH,
+                                         &saved,
+                                         &actual_changed_fields,
+                                         &error);
+  if (!ok ||
+      (actual_changed_fields != STRAPPY_SESSION_OPTION_WEB_SEARCH) ||
+      (saved.web_provider != STRAPPY_WEB_PROVIDER_PARALLEL) ||
+      !saved.bash_enabled || saved.web_search_enabled) {
+    fprintf(stderr,
+            "A stale options patch overwrote an unmasked field: %s\n",
+            (error != NULL) ? error : "snapshot mismatch");
+    ok = 0;
+    goto cleanup;
+  }
+
+  working_directory = strdup(context->temp_dir);
+  if (working_directory == NULL) {
+    fprintf(stderr, "Could not allocate the options working directory.\n");
+    ok = 0;
+    goto cleanup;
+  }
+  free(stale.working_directory);
+  stale.working_directory = working_directory;
+  stale.limit_to_one_tool = 1;
+  stale.streaming_enabled = 1;
+  actual_changed_fields = 0U;
+  ok = strappy_db_update_session_options(context->catalog_path,
+                                         session_id,
+                                         &stale,
+                                         final_update_fields,
+                                         &saved,
+                                         &actual_changed_fields,
+                                         &error);
+  if (!ok || (actual_changed_fields != final_update_fields) ||
+      !saved.limit_to_one_tool || !saved.streaming_enabled ||
+      (saved.working_directory == NULL) ||
+      (strcmp(saved.working_directory, context->temp_dir) != 0) ||
+      (saved.web_provider != STRAPPY_WEB_PROVIDER_PARALLEL) ||
+      !saved.bash_enabled) {
+    fprintf(stderr,
+            "Could not save the multi-field options patch: %s\n",
+            (error != NULL) ? error : "snapshot mismatch");
+    ok = 0;
+    goto cleanup;
+  }
+
+  actual_changed_fields = STRAPPY_SESSION_OPTION_ALL;
+  ok = strappy_db_update_session_options(context->catalog_path,
+                                         session_id,
+                                         &stale,
+                                         STRAPPY_SESSION_OPTION_WEB_SEARCH,
+                                         &saved,
+                                         &actual_changed_fields,
+                                         &error);
+  if (!ok || (actual_changed_fields != 0U) ||
+      (saved.web_provider != STRAPPY_WEB_PROVIDER_PARALLEL) ||
+      !saved.bash_enabled || saved.web_search_enabled) {
+    fprintf(stderr,
+            "A no-op options patch returned the wrong snapshot: %s\n",
+            (error != NULL) ? error : "snapshot mismatch");
+    ok = 0;
+    goto cleanup;
+  }
+
+  stale.web_provider = (strappy_web_provider)99;
+  stale.bash_enabled = 0;
+  free(error);
+  error = NULL;
+  if (strappy_db_update_session_options(
+        context->catalog_path,
+        session_id,
+        &stale,
+        STRAPPY_SESSION_OPTION_WEB_PROVIDER | STRAPPY_SESSION_OPTION_BASH,
+        &saved,
+        &actual_changed_fields,
+        &error) || (error == NULL)) {
+    fprintf(stderr, "An invalid options patch was accepted.\n");
+    ok = 0;
+    goto cleanup;
+  }
+  free(error);
+  error = NULL;
+  ok = strappy_db_load_session_options(context->catalog_path,
+                                       session_id,
+                                       &reloaded,
+                                       &error);
+  if (!ok || (reloaded.web_provider != STRAPPY_WEB_PROVIDER_PARALLEL) ||
+      !reloaded.bash_enabled || reloaded.web_search_enabled ||
+      !reloaded.limit_to_one_tool || !reloaded.streaming_enabled ||
+      (reloaded.working_directory == NULL) ||
+      (strcmp(reloaded.working_directory, context->temp_dir) != 0)) {
+    fprintf(stderr,
+            "The rejected options patch changed persisted state: %s\n",
+            (error != NULL) ? error : "snapshot mismatch");
+    ok = 0;
+  }
+
+cleanup:
+  free(error);
+  strappy_session_options_destroy(&reloaded);
+  strappy_session_options_destroy(&saved);
+  strappy_session_options_destroy(&stale);
+  return ok;
+}
+
 static int harness_run_empty_session_storage_tests(const harness_context *context)
 {
   strappy_session_record session;
@@ -9930,6 +10112,7 @@ int main(void)
        harness_run_helper_info_tests(&context) &&
        harness_run_assistant_scoped_memory_tests(&context) &&
        harness_run_database_context_limit_tests(&context) &&
+       harness_run_session_options_tests(&context) &&
        harness_run_empty_session_storage_tests(&context) &&
        harness_run_session_turn_storage_tests(&context) &&
        harness_run_openrouter_model_catalog_tests(&context) &&

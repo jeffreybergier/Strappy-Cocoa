@@ -1,5 +1,6 @@
 #import <AppKit/AppKit.h>
 #import "AICookieCutterWindowController.h"
+#import "StrappySession.h"
 #import "XPAppKit.h"
 
 @class PromptSendViewController;
@@ -9,16 +10,9 @@
                  didSubmitPrompt:(NSString *)prompt;
 - (NSArray *)allowedModelsForPromptSendViewController:
     (PromptSendViewController *)controller;
-- (NSString *)selectedModelIdentifierForPromptSendViewController:
-    (PromptSendViewController *)controller;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
-        setSelectedModelIdentifier:(NSString *)modelIdentifier;
-- (NSString *)webProviderForPromptSendViewController:
-    (PromptSendViewController *)controller;
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-                  setWebProvider:(NSString *)webProvider;
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-              setStreamingEnabled:(BOOL)enabled;
+            updateSessionOptions:(StrappySessionOptions *)options
+                   changedFields:(StrappySessionOptionMask)changedFields;
 - (void)promptSendViewControllerDidCancelPrompt:
     (PromptSendViewController *)controller;
 - (void)promptSendViewControllerDidChangeHeight:
@@ -42,8 +36,7 @@
   BOOL          expanded_;
   BOOL          sending_;
   BOOL          cancellationRequested_;
-  NSString     *webProvider_;
-  BOOL          streamingEnabled_;
+  StrappySessionOptions *sessionOptions_;
 }
 
 - (void)setDelegate:(id<PromptSendViewControllerDelegate>)delegate;
@@ -53,8 +46,7 @@
 - (void)setStudyLocked:(BOOL)studyLocked;
 - (void)setSending:(BOOL)sending;
 - (void)setCancellationRequested:(BOOL)requested;
-- (void)setWebProvider:(NSString *)webProvider;
-- (void)setStreamingEnabled:(BOOL)enabled;
+- (void)setSessionOptions:(StrappySessionOptions *)options;
 - (void)reloadOptionsMenu;
 - (BOOL)canSendCurrentPrompt;
 - (void)performSend:(id)sender;

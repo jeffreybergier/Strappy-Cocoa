@@ -304,6 +304,76 @@ int strappy_session_update_model_request_include_in_context(
     error_out);
 }
 
+int strappy_session_load_options(
+  const char *db_path,
+  long long session_id,
+  strappy_session_options *options,
+  char **error_out)
+{
+  return strappy_db_load_session_options(db_path,
+                                         session_id,
+                                         options,
+                                         error_out);
+}
+
+int strappy_session_update_options(
+  const char *db_path,
+  long long session_id,
+  const char *resource_dir,
+  const strappy_session_options *options,
+  strappy_session_option_mask changed_fields,
+  strappy_session_options *saved_options_out,
+  strappy_session_option_mask *actual_changed_fields_out,
+  char **error_out)
+{
+  strappy_assistant_set_profile profile;
+
+  if (options == NULL) {
+    strappy_set_error(error_out, "Session options are missing.");
+    return 0;
+  }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_WORKING_DIRECTORY) != 0U) {
+    if (!strappy_session_ensure_working_directory(options->working_directory,
+                                                  error_out)) {
+      return 0;
+    }
+  }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_ASSISTANT_SET) != 0U) {
+    if ((options->assistant_set_id == NULL) ||
+        (options->assistant_set_id[0] == '\0')) {
+      strappy_set_error(error_out, "Session assistant set is not selected.");
+      return 0;
+    }
+    if ((resource_dir == NULL) || (resource_dir[0] == '\0')) {
+      strappy_set_error(error_out,
+                        "Assistant resource directory is missing.");
+      return 0;
+    }
+    strappy_assistant_set_profile_init(&profile);
+    if (!strappy_assistant_sets_load_profile(resource_dir,
+                                             options->assistant_set_id,
+                                             &profile,
+                                             error_out)) {
+      return 0;
+    }
+    if (!strappy_assistant_set_profile_is_available(&profile)) {
+      strappy_set_formatted_error(error_out,
+                                  "Assistant set is not available: %s",
+                                  options->assistant_set_id);
+      strappy_assistant_set_profile_destroy(&profile);
+      return 0;
+    }
+    strappy_assistant_set_profile_destroy(&profile);
+  }
+  return strappy_db_update_session_options(db_path,
+                                           session_id,
+                                           options,
+                                           changed_fields,
+                                           saved_options_out,
+                                           actual_changed_fields_out,
+                                           error_out);
+}
+
 int strappy_session_update_streaming_enabled(const char *db_path,
                                              long long session_id,
                                              int streaming_enabled,

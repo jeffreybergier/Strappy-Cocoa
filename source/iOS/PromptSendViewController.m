@@ -15,17 +15,6 @@ static const CGFloat kStrappySendDismissGlyphSize = 14.0f;
 static const CGFloat kStrappySendFontSize = 16.0f;
 static const CGFloat kStrappySendFieldRadius = 8.0f;
 
-static NSArray *StrappyPromptWebProviders(void)
-{
-  return [NSArray arrayWithObjects:
-    StrappyWebProviderNone,
-    StrappyWebProviderAuto,
-    StrappyWebProviderNative,
-    StrappyWebProviderExa,
-    StrappyWebProviderParallel,
-    nil];
-}
-
 static NSArray *StrappyPromptSearchProviders(void)
 {
   return [NSArray arrayWithObjects:
@@ -365,10 +354,7 @@ enum {
 @property (nonatomic, assign) BOOL expanded;
 @property (nonatomic, assign) BOOL sending;
 @property (nonatomic, assign) BOOL cancellationRequested;
-@property (nonatomic, copy) NSString *webProvider;
-@property (nonatomic, assign) BOOL webSearchEnabled;
-@property (nonatomic, assign) BOOL bashEnabled;
-@property (nonatomic, assign) BOOL limitToOneTool;
+@property (nonatomic, copy) StrappySessionOptions *sessionOptions;
 - (void)buildSubviews;
 - (UIImage *)iconImageForIcon:(AIFontAwesomeIcon)icon
                         style:(AIFontAwesomeStyle)style
@@ -383,17 +369,8 @@ enum {
 - (void)updatePlaceholderVisibility;
 - (NSArray *)currentAllowedModels;
 - (NSArray *)currentAssistantSets;
-- (NSString *)currentSelectedAssistantSetIdentifier;
-- (BOOL)setSelectedAssistantSetIdentifierFromOptions:
-    (NSString *)assistantSetIdentifier;
-- (NSString *)currentSelectedModelIdentifier;
-- (BOOL)setSelectedModelIdentifierFromOptions:(NSString *)modelIdentifier;
-- (BOOL)setWebProviderFromOptions:(NSString *)webProvider;
-- (BOOL)setWebSearchEnabledFromOptions:(BOOL)enabled;
-- (BOOL)setBashEnabledFromOptions:(BOOL)enabled;
-- (BOOL)setLimitToOneToolFromOptions:(BOOL)enabled;
-- (NSString *)currentWorkingDirectory;
-- (BOOL)setWorkingDirectoryFromOptions:(NSString *)workingDirectory;
+- (BOOL)updateSessionOptions:(StrappySessionOptions *)options
+               changedFields:(StrappySessionOptionMask)changedFields;
 - (UIViewController *)containingViewController;
 - (void)dismissOptionsControllerAnimated:(BOOL)animated;
 - (void)dismissTapped:(id)sender;
@@ -404,14 +381,10 @@ enum {
 @interface StrappyPromptOptionsTableViewController : UITableViewController
 @property (nonatomic, assign) PromptSendViewController *promptSendViewController;
 @property (nonatomic, copy) NSArray *assistantSets;
-@property (nonatomic, copy) NSString *selectedAssistantSetIdentifier;
 @property (nonatomic, copy) NSArray *models;
-@property (nonatomic, copy) NSString *selectedModelIdentifier;
-@property (nonatomic, copy) NSString *webProvider;
-@property (nonatomic, assign) BOOL webSearchEnabled;
+@property (nonatomic, copy) StrappySessionOptions *sessionOptions;
 @property (nonatomic, strong) UISwitch *webSearchSwitch;
 @property (nonatomic, strong) UISwitch *bashSwitch;
-@property (nonatomic, assign) BOOL bashEnabled;
 - (instancetype)initWithPromptSendViewController:
     (PromptSendViewController *)promptSendViewController;
 - (void)reloadOptionsSnapshot;
@@ -420,11 +393,9 @@ enum {
 
 @interface StrappyPromptDebugOptionsTableViewController : UITableViewController
 @property (nonatomic, assign) PromptSendViewController *promptSendViewController;
-@property (nonatomic, copy) NSString *webProvider;
+@property (nonatomic, copy) StrappySessionOptions *sessionOptions;
 @property (nonatomic, copy) NSArray *workingDirectories;
-@property (nonatomic, copy) NSString *workingDirectory;
 @property (nonatomic, strong) UISwitch *limitToOneToolSwitch;
-@property (nonatomic, assign) BOOL limitToOneTool;
 - (instancetype)initWithPromptSendViewController:
     (PromptSendViewController *)promptSendViewController;
 - (void)reloadOptionsSnapshot;
@@ -486,37 +457,21 @@ enum {
     (promptSendViewController != nil)
       ? [promptSendViewController currentAssistantSets]
       : [NSArray array]];
-  [self setSelectedAssistantSetIdentifier:
-    (promptSendViewController != nil)
-      ? [promptSendViewController currentSelectedAssistantSetIdentifier]
-      : @""];
   [self setModels:
     (promptSendViewController != nil)
       ? [promptSendViewController currentAllowedModels]
       : [NSArray array]];
-  [self setSelectedModelIdentifier:
-    (promptSendViewController != nil)
-      ? [promptSendViewController currentSelectedModelIdentifier]
-      : @""];
-  [self setWebProvider:
-    (promptSendViewController != nil)
-      ? [promptSendViewController webProvider]
-      : StrappyWebProviderNone];
-  [self setWebSearchEnabled:
-    (promptSendViewController != nil)
-      ? [promptSendViewController webSearchEnabled]
-      : NO];
-  [self setBashEnabled:
-    (promptSendViewController != nil)
-      ? [promptSendViewController bashEnabled]
-      : NO];
+  [self setSessionOptions:(promptSendViewController != nil)
+    ? [promptSendViewController sessionOptions] : nil];
 }
 
 - (void)reloadOptionsFromPrompt
 {
   [self reloadOptionsSnapshot];
-  [[self webSearchSwitch] setOn:[self webSearchEnabled] animated:NO];
-  [[self bashSwitch] setOn:[self bashEnabled] animated:NO];
+  [[self webSearchSwitch]
+    setOn:[[self sessionOptions] webSearchEnabled]
+  animated:NO];
+  [[self bashSwitch] setOn:[[self sessionOptions] bashEnabled] animated:NO];
   [[self bashSwitch] setEnabled:YES];
   [[self tableView] reloadData];
 }
@@ -530,27 +485,35 @@ enum {
 - (void)webSearchSwitchChanged:(UISwitch *)sender
 {
   PromptSendViewController *promptSendViewController;
+  StrappySessionOptions *options;
 
   promptSendViewController = [self promptSendViewController];
   if (promptSendViewController != nil) {
-    (void)[promptSendViewController
-      setWebSearchEnabledFromOptions:[sender isOn]];
-    [self setWebSearchEnabled:
-      [promptSendViewController webSearchEnabled]];
+    options = [[promptSendViewController sessionOptions] copy];
+    [options setWebSearchEnabled:[sender isOn]];
+    (void)[promptSendViewController updateSessionOptions:options
+                                           changedFields:
+                                             StrappySessionOptionWebSearch];
+    [self setSessionOptions:[promptSendViewController sessionOptions]];
   }
-  [sender setOn:[self webSearchEnabled] animated:YES];
+  [sender setOn:[[self sessionOptions] webSearchEnabled] animated:YES];
 }
 
 - (void)bashSwitchChanged:(UISwitch *)sender
 {
   PromptSendViewController *promptSendViewController;
+  StrappySessionOptions *options;
 
   promptSendViewController = [self promptSendViewController];
   if (promptSendViewController != nil) {
-    (void)[promptSendViewController setBashEnabledFromOptions:[sender isOn]];
-    [self setBashEnabled:[promptSendViewController bashEnabled]];
+    options = [[promptSendViewController sessionOptions] copy];
+    [options setBashEnabled:[sender isOn]];
+    (void)[promptSendViewController updateSessionOptions:options
+                                           changedFields:
+                                             StrappySessionOptionBash];
+    [self setSessionOptions:[promptSendViewController sessionOptions]];
   }
-  [sender setOn:[self bashEnabled] animated:YES];
+  [sender setOn:[[self sessionOptions] bashEnabled] animated:YES];
   [sender setEnabled:YES];
 }
 
@@ -647,7 +610,8 @@ titleForFooterInSection:(NSInteger)section
     [cell setSelectionStyle:enabled ?
       UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone];
     [cell setAccessoryType:
-      [identifier isEqualToString:[self selectedAssistantSetIdentifier]]
+      [identifier isEqualToString:
+        [[self sessionOptions] assistantSetIdentifier]]
         ? UITableViewCellAccessoryCheckmark
         : UITableViewCellAccessoryNone];
     return cell;
@@ -669,7 +633,9 @@ titleForFooterInSection:(NSInteger)section
       [[cell detailTextLabel] setText:NSLocalizedString(
         @"Allows internet searches in this session", nil)];
       [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
-      [[self webSearchSwitch] setOn:[self webSearchEnabled] animated:NO];
+      [[self webSearchSwitch]
+        setOn:[[self sessionOptions] webSearchEnabled]
+      animated:NO];
       [cell setAccessoryView:[self webSearchSwitch]];
       return cell;
     }
@@ -688,7 +654,7 @@ titleForFooterInSection:(NSInteger)section
     [[cell detailTextLabel] setText:NSLocalizedString(
       @"Allows command execution in this session", nil)];
     [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
-    [[self bashSwitch] setOn:[self bashEnabled] animated:NO];
+    [[self bashSwitch] setOn:[[self sessionOptions] bashEnabled] animated:NO];
     [[self bashSwitch] setEnabled:YES];
     [cell setAccessoryView:[self bashSwitch]];
     return cell;
@@ -732,7 +698,7 @@ titleForFooterInSection:(NSInteger)section
     [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
     [cell setAccessoryView:nil];
     [cell setAccessoryType:
-      [identifier isEqualToString:[self selectedModelIdentifier]]
+      [identifier isEqualToString:[[self sessionOptions] modelIdentifier]]
         ? UITableViewCellAccessoryCheckmark
         : UITableViewCellAccessoryNone];
   }
@@ -788,6 +754,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   if ([indexPath section] == kStrappyPromptOptionsSectionAssistantSet) {
     NSDictionary *assistantSet;
     NSString *assistantSetIdentifier;
+    StrappySessionOptions *options;
 
     if ((NSUInteger)[indexPath row] >= [[self assistantSets] count]) {
       return;
@@ -799,8 +766,11 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     if ([assistantSetIdentifier length] == 0U) {
       return;
     }
+    options = [[[self promptSendViewController] sessionOptions] copy];
+    [options setAssistantSetIdentifier:assistantSetIdentifier];
     (void)[[self promptSendViewController]
-      setSelectedAssistantSetIdentifierFromOptions:assistantSetIdentifier];
+      updateSessionOptions:options
+             changedFields:StrappySessionOptionAssistantSet];
     [self reloadOptionsFromPrompt];
     return;
   }
@@ -815,14 +785,21 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     return;
   }
 
-  if ([[self promptSendViewController]
-        setSelectedModelIdentifierFromOptions:modelIdentifier]) {
-    [self setSelectedModelIdentifier:modelIdentifier];
-    [[self tableView] reloadSections:
-      [NSIndexSet indexSetWithIndex:kStrappyPromptOptionsSectionModels]
-                  withRowAnimation:UITableViewRowAnimationNone];
-  } else {
-    [self reloadOptionsFromPrompt];
+  {
+    StrappySessionOptions *options;
+
+    options = [[[self promptSendViewController] sessionOptions] copy];
+    [options setModelIdentifier:modelIdentifier];
+    if ([[self promptSendViewController]
+          updateSessionOptions:options
+                 changedFields:StrappySessionOptionModel]) {
+      [self setSessionOptions:[[self promptSendViewController] sessionOptions]];
+      [[self tableView] reloadSections:
+        [NSIndexSet indexSetWithIndex:kStrappyPromptOptionsSectionModels]
+                    withRowAnimation:UITableViewRowAnimationNone];
+    } else {
+      [self reloadOptionsFromPrompt];
+    }
   }
 }
 
@@ -871,25 +848,17 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   PromptSendViewController *promptSendViewController;
 
   promptSendViewController = [self promptSendViewController];
-  [self setWebProvider:
-    (promptSendViewController != nil)
-      ? [promptSendViewController webProvider]
-      : StrappyWebProviderNone];
-  [self setLimitToOneTool:
-    (promptSendViewController != nil)
-      ? [promptSendViewController limitToOneTool]
-      : NO];
+  [self setSessionOptions:(promptSendViewController != nil)
+    ? [promptSendViewController sessionOptions] : nil];
   [self setWorkingDirectories:[StrappySession codingWorkingDirectoryPaths]];
-  [self setWorkingDirectory:
-    (promptSendViewController != nil)
-      ? [promptSendViewController currentWorkingDirectory]
-      : @""];
 }
 
 - (void)reloadOptionsFromPrompt
 {
   [self reloadOptionsSnapshot];
-  [[self limitToOneToolSwitch] setOn:[self limitToOneTool] animated:NO];
+  [[self limitToOneToolSwitch]
+    setOn:[[self sessionOptions] limitToOneTool]
+  animated:NO];
   [[self tableView] reloadData];
 }
 
@@ -902,14 +871,18 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 - (void)limitToOneToolSwitchChanged:(UISwitch *)sender
 {
   PromptSendViewController *promptSendViewController;
+  StrappySessionOptions *options;
 
   promptSendViewController = [self promptSendViewController];
   if (promptSendViewController != nil) {
-    (void)[promptSendViewController
-      setLimitToOneToolFromOptions:[sender isOn]];
-    [self setLimitToOneTool:[promptSendViewController limitToOneTool]];
+    options = [[promptSendViewController sessionOptions] copy];
+    [options setLimitToOneTool:[sender isOn]];
+    (void)[promptSendViewController updateSessionOptions:options
+                                           changedFields:
+                                             StrappySessionOptionLimitToOneTool];
+    [self setSessionOptions:[promptSendViewController sessionOptions]];
   }
-  [sender setOn:[self limitToOneTool] animated:YES];
+  [sender setOn:[[self sessionOptions] limitToOneTool] animated:YES];
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
@@ -1000,7 +973,7 @@ titleForFooterInSection:(NSInteger)section
     [cell setAccessoryType:
       (workingDirectoryIndex < [[self workingDirectories] count]) &&
       [[[self workingDirectories] objectAtIndex:workingDirectoryIndex]
-        isEqualToString:[self workingDirectory]]
+        isEqualToString:[[self sessionOptions] workingDirectory]]
         ? UITableViewCellAccessoryCheckmark
         : UITableViewCellAccessoryNone];
     return cell;
@@ -1021,7 +994,9 @@ titleForFooterInSection:(NSInteger)section
     [[cell detailTextLabel] setText:NSLocalizedString(
       @"Prevents parallel tool calls", nil)];
     [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
-    [[self limitToOneToolSwitch] setOn:[self limitToOneTool] animated:NO];
+    [[self limitToOneToolSwitch]
+      setOn:[[self sessionOptions] limitToOneTool]
+    animated:NO];
     [cell setAccessoryView:[self limitToOneToolSwitch]];
     return cell;
   }
@@ -1043,7 +1018,7 @@ titleForFooterInSection:(NSInteger)section
     [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
     [cell setAccessoryView:nil];
     [cell setAccessoryType:
-      [webProvider isEqualToString:[self webProvider]]
+      [webProvider isEqualToString:[[self sessionOptions] webProvider]]
         ? UITableViewCellAccessoryCheckmark
         : UITableViewCellAccessoryNone];
     return cell;
@@ -1069,6 +1044,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
   if ([indexPath section] == kStrappyPromptDebugSectionWorkingDirectory) {
     NSString *workingDirectory;
+    StrappySessionOptions *options;
     NSUInteger workingDirectoryIndex;
 
     workingDirectoryIndex = (NSUInteger)[indexPath row];
@@ -1077,9 +1053,13 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     }
     workingDirectory =
       [[self workingDirectories] objectAtIndex:workingDirectoryIndex];
-    if ([[self promptSendViewController]
-          setWorkingDirectoryFromOptions:workingDirectory]) {
-      [self setWorkingDirectory:workingDirectory];
+    options = [[[self promptSendViewController] sessionOptions] copy];
+    [options setWorkingDirectory:workingDirectory];
+    if ([[self promptSendViewController] updateSessionOptions:options
+                                                changedFields:
+                                                  StrappySessionOptionWorkingDirectory]) {
+      [self setSessionOptions:
+        [[self promptSendViewController] sessionOptions]];
       [[self tableView] reloadSections:
         [NSIndexSet indexSetWithIndex:
           kStrappyPromptDebugSectionWorkingDirectory]
@@ -1091,6 +1071,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   }
   if ([indexPath section] == kStrappyPromptDebugSectionSearchProvider) {
     NSString *webProvider;
+    StrappySessionOptions *options;
 
     if ((NSUInteger)[indexPath row] >=
         [StrappyPromptSearchProviders() count]) {
@@ -1098,9 +1079,13 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     }
     webProvider = [StrappyPromptSearchProviders()
       objectAtIndex:(NSUInteger)[indexPath row]];
-    if ([[self promptSendViewController]
-          setWebProviderFromOptions:webProvider]) {
-      [self setWebProvider:webProvider];
+    options = [[[self promptSendViewController] sessionOptions] copy];
+    [options setWebProvider:webProvider];
+    if ([[self promptSendViewController] updateSessionOptions:options
+                                                changedFields:
+                                                  StrappySessionOptionWebProvider]) {
+      [self setSessionOptions:
+        [[self promptSendViewController] sessionOptions]];
       [[self tableView] reloadSections:
         [NSIndexSet indexSetWithIndex:
           kStrappyPromptDebugSectionSearchProvider]
@@ -1122,10 +1107,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     [self setAutoresizingMask:
       UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin];
     [self setControlsEnabled:YES];
-    [self setWebProvider:StrappyWebProviderNone];
-    [self setWebSearchEnabled:NO];
-    [self setBashEnabled:NO];
-    [self setLimitToOneTool:NO];
+    [self setSessionOptions:nil];
     [self buildSubviews];
   }
   return self;
@@ -1402,33 +1384,24 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [self updateControls];
 }
 
-- (void)setWebProvider:(NSString *)webProvider
+- (void)setSessionOptions:(StrappySessionOptions *)options
 {
-  NSString *canonicalWebProvider;
+  StrappySessionOptions *value;
 
-  canonicalWebProvider = [StrappyPromptWebProviders()
-    containsObject:webProvider] ? webProvider : StrappyWebProviderNone;
-  if (_webProvider != canonicalWebProvider) {
-    _webProvider = [canonicalWebProvider copy];
+  value = options;
+  if (value == nil) {
+    value = [[StrappySessionOptions alloc]
+      initWithModelIdentifier:@""
+       assistantSetIdentifier:@""
+                  webProvider:StrappyWebProviderNone
+             webSearchEnabled:NO
+                  bashEnabled:NO
+               limitToOneTool:NO
+             workingDirectory:@""
+             streamingEnabled:NO];
   }
+  _sessionOptions = [value copy];
   [[self optionsController] reloadOptionsFromPrompt];
-}
-
-- (void)setWebSearchEnabled:(BOOL)enabled
-{
-  _webSearchEnabled = enabled ? YES : NO;
-  [[self optionsController] reloadOptionsFromPrompt];
-}
-
-- (void)setBashEnabled:(BOOL)enabled
-{
-  _bashEnabled = enabled ? YES : NO;
-  [[self optionsController] reloadOptionsFromPrompt];
-}
-
-- (void)setLimitToOneTool:(BOOL)enabled
-{
-  _limitToOneTool = enabled ? YES : NO;
 }
 
 - (void)reloadOptionsMenu
@@ -1622,147 +1595,25 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     assistantSets : [NSArray array];
 }
 
-- (NSString *)currentSelectedAssistantSetIdentifier
+- (BOOL)updateSessionOptions:(StrappySessionOptions *)options
+               changedFields:(StrappySessionOptionMask)changedFields
 {
-  NSString *identifier;
+  StrappySessionOptions *previousOptions;
+  BOOL updated;
 
-  identifier = @"";
-  if ([[self delegate] respondsToSelector:
-        @selector(selectedAssistantSetIdentifierForPromptSendViewController:)]) {
-    identifier = [[self delegate]
-      selectedAssistantSetIdentifierForPromptSendViewController:self];
-  }
-  return [identifier isKindOfClass:[NSString class]] ? identifier : @"";
-}
-
-- (BOOL)setSelectedAssistantSetIdentifierFromOptions:
-    (NSString *)assistantSetIdentifier
-{
-  if (([assistantSetIdentifier length] == 0U) ||
+  if (options == nil || changedFields == 0U ||
       ![[self delegate] respondsToSelector:
-        @selector(promptSendViewController:
-          setSelectedAssistantSetIdentifier:)]) {
+        @selector(promptSendViewController:updateSessionOptions:changedFields:)]) {
     return NO;
   }
-  return [[self delegate] promptSendViewController:self
-                    setSelectedAssistantSetIdentifier:assistantSetIdentifier];
-}
-
-- (NSString *)currentSelectedModelIdentifier
-{
-  NSString *selectedModelIdentifier;
-
-  selectedModelIdentifier = @"";
-  if ([[self delegate] respondsToSelector:
-        @selector(selectedModelIdentifierForPromptSendViewController:)]) {
-    selectedModelIdentifier =
-      [[self delegate] selectedModelIdentifierForPromptSendViewController:self];
+  previousOptions = [self sessionOptions];
+  updated = [[self delegate] promptSendViewController:self
+                                  updateSessionOptions:options
+                                         changedFields:changedFields];
+  if (updated && ([self sessionOptions] == previousOptions)) {
+    [self setSessionOptions:options];
   }
-  return [selectedModelIdentifier isKindOfClass:[NSString class]]
-    ? selectedModelIdentifier
-    : @"";
-}
-
-- (BOOL)setSelectedModelIdentifierFromOptions:(NSString *)modelIdentifier
-{
-  if (([modelIdentifier length] == 0U) ||
-      ![[self delegate] respondsToSelector:
-        @selector(promptSendViewController:setSelectedModelIdentifier:)]) {
-    return NO;
-  }
-  return [[self delegate] promptSendViewController:self
-                       setSelectedModelIdentifier:modelIdentifier];
-}
-
-- (BOOL)setWebProviderFromOptions:(NSString *)webProvider
-{
-  BOOL changed;
-
-  changed = NO;
-  if ([[self delegate] respondsToSelector:
-        @selector(promptSendViewController:setWebProvider:)]) {
-    changed = [[self delegate] promptSendViewController:self
-                                        setWebProvider:webProvider];
-  }
-  if (changed) {
-    [self setWebProvider:webProvider];
-  }
-  return changed;
-}
-
-- (BOOL)setWebSearchEnabledFromOptions:(BOOL)enabled
-{
-  BOOL changed;
-
-  changed = NO;
-  if ([[self delegate] respondsToSelector:
-        @selector(promptSendViewController:setWebSearchEnabled:)]) {
-    changed = [[self delegate] promptSendViewController:self
-                                   setWebSearchEnabled:(enabled ? YES : NO)];
-  }
-  if (changed) {
-    [self setWebSearchEnabled:enabled];
-  }
-  return changed;
-}
-
-- (BOOL)setBashEnabledFromOptions:(BOOL)enabled
-{
-  BOOL changed;
-
-  changed = NO;
-  if ([[self delegate] respondsToSelector:
-        @selector(promptSendViewController:setBashEnabled:)]) {
-    changed = [[self delegate] promptSendViewController:self
-                                         setBashEnabled:(enabled ? YES : NO)];
-  }
-  if (changed) {
-    [self setBashEnabled:enabled];
-  }
-  return changed;
-}
-
-- (BOOL)setLimitToOneToolFromOptions:(BOOL)enabled
-{
-  BOOL changed;
-
-  changed = NO;
-  if ([[self delegate] respondsToSelector:
-        @selector(promptSendViewController:setLimitToOneTool:)]) {
-    changed = [[self delegate] promptSendViewController:self
-                                     setLimitToOneTool:(enabled ? YES : NO)];
-  }
-  if (changed) {
-    [self setLimitToOneTool:enabled];
-  }
-  return changed;
-}
-
-- (NSString *)currentWorkingDirectory
-{
-  NSString *workingDirectory;
-
-  workingDirectory = @"";
-  if ([[self delegate] respondsToSelector:
-        @selector(workingDirectoryForPromptSendViewController:)]) {
-    workingDirectory = [[self delegate]
-      workingDirectoryForPromptSendViewController:self];
-  }
-  return [workingDirectory isKindOfClass:[NSString class]]
-    ? workingDirectory
-    : @"";
-}
-
-- (BOOL)setWorkingDirectoryFromOptions:(NSString *)workingDirectory
-{
-  if (![workingDirectory isKindOfClass:[NSString class]] ||
-      ([workingDirectory length] == 0U) ||
-      ![[self delegate] respondsToSelector:
-        @selector(promptSendViewController:setWorkingDirectory:)]) {
-    return NO;
-  }
-  return [[self delegate] promptSendViewController:self
-                               setWorkingDirectory:workingDirectory];
+  return updated;
 }
 
 - (UIViewController *)containingViewController

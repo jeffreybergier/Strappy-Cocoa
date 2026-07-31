@@ -266,6 +266,7 @@ static BOOL StrappyContextRoundActionValues(
 
 - (void)reloadWithSession:(StrappySession *)session
 {
+  StrappySessionOptions *sessionOptions;
   BOOL sessionChanged;
   BOOL studyLocked;
 
@@ -312,10 +313,9 @@ static BOOL StrappyContextRoundActionValues(
   [sendController_ setEnabled:((session_ != nil) && !studyLocked)];
   [sendController_ setStudyLocked:studyLocked];
   [self updateSendingStateFromSession];
-  [sendController_ setStreamingEnabled:(session_ != nil) ?
-    [session_ streamingEnabled] : NO];
-  [sendController_ setWebProvider:(session_ != nil) ?
-    [session_ webProvider] : StrappyWebProviderNone];
+  sessionOptions = (session_ != nil) ?
+    [session_ optionsWithError:nil] : nil;
+  [sendController_ setSessionOptions:sessionOptions];
   [sendController_ reloadOptionsMenu];
   if (sessionChanged) {
     [self reloadContent];
@@ -369,17 +369,29 @@ static BOOL StrappyContextRoundActionValues(
 
 - (BOOL)streamingEnabled
 {
-  return (session_ != nil) ? [session_ streamingEnabled] : NO;
+  StrappySessionOptions *options;
+
+  options = (session_ != nil) ? [session_ optionsWithError:nil] : nil;
+  return [options streamingEnabled];
 }
 
 - (void)toggleStreaming:(id)sender
 {
+  StrappySessionOptions *options;
+
   (void)sender;
   if (![self canToggleStreaming]) {
     return;
   }
+  options = [[session_ optionsWithError:nil] copy];
+  if (options == nil) {
+    return;
+  }
+  [options setStreamingEnabled:![options streamingEnabled]];
   (void)[self promptSendViewController:sendController_
-                   setStreamingEnabled:![self streamingEnabled]];
+                  updateSessionOptions:options
+                         changedFields:StrappySessionOptionStreaming];
+  [options release];
 }
 
 - (BOOL)canPrintCurrentChat
@@ -439,28 +451,14 @@ static BOOL StrappyContextRoundActionValues(
 
 - (NSString *)selectedModelIdentifier
 {
-  NSString *modelIdentifier;
+  StrappySessionOptions *options;
 
   if (session_ == nil) {
     return @"";
   }
 
-  modelIdentifier = [session_ selectedOpenRouterModelIdentifierWithError:nil];
-  return (modelIdentifier != nil) ? modelIdentifier : @"";
-}
-
-- (NSString *)selectedModelIdentifierForPromptSendViewController:
-    (PromptSendViewController *)controller
-{
-  (void)controller;
-  return [self selectedModelIdentifier];
-}
-
-- (NSString *)webProviderForPromptSendViewController:
-    (PromptSendViewController *)controller
-{
-  (void)controller;
-  return (session_ != nil) ? [session_ webProvider] : StrappyWebProviderNone;
+  options = [session_ optionsWithError:nil];
+  return ([options modelIdentifier] != nil) ? [options modelIdentifier] : @"";
 }
 
 - (BOOL)canSelectModel
@@ -474,10 +472,18 @@ static BOOL StrappyContextRoundActionValues(
 
 - (BOOL)setSelectedModelIdentifier:(NSString *)modelIdentifier
 {
+  StrappySessionOptions *options;
   BOOL changed;
 
+  options = [[session_ optionsWithError:nil] copy];
+  if (options == nil) {
+    return NO;
+  }
+  [options setModelIdentifier:modelIdentifier];
   changed = [self promptSendViewController:sendController_
-                setSelectedModelIdentifier:modelIdentifier];
+                      updateSessionOptions:options
+                             changedFields:StrappySessionOptionModel];
+  [options release];
   if (changed) {
     [sendController_ reloadOptionsMenu];
   }
@@ -485,20 +491,24 @@ static BOOL StrappyContextRoundActionValues(
 }
 
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
-        setSelectedModelIdentifier:(NSString *)modelIdentifier
+            updateSessionOptions:(StrappySessionOptions *)options
+                   changedFields:(StrappySessionOptionMask)changedFields
 {
+  StrappySessionOptions *savedOptions;
   NSError *error;
 
-  (void)controller;
-  if (session_ == nil) {
+  if (![self canSelectModel] || options == nil || changedFields == 0U) {
     return NO;
   }
 
   error = nil;
-  if (![session_ setSelectedOpenRouterModelIdentifier:modelIdentifier
-                                                error:&error]) {
+  if (![session_ updateOptions:options
+                  changedFields:changedFields
+                          error:&error]) {
     NSString *errorMessage;
 
+    savedOptions = [session_ optionsWithError:nil];
+    [controller setSessionOptions:savedOptions];
     errorMessage = [error localizedDescription];
     if ([errorMessage length] == 0U) {
       errorMessage = NSLocalizedString(@"Your changes could not be saved.", nil);
@@ -508,60 +518,10 @@ static BOOL StrappyContextRoundActionValues(
     return NO;
   }
 
-  return YES;
-}
-
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-              setStreamingEnabled:(BOOL)enabled
-{
-  NSError *error;
-
-  (void)controller;
-  if (session_ == nil) {
-    return NO;
-  }
-
-  error = nil;
-  if (![session_ setStreamingEnabled:enabled error:&error]) {
-    NSString *errorMessage;
-
-    errorMessage = [error localizedDescription];
-    if ([errorMessage length] == 0U) {
-      errorMessage = NSLocalizedString(@"Your changes could not be saved.", nil);
-    }
-    [statusText_ release];
-    statusText_ = [errorMessage retain];
-    [sendController_ setStreamingEnabled:[session_ streamingEnabled]];
-    return NO;
-  }
-
-  [sendController_ setStreamingEnabled:[session_ streamingEnabled]];
-  return YES;
-}
-
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-                  setWebProvider:(NSString *)webProvider
-{
-  NSError *error;
-
-  (void)controller;
-  if (session_ == nil) {
-    return NO;
-  }
-  error = nil;
-  if (![session_ setWebProvider:webProvider error:&error]) {
-    NSString *errorMessage;
-
-    errorMessage = [error localizedDescription];
-    if ([errorMessage length] == 0U) {
-      errorMessage = NSLocalizedString(@"Your changes could not be saved.", nil);
-    }
-    [statusText_ release];
-    statusText_ = [errorMessage retain];
-    [sendController_ setWebProvider:[session_ webProvider]];
-    return NO;
-  }
-  [sendController_ setWebProvider:[session_ webProvider]];
+  savedOptions = [session_ optionsWithError:nil];
+  [controller setSessionOptions:savedOptions];
+  [statusText_ release];
+  statusText_ = nil;
   return YES;
 }
 
@@ -713,6 +673,7 @@ static BOOL StrappyContextRoundActionValues(
 - (void)beginSendingPrompt:(NSString *)prompt
 {
   NSString *promptToSend;
+  StrappySessionOptions *options;
   NSError *startError;
   BOOL shouldStream;
   BOOL didStartPrompt;
@@ -742,7 +703,8 @@ static BOOL StrappyContextRoundActionValues(
   [self clearRequestState];
 
   startError = nil;
-  shouldStream = [session_ streamingEnabled];
+  options = [session_ optionsWithError:nil];
+  shouldStream = [options streamingEnabled];
   if (shouldStream) {
     didStartPrompt = [session_ beginStreamingPrompt:promptToSend
                                            context:nil

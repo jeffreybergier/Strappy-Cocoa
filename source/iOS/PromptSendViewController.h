@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import "StrappySession.h"
 
 @class PromptSendViewController;
 
@@ -9,26 +10,9 @@
     (PromptSendViewController *)controller;
 - (NSArray *)assistantSetsForPromptSendViewController:
     (PromptSendViewController *)controller;
-- (NSString *)selectedAssistantSetIdentifierForPromptSendViewController:
-    (PromptSendViewController *)controller;
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
-  setSelectedAssistantSetIdentifier:(NSString *)assistantSetIdentifier;
-- (NSString *)selectedModelIdentifierForPromptSendViewController:
-    (PromptSendViewController *)controller;
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-        setSelectedModelIdentifier:(NSString *)modelIdentifier;
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-                  setWebProvider:(NSString *)webProvider;
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-              setWebSearchEnabled:(BOOL)enabled;
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-                  setBashEnabled:(BOOL)enabled;
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-                  setLimitToOneTool:(BOOL)enabled;
-- (NSString *)workingDirectoryForPromptSendViewController:
-    (PromptSendViewController *)controller;
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-             setWorkingDirectory:(NSString *)workingDirectory;
+            updateSessionOptions:(StrappySessionOptions *)options
+                   changedFields:(StrappySessionOptionMask)changedFields;
 - (void)promptSendViewControllerDidCancelPrompt:
     (PromptSendViewController *)controller;
 - (void)promptSendViewControllerDidChangeHeight:
@@ -45,10 +29,7 @@
 - (void)setStudyLocked:(BOOL)studyLocked;
 - (void)setSending:(BOOL)sending;
 - (void)setCancellationRequested:(BOOL)requested;
-- (void)setWebProvider:(NSString *)webProvider;
-- (void)setWebSearchEnabled:(BOOL)enabled;
-- (void)setBashEnabled:(BOOL)enabled;
-- (void)setLimitToOneTool:(BOOL)enabled;
+- (void)setSessionOptions:(StrappySessionOptions *)options;
 - (void)reloadOptionsMenu;
 - (BOOL)canSendCurrentPrompt;
 - (void)performSend:(id)sender;

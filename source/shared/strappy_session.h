@@ -89,6 +89,21 @@ int strappy_session_update_model_request_include_in_context(
   long long model_request_id,
   int include_in_context,
   char **error_out);
+int strappy_session_load_options(
+  const char *db_path,
+  long long session_id,
+  strappy_session_options *options,
+  char **error_out);
+int strappy_session_update_options(
+  const char *db_path,
+  long long session_id,
+  const char *resource_dir,
+  const strappy_session_options *options,
+  strappy_session_option_mask changed_fields,
+  strappy_session_options *saved_options_out,
+  strappy_session_option_mask *actual_changed_fields_out,
+  char **error_out);
+/* Compatibility adapters; prefer the options snapshot API above. */
 int strappy_session_update_streaming_enabled(const char *db_path,
                                              long long session_id,
                                              int streaming_enabled,

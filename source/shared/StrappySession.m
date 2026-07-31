@@ -24,16 +24,9 @@ NSString * const StrappySessionModelCatalogDidChangeNotification =
   @"StrappySessionModelCatalogDidChangeNotification";
 NSString * const StrappySessionChangeKindKey = @"change_kind";
 NSString * const StrappySessionChangeKindActivity = @"activity";
-NSString * const StrappySessionChangeKindModel = @"model";
-NSString * const StrappySessionChangeKindStreaming = @"streaming";
-NSString * const StrappySessionChangeKindWebProvider = @"web_provider";
-NSString * const StrappySessionChangeKindWebSearch = @"web_search";
-NSString * const StrappySessionChangeKindBash = @"bash";
-NSString * const StrappySessionChangeKindLimitToOneTool =
-  @"limit_to_one_tool";
-NSString * const StrappySessionChangeKindWorkingDirectory =
-  @"working_directory";
-NSString * const StrappySessionChangeKindAssistantSet = @"assistant_set";
+NSString * const StrappySessionChangeKindOptions = @"options";
+NSString * const StrappySessionOptionsKey = @"options";
+NSString * const StrappySessionChangedOptionsKey = @"changed_options";
 NSString * const StrappyWebProviderNone = @"none";
 NSString * const StrappyWebProviderAuto = @"auto";
 NSString * const StrappyWebProviderNative = @"native";
@@ -224,6 +217,251 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
   limitToOneTool = [summary objectForKey:@"limit_to_one_tool"];
   return ([limitToOneTool isKindOfClass:[NSNumber class]] &&
           [limitToOneTool boolValue]) ? YES : NO;
+}
+
+@implementation StrappySessionOptions
+
+- (id)initWithModelIdentifier:(NSString *)modelIdentifier
+       assistantSetIdentifier:(NSString *)assistantSetIdentifier
+                  webProvider:(NSString *)webProvider
+             webSearchEnabled:(BOOL)webSearchEnabled
+                  bashEnabled:(BOOL)bashEnabled
+               limitToOneTool:(BOOL)limitToOneTool
+             workingDirectory:(NSString *)workingDirectory
+             streamingEnabled:(BOOL)streamingEnabled
+{
+  if ((self = [super init])) {
+    [self setModelIdentifier:modelIdentifier];
+    [self setAssistantSetIdentifier:assistantSetIdentifier];
+    [self setWebProvider:webProvider];
+    [self setWebSearchEnabled:webSearchEnabled];
+    [self setBashEnabled:bashEnabled];
+    [self setLimitToOneTool:limitToOneTool];
+    [self setWorkingDirectory:workingDirectory];
+    [self setStreamingEnabled:streamingEnabled];
+  }
+  return self;
+}
+
+- (id)copyWithZone:(NSZone *)zone
+{
+  return [[StrappySessionOptions allocWithZone:zone]
+    initWithModelIdentifier:[self modelIdentifier]
+     assistantSetIdentifier:[self assistantSetIdentifier]
+                webProvider:[self webProvider]
+           webSearchEnabled:[self webSearchEnabled]
+                bashEnabled:[self bashEnabled]
+             limitToOneTool:[self limitToOneTool]
+           workingDirectory:[self workingDirectory]
+           streamingEnabled:[self streamingEnabled]];
+}
+
+- (NSString *)modelIdentifier
+{
+  return modelIdentifier_;
+}
+
+- (void)setModelIdentifier:(NSString *)modelIdentifier
+{
+  NSString *value;
+
+  value = [modelIdentifier isKindOfClass:[NSString class]] ?
+    modelIdentifier : @"";
+  if (modelIdentifier_ != value) {
+    [modelIdentifier_ release];
+    modelIdentifier_ = [value copy];
+  }
+}
+
+- (NSString *)assistantSetIdentifier
+{
+  return assistantSetIdentifier_;
+}
+
+- (void)setAssistantSetIdentifier:(NSString *)assistantSetIdentifier
+{
+  NSString *value;
+
+  value = [assistantSetIdentifier isKindOfClass:[NSString class]] ?
+    assistantSetIdentifier : @"";
+  if (assistantSetIdentifier_ != value) {
+    [assistantSetIdentifier_ release];
+    assistantSetIdentifier_ = [value copy];
+  }
+}
+
+- (NSString *)webProvider
+{
+  return webProvider_;
+}
+
+- (void)setWebProvider:(NSString *)webProvider
+{
+  NSString *value;
+
+  value = StrappySessionWebProviderFromValue(webProvider);
+  if (webProvider_ != value) {
+    [webProvider_ release];
+    webProvider_ = [value copy];
+  }
+}
+
+- (BOOL)webSearchEnabled
+{
+  return webSearchEnabled_;
+}
+
+- (void)setWebSearchEnabled:(BOOL)enabled
+{
+  webSearchEnabled_ = enabled ? YES : NO;
+}
+
+- (BOOL)bashEnabled
+{
+  return bashEnabled_;
+}
+
+- (void)setBashEnabled:(BOOL)enabled
+{
+  bashEnabled_ = enabled ? YES : NO;
+}
+
+- (BOOL)limitToOneTool
+{
+  return limitToOneTool_;
+}
+
+- (void)setLimitToOneTool:(BOOL)enabled
+{
+  limitToOneTool_ = enabled ? YES : NO;
+}
+
+- (NSString *)workingDirectory
+{
+  return workingDirectory_;
+}
+
+- (void)setWorkingDirectory:(NSString *)workingDirectory
+{
+  NSString *value;
+
+  value = [workingDirectory isKindOfClass:[NSString class]] ?
+    workingDirectory : @"";
+  if (workingDirectory_ != value) {
+    [workingDirectory_ release];
+    workingDirectory_ = [value copy];
+  }
+}
+
+- (BOOL)streamingEnabled
+{
+  return streamingEnabled_;
+}
+
+- (void)setStreamingEnabled:(BOOL)enabled
+{
+  streamingEnabled_ = enabled ? YES : NO;
+}
+
+- (void)dealloc
+{
+  [modelIdentifier_ release];
+  [assistantSetIdentifier_ release];
+  [webProvider_ release];
+  [workingDirectory_ release];
+  [super dealloc];
+}
+
+@end
+
+static StrappySessionOptions *StrappySessionOptionsFromSummary(
+  NSDictionary *summary,
+  NSString *workingDirectory)
+{
+  NSString *modelIdentifier;
+  NSString *assistantSetIdentifier;
+
+  modelIdentifier = [summary objectForKey:@"model"];
+  if (![modelIdentifier isKindOfClass:[NSString class]]) {
+    modelIdentifier = @"";
+  }
+  assistantSetIdentifier = [summary objectForKey:@"assistant_set_id"];
+  if (![assistantSetIdentifier isKindOfClass:[NSString class]] ||
+      ([assistantSetIdentifier length] == 0U)) {
+    assistantSetIdentifier = @"personal_assistant";
+  }
+  return [[[StrappySessionOptions alloc]
+    initWithModelIdentifier:modelIdentifier
+     assistantSetIdentifier:assistantSetIdentifier
+                webProvider:StrappySessionWebProviderFromSummary(summary)
+           webSearchEnabled:StrappySessionWebSearchEnabledFromSummary(summary)
+                bashEnabled:StrappySessionBashEnabledFromSummary(summary)
+             limitToOneTool:StrappySessionLimitToOneToolFromSummary(summary)
+           workingDirectory:workingDirectory
+           streamingEnabled:StrappySessionStreamingEnabledFromSummary(summary)]
+    autorelease];
+}
+
+static StrappySessionOptions *StrappySessionOptionsFromRecord(
+  const strappy_session_options *options)
+{
+  NSString *modelIdentifier;
+  NSString *assistantSetIdentifier;
+  NSString *workingDirectory;
+
+  if (options == NULL) {
+    return nil;
+  }
+  modelIdentifier = (options->model_id != NULL) ?
+    [NSString stringWithUTF8String:options->model_id] : @"";
+  assistantSetIdentifier = (options->assistant_set_id != NULL) ?
+    [NSString stringWithUTF8String:options->assistant_set_id] : @"";
+  workingDirectory = (options->working_directory != NULL) ?
+    [NSString stringWithUTF8String:options->working_directory] : @"";
+  return [[[StrappySessionOptions alloc]
+    initWithModelIdentifier:modelIdentifier
+     assistantSetIdentifier:assistantSetIdentifier
+                webProvider:StrappySessionWebProviderFromRecord(
+                  options->web_provider)
+           webSearchEnabled:(options->web_search_enabled ? YES : NO)
+                bashEnabled:(options->bash_enabled ? YES : NO)
+             limitToOneTool:(options->limit_to_one_tool ? YES : NO)
+           workingDirectory:workingDirectory
+           streamingEnabled:(options->streaming_enabled ? YES : NO)]
+    autorelease];
+}
+
+static BOOL StrappySessionRecordFromOptions(
+  StrappySessionOptions *options,
+  strappy_session_options *record,
+  NSError **error)
+{
+  strappy_web_provider provider;
+
+  if (![options isKindOfClass:[StrappySessionOptions class]] ||
+      (record == NULL) ||
+      !strappy_web_provider_parse([[options webProvider] UTF8String],
+                                  &provider)) {
+    if (error != nil) {
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:[NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"Session options are invalid.", nil)
+                                                            forKey:NSLocalizedDescriptionKey]];
+    }
+    return NO;
+  }
+  record->model_id = (char *)[[options modelIdentifier] UTF8String];
+  record->assistant_set_id =
+    (char *)[[options assistantSetIdentifier] UTF8String];
+  record->working_directory =
+    (char *)[[options workingDirectory] fileSystemRepresentation];
+  record->web_provider = provider;
+  record->web_search_enabled = [options webSearchEnabled] ? 1 : 0;
+  record->bash_enabled = [options bashEnabled] ? 1 : 0;
+  record->limit_to_one_tool = [options limitToOneTool] ? 1 : 0;
+  record->streaming_enabled = [options streamingEnabled] ? 1 : 0;
+  return YES;
 }
 
 @implementation StrappySession
@@ -435,19 +673,12 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
 
   if ((self = [super init])) {
     sessionIdentifier_ = [sessionIdentifier retain];
-    webProvider_ = [StrappyWebProviderAuto retain];
-    webSearchEnabled_ = YES;
-    bashEnabled_ = NO;
-    limitToOneTool_ = NO;
+    options_ = [StrappySessionOptionsFromSummary(nil, @"") retain];
+    optionsLoaded_ = NO;
     if ([summary isKindOfClass:[NSDictionary class]]) {
       cachedSummary_ = [summary retain];
-      [webProvider_ release];
-      webProvider_ = [StrappySessionWebProviderFromSummary(summary) retain];
-      webSearchEnabled_ =
-        StrappySessionWebSearchEnabledFromSummary(summary);
-      bashEnabled_ = StrappySessionBashEnabledFromSummary(summary);
-      limitToOneTool_ = StrappySessionLimitToOneToolFromSummary(summary);
-      streamingEnabled_ = StrappySessionStreamingEnabledFromSummary(summary);
+      [options_ release];
+      options_ = [StrappySessionOptionsFromSummary(summary, @"") retain];
     }
   }
   return self;
@@ -458,7 +689,7 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
   [StrappySession unregisterInFlightSession:self];
   [sessionIdentifier_ release];
   [cachedSummary_ release];
-  [webProvider_ release];
+  [options_ release];
   [processingStatusJSON_ release];
   [super dealloc];
 }
@@ -475,6 +706,9 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
 
 - (void)updateCachedSummary:(NSDictionary *)summary
 {
+  StrappySessionOptions *updatedOptions;
+  NSString *workingDirectory;
+
   if (![summary isKindOfClass:[NSDictionary class]]) {
     return;
   }
@@ -484,12 +718,11 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
       [cachedSummary_ release];
       cachedSummary_ = [summary retain];
     }
-    [webProvider_ release];
-    webProvider_ = [StrappySessionWebProviderFromSummary(summary) retain];
-    webSearchEnabled_ = StrappySessionWebSearchEnabledFromSummary(summary);
-    bashEnabled_ = StrappySessionBashEnabledFromSummary(summary);
-    limitToOneTool_ = StrappySessionLimitToOneToolFromSummary(summary);
-    streamingEnabled_ = StrappySessionStreamingEnabledFromSummary(summary);
+    workingDirectory = optionsLoaded_ ? [options_ workingDirectory] : @"";
+    updatedOptions = StrappySessionOptionsFromSummary(summary,
+                                                      workingDirectory);
+    [options_ release];
+    options_ = [updatedOptions retain];
   }
 }
 
@@ -530,7 +763,7 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
 
 - (BOOL)isDatabaseStudySession
 {
-  return [[self assistantSetIdentifier] isEqualToString:
+  return [[[self optionsWithError:nil] assistantSetIdentifier] isEqualToString:
     [NSString stringWithUTF8String:STRAPPY_ASSISTANT_SET_DATABASE_STUDY]];
 }
 
@@ -1945,9 +2178,8 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
 {
   NSString *databasePath;
   NSString *defaultModel;
-  NSString *resourcePath;
   StrappySession *session;
-  NSDictionary *summary;
+  StrappySessionOptions *studyOptions;
   strappy_study_database_id_list pending;
   char *strappyError;
   char *cleanupError;
@@ -2008,8 +2240,7 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
   strappy_study_database_id_list_destroy(&pending);
 
   defaultModel = [StrappySession defaultOpenRouterModelIdentifierWithError:error];
-  resourcePath = [StrappySession guidanceResourceDirectoryWithError:error];
-  if ((defaultModel == nil) || (resourcePath == nil)) {
+  if (defaultModel == nil) {
     return nil;
   }
   session = [StrappySession createSessionWithError:error];
@@ -2019,20 +2250,11 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
   sessionId = [[session sessionIdentifier] longLongValue];
   strappyError = NULL;
   /* Database Study has no session_rename tool; persist its fixed name here. */
-  if (!strappy_session_update_assistant_set(
+  if (!strappy_db_update_session_name(
         [databasePath UTF8String],
         sessionId,
-        [resourcePath fileSystemRepresentation],
-        STRAPPY_ASSISTANT_SET_DATABASE_STUDY,
-        &strappyError) ||
-      !strappy_db_update_session_name([databasePath UTF8String],
-                                      sessionId,
-                                      STRAPPY_ASSISTANT_SET_DATABASE_STUDY_SESSION_NAME,
-                                      &strappyError) ||
-      !strappy_session_update_model([databasePath UTF8String],
-                                    sessionId,
-                                    [defaultModel UTF8String],
-                                    &strappyError)) {
+        STRAPPY_ASSISTANT_SET_DATABASE_STUDY_SESSION_NAME,
+        &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
@@ -2043,22 +2265,22 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
     return nil;
   }
   strappy_session_free_string(strappyError);
-  summary = [session summaryWithError:error];
-  if (summary == nil) {
+  studyOptions = [[session optionsWithError:error] copy];
+  [studyOptions setAssistantSetIdentifier:
+    [NSString stringWithUTF8String:STRAPPY_ASSISTANT_SET_DATABASE_STUDY]];
+  [studyOptions setModelIdentifier:defaultModel];
+  if ((studyOptions == nil) ||
+      ![session updateOptions:studyOptions
+                changedFields:(StrappySessionOptionAssistantSet |
+                               StrappySessionOptionModel)
+                        error:error]) {
+    [studyOptions release];
     cleanupError = NULL;
     strappy_session_delete([databasePath UTF8String], sessionId, &cleanupError);
     strappy_session_free_string(cleanupError);
     return nil;
   }
-  [session updateCachedSummary:summary];
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionDidUpdateNotification
-                  object:session
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  summary, @"session",
-                  StrappySessionChangeKindAssistantSet,
-                  StrappySessionChangeKindKey,
-                  nil]];
+  [studyOptions release];
 
   @synchronized(session) {
     [session->processingStatusJSON_ release];
@@ -2607,817 +2829,206 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
       animated ? 1 : 0));
 }
 
-- (BOOL)streamingEnabled
-{
-  BOOL enabled;
-
-  @synchronized(self) {
-    enabled = streamingEnabled_;
-  }
-  return enabled;
-}
-
-- (NSString *)webProvider
-{
-  NSString *webProvider;
-
-  @synchronized(self) {
-    webProvider = [[webProvider_ retain] autorelease];
-  }
-  return webProvider;
-}
-
-- (BOOL)webSearchEnabled
-{
-  BOOL enabled;
-
-  @synchronized(self) {
-    enabled = webSearchEnabled_;
-  }
-  return enabled;
-}
-
-- (BOOL)bashEnabled
-{
-  BOOL enabled;
-
-  @synchronized(self) {
-    enabled = bashEnabled_;
-  }
-  return enabled;
-}
-
-- (BOOL)limitToOneTool
-{
-  BOOL enabled;
-
-  @synchronized(self) {
-    enabled = limitToOneTool_;
-  }
-  return enabled;
-}
-
-- (NSString *)assistantSetIdentifier
-{
-  NSDictionary *summary;
-  NSString *identifier;
-
-  @synchronized(self) {
-    identifier = [cachedSummary_ objectForKey:@"assistant_set_id"];
-    identifier = [identifier isKindOfClass:[NSString class]] ?
-      [[identifier copy] autorelease] : nil;
-  }
-  if ([identifier length] == 0U) {
-    summary = [self summaryWithError:nil];
-    identifier = [summary objectForKey:@"assistant_set_id"];
-    if ([identifier isKindOfClass:[NSString class]]) {
-      identifier = [[identifier copy] autorelease];
-    }
-  }
-  return ([identifier length] > 0U) ? identifier : @"personal_assistant";
-}
-
-- (BOOL)setAssistantSetIdentifier:(NSString *)assistantSetIdentifier
-                            error:(NSError **)error
+- (StrappySessionOptions *)optionsWithError:(NSError **)error
 {
   NSString *databasePath;
-  NSString *resourcePath;
-  NSDictionary *notificationSession;
+  StrappySessionOptions *options;
   char *strappyError;
   long long sessionId;
+  strappy_session_options record;
 
-  if (![assistantSetIdentifier isKindOfClass:[NSString class]] ||
-      ([assistantSetIdentifier length] == 0U)) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:
-          NSLocalizedString(@"Assistant is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:10
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier_ longLongValue] : 0LL;
-  if (sessionId <= 0LL) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:
-          NSLocalizedString(@"Session is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-  resourcePath = [[NSBundle mainBundle] resourcePath];
-  if (![resourcePath isKindOfClass:[NSString class]] ||
-      ([resourcePath length] == 0U)) {
-    [NSException raise:NSInternalInconsistencyException
-                format:@"Required assistant resource directory is missing from the app bundle."];
-    return NO;
-  }
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-  strappyError = NULL;
-  if (!strappy_session_update_assistant_set(
-        [databasePath UTF8String],
-        sessionId,
-        [resourcePath fileSystemRepresentation],
-        [assistantSetIdentifier UTF8String],
-        &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-
-  notificationSession = nil;
   @synchronized(self) {
-    NSMutableDictionary *summary;
-
-    if (cachedSummary_ != nil) {
-      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
-      [summary setObject:assistantSetIdentifier forKey:@"assistant_set_id"];
-      [cachedSummary_ release];
-      cachedSummary_ = summary;
-      notificationSession = [cachedSummary_ retain];
-    } else {
-      notificationSession =
-        [[NSDictionary alloc] initWithObjectsAndKeys:
-          sessionIdentifier_, @"id",
-          assistantSetIdentifier, @"assistant_set_id",
-          nil];
+    if (optionsLoaded_ && (options_ != nil)) {
+      return [[options_ copy] autorelease];
     }
   }
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionDidUpdateNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  notificationSession, @"session",
-                  StrappySessionChangeKindAssistantSet,
-                  StrappySessionChangeKindKey,
-                  nil]];
-  [notificationSession release];
-  return YES;
-}
-
-- (BOOL)setWebProvider:(NSString *)webProvider error:(NSError **)error
-{
-  NSString *databasePath;
-  NSString *canonicalWebProvider;
-  NSDictionary *notificationSession;
-  char *strappyError;
-  long long sessionId;
-  strappy_web_provider provider;
-
-  if (![webProvider isKindOfClass:[NSString class]] ||
-      !strappy_web_provider_parse([webProvider UTF8String], &provider)) {
-    if (error != nil) {
-      NSDictionary *userInfo;
-
-      userInfo = [NSDictionary dictionaryWithObject:
-        NSLocalizedString(@"Web search provider is invalid.", nil)
-                                           forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-  canonicalWebProvider = StrappySessionWebProviderFromRecord(provider);
-
-  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier_ longLongValue] : 0LL;
-  if (sessionId <= 0) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-
-  strappyError = NULL;
-  if (!strappy_session_update_web_provider([databasePath UTF8String],
-                                           sessionId,
-                                           provider,
-                                           &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-
-  notificationSession = nil;
-  @synchronized(self) {
-    NSMutableDictionary *summary;
-
-    [webProvider_ release];
-    webProvider_ = [canonicalWebProvider retain];
-    if (cachedSummary_ != nil) {
-      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
-      [summary setObject:canonicalWebProvider forKey:@"web_provider"];
-      [cachedSummary_ release];
-      cachedSummary_ = summary;
-      notificationSession = [cachedSummary_ retain];
-    } else {
-      notificationSession =
-        [[NSDictionary alloc] initWithObjectsAndKeys:
-          sessionIdentifier_, @"id",
-          canonicalWebProvider, @"web_provider",
-          nil];
-    }
-  }
-
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionDidUpdateNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  notificationSession, @"session",
-                  StrappySessionChangeKindWebProvider,
-                  StrappySessionChangeKindKey,
-                  nil]];
-  [notificationSession release];
-  return YES;
-}
-
-- (BOOL)setWebSearchEnabled:(BOOL)enabled error:(NSError **)error
-{
-  NSString *databasePath;
-  NSNumber *webSearchEnabled;
-  NSDictionary *notificationSession;
-  char *strappyError;
-  long long sessionId;
-
-  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier_ longLongValue] : 0LL;
-  if (sessionId <= 0) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:
-          NSLocalizedString(@"Session is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-
-  strappyError = NULL;
-  if (!strappy_session_update_web_search_enabled(
-        [databasePath UTF8String],
-        sessionId,
-        enabled ? 1 : 0,
-        &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-
-  webSearchEnabled = [NSNumber numberWithBool:(enabled ? YES : NO)];
-  notificationSession = nil;
-  @synchronized(self) {
-    NSMutableDictionary *summary;
-
-    webSearchEnabled_ = enabled ? YES : NO;
-    if (cachedSummary_ != nil) {
-      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
-      [summary setObject:webSearchEnabled forKey:@"web_search_enabled"];
-      [cachedSummary_ release];
-      cachedSummary_ = summary;
-      notificationSession = [cachedSummary_ retain];
-    } else {
-      notificationSession =
-        [[NSDictionary alloc] initWithObjectsAndKeys:
-          sessionIdentifier_, @"id",
-          webSearchEnabled, @"web_search_enabled",
-          nil];
-    }
-  }
-
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionDidUpdateNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  notificationSession, @"session",
-                  StrappySessionChangeKindWebSearch,
-                  StrappySessionChangeKindKey,
-                  nil]];
-  [notificationSession release];
-  return YES;
-}
-
-- (BOOL)setBashEnabled:(BOOL)enabled error:(NSError **)error
-{
-  NSString *databasePath;
-  NSNumber *bashEnabled;
-  NSDictionary *notificationSession;
-  char *strappyError;
-  long long sessionId;
-
-  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier_ longLongValue] : 0LL;
-  if (sessionId <= 0) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:
-          NSLocalizedString(@"Session is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-
-  strappyError = NULL;
-  if (!strappy_session_update_bash_enabled([databasePath UTF8String],
-                                           sessionId,
-                                           enabled ? 1 : 0,
-                                           &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-
-  bashEnabled = [NSNumber numberWithBool:(enabled ? YES : NO)];
-  notificationSession = nil;
-  @synchronized(self) {
-    NSMutableDictionary *summary;
-
-    bashEnabled_ = enabled ? YES : NO;
-    if (cachedSummary_ != nil) {
-      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
-      [summary setObject:bashEnabled forKey:@"bash_enabled"];
-      [cachedSummary_ release];
-      cachedSummary_ = summary;
-      notificationSession = [cachedSummary_ retain];
-    } else {
-      notificationSession =
-        [[NSDictionary alloc] initWithObjectsAndKeys:
-          sessionIdentifier_, @"id",
-          bashEnabled, @"bash_enabled",
-          nil];
-    }
-  }
-
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionDidUpdateNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  notificationSession, @"session",
-                  StrappySessionChangeKindBash,
-                  StrappySessionChangeKindKey,
-                  nil]];
-  [notificationSession release];
-  return YES;
-}
-
-- (BOOL)setLimitToOneTool:(BOOL)enabled error:(NSError **)error
-{
-  NSString *databasePath;
-  NSNumber *limitToOneTool;
-  NSDictionary *notificationSession;
-  char *strappyError;
-  long long sessionId;
-
-  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier_ longLongValue] : 0LL;
-  if (sessionId <= 0) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:
-          NSLocalizedString(@"Session is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-
-  strappyError = NULL;
-  if (!strappy_session_update_limit_to_one_tool(
-        [databasePath UTF8String],
-        sessionId,
-        enabled ? 1 : 0,
-        &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-
-  limitToOneTool = [NSNumber numberWithBool:(enabled ? YES : NO)];
-  notificationSession = nil;
-  @synchronized(self) {
-    NSMutableDictionary *summary;
-
-    limitToOneTool_ = enabled ? YES : NO;
-    if (cachedSummary_ != nil) {
-      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
-      [summary setObject:limitToOneTool forKey:@"limit_to_one_tool"];
-      [cachedSummary_ release];
-      cachedSummary_ = summary;
-      notificationSession = [cachedSummary_ retain];
-    } else {
-      notificationSession =
-        [[NSDictionary alloc] initWithObjectsAndKeys:
-          sessionIdentifier_, @"id",
-          limitToOneTool, @"limit_to_one_tool",
-          nil];
-    }
-  }
-
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionDidUpdateNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  notificationSession, @"session",
-                  StrappySessionChangeKindLimitToOneTool,
-                  StrappySessionChangeKindKey,
-                  nil]];
-  [notificationSession release];
-  return YES;
-}
-
-- (NSString *)workingDirectoryWithError:(NSError **)error
-{
-  NSString *databasePath;
-  char *strappyError;
-  char *workingDirectory;
-  long long sessionId;
 
   sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
     [sessionIdentifier_ longLongValue] : 0LL;
   if (sessionId <= 0LL) {
     if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:
-          NSLocalizedString(@"Session is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
       *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
                                    code:6
-                               userInfo:userInfo];
+                               userInfo:[NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"Session is not selected.", nil)
+                                                            forKey:NSLocalizedDescriptionKey]];
     }
     return nil;
   }
-
   databasePath = [StrappySession sessionsDatabasePath];
   if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
 
-  workingDirectory = NULL;
+  strappy_session_options_init(&record);
   strappyError = NULL;
-  if (!strappy_session_get_working_directory([databasePath UTF8String],
-                                              sessionId,
-                                              &workingDirectory,
-                                              &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return nil;
-  }
-  return StrappySessionStringFromCString(workingDirectory);
-}
-
-- (BOOL)setWorkingDirectory:(NSString *)workingDirectory
-                      error:(NSError **)error
-{
-  NSString *databasePath;
-  NSDictionary *notificationSession;
-  char *strappyError;
-  long long sessionId;
-
-  if (![workingDirectory isKindOfClass:[NSString class]] ||
-      ![[StrappySession codingWorkingDirectoryPaths]
-        containsObject:workingDirectory]) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:
-          NSLocalizedString(@"Working directory selection is invalid.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:15
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier_ longLongValue] : 0LL;
-  if (sessionId <= 0LL) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:
-          NSLocalizedString(@"Session is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-  strappyError = NULL;
-  if (!strappy_session_update_working_directory(
-        [databasePath UTF8String],
-        sessionId,
-        [workingDirectory fileSystemRepresentation],
-        &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-
-  notificationSession = nil;
-  @synchronized(self) {
-    NSMutableDictionary *summary;
-
-    if (cachedSummary_ != nil) {
-      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
-      [summary setObject:workingDirectory forKey:@"working_directory"];
-      [cachedSummary_ release];
-      cachedSummary_ = summary;
-      notificationSession = [cachedSummary_ retain];
-    } else {
-      notificationSession =
-        [[NSDictionary alloc] initWithObjectsAndKeys:
-          sessionIdentifier_, @"id",
-          workingDirectory, @"working_directory",
-          nil];
-    }
-  }
-
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionDidUpdateNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  notificationSession, @"session",
-                  StrappySessionChangeKindWorkingDirectory,
-                  StrappySessionChangeKindKey,
-                  nil]];
-  [notificationSession release];
-  return YES;
-}
-
-- (BOOL)setStreamingEnabled:(BOOL)enabled error:(NSError **)error
-{
-  NSString *databasePath;
-  NSNumber *streamingEnabled;
-  NSDictionary *notificationSession;
-  char *strappyError;
-  long long sessionId;
-
-  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier_ longLongValue] : 0LL;
-  if (sessionId <= 0) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-
-  strappyError = NULL;
-  if (!strappy_session_update_streaming_enabled([databasePath UTF8String],
-                                                   sessionId,
-                                                   enabled ? 1 : 0,
-                                                   &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-
-  streamingEnabled = [NSNumber numberWithBool:(enabled ? YES : NO)];
-  notificationSession = nil;
-  @synchronized(self) {
-    NSMutableDictionary *summary;
-
-    streamingEnabled_ = enabled ? YES : NO;
-    if (cachedSummary_ != nil) {
-      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
-      [summary setObject:streamingEnabled forKey:@"streaming_enabled"];
-      [cachedSummary_ release];
-      cachedSummary_ = summary;
-      notificationSession = [cachedSummary_ retain];
-    } else {
-      notificationSession =
-        [[NSDictionary alloc] initWithObjectsAndKeys:
-          sessionIdentifier_, @"id",
-          streamingEnabled, @"streaming_enabled",
-          nil];
-    }
-  }
-
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionDidUpdateNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  notificationSession, @"session",
-                  StrappySessionChangeKindStreaming,
-                  StrappySessionChangeKindKey,
-                  nil]];
-  [notificationSession release];
-  return YES;
-}
-
-- (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error
-{
-  NSString *databasePath;
-  char *modelId;
-  char *strappyError;
-  NSString *result;
-  long long sessionId;
-
-  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier_ longLongValue] : 0LL;
-  if (sessionId <= 0) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:userInfo];
-    }
-    return nil;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return nil;
-  }
-
-  modelId = NULL;
-  strappyError = NULL;
-  if (!strappy_session_get_model([databasePath UTF8String],
+  if (!strappy_session_load_options([databasePath UTF8String],
                                     sessionId,
-                                    &modelId,
+                                    &record,
                                     &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
     strappy_session_free_string(strappyError);
+    strappy_session_options_destroy(&record);
+    return nil;
+  }
+  options = StrappySessionOptionsFromRecord(&record);
+  strappy_session_options_destroy(&record);
+  if (options == nil) {
+    if (error != nil) {
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:[NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"Session options could not be loaded.", nil)
+                                                            forKey:NSLocalizedDescriptionKey]];
+    }
     return nil;
   }
 
-  result = nil;
-  if (modelId != NULL) {
-    result = [NSString stringWithUTF8String:modelId];
+  @synchronized(self) {
+    [options_ release];
+    options_ = [options copy];
+    optionsLoaded_ = YES;
+    options = [[options_ copy] autorelease];
   }
-  strappy_session_free_string(modelId);
-  return result;
+  return options;
 }
 
-- (BOOL)setSelectedOpenRouterModelIdentifier:(NSString *)modelIdentifier
-                                       error:(NSError **)error
+- (BOOL)updateOptions:(StrappySessionOptions *)options
+        changedFields:(StrappySessionOptionMask)changedFields
+                error:(NSError **)error
 {
   NSString *databasePath;
-  NSDictionary *notificationSession;
+  NSString *resourcePath;
+  NSDictionary *summary;
+  StrappySessionOptions *savedOptions;
   char *strappyError;
   long long sessionId;
+  strappy_session_option_mask actualChangedFields;
+  strappy_session_options input;
+  strappy_session_options saved;
 
-  if (![modelIdentifier isKindOfClass:[NSString class]] ||
-      ([modelIdentifier length] == 0U)) {
+  if (![options isKindOfClass:[StrappySessionOptions class]] ||
+      ((changedFields & ~((StrappySessionOptionMask)StrappySessionOptionAll)) !=
+       0U)) {
     if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Model is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
       *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:9
-                               userInfo:userInfo];
+                                   code:6
+                               userInfo:[NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"Session options are invalid.", nil)
+                                                            forKey:NSLocalizedDescriptionKey]];
+    }
+    return NO;
+  }
+  if (((changedFields & StrappySessionOptionWorkingDirectory) != 0U) &&
+      ![[StrappySession codingWorkingDirectoryPaths]
+        containsObject:[options workingDirectory]]) {
+    if (error != nil) {
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:15
+                               userInfo:[NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"Working directory selection is invalid.", nil)
+                                                            forKey:NSLocalizedDescriptionKey]];
     }
     return NO;
   }
 
   sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
     [sessionIdentifier_ longLongValue] : 0LL;
-  if (sessionId <= 0) {
+  if (sessionId <= 0LL) {
     if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
       *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
                                    code:6
-                               userInfo:userInfo];
+                               userInfo:[NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"Session is not selected.", nil)
+                                                            forKey:NSLocalizedDescriptionKey]];
     }
     return NO;
   }
-
   databasePath = [StrappySession sessionsDatabasePath];
   if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
                                                         error:error]) {
     return NO;
   }
+  resourcePath = nil;
+  if ((changedFields & StrappySessionOptionAssistantSet) != 0U) {
+    resourcePath = [StrappySession guidanceResourceDirectoryWithError:error];
+    if (resourcePath == nil) {
+      return NO;
+    }
+  }
 
+  strappy_session_options_init(&input);
+  if (!StrappySessionRecordFromOptions(options, &input, error)) {
+    return NO;
+  }
+  strappy_session_options_init(&saved);
+  actualChangedFields = 0U;
   strappyError = NULL;
-  if (!strappy_session_update_model([databasePath UTF8String],
-                                       sessionId,
-                                       [modelIdentifier UTF8String],
-                                       &strappyError)) {
+  if (!strappy_session_update_options(
+        [databasePath UTF8String],
+        sessionId,
+        StrappySessionOptionalCString(resourcePath),
+        &input,
+        (strappy_session_option_mask)changedFields,
+        &saved,
+        &actualChangedFields,
+        &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
     strappy_session_free_string(strappyError);
+    strappy_session_options_destroy(&saved);
     return NO;
   }
 
-  notificationSession = nil;
-  @synchronized(self) {
-    NSMutableDictionary *summary;
-
-    if (cachedSummary_ != nil) {
-      summary = [[NSMutableDictionary alloc] initWithDictionary:cachedSummary_];
-      [summary setObject:modelIdentifier forKey:@"model"];
-      [cachedSummary_ release];
-      cachedSummary_ = summary;
-      notificationSession = [cachedSummary_ retain];
-    } else {
-      notificationSession =
-        [[NSDictionary alloc] initWithObjectsAndKeys:
-          sessionIdentifier_, @"id",
-          modelIdentifier, @"model",
-          nil];
+  savedOptions = StrappySessionOptionsFromRecord(&saved);
+  strappy_session_options_destroy(&saved);
+  if (savedOptions == nil) {
+    if (error != nil) {
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:6
+                               userInfo:[NSDictionary dictionaryWithObject:
+        NSLocalizedString(@"Saved session options could not be loaded.", nil)
+                                                            forKey:NSLocalizedDescriptionKey]];
     }
+    return NO;
+  }
+  @synchronized(self) {
+    [options_ release];
+    options_ = [savedOptions copy];
+    optionsLoaded_ = YES;
   }
 
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionDidUpdateNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  notificationSession, @"session",
-                  StrappySessionChangeKindModel,
-                  StrappySessionChangeKindKey,
-                  nil]];
-  [notificationSession release];
+  summary =
+    [StrappySession sessionSummaryForSessionIdentifier:sessionIdentifier_
+                                                  error:nil];
+  if (summary != nil) {
+    [self updateCachedSummary:summary];
+  } else {
+    summary = [self cachedSummary];
+  }
+  if (actualChangedFields != 0U) {
+    NSMutableDictionary *userInfo;
+
+    userInfo = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+      savedOptions, StrappySessionOptionsKey,
+      [NSNumber numberWithUnsignedInteger:
+        (NSUInteger)actualChangedFields], StrappySessionChangedOptionsKey,
+      StrappySessionChangeKindOptions, StrappySessionChangeKindKey,
+      nil];
+    if ([summary isKindOfClass:[NSDictionary class]]) {
+      [userInfo setObject:summary forKey:@"session"];
+    }
+    [[NSNotificationCenter defaultCenter]
+      postNotificationName:StrappySessionDidUpdateNotification
+                    object:self
+                  userInfo:userInfo];
+  }
   return YES;
 }
-
 - (NSDictionary *)submitPrompt:(NSString *)prompt
                        context:(NSDictionary *)context
                       isolated:(BOOL)isolated

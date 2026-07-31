@@ -689,6 +689,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)reloadWithSession:(StrappySession *)session
 {
   StrappySession *oldSession;
+  StrappySessionOptions *sessionOptions;
   BOOL sessionChanged;
   BOOL studyLocked;
 
@@ -741,14 +742,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [[self sendBar] setStudyLocked:studyLocked];
   [self updateSendingStateFromSession];
   [self updatePromptIdleTimerAssertion];
-  [[self sendBar] setWebProvider:(session != nil) ?
-    [session webProvider] : StrappyWebProviderNone];
-  [[self sendBar] setWebSearchEnabled:(session != nil) ?
-    [session webSearchEnabled] : NO];
-  [[self sendBar] setBashEnabled:(session != nil) ?
-    [session bashEnabled] : NO];
-  [[self sendBar] setLimitToOneTool:(session != nil) ?
-    [session limitToOneTool] : NO];
+  sessionOptions = (session != nil) ? [session optionsWithError:nil] : nil;
+  [[self sendBar] setSessionOptions:sessionOptions];
   [[self sendBar] reloadOptionsMenu];
   if (([self webView] != nil) &&
       (sessionChanged || ![self webViewContentLoaded])) {
@@ -842,54 +837,29 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
 - (NSString *)selectedAssistantSetIdentifier
 {
-  NSString *identifier;
+  StrappySessionOptions *options;
 
   if ([self session] == nil) {
     return @"";
   }
-  identifier = [[self session] assistantSetIdentifier];
-  return [identifier isKindOfClass:[NSString class]] ? identifier : @"";
-}
-
-- (NSString *)selectedAssistantSetIdentifierForPromptSendViewController:
-    (PromptSendViewController *)controller
-{
-  (void)controller;
-  return [self selectedAssistantSetIdentifier];
+  options = [[self session] optionsWithError:nil];
+  return [[options assistantSetIdentifier] isKindOfClass:[NSString class]]
+    ? [options assistantSetIdentifier] : @"";
 }
 
 - (BOOL)setSelectedAssistantSetIdentifier:(NSString *)assistantSetIdentifier
 {
-  BOOL changed;
+  StrappySessionOptions *options;
 
-  changed = [self promptSendViewController:[self sendBar]
-            setSelectedAssistantSetIdentifier:assistantSetIdentifier];
-  return changed;
-}
-
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-  setSelectedAssistantSetIdentifier:(NSString *)assistantSetIdentifier
-{
-  NSError *error;
-
-  (void)controller;
-  error = nil;
-  if (![[self session] setAssistantSetIdentifier:assistantSetIdentifier
-                                           error:&error]) {
-    NSString *message;
-
-    message = [error localizedDescription];
-    if ([message length] == 0U) {
-      message = NSLocalizedString(@"Your changes could not be saved.", nil);
-    }
-    [self setStatusText:message];
-    [self showMessage:message
-                title:NSLocalizedString(@"Failed to Save Changes", nil)];
+  options = [[self session] optionsWithError:nil];
+  if (options == nil) {
     return NO;
   }
-  [self setStatusText:nil];
-  [[self sendBar] reloadOptionsMenu];
-  return YES;
+  options = [options copy];
+  [options setAssistantSetIdentifier:assistantSetIdentifier];
+  return [self promptSendViewController:[self sendBar]
+                   updateSessionOptions:options
+                          changedFields:StrappySessionOptionAssistantSet];
 }
 
 - (NSArray *)allowedModelsForPromptSendViewController:
@@ -901,22 +871,15 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
 - (NSString *)selectedModelIdentifier
 {
-  NSString *modelIdentifier;
+  StrappySessionOptions *options;
 
   if ([self session] == nil) {
     return @"";
   }
 
-  modelIdentifier =
-    [[self session] selectedOpenRouterModelIdentifierWithError:nil];
-  return [modelIdentifier isKindOfClass:[NSString class]] ? modelIdentifier : @"";
-}
-
-- (NSString *)selectedModelIdentifierForPromptSendViewController:
-    (PromptSendViewController *)controller
-{
-  (void)controller;
-  return [self selectedModelIdentifier];
+  options = [[self session] optionsWithError:nil];
+  return [[options modelIdentifier] isKindOfClass:[NSString class]]
+    ? [options modelIdentifier] : @"";
 }
 
 - (BOOL)canSelectModel
@@ -931,31 +894,38 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
 - (BOOL)setSelectedModelIdentifier:(NSString *)modelIdentifier
 {
-  BOOL changed;
+  StrappySessionOptions *options;
 
-  changed = [self promptSendViewController:[self sendBar]
-                 setSelectedModelIdentifier:modelIdentifier];
-  if (changed) {
-    [[self sendBar] reloadOptionsMenu];
+  options = [[self session] optionsWithError:nil];
+  if (options == nil) {
+    return NO;
   }
-  return changed;
+  options = [options copy];
+  [options setModelIdentifier:modelIdentifier];
+  return [self promptSendViewController:[self sendBar]
+                   updateSessionOptions:options
+                          changedFields:StrappySessionOptionModel];
 }
 
 - (BOOL)promptSendViewController:(PromptSendViewController *)controller
-        setSelectedModelIdentifier:(NSString *)modelIdentifier
+            updateSessionOptions:(StrappySessionOptions *)options
+                   changedFields:(StrappySessionOptionMask)changedFields
 {
+  StrappySessionOptions *savedOptions;
   NSError *error;
 
-  (void)controller;
-  if (![self canSelectModel]) {
+  if (![self canSelectModel] || options == nil || changedFields == 0U) {
     return NO;
   }
 
   error = nil;
-  if (![[self session] setSelectedOpenRouterModelIdentifier:modelIdentifier
-                                                      error:&error]) {
+  if (![[self session] updateOptions:options
+                        changedFields:changedFields
+                                error:&error]) {
     NSString *message;
 
+    savedOptions = [[self session] optionsWithError:nil];
+    [controller setSessionOptions:savedOptions];
     message = [error localizedDescription];
     if ([message length] == 0U) {
       message = NSLocalizedString(@"Your changes could not be saved.", nil);
@@ -966,171 +936,10 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     return NO;
   }
 
+  savedOptions = [[self session] optionsWithError:nil];
+  [controller setSessionOptions:savedOptions];
   [self setStatusText:nil];
   [[self sendBar] reloadOptionsMenu];
-  return YES;
-}
-
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-                  setWebProvider:(NSString *)webProvider
-{
-  NSError *error;
-
-  (void)controller;
-  if (![self canSelectModel]) {
-    return NO;
-  }
-
-  error = nil;
-  if (![[self session] setWebProvider:webProvider error:&error]) {
-    NSString *message;
-
-    message = [error localizedDescription];
-    if ([message length] == 0U) {
-      message = NSLocalizedString(@"Your changes could not be saved.", nil);
-    }
-    [self setStatusText:message];
-    [[self sendBar] setWebProvider:[[self session] webProvider]];
-    [self showMessage:message
-                title:NSLocalizedString(@"Failed to Save Changes", nil)];
-    return NO;
-  }
-
-  [[self sendBar] setWebProvider:[[self session] webProvider]];
-  [self setStatusText:nil];
-  return YES;
-}
-
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-              setWebSearchEnabled:(BOOL)enabled
-{
-  NSError *error;
-
-  (void)controller;
-  if (![self canSelectModel]) {
-    return NO;
-  }
-
-  error = nil;
-  if (![[self session] setWebSearchEnabled:enabled error:&error]) {
-    NSString *message;
-
-    message = [error localizedDescription];
-    if ([message length] == 0U) {
-      message = NSLocalizedString(@"Your changes could not be saved.", nil);
-    }
-    [self setStatusText:message];
-    [[self sendBar] setWebSearchEnabled:
-      [[self session] webSearchEnabled]];
-    [self showMessage:message
-                title:NSLocalizedString(@"Failed to Save Changes", nil)];
-    return NO;
-  }
-
-  [[self sendBar] setWebSearchEnabled:
-    [[self session] webSearchEnabled]];
-  [self setStatusText:nil];
-  return YES;
-}
-
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-                  setBashEnabled:(BOOL)enabled
-{
-  NSError *error;
-
-  (void)controller;
-  if (![self canSelectModel]) {
-    return NO;
-  }
-
-  error = nil;
-  if (![[self session] setBashEnabled:enabled error:&error]) {
-    NSString *message;
-
-    message = [error localizedDescription];
-    if ([message length] == 0U) {
-      message = NSLocalizedString(@"Your changes could not be saved.", nil);
-    }
-    [self setStatusText:message];
-    [[self sendBar] setBashEnabled:[[self session] bashEnabled]];
-    [self showMessage:message
-                title:NSLocalizedString(@"Failed to Save Changes", nil)];
-    return NO;
-  }
-
-  [[self sendBar] setBashEnabled:[[self session] bashEnabled]];
-  [self setStatusText:nil];
-  return YES;
-}
-
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-                  setLimitToOneTool:(BOOL)enabled
-{
-  NSError *error;
-
-  (void)controller;
-  if (![self canSelectModel]) {
-    return NO;
-  }
-
-  error = nil;
-  if (![[self session] setLimitToOneTool:enabled error:&error]) {
-    NSString *message;
-
-    message = [error localizedDescription];
-    if ([message length] == 0U) {
-      message = NSLocalizedString(@"Your changes could not be saved.", nil);
-    }
-    [self setStatusText:message];
-    [[self sendBar] setLimitToOneTool:[[self session] limitToOneTool]];
-    [self showMessage:message
-                title:NSLocalizedString(@"Failed to Save Changes", nil)];
-    return NO;
-  }
-
-  [[self sendBar] setLimitToOneTool:[[self session] limitToOneTool]];
-  [self setStatusText:nil];
-  return YES;
-}
-
-- (NSString *)workingDirectoryForPromptSendViewController:
-    (PromptSendViewController *)controller
-{
-  NSString *workingDirectory;
-
-  (void)controller;
-  workingDirectory = ([self session] != nil) ?
-    [[self session] workingDirectoryWithError:nil] : nil;
-  return [workingDirectory isKindOfClass:[NSString class]]
-    ? workingDirectory
-    : @"";
-}
-
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-             setWorkingDirectory:(NSString *)workingDirectory
-{
-  NSError *error;
-
-  (void)controller;
-  if (![self canSelectModel]) {
-    return NO;
-  }
-
-  error = nil;
-  if (![[self session] setWorkingDirectory:workingDirectory error:&error]) {
-    NSString *message;
-
-    message = [error localizedDescription];
-    if ([message length] == 0U) {
-      message = NSLocalizedString(@"Your changes could not be saved.", nil);
-    }
-    [self setStatusText:message];
-    [self showMessage:message
-                title:NSLocalizedString(@"Failed to Save Changes", nil)];
-    return NO;
-  }
-
-  [self setStatusText:nil];
   return YES;
 }
 

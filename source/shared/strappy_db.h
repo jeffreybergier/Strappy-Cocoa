@@ -33,6 +33,39 @@ typedef struct strappy_session_record_list {
   size_t count;
 } strappy_session_record_list;
 
+typedef unsigned int strappy_session_option_mask;
+
+enum {
+  STRAPPY_SESSION_OPTION_MODEL = 1U << 0,
+  STRAPPY_SESSION_OPTION_ASSISTANT_SET = 1U << 1,
+  STRAPPY_SESSION_OPTION_WEB_PROVIDER = 1U << 2,
+  STRAPPY_SESSION_OPTION_WEB_SEARCH = 1U << 3,
+  STRAPPY_SESSION_OPTION_BASH = 1U << 4,
+  STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL = 1U << 5,
+  STRAPPY_SESSION_OPTION_WORKING_DIRECTORY = 1U << 6,
+  STRAPPY_SESSION_OPTION_STREAMING = 1U << 7,
+  STRAPPY_SESSION_OPTION_ALL =
+    STRAPPY_SESSION_OPTION_MODEL |
+    STRAPPY_SESSION_OPTION_ASSISTANT_SET |
+    STRAPPY_SESSION_OPTION_WEB_PROVIDER |
+    STRAPPY_SESSION_OPTION_WEB_SEARCH |
+    STRAPPY_SESSION_OPTION_BASH |
+    STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
+    STRAPPY_SESSION_OPTION_WORKING_DIRECTORY |
+    STRAPPY_SESSION_OPTION_STREAMING
+};
+
+typedef struct strappy_session_options {
+  char *model_id;
+  char *assistant_set_id;
+  char *working_directory;
+  strappy_web_provider web_provider;
+  int web_search_enabled;
+  int bash_enabled;
+  int limit_to_one_tool;
+  int streaming_enabled;
+} strappy_session_options;
+
 typedef struct strappy_response_timeline_cursor {
   long long session_id;
   long long request_id;
@@ -322,6 +355,8 @@ void strappy_session_record_init(strappy_session_record *record);
 void strappy_session_record_destroy(strappy_session_record *record);
 void strappy_session_record_list_init(strappy_session_record_list *list);
 void strappy_session_record_list_destroy(strappy_session_record_list *list);
+void strappy_session_options_init(strappy_session_options *options);
+void strappy_session_options_destroy(strappy_session_options *options);
 void strappy_response_timeline_cursor_init(
   strappy_response_timeline_cursor *cursor);
 void strappy_session_message_record_init(strappy_session_message_record *record);
@@ -418,6 +453,24 @@ int strappy_db_create_session_with_working_directory(
   const char *working_directory,
   long long *session_id_out,
   char **error_out);
+int strappy_db_load_session_options(
+  const char *db_path,
+  long long session_id,
+  strappy_session_options *options,
+  char **error_out);
+int strappy_db_update_session_options(
+  const char *db_path,
+  long long session_id,
+  const strappy_session_options *options,
+  strappy_session_option_mask changed_fields,
+  strappy_session_options *saved_options_out,
+  strappy_session_option_mask *actual_changed_fields_out,
+  char **error_out);
+/*
+ * Narrow accessors remain for tool boundaries and compatibility. New callers
+ * that edit session settings should use strappy_db_update_session_options();
+ * these single-field setters delegate to that masked transaction.
+ */
 int strappy_db_get_session_working_directory(
   const char *db_path,
   long long session_id,

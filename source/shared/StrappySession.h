@@ -9,30 +9,83 @@ extern NSString * const StrappySessionModelCatalogRefreshDidFinishNotification;
 extern NSString * const StrappySessionModelCatalogDidChangeNotification;
 extern NSString * const StrappySessionChangeKindKey;
 extern NSString * const StrappySessionChangeKindActivity;
-extern NSString * const StrappySessionChangeKindModel;
-extern NSString * const StrappySessionChangeKindStreaming;
-extern NSString * const StrappySessionChangeKindWebProvider;
-extern NSString * const StrappySessionChangeKindWebSearch;
-extern NSString * const StrappySessionChangeKindBash;
-extern NSString * const StrappySessionChangeKindLimitToOneTool;
-extern NSString * const StrappySessionChangeKindWorkingDirectory;
-extern NSString * const StrappySessionChangeKindAssistantSet;
+extern NSString * const StrappySessionChangeKindOptions;
+extern NSString * const StrappySessionOptionsKey;
+extern NSString * const StrappySessionChangedOptionsKey;
 extern NSString * const StrappyWebProviderNone;
 extern NSString * const StrappyWebProviderAuto;
 extern NSString * const StrappyWebProviderNative;
 extern NSString * const StrappyWebProviderExa;
 extern NSString * const StrappyWebProviderParallel;
 
+typedef NSUInteger StrappySessionOptionMask;
+
+enum {
+  StrappySessionOptionModel = 1U << 0,
+  StrappySessionOptionAssistantSet = 1U << 1,
+  StrappySessionOptionWebProvider = 1U << 2,
+  StrappySessionOptionWebSearch = 1U << 3,
+  StrappySessionOptionBash = 1U << 4,
+  StrappySessionOptionLimitToOneTool = 1U << 5,
+  StrappySessionOptionWorkingDirectory = 1U << 6,
+  StrappySessionOptionStreaming = 1U << 7,
+  StrappySessionOptionAll =
+    StrappySessionOptionModel |
+    StrappySessionOptionAssistantSet |
+    StrappySessionOptionWebProvider |
+    StrappySessionOptionWebSearch |
+    StrappySessionOptionBash |
+    StrappySessionOptionLimitToOneTool |
+    StrappySessionOptionWorkingDirectory |
+    StrappySessionOptionStreaming
+};
+
+@interface StrappySessionOptions : NSObject <NSCopying> {
+ @private
+  NSString *modelIdentifier_;
+  NSString *assistantSetIdentifier_;
+  NSString *webProvider_;
+  NSString *workingDirectory_;
+  BOOL webSearchEnabled_;
+  BOOL bashEnabled_;
+  BOOL limitToOneTool_;
+  BOOL streamingEnabled_;
+}
+
+- (id)initWithModelIdentifier:(NSString *)modelIdentifier
+       assistantSetIdentifier:(NSString *)assistantSetIdentifier
+                  webProvider:(NSString *)webProvider
+             webSearchEnabled:(BOOL)webSearchEnabled
+                  bashEnabled:(BOOL)bashEnabled
+               limitToOneTool:(BOOL)limitToOneTool
+             workingDirectory:(NSString *)workingDirectory
+             streamingEnabled:(BOOL)streamingEnabled;
+- (NSString *)modelIdentifier;
+- (void)setModelIdentifier:(NSString *)modelIdentifier;
+- (NSString *)assistantSetIdentifier;
+- (void)setAssistantSetIdentifier:(NSString *)assistantSetIdentifier;
+- (NSString *)webProvider;
+- (void)setWebProvider:(NSString *)webProvider;
+- (BOOL)webSearchEnabled;
+- (void)setWebSearchEnabled:(BOOL)enabled;
+- (BOOL)bashEnabled;
+- (void)setBashEnabled:(BOOL)enabled;
+- (BOOL)limitToOneTool;
+- (void)setLimitToOneTool:(BOOL)enabled;
+- (NSString *)workingDirectory;
+- (void)setWorkingDirectory:(NSString *)workingDirectory;
+- (BOOL)streamingEnabled;
+- (void)setStreamingEnabled:(BOOL)enabled;
+
+@end
+
 @interface StrappySession : NSObject {
  @private
   NSNumber     *sessionIdentifier_;
   NSDictionary *cachedSummary_;
-  NSString     *webProvider_;
+  StrappySessionOptions *options_;
   NSString     *processingStatusJSON_;
-  BOOL          webSearchEnabled_;
-  BOOL          bashEnabled_;
-  BOOL          limitToOneTool_;
-  BOOL          streamingEnabled_;
+  BOOL          optionsLoaded_;
   BOOL          promptInFlight_;
   BOOL          promptCancellationRequested_;
 }
@@ -112,25 +165,10 @@ extern NSString * const StrappyWebProviderParallel;
 - (BOOL)setModelRequestIdentifier:(NSNumber *)modelRequestIdentifier
                 includedInContext:(BOOL)includedInContext
                             error:(NSError **)error;
-- (NSString *)webProvider;
-- (BOOL)setWebProvider:(NSString *)webProvider error:(NSError **)error;
-- (BOOL)webSearchEnabled;
-- (BOOL)setWebSearchEnabled:(BOOL)enabled error:(NSError **)error;
-- (BOOL)bashEnabled;
-- (BOOL)setBashEnabled:(BOOL)enabled error:(NSError **)error;
-- (BOOL)limitToOneTool;
-- (BOOL)setLimitToOneTool:(BOOL)enabled error:(NSError **)error;
-- (NSString *)workingDirectoryWithError:(NSError **)error;
-- (BOOL)setWorkingDirectory:(NSString *)workingDirectory
-                      error:(NSError **)error;
-- (NSString *)assistantSetIdentifier;
-- (BOOL)setAssistantSetIdentifier:(NSString *)assistantSetIdentifier
-                            error:(NSError **)error;
-- (BOOL)streamingEnabled;
-- (BOOL)setStreamingEnabled:(BOOL)enabled error:(NSError **)error;
-- (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error;
-- (BOOL)setSelectedOpenRouterModelIdentifier:(NSString *)modelIdentifier
-                                       error:(NSError **)error;
+- (StrappySessionOptions *)optionsWithError:(NSError **)error;
+- (BOOL)updateOptions:(StrappySessionOptions *)options
+        changedFields:(StrappySessionOptionMask)changedFields
+                error:(NSError **)error;
 - (BOOL)isPromptInFlight;
 - (BOOL)isDatabaseStudySession;
 - (BOOL)promptCancellationRequested;

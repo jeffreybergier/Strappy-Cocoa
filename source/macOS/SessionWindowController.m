@@ -245,17 +245,20 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
 - (void)strappySessionDidUpdate:(NSNotification *)notification
 {
   NSString *changeKind;
+  NSNumber *changedOptions;
   NSDictionary *session;
   NSNumber *identifier;
 
   changeKind = [[notification userInfo] objectForKey:StrappySessionChangeKindKey];
-  if ([changeKind isEqualToString:StrappySessionChangeKindWebProvider] ||
-      [changeKind isEqualToString:StrappySessionChangeKindWebSearch] ||
-      [changeKind isEqualToString:StrappySessionChangeKindBash] ||
-      [changeKind isEqualToString:StrappySessionChangeKindLimitToOneTool] ||
-      [changeKind isEqualToString:StrappySessionChangeKindWorkingDirectory] ||
-      [changeKind isEqualToString:StrappySessionChangeKindStreaming]) {
-    return;
+  if ([changeKind isEqualToString:StrappySessionChangeKindOptions]) {
+    changedOptions = [[notification userInfo]
+      objectForKey:StrappySessionChangedOptionsKey];
+    if (![changedOptions isKindOfClass:[NSNumber class]] ||
+        (([changedOptions unsignedIntegerValue] &
+          (StrappySessionOptionModel | StrappySessionOptionAssistantSet)) ==
+         0U)) {
+      return;
+    }
   }
   session = [[notification userInfo] objectForKey:@"session"];
   if (![session isKindOfClass:[NSDictionary class]]) {

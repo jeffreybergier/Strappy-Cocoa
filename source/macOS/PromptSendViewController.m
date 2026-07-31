@@ -123,6 +123,8 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 - (void)sendButtonClicked:(id)sender;
 - (void)webProviderMenuItemClicked:(id)sender;
 - (void)streamingMenuItemClicked:(id)sender;
+- (BOOL)updateSessionOptions:(StrappySessionOptions *)options
+               changedFields:(StrappySessionOptionMask)changedFields;
 @end
 
 @implementation PromptSendViewController
@@ -131,7 +133,15 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 {
   if ((self = [super init])) {
     enabled_ = YES;
-    webProvider_ = [StrappyWebProviderNone retain];
+    sessionOptions_ = [[StrappySessionOptions alloc]
+      initWithModelIdentifier:@""
+       assistantSetIdentifier:@""
+                  webProvider:StrappyWebProviderNone
+             webSearchEnabled:NO
+                  bashEnabled:NO
+               limitToOneTool:NO
+             workingDirectory:@""
+             streamingEnabled:NO];
   }
   return self;
 }
@@ -230,8 +240,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
            object:barView_];
 
   [self setEnabled:enabled_];
-  [self setWebProvider:webProvider_];
-  [self setStreamingEnabled:streamingEnabled_];
+  [self updateActionControls];
 }
 
 - (void)viewDidLayout
@@ -360,7 +369,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   NSString *selectedModelIdentifier;
   NSString *selectedTitle;
   NSString *webProvider;
-  NSString *webProviderCopy;
   NSUInteger index;
   BOOL foundSelectedModel;
 
@@ -369,7 +377,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   }
 
   models = nil;
-  selectedModelIdentifier = nil;
+  selectedModelIdentifier = [sessionOptions_ modelIdentifier];
   if (delegate_ != nil) {
     models = [delegate_ allowedModelsForPromptSendViewController:self];
   }
@@ -377,28 +385,16 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
     models = [NSArray array];
   }
 
-  if (delegate_ != nil) {
-    selectedModelIdentifier =
-      [delegate_ selectedModelIdentifierForPromptSendViewController:self];
-  }
   if (![selectedModelIdentifier isKindOfClass:[NSString class]]) {
     selectedModelIdentifier = @"";
   }
 
   foundSelectedModel = NO;
   selectedTitle = nil;
-  webProvider = webProvider_;
-  if (delegate_ != nil) {
-    webProvider =
-      [delegate_ webProviderForPromptSendViewController:self];
-  }
+  webProvider = [sessionOptions_ webProvider];
   if (![StrappyPromptWebProviders() containsObject:webProvider]) {
     webProvider = StrappyWebProviderNone;
   }
-  webProviderCopy = [webProvider copy];
-  [webProvider_ release];
-  webProvider_ = webProviderCopy;
-
   [webProviderMenuItem_ release];
   webProviderMenuItem_ = nil;
   [webProviderMenu_ release];
@@ -502,11 +498,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
     return;
   }
 
-  selectedModelIdentifier = nil;
-  if (delegate_ != nil) {
-    selectedModelIdentifier =
-      [delegate_ selectedModelIdentifierForPromptSendViewController:self];
-  }
+  selectedModelIdentifier = [sessionOptions_ modelIdentifier];
   if (![selectedModelIdentifier isKindOfClass:[NSString class]]) {
     selectedModelIdentifier = @"";
   }
@@ -555,14 +547,14 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 
       item = [webProviderMenu_ itemAtIndex:index];
       [item setState:[[item representedObject]
-        isEqualToString:webProvider_] ?
+        isEqualToString:[sessionOptions_ webProvider]] ?
           XPControlStateValueOn : XPControlStateValueOff];
     }
   }
   if (streamingMenuItem_ != nil) {
     [streamingMenuItem_ setEnabled:
       (enabled_ && !studyLocked_ && !sending_)];
-    [streamingMenuItem_ setState:(streamingEnabled_ ?
+    [streamingMenuItem_ setState:([sessionOptions_ streamingEnabled] ?
       XPControlStateValueOn : XPControlStateValueOff)];
   }
   [actionSegmented_ setEnabled:(sending_ ?
@@ -648,22 +640,26 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   [self updateActionControls];
 }
 
-- (void)setWebProvider:(NSString *)webProvider
+- (void)setSessionOptions:(StrappySessionOptions *)options
 {
-  NSString *webProviderCopy;
+  StrappySessionOptions *value;
+  StrappySessionOptions *valueCopy;
 
-  if (![StrappyPromptWebProviders() containsObject:webProvider]) {
-    webProvider = StrappyWebProviderNone;
+  value = options;
+  if (value == nil) {
+    value = [[[StrappySessionOptions alloc]
+      initWithModelIdentifier:@""
+       assistantSetIdentifier:@""
+                  webProvider:StrappyWebProviderNone
+             webSearchEnabled:NO
+                  bashEnabled:NO
+               limitToOneTool:NO
+             workingDirectory:@""
+             streamingEnabled:NO] autorelease];
   }
-  webProviderCopy = [webProvider copy];
-  [webProvider_ release];
-  webProvider_ = webProviderCopy;
-  [self updateActionControls];
-}
-
-- (void)setStreamingEnabled:(BOOL)enabled
-{
-  streamingEnabled_ = enabled ? YES : NO;
+  valueCopy = [value copy];
+  [sessionOptions_ release];
+  sessionOptions_ = valueCopy;
   [self updateActionControls];
 }
 
@@ -725,6 +721,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 - (void)modelMenuItemClicked:(id)sender
 {
   NSString *modelIdentifier;
+  StrappySessionOptions *options;
   BOOL changed;
 
   if (sending_) {
@@ -740,9 +737,11 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
     return;
   }
 
-  changed = ((delegate_ != nil) &&
-             [delegate_ promptSendViewController:self
-                      setSelectedModelIdentifier:modelIdentifier]) ? YES : NO;
+  options = [sessionOptions_ copy];
+  [options setModelIdentifier:modelIdentifier];
+  changed = [self updateSessionOptions:options
+                         changedFields:StrappySessionOptionModel];
+  [options release];
   if (changed) {
     [self reloadOptionsMenu];
   } else {
@@ -752,7 +751,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 
 - (void)streamingMenuItemClicked:(id)sender
 {
-  BOOL enabled;
+  StrappySessionOptions *options;
   BOOL changed;
 
   (void)sender;
@@ -760,13 +759,12 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
     return;
   }
 
-  enabled = streamingEnabled_ ? NO : YES;
-  changed = ((delegate_ != nil) &&
-             [delegate_ promptSendViewController:self
-                              setStreamingEnabled:enabled]) ? YES : NO;
-  if (changed) {
-    streamingEnabled_ = enabled;
-  }
+  options = [sessionOptions_ copy];
+  [options setStreamingEnabled:![sessionOptions_ streamingEnabled]];
+  changed = [self updateSessionOptions:options
+                         changedFields:StrappySessionOptionStreaming];
+  [options release];
+  (void)changed;
   [self updateActionControls];
   [self performSelector:@selector(selectCurrentModelMenuItem)
              withObject:nil
@@ -775,6 +773,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 
 - (void)webProviderMenuItemClicked:(id)sender
 {
+  StrappySessionOptions *options;
   BOOL changed;
   NSString *webProvider;
 
@@ -785,17 +784,33 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   if (![StrappyPromptWebProviders() containsObject:webProvider]) {
     return;
   }
-  changed = ((delegate_ != nil) &&
-             [delegate_ promptSendViewController:self
-                                   setWebProvider:webProvider]) ? YES : NO;
-  if (changed) {
-    NSString *webProviderCopy;
-
-    webProviderCopy = [webProvider copy];
-    [webProvider_ release];
-    webProvider_ = webProviderCopy;
-  }
+  options = [sessionOptions_ copy];
+  [options setWebProvider:webProvider];
+  changed = [self updateSessionOptions:options
+                         changedFields:StrappySessionOptionWebProvider];
+  [options release];
+  (void)changed;
   [self updateActionControls];
+}
+
+- (BOOL)updateSessionOptions:(StrappySessionOptions *)options
+               changedFields:(StrappySessionOptionMask)changedFields
+{
+  StrappySessionOptions *previousOptions;
+  BOOL updated;
+
+  if (options == nil || changedFields == 0U || delegate_ == nil) {
+    return NO;
+  }
+  previousOptions = [sessionOptions_ retain];
+  updated = [delegate_ promptSendViewController:self
+                            updateSessionOptions:options
+                                   changedFields:changedFields];
+  if (updated && (sessionOptions_ == previousOptions)) {
+    [self setSessionOptions:options];
+  }
+  [previousOptions release];
+  return updated;
 }
 
 - (void)performSend:(id)sender
@@ -862,7 +877,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   [optionsMenu_ release];
   [webProviderMenuItem_ release];
   [webProviderMenu_ release];
-  [webProvider_ release];
+  [sessionOptions_ release];
   [streamingMenuItem_ release];
   [super dealloc];
 }
