@@ -31,6 +31,22 @@
 #define HARNESS_SKILLS_LIST_EMPTY_RESULT \
   "{\"skills\":[],\"guidance\":\"No skills available\"}"
 
+#define HARNESS_IOS_DEVELOPMENT_SKILL_DESCRIPTION \
+  "Build, inspect, repair, analyze, package, and optionally install native " \
+  "Objective-C and C iOS applications directly on an iOS device using the " \
+  "locally installed Altivec Toolchain, an installed iPhoneOS SDK, UIKit, " \
+  "Make, `.app` bundles, and IPA archives. Use this skill for legacy or " \
+  "jailbroken-device iOS development and for portable C code shared with " \
+  "Cocoa applications."
+
+#define HARNESS_MACOS_DEVELOPMENT_SKILL_DESCRIPTION \
+  "Build, inspect, repair, analyze, package, and optionally run native " \
+  "Objective-C and C applications locally on Mac OS X or macOS using only " \
+  "the SDKs, compilers, libraries, and package-manager tools already " \
+  "installed by the user. Use this skill for AppKit applications, legacy " \
+  "Cocoa compatibility, native-architecture Makefiles, `.app` bundles, and " \
+  "portable C shared with Cocoa code."
+
 #define HARNESS_MEMORY_USER_FACT_REMEMBER_DESCRIPTION \
   "Call this tool to save a useful durable user fact for future prompts. " \
   "NEVER store secrets or sensitive information."
@@ -1669,6 +1685,59 @@ static int harness_preflight_object_output_equals(
     (strcmp(output->valuestring, expected_output) == 0);
 }
 
+static int harness_skill_summary_matches(cJSON *item,
+                                         const char *identifier,
+                                         const char *title,
+                                         const char *description)
+{
+  cJSON *skill_id;
+  cJSON *skill_title;
+  cJSON *skill_description;
+
+  skill_id = cJSON_GetObjectItem(item, "skill_id");
+  skill_title = cJSON_GetObjectItem(item, "title");
+  skill_description = cJSON_GetObjectItem(item, "description");
+  return cJSON_IsObject(item) && (cJSON_GetArraySize(item) == 3) &&
+    cJSON_IsString(skill_id) && (skill_id->valuestring != NULL) &&
+    (strcmp(skill_id->valuestring, identifier) == 0) &&
+    cJSON_IsString(skill_title) && (skill_title->valuestring != NULL) &&
+    (strcmp(skill_title->valuestring, title) == 0) &&
+    cJSON_IsString(skill_description) &&
+    (skill_description->valuestring != NULL) &&
+    (strcmp(skill_description->valuestring, description) == 0);
+}
+
+static int harness_coding_skills_preflight_output_is_valid(cJSON *item,
+                                                            cJSON *call)
+{
+  cJSON *output;
+  cJSON *root;
+  cJSON *skills;
+  int ok;
+
+  if (!harness_preflight_output_matches(item, call, 0)) {
+    return 0;
+  }
+  output = cJSON_GetObjectItem(item, "output");
+  root = cJSON_Parse(output->valuestring);
+  skills = cJSON_IsObject(root) ?
+    cJSON_GetObjectItem(root, "skills") : NULL;
+  ok = cJSON_IsObject(root) && (cJSON_GetArraySize(root) == 1) &&
+    cJSON_IsArray(skills) && (cJSON_GetArraySize(skills) == 2) &&
+    harness_skill_summary_matches(
+      cJSON_GetArrayItem(skills, 0),
+      "ios-development",
+      "iOS Development",
+      HARNESS_IOS_DEVELOPMENT_SKILL_DESCRIPTION) &&
+    harness_skill_summary_matches(
+      cJSON_GetArrayItem(skills, 1),
+      "macos-development",
+      "macOS Development",
+      HARNESS_MACOS_DEVELOPMENT_SKILL_DESCRIPTION);
+  cJSON_Delete(root);
+  return ok;
+}
+
 static int harness_preflight_bash_output_is_valid(cJSON *item, cJSON *call)
 {
   cJSON *output;
@@ -2312,10 +2381,9 @@ static int harness_coding_assistant_request_is_valid(
       cJSON_GetArrayItem(input, memory_output_index),
       memory_call,
       1) &&
-    harness_preflight_object_output_equals(
+    harness_coding_skills_preflight_output_is_valid(
       cJSON_GetArrayItem(input, bash_enabled ? 6 : 5),
-      skills_call,
-      HARNESS_SKILLS_LIST_EMPTY_RESULT) &&
+      skills_call) &&
     (!bash_enabled ||
       harness_preflight_bash_output_is_valid(cJSON_GetArrayItem(input, 7),
                                              bash_call)) &&

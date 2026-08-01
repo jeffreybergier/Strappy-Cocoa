@@ -20,6 +20,7 @@
 
 #define HARNESS_RESOURCE_DIR "../shared/Resources"
 #define HARNESS_SKILLS_FIXTURE_RESOURCE_DIR "fixtures/skills"
+#define HARNESS_SKILL_INSTRUCTIONS_MAX_BYTES (64U * 1024U)
 #define HARNESS_DATABASE_CONTEXT_QUERY_GUIDANCE \
   "Use database_query to inspect columns and view definitions with SELECT " \
   "type, sql FROM sqlite_schema WHERE name = 'table_or_view_name', then use " \
@@ -3030,7 +3031,18 @@ static int harness_run_assistant_set_tests(void)
       &error) &&
     strappy_assistant_set_profile_is_available(&coding) &&
     (coding.tool_name_count == 16U) &&
-    (coding.skill_identifier_count == 0U) &&
+    (coding.skill_identifier_count == 2U) &&
+    strappy_assistant_set_profile_allows_skill(
+      &coding,
+      "ios-development") &&
+    strappy_assistant_set_profile_allows_skill(
+      &coding,
+      "macos-development") &&
+    strappy_skills_validate_allowed(
+      HARNESS_RESOURCE_DIR,
+      (const char * const *)coding.skill_identifiers,
+      coding.skill_identifier_count,
+      &error) &&
     (coding.preflight_call_count == 3U) &&
     (strcmp(coding.preflight_when,
             STRAPPY_ASSISTANT_SET_PREFLIGHT_FIRST_USER_PROMPT) == 0) &&
@@ -3212,11 +3224,51 @@ static int harness_run_assistant_set_tests(void)
   return ok;
 }
 
+static int harness_write_skill_limit_fixture(const char *path,
+                                              size_t instruction_bytes)
+{
+  static const char prefix[] =
+    "{\"schema_version\":1,\"skills\":[{\"id\":\"limit-test\","
+    "\"title\":\"Limit Test\",\"description\":\"Boundary fixture.\","
+    "\"instructions\":\"";
+  static const char suffix[] = "\"}]}";
+  FILE *file;
+  char *instructions;
+  int ok;
+
+  if ((path == NULL) || (path[0] == '\0') || (instruction_bytes == 0U)) {
+    return 0;
+  }
+  instructions = (char *)malloc(instruction_bytes);
+  if (instructions == NULL) {
+    return 0;
+  }
+  memset(instructions, 'x', instruction_bytes);
+  file = fopen(path, "wb");
+  if (file == NULL) {
+    free(instructions);
+    return 0;
+  }
+  ok = (fwrite(prefix, 1U, sizeof(prefix) - 1U, file) ==
+        (sizeof(prefix) - 1U)) &&
+    (fwrite(instructions, 1U, instruction_bytes, file) ==
+     instruction_bytes) &&
+    (fwrite(suffix, 1U, sizeof(suffix) - 1U, file) ==
+     (sizeof(suffix) - 1U));
+  if (fclose(file) != 0) {
+    ok = 0;
+  }
+  free(instructions);
+  return ok;
+}
+
 static int harness_run_skills_tests(const harness_context *context)
 {
   static const char *const allowed_skills[] = { "concise-writing" };
+  static const char *const limit_skill[] = { "limit-test" };
   static const char *const missing_skills[] = { "missing-skill" };
   char catalog_path[1200];
+  char limit_resource_path[1200];
   strappy_assistant_set_profile profile;
   strappy_skill_record_list list;
   strappy_skill_record record;
@@ -3232,7 +3284,11 @@ static int harness_run_skills_tests(const harness_context *context)
       !harness_join_path(catalog_path,
                          sizeof(catalog_path),
                          context->temp_dir,
-                         "skills.sqlite")) {
+                         "skills.sqlite") ||
+      !harness_join_path(limit_resource_path,
+                         sizeof(limit_resource_path),
+                         context->temp_dir,
+                         STRAPPY_SKILLS_RESOURCE_NAME)) {
     return 0;
   }
   error = NULL;
@@ -3292,6 +3348,41 @@ static int harness_run_skills_tests(const harness_context *context)
   }
   free(error);
   error = NULL;
+
+  if (ok) {
+    ok = harness_write_skill_limit_fixture(
+           limit_resource_path,
+           HARNESS_SKILL_INSTRUCTIONS_MAX_BYTES) &&
+      strappy_skills_read_allowed(
+        context->temp_dir,
+        limit_skill,
+        sizeof(limit_skill) / sizeof(limit_skill[0]),
+        "limit-test",
+        &record,
+        &error) &&
+      (strlen(record.instructions) ==
+       HARNESS_SKILL_INSTRUCTIONS_MAX_BYTES);
+  }
+  strappy_skill_record_destroy(&record);
+  if (ok) {
+    free(error);
+    error = NULL;
+    ok = harness_write_skill_limit_fixture(
+           limit_resource_path,
+           HARNESS_SKILL_INSTRUCTIONS_MAX_BYTES + 1U) &&
+      !strappy_skills_validate_allowed(
+        context->temp_dir,
+        limit_skill,
+        sizeof(limit_skill) / sizeof(limit_skill[0]),
+        &error) &&
+      (error != NULL) &&
+      (strstr(error, "65536-byte limit") != NULL);
+    if (ok) {
+      free(error);
+      error = NULL;
+    }
+  }
+  unlink(limit_resource_path);
 
   if (ok) {
     ok = strappy_db_initialize(catalog_path, &error) &&

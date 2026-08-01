@@ -128,7 +128,10 @@
         "file_edit",
         "bash"
       ],
-      "additional_skills": [],
+      "additional_skills": [
+        "ios-development",
+        "macos-development"
+      ],
       "additional_quality_checks": []
     },
     {
