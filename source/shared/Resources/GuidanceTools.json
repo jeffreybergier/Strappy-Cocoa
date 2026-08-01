@@ -2,6 +2,17 @@
   "assistant_messages": {
     "round_limit": "Response round limit reached."
   },
+  "result_guidance": {
+    "database_list": {
+      "onEmpty": "The user has not approved any databases for use. You can ask the user to approve databases."
+    },
+    "database_context": {
+      "onNotEmpty": "Use database_query to inspect columns and view definitions with SELECT type, sql FROM sqlite_schema WHERE name = 'table_or_view_name', then use targeted SELECT queries to inspect rows."
+    },
+    "skills_list": {
+      "onEmpty": "No skills available"
+    }
+  },
   "server_tools": [
     {
       "type": "openrouter:web_search",

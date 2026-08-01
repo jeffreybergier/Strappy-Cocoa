@@ -30,6 +30,9 @@
 #define STRAPPY_TOOL_DISPLAY_PROMOTED_ARGUMENT_KEY "promoted_argument"
 #define STRAPPY_TOOL_DISPLAY_PROMOTED_PATH_KEY "promoted_path"
 #define STRAPPY_TOOL_DISPLAY_TRANSFORM_KEY "transform"
+#define STRAPPY_TOOL_RESULT_GUIDANCE_KEY "result_guidance"
+#define STRAPPY_TOOL_RESULT_GUIDANCE_ON_EMPTY_KEY "onEmpty"
+#define STRAPPY_TOOL_RESULT_GUIDANCE_ON_NOT_EMPTY_KEY "onNotEmpty"
 #define STRAPPY_DATABASE_GUIDANCE_RESOURCE "GuidanceDatabase.json"
 #define STRAPPY_FONTAWESOME_ICONS_RESOURCE "FontAwesomeIcons.json"
 #define STRAPPY_DATABASE_QUERY_MAX_ROWS 100
@@ -52,14 +55,6 @@
 #define STRAPPY_HELPER_INFO_DEFAULT_LIMIT 20
 #define STRAPPY_DATABASE_CONTEXT_TABLE_LIMIT 20
 #define STRAPPY_DATABASE_CONTEXT_VIEW_LIMIT 20
-#define STRAPPY_DATABASE_CONTEXT_QUERY_GUIDANCE \
-  "Use database_query to inspect columns and view definitions with SELECT " \
-  "type, sql FROM sqlite_schema WHERE name = 'table_or_view_name', then use " \
-  "targeted SELECT queries to inspect rows."
-#define STRAPPY_DATABASE_LIST_EMPTY_GUIDANCE \
-  "The user has not approved any databases for use."
-#define STRAPPY_SKILLS_LIST_EMPTY_GUIDANCE \
-  "No instruction skills are available to this assistant set."
 #define STRAPPY_HELPER_SESSION_NAME_MAX_BYTES 96U
 #define STRAPPY_HELPER_FONTAWESOME_MAX_QUERY_BYTES 128U
 #define STRAPPY_HELPER_FONTAWESOME_MAX_SHORTCODE_BYTES 96U
@@ -1912,6 +1907,57 @@ char *strappy_tools_tool_guidance_string(const char *resource_dir,
     strappy_set_error(error_out, "Could not allocate tool guidance string.");
   }
   return value;
+}
+
+static int strappy_tools_add_result_guidance(cJSON *result,
+                                             const char *resource_dir,
+                                             const char *tool_name,
+                                             const char *condition_name,
+                                             char **error_out)
+{
+  cJSON *root;
+  cJSON *result_guidance;
+  cJSON *tool_guidance;
+  cJSON *guidance;
+
+  if (!cJSON_IsObject(result) || (tool_name == NULL) ||
+      (tool_name[0] == '\0') || (condition_name == NULL) ||
+      (condition_name[0] == '\0')) {
+    strappy_set_error(error_out, "Tool result guidance lookup is incomplete.");
+    return 0;
+  }
+  root = strappy_tools_read_json_resource(resource_dir,
+                                          STRAPPY_TOOL_GUIDANCE_RESOURCE,
+                                          error_out);
+  if (root == NULL) {
+    return 0;
+  }
+  result_guidance = cJSON_GetObjectItemCaseSensitive(
+    root,
+    STRAPPY_TOOL_RESULT_GUIDANCE_KEY);
+  tool_guidance = cJSON_IsObject(result_guidance) ?
+    cJSON_GetObjectItemCaseSensitive(result_guidance, tool_name) : NULL;
+  guidance = cJSON_IsObject(tool_guidance) ?
+    cJSON_GetObjectItemCaseSensitive(tool_guidance, condition_name) : NULL;
+  if (!cJSON_IsString(guidance) || (guidance->valuestring == NULL) ||
+      (guidance->valuestring[0] == '\0')) {
+    cJSON_Delete(root);
+    strappy_set_formatted_error(
+      error_out,
+      "Tool result guidance is missing result_guidance.%s.%s.",
+      tool_name,
+      condition_name);
+    return 0;
+  }
+  if (cJSON_AddStringToObject(result,
+                             "guidance",
+                             guidance->valuestring) == NULL) {
+    cJSON_Delete(root);
+    strappy_set_error(error_out, "Could not add tool result guidance.");
+    return 0;
+  }
+  cJSON_Delete(root);
+  return 1;
 }
 
 static char *strappy_tools_tool_guidance_optional_string(
@@ -3895,6 +3941,7 @@ static int strappy_tools_read_database_object_names(sqlite3 *db,
 static char *strappy_tools_read_database_info(
   sqlite3 *catalog_db,
   const strappy_discovered_database_record *record,
+  const char *resource_dir,
   char **error_out)
 {
   sqlite3 *database;
@@ -3970,14 +4017,9 @@ static char *strappy_tools_read_database_info(
   }
   sqlite3_close(database);
 
-  if (((context != NULL) ?
-         (cJSON_AddStringToObject(root, "context", context) == NULL) :
-         !strappy_tools_add_null_to_object(root, "context")) ||
-      (((tables->child != NULL) || (views->child != NULL)) &&
-       (cJSON_AddStringToObject(root,
-                               "guidance",
-                               STRAPPY_DATABASE_CONTEXT_QUERY_GUIDANCE) ==
-        NULL))) {
+  if ((context != NULL) ?
+        (cJSON_AddStringToObject(root, "context", context) == NULL) :
+        !strappy_tools_add_null_to_object(root, "context")) {
     free(context);
     cJSON_Delete(root);
     cJSON_Delete(tables);
@@ -3986,6 +4028,18 @@ static char *strappy_tools_read_database_info(
     return NULL;
   }
   free(context);
+  if (((tables->child != NULL) || (views->child != NULL)) &&
+      !strappy_tools_add_result_guidance(
+        root,
+        resource_dir,
+        STRAPPY_TOOL_DATABASE_CONTEXT,
+        STRAPPY_TOOL_RESULT_GUIDANCE_ON_NOT_EMPTY_KEY,
+        error_out)) {
+    cJSON_Delete(root);
+    cJSON_Delete(tables);
+    cJSON_Delete(views);
+    return NULL;
+  }
   if (!cJSON_AddItemToObject(root, "tables", tables)) {
     cJSON_Delete(root);
     cJSON_Delete(tables);
@@ -6219,12 +6273,14 @@ static char *strappy_tools_execute_skills_list(
   }
   skills = NULL;
   if ((list.count == 0U) &&
-      (cJSON_AddStringToObject(root,
-                              "guidance",
-                              STRAPPY_SKILLS_LIST_EMPTY_GUIDANCE) == NULL)) {
+      !strappy_tools_add_result_guidance(
+        root,
+        resource_dir,
+        STRAPPY_TOOL_SKILLS_LIST,
+        STRAPPY_TOOL_RESULT_GUIDANCE_ON_EMPTY_KEY,
+        error_out)) {
     cJSON_Delete(root);
     strappy_skill_record_list_destroy(&list);
-    strappy_set_error(error_out, "Could not build skills_list result.");
     return NULL;
   }
   json = cJSON_PrintUnformatted(root);
@@ -6344,6 +6400,7 @@ static char *strappy_tools_execute_session_rename(
 
 static char *strappy_tools_execute_database_context(
   const char *session_db_path,
+  const char *resource_dir,
   const char *arguments_json,
   char **error_out)
 {
@@ -6398,6 +6455,7 @@ static char *strappy_tools_execute_database_context(
 
   json = strappy_tools_read_database_info(db,
                                           record,
+                                          resource_dir,
                                           error_out);
   sqlite3_close(db);
   strappy_discovered_database_record_list_destroy(&list);
@@ -6538,6 +6596,7 @@ static char *strappy_tools_execute_database_study(
 
 static char *strappy_tools_execute_database_list(
   const char *session_db_path,
+  const char *resource_dir,
   const char *arguments_json,
   char **error_out)
 {
@@ -6616,13 +6675,15 @@ static char *strappy_tools_execute_database_list(
   }
   databases = NULL;
   if (empty &&
-      (cJSON_AddStringToObject(root,
-                              "guidance",
-                              STRAPPY_DATABASE_LIST_EMPTY_GUIDANCE) == NULL)) {
+      !strappy_tools_add_result_guidance(
+        root,
+        resource_dir,
+        STRAPPY_TOOL_DATABASE_LIST,
+        STRAPPY_TOOL_RESULT_GUIDANCE_ON_EMPTY_KEY,
+        error_out)) {
     sqlite3_close(catalog_db);
     cJSON_Delete(root);
     strappy_discovered_database_record_list_destroy(&list);
-    strappy_set_error(error_out, "Could not build database list result.");
     return NULL;
   }
 
@@ -6696,8 +6757,9 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
 
   if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_LIST) == 0) {
     return strappy_tools_execute_database_list(session_db_path,
-                                                   arguments_json,
-                                                   error_out);
+                                               resource_dir,
+                                               arguments_json,
+                                               error_out);
   }
 
   if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_QUERY) == 0) {
@@ -6764,8 +6826,9 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
 
   if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_CONTEXT) == 0) {
     return strappy_tools_execute_database_context(session_db_path,
-                                                       arguments_json,
-                                                       error_out);
+                                                  resource_dir,
+                                                  arguments_json,
+                                                  error_out);
   }
 
   if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_STUDY) == 0) {

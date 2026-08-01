@@ -29,8 +29,7 @@
 #include "../shared/strappy_tools.h"
 
 #define HARNESS_SKILLS_LIST_EMPTY_RESULT \
-  "{\"skills\":[],\"guidance\":\"No instruction skills are available " \
-  "to this assistant set.\"}"
+  "{\"skills\":[],\"guidance\":\"No skills available\"}"
 
 #define HARNESS_MEMORY_USER_FACT_REMEMBER_DESCRIPTION \
   "Call this tool to save a useful durable user fact for future prompts. " \

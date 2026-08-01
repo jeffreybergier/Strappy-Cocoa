@@ -25,7 +25,8 @@
   "type, sql FROM sqlite_schema WHERE name = 'table_or_view_name', then use " \
   "targeted SELECT queries to inspect rows."
 #define HARNESS_DATABASE_LIST_EMPTY_GUIDANCE \
-  "The user has not approved any databases for use."
+  "The user has not approved any databases for use. " \
+  "You can ask the user to approve databases."
 
 typedef struct harness_context {
   char temp_dir[1024];
@@ -3383,8 +3384,8 @@ static int harness_run_skills_tests(const harness_context *context)
                                    &error);
     ok = (output != NULL) &&
       (strcmp(output,
-              "{\"skills\":[],\"guidance\":\"No instruction skills "
-              "are available to this assistant set.\"}") == 0);
+              "{\"skills\":[],\"guidance\":\"No skills available\"}") ==
+       0);
   }
   if (!ok) {
     fprintf(stderr,
