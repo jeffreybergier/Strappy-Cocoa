@@ -20,6 +20,8 @@ extern "C" {
 #define STRAPPY_TOOL_MEMORY_READ "memory_read"
 #define STRAPPY_TOOL_MEMORY_SAVE "memory_save"
 #define STRAPPY_TOOL_MEMORY_DELETE "memory_delete"
+#define STRAPPY_TOOL_SKILLS_LIST "skills_list"
+#define STRAPPY_TOOL_SKILL_READ "skill_read"
 #define STRAPPY_TOOL_SESSION_RENAME "session_rename"
 #define STRAPPY_TOOL_DATABASE_CONTEXT "database_context"
 #define STRAPPY_TOOL_DATABASE_STUDY "database_study"

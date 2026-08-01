@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "skills": [
+    {
+      "id": "concise-writing",
+      "title": "Concise Writing",
+      "description": "Make a written response direct and compact.",
+      "instructions": "Lead with the answer. Remove repetition and unnecessary qualifiers."
+    },
+    {
+      "id": "private-notes",
+      "title": "Private Notes",
+      "description": "Test a catalog skill that is not enabled for this assistant.",
+      "instructions": "This instruction must not be returned."
+    }
+  ]
+}

@@ -34,6 +34,8 @@ RUNNER_SOURCES = \
 	$(SHARED_DIR)/strappy_assistant_sets.c \
 	$(SHARED_DIR)/strappy_responses.c \
 	$(SHARED_DIR)/strappy_tools.c \
+	$(SHARED_DIR)/strappy_skills.c \
+	$(SHARED_DIR)/strappy_study.c \
 	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
 	$(SHARED_DIR)/strappy_file_mutation.c \

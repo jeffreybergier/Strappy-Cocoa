@@ -101,6 +101,8 @@ void strappy_assistant_set_profile_destroy(
   free(profile->goal);
   strappy_assistant_sets_destroy_strings(profile->tool_names,
                                          profile->tool_name_count);
+  strappy_assistant_sets_destroy_strings(profile->skill_identifiers,
+                                         profile->skill_identifier_count);
   free(profile->preflight_when);
   free(profile->preflight_assistant_text);
   strappy_assistant_sets_destroy_preflight_calls(
@@ -656,6 +658,7 @@ int strappy_assistant_sets_load_profile(
   const char *availability;
   const char *goal;
   int inherits_universal_tools;
+  int inherits_universal_skills;
   int inherits_universal_quality_checks;
   int user_selectable;
   size_t index;
@@ -707,6 +710,10 @@ int strappy_assistant_sets_load_profile(
                                                 "inherits_universal_tools",
                                                 &inherits_universal_tools,
                                                 error_out) ||
+      !strappy_assistant_sets_required_boolean(set,
+                                                "inherits_universal_skills",
+                                                &inherits_universal_skills,
+                                                error_out) ||
       !strappy_assistant_sets_required_boolean(
         set,
         "inherits_universal_quality_checks",
@@ -747,6 +754,19 @@ int strappy_assistant_sets_load_profile(
                                         &profile->tool_names,
                                         &profile->tool_name_count,
                                         error_out) &&
+    (!inherits_universal_skills ||
+     strappy_assistant_sets_append_array(
+       universal,
+       "skills",
+       &profile->skill_identifiers,
+       &profile->skill_identifier_count,
+       error_out)) &&
+    strappy_assistant_sets_append_array(
+      set,
+      "additional_skills",
+      &profile->skill_identifiers,
+      &profile->skill_identifier_count,
+      error_out) &&
     strappy_assistant_sets_load_preflight(set, profile, error_out) &&
     (!inherits_universal_quality_checks ||
      strappy_assistant_sets_append_array(universal,
@@ -796,6 +816,16 @@ int strappy_assistant_set_profile_allows_tool(
     strappy_assistant_sets_array_contains(profile->tool_names,
                                           profile->tool_name_count,
                                           tool_name);
+}
+
+int strappy_assistant_set_profile_allows_skill(
+  const strappy_assistant_set_profile *profile,
+  const char *skill_identifier)
+{
+  return (profile != NULL) &&
+    strappy_assistant_sets_array_contains(profile->skill_identifiers,
+                                          profile->skill_identifier_count,
+                                          skill_identifier);
 }
 
 int strappy_assistant_set_profile_has_quality_check(

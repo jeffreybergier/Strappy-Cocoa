@@ -28,6 +28,10 @@
 #include "../shared/strappy_session.h"
 #include "../shared/strappy_tools.h"
 
+#define HARNESS_SKILLS_LIST_EMPTY_RESULT \
+  "{\"skills\":[],\"guidance\":\"No instruction skills are available " \
+  "to this assistant set.\"}"
+
 #define HARNESS_MEMORY_USER_FACT_REMEMBER_DESCRIPTION \
   "Call this tool to save a useful durable user fact for future prompts. " \
   "NEVER store secrets or sensitive information."
@@ -735,6 +739,11 @@ static int harness_test_request_surfaces(void)
       tools,
       STRAPPY_TOOL_MEMORY_DELETE,
       HARNESS_MEMORY_USER_FACT_FORGET_DESCRIPTION) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_SKILLS_LIST) &&
+    harness_tool_has_required_string_parameter(
+      tools,
+      STRAPPY_TOOL_SKILL_READ,
+      "skill_id") &&
     harness_tool_description_equals(
       tools,
       STRAPPY_TOOL_DATABASE_STUDY,
@@ -1645,6 +1654,22 @@ static int harness_preflight_output_equals(cJSON *item,
     (strcmp(output->valuestring, expected_output) == 0);
 }
 
+static int harness_preflight_object_output_equals(
+  cJSON *item,
+  cJSON *call,
+  const char *expected_output)
+{
+  cJSON *output;
+
+  if ((expected_output == NULL) ||
+      !harness_preflight_output_matches(item, call, 0)) {
+    return 0;
+  }
+  output = cJSON_GetObjectItem(item, "output");
+  return cJSON_IsString(output) && (output->valuestring != NULL) &&
+    (strcmp(output->valuestring, expected_output) == 0);
+}
+
 static int harness_preflight_bash_output_is_valid(cJSON *item, cJSON *call)
 {
   cJSON *output;
@@ -1672,12 +1697,14 @@ static int harness_preflight_input_is_valid(cJSON *input,
                                             const char *prompt_group)
 {
   cJSON *memory_call;
+  cJSON *skills_call;
   cJSON *database_call;
   const char *assistant_text;
 
   assistant_text = harness_message_text(cJSON_GetArrayItem(input, 1));
   memory_call = cJSON_GetArrayItem(input, 2);
-  database_call = cJSON_GetArrayItem(input, 3);
+  skills_call = cJSON_GetArrayItem(input, 3);
+  database_call = cJSON_GetArrayItem(input, 4);
   return harness_message_role_is(cJSON_GetArrayItem(input, 1), "assistant") &&
     (assistant_text != NULL) &&
     (strcmp(assistant_text, HARNESS_PERSONAL_PREFLIGHT_ASSISTANT_TEXT) == 0) &&
@@ -1687,16 +1714,25 @@ static int harness_preflight_input_is_valid(cJSON *input,
                                     "fc_pf_0_",
                                     "call_pf_0_",
                                     prompt_group) &&
-    harness_preflight_call_is_valid(database_call,
-                                    "database_list",
+    harness_preflight_call_is_valid(skills_call,
+                                    STRAPPY_TOOL_SKILLS_LIST,
                                     "{}",
                                     "fc_pf_1_",
                                     "call_pf_1_",
                                     prompt_group) &&
-    harness_preflight_output_matches(cJSON_GetArrayItem(input, 4),
+    harness_preflight_call_is_valid(database_call,
+                                    "database_list",
+                                    "{}",
+                                    "fc_pf_2_",
+                                    "call_pf_2_",
+                                    prompt_group) &&
+    harness_preflight_output_matches(cJSON_GetArrayItem(input, 5),
                                      memory_call,
                                      1) &&
-    harness_preflight_output_matches(cJSON_GetArrayItem(input, 5),
+    harness_preflight_object_output_equals(cJSON_GetArrayItem(input, 6),
+                                           skills_call,
+                                           HARNESS_SKILLS_LIST_EMPTY_RESULT) &&
+    harness_preflight_output_matches(cJSON_GetArrayItem(input, 7),
                                      database_call,
                                      0);
 }
@@ -1806,7 +1842,7 @@ static int harness_request_base_with_tool_call_limit_is_valid(
       (has_web_search != has_web_reference_instruction) ||
       !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
       !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
-      !cJSON_IsArray(input) || (input_count != 6) ||
+      !cJSON_IsArray(input) || (input_count != 8) ||
       !harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") ||
       !harness_preflight_input_is_valid(input, prompt_group->valuestring) ||
       (text == NULL) || (strcmp(text, expected_prompt) != 0) ||
@@ -1852,7 +1888,7 @@ static int harness_world_knowledge_tools_are_valid(cJSON *tools,
                                                    int bash_enabled)
 {
   return cJSON_IsArray(tools) &&
-    (cJSON_GetArraySize(tools) == (bash_enabled ? 11 : 10)) &&
+    (cJSON_GetArraySize(tools) == (bash_enabled ? 13 : 12)) &&
     harness_server_tool_has_engine(
       tools,
       STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
@@ -1872,6 +1908,8 @@ static int harness_world_knowledge_tools_are_valid(cJSON *tools,
     harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_READ) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_SAVE) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_MEMORY_DELETE) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_SKILLS_LIST) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_SKILL_READ) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_SESSION_RENAME) &&
     (harness_has_tool_name(tools, STRAPPY_TOOL_BASH) ==
       (bash_enabled ? 1 : 0)) &&
@@ -1915,6 +1953,7 @@ static int harness_world_knowledge_request_is_valid(
   cJSON *prompt_group;
   cJSON *input;
   cJSON *memory_call;
+  cJSON *skills_call;
   cJSON *tools;
   const char *text;
 
@@ -1927,6 +1966,7 @@ static int harness_world_knowledge_request_is_valid(
     cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
   input = cJSON_GetObjectItem(root, "input");
   memory_call = cJSON_GetArrayItem(input, 2);
+  skills_call = cJSON_GetArrayItem(input, 3);
   tools = cJSON_GetObjectItem(root, "tools");
   text = harness_message_text(cJSON_GetArrayItem(input, 0));
   if (!cJSON_IsFalse(stream) || !cJSON_IsFalse(store) ||
@@ -1940,7 +1980,7 @@ static int harness_world_knowledge_request_is_valid(
               "You are an expert personal assistant.") != NULL) ||
       !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
       !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
-      !cJSON_IsArray(input) || (cJSON_GetArraySize(input) != 4) ||
+      !cJSON_IsArray(input) || (cJSON_GetArraySize(input) != 6) ||
       !harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") ||
       !harness_message_role_is(cJSON_GetArrayItem(input, 1), "assistant") ||
       (harness_message_text(cJSON_GetArrayItem(input, 1)) == NULL) ||
@@ -1952,9 +1992,19 @@ static int harness_world_knowledge_request_is_valid(
                                        "fc_pf_0_",
                                        "call_pf_0_",
                                        prompt_group->valuestring) ||
-      !harness_preflight_output_equals(cJSON_GetArrayItem(input, 3),
+      !harness_preflight_call_is_valid(skills_call,
+                                       STRAPPY_TOOL_SKILLS_LIST,
+                                       "{}",
+                                       "fc_pf_1_",
+                                       "call_pf_1_",
+                                       prompt_group->valuestring) ||
+      !harness_preflight_output_equals(cJSON_GetArrayItem(input, 4),
                                        memory_call,
                                        "[]") ||
+      !harness_preflight_object_output_equals(
+        cJSON_GetArrayItem(input, 5),
+        skills_call,
+        HARNESS_SKILLS_LIST_EMPTY_RESULT) ||
       (text == NULL) || (strcmp(text, expected_prompt) != 0) ||
       !harness_world_knowledge_tools_are_valid(tools, bash_enabled)) {
     return 0;
@@ -2102,6 +2152,7 @@ static int harness_world_followup_request_is_valid(
   cJSON *prompt_group;
   cJSON *input;
   cJSON *memory_call;
+  cJSON *skills_call;
   const char *first_prompt;
   const char *announcement;
   const char *first_answer;
@@ -2113,16 +2164,17 @@ static int harness_world_followup_request_is_valid(
     cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
   input = cJSON_GetObjectItem(root, "input");
   memory_call = cJSON_GetArrayItem(input, 2);
+  skills_call = cJSON_GetArrayItem(input, 3);
   first_prompt = harness_message_text(cJSON_GetArrayItem(input, 0));
   announcement = harness_message_text(cJSON_GetArrayItem(input, 1));
-  first_answer = harness_message_text(cJSON_GetArrayItem(input, 4));
-  second_prompt = harness_message_text(cJSON_GetArrayItem(input, 5));
+  first_answer = harness_message_text(cJSON_GetArrayItem(input, 6));
+  second_prompt = harness_message_text(cJSON_GetArrayItem(input, 7));
   return cJSON_IsString(request_session) &&
     (request_session->valuestring != NULL) &&
     (strcmp(request_session->valuestring, session_key) == 0) &&
     cJSON_IsString(prompt_group) && (prompt_group->valuestring != NULL) &&
     (strcmp(prompt_group->valuestring, first_prompt_group) != 0) &&
-    cJSON_IsArray(input) && (cJSON_GetArraySize(input) == 6) &&
+    cJSON_IsArray(input) && (cJSON_GetArraySize(input) == 8) &&
     harness_message_role_is(cJSON_GetArrayItem(input, 0), "user") &&
     (first_prompt != NULL) && (strcmp(first_prompt, "First prompt") == 0) &&
     harness_message_role_is(cJSON_GetArrayItem(input, 1), "assistant") &&
@@ -2134,13 +2186,23 @@ static int harness_world_followup_request_is_valid(
                                     "fc_pf_0_",
                                     "call_pf_0_",
                                     first_prompt_group) &&
-    harness_preflight_output_equals(cJSON_GetArrayItem(input, 3),
+    harness_preflight_call_is_valid(skills_call,
+                                    STRAPPY_TOOL_SKILLS_LIST,
+                                    "{}",
+                                    "fc_pf_1_",
+                                    "call_pf_1_",
+                                    first_prompt_group) &&
+    harness_preflight_output_equals(cJSON_GetArrayItem(input, 4),
                                     memory_call,
                                     "[]") &&
-    harness_message_role_is(cJSON_GetArrayItem(input, 4), "assistant") &&
+    harness_preflight_object_output_equals(
+      cJSON_GetArrayItem(input, 5),
+      skills_call,
+      HARNESS_SKILLS_LIST_EMPTY_RESULT) &&
+    harness_message_role_is(cJSON_GetArrayItem(input, 6), "assistant") &&
     (first_answer != NULL) &&
     (strcmp(first_answer, "First round answer.") == 0) &&
-    harness_message_role_is(cJSON_GetArrayItem(input, 5), "user") &&
+    harness_message_role_is(cJSON_GetArrayItem(input, 7), "user") &&
     (second_prompt != NULL) &&
     (strcmp(second_prompt, "Second prompt") == 0) &&
     harness_world_knowledge_tools_are_valid(cJSON_GetObjectItem(root, "tools"),
@@ -2187,6 +2249,7 @@ static int harness_coding_assistant_request_is_valid(
   cJSON *prompt_group;
   cJSON *input;
   cJSON *memory_call;
+  cJSON *skills_call;
   cJSON *bash_call;
   cJSON *bash_arguments;
   cJSON *tools;
@@ -2201,15 +2264,16 @@ static int harness_coding_assistant_request_is_valid(
     cJSON_GetObjectItem(metadata, "strappy_prompt_group_key") : NULL;
   input = cJSON_GetObjectItem(root, "input");
   memory_call = cJSON_GetArrayItem(input, 2);
-  bash_call = bash_enabled ? cJSON_GetArrayItem(input, 3) : NULL;
+  skills_call = cJSON_GetArrayItem(input, 3);
+  bash_call = bash_enabled ? cJSON_GetArrayItem(input, 4) : NULL;
   bash_arguments = cJSON_IsObject(bash_call) ?
     cJSON_GetObjectItem(bash_call, "arguments") : NULL;
   tools = cJSON_GetObjectItem(root, "tools");
   parallel_tool_calls_value =
     cJSON_GetObjectItem(root, "parallel_tool_calls");
   text = harness_message_text(cJSON_GetArrayItem(input, 0));
-  expected_input_count = bash_enabled ? 6 : 4;
-  memory_output_index = bash_enabled ? 4 : 3;
+  expected_input_count = bash_enabled ? 8 : 6;
+  memory_output_index = bash_enabled ? 5 : 4;
   return cJSON_IsString(instructions) &&
     (instructions->valuestring != NULL) &&
     (strstr(instructions->valuestring,
@@ -2229,12 +2293,18 @@ static int harness_coding_assistant_request_is_valid(
                                     "fc_pf_0_",
                                     "call_pf_0_",
                                     prompt_group->valuestring) &&
+    harness_preflight_call_is_valid(skills_call,
+                                    STRAPPY_TOOL_SKILLS_LIST,
+                                    "{}",
+                                    "fc_pf_1_",
+                                    "call_pf_1_",
+                                    prompt_group->valuestring) &&
     (!bash_enabled ||
       (harness_preflight_call_is_valid(bash_call,
                                        STRAPPY_TOOL_BASH,
                                        NULL,
-                                       "fc_pf_1_",
-                                       "call_pf_1_",
+                                       "fc_pf_2_",
+                                       "call_pf_2_",
                                        prompt_group->valuestring) &&
        harness_coding_preflight_bash_arguments_are_valid(
          cJSON_IsString(bash_arguments) ?
@@ -2243,8 +2313,12 @@ static int harness_coding_assistant_request_is_valid(
       cJSON_GetArrayItem(input, memory_output_index),
       memory_call,
       1) &&
+    harness_preflight_object_output_equals(
+      cJSON_GetArrayItem(input, bash_enabled ? 6 : 5),
+      skills_call,
+      HARNESS_SKILLS_LIST_EMPTY_RESULT) &&
     (!bash_enabled ||
-      harness_preflight_bash_output_is_valid(cJSON_GetArrayItem(input, 5),
+      harness_preflight_bash_output_is_valid(cJSON_GetArrayItem(input, 7),
                                              bash_call)) &&
     cJSON_IsArray(tools) &&
     harness_request_max_tool_calls_is_valid(
@@ -2253,12 +2327,14 @@ static int harness_coding_assistant_request_is_valid(
     (parallel_tool_calls ?
       cJSON_IsTrue(parallel_tool_calls_value) :
       cJSON_IsFalse(parallel_tool_calls_value)) &&
-    (cJSON_GetArraySize(tools) == (bash_enabled ? 12 : 11)) &&
+    (cJSON_GetArraySize(tools) == (bash_enabled ? 14 : 13)) &&
     (harness_has_tool_name(tools, STRAPPY_TOOL_BASH) ==
       (bash_enabled ? 1 : 0)) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_FILE_READ) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_FILE_WRITE) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_FILE_EDIT) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_SKILLS_LIST) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_SKILL_READ) &&
     !harness_has_tool_name(tools, STRAPPY_TOOL_DATABASE_QUERY) &&
     !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
     !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
@@ -6117,12 +6193,12 @@ static int harness_test_retry_attempt_ledger(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items WHERE "
                         "include_in_context=1;",
-                        &value) && (value == 9LL) &&
+                        &value) && (value == 11LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM conversation_items WHERE "
                         "introduced_request_id IS NOT NULL AND "
                         "include_in_context=1;",
-                        &value) && (value == 7LL) &&
+                        &value) && (value == 9LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
                         "outcome='failed';",

@@ -245,7 +245,8 @@ static const char *strappy_prompt_json_required_text(cJSON *parent,
 
   value = cJSON_IsObject(parent) ?
     cJSON_GetObjectItemCaseSensitive(parent, key) : NULL;
-  if (!cJSON_IsString(value) || (value->valuestring == NULL)) {
+  if ((value == NULL) || !cJSON_IsString(value) ||
+      (value->valuestring == NULL)) {
     strappy_set_formatted_error(
       error_out,
       "System prompt resource requires string %s.%s.",

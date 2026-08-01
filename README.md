@@ -23,13 +23,13 @@ from `/osxcross`.
 
 ## Assistant sets
 
-`source/shared/Resources/AssistantSets.json` defines the goal, tool allowlist,
-preflight calls, and answer-quality checks for each assistant set. The shared C
-prompt builder combines those selections with the matching descriptions from
-`GuidanceTools.json`, the code-owned audit behavior, and the structured section
-copy, audit guidance, optional assistant-set guidance, invariant personality,
-and hard rules in
-`SystemPrompt.json`:
+`source/shared/Resources/AssistantSets.json` defines the goal, tool and skill
+allowlists, preflight calls, and answer-quality checks for each assistant set.
+The shared C prompt builder combines those selections with the matching
+descriptions from `GuidanceTools.json`, instruction skills from
+`GuidanceSkills.json`, the code-owned audit behavior, and the structured
+section copy, audit guidance, optional assistant-set guidance, invariant
+personality, and hard rules in `SystemPrompt.json`:
 
 - World Knowledge exposes only universal web, user-memory, date, Font Awesome,
   and session-name tools.
@@ -80,6 +80,14 @@ from sessions using other assistant sets; switching a session changes which
 memories it can read, save, and delete.
 The prompt-options button is disabled while a prompt is in progress, so model,
 assistant-set, web-search, and Bash changes cannot overlap an active request.
+
+Instruction skills are deliberately small and resource-backed. Add entries to
+`source/shared/Resources/GuidanceSkills.json` with a stable lowercase `id`, a
+display `title`, a short routing `description`, and `instructions`. Enable IDs
+through `universal.skills` or a set's `additional_skills` in
+`AssistantSets.json`. On the first prompt, `skills_list` supplies only the
+allowed metadata; the model calls `skill_read` when a description matches the
+current request. Skills provide instructions only and cannot add tools.
 
 Generate every assistant-set prompt with web search set to none, auto, native,
 Exa, and Parallel:

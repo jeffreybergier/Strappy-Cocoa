@@ -17,7 +17,8 @@ resources are intentionally reduced to the minimum baseline:
 
 - `source/shared/Resources/AssistantSets.json` selects the Personal Assistant
   goal and policy while the shared prompt builder combines it with
-  `SystemPrompt.json` and the effective tool descriptions;
+  `SystemPrompt.json`, `GuidanceSkills.json`, and the effective tool
+  descriptions;
 - all Personal Assistant tool names and JSON argument schemas remain available;
 - tool-specific behavioral instructions live in their relevant tool
   descriptions instead of the system prompt;
@@ -31,9 +32,8 @@ resources are intentionally reduced to the minimum baseline:
   the harness defaults to `none` so neither tool is sent unless requested.
 
 Before round zero, the Personal Assistant profile supplies fresh
-`memory_read` and `database_list` results as application-seeded,
-matched
-`function_call` / `function_call_output` input pairs. Their call IDs are
+`memory_read`, `skills_list`, and `database_list` results as application-seeded,
+matched `function_call` / `function_call_output` input pairs. Their call IDs are
 created by the application, and those typed conversation items are not counted
 as model tool calls or tool executions. The runtime quality policy checks
 `database_context`, session naming, Font Awesome shortcode confirmation,

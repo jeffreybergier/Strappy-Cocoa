@@ -8,6 +8,7 @@
 #include "strappy_db.h"
 #include "strappy_prompt.h"
 #include "strappy_quality_policy.h"
+#include "strappy_skills.h"
 #include "strappy_tools.h"
 
 #include <cJSON.h>
@@ -1721,6 +1722,13 @@ static int strappy_responses_validate_assistant_set(
         runtime->assistant_set.tool_names[index]);
       return 0;
     }
+  }
+  if (!strappy_skills_validate_allowed(
+        runtime->config.guidance_resource_dir,
+        (const char * const *)runtime->assistant_set.skill_identifiers,
+        runtime->assistant_set.skill_identifier_count,
+        error_out)) {
+    return 0;
   }
   if ((runtime->assistant_set.preflight_when == NULL) ||
       (strcmp(runtime->assistant_set.preflight_when,

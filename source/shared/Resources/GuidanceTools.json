@@ -417,6 +417,42 @@
     {
       "type": "function",
       "function": {
+        "name": "skills_list",
+        "description": "Lists the skills available for you to use. ALWAYS call skill_read AND use skills related to the user's prompt BEFORE answering.",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "skill_read",
+        "description": "ALWAYS read AND use skills related to the user's prompt BEFORE answering.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "skill_id": {
+              "type": "string",
+              "description": "Exact skill_id returned by skills_list."
+            }
+          },
+          "required": [
+            "skill_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "x-strappy-display": {
+        "promoted_argument": "skill_id"
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "session_rename",
         "description": "ALWAYS call this tool before the final answer. Update the session with a short, descriptive name for the user's latest prompt. A non-empty name is required; null and empty values are invalid.",
         "parameters": {

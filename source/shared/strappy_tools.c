@@ -8,6 +8,7 @@
 #include "strappy_file_edit.h"
 #include "strappy_file_read.h"
 #include "strappy_file_write.h"
+#include "strappy_skills.h"
 #include "strappy_study.h"
 
 #include <cJSON.h>
@@ -57,6 +58,8 @@
   "targeted SELECT queries to inspect rows."
 #define STRAPPY_DATABASE_LIST_EMPTY_GUIDANCE \
   "The user has not approved any databases for use."
+#define STRAPPY_SKILLS_LIST_EMPTY_GUIDANCE \
+  "No instruction skills are available to this assistant set."
 #define STRAPPY_HELPER_SESSION_NAME_MAX_BYTES 96U
 #define STRAPPY_HELPER_FONTAWESOME_MAX_QUERY_BYTES 128U
 #define STRAPPY_HELPER_FONTAWESOME_MAX_SHORTCODE_BYTES 96U
@@ -106,6 +109,10 @@ typedef struct strappy_session_rename_arguments {
 typedef struct strappy_memory_delete_arguments {
   long long id;
 } strappy_memory_delete_arguments;
+
+typedef struct strappy_skill_read_arguments {
+  char *skill_identifier;
+} strappy_skill_read_arguments;
 
 typedef struct strappy_database_study_arguments {
   char *database_id;
@@ -157,6 +164,8 @@ static const strappy_tool_definition strappy_tool_definitions[] = {
   { STRAPPY_TOOL_MEMORY_READ, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_MEMORY_SAVE, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_MEMORY_DELETE, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_SKILLS_LIST, STRAPPY_TOOL_KIND_HELPER },
+  { STRAPPY_TOOL_SKILL_READ, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_SESSION_RENAME, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_DATABASE_CONTEXT, STRAPPY_TOOL_KIND_HELPER },
   { STRAPPY_TOOL_DATABASE_STUDY, STRAPPY_TOOL_KIND_HELPER },
@@ -335,6 +344,27 @@ static void strappy_memory_delete_arguments_init(
   }
 
   arguments->id = 0;
+}
+
+static void strappy_skill_read_arguments_init(
+  strappy_skill_read_arguments *arguments)
+{
+  if (arguments == NULL) {
+    return;
+  }
+
+  arguments->skill_identifier = NULL;
+}
+
+static void strappy_skill_read_arguments_destroy(
+  strappy_skill_read_arguments *arguments)
+{
+  if (arguments == NULL) {
+    return;
+  }
+
+  free(arguments->skill_identifier);
+  strappy_skill_read_arguments_init(arguments);
 }
 
 static void strappy_database_study_arguments_init(
@@ -2402,6 +2432,47 @@ static int strappy_tools_parse_memory_delete_arguments(
   return 1;
 }
 
+static int strappy_tools_parse_skill_read_arguments(
+  const char *arguments_json,
+  strappy_skill_read_arguments *arguments,
+  char **error_out)
+{
+  static const char *const allowed_names[] = { "skill_id" };
+  cJSON *root;
+  int ok;
+
+  if (arguments == NULL) {
+    strappy_set_error(error_out,
+                      "skill_read argument output is missing.");
+    return 0;
+  }
+  strappy_skill_read_arguments_init(arguments);
+  root = strappy_tools_parse_arguments_object(STRAPPY_TOOL_SKILL_READ,
+                                              arguments_json,
+                                              error_out);
+  if (root == NULL) {
+    return 0;
+  }
+  ok = strappy_tools_json_object_accepts_only(
+         root,
+         STRAPPY_TOOL_SKILL_READ,
+         allowed_names,
+         sizeof(allowed_names) / sizeof(allowed_names[0]),
+         error_out) &&
+       strappy_tools_copy_required_action_string_argument(
+         STRAPPY_TOOL_SKILL_READ,
+         root,
+         "skill_id",
+         STRAPPY_SKILL_ID_MAX_BYTES,
+         &arguments->skill_identifier,
+         error_out);
+  cJSON_Delete(root);
+  if (!ok) {
+    strappy_skill_read_arguments_destroy(arguments);
+  }
+  return ok;
+}
+
 static int strappy_tools_parse_database_query_arguments(
   const char *arguments_json,
   strappy_database_query_arguments *arguments,
@@ -3378,7 +3449,7 @@ static int strappy_tools_copy_active_assistant_set_id(
   }
   if ((assistant_set_id_out == NULL) || (tool_name == NULL)) {
     strappy_set_error(error_out,
-                      "Memory assistant-set request is incomplete.");
+                      "Tool assistant-set request is incomplete.");
     return 0;
   }
   if (active_session_id <= 0LL) {
@@ -3391,6 +3462,49 @@ static int strappy_tools_copy_active_assistant_set_id(
                                               active_session_id,
                                               assistant_set_id_out,
                                               error_out);
+}
+
+static int strappy_tools_load_active_assistant_set_profile(
+  const char *session_db_path,
+  long long active_session_id,
+  const char *resource_dir,
+  const char *tool_name,
+  strappy_assistant_set_profile *profile,
+  char **error_out)
+{
+  char *assistant_set_id;
+  int ok;
+
+  if (profile == NULL) {
+    strappy_set_error(error_out,
+                      "Tool assistant-set profile output is missing.");
+    return 0;
+  }
+  strappy_assistant_set_profile_init(profile);
+  assistant_set_id = NULL;
+  if (!strappy_tools_copy_active_assistant_set_id(session_db_path,
+                                                  active_session_id,
+                                                  tool_name,
+                                                  &assistant_set_id,
+                                                  error_out)) {
+    return 0;
+  }
+  ok = strappy_assistant_sets_load_profile(resource_dir,
+                                           assistant_set_id,
+                                           profile,
+                                           error_out);
+  free(assistant_set_id);
+  if (!ok) {
+    return 0;
+  }
+  if (!strappy_assistant_set_profile_allows_tool(profile, tool_name)) {
+    strappy_set_formatted_error(error_out,
+                                "Tool is not allowed by the assistant set: %s",
+                                tool_name);
+    strappy_assistant_set_profile_destroy(profile);
+    return 0;
+  }
+  return 1;
 }
 
 static int strappy_tools_resolve_source_item_id(sqlite3 *db,
@@ -6007,6 +6121,185 @@ static char *strappy_tools_execute_memory_delete(
   return json;
 }
 
+static int strappy_tools_add_skill_summary(
+  cJSON *skills,
+  const strappy_skill_record *record,
+  char **error_out)
+{
+  cJSON *item;
+
+  if (!cJSON_IsArray(skills) || (record == NULL) ||
+      (record->identifier == NULL) || (record->title == NULL) ||
+      (record->description == NULL)) {
+    strappy_set_error(error_out, "Skill summary is incomplete.");
+    return 0;
+  }
+  item = cJSON_CreateObject();
+  if ((item == NULL) ||
+      (cJSON_AddStringToObject(item,
+                               "skill_id",
+                               record->identifier) == NULL) ||
+      (cJSON_AddStringToObject(item, "title", record->title) == NULL) ||
+      (cJSON_AddStringToObject(item,
+                               "description",
+                               record->description) == NULL) ||
+      !cJSON_AddItemToArray(skills, item)) {
+    cJSON_Delete(item);
+    strappy_set_error(error_out, "Could not build skill summary.");
+    return 0;
+  }
+  return 1;
+}
+
+static char *strappy_tools_execute_skills_list(
+  const char *session_db_path,
+  long long active_session_id,
+  const char *resource_dir,
+  const char *arguments_json,
+  char **error_out)
+{
+  strappy_assistant_set_profile profile;
+  strappy_skill_record_list list;
+  cJSON *root;
+  cJSON *skills;
+  char *json;
+  size_t index;
+
+  if (!strappy_tools_validate_empty_arguments(STRAPPY_TOOL_SKILLS_LIST,
+                                              arguments_json,
+                                              error_out)) {
+    return NULL;
+  }
+  strappy_assistant_set_profile_init(&profile);
+  strappy_skill_record_list_init(&list);
+  if (!strappy_tools_load_active_assistant_set_profile(
+        session_db_path,
+        active_session_id,
+        resource_dir,
+        STRAPPY_TOOL_SKILLS_LIST,
+        &profile,
+        error_out) ||
+      !strappy_skills_list_allowed(
+        resource_dir,
+        (const char * const *)profile.skill_identifiers,
+        profile.skill_identifier_count,
+        &list,
+        error_out)) {
+    strappy_skill_record_list_destroy(&list);
+    strappy_assistant_set_profile_destroy(&profile);
+    return NULL;
+  }
+  strappy_assistant_set_profile_destroy(&profile);
+
+  root = cJSON_CreateObject();
+  skills = cJSON_CreateArray();
+  if ((root == NULL) || (skills == NULL)) {
+    cJSON_Delete(skills);
+    cJSON_Delete(root);
+    strappy_skill_record_list_destroy(&list);
+    strappy_set_error(error_out, "Could not allocate skills_list result.");
+    return NULL;
+  }
+  for (index = 0U; index < list.count; index++) {
+    if (!strappy_tools_add_skill_summary(skills,
+                                        &list.records[index],
+                                        error_out)) {
+      cJSON_Delete(skills);
+      cJSON_Delete(root);
+      strappy_skill_record_list_destroy(&list);
+      return NULL;
+    }
+  }
+  if (!cJSON_AddItemToObject(root, "skills", skills)) {
+    cJSON_Delete(skills);
+    cJSON_Delete(root);
+    strappy_skill_record_list_destroy(&list);
+    strappy_set_error(error_out, "Could not build skills_list result.");
+    return NULL;
+  }
+  skills = NULL;
+  if ((list.count == 0U) &&
+      (cJSON_AddStringToObject(root,
+                              "guidance",
+                              STRAPPY_SKILLS_LIST_EMPTY_GUIDANCE) == NULL)) {
+    cJSON_Delete(root);
+    strappy_skill_record_list_destroy(&list);
+    strappy_set_error(error_out, "Could not build skills_list result.");
+    return NULL;
+  }
+  json = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  strappy_skill_record_list_destroy(&list);
+  if (json == NULL) {
+    strappy_set_error(error_out, "Could not serialize skills_list result.");
+  }
+  return json;
+}
+
+static char *strappy_tools_execute_skill_read(
+  const char *session_db_path,
+  long long active_session_id,
+  const char *resource_dir,
+  const char *arguments_json,
+  char **error_out)
+{
+  strappy_skill_read_arguments arguments;
+  strappy_assistant_set_profile profile;
+  strappy_skill_record record;
+  cJSON *root;
+  char *json;
+
+  strappy_skill_read_arguments_init(&arguments);
+  strappy_assistant_set_profile_init(&profile);
+  strappy_skill_record_init(&record);
+  if (!strappy_tools_parse_skill_read_arguments(arguments_json,
+                                                &arguments,
+                                                error_out) ||
+      !strappy_tools_load_active_assistant_set_profile(
+        session_db_path,
+        active_session_id,
+        resource_dir,
+        STRAPPY_TOOL_SKILL_READ,
+        &profile,
+        error_out) ||
+      !strappy_skills_read_allowed(
+        resource_dir,
+        (const char * const *)profile.skill_identifiers,
+        profile.skill_identifier_count,
+        arguments.skill_identifier,
+        &record,
+        error_out)) {
+    strappy_skill_record_destroy(&record);
+    strappy_assistant_set_profile_destroy(&profile);
+    strappy_skill_read_arguments_destroy(&arguments);
+    return NULL;
+  }
+  strappy_assistant_set_profile_destroy(&profile);
+  strappy_skill_read_arguments_destroy(&arguments);
+
+  root = cJSON_CreateObject();
+  if ((root == NULL) ||
+      (cJSON_AddStringToObject(root,
+                               "skill_id",
+                               record.identifier) == NULL) ||
+      (cJSON_AddStringToObject(root, "title", record.title) == NULL) ||
+      (cJSON_AddStringToObject(root,
+                               "instructions",
+                               record.instructions) == NULL)) {
+    cJSON_Delete(root);
+    strappy_skill_record_destroy(&record);
+    strappy_set_error(error_out, "Could not build skill_read result.");
+    return NULL;
+  }
+  json = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  strappy_skill_record_destroy(&record);
+  if (json == NULL) {
+    strappy_set_error(error_out, "Could not serialize skill_read result.");
+  }
+  return json;
+}
+
 static char *strappy_tools_execute_session_rename(
   const char *session_db_path,
   long long active_session_id,
@@ -6444,6 +6737,22 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
                                                active_session_id,
                                                arguments_json,
                                                error_out);
+  }
+
+  if (strcmp(tool_name, STRAPPY_TOOL_SKILLS_LIST) == 0) {
+    return strappy_tools_execute_skills_list(session_db_path,
+                                             active_session_id,
+                                             resource_dir,
+                                             arguments_json,
+                                             error_out);
+  }
+
+  if (strcmp(tool_name, STRAPPY_TOOL_SKILL_READ) == 0) {
+    return strappy_tools_execute_skill_read(session_db_path,
+                                            active_session_id,
+                                            resource_dir,
+                                            arguments_json,
+                                            error_out);
   }
 
   if (strcmp(tool_name, STRAPPY_TOOL_SESSION_RENAME) == 0) {

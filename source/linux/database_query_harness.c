@@ -5,6 +5,7 @@
 #include "strappy_config.h"
 #include "strappy_db.h"
 #include "strappy_file_scanner.h"
+#include "strappy_skills.h"
 #include "strappy_study.h"
 #include "strappy_tools.h"
 #include "cJSON.h"
@@ -18,6 +19,7 @@
 #include <unistd.h>
 
 #define HARNESS_RESOURCE_DIR "../shared/Resources"
+#define HARNESS_SKILLS_FIXTURE_RESOURCE_DIR "fixtures/skills"
 #define HARNESS_DATABASE_CONTEXT_QUERY_GUIDANCE \
   "Use database_query to inspect columns and view definitions with SELECT " \
   "type, sql FROM sqlite_schema WHERE name = 'table_or_view_name', then use " \
@@ -2400,6 +2402,9 @@ static int harness_run_tool_registry_tests(void)
         harness_tool_schema_has_no_properties(
           tools,
           STRAPPY_TOOL_MEMORY_READ) &&
+        harness_tool_schema_has_no_properties(
+          tools,
+          STRAPPY_TOOL_SKILLS_LIST) &&
         harness_database_context_schema_matches(tools) &&
         harness_database_study_schema_matches(tools) &&
         harness_file_read_schema_matches(tools) &&
@@ -2449,6 +2454,10 @@ static int harness_run_tool_registry_tests(void)
                                      "id",
                                      "identifier") &&
         harness_tool_display_matches(registry,
+                                     STRAPPY_TOOL_SKILL_READ,
+                                     "skill_id",
+                                     NULL) &&
+        harness_tool_display_matches(registry,
                                      STRAPPY_TOOL_SESSION_RENAME,
                                      "name",
                                      NULL) &&
@@ -2485,6 +2494,8 @@ static int harness_run_tool_registry_tests(void)
            STRAPPY_TOOL_DATETIME_FROM_ISO8601) == NULL) &&
         (cJSON_GetObjectItem(registry,
                              STRAPPY_TOOL_MEMORY_READ) == NULL) &&
+        (cJSON_GetObjectItem(registry,
+                             STRAPPY_TOOL_SKILLS_LIST) == NULL) &&
         (strstr(tools_json,
                 "Call this tool to view approved databases. Returns an "
                 "object containing a databases array with database_id, "
@@ -2596,6 +2607,8 @@ static int harness_run_tool_registry_tests(void)
         (strstr(tools_json, STRAPPY_TOOL_MEMORY_READ) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_MEMORY_SAVE) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_MEMORY_DELETE) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_SKILLS_LIST) != NULL) &&
+        (strstr(tools_json, STRAPPY_TOOL_SKILL_READ) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_SESSION_RENAME) != NULL) &&
         (strstr(tools_json, STRAPPY_TOOL_DATABASE_CONTEXT) != NULL) &&
         (strstr(tools_json,
@@ -2609,6 +2622,8 @@ static int harness_run_tool_registry_tests(void)
         strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_READ) &&
         strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_SAVE) &&
         strappy_tools_is_helper(STRAPPY_TOOL_MEMORY_DELETE) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_SKILLS_LIST) &&
+        strappy_tools_is_helper(STRAPPY_TOOL_SKILL_READ) &&
         strappy_tools_is_helper(STRAPPY_TOOL_SESSION_RENAME) &&
         strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_CONTEXT) &&
         strappy_tools_is_helper(STRAPPY_TOOL_DATABASE_STUDY) &&
@@ -2843,8 +2858,9 @@ static int harness_run_assistant_set_tests(void)
       &world,
       &error) &&
     strappy_assistant_set_profile_is_available(&world) &&
-    (world.tool_name_count == 10U) &&
-    (world.preflight_call_count == 1U) &&
+    (world.tool_name_count == 12U) &&
+    (world.skill_identifier_count == 0U) &&
+    (world.preflight_call_count == 2U) &&
     (strcmp(world.preflight_when,
             STRAPPY_ASSISTANT_SET_PREFLIGHT_FIRST_USER_PROMPT) == 0) &&
     (strcmp(world.preflight_assistant_text,
@@ -2853,6 +2869,9 @@ static int harness_run_assistant_set_tests(void)
     (strcmp(world.preflight_calls[0].tool_name,
             STRAPPY_TOOL_MEMORY_READ) == 0) &&
     (strcmp(world.preflight_calls[0].arguments_json, "{}") == 0) &&
+    (strcmp(world.preflight_calls[1].tool_name,
+            STRAPPY_TOOL_SKILLS_LIST) == 0) &&
+    (strcmp(world.preflight_calls[1].arguments_json, "{}") == 0) &&
     (world.quality_check_key_count == 5U) &&
     strappy_assistant_set_profile_allows_tool(
       &world,
@@ -2860,6 +2879,12 @@ static int harness_run_assistant_set_tests(void)
     strappy_assistant_set_profile_allows_tool(
       &world,
       STRAPPY_TOOL_MEMORY_SAVE) &&
+    strappy_assistant_set_profile_allows_tool(
+      &world,
+      STRAPPY_TOOL_SKILLS_LIST) &&
+    strappy_assistant_set_profile_allows_tool(
+      &world,
+      STRAPPY_TOOL_SKILL_READ) &&
     !strappy_assistant_set_profile_has_quality_check(
       &world,
       STRAPPY_TOOL_MEMORY_SAVE) &&
@@ -2890,8 +2915,9 @@ static int harness_run_assistant_set_tests(void)
       &personal,
       &error) &&
     strappy_assistant_set_profile_is_available(&personal) &&
-    (personal.tool_name_count == 13U) &&
-    (personal.preflight_call_count == 2U) &&
+    (personal.tool_name_count == 15U) &&
+    (personal.skill_identifier_count == 0U) &&
+    (personal.preflight_call_count == 3U) &&
     (strcmp(personal.preflight_when,
             STRAPPY_ASSISTANT_SET_PREFLIGHT_FIRST_USER_PROMPT) == 0) &&
     (strcmp(personal.preflight_assistant_text,
@@ -2901,8 +2927,11 @@ static int harness_run_assistant_set_tests(void)
             STRAPPY_TOOL_MEMORY_READ) == 0) &&
     (strcmp(personal.preflight_calls[0].arguments_json, "{}") == 0) &&
     (strcmp(personal.preflight_calls[1].tool_name,
-            STRAPPY_TOOL_DATABASE_LIST) == 0) &&
+            STRAPPY_TOOL_SKILLS_LIST) == 0) &&
     (strcmp(personal.preflight_calls[1].arguments_json, "{}") == 0) &&
+    (strcmp(personal.preflight_calls[2].tool_name,
+            STRAPPY_TOOL_DATABASE_LIST) == 0) &&
+    (strcmp(personal.preflight_calls[2].arguments_json, "{}") == 0) &&
     (personal.quality_check_key_count == 6U) &&
     strappy_assistant_set_profile_allows_tool(
       &personal,
@@ -2934,6 +2963,7 @@ static int harness_run_assistant_set_tests(void)
     (strcmp(study.display_name,
             STRAPPY_ASSISTANT_SET_DATABASE_STUDY_SESSION_NAME) == 0) &&
     (study.tool_name_count == 6U) &&
+    (study.skill_identifier_count == 0U) &&
     (study.preflight_call_count == 1U) &&
     (study.quality_check_key_count == 2U) &&
     (strcmp(study.preflight_calls[0].tool_name,
@@ -2959,6 +2989,12 @@ static int harness_run_assistant_set_tests(void)
     !strappy_assistant_set_profile_allows_tool(
       &study,
       STRAPPY_TOOL_MEMORY_READ) &&
+    !strappy_assistant_set_profile_allows_tool(
+      &study,
+      STRAPPY_TOOL_SKILLS_LIST) &&
+    !strappy_assistant_set_profile_allows_tool(
+      &study,
+      STRAPPY_TOOL_SKILL_READ) &&
     !strappy_assistant_set_profile_allows_tool(
       &study,
       STRAPPY_TOOL_SESSION_RENAME) &&
@@ -2992,8 +3028,9 @@ static int harness_run_assistant_set_tests(void)
       &coding,
       &error) &&
     strappy_assistant_set_profile_is_available(&coding) &&
-    (coding.tool_name_count == 14U) &&
-    (coding.preflight_call_count == 2U) &&
+    (coding.tool_name_count == 16U) &&
+    (coding.skill_identifier_count == 0U) &&
+    (coding.preflight_call_count == 3U) &&
     (strcmp(coding.preflight_when,
             STRAPPY_ASSISTANT_SET_PREFLIGHT_FIRST_USER_PROMPT) == 0) &&
     (strcmp(coding.preflight_assistant_text,
@@ -3004,9 +3041,12 @@ static int harness_run_assistant_set_tests(void)
             STRAPPY_TOOL_MEMORY_READ) == 0) &&
     (strcmp(coding.preflight_calls[0].arguments_json, "{}") == 0) &&
     (strcmp(coding.preflight_calls[1].tool_name,
+            STRAPPY_TOOL_SKILLS_LIST) == 0) &&
+    (strcmp(coding.preflight_calls[1].arguments_json, "{}") == 0) &&
+    (strcmp(coding.preflight_calls[2].tool_name,
             STRAPPY_TOOL_BASH) == 0) &&
     harness_coding_preflight_bash_arguments_are_valid(
-      coding.preflight_calls[1].arguments_json) &&
+      coding.preflight_calls[2].arguments_json) &&
     strappy_assistant_set_profile_allows_tool(
       &coding,
       STRAPPY_TOOL_FILE_READ) &&
@@ -3056,7 +3096,7 @@ static int harness_run_assistant_set_tests(void)
     coding_tools = (coding_tools_json != NULL) ?
       cJSON_Parse(coding_tools_json) : NULL;
     ok = cJSON_IsArray(world_tools) &&
-      (cJSON_GetArraySize(world_tools) == 10) &&
+      (cJSON_GetArraySize(world_tools) == 12) &&
       harness_responses_tools_contains(
         world_tools,
         STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
@@ -3074,6 +3114,12 @@ static int harness_run_assistant_set_tests(void)
       harness_responses_tools_contains(
         world_tools,
         STRAPPY_TOOL_DATETIME_TO_ISO8601) &&
+      harness_responses_tools_contains(
+        world_tools,
+        STRAPPY_TOOL_SKILLS_LIST) &&
+      harness_responses_tools_contains(
+        world_tools,
+        STRAPPY_TOOL_SKILL_READ) &&
       !harness_responses_tools_contains(
         world_tools,
         STRAPPY_TOOL_FILE_READ) &&
@@ -3090,7 +3136,7 @@ static int harness_run_assistant_set_tests(void)
         world_tools,
         STRAPPY_TOOL_DATABASE_QUERY) &&
       cJSON_IsArray(world_paid_tools) &&
-      (cJSON_GetArraySize(world_paid_tools) == 10) &&
+      (cJSON_GetArraySize(world_paid_tools) == 12) &&
       harness_responses_tools_contains(
         world_paid_tools,
         STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
@@ -3106,7 +3152,7 @@ static int harness_run_assistant_set_tests(void)
         STRAPPY_TOOL_OPENROUTER_WEB_FETCH,
         "exa") &&
       cJSON_IsArray(world_tools_without_web) &&
-      (cJSON_GetArraySize(world_tools_without_web) == 8) &&
+      (cJSON_GetArraySize(world_tools_without_web) == 10) &&
       !harness_responses_tools_contains(
         world_tools_without_web,
         STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
@@ -3114,7 +3160,7 @@ static int harness_run_assistant_set_tests(void)
         world_tools_without_web,
         STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
       cJSON_IsArray(coding_tools) &&
-      (cJSON_GetArraySize(coding_tools) == 14) &&
+      (cJSON_GetArraySize(coding_tools) == 16) &&
       harness_responses_tools_contains(coding_tools,
                                        STRAPPY_TOOL_FILE_READ) &&
       harness_responses_tools_contains(coding_tools,
@@ -3162,6 +3208,197 @@ static int harness_run_assistant_set_tests(void)
   strappy_assistant_set_profile_destroy(&personal);
   strappy_assistant_set_profile_destroy(&world);
   strappy_assistant_set_record_list_destroy(&list);
+  return ok;
+}
+
+static int harness_run_skills_tests(const harness_context *context)
+{
+  static const char *const allowed_skills[] = { "concise-writing" };
+  static const char *const missing_skills[] = { "missing-skill" };
+  char catalog_path[1200];
+  strappy_assistant_set_profile profile;
+  strappy_skill_record_list list;
+  strappy_skill_record record;
+  char *error;
+  char *output;
+  cJSON *root;
+  cJSON *skills;
+  cJSON *item;
+  long long session_id;
+  int ok;
+
+  if ((context == NULL) ||
+      !harness_join_path(catalog_path,
+                         sizeof(catalog_path),
+                         context->temp_dir,
+                         "skills.sqlite")) {
+    return 0;
+  }
+  error = NULL;
+  output = NULL;
+  root = NULL;
+  session_id = 0LL;
+  strappy_assistant_set_profile_init(&profile);
+  strappy_skill_record_list_init(&list);
+  strappy_skill_record_init(&record);
+
+  ok = strappy_assistant_sets_load_profile(
+         HARNESS_SKILLS_FIXTURE_RESOURCE_DIR,
+         STRAPPY_ASSISTANT_SET_PERSONAL_ASSISTANT,
+         &profile,
+         &error) &&
+    strappy_assistant_set_profile_allows_skill(&profile,
+                                               "concise-writing") &&
+    !strappy_assistant_set_profile_allows_skill(&profile,
+                                                "private-notes") &&
+    strappy_skills_list_allowed(
+      HARNESS_SKILLS_FIXTURE_RESOURCE_DIR,
+      allowed_skills,
+      sizeof(allowed_skills) / sizeof(allowed_skills[0]),
+      &list,
+      &error) &&
+    (list.count == 1U) &&
+    (strcmp(list.records[0].identifier, "concise-writing") == 0) &&
+    (strcmp(list.records[0].title, "Concise Writing") == 0) &&
+    (strcmp(list.records[0].description,
+            "Make a written response direct and compact.") == 0) &&
+    (strcmp(list.records[0].instructions,
+            "Lead with the answer. Remove repetition and unnecessary "
+            "qualifiers.") == 0);
+  strappy_skill_record_list_destroy(&list);
+  if (ok) {
+    ok = strappy_skills_read_allowed(
+      HARNESS_SKILLS_FIXTURE_RESOURCE_DIR,
+      allowed_skills,
+      sizeof(allowed_skills) / sizeof(allowed_skills[0]),
+      "concise-writing",
+      &record,
+      &error) &&
+      (strcmp(record.title, "Concise Writing") == 0) &&
+      (strstr(record.instructions, "Lead with the answer.") != NULL);
+  }
+  strappy_skill_record_destroy(&record);
+  if (ok) {
+    free(error);
+    error = NULL;
+    ok = !strappy_skills_validate_allowed(
+      HARNESS_SKILLS_FIXTURE_RESOURCE_DIR,
+      missing_skills,
+      sizeof(missing_skills) / sizeof(missing_skills[0]),
+      &error) &&
+      (error != NULL) &&
+      (strstr(error, "Assistant-set skill is not registered") != NULL);
+  }
+  free(error);
+  error = NULL;
+
+  if (ok) {
+    ok = strappy_db_initialize(catalog_path, &error) &&
+      strappy_db_create_session(catalog_path, &session_id, &error);
+  }
+  if (ok) {
+    output = strappy_tools_execute(catalog_path,
+                                   session_id,
+                                   HARNESS_SKILLS_FIXTURE_RESOURCE_DIR,
+                                   STRAPPY_TOOL_SKILLS_LIST,
+                                   "{}",
+                                   &error);
+    root = (output != NULL) ? cJSON_Parse(output) : NULL;
+    skills = cJSON_IsObject(root) ?
+      cJSON_GetObjectItemCaseSensitive(root, "skills") : NULL;
+    item = cJSON_IsArray(skills) ? cJSON_GetArrayItem(skills, 0) : NULL;
+    ok = cJSON_IsObject(root) && (cJSON_GetArraySize(root) == 1) &&
+      cJSON_IsArray(skills) && (cJSON_GetArraySize(skills) == 1) &&
+      cJSON_IsObject(item) && (cJSON_GetArraySize(item) == 3) &&
+      cJSON_IsString(cJSON_GetObjectItemCaseSensitive(item, "skill_id")) &&
+      (strcmp(cJSON_GetObjectItemCaseSensitive(item,
+                                               "skill_id")->valuestring,
+              "concise-writing") == 0) &&
+      cJSON_IsString(cJSON_GetObjectItemCaseSensitive(item, "title")) &&
+      cJSON_IsString(cJSON_GetObjectItemCaseSensitive(item,
+                                                      "description")) &&
+      (cJSON_GetObjectItemCaseSensitive(item, "instructions") == NULL);
+    cJSON_Delete(root);
+    root = NULL;
+    free(output);
+    output = NULL;
+  }
+  if (ok) {
+    output = strappy_tools_execute(
+      catalog_path,
+      session_id,
+      HARNESS_SKILLS_FIXTURE_RESOURCE_DIR,
+      STRAPPY_TOOL_SKILL_READ,
+      "{\"skill_id\":\"concise-writing\"}",
+      &error);
+    root = (output != NULL) ? cJSON_Parse(output) : NULL;
+    ok = cJSON_IsObject(root) && (cJSON_GetArraySize(root) == 3) &&
+      cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, "skill_id")) &&
+      (strcmp(cJSON_GetObjectItemCaseSensitive(root,
+                                               "skill_id")->valuestring,
+              "concise-writing") == 0) &&
+      cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, "title")) &&
+      cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root,
+                                                      "instructions")) &&
+      (cJSON_GetObjectItemCaseSensitive(root, "description") == NULL);
+    cJSON_Delete(root);
+    root = NULL;
+    free(output);
+    output = NULL;
+  }
+  if (ok) {
+    free(error);
+    error = NULL;
+    output = strappy_tools_execute(
+      catalog_path,
+      session_id,
+      HARNESS_SKILLS_FIXTURE_RESOURCE_DIR,
+      STRAPPY_TOOL_SKILL_READ,
+      "{\"skill_id\":\"private-notes\"}",
+      &error);
+    ok = (output == NULL) && (error != NULL) &&
+      (strstr(error, "not allowed by the assistant set") != NULL);
+  }
+  if (ok) {
+    free(error);
+    error = NULL;
+    output = strappy_tools_execute(
+      catalog_path,
+      session_id,
+      HARNESS_SKILLS_FIXTURE_RESOURCE_DIR,
+      STRAPPY_TOOL_SKILL_READ,
+      "{\"skill_id\":\"Not Valid\"}",
+      &error);
+    ok = (output == NULL) && (error != NULL) &&
+      (strstr(error, "skill_id is invalid") != NULL);
+  }
+  if (ok) {
+    free(error);
+    error = NULL;
+    output = strappy_tools_execute(catalog_path,
+                                   session_id,
+                                   HARNESS_RESOURCE_DIR,
+                                   STRAPPY_TOOL_SKILLS_LIST,
+                                   "{}",
+                                   &error);
+    ok = (output != NULL) &&
+      (strcmp(output,
+              "{\"skills\":[],\"guidance\":\"No instruction skills "
+              "are available to this assistant set.\"}") == 0);
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Skills catalog/tool tests failed: %s\n",
+            (error != NULL) ? error : "unexpected result shape");
+  }
+
+  cJSON_Delete(root);
+  free(output);
+  free(error);
+  strappy_skill_record_destroy(&record);
+  strappy_skill_record_list_destroy(&list);
+  strappy_assistant_set_profile_destroy(&profile);
+  harness_unlink_sqlite_files(catalog_path);
   return ok;
 }
 
@@ -10360,7 +10597,8 @@ int main(void)
        harness_run_database_study_same_batch_guard_tests(&context) &&
        harness_run_database_study_coverage_tests(&context) &&
        harness_run_file_read_tests(&context) &&
-       harness_run_file_mutation_tests(&context);
+       harness_run_file_mutation_tests(&context) &&
+       harness_run_skills_tests(&context);
 
   harness_context_destroy(&context);
 

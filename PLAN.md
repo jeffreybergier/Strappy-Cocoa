@@ -17,7 +17,7 @@ personal context from those databases.
   required architecture.
 - After source changes, run clean builds and capture full build output so
   warnings are visible.
-- Keep prompt, tool, and database guidance resources in
+- Keep prompt, tool, skill, and database guidance resources in
   `source/shared/Resources` synchronized with the C tool registry and prompt
   loader.
 
@@ -116,8 +116,9 @@ Deliverables:
 - [x] Tool registry in C with stable tool names, JSON schemas, argument
   parsing, and result serialization. The registry exposes `database_list`,
   `database_context`, `database_query`, timestamp helpers, `memory_read`,
-  `memory_save`, `memory_delete`, `database_study`, and `session_rename`, plus
-  the Coding Assistant-only `file_read` and `bash` tools.
+  `memory_save`, `memory_delete`, `skills_list`, `skill_read`,
+  `database_study`, and `session_rename`, plus the Coding Assistant-only
+  `file_read` and `bash` tools.
 - [x] Stable database tools named `database_list`,
   `database_context`, and `database_query`, all using assistant-visible
   database IDs when a database is selected.
@@ -131,8 +132,8 @@ Deliverables:
   results.
 - [x] Assistant-set profiles select the system prompt, tool allowlist,
   round-zero preflight, and ordered answer-quality checks. World Knowledge uses
-  only universal tools and `memory_read` preflight; Personal Assistant
-  additionally enables database tools and `database_list` preflight;
+  only universal tools and `memory_read` / `skills_list` preflight; Personal
+  Assistant additionally enables database tools and `database_list` preflight;
   Coding Assistant is available and exclusively receives `file_read` plus the
   per-session, explicitly enabled `bash` tool in addition to the universal
   tools.
@@ -152,9 +153,10 @@ Deliverables:
 - [ ] `database_manage` app action link. The tool result now emits
   `strappy://database-manage`; WebView/native bridge interception that opens
   `PreferencesWindowController` remains open.
-- [x] Runtime prompt, assistant-set, tool, and database guidance resources:
-  `AssistantSets.json`, `SystemPrompt.json`, `GuidanceTools.json`, and
-  `GuidanceDatabase.json`, with system prompts assembled from the effective
+- [x] Runtime prompt, assistant-set, tool, skill, and database guidance
+  resources: `AssistantSets.json`, `SystemPrompt.json`, `GuidanceTools.json`,
+  `GuidanceSkills.json`, and `GuidanceDatabase.json`, with system prompts
+  assembled from the effective
   tool descriptions, audit policy, assistant goal, and invariant contract,
   synchronized with the stable tool names and stricter current guidance that
   supplies `database_list` as a typed preflight tool output, requires

@@ -1,0 +1,35 @@
+{
+  "schema_version": 6,
+  "default_set_id": "personal_assistant",
+  "universal": {
+    "tools": [
+      "skills_list",
+      "skill_read"
+    ],
+    "skills": [
+      "concise-writing"
+    ],
+    "quality_checks": []
+  },
+  "sets": [
+    {
+      "id": "personal_assistant",
+      "display_name": "Fixture Assistant",
+      "detail": "Skills harness fixture",
+      "user_selectable": true,
+      "inherits_universal_tools": true,
+      "inherits_universal_skills": true,
+      "inherits_universal_quality_checks": true,
+      "availability": "available",
+      "goal": "Exercise instruction skills in the Linux harness.",
+      "preflight": {
+        "when": "first_user_prompt",
+        "assistant_text": "Load fixture guidance.",
+        "calls": []
+      },
+      "additional_tools": [],
+      "additional_skills": [],
+      "additional_quality_checks": []
+    }
+  ]
+}

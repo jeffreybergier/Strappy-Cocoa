@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "default_set_id": "personal_assistant",
   "universal": {
     "tools": [
@@ -12,8 +12,11 @@
       "memory_read",
       "memory_save",
       "memory_delete",
+      "skills_list",
+      "skill_read",
       "session_rename"
     ],
+    "skills": [],
     "quality_checks": [
       "answer_non_empty",
       "unicode_emoji_absent",
@@ -29,6 +32,7 @@
       "detail": "General knowledge and web research",
       "user_selectable": true,
       "inherits_universal_tools": true,
+      "inherits_universal_skills": true,
       "inherits_universal_quality_checks": true,
       "availability": "available",
       "goal": "You are an expert world-knowledge assistant. Answer general-knowledge questions and research current public information when useful. You do not have access to the user's personal databases in this assistant set and must never imply that you inspected them.",
@@ -39,10 +43,15 @@
           {
             "name": "memory_read",
             "arguments": {}
+          },
+          {
+            "name": "skills_list",
+            "arguments": {}
           }
         ]
       },
       "additional_tools": [],
+      "additional_skills": [],
       "additional_quality_checks": []
     },
     {
@@ -51,6 +60,7 @@
       "detail": "Personal databases and assistance",
       "user_selectable": true,
       "inherits_universal_tools": true,
+      "inherits_universal_skills": true,
       "inherits_universal_quality_checks": true,
       "availability": "available",
       "goal": "You are an expert personal assistant. Research the user's approved personal databases, including contacts, calendars, emails, and text messages, whenever the request depends on that personal context. Never use your personal voice when quoting directly from a database.",
@@ -60,6 +70,10 @@
         "calls": [
           {
             "name": "memory_read",
+            "arguments": {}
+          },
+          {
+            "name": "skills_list",
             "arguments": {}
           },
           {
@@ -73,6 +87,7 @@
         "database_query",
         "database_context"
       ],
+      "additional_skills": [],
       "additional_quality_checks": [
         "database_context"
       ]
@@ -83,6 +98,7 @@
       "detail": "Code inspection and development",
       "user_selectable": true,
       "inherits_universal_tools": true,
+      "inherits_universal_skills": true,
       "inherits_universal_quality_checks": true,
       "availability": "available",
       "goal": "You are an expert coding assistant. Help inspect, explain, change, and verify software using the coding tools available to you.",
@@ -92,6 +108,10 @@
         "calls": [
           {
             "name": "memory_read",
+            "arguments": {}
+          },
+          {
+            "name": "skills_list",
             "arguments": {}
           },
           {
@@ -108,6 +128,7 @@
         "file_edit",
         "bash"
       ],
+      "additional_skills": [],
       "additional_quality_checks": []
     },
     {
@@ -116,6 +137,7 @@
       "detail": "Internal database coverage workflow",
       "user_selectable": false,
       "inherits_universal_tools": false,
+      "inherits_universal_skills": false,
       "inherits_universal_quality_checks": false,
       "availability": "available",
       "goal": "You are Strappy, an expert database sleuth. Study only the database_ids in the user prompt. A durable description says what useful user data exists. Durable context tells a future assistant exactly how to retrieve it; context is not a schema inventory.\n\nFor each database:\n1. Call database_context.\n2. Use targeted database_query schema inspection to find the user-data entry points and only the supporting tables and columns needed to access them.\n3. Design one to three common user-data access recipes. Each recipe must retrieve useful user-facing fields, use every required join and filter, define useful ordering, and use a literal LIMIT no greater than 100 when it may return many rows.\n4. Execute every final recipe exactly as it will be saved. A sqlite_schema query or generic SELECT * sampling query is not a recipe. Copy saved SQL verbatim from a successful database_query call; never add ?, :name, @name, or $name bind placeholders.\n5. If an executed recipe returns a useful numeric timestamp, verify one returned value with datetime_to_iso8601 and record the column and unit. Otherwise record that no timestamp rule applies.\n6. After the investigation is complete, call database_study exactly once with both description and context.\n\nIn context, give each recipe's purpose and exact verified SQL, followed only by non-obvious field semantics, timestamp rules, and caveats needed to use it. Mention only tables and columns used by the recipes. Do not restate table or view lists or column inventories available from database_context or sqlite_schema. If no useful user-facing data exists, say so and explain the access limitation without substituting a schema summary. Never put sampled values, secrets, or sensitive identifiers in saved study values.",
@@ -137,6 +159,7 @@
         "datetime_to_iso8601",
         "datetime_from_iso8601"
       ],
+      "additional_skills": [],
       "additional_quality_checks": [
         "answer_non_empty",
         "database_context"

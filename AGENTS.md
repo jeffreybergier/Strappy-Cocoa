@@ -83,17 +83,18 @@ House style for Strappy source:
 12. Webview HTML, CSS, and JavaScript strings are generated in C. Keep that
     rendering logic in `strappy_webview.{h,c}` or another C module, not in
     Objective-C view controllers.
-13. Prompt, assistant-set, tool, and database guidance are runtime resources
-    under `source/shared/Resources`: `AssistantSets.json`,
-    `SystemPrompt.json`, `GuidanceTools.json`, and `GuidanceDatabase.json`.
+13. Prompt, assistant-set, tool, skill, and database guidance are runtime
+    resources under `source/shared/Resources`: `AssistantSets.json`,
+    `SystemPrompt.json`, `GuidanceTools.json`, `GuidanceSkills.json`, and
+    `GuidanceDatabase.json`.
     System prompts are assembled programmatically from the selected tools and
     their descriptions, the selected quality checks and their shared policy
     guidance, the assistant-set goal, and the invariant personality/hard-rule
     text. `SystemPrompt.json` owns section copy, prompt-facing audit guidance,
     invariant personality, and hard rules; executable audit evaluation remains
-    code-owned. `AssistantSets.json` owns each set's goal, tool allowlist,
-    first-prompt preflight assistant text, preflight calls and argument values,
-    answer-quality checks, and availability. Keep tool schemas
+    code-owned. `AssistantSets.json` owns each set's goal, tool and skill
+    allowlists, first-prompt preflight assistant text, preflight calls and
+    argument values, answer-quality checks, and availability. Keep tool schemas
     in `GuidanceTools.json` in sync with the tool-name constants in
     `strappy_tools.h` and the executor in `strappy_tools.c`; do not duplicate
     prompt or tool guidance in Objective-C UI code. At the model-facing
@@ -103,6 +104,12 @@ House style for Strappy source:
     emitting tool JSON. Web search and fetch use OpenRouter server tools with a
     single session-selected provider; `strappy_client.c` remains specific to
     OpenRouter.
+    `GuidanceSkills.json` owns the stable id, display title, short routing
+    description, and instruction body for each instruction-only skill.
+    `strappy_skills.c` validates and filters that catalog; `skills_list` exposes
+    only id/title/description metadata and `skill_read` returns one allowed
+    instruction body. Skills never grant tools beyond the active assistant
+    set's tool allowlist.
     Strict assistant workflow
     rules, timestamp guidance, memory guidance, and database-specific
     instructions belong in these resources or the shared quality-policy table,
@@ -123,9 +130,10 @@ House style for Strappy source:
     selected assistant set's configured assistant preflight message, executes
     its configured preflight calls before round zero, and seeds each result as
     a typed `function_call` plus matching `function_call_output` input pair.
-    World Knowledge preflights only `memory_read`; Personal Assistant
-    additionally preflights `database_list`. Coding Assistant preflights
-    `memory_read` and an application-approved `bash` environment probe. The
+    World Knowledge preflights `memory_read` and `skills_list`; Personal
+    Assistant additionally preflights `database_list`. Coding Assistant
+    preflights `memory_read`, `skills_list`, and an application-approved `bash`
+    environment probe. The
     probe reports system information, identity, the working environment, disk
     and header roots, and developer-tool locations and versions. It
     intentionally omits the iOS system-version plist, package architecture, and
@@ -256,7 +264,8 @@ infrastructure:
 7. Filesystem search to search the host device for sqlite databases
 8. Tools that allow the Agent to discover the schema of a sqlite database found
 9. Tools that allow the Agent to answer questions the user asks from the personal context found in the sqlite databases
-10. Helper tools for timestamp conversion, remembered user facts, remembered database hints, and session naming
-11. Runtime assistant-set, prompt, tool, and database guidance resources that
-    select capabilities and steer database selection, SQL workflow, and memory
-    behavior
+10. Helper tools for timestamp conversion, remembered user facts, instruction
+    skills, remembered database hints, and session naming
+11. Runtime assistant-set, prompt, tool, skill, and database guidance resources
+    that select capabilities and steer database selection, SQL workflow,
+    instruction loading, and memory behavior

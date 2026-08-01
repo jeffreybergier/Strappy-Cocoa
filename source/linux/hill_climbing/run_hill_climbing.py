@@ -594,6 +594,7 @@ def main() -> int:
         "AssistantSets.json",
         "SystemPrompt.json",
         "GuidanceTools.json",
+        "GuidanceSkills.json",
         "GuidanceDatabase.json",
     ):
         resource = resource_dir / name
@@ -646,6 +647,7 @@ def main() -> int:
                 "AssistantSets.json",
                 "SystemPrompt.json",
                 "GuidanceTools.json",
+                "GuidanceSkills.json",
                 "GuidanceDatabase.json",
             )
             if (resource_dir / name).is_file()
