@@ -41,13 +41,13 @@ personality, and hard rules in `SystemPrompt.json`:
   assistants disables it again. This setting controls model access only: the
   application-owned first-prompt preflight always runs a bounded environment
   probe and seeds its result, even when model access to Bash is disabled. The
-  probe reports system identity, the current directory and safe shell-path
-  variables, disk/header roots, and a bounded listing of every directory in
-  the login shell's `PATH`, in command-resolution order. This avoids relying on
-  a package manager or a hardcoded command list and works on macOS and other
-  hosts. Selected critical tools also receive a compact version probe. It
-  omits the iOS system-version plist, package architecture, and
-  working-directory listing, and it does not dump the full environment.
+  probe reports compact system and effective-identity information, the current
+  directory and `PATH`, targeted cross-platform, iOS, and macOS developer-tool
+  locations, and the canonical iOS Make include. When installed, `altivec-sdk`
+  and `altivec-lib` also provide their guarded read-only inventories. The probe
+  omits the iOS system-version plist, raw package-architecture queries,
+  disk/header inventories, working-directory listings, complete `PATH`
+  directory inventories, broad tool-version sweeps, and the full environment.
   `file_read` reads bounded UTF-8 text ranges, while `bash` runs a fresh
   non-interactive child shell with a hard 120-second ceiling. File tools and
   Bash share a per-session working directory. New

@@ -1553,25 +1553,32 @@ static int harness_coding_preflight_bash_arguments_are_valid(
 {
   static const char *required_fragments[] = {
     "uname -a",
-    "id",
-    "PWD=$PWD",
+    "command -v id",
+    "UID=%s",
+    "PWD=%s",
+    "PATH=%s",
+    "=== Relevant commands ===",
+    ("for command_name in clang make git altivec-app altivec-sdk "
+     "altivec-lib ldid zip xcrun xcodebuild"),
+    "command -v \"$command_name\"",
+    "/var/altivec/share/altivec/make/ios-app.mk",
+    "command -v altivec-sdk",
+    "altivec-sdk list",
+    "altivec-sdk list exited",
+    "command -v altivec-lib",
+    "altivec-lib list",
+    "altivec-lib list exited"
+  };
+  static const char *forbidden_fragments[] = {
+    "SystemVersion.plist",
+    "dpkg --print-architecture",
     "HOME=$HOME",
     "SHELL=$SHELL",
-    "PATH=$PATH",
     "df -h .",
     "/usr/include",
-    "=== PATH directory contents (resolution order) ===",
-    "Earlier directories win.",
-    "Shell builtins are not PATH entries.",
-    "old_ifs=$IFS",
-    "IFS=:",
-    "path_listing_budget=30000",
-    "for path_dir in $PATH",
-    "COLUMNS=160 LC_ALL=C /bin/ls -mA",
-    "[directory missing]",
-    "[empty]",
-    "[listing failed]",
-    "30000-byte inventory limit reached",
+    "PATH directory contents",
+    "path_listing_budget",
+    "COLUMNS=160",
     "report_version()",
     "clang --version",
     "gcc --version",
@@ -1581,18 +1588,22 @@ static int harness_coding_preflight_bash_arguments_are_valid(
     "curl --version",
     "openssl version",
     "sqlite3 --version",
-    "magick -version"
-  };
-  static const char *forbidden_fragments[] = {
-    "SystemVersion.plist",
-    "dpkg --print-architecture",
+    "magick -version",
     "=== Working directory ===",
     "ls -al",
     "which clang",
     "which gcc",
     "report_group",
     "dpkg-query -W",
-    "com.altivecintelligence.toolchain"
+    "com.altivecintelligence.toolchain",
+    "altivec-app new",
+    "altivec-sdk install",
+    "altivec-sdk select",
+    "altivec-sdk verify",
+    "altivec-lib install",
+    "altivec-lib update",
+    "altivec-lib select",
+    "altivec-lib verify"
   };
   cJSON *root;
   cJSON *command;
