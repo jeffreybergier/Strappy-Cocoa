@@ -88,4 +88,20 @@
   [barButtonItem XP_setTintColorIfAvailable:[self primaryTintColor]];
 }
 
++ (void)applySelectionAppearanceToTableViewCell:(UITableViewCell *)cell
+{
+  UIView *selectedBackgroundView;
+
+  if ((cell == nil) ||
+      [[UIDevice currentDevice]
+        XP_isOperatingSystemAtLeastMajorVersion:7]) {
+    return;
+  }
+
+  selectedBackgroundView = [[UIView alloc] initWithFrame:CGRectZero];
+  [selectedBackgroundView
+    setBackgroundColor:[self highlightedPrimaryTintColor]];
+  [cell setSelectedBackgroundView:selectedBackgroundView];
+}
+
 @end

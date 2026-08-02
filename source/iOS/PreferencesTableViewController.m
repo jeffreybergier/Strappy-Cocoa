@@ -438,6 +438,7 @@ titleForFooterInSection:(NSInteger)section
   [cell setAccessoryType:UITableViewCellAccessoryDisclosureIndicator];
   [cell setAccessoryView:nil];
   [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
+  [StrappyAppearance applySelectionAppearanceToTableViewCell:cell];
   if ([indexPath row] == kStrappyPaneRowSessionDefaults) {
     [[cell textLabel] setText:NSLocalizedString(@"Session Defaults", nil)];
   } else if ([indexPath row] == kStrappyPaneRowModels) {

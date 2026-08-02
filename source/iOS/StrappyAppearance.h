@@ -11,5 +11,6 @@
   (UINavigationController *)navigationController;
 + (void)applyBarAppearanceToSearchBar:(UISearchBar *)searchBar;
 + (void)applyPrimaryTintToBarButtonItem:(UIBarButtonItem *)barButtonItem;
++ (void)applySelectionAppearanceToTableViewCell:(UITableViewCell *)cell;
 
 @end

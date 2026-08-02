@@ -667,6 +667,7 @@ forRowAtIndexPath:(NSIndexPath *)indexPath
   }
   [cell setEditingAccessoryType:UITableViewCellAccessoryNone];
   [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
+  [StrappyAppearance applySelectionAppearanceToTableViewCell:cell];
 }
 
 #pragma mark - UITableViewDelegate
