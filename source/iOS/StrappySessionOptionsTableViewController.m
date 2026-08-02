@@ -362,7 +362,9 @@ titleForFooterInSection:(NSInteger)section
       [UIColor blackColor] : [UIColor grayColor]];
     [cell setSelectionStyle:enabled ?
       UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone];
-    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell];
+    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
+                                                   inTableView:tableView
+                                                  atIndexPath:indexPath];
     [cell setAccessoryType:
       [identifier isEqualToString:
         [[self sessionOptions] assistantSetIdentifier]]
@@ -429,7 +431,9 @@ titleForFooterInSection:(NSInteger)section
       @"Advanced session options", nil)];
     [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
     [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell];
+    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
+                                                   inTableView:tableView
+                                                  atIndexPath:indexPath];
     [cell setAccessoryView:nil];
     [cell setAccessoryType:UITableViewCellAccessoryDisclosureIndicator];
     return cell;
@@ -454,7 +458,9 @@ titleForFooterInSection:(NSInteger)section
     [[cell textLabel] setTextColor:[UIColor blackColor]];
     [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
     [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell];
+    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
+                                                   inTableView:tableView
+                                                  atIndexPath:indexPath];
     [cell setAccessoryView:nil];
     [cell setAccessoryType:
       [identifier isEqualToString:[[self sessionOptions] modelIdentifier]]
@@ -819,7 +825,9 @@ titleForFooterInSection:(NSInteger)section
         : @""];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
     [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell];
+    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
+                                                   inTableView:tableView
+                                                  atIndexPath:indexPath];
     [cell setAccessoryView:nil];
     [cell setAccessoryType:
       (workingDirectoryIndex < [[self workingDirectories] count]) &&
@@ -904,7 +912,9 @@ titleForFooterInSection:(NSInteger)section
     [[cell textLabel] setText:StrappyPromptWebProviderTitle(webProvider)];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
     [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell];
+    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
+                                                   inTableView:tableView
+                                                  atIndexPath:indexPath];
     [cell setAccessoryView:nil];
     [cell setAccessoryType:
       [webProvider isEqualToString:[[self sessionOptions] webProvider]]

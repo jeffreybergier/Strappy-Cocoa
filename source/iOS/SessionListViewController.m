@@ -605,6 +605,9 @@ titleForHeaderInSection:(NSInteger)section
 
   session = [self sessionAtIndexPath:indexPath];
   [self configureSessionCell:cell session:session];
+  [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
+                                                 inTableView:tableView
+                                                atIndexPath:indexPath];
   return cell;
 }
 
@@ -667,7 +670,6 @@ forRowAtIndexPath:(NSIndexPath *)indexPath
   }
   [cell setEditingAccessoryType:UITableViewCellAccessoryNone];
   [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-  [StrappyAppearance applySelectionAppearanceToTableViewCell:cell];
 }
 
 #pragma mark - UITableViewDelegate

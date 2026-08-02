@@ -1,7 +1,81 @@
 #import "StrappyAppearance.h"
 
+#import <QuartzCore/QuartzCore.h>
+
 #import "XPUIKit.h"
 #import "strappy_palette.h"
+
+static const CGFloat kStrappyLegacyGroupedCellCornerRadius = 10.0f;
+
+@interface StrappyLegacySelectionBackgroundView : UIView {
+ @private
+  CAShapeLayer *maskLayer_;
+  UIRectCorner roundedCorners_;
+}
+
+- (void)setRoundedCorners:(UIRectCorner)roundedCorners;
+
+@end
+
+@implementation StrappyLegacySelectionBackgroundView
+
+- (void)setRoundedCorners:(UIRectCorner)roundedCorners
+{
+  if (roundedCorners_ == roundedCorners) {
+    return;
+  }
+  roundedCorners_ = roundedCorners;
+  [self setNeedsLayout];
+}
+
+- (void)layoutSubviews
+{
+  UIBezierPath *path;
+
+  [super layoutSubviews];
+  if (roundedCorners_ == 0U) {
+    [[self layer] setMask:nil];
+    return;
+  }
+
+  if (maskLayer_ == nil) {
+    maskLayer_ = [CAShapeLayer layer];
+  }
+  path = [UIBezierPath
+    bezierPathWithRoundedRect:[self bounds]
+            byRoundingCorners:roundedCorners_
+                  cornerRadii:CGSizeMake(
+                    kStrappyLegacyGroupedCellCornerRadius,
+                    kStrappyLegacyGroupedCellCornerRadius)];
+  [maskLayer_ setFrame:[self bounds]];
+  [maskLayer_ setPath:[path CGPath]];
+  [[self layer] setMask:maskLayer_];
+}
+
+@end
+
+static UIRectCorner StrappyLegacySelectionRoundedCorners(
+  UITableView *tableView,
+  NSIndexPath *indexPath)
+{
+  UIRectCorner roundedCorners;
+  NSInteger rowCount;
+
+  if ((tableView == nil) || (indexPath == nil) ||
+      ([tableView style] != UITableViewStyleGrouped)) {
+    return 0U;
+  }
+
+  roundedCorners = 0U;
+  if ([indexPath row] == 0) {
+    roundedCorners |= UIRectCornerTopLeft | UIRectCornerTopRight;
+  }
+  rowCount = [tableView numberOfRowsInSection:[indexPath section]];
+  if ((rowCount > 0) && ([indexPath row] == (rowCount - 1))) {
+    roundedCorners |= UIRectCornerBottomLeft | UIRectCornerBottomRight;
+  }
+  return roundedCorners;
+}
 
 @implementation StrappyAppearance
 
@@ -89,8 +163,10 @@
 }
 
 + (void)applySelectionAppearanceToTableViewCell:(UITableViewCell *)cell
+                                    inTableView:(UITableView *)tableView
+                                   atIndexPath:(NSIndexPath *)indexPath
 {
-  UIView *selectedBackgroundView;
+  StrappyLegacySelectionBackgroundView *selectedBackgroundView;
 
   if ((cell == nil) ||
       [[UIDevice currentDevice]
@@ -98,10 +174,18 @@
     return;
   }
 
-  selectedBackgroundView = [[UIView alloc] initWithFrame:CGRectZero];
+  selectedBackgroundView = (StrappyLegacySelectionBackgroundView *)
+    [cell selectedBackgroundView];
+  if (![selectedBackgroundView
+        isKindOfClass:[StrappyLegacySelectionBackgroundView class]]) {
+    selectedBackgroundView =
+      [[StrappyLegacySelectionBackgroundView alloc] initWithFrame:CGRectZero];
+    [cell setSelectedBackgroundView:selectedBackgroundView];
+  }
   [selectedBackgroundView
-    setBackgroundColor:[self highlightedPrimaryTintColor]];
-  [cell setSelectedBackgroundView:selectedBackgroundView];
+    setBackgroundColor:[self legacyBarTintColor]];
+  [selectedBackgroundView setRoundedCorners:
+    StrappyLegacySelectionRoundedCorners(tableView, indexPath)];
 }
 
 @end

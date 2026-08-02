@@ -724,7 +724,9 @@ titleForHeaderInSection:(NSInteger)section
   [[cell textLabel] setTextColor:[UIColor blackColor]];
   [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
   [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-  [StrappyAppearance applySelectionAppearanceToTableViewCell:cell];
+  [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
+                                                 inTableView:tableView
+                                                atIndexPath:indexPath];
   [self configureCell:cell withRow:row];
   return cell;
 }
