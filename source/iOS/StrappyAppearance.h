@@ -9,6 +9,7 @@
 + (void)applyApplicationTintToWindow:(UIWindow *)window;
 + (void)applyBarAppearanceToNavigationController:
   (UINavigationController *)navigationController;
++ (void)applyBarAppearanceToSearchBar:(UISearchBar *)searchBar;
 + (void)applyPrimaryTintToBarButtonItem:(UIBarButtonItem *)barButtonItem;
 
 @end

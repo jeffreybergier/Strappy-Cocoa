@@ -59,19 +59,23 @@
 
   usesModernAppearance = [[UIDevice currentDevice]
     XP_isOperatingSystemAtLeastMajorVersion:7];
-  if (usesModernAppearance) {
-    barColor = [self modernBarBackgroundColor];
-    [[navigationController navigationBar]
-      XP_setBarTintColorIfAvailable:barColor];
-    [[navigationController toolbar]
-      XP_setBarTintColorIfAvailable:barColor];
-  } else {
+  if (!usesModernAppearance) {
     barColor = [self legacyBarTintColor];
     [[navigationController navigationBar]
       XP_setTintColorIfAvailable:barColor];
     [[navigationController toolbar]
       XP_setTintColorIfAvailable:barColor];
   }
+}
+
++ (void)applyBarAppearanceToSearchBar:(UISearchBar *)searchBar
+{
+  if ((searchBar == nil) ||
+      [[UIDevice currentDevice]
+        XP_isOperatingSystemAtLeastMajorVersion:7]) {
+    return;
+  }
+  [searchBar XP_setTintColorIfAvailable:[self legacyBarTintColor]];
 }
 
 + (void)applyPrimaryTintToBarButtonItem:(UIBarButtonItem *)barButtonItem
