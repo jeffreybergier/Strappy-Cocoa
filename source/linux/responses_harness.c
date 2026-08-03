@@ -32,12 +32,9 @@
   "{\"skills\":[],\"guidance\":\"No skills available\"}"
 
 #define HARNESS_IOS_DEVELOPMENT_SKILL_DESCRIPTION \
-  "Build, inspect, repair, analyze, package, and optionally install native " \
-  "Objective-C and C iOS applications directly on an iOS device using the " \
-  "locally installed Altivec Toolchain, an installed iPhoneOS SDK, UIKit, " \
-  "Make, `.app` bundles, and IPA archives. Use this skill for legacy or " \
-  "jailbroken-device iOS development and for portable C code shared with " \
-  "Cocoa applications."
+  "Create, build, inspect, repair, analyze, package, and optionally run " \
+  "native Objective-C and C iOS applications on-device with " \
+  "AltivecToolchain."
 
 #define HARNESS_MACOS_DEVELOPMENT_SKILL_DESCRIPTION \
   "Build, inspect, repair, analyze, package, and optionally run native " \
@@ -1222,7 +1219,7 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_FILE_MUTATION = 14,
   HARNESS_RESPONSES_SERVER_PREFLIGHT_FIRST_PROMPT_ONLY = 15,
   HARNESS_RESPONSES_SERVER_ISOLATED_PROMPTS = 16,
-  HARNESS_RESPONSES_SERVER_CONFIGURED_LIMITS = 17
+  HARNESS_RESPONSES_SERVER_ROUND_LIMIT = 17
 } harness_responses_server_scenario;
 
 static int harness_send_all(int socket_fd,
@@ -1842,20 +1839,14 @@ static int harness_request_preflight_contains(cJSON *root,
   return 0;
 }
 
-static int harness_request_max_tool_calls_is_valid(cJSON *root,
-                                                   long expected_limit)
+static int harness_request_omits_max_tool_calls(cJSON *root)
 {
-  cJSON *max_tool_calls;
-
-  max_tool_calls = cJSON_GetObjectItem(root, "max_tool_calls");
-  return cJSON_IsNumber(max_tool_calls) &&
-    (max_tool_calls->valuedouble == (double)expected_limit);
+  return cJSON_GetObjectItem(root, "max_tool_calls") == NULL;
 }
 
-static int harness_request_base_with_tool_call_limit_is_valid(
+static int harness_request_base_is_valid(
   cJSON *root,
   const char *expected_prompt,
-  long expected_tool_call_limit,
   char **session_key_out,
   char **prompt_group_out)
 {
@@ -1905,9 +1896,7 @@ static int harness_request_base_with_tool_call_limit_is_valid(
   text = harness_message_text(cJSON_GetArrayItem(input, 0));
   if (!cJSON_IsFalse(stream) || !cJSON_IsFalse(store) ||
       !cJSON_IsTrue(parallel_tool_calls) ||
-      !harness_request_max_tool_calls_is_valid(
-        root,
-        expected_tool_call_limit) ||
+      !harness_request_omits_max_tool_calls(root) ||
       !cJSON_IsString(instructions) ||
       (instructions->valuestring == NULL) ||
       !harness_instructions_include_resource_sections(
@@ -1948,19 +1937,6 @@ static int harness_request_base_with_tool_call_limit_is_valid(
     }
   }
   return 1;
-}
-
-static int harness_request_base_is_valid(cJSON *root,
-                                         const char *expected_prompt,
-                                         char **session_key_out,
-                                         char **prompt_group_out)
-{
-  return harness_request_base_with_tool_call_limit_is_valid(
-    root,
-    expected_prompt,
-    STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT,
-    session_key_out,
-    prompt_group_out);
 }
 
 static int harness_world_knowledge_tools_are_valid(cJSON *tools,
@@ -2399,9 +2375,7 @@ static int harness_coding_assistant_request_is_valid(
       harness_preflight_bash_output_is_valid(cJSON_GetArrayItem(input, 7),
                                              bash_call)) &&
     cJSON_IsArray(tools) &&
-    harness_request_max_tool_calls_is_valid(
-      root,
-      STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT) &&
+    harness_request_omits_max_tool_calls(root) &&
     (parallel_tool_calls ?
       cJSON_IsTrue(parallel_tool_calls_value) :
       cJSON_IsFalse(parallel_tool_calls_value)) &&
@@ -3407,7 +3381,7 @@ static int harness_run_function_tool_server(int listener_fd)
   return ok;
 }
 
-static int harness_run_configured_limits_server(int listener_fd)
+static int harness_run_round_limit_server(int listener_fd)
 {
   static const char *first_tool_response =
     "{\"id\":\"resp-limit-first\",\"object\":\"response\","
@@ -3447,10 +3421,9 @@ static int harness_run_configured_limits_server(int listener_fd)
   root = cJSON_Parse(body);
   free(body);
   ok = cJSON_IsObject(root) &&
-    harness_request_base_with_tool_call_limit_is_valid(
+    harness_request_base_is_valid(
       root,
       "Reach the configured round limit",
-      7L,
       &session_key,
       &prompt_group) &&
     harness_send_json_response(client_fd, 200L, first_tool_response);
@@ -3471,7 +3444,7 @@ static int harness_run_configured_limits_server(int listener_fd)
   root = cJSON_Parse(body);
   free(body);
   ok = cJSON_IsObject(root) &&
-    harness_request_max_tool_calls_is_valid(root, 7L) &&
+    harness_request_omits_max_tool_calls(root) &&
     harness_named_function_output_request_is_valid(
       root,
       session_key,
@@ -3485,7 +3458,7 @@ static int harness_run_configured_limits_server(int listener_fd)
   free(session_key);
   free(prompt_group);
   if (!ok) {
-    fprintf(stderr, "Configured-limits server rejected a request.\n");
+    fprintf(stderr, "Round-limit server rejected a request.\n");
   }
   return ok;
 }
@@ -4000,8 +3973,8 @@ static int harness_start_server(harness_responses_server_scenario scenario,
       ok = harness_run_valid_web_reference_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_FUNCTION_TOOL) {
       ok = harness_run_function_tool_server(listener_fd);
-    } else if (scenario == HARNESS_RESPONSES_SERVER_CONFIGURED_LIMITS) {
-      ok = harness_run_configured_limits_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_ROUND_LIMIT) {
+      ok = harness_run_round_limit_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_BASH_CANCELLATION) {
       ok = harness_run_bash_cancellation_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_BASH_OUTPUT) {
@@ -5604,46 +5577,85 @@ static int harness_test_function_tool_continuation(void)
   return ok;
 }
 
-static int harness_test_configured_limits(void)
+typedef struct harness_round_limit_events {
+  long error_update_count;
+  int valid;
+} harness_round_limit_events;
+
+static int harness_record_round_limit_event(
+  const strappy_responses_event *event,
+  void *user_data)
 {
-  char path[] = "/tmp/strappy-responses-configured-limits-XXXXXX";
+  harness_round_limit_events *events;
+
+  events = (harness_round_limit_events *)user_data;
+  if ((events == NULL) || (event == NULL)) {
+    return 1;
+  }
+  if ((event->type == STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED) &&
+      (event->status_kind != NULL) &&
+      (strcmp(event->status_kind, "response_error") == 0)) {
+    events->error_update_count++;
+    if ((event->kind == NULL) ||
+        (strcmp(event->kind, "response_api_call") != 0) ||
+        (event->render_role == NULL) ||
+        (strcmp(event->render_role, "api_error") != 0) ||
+        (event->message_key == NULL) ||
+        (strncmp(event->message_key,
+                 "response-call-",
+                 strlen("response-call-")) != 0)) {
+      events->valid = 0;
+    }
+  }
+  return 1;
+}
+
+static int harness_test_round_limit(void)
+{
+  char path[] = "/tmp/strappy-responses-round-limit-XXXXXX";
   char endpoint[128];
   char *error;
   char *result;
   sqlite3 *db;
   strappy_session_options options;
+  strappy_session_message_record_list timeline;
+  harness_round_limit_events events;
   long long session_id;
   long long value;
+  size_t timeline_index;
   pid_t server_pid;
   int fd;
+  int saw_round_limit_status;
   int server_ok;
   int ok;
 
   fd = mkstemp(path);
   if (fd < 0) {
-    return harness_fail("Could not create configured-limits database.");
+    return harness_fail("Could not create round-limit database.");
   }
   close(fd);
   error = NULL;
   session_id = 0LL;
+  saw_round_limit_status = 0;
+  memset(&events, 0, sizeof(events));
+  events.valid = 1;
   strappy_session_options_init(&options);
+  strappy_session_message_record_list_init(&timeline);
   ok = harness_create_session_database(path, &session_id, &error) &&
     strappy_db_load_session_options(path, session_id, &options, &error);
   if (ok) {
-    options.tool_call_limit = 7L;
     options.round_limit = 2L;
     ok = strappy_db_update_session_options(
       path,
       session_id,
       &options,
-      STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT |
-        STRAPPY_SESSION_OPTION_ROUND_LIMIT,
+      STRAPPY_SESSION_OPTION_ROUND_LIMIT,
       NULL,
       NULL,
       &error);
   }
   if (ok) {
-    ok = harness_start_server(HARNESS_RESPONSES_SERVER_CONFIGURED_LIMITS,
+    ok = harness_start_server(HARNESS_RESPONSES_SERVER_ROUND_LIMIT,
                               endpoint,
                               sizeof(endpoint),
                               &server_pid);
@@ -5651,14 +5663,14 @@ static int harness_test_configured_limits(void)
   strappy_session_options_destroy(&options);
   if (!ok) {
     fprintf(stderr,
-            "Could not prepare configured-limits integration test: %s\n",
+            "Could not prepare round-limit integration test: %s\n",
             (error != NULL) ? error : "server setup failed");
     free(error);
     unlink(path);
     return 0;
   }
 
-  result = strappy_responses_send_prompt_for_session_and_store(
+  result = strappy_responses_send_prompt_for_session_and_store_with_events(
     "Reach the configured round limit",
     "/dev/null",
     endpoint,
@@ -5666,10 +5678,13 @@ static int harness_test_configured_limits(void)
     "../shared/Resources",
     path,
     session_id,
+    harness_record_round_limit_event,
+    &events,
     &error);
   server_ok = harness_wait_for_server(server_pid, 0);
   ok = (result == NULL) && (error != NULL) &&
-    (strcmp(error, "Response round limit reached.") == 0) && server_ok;
+    (strcmp(error, "Response round limit reached.") == 0) && server_ok &&
+    events.valid && (events.error_update_count == 1L);
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
@@ -5677,26 +5692,67 @@ static int harness_test_configured_limits(void)
                            &value) && (value == 2LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
-                        "max_tool_calls=7 AND round_index IN (0,1);",
-                        &value) && (value == 2LL) &&
+                        "state='completed';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests WHERE "
+                        "state='error' AND round_index=1;",
+                        &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM http_attempts WHERE "
                         "state='completed';",
-                        &value) && (value == 2LL) &&
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM http_attempts a "
+                        "JOIN api_results r ON r.attempt_id=a.id "
+                        "WHERE a.state='response_error' "
+                        "AND r.provider_status='completed' "
+                        "AND r.error_type='harness_error' "
+                        "AND r.error_code='round_limit_reached' "
+                        "AND r.error_message='Response round limit reached.';",
+                        &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM session_settings WHERE "
-                        "session_id > 0 AND tool_call_limit=7 "
-                        "AND round_limit=2;",
+                        "session_id > 0 AND round_limit=2;",
                         &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;
   }
+  if (ok) {
+    ok = strappy_db_list_response_timeline(path,
+                                           session_id,
+                                           &timeline,
+                                           &error);
+  }
+  for (timeline_index = 0U;
+       ok && (timeline_index < timeline.count);
+       timeline_index++) {
+    const strappy_session_message_record *record;
+
+    record = &timeline.records[timeline_index];
+    if ((record->kind != NULL) &&
+        (strcmp(record->kind, "response_api_call") == 0) &&
+        (record->round_index == 1L)) {
+      saw_round_limit_status = record->is_error &&
+        (record->attempt_state != NULL) &&
+        (strcmp(record->attempt_state, "response_error") == 0) &&
+        (record->content != NULL) &&
+        (strstr(record->content, "Response round limit reached.") != NULL) &&
+        (record->metadata_json != NULL) &&
+        (strstr(record->metadata_json,
+                "\"code\":\"round_limit_reached\"") != NULL);
+    }
+  }
+  if (ok && !saw_round_limit_status) {
+    ok = 0;
+  }
   if (!ok) {
     fprintf(stderr,
-            "Configured Responses limits failed: %s\n",
+            "Configured Responses round limit failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
+  strappy_session_message_record_list_destroy(&timeline);
   free(error);
   unlink(path);
   return ok;
@@ -6930,7 +6986,7 @@ static int harness_test_ledger(void)
     "\"instructions\":\"System\",\"input\":[{\"type\":\"message\","
     "\"role\":\"user\",\"content\":[{\"type\":\"input_text\","
     "\"text\":\"Hello\"}]}],\"max_output_tokens\":100,"
-    "\"max_tool_calls\":13,\"parallel_tool_calls\":true,"
+    "\"parallel_tool_calls\":true,"
     "\"reasoning\":{\"enabled\":true},"
     "\"tools\":[],\"tool_choice\":\"auto\","
     "\"provider\":{\"require_parameters\":true},"
@@ -7077,10 +7133,6 @@ static int harness_test_ledger(void)
     return harness_fail("Could not inspect Responses harness database.");
   }
   ok = harness_verify_call_columns(db, request_json, response_json) &&
-    harness_query_int(db,
-                      "SELECT COUNT(*) FROM model_requests WHERE "
-                      "max_tool_calls=13;",
-                      &value) && (value == 1LL) &&
     harness_query_int(db,
                       "SELECT COUNT(*) FROM conversation_items;",
                       &value) && (value == 6LL) &&
@@ -7838,7 +7890,7 @@ int main(void)
       harness_test_web_search_requires_markdown_reference() &&
       harness_test_valid_web_reference_passes_content_check() &&
       harness_test_function_tool_continuation() &&
-      harness_test_configured_limits() &&
+      harness_test_round_limit() &&
       harness_test_file_mutation_continuation() &&
       harness_test_bash_disabled_request() &&
       harness_test_bash_output_truncation_flag() &&

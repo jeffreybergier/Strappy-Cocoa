@@ -139,7 +139,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
              webSearchEnabled:NO
                   bashEnabled:NO
                limitToOneTool:NO
-                toolCallLimit:StrappySessionDefaultToolCallLimit
                    roundLimit:StrappySessionDefaultRoundLimit
              workingDirectory:@""];
   }
@@ -368,7 +367,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   NSArray *models;
   NSString *selectedModelIdentifier;
   NSString *selectedTitle;
-  NSString *webProvider;
   NSUInteger index;
   BOOL foundSelectedModel;
 
@@ -391,10 +389,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 
   foundSelectedModel = NO;
   selectedTitle = nil;
-  webProvider = [sessionOptions_ webProvider];
-  if (![StrappyPromptWebProviders() containsObject:webProvider]) {
-    webProvider = StrappyWebProviderNone;
-  }
   [webProviderMenuItem_ release];
   webProviderMenuItem_ = nil;
   [webProviderMenu_ release];
@@ -639,7 +633,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
              webSearchEnabled:NO
                   bashEnabled:NO
                limitToOneTool:NO
-                toolCallLimit:StrappySessionDefaultToolCallLimit
                    roundLimit:StrappySessionDefaultRoundLimit
              workingDirectory:@""] autorelease];
   }

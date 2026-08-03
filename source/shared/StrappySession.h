@@ -17,7 +17,6 @@ extern NSString * const StrappyWebProviderAuto;
 extern NSString * const StrappyWebProviderNative;
 extern NSString * const StrappyWebProviderExa;
 extern NSString * const StrappyWebProviderParallel;
-extern const NSUInteger StrappySessionDefaultToolCallLimit;
 extern const NSUInteger StrappySessionDefaultRoundLimit;
 extern const NSUInteger StrappySessionMaximumLimit;
 
@@ -31,7 +30,6 @@ enum {
   StrappySessionOptionBash = 1U << 4,
   StrappySessionOptionLimitToOneTool = 1U << 5,
   StrappySessionOptionWorkingDirectory = 1U << 6,
-  StrappySessionOptionToolCallLimit = 1U << 7,
   StrappySessionOptionRoundLimit = 1U << 8,
   StrappySessionOptionAll =
     StrappySessionOptionModel |
@@ -41,7 +39,6 @@ enum {
     StrappySessionOptionBash |
     StrappySessionOptionLimitToOneTool |
     StrappySessionOptionWorkingDirectory |
-    StrappySessionOptionToolCallLimit |
     StrappySessionOptionRoundLimit
 };
 
@@ -54,7 +51,6 @@ enum {
   BOOL webSearchEnabled_;
   BOOL bashEnabled_;
   BOOL limitToOneTool_;
-  NSUInteger toolCallLimit_;
   NSUInteger roundLimit_;
 }
 
@@ -64,8 +60,7 @@ enum {
              webSearchEnabled:(BOOL)webSearchEnabled
                   bashEnabled:(BOOL)bashEnabled
                limitToOneTool:(BOOL)limitToOneTool
-                toolCallLimit:(NSUInteger)toolCallLimit
-                    roundLimit:(NSUInteger)roundLimit
+                   roundLimit:(NSUInteger)roundLimit
              workingDirectory:(NSString *)workingDirectory;
 - (NSString *)modelIdentifier;
 - (void)setModelIdentifier:(NSString *)modelIdentifier;
@@ -79,8 +74,6 @@ enum {
 - (void)setBashEnabled:(BOOL)enabled;
 - (BOOL)limitToOneTool;
 - (void)setLimitToOneTool:(BOOL)enabled;
-- (NSUInteger)toolCallLimit;
-- (void)setToolCallLimit:(NSUInteger)toolCallLimit;
 - (NSUInteger)roundLimit;
 - (void)setRoundLimit:(NSUInteger)roundLimit;
 - (NSString *)workingDirectory;

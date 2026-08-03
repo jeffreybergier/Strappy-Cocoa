@@ -1409,7 +1409,6 @@ static char *strappy_responses_build_request_json(
   long round_index,
   const char *tools_json,
   int parallel_tool_calls,
-  long tool_call_limit,
   const strappy_response_item_raw_record_list *history,
   const strappy_responses_owned_items *new_items,
   long *new_input_start_index_out,
@@ -1417,7 +1416,6 @@ static char *strappy_responses_build_request_json(
 {
   strappy_responses_buffer buffer;
   char round_text[64];
-  char tool_call_limit_text[64];
   char *model_json;
   char *instructions_json;
   char *session_key;
@@ -1430,9 +1428,7 @@ static char *strappy_responses_build_request_json(
 
   if ((config == NULL) || (config->api_model == NULL) ||
       (instructions == NULL) || (prompt_group_key == NULL) ||
-      (tools_json == NULL) || (history == NULL) || (new_items == NULL) ||
-      (tool_call_limit < 1L) ||
-      (tool_call_limit > STRAPPY_SESSION_MAX_LIMIT)) {
+      (tools_json == NULL) || (history == NULL) || (new_items == NULL)) {
     strappy_set_error(error_out, "Responses request builder is incomplete.");
     return NULL;
   }
@@ -1445,16 +1441,6 @@ static char *strappy_responses_build_request_json(
     strappy_set_error(error_out, "Responses round number is invalid.");
     return NULL;
   }
-  written = snprintf(tool_call_limit_text,
-                     sizeof(tool_call_limit_text),
-                     "%ld",
-                     tool_call_limit);
-  if ((written < 0) ||
-      ((size_t)written >= sizeof(tool_call_limit_text))) {
-    strappy_set_error(error_out, "Responses tool-call limit is invalid.");
-    return NULL;
-  }
-
   model_json = strappy_responses_json_string(config->api_model);
   instructions_json = strappy_responses_json_string(instructions);
   session_key = strappy_responses_session_key(session_id);
@@ -1525,11 +1511,7 @@ static char *strappy_responses_build_request_json(
     &buffer,
     "],\"include\":[\"reasoning.encrypted_content\"],"
     "\"reasoning\":{\"enabled\":true,\"summary\":\"auto\"},"
-    "\"max_tool_calls\":") &&
-    strappy_responses_buffer_append_string(&buffer, tool_call_limit_text) &&
-    strappy_responses_buffer_append_string(
-      &buffer,
-      ",\"parallel_tool_calls\":") &&
+    "\"parallel_tool_calls\":") &&
     strappy_responses_buffer_append_string(
       &buffer,
       parallel_tool_calls ? "true" : "false") &&
@@ -1558,7 +1540,6 @@ typedef struct strappy_responses_runtime {
   char *request_url;
   int is_first_user_prompt;
   int parallel_tool_calls;
-  long tool_call_limit;
   long round_limit;
 } strappy_responses_runtime;
 
@@ -1575,7 +1556,6 @@ static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
   runtime->request_url = NULL;
   runtime->is_first_user_prompt = 0;
   runtime->parallel_tool_calls = 1;
-  runtime->tool_call_limit = STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT;
   runtime->round_limit = STRAPPY_SESSION_DEFAULT_ROUND_LIMIT;
 }
 
@@ -1810,7 +1790,6 @@ static int strappy_responses_prepare_runtime(
     : STRAPPY_WEB_PROVIDER_NONE;
   bash_enabled = session.bash_enabled ? 1 : 0;
   runtime->parallel_tool_calls = session.limit_to_one_tool ? 0 : 1;
-  runtime->tool_call_limit = session.tool_call_limit;
   runtime->round_limit = session.round_limit;
   runtime->is_first_user_prompt =
     (session.prompt == NULL) || (session.prompt[0] == '\0');
@@ -2170,6 +2149,39 @@ static void strappy_responses_call_did_finish(
     event.status_started_ms = http->started_at_ms;
     event.status_updated_ms = http->completed_at_ms;
   }
+  (void)callback(&event, callback_data);
+}
+
+static void strappy_responses_call_did_reach_round_limit(
+  long long session_id,
+  long long call_id,
+  const char *prompt_group_key,
+  strappy_responses_event_callback callback,
+  void *callback_data)
+{
+  strappy_responses_event event;
+  char message_key[64];
+
+  syslog(LOG_NOTICE,
+         "StrappyResponses round_limit_reached session=%lld call=%lld",
+         session_id,
+         call_id);
+  if (callback == NULL) {
+    return;
+  }
+
+  snprintf(message_key,
+           sizeof(message_key),
+           "response-call-%lld",
+           call_id);
+  memset(&event, 0, sizeof(event));
+  event.type = STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED;
+  event.prompt_group_key = prompt_group_key;
+  event.actor = "api";
+  event.kind = "response_api_call";
+  event.message_key = message_key;
+  event.render_role = "api_error";
+  event.status_kind = "response_error";
   (void)callback(&event, callback_data);
 }
 
@@ -2819,7 +2831,6 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
       round_index,
       runtime.tools_json,
       runtime.parallel_tool_calls,
-      runtime.tool_call_limit,
       &history,
       &new_items,
       &new_input_start_index,
@@ -2948,23 +2959,46 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
   if ((round_index >= runtime.round_limit) &&
       ((error_out == NULL) || (*error_out == NULL))) {
     char *limit_message;
+    char *mark_error;
+    const char *message;
+    int marked;
 
     limit_message = strappy_tools_tool_guidance_string(
       runtime.config.guidance_resource_dir,
       "assistant_messages",
       "round_limit",
       NULL);
-    strappy_set_error(error_out,
-                      (limit_message != NULL) ? limit_message :
-                        "Responses round limit was reached.");
+    message = (limit_message != NULL) ? limit_message :
+      "Responses round limit was reached.";
+    mark_error = NULL;
+    marked = strappy_db_mark_response_call_round_limit(
+      session_db_path,
+      previous_call_id,
+      message,
+      &mark_error);
+    if (marked) {
+      strappy_responses_call_did_reach_round_limit(session_id,
+                                                   previous_call_id,
+                                                   prompt_group_key,
+                                                   callback,
+                                                   callback_data);
+      strappy_set_error(error_out, message);
+    } else {
+      strappy_set_error(
+        error_out,
+        (mark_error != NULL) ? mark_error :
+          "Could not save the Responses round-limit result.");
+    }
     strappy_responses_update_failure_summary(
       session_db_path,
       session_id,
       prompt,
       last_model,
       last_http_status,
-      (limit_message != NULL) ? limit_message :
-        "Responses round limit was reached.");
+      marked ? message :
+        ((mark_error != NULL) ? mark_error :
+          "Could not save the Responses round-limit result."));
+    free(mark_error);
     free(limit_message);
   }
 

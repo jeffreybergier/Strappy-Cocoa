@@ -610,7 +610,6 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
              webSearchEnabled:NO
                   bashEnabled:NO
                limitToOneTool:NO
-                toolCallLimit:StrappySessionDefaultToolCallLimit
                    roundLimit:StrappySessionDefaultRoundLimit
              workingDirectory:@""];
   }

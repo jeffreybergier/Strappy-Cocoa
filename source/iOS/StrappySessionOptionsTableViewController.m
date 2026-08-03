@@ -88,7 +88,6 @@ enum {
 
 enum {
   kStrappyPromptDebugLimitRowLimitToOneTool = 0,
-  kStrappyPromptDebugLimitRowToolCallLimit,
   kStrappyPromptDebugLimitRowRoundLimit,
   kStrappyPromptDebugLimitRowCount
 };
@@ -140,7 +139,6 @@ static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
 @property (nonatomic, copy) StrappySessionOptions *sessionOptions;
 @property (nonatomic, copy) NSArray *workingDirectories;
 @property (nonatomic, strong) UISwitch *limitToOneToolSwitch;
-@property (nonatomic, strong) UITextField *toolCallLimitField;
 @property (nonatomic, strong) UITextField *roundLimitField;
 - (instancetype)initWithOptionsDelegate:
     (id<StrappySessionOptionsTableViewControllerDelegate>)optionsDelegate;
@@ -586,7 +584,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 - (void)viewDidLoad
 {
   UISwitch *limitToOneToolSwitch;
-  UITextField *toolCallLimitField;
   UITextField *roundLimitField;
   UIToolbar *keyboardToolbar;
   UIBarButtonItem *flexibleItem;
@@ -612,19 +609,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
                          action:@selector(limitFieldDoneAction:)];
   [keyboardToolbar setItems:[NSArray arrayWithObjects:
     flexibleItem, doneItem, nil]];
-
-  toolCallLimitField = [[UITextField alloc]
-    initWithFrame:CGRectMake(0.0f, 0.0f, 72.0f, 30.0f)];
-  [toolCallLimitField setKeyboardType:UIKeyboardTypeNumberPad];
-  [toolCallLimitField XP_setTextAlignmentRight];
-  [toolCallLimitField setContentVerticalAlignment:
-    UIControlContentVerticalAlignmentCenter];
-  [toolCallLimitField setDelegate:self];
-  [toolCallLimitField setInputAccessoryView:keyboardToolbar];
-  [toolCallLimitField addTarget:self
-                         action:@selector(toolCallLimitFieldEditingDidEnd:)
-               forControlEvents:UIControlEventEditingDidEnd];
-  [self setToolCallLimitField:toolCallLimitField];
 
   roundLimitField = [[UITextField alloc]
     initWithFrame:CGRectMake(0.0f, 0.0f, 72.0f, 30.0f)];
@@ -664,8 +648,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [[self limitToOneToolSwitch]
     setOn:[[self sessionOptions] limitToOneTool]
   animated:NO];
-  [[self toolCallLimitField] setText:[NSString stringWithFormat:
-    @"%lu", (unsigned long)[[self sessionOptions] toolCallLimit]]];
   [[self roundLimitField] setText:[NSString stringWithFormat:
     @"%lu", (unsigned long)[[self sessionOptions] roundLimit]]];
   [[self tableView] reloadData];
@@ -692,26 +674,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     [self setSessionOptions:[optionsDelegate sessionOptions]];
   }
   [sender setOn:[[self sessionOptions] limitToOneTool] animated:YES];
-}
-
-- (void)toolCallLimitFieldEditingDidEnd:(UITextField *)sender
-{
-  id<StrappySessionOptionsTableViewControllerDelegate> optionsDelegate;
-  StrappySessionOptions *options;
-  NSUInteger limit;
-
-  optionsDelegate = [self optionsDelegate];
-  if ((optionsDelegate != nil) &&
-      StrappyPromptParseLimit([sender text], &limit)) {
-    options = [[optionsDelegate sessionOptions] copy];
-    [options setToolCallLimit:limit];
-    (void)[optionsDelegate updateSessionOptions:options
-                                           changedFields:
-                                             StrappySessionOptionToolCallLimit];
-    [self setSessionOptions:[optionsDelegate sessionOptions]];
-  }
-  [sender setText:[NSString stringWithFormat:
-    @"%lu", (unsigned long)[[self sessionOptions] toolCallLimit]]];
 }
 
 - (void)roundLimitFieldEditingDidEnd:(UITextField *)sender
@@ -789,8 +751,7 @@ titleForFooterInSection:(NSInteger)section
   }
   if (section == kStrappyPromptDebugSectionLimits) {
     return NSLocalizedString(
-      @"Tool Call Limit applies to OpenRouter server tools in each response. "
-       @"Round Limit includes the first model request and excludes retries.",
+      @"Round Limit includes the first model request and excludes retries.",
       nil);
   }
   if (section == kStrappyPromptDebugSectionSearchProvider) {
@@ -867,17 +828,9 @@ titleForFooterInSection:(NSInteger)section
     NSString *title;
     NSString *detail;
 
-    if ([indexPath row] == kStrappyPromptDebugLimitRowToolCallLimit) {
-      limitField = [self toolCallLimitField];
-      title = NSLocalizedString(@"Tool Call Limit", nil);
-      detail = NSLocalizedString(
-        @"Maximum server tool calls per response", nil);
-    } else {
-      limitField = [self roundLimitField];
-      title = NSLocalizedString(@"Round Limit", nil);
-      detail = NSLocalizedString(
-        @"Maximum model rounds per prompt", nil);
-    }
+    limitField = [self roundLimitField];
+    title = NSLocalizedString(@"Round Limit", nil);
+    detail = NSLocalizedString(@"Maximum model rounds per prompt", nil);
     cell = [tableView dequeueReusableCellWithIdentifier:@"LimitValueCell"];
     if (cell == nil) {
       cell = [[UITableViewCell alloc]

@@ -717,11 +717,12 @@ static const char *strappy_tools_schema_property_value_type(cJSON *type)
   const char *value_type;
   int null_count;
 
-  if (cJSON_IsString(type) && (type->valuestring != NULL) &&
+  if ((type != NULL) && cJSON_IsString(type) &&
+      (type->valuestring != NULL) &&
       (type->valuestring[0] != '\0')) {
     return type->valuestring;
   }
-  if (!cJSON_IsArray(type)) {
+  if ((type == NULL) || !cJSON_IsArray(type)) {
     return NULL;
   }
 
@@ -1939,7 +1940,8 @@ static int strappy_tools_add_result_guidance(cJSON *result,
     cJSON_GetObjectItemCaseSensitive(result_guidance, tool_name) : NULL;
   guidance = cJSON_IsObject(tool_guidance) ?
     cJSON_GetObjectItemCaseSensitive(tool_guidance, condition_name) : NULL;
-  if (!cJSON_IsString(guidance) || (guidance->valuestring == NULL) ||
+  if ((guidance == NULL) || !cJSON_IsString(guidance) ||
+      (guidance->valuestring == NULL) ||
       (guidance->valuestring[0] == '\0')) {
     cJSON_Delete(root);
     strappy_set_formatted_error(
@@ -5752,7 +5754,8 @@ static int strappy_tools_fontawesome_add_candidate(
 
   shortcode = cJSON_IsObject(icon) ?
     cJSON_GetObjectItemCaseSensitive(icon, "shortcode") : NULL;
-  if (!cJSON_IsString(shortcode) || (shortcode->valuestring == NULL)) {
+  if ((shortcode == NULL) || !cJSON_IsString(shortcode) ||
+      (shortcode->valuestring == NULL)) {
     strappy_set_error(error_out,
                       "Font Awesome icon resource contains a malformed icon.");
     return 0;

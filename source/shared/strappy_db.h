@@ -5,7 +5,6 @@
 
 #include <stddef.h>
 
-#define STRAPPY_SESSION_DEFAULT_TOOL_CALL_LIMIT 25
 #define STRAPPY_SESSION_DEFAULT_ROUND_LIMIT 50
 #define STRAPPY_SESSION_MAX_LIMIT 2147483647
 
@@ -28,7 +27,6 @@ typedef struct strappy_session_record {
   int web_search_enabled;
   int bash_enabled;
   int limit_to_one_tool;
-  long tool_call_limit;
   long round_limit;
   long http_status;
 } strappy_session_record;
@@ -48,7 +46,6 @@ enum {
   STRAPPY_SESSION_OPTION_BASH = 1U << 4,
   STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL = 1U << 5,
   STRAPPY_SESSION_OPTION_WORKING_DIRECTORY = 1U << 6,
-  STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT = 1U << 7,
   STRAPPY_SESSION_OPTION_ROUND_LIMIT = 1U << 8,
   STRAPPY_SESSION_OPTION_ALL =
     STRAPPY_SESSION_OPTION_MODEL |
@@ -58,7 +55,6 @@ enum {
     STRAPPY_SESSION_OPTION_BASH |
     STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
     STRAPPY_SESSION_OPTION_WORKING_DIRECTORY |
-    STRAPPY_SESSION_OPTION_TOOL_CALL_LIMIT |
     STRAPPY_SESSION_OPTION_ROUND_LIMIT
 };
 
@@ -70,7 +66,6 @@ typedef struct strappy_session_options {
   int web_search_enabled;
   int bash_enabled;
   int limit_to_one_tool;
-  long tool_call_limit;
   long round_limit;
 } strappy_session_options;
 
@@ -629,6 +624,11 @@ int strappy_db_begin_response_call(
 int strappy_db_finish_response_call(
   const char *db_path,
   const strappy_response_call_finish_input *input,
+  char **error_out);
+int strappy_db_mark_response_call_round_limit(
+  const char *db_path,
+  long long call_id,
+  const char *message,
   char **error_out);
 int strappy_db_list_canonical_response_items(
   const char *db_path,
