@@ -18,6 +18,12 @@ typedef struct strappy_study_database_id_list {
   size_t count;
 } strappy_study_database_id_list;
 
+typedef struct strappy_study_batch {
+  strappy_study_database_id_list database_ids;
+  strappy_study_database_id_list pending_database_ids;
+  char *prompt;
+} strappy_study_batch;
+
 typedef struct strappy_study_database_status_record {
   char *database_id;
   char *path;
@@ -39,6 +45,8 @@ void strappy_study_database_id_list_init(
   strappy_study_database_id_list *list);
 void strappy_study_database_id_list_destroy(
   strappy_study_database_id_list *list);
+void strappy_study_batch_init(strappy_study_batch *batch);
+void strappy_study_batch_destroy(strappy_study_batch *batch);
 void strappy_study_database_status_record_list_init(
   strappy_study_database_status_record_list *list);
 void strappy_study_database_status_record_list_destroy(
@@ -76,9 +84,9 @@ int strappy_study_list_unstudied_database_ids(
   const char *db_path,
   strappy_study_database_id_list *list,
   char **error_out);
-char *strappy_study_batch_prompt(const char * const *database_ids,
-                                 size_t database_id_count,
-                                 char **error_out);
+int strappy_study_next_batch(const char *db_path,
+                             strappy_study_batch *batch,
+                             char **error_out);
 
 #ifdef __cplusplus
 }

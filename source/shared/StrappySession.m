@@ -3474,51 +3474,34 @@ static BOOL StrappySessionRecordFromOptions(
   consecutiveNoProgress = 0U;
 
   while (![self promptCancellationRequested]) {
-    strappy_study_database_id_list pending;
+    strappy_study_batch batch;
     strappy_study_database_id_list after;
-    const char *batchIds[5];
-    char *promptText;
     char *strappyError;
     NSString *prompt;
-    size_t batchCount;
     size_t index;
     int batchProgressed;
 
-    strappy_study_database_id_list_init(&pending);
+    strappy_study_batch_init(&batch);
     strappyError = NULL;
-    if (!strappy_study_list_unstudied_database_ids([databasePath UTF8String],
-                                                    &pending,
-                                                    &strappyError)) {
+    if (!strappy_study_next_batch([databasePath UTF8String],
+                                  &batch,
+                                  &strappyError)) {
       requestError = [StrappySession errorFromCString:strappyError];
       errorMessage = [requestError localizedDescription];
       strappy_session_free_string(strappyError);
+      strappy_study_batch_destroy(&batch);
       break;
     }
-    if (pending.count == 0U) {
-      strappy_study_database_id_list_destroy(&pending);
+    if (batch.pending_database_ids.count == 0U) {
+      strappy_study_batch_destroy(&batch);
       break;
     }
 
-    batchCount = (pending.count < 5U) ? pending.count : 5U;
-    for (index = 0U; index < batchCount; index++) {
-      batchIds[index] = pending.database_ids[index];
-    }
-    strappyError = NULL;
-    promptText = strappy_study_batch_prompt(batchIds,
-                                            batchCount,
-                                            &strappyError);
-    if (promptText == NULL) {
-      requestError = [StrappySession errorFromCString:strappyError];
-      errorMessage = [requestError localizedDescription];
-      strappy_session_free_string(strappyError);
-      strappy_study_database_id_list_destroy(&pending);
-      break;
-    }
-    prompt = [NSString stringWithUTF8String:promptText];
-    strappy_session_free_string(promptText);
+    prompt = (batch.prompt != NULL) ?
+      [NSString stringWithUTF8String:batch.prompt] : nil;
     if (prompt == nil) {
       errorMessage = NSLocalizedString(@"Database Study prompt is not valid text.", nil);
-      strappy_study_database_id_list_destroy(&pending);
+      strappy_study_batch_destroy(&batch);
       break;
     }
 
@@ -3532,11 +3515,11 @@ static BOOL StrappySessionRecordFromOptions(
       if ([errorMessage length] == 0U) {
         errorMessage = NSLocalizedString(@"Database Study request failed.", nil);
       }
-      strappy_study_database_id_list_destroy(&pending);
+      strappy_study_batch_destroy(&batch);
       break;
     }
     if ([self promptCancellationRequested]) {
-      strappy_study_database_id_list_destroy(&pending);
+      strappy_study_batch_destroy(&batch);
       break;
     }
 
@@ -3548,17 +3531,20 @@ static BOOL StrappySessionRecordFromOptions(
       requestError = [StrappySession errorFromCString:strappyError];
       errorMessage = [requestError localizedDescription];
       strappy_session_free_string(strappyError);
-      strappy_study_database_id_list_destroy(&pending);
+      strappy_study_batch_destroy(&batch);
       break;
     }
     batchProgressed = 0;
-    for (index = 0U; index < batchCount; index++) {
+    for (index = 0U;
+         index < batch.pending_database_ids.count;
+         index++) {
       size_t afterIndex;
       int stillPending;
 
       stillPending = 0;
       for (afterIndex = 0U; afterIndex < after.count; afterIndex++) {
-        if (strcmp(batchIds[index], after.database_ids[afterIndex]) == 0) {
+        if (strcmp(batch.pending_database_ids.database_ids[index],
+                   after.database_ids[afterIndex]) == 0) {
           stillPending = 1;
           break;
         }
@@ -3568,7 +3554,7 @@ static BOOL StrappySessionRecordFromOptions(
       }
     }
     strappy_study_database_id_list_destroy(&after);
-    strappy_study_database_id_list_destroy(&pending);
+    strappy_study_batch_destroy(&batch);
 
     if (batchProgressed) {
       consecutiveNoProgress = 0U;

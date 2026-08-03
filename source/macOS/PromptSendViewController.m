@@ -587,8 +587,8 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 - (void)setEnabled:(BOOL)enabled
 {
   enabled_ = enabled ? YES : NO;
-  [textView_ setEditable:(enabled_ && !studyLocked_)];
-  [textView_ setSelectable:(enabled_ && !studyLocked_)];
+  [textView_ setEditable:enabled_];
+  [textView_ setSelectable:enabled_];
   [textView_ setDrawsBackground:YES];
   [textView_ setBackgroundColor:enabled_
     ? [NSColor controlBackgroundColor]
@@ -599,8 +599,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 - (void)setStudyLocked:(BOOL)studyLocked
 {
   studyLocked_ = studyLocked ? YES : NO;
-  [textView_ setEditable:(enabled_ && !studyLocked_)];
-  [textView_ setSelectable:(enabled_ && !studyLocked_)];
   [self updateActionControls];
 }
 
@@ -647,7 +645,7 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   NSString *text;
   NSString *trimmed;
 
-  if (studyLocked_ || !enabled_ || sending_ || (textView_ == nil)) {
+  if (!enabled_ || sending_ || (textView_ == nil)) {
     return NO;
   }
 

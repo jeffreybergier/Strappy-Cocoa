@@ -6721,6 +6721,435 @@ static int harness_write_study_values(const char *catalog_path,
   return ok;
 }
 
+typedef struct harness_study_app_fixture {
+  const char *group_key;
+  const char *app_name;
+  const char *bundle_id;
+  size_t database_count;
+} harness_study_app_fixture;
+
+static int harness_prepare_study_batch_catalog(
+  const harness_context *context,
+  const harness_study_app_fixture *apps,
+  size_t app_count,
+  char *catalog_path,
+  size_t catalog_path_size,
+  char **error_out)
+{
+  strappy_discovered_database_input *inputs;
+  strappy_discovered_database_record_list records;
+  char **location_tails;
+  char **paths;
+  size_t app_index;
+  size_t database_index;
+  size_t index;
+  size_t total_count;
+  int ok;
+
+  if ((context == NULL) || (apps == NULL) || (app_count == 0U) ||
+      (catalog_path == NULL) || (catalog_path_size == 0U) ||
+      !harness_join_path(catalog_path,
+                         catalog_path_size,
+                         context->temp_dir,
+                         "study-batch-catalog.sqlite")) {
+    strappy_set_error(error_out,
+                      "Database Study batch fixture is incomplete.");
+    return 0;
+  }
+
+  total_count = 0U;
+  for (app_index = 0U; app_index < app_count; app_index++) {
+    if ((apps[app_index].database_count == 0U) ||
+        (apps[app_index].database_count > ((size_t)-1) - total_count)) {
+      strappy_set_error(error_out,
+                        "Database Study batch fixture count is invalid.");
+      return 0;
+    }
+    total_count += apps[app_index].database_count;
+  }
+
+  inputs = (strappy_discovered_database_input *)calloc(
+    total_count,
+    sizeof(strappy_discovered_database_input));
+  paths = (char **)calloc(total_count, sizeof(char *));
+  location_tails = (char **)calloc(total_count, sizeof(char *));
+  if ((inputs == NULL) || (paths == NULL) || (location_tails == NULL)) {
+    free(inputs);
+    free(paths);
+    free(location_tails);
+    strappy_set_error(error_out,
+                      "Could not allocate Database Study batch fixture.");
+    return 0;
+  }
+
+  index = 0U;
+  ok = 1;
+  for (app_index = 0U; ok && (app_index < app_count); app_index++) {
+    for (database_index = 0U;
+         ok && (database_index < apps[app_index].database_count);
+         database_index++) {
+      int path_written;
+      int tail_written;
+
+      paths[index] = (char *)calloc(1400U, sizeof(char));
+      location_tails[index] = (char *)calloc(128U, sizeof(char));
+      if ((paths[index] == NULL) || (location_tails[index] == NULL)) {
+        ok = 0;
+        break;
+      }
+      path_written = snprintf(paths[index],
+                              1400U,
+                              "%s/study-app-%u-database-%u.sqlite",
+                              context->temp_dir,
+                              (unsigned int)app_index,
+                              (unsigned int)database_index);
+      tail_written = snprintf(location_tails[index],
+                              128U,
+                              "database-%u.sqlite",
+                              (unsigned int)database_index);
+      if ((path_written <= 0) || ((size_t)path_written >= 1400U) ||
+          (tail_written <= 0) || ((size_t)tail_written >= 128U)) {
+        ok = 0;
+        break;
+      }
+
+      inputs[index].path = paths[index];
+      inputs[index].size = 4096LL + (long long)index;
+      inputs[index].modified_at = 1LL;
+      inputs[index].device = 100ULL + (unsigned long long)index;
+      inputs[index].inode = 1000ULL + (unsigned long long)index;
+      inputs[index].is_valid_sqlite = 1;
+      inputs[index].scan_root = context->temp_dir;
+      inputs[index].app_group_key = apps[app_index].group_key;
+      inputs[index].app_name = apps[app_index].app_name;
+      inputs[index].app_bundle_id = apps[app_index].bundle_id;
+      inputs[index].origin_kind = "application_support";
+      inputs[index].location_tail = location_tails[index];
+      index++;
+    }
+  }
+  if (!ok) {
+    strappy_set_error(error_out,
+                      "Could not build Database Study batch fixture paths.");
+  }
+
+  harness_unlink_sqlite_files(catalog_path);
+  if (ok) {
+    ok = strappy_db_save_discovered_databases(catalog_path,
+                                               inputs,
+                                               total_count,
+                                               error_out);
+  }
+  strappy_discovered_database_record_list_init(&records);
+  if (ok) {
+    ok = strappy_db_list_discovered_databases(catalog_path,
+                                               &records,
+                                               error_out) &&
+      (records.count == total_count);
+  }
+  for (index = 0U; ok && (index < records.count); index++) {
+    ok = strappy_db_update_discovered_database_decision(
+      catalog_path,
+      records.records[index].catalog_id,
+      "allowed",
+      error_out);
+  }
+  strappy_discovered_database_record_list_destroy(&records);
+
+  for (index = 0U; index < total_count; index++) {
+    free(paths[index]);
+    free(location_tails[index]);
+  }
+  free(inputs);
+  free(paths);
+  free(location_tails);
+  return ok;
+}
+
+static int harness_study_batch_matches(
+  const strappy_study_batch *batch,
+  size_t expected_database_count,
+  size_t expected_pending_count,
+  size_t expected_group_count,
+  const char *expected_first_app_name,
+  const char *expected_first_bundle_id,
+  int check_first_metadata)
+{
+  static const char *const root_keys[] = {
+    "instruction", "application_groups"
+  };
+  static const char *const group_keys[] = {
+    "app_name", "app_bundle_id", "database_ids"
+  };
+  cJSON *application_groups;
+  cJSON *instruction;
+  cJSON *root;
+  size_t flattened_index;
+  size_t group_index;
+  int ok;
+
+  if ((batch == NULL) || (batch->prompt == NULL)) {
+    return 0;
+  }
+  root = cJSON_Parse(batch->prompt);
+  instruction = cJSON_IsObject(root) ?
+    cJSON_GetObjectItemCaseSensitive(root, "instruction") : NULL;
+  application_groups = cJSON_IsObject(root) ?
+    cJSON_GetObjectItemCaseSensitive(root, "application_groups") : NULL;
+  ok = (batch->database_ids.count == expected_database_count) &&
+    (batch->pending_database_ids.count == expected_pending_count) &&
+    harness_object_has_exact_keys(root,
+                                  root_keys,
+                                  sizeof(root_keys) / sizeof(root_keys[0])) &&
+    cJSON_IsString(instruction) && (instruction->valuestring != NULL) &&
+    (strstr(instruction->valuestring, "tightly coupled data") != NULL) &&
+    cJSON_IsArray(application_groups) &&
+    (cJSON_GetArraySize(application_groups) == (int)expected_group_count);
+
+  flattened_index = 0U;
+  for (group_index = 0U;
+       ok && (group_index < expected_group_count);
+       group_index++) {
+    cJSON *app_bundle_id;
+    cJSON *app_name;
+    cJSON *database_id;
+    cJSON *database_ids;
+    cJSON *group;
+
+    group = cJSON_GetArrayItem(application_groups, (int)group_index);
+    app_name = cJSON_IsObject(group) ?
+      cJSON_GetObjectItemCaseSensitive(group, "app_name") : NULL;
+    app_bundle_id = cJSON_IsObject(group) ?
+      cJSON_GetObjectItemCaseSensitive(group, "app_bundle_id") : NULL;
+    database_ids = cJSON_IsObject(group) ?
+      cJSON_GetObjectItemCaseSensitive(group, "database_ids") : NULL;
+    ok = harness_object_has_exact_keys(
+           group,
+           group_keys,
+           sizeof(group_keys) / sizeof(group_keys[0])) &&
+      cJSON_IsArray(database_ids) && (database_ids->child != NULL);
+    for (database_id = cJSON_IsArray(database_ids) ?
+           database_ids->child : NULL;
+         ok && (database_id != NULL);
+         database_id = database_id->next) {
+      ok = (flattened_index < batch->database_ids.count) &&
+        cJSON_IsString(database_id) &&
+        (database_id->valuestring != NULL) &&
+        (strcmp(database_id->valuestring,
+                batch->database_ids.database_ids[flattened_index]) == 0);
+      flattened_index++;
+    }
+    if (ok && check_first_metadata && (group_index == 0U)) {
+      ok = cJSON_IsString(app_name) && (app_name->valuestring != NULL) &&
+        (expected_first_app_name != NULL) &&
+        (strcmp(app_name->valuestring, expected_first_app_name) == 0) &&
+        ((expected_first_bundle_id != NULL) ?
+          (cJSON_IsString(app_bundle_id) &&
+           (app_bundle_id->valuestring != NULL) &&
+           (strcmp(app_bundle_id->valuestring,
+                   expected_first_bundle_id) == 0)) :
+          cJSON_IsNull(app_bundle_id));
+    }
+  }
+  ok = ok && (flattened_index == batch->database_ids.count);
+  if (!ok) {
+    fprintf(stderr,
+            "Database Study batch did not match its grouped public shape: "
+            "%s\n",
+            batch->prompt);
+  }
+  cJSON_Delete(root);
+  return ok;
+}
+
+static int harness_run_database_study_batch_planning_tests(
+  const harness_context *context)
+{
+  static const harness_study_app_fixture large_and_small[] = {
+    { "bundle:com.example.small", "Small", "com.example.small", 1U },
+    { "bundle:com.example.large", "Large", "com.example.large", 10U }
+  };
+  static const harness_study_app_fixture three_and_one[] = {
+    { "bundle:com.example.one", "One", "com.example.one", 1U },
+    { "bundle:com.example.three", "Three", "com.example.three", 3U }
+  };
+  static const harness_study_app_fixture two_and_one[] = {
+    { "bundle:com.example.one", "One", "com.example.one", 1U },
+    { "bundle:com.example.two", "Two", "com.example.two", 2U }
+  };
+  static const harness_study_app_fixture two_and_two[] = {
+    { "bundle:com.example.first-two", "First Two",
+      "com.example.first-two", 2U },
+    { "bundle:com.example.second-two", "Second Two",
+      "com.example.second-two", 2U }
+  };
+  static const harness_study_app_fixture unknown_databases[] = {
+    { NULL, NULL, NULL, 4U }
+  };
+  static const harness_study_app_fixture stale_siblings[] = {
+    { "bundle:com.example.stale", "Stale", "com.example.stale", 3U }
+  };
+  strappy_study_batch batch;
+  strappy_study_database_status_record_list status;
+  char catalog_path[1200];
+  char *error;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+  catalog_path[0] = '\0';
+  error = NULL;
+  strappy_study_batch_init(&batch);
+  strappy_study_database_status_record_list_init(&status);
+
+  ok = harness_prepare_study_batch_catalog(
+         context,
+         large_and_small,
+         sizeof(large_and_small) / sizeof(large_and_small[0]),
+         catalog_path,
+         sizeof(catalog_path),
+         &error) &&
+    strappy_study_next_batch(catalog_path, &batch, &error) &&
+    harness_study_batch_matches(&batch,
+                                10U,
+                                10U,
+                                1U,
+                                "Large",
+                                "com.example.large",
+                                1);
+  if (!ok) {
+    fprintf(stderr,
+            "Database Study did not keep a ten-database app together: %s\n",
+            (error != NULL) ? error : "batch mismatch");
+    goto cleanup;
+  }
+  strappy_study_batch_destroy(&batch);
+
+  ok = harness_prepare_study_batch_catalog(
+         context,
+         three_and_one,
+         sizeof(three_and_one) / sizeof(three_and_one[0]),
+         catalog_path,
+         sizeof(catalog_path),
+         &error) &&
+    strappy_study_next_batch(catalog_path, &batch, &error) &&
+    harness_study_batch_matches(&batch,
+                                3U,
+                                3U,
+                                1U,
+                                "Three",
+                                "com.example.three",
+                                1);
+  if (!ok) {
+    fprintf(stderr,
+            "Database Study grouped another app with a three-database app: "
+            "%s\n",
+            (error != NULL) ? error : "batch mismatch");
+    goto cleanup;
+  }
+  strappy_study_batch_destroy(&batch);
+
+  ok = harness_prepare_study_batch_catalog(
+         context,
+         two_and_one,
+         sizeof(two_and_one) / sizeof(two_and_one[0]),
+         catalog_path,
+         sizeof(catalog_path),
+         &error) &&
+    strappy_study_next_batch(catalog_path, &batch, &error) &&
+    harness_study_batch_matches(&batch, 3U, 3U, 2U, NULL, NULL, 0);
+  if (!ok) {
+    fprintf(stderr,
+            "Database Study did not pack two small apps into three "
+            "databases: %s\n",
+            (error != NULL) ? error : "batch mismatch");
+    goto cleanup;
+  }
+  strappy_study_batch_destroy(&batch);
+
+  ok = harness_prepare_study_batch_catalog(
+         context,
+         two_and_two,
+         sizeof(two_and_two) / sizeof(two_and_two[0]),
+         catalog_path,
+         sizeof(catalog_path),
+         &error) &&
+    strappy_study_next_batch(catalog_path, &batch, &error) &&
+    harness_study_batch_matches(&batch, 2U, 2U, 1U, NULL, NULL, 0);
+  if (!ok) {
+    fprintf(stderr,
+            "Database Study combined small apps above the three-database "
+            "limit: %s\n",
+            (error != NULL) ? error : "batch mismatch");
+    goto cleanup;
+  }
+  strappy_study_batch_destroy(&batch);
+
+  ok = harness_prepare_study_batch_catalog(
+         context,
+         unknown_databases,
+         sizeof(unknown_databases) / sizeof(unknown_databases[0]),
+         catalog_path,
+         sizeof(catalog_path),
+         &error) &&
+    strappy_study_next_batch(catalog_path, &batch, &error) &&
+    harness_study_batch_matches(&batch, 3U, 3U, 3U, NULL, NULL, 0);
+  if (!ok) {
+    fprintf(stderr,
+            "Database Study treated unrelated unknown databases as one app: "
+            "%s\n",
+            (error != NULL) ? error : "batch mismatch");
+    goto cleanup;
+  }
+  strappy_study_batch_destroy(&batch);
+
+  ok = harness_prepare_study_batch_catalog(
+         context,
+         stale_siblings,
+         sizeof(stale_siblings) / sizeof(stale_siblings[0]),
+         catalog_path,
+         sizeof(catalog_path),
+         &error) &&
+    strappy_study_list_database_status_records(catalog_path,
+                                                &status,
+                                                &error) &&
+    (status.count == 3U) &&
+    harness_write_study_values(catalog_path,
+                               status.records[0].database_id,
+                               "First fresh sibling",
+                               "First fresh sibling context") &&
+    harness_write_study_values(catalog_path,
+                               status.records[1].database_id,
+                               "Second fresh sibling",
+                               "Second fresh sibling context") &&
+    strappy_study_next_batch(catalog_path, &batch, &error) &&
+    harness_study_batch_matches(&batch,
+                                3U,
+                                1U,
+                                1U,
+                                "Stale",
+                                "com.example.stale",
+                                1) &&
+    (strcmp(batch.pending_database_ids.database_ids[0],
+            status.records[2].database_id) == 0);
+  if (!ok) {
+    fprintf(stderr,
+            "Database Study did not include fresh siblings of a pending "
+            "database: %s\n",
+            (error != NULL) ? error : "batch mismatch");
+  }
+
+cleanup:
+  strappy_study_batch_destroy(&batch);
+  strappy_study_database_status_record_list_destroy(&status);
+  free(error);
+  if (catalog_path[0] != '\0') {
+    harness_unlink_sqlite_files(catalog_path);
+  }
+  return ok;
+}
+
 typedef struct harness_study_research_call {
   const char *call_id;
   const char *tool_name;
@@ -7392,21 +7821,22 @@ cleanup:
 static int harness_run_database_study_coverage_tests(
   const harness_context *context)
 {
-  static const char *const too_many_ids[] = {
-    "db_1", "db_2", "db_3", "db_4", "db_5", "db_6"
+  static const char *const prompt_keys[] = {
+    "instruction", "application_groups"
   };
   static const char replacement_description[] =
     "Replacement coverage description";
+  strappy_study_batch batch;
   strappy_study_database_id_list pending;
   strappy_study_database_id_list remaining;
-  cJSON *batch_ids;
+  cJSON *application_groups;
+  cJSON *prompt_root;
   char description[128];
   char study_context[128];
   char freshness_sql[512];
-  char *batch_prompt;
   char *error;
   size_t approved_count;
-  size_t batch_count;
+  size_t expected_batch_count;
   size_t index;
   size_t studied_count;
   int written;
@@ -7415,11 +7845,12 @@ static int harness_run_database_study_coverage_tests(
   if (context == NULL) {
     return 0;
   }
+  strappy_study_batch_init(&batch);
   strappy_study_database_id_list_init(&pending);
   strappy_study_database_id_list_init(&remaining);
   error = NULL;
-  batch_prompt = NULL;
-  batch_ids = NULL;
+  application_groups = NULL;
+  prompt_root = NULL;
   approved_count = 0U;
   studied_count = 0U;
   ok = strappy_study_reset(context->catalog_path, &error) &&
@@ -7442,61 +7873,58 @@ static int harness_run_database_study_coverage_tests(
     goto cleanup;
   }
 
-  batch_prompt = strappy_study_batch_prompt(
-    (const char * const *)too_many_ids,
-    sizeof(too_many_ids) / sizeof(too_many_ids[0]),
-    &error);
-  if ((batch_prompt != NULL) || (error == NULL) ||
-      (strstr(error, "1 to 5 IDs") == NULL)) {
-    fprintf(stderr, "Database Study accepted a batch larger than five.\n");
+  if (!strappy_study_next_batch(context->catalog_path, &batch, &error)) {
     ok = 0;
     goto cleanup;
   }
-  free(error);
-  error = NULL;
-
-  batch_count = (pending.count < 5U) ? pending.count : 5U;
-  batch_prompt = strappy_study_batch_prompt(
-    (const char * const *)pending.database_ids,
-    batch_count,
-    &error);
-  if (batch_prompt == NULL) {
-    ok = 0;
-    goto cleanup;
-  }
-  {
-    const char *array_start;
-    const char *array_end;
-    char *array_json;
-
-    array_start = strchr(batch_prompt, '[');
-    array_end = (array_start != NULL) ? strchr(array_start, ']') : NULL;
-    array_json = ((array_start != NULL) && (array_end != NULL)) ?
-      strappy_string_duplicate_length(
-        array_start,
-        (size_t)(array_end - array_start) + 1U) : NULL;
-    batch_ids = (array_json != NULL) ? cJSON_Parse(array_json) : NULL;
-    free(array_json);
-  }
-  if (!harness_string_array_equals(
-        batch_ids,
-        (const char * const *)pending.database_ids,
-        batch_count) ||
-      (strstr(batch_prompt, "Study these database_ids:") == NULL) ||
-      (strstr(batch_prompt,
-              "Complete the Database Study workflow for each.") == NULL) ||
-      (strstr(batch_prompt, "database_study exactly twice") != NULL)) {
+  expected_batch_count = (pending.count < 3U) ? pending.count : 3U;
+  prompt_root = (batch.prompt != NULL) ? cJSON_Parse(batch.prompt) : NULL;
+  application_groups = cJSON_IsObject(prompt_root) ?
+    cJSON_GetObjectItemCaseSensitive(prompt_root, "application_groups") : NULL;
+  if ((batch.database_ids.count != expected_batch_count) ||
+      (batch.pending_database_ids.count != expected_batch_count) ||
+      !harness_object_has_exact_keys(
+        prompt_root,
+        prompt_keys,
+        sizeof(prompt_keys) / sizeof(prompt_keys[0])) ||
+      !cJSON_IsArray(application_groups) ||
+      (cJSON_GetArraySize(application_groups) !=
+       (int)expected_batch_count)) {
     fprintf(stderr,
-            "Database Study batch prompt did not contain the exact next "
-            "five-or-fewer IDs: %s\n",
-            batch_prompt);
+            "Database Study singleton batch did not contain the next "
+            "three-or-fewer application groups: %s\n",
+            (batch.prompt != NULL) ? batch.prompt : "(null)");
     ok = 0;
     goto cleanup;
   }
-  cJSON_Delete(batch_ids);
-  batch_ids = NULL;
-  free(batch_prompt);
-  batch_prompt = NULL;
+  for (index = 0U; index < expected_batch_count; index++) {
+    cJSON *database_ids;
+    cJSON *group;
+
+    group = cJSON_GetArrayItem(application_groups, (int)index);
+    database_ids = cJSON_IsObject(group) ?
+      cJSON_GetObjectItemCaseSensitive(group, "database_ids") : NULL;
+    if (!cJSON_IsArray(database_ids) ||
+        (cJSON_GetArraySize(database_ids) != 1) ||
+        !harness_string_array_equals(
+          database_ids,
+          (const char * const *)&pending.database_ids[index],
+          1U) ||
+        (strcmp(batch.database_ids.database_ids[index],
+                pending.database_ids[index]) != 0) ||
+        (strcmp(batch.pending_database_ids.database_ids[index],
+                pending.database_ids[index]) != 0)) {
+      fprintf(stderr,
+              "Database Study singleton batch IDs did not match pending "
+              "database order.\n");
+      ok = 0;
+      goto cleanup;
+    }
+  }
+  cJSON_Delete(prompt_root);
+  prompt_root = NULL;
+  application_groups = NULL;
+  strappy_study_batch_destroy(&batch);
 
   for (index = 0U; index < pending.count; index++) {
     written = snprintf(description,
@@ -7723,9 +8151,9 @@ static int harness_run_database_study_coverage_tests(
   }
 
 cleanup:
-  cJSON_Delete(batch_ids);
-  free(batch_prompt);
+  cJSON_Delete(prompt_root);
   free(error);
+  strappy_study_batch_destroy(&batch);
   strappy_study_database_id_list_destroy(&remaining);
   strappy_study_database_id_list_destroy(&pending);
   return ok;
@@ -10670,6 +11098,7 @@ int main(void)
        harness_run_sms_context_tests(&context) &&
        harness_run_mail_context_tests(&context) &&
        harness_run_database_study_same_batch_guard_tests(&context) &&
+       harness_run_database_study_batch_planning_tests(&context) &&
        harness_run_database_study_coverage_tests(&context) &&
        harness_run_file_read_tests(&context) &&
        harness_run_file_mutation_tests(&context) &&

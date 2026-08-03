@@ -310,7 +310,7 @@ static BOOL StrappyContextRoundActionValues(
   }
 
   studyLocked = (session_ != nil) && [session_ isDatabaseStudySession];
-  [sendController_ setEnabled:((session_ != nil) && !studyLocked)];
+  [sendController_ setEnabled:(session_ != nil)];
   [sendController_ setStudyLocked:studyLocked];
   [self updateSendingStateFromSession];
   sessionOptions = (session_ != nil) ?
@@ -328,8 +328,7 @@ static BOOL StrappyContextRoundActionValues(
 
 - (BOOL)canSendCurrentPrompt
 {
-  if ((session_ == nil) || [session_ isDatabaseStudySession] || sending_ ||
-      [self sessionPromptIsInFlight]) {
+  if ((session_ == nil) || sending_ || [self sessionPromptIsInFlight]) {
     return NO;
   }
   return [sendController_ canSendCurrentPrompt];
@@ -640,8 +639,7 @@ static BOOL StrappyContextRoundActionValues(
     return;
   }
 
-  if ((session_ == nil) || [session_ isDatabaseStudySession] ||
-      [self sessionPromptIsInFlight]) {
+  if ((session_ == nil) || [self sessionPromptIsInFlight]) {
     return;
   }
 

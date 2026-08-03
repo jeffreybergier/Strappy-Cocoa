@@ -738,7 +738,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
   [self updateTitleFromSession];
   studyLocked = (session != nil) && [session isDatabaseStudySession];
-  [[self sendBar] setEnabled:((session != nil) && !studyLocked)];
+  [[self sendBar] setEnabled:(session != nil)];
   [[self sendBar] setStudyLocked:studyLocked];
   [self updateSendingStateFromSession];
   [self updatePromptIdleTimerAssertion];
@@ -781,7 +781,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (BOOL)canSendCurrentPrompt
 {
   if (([self session] == nil) || [self sending] ||
-      [[self session] isDatabaseStudySession] ||
       [self sessionPromptIsInFlight]) {
     return NO;
   }
@@ -1063,8 +1062,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   if ([self sending]) {
     return;
   }
-  if (([self session] == nil) || [[self session] isDatabaseStudySession] ||
-      [self sessionPromptIsInFlight]) {
+  if (([self session] == nil) || [self sessionPromptIsInFlight]) {
     return;
   }
   if (![prompt isKindOfClass:[NSString class]] || ([prompt length] == 0U)) {

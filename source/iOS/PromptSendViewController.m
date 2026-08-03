@@ -572,7 +572,7 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
 - (void)setEnabled:(BOOL)enabled
 {
   [self setControlsEnabled:enabled ? YES : NO];
-  [[self textView] setEditable:(enabled && ![self studyLocked]) ? YES : NO];
+  [[self textView] setEditable:(enabled && ![self sending]) ? YES : NO];
   [self updateControls];
 }
 
@@ -637,8 +637,7 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
 
 - (BOOL)canSendCurrentPrompt
 {
-  if ([self studyLocked] || ![self controlsEnabled] || [self sending] ||
-      ([self textView] == nil)) {
+  if (![self controlsEnabled] || [self sending] || ([self textView] == nil)) {
     return NO;
   }
   return ([[self trimmedPromptText] length] > 0U) ? YES : NO;
@@ -659,9 +658,9 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
   [[self optionsButton] setEnabled:
     ([self controlsEnabled] && ![self studyLocked] && ![self sending]) ? YES : NO];
   [[self dismissButton] setEnabled:
-    ([self controlsEnabled] && ![self studyLocked] && [self composing]) ? YES : NO];
+    ([self controlsEnabled] && [self composing]) ? YES : NO];
   [[self textView] setEditable:
-    ([self controlsEnabled] && ![self studyLocked] && ![self sending]) ? YES : NO];
+    ([self controlsEnabled] && ![self sending]) ? YES : NO];
   [[self sendButton] setEnabled:sendEnabled];
 
   if ([self sending]) {

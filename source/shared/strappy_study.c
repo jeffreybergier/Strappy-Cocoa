@@ -107,6 +107,27 @@ void strappy_study_database_id_list_destroy(
   strappy_study_database_id_list_init(list);
 }
 
+void strappy_study_batch_init(strappy_study_batch *batch)
+{
+  if (batch == NULL) {
+    return;
+  }
+  strappy_study_database_id_list_init(&batch->database_ids);
+  strappy_study_database_id_list_init(&batch->pending_database_ids);
+  batch->prompt = NULL;
+}
+
+void strappy_study_batch_destroy(strappy_study_batch *batch)
+{
+  if (batch == NULL) {
+    return;
+  }
+  strappy_study_database_id_list_destroy(&batch->database_ids);
+  strappy_study_database_id_list_destroy(&batch->pending_database_ids);
+  free(batch->prompt);
+  strappy_study_batch_init(batch);
+}
+
 static void strappy_study_database_status_record_init(
   strappy_study_database_status_record *record)
 {
@@ -646,65 +667,6 @@ int strappy_study_reset(const char *db_path, char **error_out)
   return 1;
 }
 
-char *strappy_study_batch_prompt(const char * const *database_ids,
-                                 size_t database_id_count,
-                                 char **error_out)
-{
-  static const char *prefix =
-    "Study these database_ids: ";
-  static const char *suffix =
-    ". Complete the Database Study workflow for each.";
-  cJSON *array;
-  char *array_json;
-  char *prompt;
-  size_t index;
-  size_t length;
-
-  if ((database_ids == NULL) || (database_id_count == 0U) ||
-      (database_id_count > 5U)) {
-    strappy_set_error(error_out,
-                      "Database Study batch must contain 1 to 5 IDs.");
-    return NULL;
-  }
-  array = cJSON_CreateArray();
-  if (array == NULL) {
-    strappy_set_error(error_out, "Could not allocate Database Study batch.");
-    return NULL;
-  }
-  for (index = 0U; index < database_id_count; index++) {
-    cJSON *item;
-
-    if ((database_ids[index] == NULL) || (database_ids[index][0] == '\0')) {
-      cJSON_Delete(array);
-      strappy_set_error(error_out, "Database Study batch contains an empty ID.");
-      return NULL;
-    }
-    item = cJSON_CreateString(database_ids[index]);
-    if ((item == NULL) || !cJSON_AddItemToArray(array, item)) {
-      cJSON_Delete(item);
-      cJSON_Delete(array);
-      strappy_set_error(error_out, "Could not build Database Study batch.");
-      return NULL;
-    }
-  }
-  array_json = cJSON_PrintUnformatted(array);
-  cJSON_Delete(array);
-  if (array_json == NULL) {
-    strappy_set_error(error_out, "Could not serialize Database Study batch.");
-    return NULL;
-  }
-  length = strlen(prefix) + strlen(array_json) + strlen(suffix);
-  prompt = (char *)malloc(length + 1U);
-  if (prompt == NULL) {
-    free(array_json);
-    strappy_set_error(error_out, "Could not allocate Database Study prompt.");
-    return NULL;
-  }
-  snprintf(prompt, length + 1U, "%s%s%s", prefix, array_json, suffix);
-  free(array_json);
-  return prompt;
-}
-
 static int strappy_study_list_append(strappy_study_database_id_list *list,
                                      const char *database_id,
                                      char **error_out)
@@ -989,4 +951,336 @@ int strappy_study_list_unstudied_database_ids(
                                         NULL,
                                         NULL,
                                         error_out);
+}
+
+static int strappy_study_status_records_share_app(
+  const strappy_study_database_status_record_list *list,
+  size_t left_index,
+  size_t right_index)
+{
+  const char *left_key;
+  const char *right_key;
+
+  if ((list == NULL) || (left_index >= list->count) ||
+      (right_index >= list->count)) {
+    return 0;
+  }
+  if (left_index == right_index) {
+    return 1;
+  }
+  left_key = list->records[left_index].app_group_key;
+  right_key = list->records[right_index].app_group_key;
+  return (left_key != NULL) && (left_key[0] != '\0') &&
+    (right_key != NULL) && (right_key[0] != '\0') &&
+    (strcmp(left_key, right_key) == 0);
+}
+
+static int strappy_study_status_group_was_seen(
+  const strappy_study_database_status_record_list *list,
+  size_t index)
+{
+  size_t previous_index;
+
+  for (previous_index = 0U; previous_index < index; previous_index++) {
+    if (strappy_study_status_records_share_app(list,
+                                               previous_index,
+                                               index)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int strappy_study_append_selected_group(
+  const strappy_study_database_status_record_list *status,
+  size_t group_index,
+  unsigned char *selected,
+  strappy_study_batch *batch,
+  char **error_out)
+{
+  size_t index;
+
+  if ((status == NULL) || (group_index >= status->count) ||
+      (selected == NULL) || (batch == NULL)) {
+    strappy_set_error(error_out,
+                      "Database Study application group is incomplete.");
+    return 0;
+  }
+
+  for (index = 0U; index < status->count; index++) {
+    const strappy_study_database_status_record *record;
+
+    if (!strappy_study_status_records_share_app(status,
+                                                 group_index,
+                                                 index)) {
+      continue;
+    }
+    record = &status->records[index];
+    if ((record->database_id == NULL) || (record->database_id[0] == '\0') ||
+        !strappy_study_list_append(&batch->database_ids,
+                                   record->database_id,
+                                   error_out) ||
+        (!record->studied &&
+         !strappy_study_list_append(&batch->pending_database_ids,
+                                    record->database_id,
+                                    error_out))) {
+      if ((error_out == NULL) || (*error_out == NULL)) {
+        strappy_set_error(error_out,
+                          "Database Study application group has no valid ID.");
+      }
+      return 0;
+    }
+    selected[index] = 1U;
+  }
+  return 1;
+}
+
+static char *strappy_study_selected_batch_prompt(
+  const strappy_study_database_status_record_list *status,
+  const unsigned char *selected,
+  char **error_out)
+{
+  static const char *instruction =
+    "Complete the Database Study workflow for every database_id. "
+    "Databases within one application group belong to the same app and may "
+    "contain tightly coupled data.";
+  cJSON *root;
+  cJSON *groups;
+  char *prompt;
+  size_t index;
+
+  if ((status == NULL) || (selected == NULL)) {
+    strappy_set_error(error_out, "Database Study batch prompt is incomplete.");
+    return NULL;
+  }
+
+  root = cJSON_CreateObject();
+  groups = cJSON_CreateArray();
+  if ((root == NULL) || (groups == NULL) ||
+      (cJSON_AddStringToObject(root,
+                               "instruction",
+                               instruction) == NULL)) {
+    cJSON_Delete(root);
+    cJSON_Delete(groups);
+    strappy_set_error(error_out,
+                      "Could not allocate Database Study batch prompt.");
+    return NULL;
+  }
+
+  for (index = 0U; index < status->count; index++) {
+    const strappy_study_database_status_record *record;
+    cJSON *group;
+    cJSON *database_ids;
+    size_t member_index;
+    size_t previous_index;
+    int already_added;
+
+    if (!selected[index]) {
+      continue;
+    }
+    already_added = 0;
+    for (previous_index = 0U;
+         previous_index < index;
+         previous_index++) {
+      if (selected[previous_index] &&
+          strappy_study_status_records_share_app(status,
+                                                  previous_index,
+                                                  index)) {
+        already_added = 1;
+        break;
+      }
+    }
+    if (already_added) {
+      continue;
+    }
+
+    record = &status->records[index];
+    group = cJSON_CreateObject();
+    database_ids = cJSON_CreateArray();
+    if ((group == NULL) || (database_ids == NULL) ||
+        !strappy_study_add_nullable_string(
+          group,
+          "app_name",
+          ((record->app_name != NULL) && (record->app_name[0] != '\0')) ?
+            record->app_name : NULL) ||
+        !strappy_study_add_nullable_string(
+          group,
+          "app_bundle_id",
+          ((record->app_bundle_id != NULL) &&
+           (record->app_bundle_id[0] != '\0')) ?
+            record->app_bundle_id : NULL)) {
+      cJSON_Delete(group);
+      cJSON_Delete(database_ids);
+      cJSON_Delete(root);
+      cJSON_Delete(groups);
+      strappy_set_error(error_out,
+                        "Could not build Database Study application group.");
+      return NULL;
+    }
+
+    for (member_index = 0U;
+         member_index < status->count;
+         member_index++) {
+      cJSON *database_id;
+
+      if (!selected[member_index] ||
+          !strappy_study_status_records_share_app(status,
+                                                   index,
+                                                   member_index)) {
+        continue;
+      }
+      database_id = cJSON_CreateString(
+        status->records[member_index].database_id);
+      if ((database_id == NULL) ||
+          !cJSON_AddItemToArray(database_ids, database_id)) {
+        cJSON_Delete(database_id);
+        cJSON_Delete(group);
+        cJSON_Delete(database_ids);
+        cJSON_Delete(root);
+        cJSON_Delete(groups);
+        strappy_set_error(error_out,
+                          "Could not build Database Study database IDs.");
+        return NULL;
+      }
+    }
+
+    if (!cJSON_AddItemToObject(group, "database_ids", database_ids)) {
+      cJSON_Delete(group);
+      cJSON_Delete(database_ids);
+      cJSON_Delete(root);
+      cJSON_Delete(groups);
+      strappy_set_error(error_out,
+                        "Could not build Database Study application group.");
+      return NULL;
+    }
+    database_ids = NULL;
+    if (!cJSON_AddItemToArray(groups, group)) {
+      cJSON_Delete(group);
+      cJSON_Delete(root);
+      cJSON_Delete(groups);
+      strappy_set_error(error_out,
+                        "Could not build Database Study application groups.");
+      return NULL;
+    }
+  }
+
+  if (!cJSON_AddItemToObject(root, "application_groups", groups)) {
+    cJSON_Delete(root);
+    cJSON_Delete(groups);
+    strappy_set_error(error_out,
+                      "Could not build Database Study batch prompt.");
+    return NULL;
+  }
+  groups = NULL;
+  prompt = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  if (prompt == NULL) {
+    strappy_set_error(error_out,
+                      "Could not serialize Database Study batch prompt.");
+  }
+  return prompt;
+}
+
+int strappy_study_next_batch(const char *db_path,
+                             strappy_study_batch *batch,
+                             char **error_out)
+{
+  strappy_study_database_status_record_list status;
+  unsigned char *selected;
+  size_t index;
+  int has_pending;
+  int ok;
+
+  if (batch == NULL) {
+    strappy_set_error(error_out, "Database Study batch has no output.");
+    return 0;
+  }
+  strappy_study_batch_init(batch);
+  strappy_study_database_status_record_list_init(&status);
+  if (!strappy_study_list_database_status_records(db_path,
+                                                   &status,
+                                                   error_out)) {
+    return 0;
+  }
+  if (status.count == 0U) {
+    strappy_study_database_status_record_list_destroy(&status);
+    return 1;
+  }
+
+  selected = (unsigned char *)calloc(status.count, sizeof(unsigned char));
+  if (selected == NULL) {
+    strappy_study_database_status_record_list_destroy(&status);
+    strappy_set_error(error_out,
+                      "Could not allocate Database Study batch selection.");
+    return 0;
+  }
+
+  has_pending = 0;
+  ok = 1;
+  for (index = 0U; ok && (index < status.count); index++) {
+    size_t group_count;
+    size_t member_index;
+    size_t pending_count;
+    int should_select;
+
+    if (strappy_study_status_group_was_seen(&status, index)) {
+      continue;
+    }
+    group_count = 0U;
+    pending_count = 0U;
+    for (member_index = 0U;
+         member_index < status.count;
+         member_index++) {
+      if (!strappy_study_status_records_share_app(&status,
+                                                   index,
+                                                   member_index)) {
+        continue;
+      }
+      group_count++;
+      if (!status.records[member_index].studied) {
+        pending_count++;
+      }
+    }
+    if (pending_count == 0U) {
+      continue;
+    }
+    has_pending = 1;
+    should_select = (batch->database_ids.count == 0U) ? 1 : 0;
+    if (!should_select && (group_count < 3U) &&
+        (batch->database_ids.count < 3U) &&
+        (group_count <= (3U - batch->database_ids.count))) {
+      should_select = 1;
+    }
+    if (!should_select) {
+      continue;
+    }
+    ok = strappy_study_append_selected_group(&status,
+                                              index,
+                                              selected,
+                                              batch,
+                                              error_out);
+    if (ok && ((group_count >= 3U) ||
+               (batch->database_ids.count == 3U))) {
+      break;
+    }
+  }
+
+  if (ok && has_pending && (batch->pending_database_ids.count == 0U)) {
+    strappy_set_error(error_out,
+                      "Could not select the next Database Study batch.");
+    ok = 0;
+  }
+  if (ok && (batch->database_ids.count > 0U)) {
+    batch->prompt = strappy_study_selected_batch_prompt(&status,
+                                                        selected,
+                                                        error_out);
+    ok = (batch->prompt != NULL) ? 1 : 0;
+  }
+
+  free(selected);
+  strappy_study_database_status_record_list_destroy(&status);
+  if (!ok) {
+    strappy_study_batch_destroy(batch);
+  }
+  return ok;
 }
