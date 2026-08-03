@@ -32,6 +32,7 @@ typedef struct strappy_webview_labels {
   const char *response_item;
   const char *request;
   const char *response;
+  const char *prompt;
   const char *round;
   const char *attempt;
   const char *included_in_future_context;
@@ -62,12 +63,15 @@ typedef struct strappy_webview_message {
   long long message_id;
   long long round_id;
   long long api_call_id;
+  long prompt_number;
   long round_number;
   long attempt_number;
   long http_status;
   const char *attempt_state;
   double cumulative_usage_cost;
   int has_cumulative_usage_cost;
+  long long cumulative_wait_ms;
+  int has_cumulative_wait_ms;
   const char *element_id;
   const char *role;
   const char *kind;

@@ -18,6 +18,7 @@
 "Response Item" = "Response Item";
 "Request" = "Request";
 "Response" = "Response";
+"Prompt" = "Prompt";
 "Round" = "Round";
 "Attempt" = "Attempt";
 "Included in Future Context" = "Included in Future Context";

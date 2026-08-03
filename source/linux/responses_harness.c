@@ -6684,7 +6684,7 @@ static int harness_context_selection_matches(
   return ok;
 }
 
-static int harness_append_usage_cost_call(
+static int harness_append_usage_metrics_call(
   const char *path,
   long long session_id,
   long long previous_call_id,
@@ -6695,6 +6695,7 @@ static int harness_append_usage_cost_call(
   const char *state,
   int is_error,
   const char *response_json,
+  long long wait_ms,
   long long *call_id_out,
   char **error_out)
 {
@@ -6729,10 +6730,10 @@ static int harness_append_usage_cost_call(
   finish.output_is_canonical = is_error ? 0 : 1;
   finish.http_status = 200L;
   finish.started_at_ms = call_id * 1000LL;
-  finish.completed_at_ms = finish.started_at_ms + 100LL;
+  finish.completed_at_ms = finish.started_at_ms + wait_ms;
   finish.request_bytes = (long long)strlen(request_json);
   finish.response_bytes = (long long)strlen(response_json);
-  finish.total_seconds = 0.1;
+  finish.total_seconds = (double)wait_ms / 1000.0;
   finish.effective_url = begin.request_url;
   finish.content_type = "application/json";
   finish.response_headers = "";
@@ -6746,7 +6747,7 @@ static int harness_append_usage_cost_call(
   return 1;
 }
 
-static int harness_test_cumulative_session_usage_cost(void)
+static int harness_test_cumulative_session_metrics(void)
 {
   static const char *cost_one =
     "{\"id\":\"cost-1\",\"status\":\"completed\","
@@ -6791,7 +6792,7 @@ static int harness_test_cumulative_session_usage_cost(void)
   strappy_session_message_record_list_init(&timeline);
   strappy_session_message_record_list_init(&ranged_timeline);
   ok = strappy_db_create_session(path, &session_id, &error) &&
-    harness_append_usage_cost_call(path,
+    harness_append_usage_metrics_call(path,
                                    session_id,
                                    previous_call_id,
                                    "group-one",
@@ -6801,9 +6802,10 @@ static int harness_test_cumulative_session_usage_cost(void)
                                    "completed",
                                    0,
                                    cost_one,
+                                   1500LL,
                                    &previous_call_id,
                                    &error) &&
-    harness_append_usage_cost_call(path,
+    harness_append_usage_metrics_call(path,
                                    session_id,
                                    previous_call_id,
                                    "group-one",
@@ -6813,9 +6815,10 @@ static int harness_test_cumulative_session_usage_cost(void)
                                    "response_error",
                                    1,
                                    cost_error,
+                                   2500LL,
                                    &previous_call_id,
                                    &error) &&
-    harness_append_usage_cost_call(path,
+    harness_append_usage_metrics_call(path,
                                    session_id,
                                    previous_call_id,
                                    "group-one",
@@ -6825,9 +6828,10 @@ static int harness_test_cumulative_session_usage_cost(void)
                                    "completed",
                                    0,
                                    cost_retry,
+                                   500LL,
                                    &previous_call_id,
                                    &error) &&
-    harness_append_usage_cost_call(path,
+    harness_append_usage_metrics_call(path,
                                    session_id,
                                    previous_call_id,
                                    "group-two",
@@ -6837,9 +6841,10 @@ static int harness_test_cumulative_session_usage_cost(void)
                                    "completed",
                                    0,
                                    cost_missing,
+                                   317500LL,
                                    &previous_call_id,
                                    &error) &&
-    harness_append_usage_cost_call(path,
+    harness_append_usage_metrics_call(path,
                                    session_id,
                                    previous_call_id,
                                    "group-two",
@@ -6849,6 +6854,7 @@ static int harness_test_cumulative_session_usage_cost(void)
                                    "completed",
                                    0,
                                    cost_final,
+                                   1000LL,
                                    &previous_call_id,
                                    &error) &&
     strappy_db_list_response_timeline(path,
@@ -6856,10 +6862,15 @@ static int harness_test_cumulative_session_usage_cost(void)
                                       &timeline,
                                       &error) &&
     (timeline.count == 5U) &&
+    (timeline.records[0].prompt_index == 0L) &&
     timeline.records[0].has_cumulative_usage_cost &&
+    timeline.records[0].has_cumulative_wait_ms &&
+    (timeline.records[0].cumulative_wait_ms == 1500LL) &&
     (strcmp(timeline.records[0].attempt_state, "completed") == 0) &&
     harness_double_matches(timeline.records[0].cumulative_usage_cost, 0.001) &&
     timeline.records[1].has_cumulative_usage_cost &&
+    timeline.records[1].has_cumulative_wait_ms &&
+    (timeline.records[1].cumulative_wait_ms == 4500LL) &&
     timeline.records[1].is_error &&
     (strcmp(timeline.records[1].attempt_state, "response_error") == 0) &&
     harness_double_matches(timeline.records[1].cumulative_usage_cost, 0.0075) &&
@@ -6870,10 +6881,14 @@ static int harness_test_cumulative_session_usage_cost(void)
     (timeline.records[2].http_attempt_id !=
      timeline.records[1].http_attempt_id) &&
     (strcmp(timeline.records[2].attempt_state, "completed") == 0) &&
+    (timeline.records[2].cumulative_wait_ms == 4500LL) &&
     harness_double_matches(timeline.records[2].cumulative_usage_cost, 0.0075) &&
     (strcmp(timeline.records[3].prompt_group_key, "group-two") == 0) &&
+    (timeline.records[3].prompt_index == 1L) &&
     (timeline.records[3].round_index == 0L) &&
+    (timeline.records[3].cumulative_wait_ms == 322000LL) &&
     harness_double_matches(timeline.records[3].cumulative_usage_cost, 0.0075) &&
+    (timeline.records[4].cumulative_wait_ms == 323000LL) &&
     harness_double_matches(timeline.records[4].cumulative_usage_cost, 0.008);
 
   if (ok) {
@@ -6887,15 +6902,18 @@ static int harness_test_cumulative_session_usage_cost(void)
       (ranged_timeline.count == 3U) &&
       harness_double_matches(
         ranged_timeline.records[0].cumulative_usage_cost, 0.0075) &&
+      (ranged_timeline.records[0].cumulative_wait_ms == 4500LL) &&
       harness_double_matches(
         ranged_timeline.records[1].cumulative_usage_cost, 0.0075) &&
+      (ranged_timeline.records[1].cumulative_wait_ms == 322000LL) &&
       harness_double_matches(
-        ranged_timeline.records[2].cumulative_usage_cost, 0.008);
+        ranged_timeline.records[2].cumulative_usage_cost, 0.008) &&
+      (ranged_timeline.records[2].cumulative_wait_ms == 323000LL);
   }
 
   if (!ok) {
     fprintf(stderr,
-            "Cumulative session usage cost failed: %s\n",
+            "Cumulative session metrics failed: %s\n",
             (error != NULL) ? error : "timeline total mismatch");
   }
   strappy_session_message_record_list_destroy(&ranged_timeline);
@@ -7810,7 +7828,7 @@ int main(void)
       harness_test_working_directory_selection() &&
       harness_test_request_surfaces() &&
       harness_test_ledger() &&
-      harness_test_cumulative_session_usage_cost() &&
+      harness_test_cumulative_session_metrics() &&
       harness_test_answer_quality_report() &&
       harness_test_world_knowledge_assistant_set() &&
       harness_test_preflight_runs_only_on_first_prompt() &&

@@ -1017,10 +1017,13 @@ static BOOL StrappySessionRecordFromOptions(
   NSNumber *httpStatus;
   NSNumber *includeInContext;
   NSNumber *isError;
+  NSNumber *promptIndex;
   NSNumber *roundIndex;
   NSNumber *attemptIndex;
   NSNumber *cumulativeUsageCost;
   NSNumber *hasCumulativeUsageCost;
+  NSNumber *cumulativeWaitMilliseconds;
+  NSNumber *hasCumulativeWaitMilliseconds;
   NSString *turnKey;
   NSString *promptGroupKey;
   NSString *actor;
@@ -1060,12 +1063,17 @@ static BOOL StrappySessionRecordFromOptions(
   turnId = [NSNumber numberWithLongLong:record->turn_id];
   modelRequestId = [NSNumber numberWithLongLong:record->model_request_id];
   httpAttemptId = [NSNumber numberWithLongLong:record->http_attempt_id];
+  promptIndex = [NSNumber numberWithLong:record->prompt_index];
   roundIndex = [NSNumber numberWithLong:record->round_index];
   attemptIndex = [NSNumber numberWithLong:record->attempt_index];
   cumulativeUsageCost =
     [NSNumber numberWithDouble:record->cumulative_usage_cost];
   hasCumulativeUsageCost =
     [NSNumber numberWithBool:(record->has_cumulative_usage_cost ? YES : NO)];
+  cumulativeWaitMilliseconds =
+    [NSNumber numberWithLongLong:record->cumulative_wait_ms];
+  hasCumulativeWaitMilliseconds =
+    [NSNumber numberWithBool:(record->has_cumulative_wait_ms ? YES : NO)];
   httpStatus = [NSNumber numberWithLong:record->http_status];
   includeInContext = [NSNumber numberWithBool:(record->include_in_context ? YES : NO)];
   isError = [NSNumber numberWithBool:(record->is_error ? YES : NO)];
@@ -1115,10 +1123,13 @@ static BOOL StrappySessionRecordFromOptions(
     turnId, @"turn_id",
     modelRequestId, @"model_request_id",
     httpAttemptId, @"http_attempt_id",
+    promptIndex, @"prompt_index",
     roundIndex, @"round_index",
     attemptIndex, @"attempt_index",
     cumulativeUsageCost, @"cumulative_usage_cost",
     hasCumulativeUsageCost, @"has_cumulative_usage_cost",
+    cumulativeWaitMilliseconds, @"cumulative_wait_ms",
+    hasCumulativeWaitMilliseconds, @"has_cumulative_wait_ms",
     turnKey, @"turn_key",
     promptGroupKey, @"prompt_group_key",
     actor, @"actor",

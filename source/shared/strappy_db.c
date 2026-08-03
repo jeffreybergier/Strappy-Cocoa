@@ -465,10 +465,13 @@ void strappy_session_message_record_init(strappy_session_message_record *record)
   record->turn_id = 0;
   record->model_request_id = 0;
   record->http_attempt_id = 0;
+  record->prompt_index = 0L;
   record->round_index = 0L;
   record->attempt_index = 0L;
   record->cumulative_usage_cost = 0.0;
   record->has_cumulative_usage_cost = 0;
+  record->cumulative_wait_ms = 0LL;
+  record->has_cumulative_wait_ms = 0;
   record->turn_key = NULL;
   record->prompt_group_key = NULL;
   record->actor = NULL;
@@ -17956,19 +17959,23 @@ static int strappy_db_semantic_timeline_append(
   return 1;
 }
 
-static void strappy_db_semantic_finalize_timeline_costs(
+static void strappy_db_semantic_finalize_timeline_totals(
   strappy_session_message_record_list *list)
 {
   size_t group_start;
   double cumulative_cost;
+  long long cumulative_wait_ms;
   int has_cumulative_cost;
+  int has_cumulative_wait;
 
   if (list == NULL) {
     return;
   }
   group_start = 0U;
   cumulative_cost = 0.0;
+  cumulative_wait_ms = 0LL;
   has_cumulative_cost = 0;
+  has_cumulative_wait = 0;
   while (group_start < list->count) {
     long long model_request_id;
     size_t group_end;
@@ -17980,75 +17987,117 @@ static void strappy_db_semantic_finalize_timeline_costs(
            (list->records[group_end].model_request_id == model_request_id)) {
       if ((list->records[group_end].kind != NULL) &&
           (strcmp(list->records[group_end].kind,
-                  "response_api_call") == 0) &&
-          list->records[group_end].has_cumulative_usage_cost) {
-        cumulative_cost +=
-          list->records[group_end].cumulative_usage_cost;
-        has_cumulative_cost = 1;
+                  "response_api_call") == 0)) {
+        if (list->records[group_end].has_cumulative_usage_cost) {
+          cumulative_cost +=
+            list->records[group_end].cumulative_usage_cost;
+          has_cumulative_cost = 1;
+        }
+        if (list->records[group_end].has_cumulative_wait_ms) {
+          long long wait_ms;
+
+          wait_ms = list->records[group_end].cumulative_wait_ms;
+          cumulative_wait_ms =
+            (wait_ms > (LLONG_MAX - cumulative_wait_ms)) ?
+              LLONG_MAX : cumulative_wait_ms + wait_ms;
+          has_cumulative_wait = 1;
+        }
       }
       group_end++;
     }
     for (index = group_start; index < group_end; index++) {
       list->records[index].cumulative_usage_cost = cumulative_cost;
       list->records[index].has_cumulative_usage_cost = has_cumulative_cost;
+      list->records[index].cumulative_wait_ms = cumulative_wait_ms;
+      list->records[index].has_cumulative_wait_ms = has_cumulative_wait;
     }
     group_start = group_end;
   }
 }
 
-static int strappy_db_semantic_finalize_ranged_timeline_costs(
+static int strappy_db_semantic_finalize_ranged_timeline_totals(
   sqlite3 *db,
   long long session_id,
   strappy_session_message_record_list *list,
   char **error_out)
 {
   static const char *sql =
-    "SELECT SUM(u.cost_nano_usd) FROM api_usage u "
-    "JOIN http_attempts a ON a.id = u.attempt_id "
-    "JOIN model_requests r ON r.id = a.request_id "
+    "SELECT r.id, SUM(u.cost_nano_usd), "
+    "SUM(CASE WHEN a.completed_at_ms IS NOT NULL "
+      "AND a.completed_at_ms >= a.started_at_ms "
+      "THEN a.completed_at_ms - a.started_at_ms END) "
+    "FROM model_requests r "
     "JOIN turns t ON t.id = r.turn_id "
+    "JOIN http_attempts a ON a.request_id = r.id "
+    "LEFT JOIN api_usage u ON u.attempt_id = a.id "
     "WHERE t.session_id = ? AND r.id <= ? "
-    "AND a.state NOT IN ('pending','running');";
+    "AND a.state NOT IN ('pending','running') "
+    "GROUP BY r.id ORDER BY r.id;";
   sqlite3_stmt *stmt;
+  long long maximum_request_id;
+  long long cumulative_wait_ms;
+  double cumulative_cost;
   size_t group_start;
+  int has_cumulative_cost;
+  int has_cumulative_wait;
   int rc;
 
+  if ((list == NULL) || (list->count == 0U)) {
+    return 1;
+  }
+  maximum_request_id = list->records[list->count - 1U].model_request_id;
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-  if (rc != SQLITE_OK) {
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt,
+                          1,
+                          (sqlite3_int64)session_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt,
+                          2,
+                          (sqlite3_int64)maximum_request_id) != SQLITE_OK)) {
     strappy_set_formatted_error(error_out,
-                                "Could not prepare ranged timeline cost: %s",
+                                "Could not prepare ranged timeline totals: %s",
                                 sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
     return 0;
   }
   group_start = 0U;
+  cumulative_cost = 0.0;
+  cumulative_wait_ms = 0LL;
+  has_cumulative_cost = 0;
+  has_cumulative_wait = 0;
+  rc = sqlite3_step(stmt);
   while (group_start < list->count) {
     long long model_request_id;
-    double cumulative_cost;
-    int has_cumulative_cost;
     size_t group_end;
     size_t index;
 
     model_request_id = list->records[group_start].model_request_id;
-    if ((sqlite3_reset(stmt) != SQLITE_OK) ||
-        (sqlite3_clear_bindings(stmt) != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt,
-                            1,
-                            (sqlite3_int64)session_id) != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt,
-                            2,
-                            (sqlite3_int64)model_request_id) != SQLITE_OK) ||
-        (sqlite3_step(stmt) != SQLITE_ROW)) {
+    while ((rc == SQLITE_ROW) &&
+           ((long long)sqlite3_column_int64(stmt, 0) <= model_request_id)) {
+      if (sqlite3_column_type(stmt, 1) != SQLITE_NULL) {
+        cumulative_cost +=
+          (double)sqlite3_column_int64(stmt, 1) / 1000000000.0;
+        has_cumulative_cost = 1;
+      }
+      if (sqlite3_column_type(stmt, 2) != SQLITE_NULL) {
+        long long wait_ms;
+
+        wait_ms = (long long)sqlite3_column_int64(stmt, 2);
+        cumulative_wait_ms =
+          (wait_ms > (LLONG_MAX - cumulative_wait_ms)) ?
+            LLONG_MAX : cumulative_wait_ms + wait_ms;
+        has_cumulative_wait = 1;
+      }
+      rc = sqlite3_step(stmt);
+    }
+    if ((rc != SQLITE_ROW) && (rc != SQLITE_DONE)) {
       strappy_set_formatted_error(error_out,
-                                  "Could not read ranged timeline cost: %s",
+                                  "Could not read ranged timeline totals: %s",
                                   sqlite3_errmsg(db));
       sqlite3_finalize(stmt);
       return 0;
     }
-    has_cumulative_cost =
-      (sqlite3_column_type(stmt, 0) != SQLITE_NULL) ? 1 : 0;
-    cumulative_cost = has_cumulative_cost ?
-      ((double)sqlite3_column_int64(stmt, 0) / 1000000000.0) : 0.0;
     group_end = group_start;
     while ((group_end < list->count) &&
            (list->records[group_end].model_request_id == model_request_id)) {
@@ -18057,6 +18106,8 @@ static int strappy_db_semantic_finalize_ranged_timeline_costs(
     for (index = group_start; index < group_end; index++) {
       list->records[index].cumulative_usage_cost = cumulative_cost;
       list->records[index].has_cumulative_usage_cost = has_cumulative_cost;
+      list->records[index].cumulative_wait_ms = cumulative_wait_ms;
+      list->records[index].has_cumulative_wait_ms = has_cumulative_wait;
     }
     group_start = group_end;
   }
@@ -18227,7 +18278,10 @@ static int strappy_db_semantic_list_response_timeline(
     "1 AS group_phase, 0 AS attempt_phase, -1 AS item_index, "
     "a.method, a.endpoint, ar.provider_status, a.transport_error, "
     "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason, "
-    "r.model_id, 0 AS can_include_in_context "
+    "r.model_id, 0 AS can_include_in_context, t.ordinal, "
+    "CASE WHEN a.completed_at_ms IS NOT NULL "
+      "AND a.completed_at_ms >= a.started_at_ms "
+      "THEN a.completed_at_ms - a.started_at_ms END "
     "FROM http_attempts a JOIN model_requests r ON r.id = a.request_id "
     "JOIN turns t ON t.id = r.turn_id "
     "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
@@ -18241,7 +18295,7 @@ static int strappy_db_semantic_list_response_timeline(
     "strftime('%Y-%m-%dT%H:%M:%fZ', i.created_at_ms / 1000.0, 'unixepoch'), "
     "i.is_error, i.include_in_context, NULL, "
     "0, 0, i.source_item_index, NULL, NULL, NULL, NULL, NULL, NULL, "
-    "r.model_id, 1 "
+    "r.model_id, 1, t.ordinal, NULL "
     "FROM conversation_items i "
     "JOIN model_requests r ON r.id = i.introduced_request_id "
     "JOIN turns t ON t.id = r.turn_id "
@@ -18265,7 +18319,7 @@ static int strappy_db_semantic_list_response_timeline(
       "2147483647), "
     "a.method, a.endpoint, ar.provider_status, a.transport_error, "
     "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason, "
-    "r.model_id, 0 "
+    "r.model_id, 0, t.ordinal, NULL "
     "FROM answer_quality_audits q "
     "JOIN http_attempts a ON a.id = q.response_attempt_id "
     "JOIN model_requests r ON r.id = a.request_id "
@@ -18284,7 +18338,7 @@ static int strappy_db_semantic_list_response_timeline(
     "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason, "
     "r.model_id, CASE WHEN i.include_in_context = 1 OR (" \
       STRAPPY_DB_CONTEXT_ELIGIBLE_ATTEMPT_SQL \
-    ") THEN 1 ELSE 0 END "
+    ") THEN 1 ELSE 0 END, t.ordinal, NULL "
     "FROM conversation_items i "
     "JOIN http_attempts a ON a.id = i.source_attempt_id "
     "JOIN model_requests r ON r.id = a.request_id "
@@ -18419,6 +18473,7 @@ static int strappy_db_semantic_list_response_timeline(
     record->turn_id = (long long)sqlite3_column_int64(stmt, 2);
     record->model_request_id = (long long)sqlite3_column_int64(stmt, 3);
     record->http_attempt_id = attempt_id;
+    record->prompt_index = (long)sqlite3_column_int64(stmt, 29);
     record->round_index = (long)sqlite3_column_int64(stmt, 9);
     record->attempt_index = (sqlite3_column_type(stmt, 10) != SQLITE_NULL) ?
       (long)sqlite3_column_int64(stmt, 10) : 0L;
@@ -18440,6 +18495,12 @@ static int strappy_db_semantic_list_response_timeline(
       record->cumulative_usage_cost =
         (double)sqlite3_column_int64(stmt, 17) / 1000000000.0;
       record->has_cumulative_usage_cost = 1;
+    }
+    if ((entry_type == 0) &&
+        (sqlite3_column_type(stmt, 30) != SQLITE_NULL)) {
+      record->cumulative_wait_ms =
+        (long long)sqlite3_column_int64(stmt, 30);
+      record->has_cumulative_wait_ms = 1;
     }
     record->turn_key = strappy_db_column_string(stmt, 7);
     record->prompt_group_key = strappy_db_column_string(stmt, 7);
@@ -18534,11 +18595,11 @@ static int strappy_db_semantic_list_response_timeline(
     return 0;
   }
   if (after_cursor == NULL) {
-    strappy_db_semantic_finalize_timeline_costs(list);
-  } else if (!strappy_db_semantic_finalize_ranged_timeline_costs(db,
-                                                                 session_id,
-                                                                 list,
-                                                                 error_out)) {
+    strappy_db_semantic_finalize_timeline_totals(list);
+  } else if (!strappy_db_semantic_finalize_ranged_timeline_totals(db,
+                                                                  session_id,
+                                                                  list,
+                                                                  error_out)) {
     strappy_db_release(db);
     strappy_session_message_record_list_destroy(list);
     return 0;

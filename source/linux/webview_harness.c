@@ -127,6 +127,7 @@ static int harness_check_localized_labels(void)
        harness_expect_equal(labels->response_item, "Response Item") &&
        harness_expect_equal(labels->request, "Request") &&
        harness_expect_equal(labels->response, "Response") &&
+       harness_expect_equal(labels->prompt, "Prompt") &&
        harness_expect_equal(labels->round, "Round") &&
        harness_expect_equal(labels->attempt, "Attempt") &&
        harness_expect_equal(labels->included_in_future_context,
@@ -409,6 +410,10 @@ static int harness_check_page_scripts(void)
          "padding-right:32px!important;}") &&
        harness_expect_contains(
          page_html,
+         ".context-inclusion-target{position:absolute;right:0;top:0;"
+         "bottom:0;width:32px;") &&
+       harness_expect_contains(
+         page_html,
          ".context-inclusion-checkbox{position:absolute;right:10px;"
          "top:50%;") &&
        harness_expect_contains(page_html,
@@ -500,11 +505,18 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(
          page_html,
          "if(locked){box.disabled=true;"
-         "box.setAttribute('disabled','disabled');}") &&
+         "box.setAttribute('disabled','disabled');"
+         "target.className+=' context-inclusion-target-disabled';}") &&
        harness_expect_contains(
          page_html,
          "box.onclick=function(event){return "
          "requestContextInclusionChange(this,event||window.event);}") &&
+       harness_expect_contains(
+         page_html,
+         "target.onclick=function(event){return "
+         "requestContextInclusionChange(box,event||window.event);}") &&
+       harness_expect_contains(page_html,
+                               "target.appendChild(box);return target;") &&
        harness_expect_not_contains(page_html, "aria-readonly") &&
        harness_expect_contains(
          page_html,
@@ -520,8 +532,10 @@ static int harness_check_page_scripts(void)
                                    "decorateContextInclusionRows") &&
        harness_expect_contains(page_html, "context-round-checkbox") &&
        harness_expect_contains(page_html,
-                               "h.className='api-exchange-turn-header';"
-                               "if(!active){h.className+=' disclosure-title'") &&
+                               "h.className='api-exchange-turn-header';") &&
+       harness_expect_contains(page_html,
+                               "h.appendChild(metrics);if(!active){"
+                               "h.className+=' disclosure-title'") &&
        harness_expect_contains(
          page_html,
          "if(!active&&context&&context.count>0){"
@@ -633,6 +647,13 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                ".api-exchange-turn-title{"
                                "vertical-align:baseline;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-turn-metrics{float:right;"
+                               "font-size:10px;font-weight:normal;") &&
+       harness_expect_contains(page_html,
+                               "text-align:right;white-space:nowrap;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-turn-metric{margin-left:4px;}") &&
        harness_expect_contains(page_html,
                                ".user .role{background:#c1c8ce;color:#30363b;"
                                "margin:0 -12px;padding:8px 12px;") &&
@@ -1141,11 +1162,11 @@ static int harness_check_page_scripts(void)
                                "function apiExchangeCumulativeUsageCost") &&
        harness_expect_contains(page_html,
                                "for(i=rows.length-1;i>=0;i--)") &&
-       harness_expect_contains(
+       harness_expect_not_contains(
          page_html,
          "if(!rowIsResponseStatus(row)||"
          "!responseStatusResolved(row))continue;") &&
-       harness_expect_contains(
+       harness_expect_not_contains(
          page_html,
          "if(active&&rowIsAPIExchangeError(row))return '';") &&
        harness_expect_not_contains(page_html,
@@ -1168,11 +1189,19 @@ static int harness_check_page_scripts(void)
                                "formatAPIExchangeAttemptState(state)") &&
        harness_expect_contains(page_html,
                                "function formatCumulativeUsageCost(value){"
-                               "return value!==''?'$'+value:'';}") &&
+                               "return value!==''?value:'0.00';}") &&
+       harness_expect_contains(page_html,
+                               "function apiExchangeCumulativeWaitDuration") &&
+       harness_expect_contains(page_html,
+                               "data-cumulative-wait-duration") &&
+       harness_expect_contains(page_html,
+                               "function formatCumulativeWaitDuration(value){"
+                               "return value!==''?value:'00:00';}") &&
        harness_expect_not_contains(page_html,
                                    "value!==''?value:'-'") &&
        harness_expect_contains(page_html,
-                               "titleText=roundLabel+' '+roundNumber;") &&
+                               "titleText=promptLabel+' '+promptNumber+"
+                               "' \\u00b7 '+roundLabel+' '+roundNumber;") &&
        harness_expect_not_contains(page_html,
                                    "parseInt(attemptNumber,10)") &&
        harness_expect_contains(page_html,
@@ -1184,10 +1213,9 @@ static int harness_check_page_scripts(void)
                                    "formatAPIExchangeAttemptState("
                                    "attemptState)") &&
        harness_expect_contains(page_html,
-                               "if(cumulativeUsageCost!=='')titleText+="
-                               "' \\u00b7 '+"
-                               "formatCumulativeUsageCost("
-                               "cumulativeUsageCost);") &&
+                               "faIconHTML('solid','dollar-sign','$')") &&
+       harness_expect_contains(page_html,
+                               "faIconHTML('solid','hourglass-half','Wait')") &&
        harness_expect_contains(
          page_html,
          "context=contextInclusionState(g.rows);"
@@ -1196,7 +1224,8 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(
          page_html,
          "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed,active,"
-         "apiExchangeCumulativeUsageCost(g.rows,active),context);") &&
+         "apiExchangeCumulativeUsageCost(g.rows),"
+         "apiExchangeCumulativeWaitDuration(g.rows),context);") &&
        harness_expect_contains(page_html,
                                "setNodeText(title,titleText);") &&
        harness_expect_not_contains(page_html,
@@ -2535,6 +2564,66 @@ static int harness_check_api_exchange_status_states(void)
   return ok;
 }
 
+static int harness_check_round_metric_formatting(void)
+{
+  static const struct {
+    double cost;
+    const char *cost_text;
+    long long wait_ms;
+    const char *wait_text;
+  } cases[] = {
+    { 0.0, "0.00", 0LL, "00:00" },
+    { 0.01, "0.01", 1LL, "00:01" },
+    { 0.010000001, "0.02", 323000LL, "05:23" },
+    { 0.9999, "1.00", 3600000LL, "60:00" },
+    { 0.00003, "0.01", 66500LL, "01:07" }
+  };
+  strappy_webview_message message;
+  char expected_cost[96];
+  char expected_wait[96];
+  char *html;
+  size_t index;
+  int written;
+  int ok;
+
+  for (index = 0U; index < (sizeof(cases) / sizeof(cases[0])); index++) {
+    memset(&message, 0, sizeof(message));
+    message.round_id = 1LL;
+    message.prompt_number = 1L;
+    message.round_number = 1L;
+    message.role = "api_call";
+    message.kind = "response_api_call";
+    message.attempt_state = "completed";
+    message.cumulative_usage_cost = cases[index].cost;
+    message.has_cumulative_usage_cost = 1;
+    message.cumulative_wait_ms = cases[index].wait_ms;
+    message.has_cumulative_wait_ms = 1;
+    written = snprintf(expected_cost,
+                       sizeof(expected_cost),
+                       "data-cumulative-usage-cost=\"%s\"",
+                       cases[index].cost_text);
+    if ((written < 0) || ((size_t)written >= sizeof(expected_cost))) {
+      return 0;
+    }
+    written = snprintf(expected_wait,
+                       sizeof(expected_wait),
+                       "data-cumulative-wait-duration=\"%s\"",
+                       cases[index].wait_text);
+    if ((written < 0) || ((size_t)written >= sizeof(expected_wait))) {
+      return 0;
+    }
+    html = strappy_webview_message_html(&message, NULL, NULL, NULL);
+    ok = (html != NULL) &&
+      harness_expect_contains(html, expected_cost) &&
+      harness_expect_contains(html, expected_wait);
+    strappy_webview_free(html);
+    if (!ok) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int harness_check_responses_items(void)
 {
   strappy_webview_message message;
@@ -2584,14 +2673,17 @@ static int harness_check_responses_items(void)
   message.element_id = "response-call-1";
   message.round_id = 3LL;
   message.api_call_id = 1LL;
+  message.prompt_number = 2L;
   message.round_number = 3L;
   message.attempt_number = 2L;
   message.http_status = 200L;
   message.attempt_state = "completed";
   message.request_method = "POST";
   message.request_endpoint = "/responses";
-  message.cumulative_usage_cost = 0.02392002;
+  message.cumulative_usage_cost = 0.00003;
   message.has_cumulative_usage_cost = 1;
+  message.cumulative_wait_ms = 323000LL;
+  message.has_cumulative_wait_ms = 1;
   message.role = "api_call";
   message.kind = "response_api_call";
   message.text = "Model: example/model\nStarted: 2026-07-16";
@@ -2789,6 +2881,8 @@ static int harness_check_responses_items(void)
        harness_expect_contains(call_html, "class=\"row api_call\"") &&
        harness_expect_contains(call_html, "data-round-id=\"3\"") &&
        harness_expect_contains(call_html, "data-api-call-id=\"1\"") &&
+       harness_expect_contains(call_html, "data-prompt-number=\"2\"") &&
+       harness_expect_contains(call_html, "data-prompt-label=\"Prompt\"") &&
        harness_expect_contains(call_html, "data-round-number=\"3\"") &&
        harness_expect_contains(call_html, "data-round-label=\"Round\"") &&
        harness_expect_contains(call_html, "data-attempt-number=\"2\"") &&
@@ -2797,7 +2891,9 @@ static int harness_check_responses_items(void)
        harness_expect_contains(call_html,
                                "data-request-endpoint=\"/responses\"") &&
        harness_expect_contains(call_html,
-                               "data-cumulative-usage-cost=\"0.02392002\"") &&
+                               "data-cumulative-usage-cost=\"0.01\"") &&
+       harness_expect_contains(call_html,
+                               "data-cumulative-wait-duration=\"05:23\"") &&
        harness_expect_not_contains(call_html,
                                    "data-include-in-context=") &&
        harness_expect_contains(call_html,
@@ -3160,6 +3256,9 @@ int main(void)
     return 1;
   }
   if (!harness_check_api_exchange_status_states()) {
+    return 1;
+  }
+  if (!harness_check_round_metric_formatting()) {
     return 1;
   }
   if (!harness_check_responses_items()) {

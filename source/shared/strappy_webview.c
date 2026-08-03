@@ -61,6 +61,7 @@ typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_RESPONSE_ITEM,
   STRAPPY_WEBVIEW_LABEL_REQUEST,
   STRAPPY_WEBVIEW_LABEL_RESPONSE,
+  STRAPPY_WEBVIEW_LABEL_PROMPT,
   STRAPPY_WEBVIEW_LABEL_ROUND,
   STRAPPY_WEBVIEW_LABEL_ATTEMPT,
   STRAPPY_WEBVIEW_LABEL_INCLUDED_IN_FUTURE_CONTEXT,
@@ -123,6 +124,7 @@ static const char * const g_strappy_webview_label_keys[
   "Response Item",
   "Request",
   "Response",
+  "Prompt",
   "Round",
   "Attempt",
   "Included in Future Context",
@@ -190,6 +192,7 @@ static void strappy_webview_assign_localized_labels(
   labels->response_item = values[STRAPPY_WEBVIEW_LABEL_RESPONSE_ITEM];
   labels->request = values[STRAPPY_WEBVIEW_LABEL_REQUEST];
   labels->response = values[STRAPPY_WEBVIEW_LABEL_RESPONSE];
+  labels->prompt = values[STRAPPY_WEBVIEW_LABEL_PROMPT];
   labels->round = values[STRAPPY_WEBVIEW_LABEL_ROUND];
   labels->attempt = values[STRAPPY_WEBVIEW_LABEL_ATTEMPT];
   labels->included_in_future_context =
@@ -1069,6 +1072,16 @@ static const char *strappy_webview_round_label(
   return "Round";
 }
 
+static const char *strappy_webview_prompt_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) && (labels->prompt != NULL) &&
+      (labels->prompt[0] != '\0')) {
+    return labels->prompt;
+  }
+  return "Prompt";
+}
+
 static const char *strappy_webview_attempt_label(
   const strappy_webview_labels *labels)
 {
@@ -1478,38 +1491,113 @@ static int strappy_webview_format_usage_cost(double value,
                                              char *buffer,
                                              size_t buffer_size)
 {
-  size_t index;
+  char precise[96];
+  char *decimal;
+  char *scan;
+  char *carry;
   size_t length;
+  int written;
+  int prepend_one;
+  int round_up;
+
+  if ((buffer == NULL) || (buffer_size == 0U)) {
+    return 0;
+  }
+  if (!(value > 0.0)) {
+    written = snprintf(buffer, buffer_size, "0.00");
+    return (written >= 0) && ((size_t)written < buffer_size);
+  }
+
+  written = snprintf(precise, sizeof(precise), "%.10f", value);
+  if ((written < 0) || ((size_t)written >= sizeof(precise))) {
+    buffer[0] = '\0';
+    return 0;
+  }
+  length = (size_t)written;
+  for (scan = precise; *scan != '\0'; scan++) {
+    if (*scan == ',') {
+      *scan = '.';
+    }
+  }
+  decimal = strchr(precise, '.');
+  if ((decimal == NULL) || ((size_t)(decimal - precise) >= length) ||
+      (decimal[1] < '0') || (decimal[1] > '9') ||
+      (decimal[2] < '0') || (decimal[2] > '9')) {
+    buffer[0] = '\0';
+    return 0;
+  }
+  round_up = 0;
+  for (scan = decimal + 3; *scan != '\0'; scan++) {
+    if ((*scan >= '1') && (*scan <= '9')) {
+      round_up = 1;
+      break;
+    }
+  }
+  decimal[3] = '\0';
+  if (round_up) {
+    prepend_one = 0;
+    carry = decimal + 2;
+    for (;;) {
+      if (*carry == '.') {
+        carry--;
+        continue;
+      }
+      if ((*carry >= '0') && (*carry < '9')) {
+        (*carry)++;
+        break;
+      }
+      if (*carry != '9') {
+        buffer[0] = '\0';
+        return 0;
+      }
+      *carry = '0';
+      if (carry == precise) {
+        prepend_one = 1;
+        break;
+      }
+      carry--;
+    }
+    if (prepend_one) {
+      length = strlen(precise);
+      if ((length + 1U) >= sizeof(precise)) {
+        buffer[0] = '\0';
+        return 0;
+      }
+      memmove(precise + 1, precise, length + 1U);
+      precise[0] = '1';
+    }
+  }
+  written = snprintf(buffer, buffer_size, "%s", precise);
+  return (written >= 0) && ((size_t)written < buffer_size);
+}
+
+static int strappy_webview_format_wait_duration(long long milliseconds,
+                                                char *buffer,
+                                                size_t buffer_size)
+{
+  unsigned long long total_seconds;
+  unsigned long long minutes;
+  unsigned long long seconds;
   int written;
 
   if ((buffer == NULL) || (buffer_size == 0U)) {
     return 0;
   }
-
-  written = snprintf(buffer, buffer_size, "%.10f", value);
-  if ((written < 0) || ((size_t)written >= buffer_size)) {
-    buffer[0] = '\0';
-    return 0;
+  if (milliseconds < 0LL) {
+    milliseconds = 0LL;
   }
-
-  length = (size_t)written;
-  for (index = 0U; index < length; index++) {
-    if (buffer[index] == ',') {
-      buffer[index] = '.';
-    }
+  total_seconds = (unsigned long long)(milliseconds / 1000LL);
+  if ((milliseconds % 1000LL) != 0LL) {
+    total_seconds++;
   }
-  while ((length > 0U) && (buffer[length - 1U] == '0')) {
-    length--;
-  }
-  if ((length > 0U) && (buffer[length - 1U] == '.')) {
-    length--;
-  }
-  buffer[length] = '\0';
-  if (strcmp(buffer, "-0") == 0) {
-    buffer[0] = '0';
-    buffer[1] = '\0';
-  }
-  return 1;
+  minutes = total_seconds / 60ULL;
+  seconds = total_seconds % 60ULL;
+  written = snprintf(buffer,
+                     buffer_size,
+                     "%02llu:%02llu",
+                     minutes,
+                     seconds);
+  return (written >= 0) && ((size_t)written < buffer_size);
 }
 
 static const char *strappy_webview_disclosure_icon_html(int collapsed)
@@ -1811,6 +1899,9 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     ".row:last-child{margin-bottom:0;}",
     ".role{font-size:12px;font-weight:bold;color:#606970;margin:0 0 4px;}",
     ".context-inclusion-host{position:relative;padding-right:32px!important;}",
+    ".context-inclusion-target{position:absolute;right:0;top:0;bottom:0;",
+    "width:32px;cursor:pointer;-webkit-tap-highlight-color:transparent;}",
+    ".context-inclusion-target-disabled{cursor:default;}",
     ".context-inclusion-checkbox{position:absolute;right:10px;top:50%;",
     "box-sizing:border-box;width:14px;height:14px;margin:-7px 0 0;",
     "padding:0;cursor:pointer;opacity:1;",
@@ -2023,6 +2114,10 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
     "color:#30363b;font-size:12px;font-weight:bold;line-height:1.3;}",
     ".api-exchange-toggle{color:#4e5961;text-decoration:none;}",
     ".api-exchange-turn-title{vertical-align:baseline;}",
+    ".api-exchange-turn-metrics{float:right;font-size:10px;font-weight:normal;",
+    "line-height:1.56;text-align:right;white-space:nowrap;}",
+    ".api-exchange-turn-metric{margin-left:4px;}",
+    ".api-exchange-turn-metric>.fa{margin-right:2px;}",
     ".api-exchange-item,.api-exchange-status{background:#dfe4e8;}",
     ".api-exchange-item>.role,",
     ".api-exchange-status>.response-status-section>.role{",
@@ -2524,20 +2619,28 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "next=(mixed||!current)?1:0;box.checked=current;box.indeterminate=mixed;",
     "box.setAttribute('aria-checked',mixed?'mixed':(current?'true':'false'));box.disabled=true;",
     "window.location.href='strappy-action://context-round/'+id+'/'+next;return false;}",
-    "function contextInclusionCheckbox(label,checked,indeterminate,id,locked){var box=document.createElement('input');",
+    "function contextInclusionCheckbox(label,checked,indeterminate,id,locked){",
+    "var target=document.createElement('span'),box=document.createElement('input');",
+    "target.className='context-inclusion-target';target.title=label||'Included in Future Context';",
     "box.type='checkbox';box.className='context-inclusion-checkbox context-round-checkbox';",
     "box.setAttribute('aria-label',label||'Included in Future Context');box.title=label||'Included in Future Context';",
     "box.checked=checked?true:false;box.indeterminate=indeterminate?true:false;",
     "box.setAttribute('aria-checked',indeterminate?'mixed':(checked?'true':'false'));",
     "box.setAttribute('data-context-current',checked?'1':'0');box.setAttribute('data-context-mixed',indeterminate?'1':'0');",
     "box.setAttribute('data-context-id',id);",
-    "if(locked){box.disabled=true;box.setAttribute('disabled','disabled');}",
-    "box.onclick=function(event){return requestContextInclusionChange(this,event||window.event);};return box;}",
-    "function apiExchangeCumulativeUsageCost(rows,active){var i,row,value;for(i=rows.length-1;i>=0;i--){",
-    "row=rows[i];if(!rowIsResponseStatus(row)||!responseStatusResolved(row))continue;",
-    "if(active&&rowIsAPIExchangeError(row))return '';",
-    "value=row.getAttribute?row.getAttribute('data-cumulative-usage-cost')||'':'';if(value!=='')return value;}return '';}",
-    "function formatCumulativeUsageCost(value){return value!==''?'$'+value:'';}",
+    "if(locked){box.disabled=true;box.setAttribute('disabled','disabled');",
+    "target.className+=' context-inclusion-target-disabled';}",
+    "box.onclick=function(event){return requestContextInclusionChange(this,event||window.event);};",
+    "target.onclick=function(event){return requestContextInclusionChange(box,event||window.event);};",
+    "target.appendChild(box);return target;}",
+    "function apiExchangeCumulativeUsageCost(rows){var i,row,value;for(i=rows.length-1;i>=0;i--){",
+    "row=rows[i];value=row.getAttribute?row.getAttribute('data-cumulative-usage-cost')||'':'';",
+    "if(value!=='')return value;}return '';}",
+    "function apiExchangeCumulativeWaitDuration(rows){var i,row,value;for(i=rows.length-1;i>=0;i--){",
+    "row=rows[i];value=row.getAttribute?row.getAttribute('data-cumulative-wait-duration')||'':'';",
+    "if(value!=='')return value;}return '';}",
+    "function formatCumulativeUsageCost(value){return value!==''?value:'0.00';}",
+    "function formatCumulativeWaitDuration(value){return value!==''?value:'00:00';}",
     "function formatAPIExchangeAttemptState(value){var words=jsonText(value).replace(/_/g,' ').split(' ');var i;",
     "if(!words.length||words[0]==='')return 'Unknown state';for(i=0;i<words.length;i++){",
     "if(words[i]!=='')words[i]=words[i].charAt(0).toUpperCase()+words[i].substring(1);}return words.join(' ');}",
@@ -2604,14 +2707,22 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "while((n=firstByClass(row,'api-exchange-section-label'))&&n.parentNode===row)row.removeChild(n);}",
     "function removeAPIExchangeTurnHeader(row){var n=firstByClass(row,'api-exchange-turn-header');",
     "if(n&&n.parentNode)n.parentNode.removeChild(n);}",
-    "function ensureAPIExchangeTurnHeader(row,id,collapsed,active,cumulativeUsageCost,context){var h,a,d,title,titleText,roundNumber,roundLabel,box;",
-    "if(!row)return;roundNumber=row.getAttribute('data-round-number')||'1';roundLabel=row.getAttribute('data-round-label')||'Round';",
-    "h=document.createElement('div');h.className='api-exchange-turn-header';if(!active){h.className+=' disclosure-title';a=document.createElement('a');",
+    "function ensureAPIExchangeTurnHeader(row,id,collapsed,active,cumulativeUsageCost,cumulativeWaitDuration,context){",
+    "var h,a,d,title,titleText,promptNumber,promptLabel,roundNumber,roundLabel,metrics,cost,wait,box;",
+    "if(!row)return;promptNumber=row.getAttribute('data-prompt-number')||'1';promptLabel=row.getAttribute('data-prompt-label')||'Prompt';",
+    "roundNumber=row.getAttribute('data-round-number')||'1';roundLabel=row.getAttribute('data-round-label')||'Round';",
+    "h=document.createElement('div');h.className='api-exchange-turn-header';",
+    "metrics=document.createElement('span');metrics.className='api-exchange-turn-metrics';",
+    "cost=document.createElement('span');cost.className='api-exchange-turn-metric api-exchange-turn-cost';",
+    "cost.innerHTML=faIconHTML('solid','dollar-sign','$')+escHTML(formatCumulativeUsageCost(cumulativeUsageCost));metrics.appendChild(cost);",
+    "wait=document.createElement('span');wait.className='api-exchange-turn-metric api-exchange-turn-wait';",
+    "wait.innerHTML=faIconHTML('solid','hourglass-half','Wait')+escHTML(formatCumulativeWaitDuration(cumulativeWaitDuration));",
+    "metrics.appendChild(wait);h.appendChild(metrics);if(!active){h.className+=' disclosure-title';a=document.createElement('a');",
     "a.className='api-exchange-toggle';a.href='#';a.setAttribute('data-round-id',id);a.setAttribute('data-prompt-group-key',promptGroupKey(row));",
     "a.setAttribute('aria-expanded',collapsed?'false':'true');d=document.createElement('span');d.className='api-exchange-disclosure';",
     "d.innerHTML=disclosureIconHTML(collapsed);a.appendChild(d);h.appendChild(a);h.onclick=function(){return toggleAPIExchange(a);};}",
-    "title=document.createElement('span');title.className='api-exchange-turn-title';titleText=roundLabel+' '+roundNumber;",
-    "if(cumulativeUsageCost!=='')titleText+=' \\u00b7 '+formatCumulativeUsageCost(cumulativeUsageCost);",
+    "title=document.createElement('span');title.className='api-exchange-turn-title';",
+    "titleText=promptLabel+' '+promptNumber+' \\u00b7 '+roundLabel+' '+roundNumber;",
     "setNodeText(title,titleText);h.appendChild(title);",
     "if(!active&&context&&context.count>0){h.className+=' context-inclusion-host';box=contextInclusionCheckbox(",
     "context.label,context.checked,context.indeterminate,id,",
@@ -2673,7 +2784,8 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(attemptRows.length)setRowClass(attemptRows[attemptRows.length-1],'api-exchange-attempt-end',1);",
     "if(responseRows.length)ensureResponseAttemptLabel(responseRows[0]);else if(statusRow)ensureResponseAttemptLabel(statusRow);}",
     "context=contextInclusionState(g.rows);setContextRoundOpacity(g.rows,context.count==0||context.checked);",
-    "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed,active,apiExchangeCumulativeUsageCost(g.rows,active),context);}}",
+    "ensureAPIExchangeTurnHeader(anchor,g.id,collapsed,active,apiExchangeCumulativeUsageCost(g.rows),",
+    "apiExchangeCumulativeWaitDuration(g.rows),context);}}",
     "function decorateAPIExchanges(root){decorateAPIExchangesForRows(messageRows());}",
     "function toggleAPIExchange(a){var id=a&&a.getAttribute?a.getAttribute('data-round-id'):'';var group=a&&a.getAttribute?a.getAttribute('data-prompt-group-key'):'';var current,rows;",
     "if(id===''||promptGroupIsProcessing(group))return false;current=a.getAttribute('aria-expanded')=='false'?1:0;strappyAPIRoundCollapsed[id]=current?0:1;",
@@ -3524,9 +3636,11 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   char http_status_value[64];
   char round_id_text[64];
   char api_call_id_text[64];
+  char prompt_number_text[64];
   char round_number_text[64];
   char attempt_number_text[64];
   char cumulative_usage_cost_text[64];
+  char cumulative_wait_duration_text[64];
   char include_in_context_text[2];
   int has_state;
   int render_created_at;
@@ -3572,10 +3686,12 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
   }
   round_id_text[0] = '\0';
   api_call_id_text[0] = '\0';
+  prompt_number_text[0] = '\0';
   round_number_text[0] = '\0';
   attempt_number_text[0] = '\0';
   http_status_value[0] = '\0';
   cumulative_usage_cost_text[0] = '\0';
+  cumulative_wait_duration_text[0] = '\0';
   include_in_context_text[0] = '\0';
   include_in_context_text[1] = '\0';
   if ((message != NULL) && message->can_include_in_context) {
@@ -3593,10 +3709,23 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                "%ld",
                message->round_number);
     }
+    if (message->prompt_number > 0L) {
+      snprintf(prompt_number_text,
+               sizeof(prompt_number_text),
+               "%ld",
+               message->prompt_number);
+    }
     if (message->has_cumulative_usage_cost &&
         !strappy_webview_format_usage_cost(message->cumulative_usage_cost,
                                           cumulative_usage_cost_text,
                                           sizeof(cumulative_usage_cost_text))) {
+      return NULL;
+    }
+    if (message->has_cumulative_wait_ms &&
+        !strappy_webview_format_wait_duration(
+          message->cumulative_wait_ms,
+          cumulative_wait_duration_text,
+          sizeof(cumulative_wait_duration_text))) {
       return NULL;
     }
   }
@@ -3748,6 +3877,14 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                              "round-number",
                                              round_number_text) &&
        strappy_webview_append_data_attribute(&buffer,
+                                             "prompt-number",
+                                             prompt_number_text) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "prompt-label",
+         (round_id_text[0] != '\0') ?
+           strappy_webview_prompt_label(labels) : NULL) &&
+       strappy_webview_append_data_attribute(&buffer,
                                              "round-label",
                                              (round_id_text[0] != '\0') ?
                                                strappy_webview_round_label(labels) :
@@ -3785,6 +3922,10 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
          &buffer,
          "cumulative-usage-cost",
          cumulative_usage_cost_text) &&
+       strappy_webview_append_data_attribute(
+         &buffer,
+         "cumulative-wait-duration",
+         cumulative_wait_duration_text) &&
        strappy_webview_append_data_attribute(&buffer,
                                              "direction",
                                              direction) &&

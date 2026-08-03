@@ -18,6 +18,7 @@
 "Response Item" = "レスポンス項目";
 "Request" = "リクエスト";
 "Response" = "レスポンス";
+"Prompt" = "プロンプト";
 "Round" = "ラウンド";
 "Attempt" = "試行";
 "Included in Future Context" = "今後のコンテキストに含まれる";

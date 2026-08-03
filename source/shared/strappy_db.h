@@ -92,10 +92,13 @@ typedef struct strappy_session_message_record {
   long long turn_id;
   long long model_request_id;
   long long http_attempt_id;
+  long prompt_index;
   long round_index;
   long attempt_index;
   double cumulative_usage_cost;
   int has_cumulative_usage_cost;
+  long long cumulative_wait_ms;
+  int has_cumulative_wait_ms;
   char *turn_key;
   char *prompt_group_key;
   char *actor;

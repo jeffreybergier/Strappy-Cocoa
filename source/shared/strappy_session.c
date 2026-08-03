@@ -808,12 +808,15 @@ static void strappy_session_webview_message_from_record(
   message->message_id = record->message_id;
   message->round_id = record->model_request_id;
   message->api_call_id = record->http_attempt_id;
+  message->prompt_number = record->prompt_index + 1L;
   message->round_number = record->round_index + 1L;
   message->attempt_number = record->attempt_index + 1L;
   message->http_status = record->http_status;
   message->attempt_state = record->attempt_state;
   message->cumulative_usage_cost = record->cumulative_usage_cost;
   message->has_cumulative_usage_cost = record->has_cumulative_usage_cost;
+  message->cumulative_wait_ms = record->cumulative_wait_ms;
+  message->has_cumulative_wait_ms = record->has_cumulative_wait_ms;
   if ((record->render_role != NULL) &&
       (strcmp(record->render_role, "answer_quality") == 0)) {
     message->element_id = record->message_key;
