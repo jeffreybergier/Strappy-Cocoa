@@ -16008,6 +16008,32 @@ static void strappy_db_semantic_destroy_structured_children(
   free(children);
 }
 
+static int strappy_db_semantic_sanitize_utf8(char **value_io,
+                                             char **error_out)
+{
+  char *sanitized;
+  size_t length;
+
+  if ((value_io == NULL) || (*value_io == NULL)) {
+    return 1;
+  }
+
+  length = strlen(*value_io);
+  if (strappy_utf8_validate(*value_io, length)) {
+    return 1;
+  }
+
+  sanitized = strappy_utf8_sanitized_string_duplicate(*value_io, length);
+  if (sanitized == NULL) {
+    strappy_set_error(error_out,
+                      "Could not sanitize structured UTF-8 text.");
+    return 0;
+  }
+  free(*value_io);
+  *value_io = sanitized;
+  return 1;
+}
+
 static cJSON *strappy_db_semantic_load_structured_node(
   strappy_db_structured_load_context *context,
   long long node_id,
@@ -16050,6 +16076,12 @@ static cJSON *strappy_db_semantic_load_structured_node(
     free(text_value);
     free(number_value);
     strappy_set_error(error_out, "Structured value type is missing.");
+    return NULL;
+  }
+  if (!strappy_db_semantic_sanitize_utf8(&text_value, error_out)) {
+    free(value_type);
+    free(text_value);
+    free(number_value);
     return NULL;
   }
 
@@ -16121,6 +16153,14 @@ static cJSON *strappy_db_semantic_load_structured_node(
     children[child_count].member_name =
       strappy_db_column_string(context->children_stmt, 1);
     child_count++;
+    if (!strappy_db_semantic_sanitize_utf8(
+          &children[child_count - 1U].member_name,
+          error_out)) {
+      sqlite3_reset(context->children_stmt);
+      strappy_db_semantic_destroy_structured_children(children, child_count);
+      cJSON_Delete(value);
+      return NULL;
+    }
   }
   sqlite3_reset(context->children_stmt);
   if (rc != SQLITE_DONE) {

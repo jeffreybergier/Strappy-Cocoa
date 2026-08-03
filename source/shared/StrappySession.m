@@ -1,6 +1,7 @@
 #import "StrappySession.h"
 
 #import "StrappyKeychain.h"
+#import "strappy_core.h"
 #import "strappy_prompt.h"
 #import "strappy_session.h"
 #import "strappy_study.h"
@@ -55,13 +56,23 @@ static const char *StrappySessionOptionalCString(NSString *string)
 
 static NSString *StrappySessionStringFromCString(char *value)
 {
+  char *sanitized;
   NSString *string;
+  size_t length;
 
   if (value == NULL) {
     return @"";
   }
 
   string = [NSString stringWithUTF8String:value];
+  if (string == nil) {
+    length = strlen(value);
+    sanitized = strappy_utf8_sanitized_string_duplicate(value, length);
+    if (sanitized != NULL) {
+      string = [NSString stringWithUTF8String:sanitized];
+    }
+    strappy_free_string(sanitized);
+  }
   strappy_session_free_string(value);
   return (string != nil) ? string : @"";
 }

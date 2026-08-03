@@ -556,6 +556,8 @@ static BOOL StrappyContextRoundActionValues(
   NSString *html;
   NSString *errorText;
   NSString *timelineCursor;
+  NSError *renderError;
+  NSError *writeError;
 
   path = [htmlDirectoryPath_ stringByAppendingPathComponent:@"session.html"];
   if (!StrappyEnsureDirectory(htmlDirectoryPath_)) {
@@ -567,16 +569,33 @@ static BOOL StrappyContextRoundActionValues(
 
   errorText = ([statusText_ length] > 0U) ? statusText_ : nil;
   timelineCursor = nil;
+  renderError = nil;
   html = [session_ webViewMessagesPageHTMLWithErrorText:errorText
                                            messageCount:NULL
                                          timelineCursor:&timelineCursor
-                                                  error:nil];
-  [newestRenderedTimelineCursor_ release];
-  newestRenderedTimelineCursor_ = [timelineCursor copy];
-  if (![html writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil]) {
+                                                  error:&renderError];
+  if (![html isKindOfClass:[NSString class]] || ([html length] == 0U)) {
+    NSLog(@"StrappyResponses could not render WebView HTML for session %@: %@",
+          [[session_ sessionIdentifier] description],
+          ([renderError localizedDescription] != nil) ?
+            [renderError localizedDescription] : @"empty HTML");
     return nil;
   }
 
+  writeError = nil;
+  if (![html writeToFile:path
+              atomically:YES
+                encoding:NSUTF8StringEncoding
+                   error:&writeError]) {
+    NSLog(@"StrappyResponses could not write WebView HTML for session %@: %@",
+          [[session_ sessionIdentifier] description],
+          ([writeError localizedDescription] != nil) ?
+            [writeError localizedDescription] : @"unknown write error");
+    return nil;
+  }
+
+  [newestRenderedTimelineCursor_ release];
+  newestRenderedTimelineCursor_ = [timelineCursor copy];
   return path;
 }
 

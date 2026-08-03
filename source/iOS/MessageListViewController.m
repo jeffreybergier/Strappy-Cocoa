@@ -966,6 +966,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   NSString *path;
   NSString *html;
   NSString *errorText;
+  NSError *renderError;
+  NSError *writeError;
   NSString *timelineCursor;
   NSNumber *identifier;
 
@@ -983,20 +985,33 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
   errorText = ([[self statusText] length] > 0U) ? [self statusText] : nil;
   timelineCursor = nil;
+  renderError = nil;
   html = [[self session]
     webViewMessagesPageHTMLWithErrorText:errorText
                             messageCount:NULL
                           timelineCursor:&timelineCursor
-                                   error:nil];
-  [self setNewestRenderedTimelineCursor:timelineCursor];
-  if (![html isKindOfClass:[NSString class]] ||
-      ![html writeToFile:path
-              atomically:YES
-                encoding:NSUTF8StringEncoding
-                   error:nil]) {
+                                   error:&renderError];
+  if (![html isKindOfClass:[NSString class]] || ([html length] == 0U)) {
+    NSLog(@"StrappyResponses could not render WebView HTML for session %@: %@",
+          [identifier description],
+          ([renderError localizedDescription] != nil) ?
+            [renderError localizedDescription] : @"empty HTML");
     return nil;
   }
 
+  writeError = nil;
+  if (![html writeToFile:path
+              atomically:YES
+                encoding:NSUTF8StringEncoding
+                   error:&writeError]) {
+    NSLog(@"StrappyResponses could not write WebView HTML for session %@: %@",
+          [identifier description],
+          ([writeError localizedDescription] != nil) ?
+            [writeError localizedDescription] : @"unknown write error");
+    return nil;
+  }
+
+  [self setNewestRenderedTimelineCursor:timelineCursor];
   return path;
 }
 

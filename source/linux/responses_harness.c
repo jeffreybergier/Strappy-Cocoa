@@ -21,6 +21,7 @@
 #include "../shared/strappy_client.h"
 #include "../shared/strappy_assistant_sets.h"
 #include "../shared/strappy_config.h"
+#include "../shared/strappy_core.h"
 #include "../shared/strappy_db.h"
 #include "../shared/strappy_prompt.h"
 #include "../shared/strappy_quality_policy.h"
@@ -6979,6 +6980,182 @@ static int harness_test_cumulative_session_metrics(void)
   return ok;
 }
 
+static int harness_verify_invalid_structured_text_webview_recovery(
+  const char *path,
+  long long session_id,
+  long long call_id,
+  char **error_out)
+{
+  static const char *continuation_request_json =
+    "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
+    "\"instructions\":\"System\",\"input\":[{"
+    "\"type\":\"function_call_output\",\"call_id\":\"call-test\","
+    "\"output\":{\"value\":\"safe\"}}],\"max_output_tokens\":100,"
+    "\"parallel_tool_calls\":true,\"tools\":[],"
+    "\"tool_choice\":\"auto\"}";
+  static const char *invalid_update_sql =
+    "UPDATE structured_nodes "
+    "SET text_value=CAST(X'62706C6973743030D4010203' AS TEXT) "
+    "WHERE value_type='string' AND member_name='value' "
+    "AND document_id IN ("
+      "SELECT d.id FROM structured_documents d "
+      "JOIN function_outputs o ON o.item_id=d.owner_item_id "
+      "JOIN function_calls c ON c.item_id=o.function_call_item_id "
+      "WHERE d.purpose='output' AND c.provider_call_id='call-test'"
+    ");";
+  strappy_response_tool_execution_input execution;
+  strappy_response_call_begin_input continuation;
+  sqlite3 *db;
+  char *append_cursor;
+  char *append_script;
+  char *before_cursor;
+  char *before_page;
+  char *page_cursor;
+  char *page_html;
+  char *sqlite_error;
+  size_t append_count;
+  size_t before_count;
+  size_t page_count;
+  long long continuation_call_id;
+  int ok;
+  int rc;
+
+  append_cursor = NULL;
+  append_script = NULL;
+  before_cursor = NULL;
+  before_page = NULL;
+  db = NULL;
+  page_cursor = NULL;
+  page_html = NULL;
+  sqlite_error = NULL;
+  append_count = 0U;
+  before_count = 0U;
+  page_count = 0U;
+  continuation_call_id = 0LL;
+  ok = strappy_webview_configure_localized_labels(error_out) ? 1 : 0;
+  if (!ok) {
+    goto cleanup;
+  }
+
+  before_page = strappy_session_webview_messages_page_html_for_session(
+    path,
+    session_id,
+    "../shared/Resources",
+    NULL,
+    NULL,
+    &before_count,
+    &before_cursor,
+    error_out);
+  if ((before_page == NULL) || (before_cursor == NULL)) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  memset(&execution, 0, sizeof(execution));
+  execution.session_id = session_id;
+  execution.response_call_id = call_id;
+  execution.output_index = 1L;
+  execution.call_id = "call-test";
+  execution.tool_name = "database_list";
+  execution.arguments_json = "{}";
+  execution.status = "completed";
+  execution.output_json = "{\"value\":\"safe\"}";
+  execution.started_at_ms = 1200LL;
+  execution.completed_at_ms = 1210LL;
+  if (!strappy_db_save_response_tool_execution(path, &execution, error_out)) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  memset(&continuation, 0, sizeof(continuation));
+  continuation.session_id = session_id;
+  continuation.prompt_group_key = "group-test";
+  continuation.request_kind = "tool_continuation";
+  continuation.round_index = 1L;
+  continuation.attempt_index = 0L;
+  continuation.previous_call_id = call_id;
+  continuation.new_input_start_index = 0L;
+  continuation.request_method = "POST";
+  continuation.request_url = "https://openrouter.ai/api/v1/responses";
+  continuation.request_json = continuation_request_json;
+  if (!strappy_db_begin_response_call(path,
+                                      &continuation,
+                                      &continuation_call_id,
+                                      error_out)) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  rc = sqlite3_open(path, &db);
+  if (rc != SQLITE_OK) {
+    strappy_set_error(error_out,
+                      "Could not open the invalid UTF-8 ledger fixture.");
+    ok = 0;
+    goto cleanup;
+  }
+  rc = sqlite3_exec(db,
+                    invalid_update_sql,
+                    NULL,
+                    NULL,
+                    &sqlite_error);
+  if ((rc != SQLITE_OK) || (sqlite3_changes(db) != 1)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not create the invalid UTF-8 ledger fixture: %s",
+      (sqlite_error != NULL) ? sqlite_error : "unexpected changed row count");
+    ok = 0;
+    goto cleanup;
+  }
+  sqlite3_close(db);
+  db = NULL;
+
+  page_html = strappy_session_webview_messages_page_html_for_session(
+    path,
+    session_id,
+    "../shared/Resources",
+    NULL,
+    NULL,
+    &page_count,
+    &page_cursor,
+    error_out);
+  append_script = strappy_session_webview_append_messages_js_for_session(
+    path,
+    session_id,
+    before_cursor,
+    &append_count,
+    &append_cursor,
+    error_out);
+  ok = (page_html != NULL) && (page_cursor != NULL) &&
+    (append_script != NULL) && (append_cursor != NULL) &&
+    (page_count > before_count) &&
+    (append_count == (page_count - before_count)) &&
+    (strcmp(page_cursor, append_cursor) == 0) &&
+    strappy_utf8_validate(page_html, strlen(page_html)) &&
+    strappy_utf8_validate(append_script, strlen(append_script)) &&
+    (strstr(page_html, "bplist00") != NULL) &&
+    (strstr(page_html, "\xEF\xBF\xBD") != NULL) &&
+    (strstr(append_script, "bplist00") != NULL) &&
+    (strstr(append_script, "\xEF\xBF\xBD") != NULL);
+  if (!ok && (error_out != NULL) && (*error_out == NULL)) {
+    strappy_set_error(
+      error_out,
+      "Invalid structured UTF-8 did not render safely in both WebView paths.");
+  }
+
+cleanup:
+  if (db != NULL) {
+    sqlite3_close(db);
+  }
+  sqlite3_free(sqlite_error);
+  strappy_session_free_string(append_cursor);
+  strappy_session_free_string(append_script);
+  strappy_session_free_string(before_cursor);
+  strappy_session_free_string(before_page);
+  strappy_session_free_string(page_cursor);
+  strappy_session_free_string(page_html);
+  return ok;
+}
+
 static int harness_test_ledger(void)
 {
   static const char *request_json =
@@ -7032,7 +7209,6 @@ static int harness_test_ledger(void)
   char path[] = "/tmp/strappy-responses-XXXXXX";
   strappy_response_call_begin_input begin;
   strappy_response_call_finish_input finish;
-  strappy_response_tool_execution_input execution;
   strappy_response_item_raw_record_list context;
   strappy_session_message_record_list timeline;
   sqlite3 *db;
@@ -7332,20 +7508,12 @@ static int harness_test_ledger(void)
   free(error);
   error = NULL;
 
-  memset(&execution, 0, sizeof(execution));
-  execution.session_id = session_id;
-  execution.response_call_id = call_id;
-  execution.output_index = 1L;
-  execution.call_id = "call-test";
-  execution.tool_name = "database_list";
-  execution.arguments_json = "{}";
-  execution.status = "completed";
-  execution.output_json = "{\"ok\":true}";
-  execution.started_at_ms = 1200LL;
-  execution.completed_at_ms = 1210LL;
-  ok = strappy_db_save_response_tool_execution(path, &execution, &error);
+  ok = harness_verify_invalid_structured_text_webview_recovery(
+    path, session_id, call_id, &error);
   if (!ok) {
-    fprintf(stderr, "Responses tool execution failed: %s\n", error);
+    fprintf(stderr,
+            "Invalid UTF-8 WebView recovery failed: %s\n",
+            (error != NULL) ? error : "unexpected output");
     free(error);
     unlink(path);
     return 0;

@@ -844,10 +844,12 @@ static int harness_create_user_database(const char *database_path)
     "(42);"
     "CREATE TABLE payloads ("
     "large_text TEXT NOT NULL,"
-    "data BLOB NOT NULL"
+    "data BLOB NOT NULL,"
+    "binary_text BLOB NOT NULL"
     ");"
-    "INSERT INTO payloads(large_text, data) VALUES "
-    "(printf('%05000d', 0), zeroblob(20));");
+    "INSERT INTO payloads(large_text, data, binary_text) VALUES "
+    "(printf('%05000d', 0), zeroblob(20),"
+    "X'62706c6973743030D4010203');");
 
   sqlite3_close(db);
   return ok;
@@ -1214,6 +1216,38 @@ static int harness_expect_output_contains(const char *catalog_path,
             output);
   }
 
+  free(output);
+  return ok;
+}
+
+static int harness_expect_output_is_valid_utf8(const char *catalog_path,
+                                               const char *tool_name,
+                                               const char *arguments_json)
+{
+  char *error;
+  char *output;
+  int ok;
+
+  error = NULL;
+  output = strappy_tools_execute(catalog_path,
+                                 0LL,
+                                 HARNESS_RESOURCE_DIR,
+                                 tool_name,
+                                 arguments_json,
+                                 &error);
+  if (output == NULL) {
+    fprintf(stderr,
+            "Expected UTF-8 output but got error: %s\n",
+            (error != NULL) ? error : "(null)");
+    free(error);
+    return 0;
+  }
+
+  ok = strappy_utf8_validate(output, strlen(output));
+  if (!ok) {
+    fprintf(stderr, "Tool output was not valid UTF-8.\n");
+  }
+  free(error);
   free(output);
   return ok;
 }
@@ -5230,6 +5264,7 @@ static int harness_build_query_arguments(char *output,
 
 static int harness_run_database_query_tests(const harness_context *context)
 {
+  static const char *const invalid_text_columns[] = { "invalid_text" };
   static const char *const message_columns[] = { "sender", "body" };
   static const char *const schema_columns[] = { "type", "sql" };
   static const char *const value_columns[] = { "value" };
@@ -5294,6 +5329,34 @@ static int harness_run_database_query_tests(const harness_context *context)
                                       arguments,
                                       "alice",
                                       "bob")) {
+    return 0;
+  }
+
+  if (!harness_build_query_arguments(
+        arguments,
+        sizeof(arguments),
+        context->database_id,
+        "SELECT CAST(binary_text AS TEXT) AS invalid_text FROM payloads")) {
+    fprintf(stderr, "Could not build invalid UTF-8 query arguments.\n");
+    return 0;
+  }
+  if (!harness_expect_database_query_shape(
+        context->catalog_path,
+        arguments,
+        invalid_text_columns,
+        sizeof(invalid_text_columns) / sizeof(invalid_text_columns[0]),
+        1U,
+        0) ||
+      !harness_expect_output_is_valid_utf8(context->catalog_path,
+                                           STRAPPY_TOOL_DATABASE_QUERY,
+                                           arguments) ||
+      !harness_expect_output_contains_without(
+        context->catalog_path,
+        STRAPPY_TOOL_DATABASE_QUERY,
+        arguments,
+        "\"size_bytes\":12",
+        "\"invalid_utf8\":true",
+        "bplist00")) {
     return 0;
   }
 

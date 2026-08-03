@@ -4337,59 +4337,18 @@ static size_t strappy_tools_bounded_strlen(const char *value,
 static size_t strappy_tools_utf8_prefix_length(const char *value,
                                                size_t max_length)
 {
-  size_t index;
+  size_t length;
 
   if (value == NULL) {
     return 0U;
   }
 
-  index = 0U;
-  while ((index < max_length) && (value[index] != '\0')) {
-    unsigned char current;
-    size_t character_length;
-    size_t offset;
-    int valid;
-
-    current = (unsigned char)value[index];
-    character_length = 1U;
-    if ((current & 0x80U) == 0U) {
-      character_length = 1U;
-    } else if ((current & 0xE0U) == 0xC0U) {
-      character_length = 2U;
-    } else if ((current & 0xF0U) == 0xE0U) {
-      character_length = 3U;
-    } else if ((current & 0xF8U) == 0xF0U) {
-      character_length = 4U;
-    }
-
-    if (index > (((size_t)-1) - character_length)) {
-      break;
-    }
-
-    if ((index + character_length) > max_length) {
-      break;
-    }
-
-    valid = 1;
-    for (offset = 1U; offset < character_length; offset++) {
-      unsigned char continuation;
-
-      continuation = (unsigned char)value[index + offset];
-      if ((continuation == '\0') ||
-          ((continuation & 0xC0U) != 0x80U)) {
-        valid = 0;
-        break;
-      }
-    }
-
-    if (!valid) {
-      character_length = 1U;
-    }
-
-    index += character_length;
+  length = max_length;
+  while ((length > 0U) &&
+         (((unsigned char)value[length] & 0xC0U) == 0x80U)) {
+    length--;
   }
-
-  return index;
+  return length;
 }
 
 static int strappy_tools_size_add_would_exceed(size_t current,
@@ -4480,6 +4439,41 @@ static cJSON *strappy_tools_create_blob_value(size_t byte_count,
     *payload_bytes_out = 64U;
   }
 
+  return object;
+}
+
+static cJSON *strappy_tools_create_invalid_text_value(
+  size_t byte_count,
+  int contains_nul_bytes,
+  size_t *payload_bytes_out,
+  char **error_out)
+{
+  cJSON *object;
+
+  object = cJSON_CreateObject();
+  if (object == NULL) {
+    strappy_set_error(error_out, "Could not allocate invalid text value.");
+    return NULL;
+  }
+
+  if ((cJSON_AddStringToObject(object, "type", "text") == NULL) ||
+      (cJSON_AddNumberToObject(object,
+                               "size_bytes",
+                               (double)byte_count) == NULL) ||
+      !strappy_tools_add_bool_to_object(object, "omitted", 1) ||
+      !strappy_tools_add_bool_to_object(object, "invalid_utf8", 1) ||
+      (contains_nul_bytes &&
+       !strappy_tools_add_bool_to_object(object,
+                                         "contains_nul_bytes",
+                                         1))) {
+    cJSON_Delete(object);
+    strappy_set_error(error_out, "Could not build invalid text value.");
+    return NULL;
+  }
+
+  if (payload_bytes_out != NULL) {
+    *payload_bytes_out = 96U;
+  }
   return object;
 }
 
@@ -4577,6 +4571,7 @@ static cJSON *strappy_tools_create_database_query_value(
 
   if (column_type == SQLITE_TEXT) {
     const char *text;
+    int contains_nul_bytes;
     size_t visible_length;
 
     text = strappy_tools_sqlite_column_text(stmt, column);
@@ -4589,8 +4584,15 @@ static cJSON *strappy_tools_create_database_query_value(
     }
 
     visible_length = strappy_tools_bounded_strlen(text, byte_count);
+    contains_nul_bytes = (visible_length < byte_count) ? 1 : 0;
+    if (!strappy_utf8_validate(text, byte_count)) {
+      return strappy_tools_create_invalid_text_value(byte_count,
+                                                     contains_nul_bytes,
+                                                     payload_bytes_out,
+                                                     error_out);
+    }
     if ((byte_count > STRAPPY_DATABASE_QUERY_MAX_CELL_BYTES) ||
-        (visible_length < byte_count)) {
+        contains_nul_bytes) {
       return strappy_tools_create_truncated_text_value(text,
                                                        byte_count,
                                                        visible_length,
@@ -4628,14 +4630,30 @@ static int strappy_tools_add_database_query_columns(sqlite3_stmt *stmt,
 
   for (column = 0; column < column_count; column++) {
     cJSON *column_name;
+    char *sanitized_name;
     const char *name;
+    size_t name_length;
 
     name = sqlite3_column_name(stmt, column);
     if (name == NULL) {
       name = "";
     }
+    name_length = strlen(name);
+    sanitized_name = NULL;
+    if (!strappy_utf8_validate(name, name_length)) {
+      sanitized_name =
+        strappy_utf8_sanitized_string_duplicate(name, name_length);
+      if (sanitized_name == NULL) {
+        cJSON_Delete(columns);
+        strappy_set_error(error_out,
+                          "Could not sanitize query column name.");
+        return 0;
+      }
+      name = sanitized_name;
+    }
 
     column_name = cJSON_CreateString(name);
+    free(sanitized_name);
     if (column_name == NULL) {
       cJSON_Delete(columns);
       strappy_set_error(error_out, "Could not allocate query column.");

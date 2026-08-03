@@ -452,6 +452,9 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "\"heart\":'F004'") &&
        harness_expect_contains(page_html, "[fa(?::(solid|regular|brands))?") &&
        harness_expect_contains(page_html, "function toolJSONHTML") &&
+       harness_expect_contains(
+         page_html,
+         "if(v.invalid_utf8)m[m.length]='invalid UTF-8'") &&
        harness_expect_contains(page_html, "function toolObjectArrayTable") &&
        harness_expect_contains(page_html, "function toolInputBodyHTML") &&
        harness_expect_contains(page_html, "function toolOutputHasError") &&

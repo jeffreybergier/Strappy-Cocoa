@@ -12,96 +12,16 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-typedef struct strappy_file_mutation_utf8_state {
-  unsigned int remaining;
-  unsigned char next_minimum;
-  unsigned char next_maximum;
-} strappy_file_mutation_utf8_state;
-
 static pthread_mutex_t strappy_file_mutation_mutex =
   PTHREAD_MUTEX_INITIALIZER;
 
-static void strappy_file_mutation_utf8_state_init(
-  strappy_file_mutation_utf8_state *state)
-{
-  state->remaining = 0U;
-  state->next_minimum = 0x80U;
-  state->next_maximum = 0xBFU;
-}
-
-static int strappy_file_mutation_utf8_consume(
-  strappy_file_mutation_utf8_state *state,
-  unsigned char byte)
-{
-  if (state->remaining > 0U) {
-    if ((byte < state->next_minimum) || (byte > state->next_maximum)) {
-      return 0;
-    }
-    state->remaining--;
-    state->next_minimum = 0x80U;
-    state->next_maximum = 0xBFU;
-    return 1;
-  }
-
-  if (byte == 0U) {
-    return 0;
-  }
-  if (byte <= 0x7FU) {
-    return 1;
-  }
-  if ((byte >= 0xC2U) && (byte <= 0xDFU)) {
-    state->remaining = 1U;
-    return 1;
-  }
-  if (byte == 0xE0U) {
-    state->remaining = 2U;
-    state->next_minimum = 0xA0U;
-    return 1;
-  }
-  if (((byte >= 0xE1U) && (byte <= 0xECU)) ||
-      ((byte >= 0xEEU) && (byte <= 0xEFU))) {
-    state->remaining = 2U;
-    return 1;
-  }
-  if (byte == 0xEDU) {
-    state->remaining = 2U;
-    state->next_maximum = 0x9FU;
-    return 1;
-  }
-  if (byte == 0xF0U) {
-    state->remaining = 3U;
-    state->next_minimum = 0x90U;
-    return 1;
-  }
-  if ((byte >= 0xF1U) && (byte <= 0xF3U)) {
-    state->remaining = 3U;
-    return 1;
-  }
-  if (byte == 0xF4U) {
-    state->remaining = 3U;
-    state->next_maximum = 0x8FU;
-    return 1;
-  }
-  return 0;
-}
-
 int strappy_file_mutation_validate_utf8(const char *text, size_t length)
 {
-  strappy_file_mutation_utf8_state state;
-  size_t index;
-
-  if ((text == NULL) && (length != 0U)) {
-    return 0;
+  if (text == NULL) {
+    return (length == 0U) ? 1 : 0;
   }
-  strappy_file_mutation_utf8_state_init(&state);
-  for (index = 0U; index < length; index++) {
-    if (!strappy_file_mutation_utf8_consume(
-          &state,
-          (unsigned char)text[index])) {
-      return 0;
-    }
-  }
-  return (state.remaining == 0U) ? 1 : 0;
+  return ((memchr(text, '\0', length) == NULL) &&
+          strappy_utf8_validate(text, length)) ? 1 : 0;
 }
 
 int strappy_file_mutation_json_has_null_escape(const char *json)

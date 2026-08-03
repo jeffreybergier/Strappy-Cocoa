@@ -5,6 +5,65 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int strappy_utf8_is_continuation(unsigned char value)
+{
+  return ((value & 0xC0U) == 0x80U) ? 1 : 0;
+}
+
+static size_t strappy_utf8_sequence_length(const unsigned char *value,
+                                           size_t length)
+{
+  unsigned char first;
+
+  if ((value == NULL) || (length == 0U)) {
+    return 0U;
+  }
+
+  first = value[0];
+  if (first <= 0x7FU) {
+    return 1U;
+  }
+  if ((first >= 0xC2U) && (first <= 0xDFU)) {
+    return ((length >= 2U) && strappy_utf8_is_continuation(value[1])) ?
+      2U : 0U;
+  }
+  if (first == 0xE0U) {
+    return ((length >= 3U) &&
+            (value[1] >= 0xA0U) && (value[1] <= 0xBFU) &&
+            strappy_utf8_is_continuation(value[2])) ? 3U : 0U;
+  }
+  if (((first >= 0xE1U) && (first <= 0xECU)) ||
+      ((first >= 0xEEU) && (first <= 0xEFU))) {
+    return ((length >= 3U) &&
+            strappy_utf8_is_continuation(value[1]) &&
+            strappy_utf8_is_continuation(value[2])) ? 3U : 0U;
+  }
+  if (first == 0xEDU) {
+    return ((length >= 3U) &&
+            (value[1] >= 0x80U) && (value[1] <= 0x9FU) &&
+            strappy_utf8_is_continuation(value[2])) ? 3U : 0U;
+  }
+  if (first == 0xF0U) {
+    return ((length >= 4U) &&
+            (value[1] >= 0x90U) && (value[1] <= 0xBFU) &&
+            strappy_utf8_is_continuation(value[2]) &&
+            strappy_utf8_is_continuation(value[3])) ? 4U : 0U;
+  }
+  if ((first >= 0xF1U) && (first <= 0xF3U)) {
+    return ((length >= 4U) &&
+            strappy_utf8_is_continuation(value[1]) &&
+            strappy_utf8_is_continuation(value[2]) &&
+            strappy_utf8_is_continuation(value[3])) ? 4U : 0U;
+  }
+  if (first == 0xF4U) {
+    return ((length >= 4U) &&
+            (value[1] >= 0x80U) && (value[1] <= 0x8FU) &&
+            strappy_utf8_is_continuation(value[2]) &&
+            strappy_utf8_is_continuation(value[3])) ? 4U : 0U;
+  }
+  return 0U;
+}
+
 char *strappy_string_duplicate_length(const char *value, size_t length)
 {
   char *copy;
@@ -37,6 +96,75 @@ char *strappy_string_duplicate(const char *value)
   }
 
   return strappy_string_duplicate_length(value, strlen(value));
+}
+
+int strappy_utf8_validate(const char *value, size_t length)
+{
+  const unsigned char *bytes;
+  size_t index;
+
+  if (value == NULL) {
+    return (length == 0U) ? 1 : 0;
+  }
+
+  bytes = (const unsigned char *)value;
+  index = 0U;
+  while (index < length) {
+    size_t sequence_length;
+
+    sequence_length = strappy_utf8_sequence_length(bytes + index,
+                                                    length - index);
+    if (sequence_length == 0U) {
+      return 0;
+    }
+    index += sequence_length;
+  }
+  return 1;
+}
+
+char *strappy_utf8_sanitized_string_duplicate(const char *value,
+                                              size_t length)
+{
+  static const unsigned char replacement[] = { 0xEFU, 0xBFU, 0xBDU };
+  const unsigned char *bytes;
+  char *copy;
+  size_t capacity;
+  size_t input_index;
+  size_t output_index;
+
+  if (value == NULL) {
+    return (length == 0U) ? strappy_string_duplicate("") : NULL;
+  }
+  if (length > ((((size_t)-1) - 1U) / 3U)) {
+    return NULL;
+  }
+
+  capacity = (length * 3U) + 1U;
+  copy = (char *)malloc(capacity);
+  if (copy == NULL) {
+    return NULL;
+  }
+
+  bytes = (const unsigned char *)value;
+  input_index = 0U;
+  output_index = 0U;
+  while (input_index < length) {
+    size_t sequence_length;
+
+    sequence_length = strappy_utf8_sequence_length(bytes + input_index,
+                                                    length - input_index);
+    if ((sequence_length == 0U) || (bytes[input_index] == 0U)) {
+      memcpy(copy + output_index, replacement, sizeof(replacement));
+      output_index += sizeof(replacement);
+      input_index++;
+    } else {
+      memcpy(copy + output_index, bytes + input_index, sequence_length);
+      output_index += sequence_length;
+      input_index += sequence_length;
+    }
+  }
+  copy[output_index] = '\0';
+  return copy;
 }
 
 void strappy_free_string(char *value)
