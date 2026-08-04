@@ -27,6 +27,7 @@ typedef struct strappy_session_record {
   int web_search_enabled;
   int bash_enabled;
   int limit_to_one_tool;
+  int answer_quality_enabled;
   long round_limit;
   long http_status;
 } strappy_session_record;
@@ -47,6 +48,7 @@ enum {
   STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL = 1U << 5,
   STRAPPY_SESSION_OPTION_WORKING_DIRECTORY = 1U << 6,
   STRAPPY_SESSION_OPTION_ROUND_LIMIT = 1U << 8,
+  STRAPPY_SESSION_OPTION_ANSWER_QUALITY = 1U << 9,
   STRAPPY_SESSION_OPTION_ALL =
     STRAPPY_SESSION_OPTION_MODEL |
     STRAPPY_SESSION_OPTION_ASSISTANT_SET |
@@ -55,7 +57,8 @@ enum {
     STRAPPY_SESSION_OPTION_BASH |
     STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
     STRAPPY_SESSION_OPTION_WORKING_DIRECTORY |
-    STRAPPY_SESSION_OPTION_ROUND_LIMIT
+    STRAPPY_SESSION_OPTION_ROUND_LIMIT |
+    STRAPPY_SESSION_OPTION_ANSWER_QUALITY
 };
 
 typedef struct strappy_session_options {
@@ -66,6 +69,7 @@ typedef struct strappy_session_options {
   int web_search_enabled;
   int bash_enabled;
   int limit_to_one_tool;
+  int answer_quality_enabled;
   long round_limit;
 } strappy_session_options;
 

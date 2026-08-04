@@ -221,6 +221,20 @@ static BOOL StrappySessionLimitToOneToolFromSummary(NSDictionary *summary)
           [limitToOneTool boolValue]) ? YES : NO;
 }
 
+static BOOL StrappySessionAnswerQualityEnabledFromSummary(
+  NSDictionary *summary)
+{
+  NSNumber *answerQualityEnabled;
+
+  if (![summary isKindOfClass:[NSDictionary class]]) {
+    return NO;
+  }
+
+  answerQualityEnabled = [summary objectForKey:@"answer_quality_enabled"];
+  return ([answerQualityEnabled isKindOfClass:[NSNumber class]] &&
+          [answerQualityEnabled boolValue]) ? YES : NO;
+}
+
 static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
                                                   NSString *key,
                                                   NSUInteger defaultValue)
@@ -261,6 +275,7 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
     [self setWebSearchEnabled:webSearchEnabled];
     [self setBashEnabled:bashEnabled];
     [self setLimitToOneTool:limitToOneTool];
+    [self setAnswerQualityEnabled:NO];
     [self setRoundLimit:roundLimit];
     [self setWorkingDirectory:workingDirectory];
   }
@@ -269,7 +284,9 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
 
 - (id)copyWithZone:(NSZone *)zone
 {
-  return [[StrappySessionOptions allocWithZone:zone]
+  StrappySessionOptions *copy;
+
+  copy = [[StrappySessionOptions allocWithZone:zone]
     initWithModelIdentifier:[self modelIdentifier]
      assistantSetIdentifier:[self assistantSetIdentifier]
                 webProvider:[self webProvider]
@@ -278,6 +295,8 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
              limitToOneTool:[self limitToOneTool]
                  roundLimit:[self roundLimit]
            workingDirectory:[self workingDirectory]];
+  [copy setAnswerQualityEnabled:[self answerQualityEnabled]];
+  return copy;
 }
 
 - (NSString *)modelIdentifier
@@ -360,6 +379,16 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
   limitToOneTool_ = enabled ? YES : NO;
 }
 
+- (BOOL)answerQualityEnabled
+{
+  return answerQualityEnabled_;
+}
+
+- (void)setAnswerQualityEnabled:(BOOL)enabled
+{
+  answerQualityEnabled_ = enabled ? YES : NO;
+}
+
 - (NSUInteger)roundLimit
 {
   return roundLimit_;
@@ -404,6 +433,7 @@ static StrappySessionOptions *StrappySessionOptionsFromSummary(
 {
   NSString *modelIdentifier;
   NSString *assistantSetIdentifier;
+  StrappySessionOptions *options;
 
   modelIdentifier = [summary objectForKey:@"model"];
   if (![modelIdentifier isKindOfClass:[NSString class]]) {
@@ -414,7 +444,7 @@ static StrappySessionOptions *StrappySessionOptionsFromSummary(
       ([assistantSetIdentifier length] == 0U)) {
     assistantSetIdentifier = @"personal_assistant";
   }
-  return [[[StrappySessionOptions alloc]
+  options = [[[StrappySessionOptions alloc]
     initWithModelIdentifier:modelIdentifier
      assistantSetIdentifier:assistantSetIdentifier
                 webProvider:StrappySessionWebProviderFromSummary(summary)
@@ -427,6 +457,9 @@ static StrappySessionOptions *StrappySessionOptionsFromSummary(
                 StrappySessionDefaultRoundLimit)
            workingDirectory:workingDirectory]
     autorelease];
+  [options setAnswerQualityEnabled:
+    StrappySessionAnswerQualityEnabledFromSummary(summary)];
+  return options;
 }
 
 static StrappySessionOptions *StrappySessionOptionsFromRecord(
@@ -435,6 +468,7 @@ static StrappySessionOptions *StrappySessionOptionsFromRecord(
   NSString *modelIdentifier;
   NSString *assistantSetIdentifier;
   NSString *workingDirectory;
+  StrappySessionOptions *sessionOptions;
 
   if (options == NULL) {
     return nil;
@@ -445,7 +479,7 @@ static StrappySessionOptions *StrappySessionOptionsFromRecord(
     [NSString stringWithUTF8String:options->assistant_set_id] : @"";
   workingDirectory = (options->working_directory != NULL) ?
     [NSString stringWithUTF8String:options->working_directory] : @"";
-  return [[[StrappySessionOptions alloc]
+  sessionOptions = [[[StrappySessionOptions alloc]
     initWithModelIdentifier:modelIdentifier
      assistantSetIdentifier:assistantSetIdentifier
                 webProvider:StrappySessionWebProviderFromRecord(
@@ -456,6 +490,9 @@ static StrappySessionOptions *StrappySessionOptionsFromRecord(
                  roundLimit:(NSUInteger)options->round_limit
            workingDirectory:workingDirectory]
     autorelease];
+  [sessionOptions setAnswerQualityEnabled:
+    (options->answer_quality_enabled ? YES : NO)];
+  return sessionOptions;
 }
 
 static BOOL StrappySessionRecordFromOptions(
@@ -492,6 +529,7 @@ static BOOL StrappySessionRecordFromOptions(
   record->web_search_enabled = [options webSearchEnabled] ? 1 : 0;
   record->bash_enabled = [options bashEnabled] ? 1 : 0;
   record->limit_to_one_tool = [options limitToOneTool] ? 1 : 0;
+  record->answer_quality_enabled = [options answerQualityEnabled] ? 1 : 0;
   record->round_limit = (long)roundLimit;
   return YES;
 }
@@ -904,6 +942,7 @@ static BOOL StrappySessionRecordFromOptions(
   NSNumber *webSearchEnabled;
   NSNumber *bashEnabled;
   NSNumber *limitToOneTool;
+  NSNumber *answerQualityEnabled;
   NSNumber *roundLimit;
   NSString *name;
   NSString *prompt;
@@ -927,6 +966,8 @@ static BOOL StrappySessionRecordFromOptions(
   bashEnabled = [NSNumber numberWithBool:(record->bash_enabled ? YES : NO)];
   limitToOneTool =
     [NSNumber numberWithBool:(record->limit_to_one_tool ? YES : NO)];
+  answerQualityEnabled =
+    [NSNumber numberWithBool:(record->answer_quality_enabled ? YES : NO)];
   roundLimit = [NSNumber numberWithLong:record->round_limit];
   name = [StrappySession stringFromCStringOrEmpty:record->name];
   prompt = [StrappySession stringFromCStringOrEmpty:record->prompt];
@@ -952,6 +993,7 @@ static BOOL StrappySessionRecordFromOptions(
     webSearchEnabled, @"web_search_enabled",
     bashEnabled, @"bash_enabled",
     limitToOneTool, @"limit_to_one_tool",
+    answerQualityEnabled, @"answer_quality_enabled",
     roundLimit, @"round_limit",
     createdAt, @"created_at",
     lastActivityAt, @"last_message_at",

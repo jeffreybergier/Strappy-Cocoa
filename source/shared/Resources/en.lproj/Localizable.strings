@@ -56,6 +56,8 @@
 "The selected provider is used only when web search is enabled." = "The selected provider is used only when web search is enabled.";
 "Limit to 1 Tool" = "Limit to 1 Tool";
 "Prevents parallel tool calls" = "Prevents parallel tool calls";
+"Answer Quality Check" = "Answer Quality Check";
+"Evaluates and reports final answers" = "Evaluates and reports final answers";
 "Round Limit" = "Round Limit";
 "Maximum model rounds per prompt" = "Maximum model rounds per prompt";
 "World Knowledge" = "World Knowledge";

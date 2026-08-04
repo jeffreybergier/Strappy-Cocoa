@@ -648,6 +648,20 @@ char *strappy_prompt_build(
   strappy_web_provider web_provider,
   char **error_out)
 {
+  return strappy_prompt_build_with_answer_quality(resource_dir,
+                                                  profile,
+                                                  web_provider,
+                                                  1,
+                                                  error_out);
+}
+
+char *strappy_prompt_build_with_answer_quality(
+  const char *resource_dir,
+  const strappy_assistant_set_profile *profile,
+  strappy_web_provider web_provider,
+  int answer_quality_enabled,
+  char **error_out)
+{
   strappy_prompt_buffer buffer;
   char *tools_markdown;
   cJSON *root;
@@ -670,8 +684,9 @@ char *strappy_prompt_build(
       (profile == NULL) || (profile->goal == NULL) ||
       (profile->goal[0] == '\0') || (profile->tool_names == NULL) ||
       (profile->tool_name_count == 0U) ||
-      (profile->quality_check_keys == NULL) ||
-      (profile->quality_check_key_count == 0U)) {
+      (answer_quality_enabled &&
+       ((profile->quality_check_keys == NULL) ||
+        (profile->quality_check_key_count == 0U)))) {
     strappy_set_error(error_out,
                       "System prompt configuration is incomplete.");
     return NULL;
@@ -712,13 +727,19 @@ char *strappy_prompt_build(
     strappy_prompt_buffer_append_section_footer(&buffer,
                                                  tools_section,
                                                  "sections.tools",
-                                                 error_out) &&
-    strappy_prompt_buffer_append_section_open(&buffer,
-                                               audit_section,
-                                               "sections.audit",
-                                               error_out);
+                                                 error_out);
 
-  for (index = 0U; ok && (index < profile->quality_check_key_count); index++) {
+  if (ok && answer_quality_enabled) {
+    ok = strappy_prompt_buffer_append_section_open(&buffer,
+                                                   audit_section,
+                                                   "sections.audit",
+                                                   error_out);
+  }
+
+  for (index = 0U;
+       ok && answer_quality_enabled &&
+         (index < profile->quality_check_key_count);
+       index++) {
     const strappy_quality_check_definition *definition;
     cJSON *check_guidance;
     const char *requirement;
@@ -772,15 +793,17 @@ char *strappy_prompt_build(
       strappy_prompt_buffer_append(&buffer, "\n");
   }
 
-  if (ok) {
+  if (ok && answer_quality_enabled) {
     ok = strappy_prompt_buffer_append_section_footer(&buffer,
                                                      audit_section,
                                                      "sections.audit",
-                                                     error_out) &&
-      strappy_prompt_buffer_append_section_open(&buffer,
-                                                 goal_section,
-                                                 "sections.goal",
-                                                 error_out) &&
+                                                     error_out);
+  }
+  if (ok) {
+    ok = strappy_prompt_buffer_append_section_open(&buffer,
+                                                   goal_section,
+                                                   "sections.goal",
+                                                   error_out) &&
       strappy_prompt_buffer_append(&buffer, profile->goal) &&
       strappy_prompt_buffer_append_section_footer(&buffer,
                                                    goal_section,

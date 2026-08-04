@@ -78,6 +78,12 @@ An assistant set is selected per session and can be changed between prompts.
 User memories are shared by sessions using the same assistant set and isolated
 from sessions using other assistant sets; switching a session changes which
 memories it can read, save, and delete.
+Answer-quality checking is also persisted per session and initially defaults
+to off. On iOS it can be enabled for an active session under Debug → Limits or
+for future sessions under Preferences → Session Defaults → Debug → Limits.
+When disabled, the prompt omits audit guidance and Strappy creates no
+answer-quality audit, check, or timeline entry; enabling it preserves the full
+current evaluation and report behavior.
 The prompt-options button is disabled while a prompt is in progress, so model,
 assistant-set, web-search, and Bash changes cannot overlap an active request.
 

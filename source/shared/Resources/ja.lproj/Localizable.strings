@@ -56,6 +56,8 @@
 "The selected provider is used only when web search is enabled." = "選択したプロバイダーは、Web 検索が有効な場合にのみ使用されます。";
 "Limit to 1 Tool" = "ツールを 1 つに制限";
 "Prevents parallel tool calls" = "並列ツール呼び出しを防ぎます";
+"Answer Quality Check" = "回答品質チェック";
+"Evaluates and reports final answers" = "最終回答を評価して結果を表示します";
 "Round Limit" = "ラウンド上限";
 "Maximum model rounds per prompt" = "プロンプトごとのモデルラウンドの上限";
 "World Knowledge" = "世界知識";

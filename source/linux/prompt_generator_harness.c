@@ -699,6 +699,60 @@ static int harness_verify_assistant_set_guidance(
   return 1;
 }
 
+static int harness_verify_answer_quality_disabled(
+  const strappy_assistant_set_profile *profile,
+  const char *prompt,
+  cJSON *system_prompt)
+{
+  cJSON *sections;
+  cJSON *audit_section;
+  char *audit_heading;
+  size_t index;
+
+  sections = harness_json_object(system_prompt, "sections");
+  audit_section = harness_json_object(sections, "audit");
+  audit_heading = harness_heading_marker(
+    1U,
+    harness_json_string(audit_section, "heading"));
+  if ((prompt == NULL) || (audit_heading == NULL) ||
+      (strstr(prompt, profile->goal) == NULL) ||
+      (strstr(prompt, audit_heading) != NULL)) {
+    free(audit_heading);
+    return harness_fail(
+      "Answer-quality-disabled prompt has the wrong sections.");
+  }
+  free(audit_heading);
+
+  for (index = 0U; index < profile->quality_check_key_count; index++) {
+    const strappy_quality_check_definition *definition;
+    size_t length;
+    char *needle;
+
+    definition = strappy_quality_policy_find(
+      profile->quality_check_keys[index]);
+    if ((definition != NULL) && (definition->tool_name != NULL)) {
+      continue;
+    }
+    length = strlen(profile->quality_check_keys[index]) + sizeof("- ``:");
+    needle = (char *)malloc(length);
+    if (needle == NULL) {
+      return harness_fail(
+        "Could not allocate disabled answer-quality prompt check.");
+    }
+    (void)snprintf(needle,
+                   length,
+                   "- `%s`:",
+                   profile->quality_check_keys[index]);
+    if (strstr(prompt, needle) != NULL) {
+      free(needle);
+      return harness_fail(
+        "Answer-quality-disabled prompt includes audit guidance.");
+    }
+    free(needle);
+  }
+  return 1;
+}
+
 static const char *harness_web_provider_name(strappy_web_provider provider)
 {
   return strappy_web_provider_name(provider);
@@ -792,6 +846,7 @@ int main(int argc, char **argv)
        set_index < harness_assistant_set_count;
        set_index++) {
     strappy_assistant_set_profile profile;
+    char *answer_quality_disabled_prompt;
     char *without_web_prompt;
     int supports_web_tools;
     int web_provider_value;
@@ -818,6 +873,34 @@ int main(int argc, char **argv)
       strappy_assistant_set_profile_allows_tool(
         &profile,
         STRAPPY_TOOL_OPENROUTER_WEB_FETCH);
+    error = NULL;
+    answer_quality_disabled_prompt =
+      strappy_prompt_build_with_answer_quality(
+        resource_dir,
+        &profile,
+        STRAPPY_WEB_PROVIDER_NONE,
+        0,
+        &error);
+    if ((answer_quality_disabled_prompt == NULL) ||
+        !harness_verify_answer_quality_disabled(
+          &profile,
+          answer_quality_disabled_prompt,
+          system_prompt) ||
+        !harness_verify_assistant_set_guidance(
+          &profile,
+          answer_quality_disabled_prompt)) {
+      fprintf(stderr,
+              "Could not generate %s with answer quality disabled: %s\n",
+              profile.identifier,
+              (error != NULL) ? error : "prompt validation failed");
+      free(answer_quality_disabled_prompt);
+      free(error);
+      strappy_assistant_set_profile_destroy(&profile);
+      cJSON_Delete(system_prompt);
+      return 1;
+    }
+    free(answer_quality_disabled_prompt);
+    free(error);
     without_web_prompt = NULL;
     for (web_provider_value = (int)STRAPPY_WEB_PROVIDER_NONE;
          web_provider_value <= (int)STRAPPY_WEB_PROVIDER_PARALLEL;
@@ -984,7 +1067,7 @@ int main(int argc, char **argv)
   }
   cJSON_Delete(system_prompt);
   if (check_only) {
-    printf("Prompt generator harness passed (20 variants).\n");
+    printf("Prompt generator harness passed (24 variants).\n");
   }
   return 0;
 }

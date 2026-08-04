@@ -1540,6 +1540,7 @@ typedef struct strappy_responses_runtime {
   char *request_url;
   int is_first_user_prompt;
   int parallel_tool_calls;
+  int answer_quality_enabled;
   long round_limit;
 } strappy_responses_runtime;
 
@@ -1556,6 +1557,7 @@ static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
   runtime->request_url = NULL;
   runtime->is_first_user_prompt = 0;
   runtime->parallel_tool_calls = 1;
+  runtime->answer_quality_enabled = 0;
   runtime->round_limit = STRAPPY_SESSION_DEFAULT_ROUND_LIMIT;
 }
 
@@ -1736,9 +1738,13 @@ static int strappy_responses_validate_assistant_set(
       return 0;
     }
   }
-  return strappy_responses_audit_init(&runtime->audit,
-                                      &runtime->assistant_set,
-                                      error_out);
+  if (runtime->answer_quality_enabled) {
+    return strappy_responses_audit_init(&runtime->audit,
+                                        &runtime->assistant_set,
+                                        error_out);
+  }
+  strappy_responses_audit_reset(&runtime->audit);
+  return 1;
 }
 
 static int strappy_responses_prepare_runtime(
@@ -1790,6 +1796,7 @@ static int strappy_responses_prepare_runtime(
     : STRAPPY_WEB_PROVIDER_NONE;
   bash_enabled = session.bash_enabled ? 1 : 0;
   runtime->parallel_tool_calls = session.limit_to_one_tool ? 0 : 1;
+  runtime->answer_quality_enabled = session.answer_quality_enabled ? 1 : 0;
   runtime->round_limit = session.round_limit;
   runtime->is_first_user_prompt =
     (session.prompt == NULL) || (session.prompt[0] == '\0');
@@ -1852,11 +1859,12 @@ static int strappy_responses_prepare_runtime(
   runtime->config.tool_allowlist =
     (const char * const *)runtime->assistant_set.tool_names;
   runtime->config.tool_allowlist_count = runtime->assistant_set.tool_name_count;
-  runtime->system_prompt =
-    strappy_prompt_build(runtime->config.guidance_resource_dir,
-                         &runtime->assistant_set,
-                         runtime->config.web_provider,
-                         error_out);
+  runtime->system_prompt = strappy_prompt_build_with_answer_quality(
+    runtime->config.guidance_resource_dir,
+    &runtime->assistant_set,
+    runtime->config.web_provider,
+    runtime->answer_quality_enabled,
+    error_out);
   if (runtime->system_prompt == NULL) {
     strappy_responses_runtime_destroy(runtime);
     return 0;
@@ -2517,7 +2525,8 @@ static int strappy_responses_send_round(
       strappy_responses_output_is_canonical(&http, &analysis);
     response_ok = client_ok &&
       strappy_responses_http_is_success(&http, &analysis);
-    if (output_is_canonical && response_ok) {
+    if (runtime->answer_quality_enabled &&
+        output_is_canonical && response_ok) {
       size_t activity_index;
 
       for (activity_index = 0U;
@@ -2898,7 +2907,7 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
             runtime.config.guidance_resource_dir,
             successful_call_id,
             &analysis,
-            &runtime.audit,
+            runtime.answer_quality_enabled ? &runtime.audit : NULL,
             &new_items,
             callback,
             callback_data,

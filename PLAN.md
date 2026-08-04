@@ -131,7 +131,8 @@ Deliverables:
   intentionally omits raw filesystem paths, schema, remembered hints, and query
   results.
 - [x] Assistant-set profiles select the system prompt, tool allowlist,
-  round-zero preflight, and ordered answer-quality checks. World Knowledge uses
+  round-zero preflight, and ordered answer-quality checks used when the
+  session's answer-quality option is enabled. World Knowledge uses
   only universal tools and `memory_read` / `skills_list` preflight; Personal
   Assistant additionally enables database tools and `database_list` preflight;
   Coding Assistant is available and exclusively receives `file_read` plus the
@@ -157,7 +158,7 @@ Deliverables:
   resources: `AssistantSets.json`, `SystemPrompt.json`, `GuidanceTools.json`,
   `GuidanceSkills.json`, and `GuidanceDatabase.json`, with system prompts
   assembled from the effective
-  tool descriptions, audit policy, assistant goal, and invariant contract,
+  tool descriptions, optional audit policy, assistant goal, and invariant contract,
   synchronized with the stable tool names and stricter current guidance that
   supplies `database_list` as a typed preflight tool output, requires
   `database_context` before querying, uses explicit timestamp units, and
@@ -165,10 +166,14 @@ Deliverables:
 - [x] Bounded multi-round Responses tool loop: execute typed function calls,
   append `function_call_output` items, and continue until final output or the
   round limit.
-- [x] Persisted post-answer quality report that lists every applicable check
-  once in the visible timeline without automatically asking the model to
-  remediate failures. An empty tool-free response is accepted as final and
-  fails the non-empty-answer check without causing another model request.
+- [x] Per-session, initially-off answer-quality option with an iOS Debug >
+  Limits switch for active sessions and Preferences > Session Defaults. When
+  enabled, the persisted post-answer quality report lists every applicable
+  check once in the visible timeline without automatically asking the model to
+  remediate failures. When disabled, audit guidance, evaluation, persistence,
+  and timeline rows are omitted. An empty tool-free response is accepted as
+  final and, when checking is enabled, fails the non-empty-answer check without
+  causing another model request.
 - [x] Persisted prompt, assistant, tool-call, tool-result, and harness messages
   in `session_messages`, with `session_turns`, `turn_key`, `prompt_group_key`,
   raw message JSON, reasoning text, context inclusion flags, tool names,

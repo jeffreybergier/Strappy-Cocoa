@@ -1220,7 +1220,8 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_FILE_MUTATION = 14,
   HARNESS_RESPONSES_SERVER_PREFLIGHT_FIRST_PROMPT_ONLY = 15,
   HARNESS_RESPONSES_SERVER_ISOLATED_PROMPTS = 16,
-  HARNESS_RESPONSES_SERVER_ROUND_LIMIT = 17
+  HARNESS_RESPONSES_SERVER_ROUND_LIMIT = 17,
+  HARNESS_RESPONSES_SERVER_ANSWER_QUALITY_DISABLED = 18
 } harness_responses_server_scenario;
 
 static int harness_send_all(int socket_fd,
@@ -1441,7 +1442,8 @@ static const char *harness_object_text(cJSON *parent, const char *key)
 }
 
 static int harness_instructions_include_resource_sections(
-  const char *instructions)
+  const char *instructions,
+  int answer_quality_enabled)
 {
   static const char *section_names[] = {
     "tools",
@@ -1486,6 +1488,12 @@ static int harness_instructions_include_resource_sections(
     heading = harness_object_string(section, "heading");
     instruction = harness_object_text(section, "instruction");
     footer = harness_object_text(section, "footer");
+    if ((strcmp(section_names[index], "audit") == 0) &&
+        !answer_quality_enabled) {
+      result = (heading != NULL) &&
+        (strstr(instructions, heading) == NULL);
+      continue;
+    }
     result = (heading != NULL) && (instruction != NULL) &&
       (footer != NULL) && (strstr(instructions, heading) != NULL) &&
       ((instruction[0] == '\0') ||
@@ -1845,9 +1853,10 @@ static int harness_request_omits_max_tool_calls(cJSON *root)
   return cJSON_GetObjectItem(root, "max_tool_calls") == NULL;
 }
 
-static int harness_request_base_is_valid(
+static int harness_request_base_is_valid_with_answer_quality(
   cJSON *root,
   const char *expected_prompt,
+  int answer_quality_enabled,
   char **session_key_out,
   char **prompt_group_out)
 {
@@ -1901,14 +1910,25 @@ static int harness_request_base_is_valid(
       !cJSON_IsString(instructions) ||
       (instructions->valuestring == NULL) ||
       !harness_instructions_include_resource_sections(
-        instructions->valuestring) ||
-      (strstr(instructions->valuestring,
-              "`unicode_emoji_absent`") == NULL) ||
-      (strstr(instructions->valuestring,
-              "NEVER use unicode emoji in your answer") == NULL) ||
+        instructions->valuestring,
+        answer_quality_enabled) ||
+      (answer_quality_enabled &&
+       (strstr(instructions->valuestring,
+               "`unicode_emoji_absent`") == NULL)) ||
+      (answer_quality_enabled &&
+       (strstr(instructions->valuestring,
+               "NEVER use unicode emoji in your answer") == NULL)) ||
+      (!answer_quality_enabled &&
+       ((strstr(instructions->valuestring,
+                "`unicode_emoji_absent`") != NULL) ||
+        (strstr(instructions->valuestring,
+                "NEVER use unicode emoji in your answer") != NULL) ||
+        has_web_reference_key || has_web_reference_instruction)) ||
       (has_web_search != has_web_fetch) ||
-      (has_web_search != has_web_reference_key) ||
-      (has_web_search != has_web_reference_instruction) ||
+      (answer_quality_enabled &&
+       (has_web_search != has_web_reference_key)) ||
+      (answer_quality_enabled &&
+       (has_web_search != has_web_reference_instruction)) ||
       !cJSON_IsString(session_key) || (session_key->valuestring == NULL) ||
       !cJSON_IsString(prompt_group) || (prompt_group->valuestring == NULL) ||
       !cJSON_IsArray(input) || (input_count != 8) ||
@@ -1938,6 +1958,20 @@ static int harness_request_base_is_valid(
     }
   }
   return 1;
+}
+
+static int harness_request_base_is_valid(
+  cJSON *root,
+  const char *expected_prompt,
+  char **session_key_out,
+  char **prompt_group_out)
+{
+  return harness_request_base_is_valid_with_answer_quality(
+    root,
+    expected_prompt,
+    1,
+    session_key_out,
+    prompt_group_out);
 }
 
 static int harness_world_knowledge_tools_are_valid(cJSON *tools,
@@ -2857,6 +2891,51 @@ static int harness_run_answer_quality_server(int listener_fd)
   close(client_fd);
   if (!ok) {
     fprintf(stderr, "Answer quality server rejected the request.\n");
+  }
+  free(session_key);
+  free(prompt_group);
+  return ok;
+}
+
+static int harness_run_answer_quality_disabled_server(int listener_fd)
+{
+  static const char *response =
+    "{\"id\":\"resp-quality-disabled\",\"object\":\"response\","
+    "\"created_at\":1700000000,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-quality-disabled\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Answer quality disabled.\",\"annotations\":[]}]}],"
+    "\"usage\":{\"input_tokens\":4,\"output_tokens\":4,"
+    "\"total_tokens\":8}}";
+  char *body;
+  char *session_key;
+  char *prompt_group;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  session_key = NULL;
+  prompt_group = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_request_base_is_valid_with_answer_quality(
+      root,
+      "Skip answer quality",
+      0,
+      &session_key,
+      &prompt_group) &&
+    harness_send_json_response(client_fd, 200L, response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok) {
+    fprintf(stderr,
+            "Answer-quality-disabled server rejected the request.\n");
   }
   free(session_key);
   free(prompt_group);
@@ -3960,6 +4039,9 @@ static int harness_start_server(harness_responses_server_scenario scenario,
     alarm(15U);
     if (scenario == HARNESS_RESPONSES_SERVER_ANSWER_QUALITY) {
       ok = harness_run_answer_quality_server(listener_fd);
+    } else if (scenario ==
+               HARNESS_RESPONSES_SERVER_ANSWER_QUALITY_DISABLED) {
+      ok = harness_run_answer_quality_disabled_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_WORLD_KNOWLEDGE) {
       ok = harness_run_world_knowledge_server(listener_fd);
     } else if (scenario ==
@@ -4020,12 +4102,54 @@ static int harness_wait_for_server(pid_t pid, int terminate)
     (WEXITSTATUS(status) == 0);
 }
 
+static int harness_create_session_database_with_answer_quality(
+  const char *path,
+  int answer_quality_enabled,
+  long long *session_id_out,
+  char **error_out)
+{
+  strappy_session_options options;
+  strappy_session_option_mask actual_changed_fields;
+  int ok;
+
+  unlink(path);
+  if (!strappy_db_create_session(path, session_id_out, error_out)) {
+    return 0;
+  }
+  if (!answer_quality_enabled) {
+    return 1;
+  }
+
+  strappy_session_options_init(&options);
+  actual_changed_fields = 0U;
+  ok = strappy_db_load_session_options(path,
+                                       *session_id_out,
+                                       &options,
+                                       error_out);
+  if (ok) {
+    options.answer_quality_enabled = 1;
+    ok = strappy_db_update_session_options(
+      path,
+      *session_id_out,
+      &options,
+      STRAPPY_SESSION_OPTION_ANSWER_QUALITY,
+      NULL,
+      &actual_changed_fields,
+      error_out) &&
+      (actual_changed_fields == STRAPPY_SESSION_OPTION_ANSWER_QUALITY);
+  }
+  strappy_session_options_destroy(&options);
+  return ok;
+}
+
 static int harness_create_session_database(const char *path,
                                            long long *session_id_out,
                                            char **error_out)
 {
-  unlink(path);
-  return strappy_db_create_session(path, session_id_out, error_out);
+  return harness_create_session_database_with_answer_quality(path,
+                                                             1,
+                                                             session_id_out,
+                                                             error_out);
 }
 
 static int harness_create_approved_preflight_database(
@@ -4162,6 +4286,135 @@ static int harness_answer_quality_is_final(
     (quality->message_key != NULL) &&
     (strncmp(quality->message_key, "answer-quality-", 15U) == 0) &&
     !quality->include_in_context;
+}
+
+static int harness_test_answer_quality_disabled(void)
+{
+  static const char *answer = "Answer quality disabled.";
+  char path[] = "/tmp/strappy-responses-quality-disabled-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *result;
+  sqlite3 *db;
+  strappy_session_message_record_list timeline;
+  strappy_session_options options;
+  long long session_id;
+  long long value;
+  size_t index;
+  harness_ledger_event_recorder events;
+  pid_t server_pid;
+  int fd;
+  int saw_answer;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail(
+      "Could not create answer-quality-disabled harness database.");
+  }
+  close(fd);
+  error = NULL;
+  result = NULL;
+  session_id = 0LL;
+  strappy_session_message_record_list_init(&timeline);
+  strappy_session_options_init(&options);
+  ok = harness_create_session_database_with_answer_quality(path,
+                                                           0,
+                                                           &session_id,
+                                                           &error) &&
+    strappy_db_load_session_options(path,
+                                    session_id,
+                                    &options,
+                                    &error) &&
+    !options.answer_quality_enabled &&
+    harness_start_server(HARNESS_RESPONSES_SERVER_ANSWER_QUALITY_DISABLED,
+                         endpoint,
+                         sizeof(endpoint),
+                         &server_pid);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not prepare answer-quality-disabled integration test: "
+            "%s\n",
+            (error != NULL) ? error : "setup failed");
+    goto cleanup;
+  }
+
+  memset(&events, 0, sizeof(events));
+  events.db_path = path;
+  events.valid = 1;
+  result = strappy_responses_send_prompt_for_session_and_store_with_events(
+    "Skip answer quality",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources",
+    path,
+    session_id,
+    harness_record_ledger_event,
+    &events,
+    &error);
+  server_ok = harness_wait_for_server(server_pid, result == NULL);
+  ok = (result != NULL) && (strcmp(result, answer) == 0) && server_ok &&
+    events.valid && (events.count == 1LL) &&
+    (events.answer_quality_count == 0LL) && events.saw_thinking &&
+    !events.saw_tools && (events.clear_count == 1L);
+
+  db = NULL;
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM answer_quality_audits;",
+                           &value) && (value == 0LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_checks;",
+                        &value) && (value == 0LL) &&
+      harness_query_int(
+        db,
+        "SELECT COUNT(*) FROM session_settings WHERE "
+        "session_id=(SELECT id FROM sessions LIMIT 1) AND "
+        "answer_quality_enabled=0;",
+        &value) && (value == 1LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+
+  if (ok) {
+    ok = strappy_db_list_response_timeline(path,
+                                           session_id,
+                                           &timeline,
+                                           &error);
+  }
+  saw_answer = 0;
+  for (index = 0U; ok && (index < timeline.count); index++) {
+    const strappy_session_message_record *record;
+
+    record = &timeline.records[index];
+    if ((record->role != NULL) &&
+        (strcmp(record->role, "answer_quality") == 0)) {
+      ok = 0;
+    }
+    if ((record->role != NULL) &&
+        (strcmp(record->role, "assistant") == 0) &&
+        (record->content != NULL) &&
+        (strcmp(record->content, answer) == 0)) {
+      saw_answer = 1;
+    }
+  }
+  ok = ok && saw_answer;
+  if (!ok) {
+    fprintf(stderr,
+            "Answer-quality-disabled integration failed: %s\n",
+            (error != NULL) ? error : "request or storage mismatch");
+  }
+
+cleanup:
+  free(result);
+  free(error);
+  strappy_session_options_destroy(&options);
+  strappy_session_message_record_list_destroy(&timeline);
+  unlink(path);
+  return ok;
 }
 
 static int harness_test_answer_quality_report(void)
@@ -8049,6 +8302,7 @@ int main(void)
       harness_test_request_surfaces() &&
       harness_test_ledger() &&
       harness_test_cumulative_session_metrics() &&
+      harness_test_answer_quality_disabled() &&
       harness_test_answer_quality_report() &&
       harness_test_world_knowledge_assistant_set() &&
       harness_test_preflight_runs_only_on_first_prompt() &&

@@ -495,13 +495,15 @@ static int harness_run_fresh_catalog_schema_tests(
          harness_expect_catalog_sql_ok(
            context->catalog_path,
            "SELECT session_id, web_provider, web_search_enabled, bash_enabled, "
-           "limit_to_one_tool, round_limit, updated_at_ms "
+           "limit_to_one_tool, answer_quality_enabled, round_limit, "
+           "updated_at_ms "
          "FROM session_settings LIMIT 0;",
            "session settings columns") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
            "SELECT id, assistant_set_id, web_provider, web_search_enabled, "
-           "bash_enabled, limit_to_one_tool, round_limit, "
+           "bash_enabled, limit_to_one_tool, answer_quality_enabled, "
+           "round_limit, "
            "working_directory, updated_at_ms "
            "FROM default_session_options LIMIT 0;",
            "default session options columns") &&
@@ -521,6 +523,18 @@ static int harness_run_fresh_catalog_schema_tests(
          harness_expect_catalog_integer(
            context->catalog_path,
            "SELECT COUNT(*) FROM pragma_table_info('session_settings') "
+           "WHERE name = 'answer_quality_enabled' AND dflt_value = '0';",
+           1LL,
+           "disabled session answer-quality default") &&
+         harness_expect_catalog_integer(
+           context->catalog_path,
+           "SELECT answer_quality_enabled FROM default_session_options "
+           "WHERE id = 1;",
+           0LL,
+           "disabled default-session answer quality") &&
+         harness_expect_catalog_integer(
+           context->catalog_path,
+           "SELECT COUNT(*) FROM pragma_table_info('session_settings') "
            "WHERE name = 'tool_call_limit';",
            0LL,
            "removed session tool-call-limit column") &&
@@ -534,7 +548,7 @@ static int harness_run_fresh_catalog_schema_tests(
            context->catalog_path,
            "SELECT COUNT(*) FROM pragma_table_info('sessions') "
            "WHERE name IN ('web_provider','web_search_enabled','bash_enabled',"
-           "'limit_to_one_tool','round_limit');",
+           "'limit_to_one_tool','answer_quality_enabled','round_limit');",
            0LL,
            "session toggle columns remaining in sessions") &&
          harness_expect_catalog_sql_ok(
@@ -756,6 +770,18 @@ static int harness_run_session_settings_upgrade_test(
       "WHERE name='web_search_enabled' AND dflt_value='1';",
       1LL,
       "upgraded web-search column") &&
+    harness_expect_catalog_integer(
+      path,
+      "SELECT COUNT(*) FROM pragma_table_info('session_settings') "
+      "WHERE name='answer_quality_enabled' AND dflt_value='0';",
+      1LL,
+      "upgraded answer-quality column") &&
+    harness_expect_catalog_integer(
+      path,
+      "SELECT COUNT(*) FROM pragma_table_info('default_session_options') "
+      "WHERE name='answer_quality_enabled' AND dflt_value='0';",
+      1LL,
+      "upgraded default answer-quality column") &&
     harness_expect_catalog_integer(
       path,
       "SELECT COUNT(*) FROM pragma_table_info('model_requests') "
@@ -8236,6 +8262,7 @@ static int harness_run_session_options_tests(const harness_context *context)
     STRAPPY_SESSION_OPTION_WEB_PROVIDER | STRAPPY_SESSION_OPTION_BASH;
   const strappy_session_option_mask final_update_fields =
     STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
+    STRAPPY_SESSION_OPTION_ANSWER_QUALITY |
     STRAPPY_SESSION_OPTION_ROUND_LIMIT |
     STRAPPY_SESSION_OPTION_WORKING_DIRECTORY;
   const strappy_session_option_mask default_update_fields =
@@ -8244,6 +8271,7 @@ static int harness_run_session_options_tests(const harness_context *context)
     STRAPPY_SESSION_OPTION_WEB_SEARCH |
     STRAPPY_SESSION_OPTION_BASH |
     STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
+    STRAPPY_SESSION_OPTION_ANSWER_QUALITY |
     STRAPPY_SESSION_OPTION_ROUND_LIMIT |
     STRAPPY_SESSION_OPTION_WORKING_DIRECTORY;
   const char *fallback_working_directory;
@@ -8287,7 +8315,7 @@ static int harness_run_session_options_tests(const harness_context *context)
       (stale.working_directory == NULL) ||
       (stale.web_provider != STRAPPY_WEB_PROVIDER_AUTO) ||
       !stale.web_search_enabled || stale.bash_enabled ||
-      stale.limit_to_one_tool ||
+      stale.limit_to_one_tool || stale.answer_quality_enabled ||
       (stale.round_limit != STRAPPY_SESSION_DEFAULT_ROUND_LIMIT)) {
     fprintf(stderr, "Initial session-options snapshot did not match.\n");
     ok = 0;
@@ -8348,6 +8376,7 @@ static int harness_run_session_options_tests(const harness_context *context)
   free(stale.working_directory);
   stale.working_directory = working_directory;
   stale.limit_to_one_tool = 1;
+  stale.answer_quality_enabled = 1;
   stale.round_limit = 9L;
   actual_changed_fields = 0U;
   ok = strappy_db_update_session_options(context->catalog_path,
@@ -8358,7 +8387,7 @@ static int harness_run_session_options_tests(const harness_context *context)
                                          &actual_changed_fields,
                                          &error);
   if (!ok || (actual_changed_fields != final_update_fields) ||
-      !saved.limit_to_one_tool ||
+      !saved.limit_to_one_tool || !saved.answer_quality_enabled ||
       (saved.round_limit != 9L) ||
       (saved.working_directory == NULL) ||
       (strcmp(saved.working_directory, context->temp_dir) != 0) ||
@@ -8382,6 +8411,7 @@ static int harness_run_session_options_tests(const harness_context *context)
   if (!ok || (actual_changed_fields != 0U) ||
       (saved.web_provider != STRAPPY_WEB_PROVIDER_PARALLEL) ||
       !saved.bash_enabled || saved.web_search_enabled ||
+      !saved.answer_quality_enabled ||
       (saved.round_limit != 9L)) {
     fprintf(stderr,
             "A no-op options patch returned the wrong snapshot: %s\n",
@@ -8429,7 +8459,7 @@ static int harness_run_session_options_tests(const harness_context *context)
                                        &error);
   if (!ok || (reloaded.web_provider != STRAPPY_WEB_PROVIDER_PARALLEL) ||
       !reloaded.bash_enabled || reloaded.web_search_enabled ||
-      !reloaded.limit_to_one_tool ||
+      !reloaded.limit_to_one_tool || !reloaded.answer_quality_enabled ||
       (reloaded.round_limit != 9L) ||
       (reloaded.working_directory == NULL) ||
       (strcmp(reloaded.working_directory, context->temp_dir) != 0)) {
@@ -8472,6 +8502,7 @@ static int harness_run_session_options_tests(const harness_context *context)
   default_patch.web_search_enabled = 0;
   default_patch.bash_enabled = 1;
   default_patch.limit_to_one_tool = 1;
+  default_patch.answer_quality_enabled = 1;
   default_patch.round_limit = 13L;
   actual_changed_fields = 0U;
   ok = strappy_db_update_default_session_options(
@@ -8494,6 +8525,7 @@ static int harness_run_session_options_tests(const harness_context *context)
       (saved_defaults.web_provider != STRAPPY_WEB_PROVIDER_NATIVE) ||
       saved_defaults.web_search_enabled || !saved_defaults.bash_enabled ||
       !saved_defaults.limit_to_one_tool ||
+      !saved_defaults.answer_quality_enabled ||
       (saved_defaults.round_limit != 13L) ||
       (saved_defaults.working_directory == NULL) ||
       (strcmp(saved_defaults.working_directory, context->temp_dir) != 0)) {
@@ -8510,7 +8542,7 @@ static int harness_run_session_options_tests(const harness_context *context)
                                        &error);
   if (!ok || (reloaded.web_provider != STRAPPY_WEB_PROVIDER_PARALLEL) ||
       !reloaded.bash_enabled || reloaded.web_search_enabled ||
-      !reloaded.limit_to_one_tool ||
+      !reloaded.limit_to_one_tool || !reloaded.answer_quality_enabled ||
       (reloaded.round_limit != 9L)) {
     fprintf(stderr,
             "Changing defaults modified an existing session: %s\n",
@@ -8534,6 +8566,7 @@ static int harness_run_session_options_tests(const harness_context *context)
       (future_options.web_provider != STRAPPY_WEB_PROVIDER_NATIVE) ||
       future_options.web_search_enabled || !future_options.bash_enabled ||
       !future_options.limit_to_one_tool ||
+      !future_options.answer_quality_enabled ||
       (future_options.round_limit != 13L) ||
       (future_options.working_directory == NULL) ||
       (strcmp(future_options.working_directory, context->temp_dir) != 0)) {

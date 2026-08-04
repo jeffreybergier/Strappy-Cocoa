@@ -88,6 +88,7 @@ enum {
 
 enum {
   kStrappyPromptDebugLimitRowLimitToOneTool = 0,
+  kStrappyPromptDebugLimitRowAnswerQuality,
   kStrappyPromptDebugLimitRowRoundLimit,
   kStrappyPromptDebugLimitRowCount
 };
@@ -139,6 +140,7 @@ static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
 @property (nonatomic, copy) StrappySessionOptions *sessionOptions;
 @property (nonatomic, copy) NSArray *workingDirectories;
 @property (nonatomic, strong) UISwitch *limitToOneToolSwitch;
+@property (nonatomic, strong) UISwitch *answerQualitySwitch;
 @property (nonatomic, strong) UITextField *roundLimitField;
 - (instancetype)initWithOptionsDelegate:
     (id<StrappySessionOptionsTableViewControllerDelegate>)optionsDelegate;
@@ -584,6 +586,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 - (void)viewDidLoad
 {
   UISwitch *limitToOneToolSwitch;
+  UISwitch *answerQualitySwitch;
   UITextField *roundLimitField;
   UIToolbar *keyboardToolbar;
   UIBarButtonItem *flexibleItem;
@@ -596,6 +599,12 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
                            action:@selector(limitToOneToolSwitchChanged:)
                  forControlEvents:UIControlEventValueChanged];
   [self setLimitToOneToolSwitch:limitToOneToolSwitch];
+
+  answerQualitySwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
+  [answerQualitySwitch addTarget:self
+                          action:@selector(answerQualitySwitchChanged:)
+                forControlEvents:UIControlEventValueChanged];
+  [self setAnswerQualitySwitch:answerQualitySwitch];
 
   keyboardToolbar = [[UIToolbar alloc]
     initWithFrame:CGRectMake(0.0f, 0.0f, 320.0f, 44.0f)];
@@ -648,6 +657,9 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   [[self limitToOneToolSwitch]
     setOn:[[self sessionOptions] limitToOneTool]
   animated:NO];
+  [[self answerQualitySwitch]
+    setOn:[[self sessionOptions] answerQualityEnabled]
+  animated:NO];
   [[self roundLimitField] setText:[NSString stringWithFormat:
     @"%lu", (unsigned long)[[self sessionOptions] roundLimit]]];
   [[self tableView] reloadData];
@@ -694,6 +706,23 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   }
   [sender setText:[NSString stringWithFormat:
     @"%lu", (unsigned long)[[self sessionOptions] roundLimit]]];
+}
+
+- (void)answerQualitySwitchChanged:(UISwitch *)sender
+{
+  id<StrappySessionOptionsTableViewControllerDelegate> optionsDelegate;
+  StrappySessionOptions *options;
+
+  optionsDelegate = [self optionsDelegate];
+  if (optionsDelegate != nil) {
+    options = [[optionsDelegate sessionOptions] copy];
+    [options setAnswerQualityEnabled:[sender isOn]];
+    (void)[optionsDelegate updateSessionOptions:options
+                                           changedFields:
+                                             StrappySessionOptionAnswerQuality];
+    [self setSessionOptions:[optionsDelegate sessionOptions]];
+  }
+  [sender setOn:[[self sessionOptions] answerQualityEnabled] animated:YES];
 }
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField
@@ -820,6 +849,32 @@ titleForFooterInSection:(NSInteger)section
     animated:NO];
     [cell setAccessoryType:UITableViewCellAccessoryNone];
     [cell setAccessoryView:[self limitToOneToolSwitch]];
+    return cell;
+  }
+
+  if (([indexPath section] == kStrappyPromptDebugSectionLimits) &&
+      ([indexPath row] == kStrappyPromptDebugLimitRowAnswerQuality)) {
+    cell = [tableView dequeueReusableCellWithIdentifier:
+      @"AnswerQualityCell"];
+    if (cell == nil) {
+      cell = [[UITableViewCell alloc]
+        initWithStyle:UITableViewCellStyleSubtitle
+       reuseIdentifier:@"AnswerQualityCell"];
+      [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+      [[cell textLabel] setNumberOfLines:1];
+      [[cell detailTextLabel] setNumberOfLines:1];
+    }
+    [[cell textLabel] setText:NSLocalizedString(
+      @"Answer Quality Check", nil)];
+    [[cell textLabel] setTextColor:[UIColor blackColor]];
+    [[cell detailTextLabel] setText:NSLocalizedString(
+      @"Evaluates and reports final answers", nil)];
+    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+    [[self answerQualitySwitch]
+      setOn:[[self sessionOptions] answerQualityEnabled]
+    animated:NO];
+    [cell setAccessoryType:UITableViewCellAccessoryNone];
+    [cell setAccessoryView:[self answerQualitySwitch]];
     return cell;
   }
 

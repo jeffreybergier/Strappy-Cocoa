@@ -51,6 +51,9 @@
 #define STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL \
   "COALESCE((SELECT x.limit_to_one_tool FROM session_settings x " \
   "WHERE x.session_id = s.id), 0)"
+#define STRAPPY_DB_SESSION_ANSWER_QUALITY_ENABLED_SQL \
+  "COALESCE((SELECT x.answer_quality_enabled FROM session_settings x " \
+  "WHERE x.session_id = s.id), 0)"
 #define STRAPPY_DB_SESSION_ROUND_LIMIT_SQL \
   "COALESCE((SELECT x.round_limit FROM session_settings x " \
   "WHERE x.session_id = s.id), " \
@@ -356,6 +359,7 @@ void strappy_session_record_init(strappy_session_record *record)
   record->web_search_enabled = 0;
   record->bash_enabled = 0;
   record->limit_to_one_tool = 0;
+  record->answer_quality_enabled = 0;
   record->round_limit = STRAPPY_SESSION_DEFAULT_ROUND_LIMIT;
   record->http_status = 0L;
 }
@@ -399,6 +403,7 @@ void strappy_session_options_init(strappy_session_options *options)
   options->web_search_enabled = 1;
   options->bash_enabled = 0;
   options->limit_to_one_tool = 0;
+  options->answer_quality_enabled = 0;
   options->round_limit = STRAPPY_SESSION_DEFAULT_ROUND_LIMIT;
 }
 
@@ -1502,6 +1507,81 @@ static int strappy_db_ensure_session_settings_web_search_column(
   return 1;
 }
 
+static int strappy_db_ensure_answer_quality_enabled_columns(
+  sqlite3 *db,
+  char **error_out)
+{
+  static const char *const inspect_sql[] = {
+    "PRAGMA table_info(default_session_options);",
+    "PRAGMA table_info(session_settings);"
+  };
+  static const char *const alter_sql[] = {
+    "ALTER TABLE default_session_options ADD COLUMN "
+      "answer_quality_enabled INTEGER NOT NULL DEFAULT 0 "
+      "CHECK(answer_quality_enabled IN (0,1));",
+    "ALTER TABLE session_settings ADD COLUMN "
+      "answer_quality_enabled INTEGER NOT NULL DEFAULT 0 "
+      "CHECK(answer_quality_enabled IN (0,1));"
+  };
+  static const char *const table_labels[] = {
+    "default session options",
+    "session settings"
+  };
+  size_t table_index;
+
+  for (table_index = 0U;
+       table_index < (sizeof(inspect_sql) / sizeof(inspect_sql[0]));
+       table_index++) {
+    sqlite3_stmt *stmt;
+    int found;
+    int rc;
+
+    stmt = NULL;
+    found = 0;
+    rc = sqlite3_prepare_v2(db,
+                            inspect_sql[table_index],
+                            -1,
+                            &stmt,
+                            NULL);
+    if (rc != SQLITE_OK) {
+      strappy_set_formatted_error(
+        error_out,
+        "Could not inspect %s schema: %s",
+        table_labels[table_index],
+        sqlite3_errmsg(db));
+      return 0;
+    }
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+      const unsigned char *name;
+
+      name = sqlite3_column_text(stmt, 1);
+      if ((name != NULL) &&
+          (strcmp((const char *)name, "answer_quality_enabled") == 0)) {
+        found = 1;
+        break;
+      }
+    }
+    if ((rc != SQLITE_ROW) && (rc != SQLITE_DONE)) {
+      strappy_set_formatted_error(
+        error_out,
+        "Could not inspect %s schema: %s",
+        table_labels[table_index],
+        sqlite3_errmsg(db));
+      sqlite3_finalize(stmt);
+      return 0;
+    }
+    sqlite3_finalize(stmt);
+    if (!found &&
+        !strappy_db_exec(db,
+                         alter_sql[table_index],
+                         "Could not add the answer-quality setting",
+                         error_out)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int strappy_db_ensure_model_requests_parallel_tool_calls_column(
   sqlite3 *db,
   char **error_out)
@@ -1638,6 +1718,8 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
       "CHECK(bash_enabled IN (0,1)),"
     "limit_to_one_tool INTEGER NOT NULL DEFAULT 0 "
       "CHECK(limit_to_one_tool IN (0,1)),"
+    "answer_quality_enabled INTEGER NOT NULL DEFAULT 0 "
+      "CHECK(answer_quality_enabled IN (0,1)),"
     "round_limit INTEGER NOT NULL DEFAULT "
       STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_ROUND_LIMIT) " "
       "CHECK(round_limit BETWEEN 1 AND "
@@ -1676,6 +1758,8 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
       "CHECK(bash_enabled IN (0,1)),"
     "limit_to_one_tool INTEGER NOT NULL DEFAULT 0 "
       "CHECK(limit_to_one_tool IN (0,1)),"
+    "answer_quality_enabled INTEGER NOT NULL DEFAULT 0 "
+      "CHECK(answer_quality_enabled IN (0,1)),"
     "round_limit INTEGER NOT NULL DEFAULT "
       STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_ROUND_LIMIT) " "
       "CHECK(round_limit BETWEEN 1 AND "
@@ -2188,6 +2272,9 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
   if (!strappy_db_ensure_session_settings_web_search_column(db, error_out)) {
     return 0;
   }
+  if (!strappy_db_ensure_answer_quality_enabled_columns(db, error_out)) {
+    return 0;
+  }
   if (!strappy_db_ensure_model_requests_parallel_tool_calls_column(
         db,
         error_out)) {
@@ -2679,6 +2766,7 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   record->limit_to_one_tool = sqlite3_column_int(stmt, 12) ? 1 : 0;
   record->round_limit = (long)sqlite3_column_int64(stmt, 13);
   record->web_search_enabled = sqlite3_column_int(stmt, 15) ? 1 : 0;
+  record->answer_quality_enabled = sqlite3_column_int(stmt, 16) ? 1 : 0;
   if ((record->round_limit < 1L) ||
       (record->round_limit > STRAPPY_SESSION_MAX_LIMIT)) {
     strappy_set_error(error_out, "Stored session limits are invalid.");
@@ -8850,7 +8938,8 @@ int strappy_db_list_sessions(const char *db_path,
     STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
     STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
-    STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL " "
+    STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_ANSWER_QUALITY_ENABLED_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " "
     "ORDER BY " STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " DESC, s.id DESC;";
@@ -8967,7 +9056,8 @@ int strappy_db_load_session(const char *db_path,
     STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
     STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
-    STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL " "
+    STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_ANSWER_QUALITY_ENABLED_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " WHERE s.id = ?;";
   sqlite3 *db;
@@ -9060,7 +9150,8 @@ int strappy_db_load_session_list_record(const char *db_path,
     STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
     STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
-    STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL " "
+    STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_ANSWER_QUALITY_ENABLED_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " WHERE s.id = ?;";
   sqlite3 *db;
@@ -11080,7 +11171,8 @@ static int strappy_db_copy_default_session_options(
   static const char *sql =
     "SELECT " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL ", "
     "assistant_set_id, web_provider, web_search_enabled, bash_enabled, "
-    "limit_to_one_tool, round_limit, working_directory "
+    "limit_to_one_tool, round_limit, working_directory, "
+    "answer_quality_enabled "
     "FROM default_session_options WHERE id = 1;";
   strappy_session_options loaded;
   const unsigned char *provider_text;
@@ -11122,6 +11214,7 @@ static int strappy_db_copy_default_session_options(
   loaded.limit_to_one_tool = sqlite3_column_int(stmt, 5) ? 1 : 0;
   loaded.round_limit = (long)sqlite3_column_int64(stmt, 6);
   working_directory_text = sqlite3_column_text(stmt, 7);
+  loaded.answer_quality_enabled = sqlite3_column_int(stmt, 8) ? 1 : 0;
   if ((loaded.model_id == NULL) || (loaded.assistant_set_id == NULL) ||
       (provider_text == NULL) ||
       (loaded.round_limit < 1L) ||
@@ -11487,7 +11580,8 @@ static int strappy_db_copy_session_options(sqlite3 *db,
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_BASH_ENABLED_SQL ", "
     STRAPPY_DB_SESSION_LIMIT_TO_ONE_TOOL_SQL ", "
-    STRAPPY_DB_SESSION_ROUND_LIMIT_SQL " "
+    STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
+    STRAPPY_DB_SESSION_ANSWER_QUALITY_ENABLED_SQL " "
     "FROM sessions s WHERE s.id = ?;";
   strappy_session_options loaded;
   const unsigned char *provider_text;
@@ -11530,6 +11624,7 @@ static int strappy_db_copy_session_options(sqlite3 *db,
   loaded.bash_enabled = sqlite3_column_int(stmt, 4) ? 1 : 0;
   loaded.limit_to_one_tool = sqlite3_column_int(stmt, 5) ? 1 : 0;
   loaded.round_limit = (long)sqlite3_column_int64(stmt, 6);
+  loaded.answer_quality_enabled = sqlite3_column_int(stmt, 7) ? 1 : 0;
   if ((loaded.model_id == NULL) || (loaded.assistant_set_id == NULL) ||
       (provider_text == NULL) ||
       (loaded.round_limit < 1L) ||
@@ -11626,6 +11721,7 @@ static int strappy_db_copy_options(const strappy_session_options *source,
   copy.web_search_enabled = source->web_search_enabled ? 1 : 0;
   copy.bash_enabled = source->bash_enabled ? 1 : 0;
   copy.limit_to_one_tool = source->limit_to_one_tool ? 1 : 0;
+  copy.answer_quality_enabled = source->answer_quality_enabled ? 1 : 0;
   copy.round_limit = source->round_limit;
   strappy_session_options_destroy(destination);
   *destination = copy;
@@ -11642,8 +11738,8 @@ static int strappy_db_save_session_options_settings(
   static const char *sql =
     "INSERT OR REPLACE INTO session_settings "
     "(session_id, web_provider, web_search_enabled, bash_enabled, "
-     "limit_to_one_tool, round_limit, updated_at_ms) "
-     "VALUES (?, ?, ?, ?, ?, ?, ?);";
+     "limit_to_one_tool, round_limit, answer_quality_enabled, updated_at_ms) "
+     "VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
   const char *provider_name;
   sqlite3_stmt *stmt;
   int rc;
@@ -11676,7 +11772,10 @@ static int strappy_db_save_session_options_settings(
                             (sqlite3_int64)options->round_limit);
   }
   if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_int64(stmt, 7, (sqlite3_int64)now_ms);
+    rc = sqlite3_bind_int(stmt, 7, options->answer_quality_enabled ? 1 : 0);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 8, (sqlite3_int64)now_ms);
   }
   if (rc == SQLITE_OK) {
     rc = sqlite3_step(stmt);
@@ -11701,7 +11800,7 @@ static int strappy_db_save_default_session_options(
     "UPDATE default_session_options SET assistant_set_id = ?, "
     "web_provider = ?, web_search_enabled = ?, bash_enabled = ?, "
     "limit_to_one_tool = ?, round_limit = ?, working_directory = ?, "
-    "updated_at_ms = ? WHERE id = 1;";
+    "answer_quality_enabled = ?, updated_at_ms = ? WHERE id = 1;";
   const char *provider_name;
   sqlite3_stmt *stmt;
   int rc;
@@ -11750,7 +11849,10 @@ static int strappy_db_save_default_session_options(
                            SQLITE_TRANSIENT);
   }
   if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_int64(stmt, 8, (sqlite3_int64)now_ms);
+    rc = sqlite3_bind_int(stmt, 8, options->answer_quality_enabled ? 1 : 0);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 9, (sqlite3_int64)now_ms);
   }
   if (rc == SQLITE_OK) {
     rc = sqlite3_step(stmt);
@@ -11936,6 +12038,7 @@ int strappy_db_update_session_options(
     STRAPPY_SESSION_OPTION_WEB_SEARCH |
     STRAPPY_SESSION_OPTION_BASH |
     STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
+    STRAPPY_SESSION_OPTION_ANSWER_QUALITY |
     STRAPPY_SESSION_OPTION_ROUND_LIMIT;
   strappy_session_options current;
   strappy_session_options merged;
@@ -12046,6 +12149,9 @@ int strappy_db_update_session_options(
   if ((changed_fields & STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL) != 0U) {
     merged.limit_to_one_tool = options->limit_to_one_tool ? 1 : 0;
   }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_ANSWER_QUALITY) != 0U) {
+    merged.answer_quality_enabled = options->answer_quality_enabled ? 1 : 0;
+  }
   if ((changed_fields & STRAPPY_SESSION_OPTION_ROUND_LIMIT) != 0U) {
     merged.round_limit = options->round_limit;
   }
@@ -12073,6 +12179,10 @@ int strappy_db_update_session_options(
   if (((changed_fields & STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL) != 0U) &&
       (current.limit_to_one_tool != merged.limit_to_one_tool)) {
     actual_changed_fields |= STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_ANSWER_QUALITY) != 0U) &&
+      (current.answer_quality_enabled != merged.answer_quality_enabled)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_ANSWER_QUALITY;
   }
   if (((changed_fields & STRAPPY_SESSION_OPTION_ROUND_LIMIT) != 0U) &&
       (current.round_limit != merged.round_limit)) {
@@ -12190,6 +12300,7 @@ int strappy_db_update_default_session_options(
     STRAPPY_SESSION_OPTION_WEB_SEARCH |
     STRAPPY_SESSION_OPTION_BASH |
     STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
+    STRAPPY_SESSION_OPTION_ANSWER_QUALITY |
     STRAPPY_SESSION_OPTION_WORKING_DIRECTORY |
     STRAPPY_SESSION_OPTION_ROUND_LIMIT;
   strappy_session_options current;
@@ -12294,6 +12405,9 @@ int strappy_db_update_default_session_options(
   if ((changed_fields & STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL) != 0U) {
     merged.limit_to_one_tool = options->limit_to_one_tool ? 1 : 0;
   }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_ANSWER_QUALITY) != 0U) {
+    merged.answer_quality_enabled = options->answer_quality_enabled ? 1 : 0;
+  }
   if ((changed_fields & STRAPPY_SESSION_OPTION_ROUND_LIMIT) != 0U) {
     merged.round_limit = options->round_limit;
   }
@@ -12322,6 +12436,10 @@ int strappy_db_update_default_session_options(
   if (((changed_fields & STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL) != 0U) &&
       (current.limit_to_one_tool != merged.limit_to_one_tool)) {
     actual_changed_fields |= STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_ANSWER_QUALITY) != 0U) &&
+      (current.answer_quality_enabled != merged.answer_quality_enabled)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_ANSWER_QUALITY;
   }
   if (((changed_fields & STRAPPY_SESSION_OPTION_ROUND_LIMIT) != 0U) &&
       (current.round_limit != merged.round_limit)) {

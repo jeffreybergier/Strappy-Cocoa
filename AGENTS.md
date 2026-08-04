@@ -168,9 +168,14 @@ House style for Strappy source:
     objects and arrays as `structured_documents` / `structured_nodes`. Never
     persist request bodies, response bodies, headers, or raw JSON. Reconstruct
     provider-shaped JSON transiently only at an API or compatibility boundary.
-    At every canonical, successful, tool-free final response, evaluate the
-    code-owned ordered quality checks exactly once and persist one
-    `answer_quality_audits` report with its `answer_quality_checks`. The first
+    Answer quality is a persisted per-session option whose initial default is
+    off. The iOS Debug > Limits pane exposes it for active sessions and through
+    Preferences > Session Defaults for future sessions. When it is off, omit
+    the prompt-facing audit section, do not evaluate quality checks, and do not
+    create answer-quality audit or check rows. When it is on, at every
+    canonical, successful, tool-free final response, evaluate the code-owned
+    ordered quality checks exactly once and persist one `answer_quality_audits`
+    report with its `answer_quality_checks`. The first
     selected check verifies that the response contains a non-whitespace
     assistant answer. User-selectable assistant sets next scan the answer's
     UTF-8 text for Unicode emoji and fail at the first match; ASCII keycap bases

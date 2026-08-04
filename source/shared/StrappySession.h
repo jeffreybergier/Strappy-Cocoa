@@ -31,6 +31,7 @@ enum {
   StrappySessionOptionLimitToOneTool = 1U << 5,
   StrappySessionOptionWorkingDirectory = 1U << 6,
   StrappySessionOptionRoundLimit = 1U << 8,
+  StrappySessionOptionAnswerQuality = 1U << 9,
   StrappySessionOptionAll =
     StrappySessionOptionModel |
     StrappySessionOptionAssistantSet |
@@ -39,7 +40,8 @@ enum {
     StrappySessionOptionBash |
     StrappySessionOptionLimitToOneTool |
     StrappySessionOptionWorkingDirectory |
-    StrappySessionOptionRoundLimit
+    StrappySessionOptionRoundLimit |
+    StrappySessionOptionAnswerQuality
 };
 
 @interface StrappySessionOptions : NSObject <NSCopying> {
@@ -51,6 +53,7 @@ enum {
   BOOL webSearchEnabled_;
   BOOL bashEnabled_;
   BOOL limitToOneTool_;
+  BOOL answerQualityEnabled_;
   NSUInteger roundLimit_;
 }
 
@@ -74,6 +77,8 @@ enum {
 - (void)setBashEnabled:(BOOL)enabled;
 - (BOOL)limitToOneTool;
 - (void)setLimitToOneTool:(BOOL)enabled;
+- (BOOL)answerQualityEnabled;
+- (void)setAnswerQualityEnabled:(BOOL)enabled;
 - (NSUInteger)roundLimit;
 - (void)setRoundLimit:(NSUInteger)roundLimit;
 - (NSString *)workingDirectory;
