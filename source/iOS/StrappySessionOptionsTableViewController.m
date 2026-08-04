@@ -1,7 +1,6 @@
 #import "StrappySessionOptionsTableViewController.h"
 
 #import "StrappyAppearance.h"
-#import "StrappyModelCellFormatter.h"
 #import "XPUIKit.h"
 
 static NSArray *StrappyPromptSearchProviders(void)
@@ -31,14 +30,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   return NSLocalizedString(@"None", nil);
 }
 
-static NSArray *StrappyPromptWorkingDirectoryTitles(void)
-{
-  return [NSArray arrayWithObjects:
-    NSLocalizedString(@"~/Developer", nil),
-    NSLocalizedString(@"~/", nil),
-    NSLocalizedString(@"~/Library/...", nil),
-    nil];
-}
 static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
                                                  NSString *key)
 {
@@ -80,9 +71,8 @@ enum {
 };
 
 enum {
-  kStrappyPromptDebugSectionSearchProvider = 0,
-  kStrappyPromptDebugSectionLimits,
-  kStrappyPromptDebugSectionWorkingDirectory,
+  kStrappyPromptDebugSectionLimits = 0,
+  kStrappyPromptDebugSectionSearchProvider,
   kStrappyPromptDebugSectionCount
 };
 
@@ -138,7 +128,6 @@ static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
   UITableViewController <UITextFieldDelegate>
 @property (nonatomic, assign) id<StrappySessionOptionsTableViewControllerDelegate> optionsDelegate;
 @property (nonatomic, copy) StrappySessionOptions *sessionOptions;
-@property (nonatomic, copy) NSArray *workingDirectories;
 @property (nonatomic, strong) UISwitch *limitToOneToolSwitch;
 @property (nonatomic, strong) UISwitch *answerQualitySwitch;
 @property (nonatomic, strong) UITextField *roundLimitField;
@@ -305,29 +294,10 @@ titleForHeaderInSection:(NSInteger)section
       : nil;
   }
   if (section == kStrappyPromptOptionsSectionModels) {
-    return ([[self models] count] > 0U) ? NSLocalizedString(@"Models", nil) : nil;
+    return ([[self models] count] > 0U) ? NSLocalizedString(@"Model", nil) : nil;
   }
   if (section == kStrappyPromptOptionsSectionAvailableTools) {
-    return NSLocalizedString(@"Available Tools", nil);
-  }
-  return nil;
-}
-
-- (NSString *)tableView:(UITableView *)tableView
-titleForFooterInSection:(NSInteger)section
-{
-  (void)tableView;
-  if (section == kStrappyPromptOptionsSectionAssistantSet) {
-    return ([[self assistantSets] count] > 0U)
-      ? NSLocalizedString(
-          @"Different tools are available the model based on the selection",
-          nil)
-      : nil;
-  }
-  if (section == kStrappyPromptOptionsSectionAvailableTools) {
-    return NSLocalizedString(
-      @"Using web search may incur extra costs.",
-      nil);
+    return NSLocalizedString(@"Tools", nil);
   }
   return nil;
 }
@@ -378,17 +348,13 @@ titleForFooterInSection:(NSInteger)section
       cell = [tableView dequeueReusableCellWithIdentifier:@"WebSearchCell"];
       if (cell == nil) {
         cell = [[UITableViewCell alloc]
-          initWithStyle:UITableViewCellStyleSubtitle
+          initWithStyle:UITableViewCellStyleDefault
          reuseIdentifier:@"WebSearchCell"];
         [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
         [[cell textLabel] setNumberOfLines:1];
-        [[cell detailTextLabel] setNumberOfLines:1];
       }
       [[cell textLabel] setText:NSLocalizedString(@"Enable Web Search", nil)];
       [[cell textLabel] setTextColor:[UIColor blackColor]];
-      [[cell detailTextLabel] setText:NSLocalizedString(
-        @"Allows internet searches in this session", nil)];
-      [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
       [[self webSearchSwitch]
         setOn:[[self sessionOptions] webSearchEnabled]
       animated:NO];
@@ -399,17 +365,13 @@ titleForFooterInSection:(NSInteger)section
     cell = [tableView dequeueReusableCellWithIdentifier:@"BashCell"];
     if (cell == nil) {
       cell = [[UITableViewCell alloc]
-        initWithStyle:UITableViewCellStyleSubtitle
+        initWithStyle:UITableViewCellStyleDefault
        reuseIdentifier:@"BashCell"];
       [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
       [[cell textLabel] setNumberOfLines:1];
-      [[cell detailTextLabel] setNumberOfLines:1];
     }
     [[cell textLabel] setText:NSLocalizedString(@"Enable Bash", nil)];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
-    [[cell detailTextLabel] setText:NSLocalizedString(
-      @"Allows command execution in this session", nil)];
-    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
     [[self bashSwitch] setOn:[[self sessionOptions] bashEnabled] animated:NO];
     [[self bashSwitch] setEnabled:YES];
     [cell setAccessoryView:[self bashSwitch]];
@@ -420,16 +382,12 @@ titleForFooterInSection:(NSInteger)section
     cell = [tableView dequeueReusableCellWithIdentifier:@"DebugCell"];
     if (cell == nil) {
       cell = [[UITableViewCell alloc]
-        initWithStyle:UITableViewCellStyleSubtitle
+        initWithStyle:UITableViewCellStyleDefault
        reuseIdentifier:@"DebugCell"];
       [[cell textLabel] setNumberOfLines:1];
-      [[cell detailTextLabel] setNumberOfLines:1];
     }
-    [[cell textLabel] setText:NSLocalizedString(@"Debug", nil)];
+    [[cell textLabel] setText:NSLocalizedString(@"Advanced", nil)];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
-    [[cell detailTextLabel] setText:NSLocalizedString(
-      @"Advanced session options", nil)];
-    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
     [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
     [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
                                                    inTableView:tableView
@@ -441,10 +399,9 @@ titleForFooterInSection:(NSInteger)section
 
   cell = [tableView dequeueReusableCellWithIdentifier:@"ModelCell"];
   if (cell == nil) {
-    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
                                   reuseIdentifier:@"ModelCell"];
     [[cell textLabel] setNumberOfLines:1];
-    [[cell detailTextLabel] setNumberOfLines:1];
   }
 
   {
@@ -454,9 +411,7 @@ titleForFooterInSection:(NSInteger)section
     model = [[self models] objectAtIndex:(NSUInteger)[indexPath row]];
     identifier = StrappyMessageModelStringForRow(model, @"id");
     [[cell textLabel] setText:StrappyMessageModelDisplayNameForRow(model)];
-    [[cell detailTextLabel] setText:StrappyModelCellDetailText(model)];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
-    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
     [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
     [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
                                                    inTableView:tableView
@@ -577,7 +532,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
   if ((self = [super initWithStyle:UITableViewStyleGrouped])) {
     [self setOptionsDelegate:optionsDelegate];
-    [[self navigationItem] setTitle:NSLocalizedString(@"Debug", nil)];
+    [[self navigationItem] setTitle:NSLocalizedString(@"Advanced", nil)];
     [self reloadOptionsSnapshot];
   }
   return self;
@@ -648,7 +603,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   optionsDelegate = [self optionsDelegate];
   [self setSessionOptions:(optionsDelegate != nil)
     ? [optionsDelegate sessionOptions] : nil];
-  [self setWorkingDirectories:[StrappySession codingWorkingDirectoryPaths]];
 }
 
 - (void)reloadOptionsFromDelegate
@@ -741,9 +695,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
  numberOfRowsInSection:(NSInteger)section
 {
   (void)tableView;
-  if (section == kStrappyPromptDebugSectionWorkingDirectory) {
-    return (NSInteger)[[self workingDirectories] count];
-  }
   if (section == kStrappyPromptDebugSectionLimits) {
     return kStrappyPromptDebugLimitRowCount;
   }
@@ -757,9 +708,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 titleForHeaderInSection:(NSInteger)section
 {
   (void)tableView;
-  if (section == kStrappyPromptDebugSectionWorkingDirectory) {
-    return NSLocalizedString(@"Working Directory", nil);
-  }
   if (section == kStrappyPromptDebugSectionLimits) {
     return NSLocalizedString(@"Limits", nil);
   }
@@ -769,81 +717,23 @@ titleForHeaderInSection:(NSInteger)section
   return nil;
 }
 
-- (NSString *)tableView:(UITableView *)tableView
-titleForFooterInSection:(NSInteger)section
-{
-  (void)tableView;
-  if (section == kStrappyPromptDebugSectionWorkingDirectory) {
-    return NSLocalizedString(
-      @"Relative file paths and Bash commands use this directory.",
-      nil);
-  }
-  if (section == kStrappyPromptDebugSectionLimits) {
-    return NSLocalizedString(
-      @"Round Limit includes the first model request and excludes retries.",
-      nil);
-  }
-  if (section == kStrappyPromptDebugSectionSearchProvider) {
-    return NSLocalizedString(
-      @"The selected provider is used only when web search is enabled.",
-      nil);
-  }
-  return nil;
-}
-
 - (UITableViewCell *)tableView:(UITableView *)tableView
          cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
   UITableViewCell *cell;
-
-  if ([indexPath section] == kStrappyPromptDebugSectionWorkingDirectory) {
-    NSUInteger workingDirectoryIndex;
-
-    workingDirectoryIndex = (NSUInteger)[indexPath row];
-    cell =
-      [tableView dequeueReusableCellWithIdentifier:@"WorkingDirectoryCell"];
-    if (cell == nil) {
-      cell = [[UITableViewCell alloc]
-        initWithStyle:UITableViewCellStyleDefault
-       reuseIdentifier:@"WorkingDirectoryCell"];
-      [[cell textLabel] setNumberOfLines:1];
-    }
-    [[cell textLabel] setText:
-      (workingDirectoryIndex < [StrappyPromptWorkingDirectoryTitles() count])
-        ? [StrappyPromptWorkingDirectoryTitles()
-            objectAtIndex:workingDirectoryIndex]
-        : @""];
-    [[cell textLabel] setTextColor:[UIColor blackColor]];
-    [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
-                                                   inTableView:tableView
-                                                  atIndexPath:indexPath];
-    [cell setAccessoryView:nil];
-    [cell setAccessoryType:
-      (workingDirectoryIndex < [[self workingDirectories] count]) &&
-      [[[self workingDirectories] objectAtIndex:workingDirectoryIndex]
-        isEqualToString:[[self sessionOptions] workingDirectory]]
-        ? UITableViewCellAccessoryCheckmark
-        : UITableViewCellAccessoryNone];
-    return cell;
-  }
 
   if (([indexPath section] == kStrappyPromptDebugSectionLimits) &&
       ([indexPath row] == kStrappyPromptDebugLimitRowLimitToOneTool)) {
     cell = [tableView dequeueReusableCellWithIdentifier:@"LimitOneToolCell"];
     if (cell == nil) {
       cell = [[UITableViewCell alloc]
-        initWithStyle:UITableViewCellStyleSubtitle
+        initWithStyle:UITableViewCellStyleDefault
        reuseIdentifier:@"LimitOneToolCell"];
       [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
       [[cell textLabel] setNumberOfLines:1];
-      [[cell detailTextLabel] setNumberOfLines:1];
     }
     [[cell textLabel] setText:NSLocalizedString(@"Limit to 1 Tool", nil)];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
-    [[cell detailTextLabel] setText:NSLocalizedString(
-      @"Prevents parallel tool calls", nil)];
-    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
     [[self limitToOneToolSwitch]
       setOn:[[self sessionOptions] limitToOneTool]
     animated:NO];
@@ -858,18 +748,14 @@ titleForFooterInSection:(NSInteger)section
       @"AnswerQualityCell"];
     if (cell == nil) {
       cell = [[UITableViewCell alloc]
-        initWithStyle:UITableViewCellStyleSubtitle
+        initWithStyle:UITableViewCellStyleDefault
        reuseIdentifier:@"AnswerQualityCell"];
       [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
       [[cell textLabel] setNumberOfLines:1];
-      [[cell detailTextLabel] setNumberOfLines:1];
     }
     [[cell textLabel] setText:NSLocalizedString(
       @"Answer Quality Check", nil)];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
-    [[cell detailTextLabel] setText:NSLocalizedString(
-      @"Evaluates and reports final answers", nil)];
-    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
     [[self answerQualitySwitch]
       setOn:[[self sessionOptions] answerQualityEnabled]
     animated:NO];
@@ -881,24 +767,19 @@ titleForFooterInSection:(NSInteger)section
   if ([indexPath section] == kStrappyPromptDebugSectionLimits) {
     UITextField *limitField;
     NSString *title;
-    NSString *detail;
 
     limitField = [self roundLimitField];
     title = NSLocalizedString(@"Round Limit", nil);
-    detail = NSLocalizedString(@"Maximum model rounds per prompt", nil);
     cell = [tableView dequeueReusableCellWithIdentifier:@"LimitValueCell"];
     if (cell == nil) {
       cell = [[UITableViewCell alloc]
-        initWithStyle:UITableViewCellStyleSubtitle
+        initWithStyle:UITableViewCellStyleDefault
        reuseIdentifier:@"LimitValueCell"];
       [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
       [[cell textLabel] setNumberOfLines:1];
-      [[cell detailTextLabel] setNumberOfLines:1];
     }
     [[cell textLabel] setText:title];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
-    [[cell detailTextLabel] setText:detail];
-    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
     [limitField setAccessibilityLabel:title];
     [cell setAccessoryType:UITableViewCellAccessoryNone];
     [cell setAccessoryView:limitField];
@@ -936,9 +817,6 @@ titleForFooterInSection:(NSInteger)section
   willSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
   (void)tableView;
-  if ([indexPath section] == kStrappyPromptDebugSectionWorkingDirectory) {
-    return indexPath;
-  }
   if ([indexPath section] == kStrappyPromptDebugSectionSearchProvider) {
     return indexPath;
   }
@@ -949,33 +827,6 @@ titleForFooterInSection:(NSInteger)section
 didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
-  if ([indexPath section] == kStrappyPromptDebugSectionWorkingDirectory) {
-    NSString *workingDirectory;
-    StrappySessionOptions *options;
-    NSUInteger workingDirectoryIndex;
-
-    workingDirectoryIndex = (NSUInteger)[indexPath row];
-    if (workingDirectoryIndex >= [[self workingDirectories] count]) {
-      return;
-    }
-    workingDirectory =
-      [[self workingDirectories] objectAtIndex:workingDirectoryIndex];
-    options = [[[self optionsDelegate] sessionOptions] copy];
-    [options setWorkingDirectory:workingDirectory];
-    if ([[self optionsDelegate] updateSessionOptions:options
-                                                changedFields:
-                                                  StrappySessionOptionWorkingDirectory]) {
-      [self setSessionOptions:
-        [[self optionsDelegate] sessionOptions]];
-      [[self tableView] reloadSections:
-        [NSIndexSet indexSetWithIndex:
-          kStrappyPromptDebugSectionWorkingDirectory]
-                    withRowAnimation:UITableViewRowAnimationNone];
-    } else {
-      [self reloadOptionsFromDelegate];
-    }
-    return;
-  }
   if ([indexPath section] == kStrappyPromptDebugSectionSearchProvider) {
     NSString *webProvider;
     StrappySessionOptions *options;
