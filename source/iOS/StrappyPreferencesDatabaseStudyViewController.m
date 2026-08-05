@@ -358,7 +358,8 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows)
            target:self
            action:@selector(studyAction:)];
   [[self navigationItem] setRightBarButtonItem:studyActionButton_];
-  [StrappyAppearance applyPrimaryTintToBarButtonItem:studyActionButton_];
+  [StrappyAppearance
+    applyLegacyTintToBarButtonItem:studyActionButton_];
   statusToolbarView_ = [[StrappyPreferencesStatusToolbarView alloc] init];
   statusToolbarItem_ = [[UIBarButtonItem alloc]
     initWithCustomView:statusToolbarView_];
@@ -472,6 +473,8 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows)
     NSLocalizedString(@"Reset", nil) : NSLocalizedString(@"Study", nil)];
   [studyActionButton_ setStyle:allStudied ?
     UIBarButtonItemStyleBordered : UIBarButtonItemStyleDone];
+  [StrappyAppearance
+    applyLegacyTintToBarButtonItem:studyActionButton_];
   [studyActionButton_ setAction:allStudied ?
     @selector(resetAction:) : @selector(studyAction:)];
 }

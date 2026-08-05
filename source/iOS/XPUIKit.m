@@ -115,6 +115,29 @@ static void XPUIKitInvokeBoolSetter(id target, SEL selector, BOOL value)
   [invocation invoke];
 }
 
+static id XPUIKitAppearanceProxyForClass(Class appearanceClass)
+{
+  if (appearanceClass == Nil) {
+    return nil;
+  }
+  if (![(id)appearanceClass respondsToSelector:@selector(appearance)]) {
+    return nil;
+  }
+  return [(id)appearanceClass performSelector:@selector(appearance)];
+}
+
+static BOOL XPUIKitAppearanceProxyCanForwardSelector(
+  id appearanceProxy,
+  SEL selector)
+{
+  /* iOS 6 appearance proxies forward setters while reporting that they do
+     not respond to them. Their method signatures expose the forwarding
+     support reliably. */
+  return ((appearanceProxy != nil) &&
+          ([appearanceProxy methodSignatureForSelector:selector] != nil))
+    ? YES : NO;
+}
+
 static BOOL XPUIKitInvokeBoolGetter(id target, SEL selector)
 {
   NSMethodSignature *signature;
@@ -195,17 +218,36 @@ static UITextField *XPUIKitFindTextField(UIView *view)
 
 @implementation UIView (XPUIKit)
 
++ (void)XP_setAppearanceBarTintColorIfAvailable:(UIColor *)barTintColor
+{
+  id appearanceProxy;
+
+  appearanceProxy = XPUIKitAppearanceProxyForClass(self);
+  if (XPUIKitAppearanceProxyCanForwardSelector(
+        appearanceProxy,
+        @selector(setBarTintColor:))) {
+    [appearanceProxy performSelector:@selector(setBarTintColor:)
+                          withObject:barTintColor];
+  }
+}
+
++ (void)XP_setAppearanceTintColorIfAvailable:(UIColor *)tintColor
+{
+  id appearanceProxy;
+
+  appearanceProxy = XPUIKitAppearanceProxyForClass(self);
+  if (XPUIKitAppearanceProxyCanForwardSelector(
+        appearanceProxy,
+        @selector(setTintColor:))) {
+    [appearanceProxy performSelector:@selector(setTintColor:)
+                          withObject:tintColor];
+  }
+}
+
 - (void)XP_setBackgroundTransparent
 {
   [self setOpaque:NO];
   [self setBackgroundColor:[UIColor clearColor]];
-}
-
-- (void)XP_setBarTintColorIfAvailable:(UIColor *)barTintColor
-{
-  if ([self respondsToSelector:@selector(setBarTintColor:)]) {
-    [self performSelector:@selector(setBarTintColor:) withObject:barTintColor];
-  }
 }
 
 - (void)XP_setTintColorIfAvailable:(UIColor *)tintColor
@@ -219,10 +261,40 @@ static UITextField *XPUIKitFindTextField(UIView *view)
 
 @implementation UIBarButtonItem (XPUIKit)
 
++ (void)XP_setAppearanceTintColorIfAvailable:(UIColor *)tintColor
+{
+  id appearanceProxy;
+
+  appearanceProxy = XPUIKitAppearanceProxyForClass(self);
+  if (XPUIKitAppearanceProxyCanForwardSelector(
+        appearanceProxy,
+        @selector(setTintColor:))) {
+    [appearanceProxy performSelector:@selector(setTintColor:)
+                          withObject:tintColor];
+  }
+}
+
 - (void)XP_setTintColorIfAvailable:(UIColor *)tintColor
 {
   if ([self respondsToSelector:@selector(setTintColor:)]) {
     [self performSelector:@selector(setTintColor:) withObject:tintColor];
+  }
+}
+
+@end
+
+@implementation UISwitch (XPUIKit)
+
++ (void)XP_setAppearanceOnTintColorIfAvailable:(UIColor *)onTintColor
+{
+  id appearanceProxy;
+
+  appearanceProxy = XPUIKitAppearanceProxyForClass(self);
+  if (XPUIKitAppearanceProxyCanForwardSelector(
+        appearanceProxy,
+        @selector(setOnTintColor:))) {
+    [appearanceProxy performSelector:@selector(setOnTintColor:)
+                          withObject:onTintColor];
   }
 }
 

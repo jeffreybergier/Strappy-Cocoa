@@ -179,7 +179,7 @@ static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
         initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                              target:self
                              action:@selector(doneAction:)]];
-    [StrappyAppearance applyPrimaryTintToBarButtonItem:
+    [StrappyAppearance applyLegacyTintToBarButtonItem:
       [[self navigationItem] rightBarButtonItem]];
   }
 }
@@ -332,9 +332,6 @@ titleForHeaderInSection:(NSInteger)section
       [UIColor blackColor] : [UIColor grayColor]];
     [cell setSelectionStyle:enabled ?
       UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone];
-    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
-                                                   inTableView:tableView
-                                                  atIndexPath:indexPath];
     [cell setAccessoryType:
       [identifier isEqualToString:
         [[self sessionOptions] assistantSetIdentifier]]
@@ -389,9 +386,6 @@ titleForHeaderInSection:(NSInteger)section
     [[cell textLabel] setText:NSLocalizedString(@"Advanced", nil)];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
     [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
-                                                   inTableView:tableView
-                                                  atIndexPath:indexPath];
     [cell setAccessoryView:nil];
     [cell setAccessoryType:UITableViewCellAccessoryDisclosureIndicator];
     return cell;
@@ -413,9 +407,6 @@ titleForHeaderInSection:(NSInteger)section
     [[cell textLabel] setText:StrappyMessageModelDisplayNameForRow(model)];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
     [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
-                                                   inTableView:tableView
-                                                  atIndexPath:indexPath];
     [cell setAccessoryView:nil];
     [cell setAccessoryType:
       [identifier isEqualToString:[[self sessionOptions] modelIdentifier]]
@@ -571,6 +562,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                          target:self
                          action:@selector(limitFieldDoneAction:)];
+  [StrappyAppearance applyLegacyTintToBarButtonItem:doneItem];
   [keyboardToolbar setItems:[NSArray arrayWithObjects:
     flexibleItem, doneItem, nil]];
 
@@ -801,9 +793,6 @@ titleForHeaderInSection:(NSInteger)section
     [[cell textLabel] setText:StrappyPromptWebProviderTitle(webProvider)];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
     [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-    [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
-                                                   inTableView:tableView
-                                                  atIndexPath:indexPath];
     [cell setAccessoryView:nil];
     [cell setAccessoryType:
       [webProvider isEqualToString:[[self sessionOptions] webProvider]]

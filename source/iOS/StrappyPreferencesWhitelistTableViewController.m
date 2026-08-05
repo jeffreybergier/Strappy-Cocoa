@@ -1,7 +1,6 @@
 #import "StrappyPreferencesWhitelistTableViewController.h"
 
 #import "AIFontAwesome.h"
-#import "StrappyAppearance.h"
 #import "StrappyIdleTimerAssertion.h"
 #import "StrappyPreferencesStatusToolbarView.h"
 #import "XPUIKit.h"
@@ -40,7 +39,6 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
 
   [self setSearchBar:[[UISearchBar alloc] initWithFrame:
     CGRectMake(0.0f, 0.0f, CGRectGetWidth([[self tableView] bounds]), 44.0f)]];
-  [StrappyAppearance applyBarAppearanceToSearchBar:[self searchBar]];
   [[self searchBar] setDelegate:self];
   [[self searchBar] setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
   [[self searchBar] setPlaceholder:NSLocalizedString(@"Search", nil)];
@@ -370,9 +368,6 @@ titleForFooterInSection:(NSInteger)section
   [[cell textLabel] setTextColor:[UIColor blackColor]];
   [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
   [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-  [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
-                                                 inTableView:tableView
-                                                atIndexPath:indexPath];
   [self configureCell:cell withRow:row];
   return cell;
 }

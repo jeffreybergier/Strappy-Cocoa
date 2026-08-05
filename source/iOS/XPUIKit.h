@@ -10,13 +10,19 @@
 @end
 
 @interface UIView (XPUIKit)
++ (void)XP_setAppearanceBarTintColorIfAvailable:(UIColor *)barTintColor;
++ (void)XP_setAppearanceTintColorIfAvailable:(UIColor *)tintColor;
 - (void)XP_setBackgroundTransparent;
-- (void)XP_setBarTintColorIfAvailable:(UIColor *)barTintColor;
 - (void)XP_setTintColorIfAvailable:(UIColor *)tintColor;
 @end
 
 @interface UIBarButtonItem (XPUIKit)
++ (void)XP_setAppearanceTintColorIfAvailable:(UIColor *)tintColor;
 - (void)XP_setTintColorIfAvailable:(UIColor *)tintColor;
+@end
+
+@interface UISwitch (XPUIKit)
++ (void)XP_setAppearanceOnTintColorIfAvailable:(UIColor *)onTintColor;
 @end
 
 @interface UIScrollView (XPUIKit)

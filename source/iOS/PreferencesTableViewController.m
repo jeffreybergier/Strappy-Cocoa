@@ -133,7 +133,7 @@ enum {
     [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                   target:self
                                                   action:@selector(doneAction:)]];
-  [StrappyAppearance applyPrimaryTintToBarButtonItem:
+  [StrappyAppearance applyLegacyTintToBarButtonItem:
     [[self navigationItem] rightBarButtonItem]];
 
   [[NSNotificationCenter defaultCenter]
@@ -438,9 +438,6 @@ titleForFooterInSection:(NSInteger)section
   [cell setAccessoryType:UITableViewCellAccessoryDisclosureIndicator];
   [cell setAccessoryView:nil];
   [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-  [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
-                                                 inTableView:tableView
-                                                atIndexPath:indexPath];
   if ([indexPath row] == kStrappyPaneRowSessionDefaults) {
     [[cell textLabel] setText:NSLocalizedString(@"Session Defaults", nil)];
   } else if ([indexPath row] == kStrappyPaneRowModels) {

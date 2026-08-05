@@ -443,7 +443,6 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
                                     target:self
                                     action:@selector(hiddenModeButtonPressed:)]];
   [[self navigationItem] setRightBarButtonItem:[self hiddenModeButton]];
-  [StrappyAppearance applyPrimaryTintToBarButtonItem:[self hiddenModeButton]];
   [self updateHiddenModeButton];
   [self setScanning:[FileScanner isDatabaseCatalogScanInFlight]];
 }
@@ -470,6 +469,8 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
   [[self hiddenModeButton] setTitle:NSLocalizedString(@"Hidden", nil)];
   [[self hiddenModeButton] setStyle:[self hiddenMode] ?
     UIBarButtonItemStyleDone : UIBarButtonItemStyleBordered];
+  [StrappyAppearance applyLegacyTintToBarButtonItem:
+    [self hiddenModeButton]];
   [[self hiddenModeButton] setAccessibilityLabel:[self hiddenMode] ?
     NSLocalizedString(@"Editing hidden databases", nil) :
     NSLocalizedString(@"Edit hidden databases", nil)];
@@ -724,9 +725,6 @@ titleForHeaderInSection:(NSInteger)section
   [[cell textLabel] setTextColor:[UIColor blackColor]];
   [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
   [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-  [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
-                                                 inTableView:tableView
-                                                atIndexPath:indexPath];
   [self configureCell:cell withRow:row];
   return cell;
 }

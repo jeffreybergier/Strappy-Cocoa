@@ -2,7 +2,6 @@
 
 #import "AIFontAwesome.h"
 #import "PreferencesTableViewController.h"
-#import "StrappyAppearance.h"
 #import "StrappyActivityAccessoryView.h"
 #import "StrappySession.h"
 #import "XPFoundation.h"
@@ -138,7 +137,6 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
     setAccessibilityLabel:NSLocalizedString(@"Preferences", nil)];
   [[self navigationItem] setRightBarButtonItem:[self addButton]];
   [[self navigationItem] setLeftBarButtonItem:[self settingsButton]];
-  [StrappyAppearance applyPrimaryTintToBarButtonItem:[self addButton]];
 
   [[NSNotificationCenter defaultCenter]
     addObserver:self
@@ -189,8 +187,6 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   preferences = [[PreferencesTableViewController alloc] init];
   navigationController =
     [[UINavigationController alloc] initWithRootViewController:preferences];
-  [StrappyAppearance
-    applyBarAppearanceToNavigationController:navigationController];
   [self presentModalViewController:navigationController animated:YES];
 }
 
@@ -605,9 +601,6 @@ titleForHeaderInSection:(NSInteger)section
 
   session = [self sessionAtIndexPath:indexPath];
   [self configureSessionCell:cell session:session];
-  [StrappyAppearance applySelectionAppearanceToTableViewCell:cell
-                                                 inTableView:tableView
-                                                atIndexPath:indexPath];
   return cell;
 }
 

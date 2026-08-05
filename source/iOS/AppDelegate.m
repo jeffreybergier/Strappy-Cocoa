@@ -67,6 +67,7 @@ static void StrappyLogApplicationLifecycle(NSString *event,
   StrappyLogApplicationLifecycle(@"didFinishLaunching begin", application);
   NSLog(@"StrappyLifecycle AppDelegate launchOptions=%@", launchOptions);
 
+  [StrappyAppearance configureAppearance];
   self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
   [StrappyAppearance applyApplicationTintToWindow:[self window]];
 

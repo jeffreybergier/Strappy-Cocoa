@@ -6,13 +6,20 @@
 + (UIColor *)highlightedPrimaryTintColor;
 + (UIColor *)legacyBarTintColor;
 + (UIColor *)modernBarBackgroundColor;
++ (void)configureAppearance;
 + (void)applyApplicationTintToWindow:(UIWindow *)window;
-+ (void)applyBarAppearanceToNavigationController:
-  (UINavigationController *)navigationController;
-+ (void)applyBarAppearanceToSearchBar:(UISearchBar *)searchBar;
-+ (void)applyPrimaryTintToBarButtonItem:(UIBarButtonItem *)barButtonItem;
-+ (void)applySelectionAppearanceToTableViewCell:(UITableViewCell *)cell
-                                    inTableView:(UITableView *)tableView
-                                   atIndexPath:(NSIndexPath *)indexPath;
++ (void)applyLegacyTintToBarButtonItem:
+  (UIBarButtonItem *)barButtonItem;
+
+@end
+
+/* UITableViewCell does not expose selectedBackgroundView through
+   UIAppearance, so Strappy supplies an appearance selector for its color. */
+@interface UITableViewCell (StrappyAppearance)
+
++ (void)strappy_setAppearanceSelectionBackgroundColorIfAvailable:
+  (UIColor *)selectionBackgroundColor;
+- (void)setStrappySelectionBackgroundColor:
+  (UIColor *)selectionBackgroundColor UI_APPEARANCE_SELECTOR;
 
 @end

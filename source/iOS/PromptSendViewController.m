@@ -882,8 +882,6 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
            presentedModally:YES];
   navigationController =
     [[UINavigationController alloc] initWithRootViewController:optionsController];
-  [StrappyAppearance
-    applyBarAppearanceToNavigationController:navigationController];
   [self setOptionsController:optionsController];
   [self setOptionsNavigationController:navigationController];
   [presentingController presentModalViewController:navigationController

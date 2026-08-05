@@ -10,59 +10,46 @@ static const CGFloat kStrappyLegacyGroupedCellCornerRadius = 10.0f;
 @interface StrappyLegacySelectionBackgroundView : UIView {
  @private
   CAShapeLayer *maskLayer_;
-  UIRectCorner roundedCorners_;
 }
-
-- (void)setRoundedCorners:(UIRectCorner)roundedCorners;
-
+- (void)updateRoundedCornerMask;
 @end
 
-@implementation StrappyLegacySelectionBackgroundView
-
-- (void)setRoundedCorners:(UIRectCorner)roundedCorners
+static UIView *StrappyAncestorViewOfClass(UIView *view, Class viewClass)
 {
-  if (roundedCorners_ == roundedCorners) {
-    return;
+  UIView *ancestorView;
+
+  ancestorView = [view superview];
+  while (ancestorView != nil) {
+    if ([ancestorView isKindOfClass:viewClass]) {
+      return ancestorView;
+    }
+    ancestorView = [ancestorView superview];
   }
-  roundedCorners_ = roundedCorners;
-  [self setNeedsLayout];
+  return nil;
 }
 
-- (void)layoutSubviews
+static UIRectCorner StrappyLegacySelectionRoundedCornersForView(
+  UIView *selectionBackgroundView)
 {
-  UIBezierPath *path;
-
-  [super layoutSubviews];
-  if (roundedCorners_ == 0U) {
-    [[self layer] setMask:nil];
-    return;
-  }
-
-  if (maskLayer_ == nil) {
-    maskLayer_ = [CAShapeLayer layer];
-  }
-  path = [UIBezierPath
-    bezierPathWithRoundedRect:[self bounds]
-            byRoundingCorners:roundedCorners_
-                  cornerRadii:CGSizeMake(
-                    kStrappyLegacyGroupedCellCornerRadius,
-                    kStrappyLegacyGroupedCellCornerRadius)];
-  [maskLayer_ setFrame:[self bounds]];
-  [maskLayer_ setPath:[path CGPath]];
-  [[self layer] setMask:maskLayer_];
-}
-
-@end
-
-static UIRectCorner StrappyLegacySelectionRoundedCorners(
-  UITableView *tableView,
-  NSIndexPath *indexPath)
-{
+  UITableViewCell *cell;
+  UITableView *tableView;
+  NSIndexPath *indexPath;
   UIRectCorner roundedCorners;
   NSInteger rowCount;
 
-  if ((tableView == nil) || (indexPath == nil) ||
+  cell = (UITableViewCell *)StrappyAncestorViewOfClass(
+    selectionBackgroundView,
+    [UITableViewCell class]);
+  tableView = (UITableView *)StrappyAncestorViewOfClass(
+    cell,
+    [UITableView class]);
+  if ((cell == nil) || (tableView == nil) ||
       ([tableView style] != UITableViewStyleGrouped)) {
+    return 0U;
+  }
+
+  indexPath = [tableView indexPathForCell:cell];
+  if (indexPath == nil) {
     return 0U;
   }
 
@@ -76,6 +63,106 @@ static UIRectCorner StrappyLegacySelectionRoundedCorners(
   }
   return roundedCorners;
 }
+
+@implementation StrappyLegacySelectionBackgroundView
+
+- (void)setFrame:(CGRect)frame
+{
+  [super setFrame:frame];
+  [self updateRoundedCornerMask];
+}
+
+- (void)setBounds:(CGRect)bounds
+{
+  [super setBounds:bounds];
+  [self updateRoundedCornerMask];
+}
+
+- (void)didMoveToSuperview
+{
+  [super didMoveToSuperview];
+  [self updateRoundedCornerMask];
+}
+
+- (void)didMoveToWindow
+{
+  [super didMoveToWindow];
+  [self updateRoundedCornerMask];
+}
+
+- (void)layoutSubviews
+{
+  [super layoutSubviews];
+  [self updateRoundedCornerMask];
+}
+
+- (void)updateRoundedCornerMask
+{
+  UIBezierPath *path;
+  UIRectCorner roundedCorners;
+
+  roundedCorners = StrappyLegacySelectionRoundedCornersForView(self);
+  if (roundedCorners == 0U) {
+    [[self layer] setMask:nil];
+    return;
+  }
+
+  if (maskLayer_ == nil) {
+    maskLayer_ = [CAShapeLayer layer];
+  }
+  path = [UIBezierPath
+    bezierPathWithRoundedRect:[self bounds]
+            byRoundingCorners:roundedCorners
+                  cornerRadii:CGSizeMake(
+                    kStrappyLegacyGroupedCellCornerRadius,
+                    kStrappyLegacyGroupedCellCornerRadius)];
+  [maskLayer_ setFrame:[self bounds]];
+  [maskLayer_ setPath:[path CGPath]];
+  [[self layer] setMask:maskLayer_];
+}
+
+@end
+
+@implementation UITableViewCell (StrappyAppearance)
+
++ (void)strappy_setAppearanceSelectionBackgroundColorIfAvailable:
+  (UIColor *)selectionBackgroundColor
+{
+  id appearanceProxy;
+
+  if (![(id)self respondsToSelector:@selector(appearance)]) {
+    return;
+  }
+  appearanceProxy = [(id)self performSelector:@selector(appearance)];
+  if ((appearanceProxy == nil) ||
+      ([appearanceProxy methodSignatureForSelector:
+        @selector(setStrappySelectionBackgroundColor:)] == nil)) {
+    return;
+  }
+  [appearanceProxy
+    performSelector:@selector(setStrappySelectionBackgroundColor:)
+                        withObject:selectionBackgroundColor];
+}
+
+- (void)setStrappySelectionBackgroundColor:
+  (UIColor *)selectionBackgroundColor
+{
+  StrappyLegacySelectionBackgroundView *selectionBackgroundView;
+
+  selectionBackgroundView = (StrappyLegacySelectionBackgroundView *)
+    [self selectedBackgroundView];
+  if (![selectionBackgroundView
+        isKindOfClass:[StrappyLegacySelectionBackgroundView class]]) {
+    selectionBackgroundView =
+      [[StrappyLegacySelectionBackgroundView alloc]
+        initWithFrame:[self bounds]];
+    [self setSelectedBackgroundView:selectionBackgroundView];
+  }
+  [selectionBackgroundView setBackgroundColor:selectionBackgroundColor];
+  [selectionBackgroundView setNeedsLayout];
+}
+
+@end
 
 @implementation StrappyAppearance
 
@@ -111,6 +198,40 @@ static UIRectCorner StrappyLegacySelectionRoundedCorners(
                          alpha:1.0f];
 }
 
++ (void)configureAppearance
+{
+  UIDevice *device;
+
+  device = [UIDevice currentDevice];
+  if (![device XP_isOperatingSystemAtLeastMajorVersion:5]) {
+    return;
+  }
+
+  if ([device XP_isOperatingSystemAtLeastMajorVersion:7]) {
+    UIColor *barColor;
+
+    barColor = [self modernBarBackgroundColor];
+    [UINavigationBar XP_setAppearanceBarTintColorIfAvailable:barColor];
+    [UIToolbar XP_setAppearanceBarTintColorIfAvailable:barColor];
+    [UISearchBar XP_setAppearanceBarTintColorIfAvailable:barColor];
+    return;
+  }
+
+  [UINavigationBar
+    XP_setAppearanceTintColorIfAvailable:[self legacyBarTintColor]];
+  [UIToolbar
+    XP_setAppearanceTintColorIfAvailable:[self legacyBarTintColor]];
+  [UISearchBar
+    XP_setAppearanceTintColorIfAvailable:[self legacyBarTintColor]];
+  [UIBarButtonItem
+    XP_setAppearanceTintColorIfAvailable:[self primaryTintColor]];
+  [UISwitch
+    XP_setAppearanceOnTintColorIfAvailable:[self primaryTintColor]];
+  [UITableViewCell
+    strappy_setAppearanceSelectionBackgroundColorIfAvailable:
+      [self legacyBarTintColor]];
+}
+
 + (void)applyApplicationTintToWindow:(UIWindow *)window
 {
   if ((window == nil) ||
@@ -121,71 +242,21 @@ static UIRectCorner StrappyLegacySelectionRoundedCorners(
   [window XP_setTintColorIfAvailable:[self primaryTintColor]];
 }
 
-+ (void)applyBarAppearanceToNavigationController:
-  (UINavigationController *)navigationController
++ (void)applyLegacyTintToBarButtonItem:
+  (UIBarButtonItem *)barButtonItem
 {
-  UIColor *barColor;
-  BOOL usesModernAppearance;
+  UIDevice *device;
 
-  if (navigationController == nil) {
+  if (barButtonItem == nil) {
+    return;
+  }
+  device = [UIDevice currentDevice];
+  if (![device XP_isOperatingSystemAtLeastMajorVersion:5] ||
+      [device XP_isOperatingSystemAtLeastMajorVersion:7]) {
     return;
   }
 
-  usesModernAppearance = [[UIDevice currentDevice]
-    XP_isOperatingSystemAtLeastMajorVersion:7];
-  if (!usesModernAppearance) {
-    barColor = [self legacyBarTintColor];
-    [[navigationController navigationBar]
-      XP_setTintColorIfAvailable:barColor];
-    [[navigationController toolbar]
-      XP_setTintColorIfAvailable:barColor];
-  }
-}
-
-+ (void)applyBarAppearanceToSearchBar:(UISearchBar *)searchBar
-{
-  if ((searchBar == nil) ||
-      [[UIDevice currentDevice]
-        XP_isOperatingSystemAtLeastMajorVersion:7]) {
-    return;
-  }
-  [searchBar XP_setTintColorIfAvailable:[self legacyBarTintColor]];
-}
-
-+ (void)applyPrimaryTintToBarButtonItem:(UIBarButtonItem *)barButtonItem
-{
-  if ((barButtonItem == nil) ||
-      [[UIDevice currentDevice]
-        XP_isOperatingSystemAtLeastMajorVersion:7]) {
-    return;
-  }
   [barButtonItem XP_setTintColorIfAvailable:[self primaryTintColor]];
-}
-
-+ (void)applySelectionAppearanceToTableViewCell:(UITableViewCell *)cell
-                                    inTableView:(UITableView *)tableView
-                                   atIndexPath:(NSIndexPath *)indexPath
-{
-  StrappyLegacySelectionBackgroundView *selectedBackgroundView;
-
-  if ((cell == nil) ||
-      [[UIDevice currentDevice]
-        XP_isOperatingSystemAtLeastMajorVersion:7]) {
-    return;
-  }
-
-  selectedBackgroundView = (StrappyLegacySelectionBackgroundView *)
-    [cell selectedBackgroundView];
-  if (![selectedBackgroundView
-        isKindOfClass:[StrappyLegacySelectionBackgroundView class]]) {
-    selectedBackgroundView =
-      [[StrappyLegacySelectionBackgroundView alloc] initWithFrame:CGRectZero];
-    [cell setSelectedBackgroundView:selectedBackgroundView];
-  }
-  [selectedBackgroundView
-    setBackgroundColor:[self legacyBarTintColor]];
-  [selectedBackgroundView setRoundedCorners:
-    StrappyLegacySelectionRoundedCorners(tableView, indexPath)];
 }
 
 @end
