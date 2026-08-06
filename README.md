@@ -51,9 +51,9 @@ personality, and hard rules in `SystemPrompt.json`:
   `file_read` reads bounded UTF-8 text ranges, while `bash` runs a fresh
   non-interactive child shell with a hard 120-second ceiling. File tools and
   Bash share a per-session working directory. New
-  sessions default to `~/Developer`; the iOS prompt options' Debug submenu can
+  sessions default to `~/Developer`; the iOS prompt options can
   instead select `~/` or `~/Library/Application Support/Strappy/Developer`.
-  The same submenu can disable parallel tool calls for a session, asking the
+  The Limits section can disable parallel tool calls for a session, asking the
   model to make at most one tool call per response. Selecting a missing
   directory creates it before the database setting is changed. Bash results
   expose `output_truncated` so the model can distinguish complete output from a
@@ -79,8 +79,8 @@ User memories are shared by sessions using the same assistant set and isolated
 from sessions using other assistant sets; switching a session changes which
 memories it can read, save, and delete.
 Answer-quality checking is also persisted per session and initially defaults
-to off. On iOS it can be enabled for an active session under Debug → Limits or
-for future sessions under Preferences → Session Defaults → Debug → Limits.
+to off. On iOS it can be enabled for an active session under Session Options →
+Limits or for future sessions under Preferences → Session Defaults → Limits.
 When disabled, the prompt omits audit guidance and Strappy creates no
 answer-quality audit, check, or timeline entry; enabling it preserves the full
 current evaluation and report behavior.

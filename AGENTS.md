@@ -169,8 +169,9 @@ House style for Strappy source:
     persist request bodies, response bodies, headers, or raw JSON. Reconstruct
     provider-shaped JSON transiently only at an API or compatibility boundary.
     Answer quality is a persisted per-session option whose initial default is
-    off. The iOS Debug > Limits pane exposes it for active sessions and through
-    Preferences > Session Defaults for future sessions. When it is off, omit
+    off. The iOS Session Options > Limits section exposes it for active sessions
+    and Preferences > Session Defaults > Limits exposes it for future sessions.
+    When it is off, omit
     the prompt-facing audit section, do not evaluate quality checks, and do not
     create answer-quality audit or check rows. When it is on, at every
     canonical, successful, tool-free final response, evaluate the code-owned
