@@ -1,6 +1,7 @@
 #import "StrappySessionOptionsTableViewController.h"
 
 #import "StrappyAppearance.h"
+#import "StrappyModelCellFormatter.h"
 #import "XPUIKit.h"
 
 static NSArray *StrappyPromptSearchProviders(void)
@@ -393,9 +394,10 @@ titleForHeaderInSection:(NSInteger)section
 
   cell = [tableView dequeueReusableCellWithIdentifier:@"ModelCell"];
   if (cell == nil) {
-    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
                                   reuseIdentifier:@"ModelCell"];
     [[cell textLabel] setNumberOfLines:1];
+    [[cell detailTextLabel] setNumberOfLines:1];
   }
 
   {
@@ -405,7 +407,9 @@ titleForHeaderInSection:(NSInteger)section
     model = [[self models] objectAtIndex:(NSUInteger)[indexPath row]];
     identifier = StrappyMessageModelStringForRow(model, @"id");
     [[cell textLabel] setText:StrappyMessageModelDisplayNameForRow(model)];
+    [[cell detailTextLabel] setText:StrappyModelCellDetailText(model)];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
+    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
     [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
     [cell setAccessoryView:nil];
     [cell setAccessoryType:
