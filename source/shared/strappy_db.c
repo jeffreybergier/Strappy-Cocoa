@@ -1842,6 +1842,7 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
       "('pending','running','completed','error','cancelled')),"
     "created_at_ms INTEGER NOT NULL,"
     "completed_at_ms INTEGER,"
+    "wall_duration_ms INTEGER CHECK(wall_duration_ms >= 0),"
     "UNIQUE(turn_id, round_index),"
     "FOREIGN KEY(turn_id) REFERENCES turns(id) ON DELETE CASCADE,"
     "FOREIGN KEY(previous_request_id) REFERENCES model_requests(id),"
@@ -15935,6 +15936,56 @@ int strappy_db_finish_response_call(
   return 1;
 }
 
+int strappy_db_set_response_round_wall_duration(
+  const char *db_path,
+  long long response_call_id,
+  long long wall_duration_ms,
+  char **error_out)
+{
+  static const char *sql =
+    "UPDATE model_requests SET wall_duration_ms = ? "
+    "WHERE id = (SELECT request_id FROM http_attempts WHERE id = ?);";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if ((response_call_id <= 0LL) || (wall_duration_ms < 0LL)) {
+    strappy_set_error(error_out,
+                      "Responses round wall duration is incomplete.");
+    return 0;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt,
+                          1,
+                          (sqlite3_int64)wall_duration_ms) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt,
+                          2,
+                          (sqlite3_int64)response_call_id) != SQLITE_OK) ||
+      (sqlite3_step(stmt) != SQLITE_DONE) ||
+      (sqlite3_changes(db) != 1)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not save Responses round wall duration: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+  strappy_db_release(db);
+  return 1;
+}
+
 int strappy_db_mark_response_call_round_limit(
   const char *db_path,
   long long call_id,
@@ -18283,9 +18334,10 @@ static int strappy_db_semantic_finalize_ranged_timeline_totals(
 {
   static const char *sql =
     "SELECT r.id, SUM(u.cost_nano_usd), "
-    "SUM(CASE WHEN a.completed_at_ms IS NOT NULL "
-      "AND a.completed_at_ms >= a.started_at_ms "
-      "THEN a.completed_at_ms - a.started_at_ms END) "
+    "COALESCE(MAX(r.wall_duration_ms), "
+      "SUM(CASE WHEN a.completed_at_ms IS NOT NULL "
+        "AND a.completed_at_ms >= a.started_at_ms "
+        "THEN a.completed_at_ms - a.started_at_ms END)) "
     "FROM model_requests r "
     "JOIN turns t ON t.id = r.turn_id "
     "JOIN http_attempts a ON a.request_id = r.id "
@@ -18539,9 +18591,14 @@ static int strappy_db_semantic_list_response_timeline(
     "a.method, a.endpoint, ar.provider_status, a.transport_error, "
     "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason, "
     "r.model_id, 0 AS can_include_in_context, t.ordinal, "
-    "CASE WHEN a.completed_at_ms IS NOT NULL "
-      "AND a.completed_at_ms >= a.started_at_ms "
-      "THEN a.completed_at_ms - a.started_at_ms END "
+    "CASE WHEN r.wall_duration_ms IS NOT NULL THEN "
+      "CASE WHEN NOT EXISTS (SELECT 1 FROM http_attempts a2 "
+        "WHERE a2.request_id = r.id "
+        "AND a2.attempt_index > a.attempt_index) "
+        "THEN r.wall_duration_ms END "
+      "WHEN a.completed_at_ms IS NOT NULL "
+        "AND a.completed_at_ms >= a.started_at_ms "
+        "THEN a.completed_at_ms - a.started_at_ms END "
     "FROM http_attempts a JOIN model_requests r ON r.id = a.request_id "
     "JOIN turns t ON t.id = r.turn_id "
     "LEFT JOIN api_results ar ON ar.attempt_id = a.id "

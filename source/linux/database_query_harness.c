@@ -567,9 +567,16 @@ static int harness_run_fresh_catalog_schema_tests(
            "request_kind, model_id, instruction_revision_id, "
            "toolset_revision_id, input_from_sequence, "
            "input_through_sequence, new_input_from_sequence, "
-           "parallel_tool_calls, state "
+           "parallel_tool_calls, state, wall_duration_ms "
            "FROM model_requests LIMIT 0;",
            "model_requests columns") &&
+         harness_expect_catalog_integer(
+           context->catalog_path,
+           "SELECT COUNT(*) FROM pragma_table_info('model_requests') "
+           "WHERE name = 'wall_duration_ms' AND [notnull] = 0 "
+           "AND dflt_value IS NULL;",
+           1LL,
+           "nullable model request wall duration") &&
          harness_expect_catalog_integer(
            context->catalog_path,
            "SELECT COUNT(*) FROM pragma_table_info('model_requests') "

@@ -895,6 +895,7 @@ typedef struct harness_ledger_event_recorder {
   long long processing_count;
   long long processing_started_ms;
   long long answer_quality_count;
+  long long wall_duration_update_count;
   size_t timeline_count;
   long clear_count;
   int valid;
@@ -1117,6 +1118,59 @@ static int harness_record_ledger_event(
     }
     recorder->processing_count++;
     cJSON_Delete(root);
+    return 1;
+  }
+
+  if (event->type == STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED) {
+    long long wall_duration_ms;
+    int rc;
+
+    call_id = 0LL;
+    extra = '\0';
+    db = NULL;
+    stmt = NULL;
+    wall_duration_ms = -1LL;
+    event_ok =
+      (event->kind != NULL) &&
+      (strcmp(event->kind, "response_api_call") == 0) &&
+      (event->message_key != NULL) &&
+      (sscanf(event->message_key,
+              "response-call-%lld%c",
+              &call_id,
+              &extra) == 1) &&
+      (call_id > 0LL) &&
+      (event->status_kind != NULL) &&
+      (strcmp(event->status_kind, "wall_duration") == 0) &&
+      (sqlite3_open(recorder->db_path, &db) == SQLITE_OK);
+    if (event_ok) {
+      rc = sqlite3_prepare_v2(
+        db,
+        "SELECT r.wall_duration_ms FROM model_requests r "
+        "JOIN http_attempts a ON a.request_id=r.id WHERE a.id=?;",
+        -1,
+        &stmt,
+        NULL);
+      if ((rc != SQLITE_OK) ||
+          (sqlite3_bind_int64(stmt,
+                              1,
+                              (sqlite3_int64)call_id) != SQLITE_OK) ||
+          (sqlite3_step(stmt) != SQLITE_ROW) ||
+          (sqlite3_column_type(stmt, 0) == SQLITE_NULL)) {
+        event_ok = 0;
+      } else {
+        wall_duration_ms = (long long)sqlite3_column_int64(stmt, 0);
+        event_ok = wall_duration_ms >= 0LL;
+      }
+    }
+    sqlite3_finalize(stmt);
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    if (event_ok) {
+      recorder->wall_duration_update_count++;
+    } else {
+      recorder->valid = 0;
+    }
     return 1;
   }
 
@@ -4374,6 +4428,7 @@ static int harness_test_answer_quality_disabled(void)
   server_ok = harness_wait_for_server(server_pid, result == NULL);
   ok = (result != NULL) && (strcmp(result, answer) == 0) && server_ok &&
     events.valid && (events.count == 1LL) &&
+    (events.wall_duration_update_count == 1LL) &&
     (events.answer_quality_count == 0LL) && events.saw_thinking &&
     !events.saw_tools && (events.clear_count == 1L);
 
@@ -4390,6 +4445,13 @@ static int harness_test_answer_quality_disabled(void)
         "SELECT COUNT(*) FROM session_settings WHERE "
         "session_id=(SELECT id FROM sessions LIMIT 1) AND "
         "answer_quality_enabled=0;",
+        &value) && (value == 1LL) &&
+      harness_query_int(
+        db,
+        "SELECT COUNT(*) FROM model_requests r "
+        "JOIN http_attempts a ON a.request_id=r.id "
+        "WHERE r.wall_duration_ms IS NOT NULL AND "
+        "r.wall_duration_ms >= a.completed_at_ms-a.started_at_ms;",
         &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
@@ -5757,6 +5819,7 @@ static int harness_test_function_tool_continuation(void)
   ok = (result != NULL) &&
     (strcmp(result, "Function tool final answer.") == 0) &&
     server_ok && events.valid && (events.count == 2LL) &&
+    (events.wall_duration_update_count == 2LL) &&
     (events.answer_quality_count == 1LL) && events.saw_thinking &&
     events.saw_tools && (events.clear_count == 1L);
   free(result);
@@ -5772,6 +5835,10 @@ static int harness_test_function_tool_continuation(void)
                         "SELECT COUNT(*) FROM model_requests WHERE "
                         "request_kind='tool_continuation';",
                         &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests WHERE "
+                        "wall_duration_ms IS NOT NULL;",
+                        &value) && (value == 2LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM tool_executions e "
                         "JOIN function_calls f ON "
@@ -5850,6 +5917,7 @@ static int harness_test_function_tool_continuation(void)
 
 typedef struct harness_round_limit_events {
   long error_update_count;
+  long wall_update_count;
   int valid;
 } harness_round_limit_events;
 
@@ -5861,6 +5929,20 @@ static int harness_record_round_limit_event(
 
   events = (harness_round_limit_events *)user_data;
   if ((events == NULL) || (event == NULL)) {
+    return 1;
+  }
+  if (event->type == STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED) {
+    events->wall_update_count++;
+    if ((event->kind == NULL) ||
+        (strcmp(event->kind, "response_api_call") != 0) ||
+        (event->status_kind == NULL) ||
+        (strcmp(event->status_kind, "wall_duration") != 0) ||
+        (event->message_key == NULL) ||
+        (strncmp(event->message_key,
+                 "response-call-",
+                 strlen("response-call-")) != 0)) {
+      events->valid = 0;
+    }
     return 1;
   }
   if ((event->type == STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED) &&
@@ -5955,7 +6037,8 @@ static int harness_test_round_limit(void)
   server_ok = harness_wait_for_server(server_pid, 0);
   ok = (result == NULL) && (error != NULL) &&
     (strcmp(error, "Response round limit reached.") == 0) && server_ok &&
-    events.valid && (events.error_update_count == 1L);
+    events.valid && (events.error_update_count == 1L) &&
+    (events.wall_update_count == 2L);
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
@@ -5965,6 +6048,10 @@ static int harness_test_round_limit(void)
                         "SELECT COUNT(*) FROM model_requests WHERE "
                         "state='completed';",
                         &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests WHERE "
+                        "wall_duration_ms IS NOT NULL;",
+                        &value) && (value == 2LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM model_requests WHERE "
                         "state='error' AND round_index=1;",
@@ -6458,7 +6545,9 @@ static int harness_test_bash_tool_cancellation(void)
   server_ok = harness_wait_for_server(server_pid, result != NULL);
   ok = (result == NULL) && server_ok && events.valid &&
     events.saw_cancellation_poll && events.saw_tools &&
-    (events.count == 1LL) && (events.clear_count == 1L) &&
+    (events.count == 1LL) &&
+    (events.wall_duration_update_count == 1LL) &&
+    (events.clear_count == 1L) &&
     (error != NULL) && (strstr(error, "cancelled") != NULL) &&
     (elapsed_ms < 3000LL);
   free(result);
@@ -6492,6 +6581,14 @@ static int harness_test_bash_tool_cancellation(void)
                         &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM turns WHERE state='cancelled';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests r "
+                        "JOIN http_attempts a ON a.request_id=r.id "
+                        "JOIN tool_executions e ON e.response_attempt_id=a.id "
+                        "WHERE r.wall_duration_ms IS NOT NULL AND "
+                        "r.wall_duration_ms >= "
+                        "e.completed_at_ms-e.started_at_ms;",
                         &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
@@ -6570,6 +6667,7 @@ static int harness_test_retry_attempt_ledger(void)
   ok = (result != NULL) &&
     (strcmp(result, "Retry final answer.") == 0) &&
     server_ok && events.valid && (events.count == 3LL) &&
+    (events.wall_duration_update_count == 2LL) &&
     (events.answer_quality_count == 1LL) && events.saw_thinking &&
     events.saw_tools && events.saw_retry_wait && events.saw_retrying &&
     (events.clear_count == 1L);
@@ -6607,7 +6705,16 @@ static int harness_test_retry_attempt_ledger(void)
       harness_query_int(db,
                         "SELECT COUNT(*) FROM answer_quality_audits WHERE "
                         "outcome='failed';",
-                        &value) && (value == 1LL);
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests WHERE "
+                        "wall_duration_ms IS NOT NULL;",
+                        &value) && (value == 2LL) &&
+      harness_query_int(
+        db,
+        "SELECT (SELECT SUM(wall_duration_ms) FROM model_requests)-"
+        "(SELECT SUM(completed_at_ms-started_at_ms) FROM http_attempts);",
+        &value) && (value >= 400LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;
@@ -6690,6 +6797,7 @@ static int harness_test_active_request_cancellation(void)
   server_ok = harness_wait_for_server(server_pid, result != NULL);
   ok = (result == NULL) && server_ok && events.valid &&
     events.saw_cancellation_poll && (events.count == 1LL) &&
+    (events.wall_duration_update_count == 1LL) &&
     (events.clear_count == 1L) && (error != NULL) &&
     (strstr(error, "cancelled") != NULL);
   free(result);
@@ -6701,7 +6809,14 @@ static int harness_test_active_request_cancellation(void)
                            &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM http_attempts;",
-                        &value) && (value == 1LL);
+                        &value) && (value == 1LL) &&
+      harness_query_int(
+        db,
+        "SELECT COUNT(*) FROM model_requests r "
+        "JOIN http_attempts a ON a.request_id=r.id "
+        "WHERE r.wall_duration_ms IS NOT NULL AND "
+        "r.wall_duration_ms >= a.completed_at_ms-a.started_at_ms;",
+        &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
     ok = 0;
@@ -6781,7 +6896,9 @@ static int harness_test_retry_after_clamp_and_cancellation(void)
   ok = (result == NULL) && server_ok && events.valid &&
     events.saw_retry_wait && !events.saw_retrying &&
     (events.retry_after_seconds == 60U) &&
-    (events.count == 1LL) && (events.clear_count == 1L) &&
+    (events.count == 1LL) &&
+    (events.wall_duration_update_count == 1LL) &&
+    (events.clear_count == 1L) &&
     (error != NULL) && (strstr(error, "cancelled") != NULL);
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
@@ -6792,6 +6909,10 @@ static int harness_test_retry_after_clamp_and_cancellation(void)
                            &value) && (value == 1LL) &&
       harness_query_int(db,
                         "SELECT COUNT(*) FROM http_attempts;",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM model_requests WHERE "
+                        "wall_duration_ms IS NOT NULL;",
                         &value) && (value == 1LL);
     sqlite3_close(db);
   } else if (ok) {
@@ -7022,7 +7143,8 @@ static int harness_append_usage_metrics_call(
   const char *state,
   int is_error,
   const char *response_json,
-  long long wait_ms,
+  long long http_wait_ms,
+  long long wall_duration_ms,
   long long *call_id_out,
   char **error_out)
 {
@@ -7057,15 +7179,22 @@ static int harness_append_usage_metrics_call(
   finish.output_is_canonical = is_error ? 0 : 1;
   finish.http_status = 200L;
   finish.started_at_ms = call_id * 1000LL;
-  finish.completed_at_ms = finish.started_at_ms + wait_ms;
+  finish.completed_at_ms = finish.started_at_ms + http_wait_ms;
   finish.request_bytes = (long long)strlen(request_json);
   finish.response_bytes = (long long)strlen(response_json);
-  finish.total_seconds = (double)wait_ms / 1000.0;
+  finish.total_seconds = (double)http_wait_ms / 1000.0;
   finish.effective_url = begin.request_url;
   finish.content_type = "application/json";
   finish.response_headers = "";
   finish.response_json = response_json;
   if (!strappy_db_finish_response_call(path, &finish, error_out)) {
+    return 0;
+  }
+  if ((wall_duration_ms >= 0LL) &&
+      !strappy_db_set_response_round_wall_duration(path,
+                                                   call_id,
+                                                   wall_duration_ms,
+                                                   error_out)) {
     return 0;
   }
   if (call_id_out != NULL) {
@@ -7130,6 +7259,7 @@ static int harness_test_cumulative_session_metrics(void)
                                    0,
                                    cost_one,
                                    1500LL,
+                                   2500LL,
                                    &previous_call_id,
                                    &error) &&
     harness_append_usage_metrics_call(path,
@@ -7143,6 +7273,7 @@ static int harness_test_cumulative_session_metrics(void)
                                    1,
                                    cost_error,
                                    2500LL,
+                                   -1LL,
                                    &previous_call_id,
                                    &error) &&
     harness_append_usage_metrics_call(path,
@@ -7156,6 +7287,7 @@ static int harness_test_cumulative_session_metrics(void)
                                    0,
                                    cost_retry,
                                    500LL,
+                                   7000LL,
                                    &previous_call_id,
                                    &error) &&
     harness_append_usage_metrics_call(path,
@@ -7169,6 +7301,7 @@ static int harness_test_cumulative_session_metrics(void)
                                    0,
                                    cost_missing,
                                    317500LL,
+                                   400000LL,
                                    &previous_call_id,
                                    &error) &&
     harness_append_usage_metrics_call(path,
@@ -7182,6 +7315,7 @@ static int harness_test_cumulative_session_metrics(void)
                                    0,
                                    cost_final,
                                    1000LL,
+                                   2000LL,
                                    &previous_call_id,
                                    &error) &&
     strappy_db_list_response_timeline(path,
@@ -7192,12 +7326,12 @@ static int harness_test_cumulative_session_metrics(void)
     (timeline.records[0].prompt_index == 0L) &&
     timeline.records[0].has_cumulative_usage_cost &&
     timeline.records[0].has_cumulative_wait_ms &&
-    (timeline.records[0].cumulative_wait_ms == 1500LL) &&
+    (timeline.records[0].cumulative_wait_ms == 2500LL) &&
     (strcmp(timeline.records[0].attempt_state, "completed") == 0) &&
     harness_double_matches(timeline.records[0].cumulative_usage_cost, 0.001) &&
     timeline.records[1].has_cumulative_usage_cost &&
     timeline.records[1].has_cumulative_wait_ms &&
-    (timeline.records[1].cumulative_wait_ms == 4500LL) &&
+    (timeline.records[1].cumulative_wait_ms == 9500LL) &&
     timeline.records[1].is_error &&
     (strcmp(timeline.records[1].attempt_state, "response_error") == 0) &&
     harness_double_matches(timeline.records[1].cumulative_usage_cost, 0.0075) &&
@@ -7208,14 +7342,14 @@ static int harness_test_cumulative_session_metrics(void)
     (timeline.records[2].http_attempt_id !=
      timeline.records[1].http_attempt_id) &&
     (strcmp(timeline.records[2].attempt_state, "completed") == 0) &&
-    (timeline.records[2].cumulative_wait_ms == 4500LL) &&
+    (timeline.records[2].cumulative_wait_ms == 9500LL) &&
     harness_double_matches(timeline.records[2].cumulative_usage_cost, 0.0075) &&
     (strcmp(timeline.records[3].prompt_group_key, "group-two") == 0) &&
     (timeline.records[3].prompt_index == 1L) &&
     (timeline.records[3].round_index == 0L) &&
-    (timeline.records[3].cumulative_wait_ms == 322000LL) &&
+    (timeline.records[3].cumulative_wait_ms == 409500LL) &&
     harness_double_matches(timeline.records[3].cumulative_usage_cost, 0.0075) &&
-    (timeline.records[4].cumulative_wait_ms == 323000LL) &&
+    (timeline.records[4].cumulative_wait_ms == 411500LL) &&
     harness_double_matches(timeline.records[4].cumulative_usage_cost, 0.008);
 
   if (ok) {
@@ -7229,13 +7363,13 @@ static int harness_test_cumulative_session_metrics(void)
       (ranged_timeline.count == 3U) &&
       harness_double_matches(
         ranged_timeline.records[0].cumulative_usage_cost, 0.0075) &&
-      (ranged_timeline.records[0].cumulative_wait_ms == 4500LL) &&
+      (ranged_timeline.records[0].cumulative_wait_ms == 9500LL) &&
       harness_double_matches(
         ranged_timeline.records[1].cumulative_usage_cost, 0.0075) &&
-      (ranged_timeline.records[1].cumulative_wait_ms == 322000LL) &&
+      (ranged_timeline.records[1].cumulative_wait_ms == 409500LL) &&
       harness_double_matches(
         ranged_timeline.records[2].cumulative_usage_cost, 0.008) &&
-      (ranged_timeline.records[2].cumulative_wait_ms == 323000LL);
+      (ranged_timeline.records[2].cumulative_wait_ms == 411500LL);
   }
 
   if (!ok) {
@@ -7566,7 +7700,11 @@ static int harness_test_ledger(void)
   finish.rate_limit_remaining = "9";
   finish.response_headers = "HTTP/2 200\r\nX-Request-Id: req-test\r\n";
   finish.response_json = response_json;
-  ok = strappy_db_finish_response_call(path, &finish, &error);
+  ok = strappy_db_finish_response_call(path, &finish, &error) &&
+    strappy_db_set_response_round_wall_duration(path,
+                                                call_id,
+                                                250LL,
+                                                &error);
   if (!ok) {
     fprintf(stderr, "Could not finish harness call: %s\n", error);
     free(error);
@@ -7612,6 +7750,9 @@ static int harness_test_ledger(void)
                       "url='https://example.com/article' AND "
                       "title='Example Article' AND http_status=200;",
                       &value) && (value == 1LL) &&
+    harness_query_int(db,
+                      "SELECT wall_duration_ms FROM model_requests LIMIT 1;",
+                      &value) && (value == 250LL) &&
     harness_query_int(db, "PRAGMA user_version;", &value) && (value == 1LL);
   sqlite3_close(db);
   if (!ok) {
@@ -7653,6 +7794,8 @@ static int harness_test_ledger(void)
     (timeline.records[1].http_attempt_id == call_id) &&
     (timeline.records[1].round_index == 0L) &&
     (timeline.records[1].attempt_index == 0L) &&
+    timeline.records[1].has_cumulative_wait_ms &&
+    (timeline.records[1].cumulative_wait_ms == 250LL) &&
     (strcmp(timeline.records[1].attempt_state, "completed") == 0) &&
     (strcmp(timeline.records[1].request_method, "POST") == 0) &&
     (strcmp(timeline.records[1].request_endpoint,

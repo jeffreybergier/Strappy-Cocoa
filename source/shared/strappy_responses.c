@@ -2160,6 +2160,70 @@ static void strappy_responses_call_did_finish(
   (void)callback(&event, callback_data);
 }
 
+static void strappy_responses_round_wall_duration_did_finish(
+  long long call_id,
+  const char *prompt_group_key,
+  long long wall_duration_ms,
+  strappy_responses_event_callback callback,
+  void *callback_data)
+{
+  strappy_responses_event event;
+  char message_key[64];
+
+  syslog(LOG_NOTICE,
+         "StrappyResponses round_wall_duration call=%lld elapsed_ms=%lld",
+         call_id,
+         wall_duration_ms);
+  if (callback == NULL) {
+    return;
+  }
+
+  snprintf(message_key,
+           sizeof(message_key),
+           "response-call-%lld",
+           call_id);
+  memset(&event, 0, sizeof(event));
+  event.type = STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED;
+  event.prompt_group_key = prompt_group_key;
+  event.actor = "api";
+  event.kind = "response_api_call";
+  event.message_key = message_key;
+  event.render_role = "api_call";
+  event.status_kind = "wall_duration";
+  (void)callback(&event, callback_data);
+}
+
+static int strappy_responses_finish_round_wall_duration(
+  const char *session_db_path,
+  long long call_id,
+  const char *prompt_group_key,
+  long long started_at_ms,
+  long long completed_at_ms,
+  strappy_responses_event_callback callback,
+  void *callback_data,
+  char **error_out)
+{
+  long long wall_duration_ms;
+
+  if ((started_at_ms <= 0LL) || (completed_at_ms < started_at_ms)) {
+    wall_duration_ms = 0LL;
+  } else {
+    wall_duration_ms = completed_at_ms - started_at_ms;
+  }
+  if (!strappy_db_set_response_round_wall_duration(session_db_path,
+                                                    call_id,
+                                                    wall_duration_ms,
+                                                    error_out)) {
+    return 0;
+  }
+  strappy_responses_round_wall_duration_did_finish(call_id,
+                                                   prompt_group_key,
+                                                   wall_duration_ms,
+                                                   callback,
+                                                   callback_data);
+  return 1;
+}
+
 static void strappy_responses_call_did_reach_round_limit(
   long long session_id,
   long long call_id,
@@ -2405,7 +2469,7 @@ static int strappy_responses_send_round(
   const char *request_json,
   long new_input_start_index,
   long long *previous_call_id_io,
-  long long *successful_call_id_out,
+  long long *round_call_id_out,
   long long processing_started_ms,
   strappy_responses_http_result *http_out,
   strappy_responses_analysis *analysis_out,
@@ -2424,8 +2488,8 @@ static int strappy_responses_send_round(
 
   strappy_responses_http_result_init(http_out);
   strappy_responses_analysis_init(analysis_out);
-  if (successful_call_id_out != NULL) {
-    *successful_call_id_out = 0LL;
+  if (round_call_id_out != NULL) {
+    *round_call_id_out = 0LL;
   }
   retry_delay_ms = STRAPPY_RESPONSES_INITIAL_RETRY_DELAY_MS;
 
@@ -2468,6 +2532,9 @@ static int strappy_responses_send_round(
                                         &call_id,
                                         error_out)) {
       return 0;
+    }
+    if (round_call_id_out != NULL) {
+      *round_call_id_out = call_id;
     }
     strappy_responses_log_call_started(session_id,
                                        call_id,
@@ -2645,9 +2712,6 @@ static int strappy_responses_send_round(
 
     *http_out = http;
     *analysis_out = analysis;
-    if (successful_call_id_out != NULL) {
-      *successful_call_id_out = call_id;
-    }
     return 1;
   }
 
@@ -2736,7 +2800,9 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
   long long previous_call_id;
   long last_http_status;
   long round_index;
+  long long pending_round_call_id;
   long long processing_started_ms;
+  long long round_started_ms;
   int ok;
 
   if ((prompt == NULL) || (prompt[0] == '\0') ||
@@ -2753,7 +2819,9 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
   last_model = NULL;
   previous_call_id = 0LL;
   last_http_status = 0L;
+  pending_round_call_id = 0LL;
   processing_started_ms = strappy_responses_now_ms();
+  round_started_ms = processing_started_ms;
   next_request_kind = "user";
 
   if (!strappy_responses_prepare_runtime(&runtime,
@@ -2798,8 +2866,9 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
     strappy_responses_analysis analysis;
     char *request_json;
     long new_input_start_index;
-    long long successful_call_id;
+    long long round_call_id;
 
+    round_call_id = 0LL;
     strappy_responses_emit_processing_status(callback,
                                              callback_data,
                                              prompt_group_key,
@@ -2859,7 +2928,7 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
                                       request_json,
                                       new_input_start_index,
                                       &previous_call_id,
-                                      &successful_call_id,
+                                      &round_call_id,
                                       processing_started_ms,
                                       &http,
                                       &analysis,
@@ -2867,6 +2936,9 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
                                       callback_data,
                                       error_out);
     free(request_json);
+    if (round_call_id > 0LL) {
+      pending_round_call_id = round_call_id;
+    }
     if (!ok) {
       last_http_status = http.http_status;
       strappy_responses_update_failure_summary(
@@ -2905,7 +2977,7 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
             session_db_path,
             session_id,
             runtime.config.guidance_resource_dir,
-            successful_call_id,
+            round_call_id,
             &analysis,
             runtime.answer_quality_enabled ? &runtime.audit : NULL,
             &new_items,
@@ -2915,6 +2987,27 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
         strappy_responses_analysis_destroy(&analysis);
         strappy_responses_http_result_destroy(&http);
         break;
+      }
+      if ((round_index + 1L) < runtime.round_limit) {
+        long long round_completed_ms;
+
+        round_completed_ms = strappy_responses_now_ms();
+        if (!strappy_responses_finish_round_wall_duration(
+              session_db_path,
+              pending_round_call_id,
+              prompt_group_key,
+              round_started_ms,
+              round_completed_ms,
+              callback,
+              callback_data,
+              error_out)) {
+          strappy_responses_analysis_destroy(&analysis);
+          strappy_responses_http_result_destroy(&http);
+          pending_round_call_id = 0LL;
+          break;
+        }
+        pending_round_call_id = 0LL;
+        round_started_ms = round_completed_ms;
       }
       next_request_kind = "tool_continuation";
       strappy_responses_analysis_destroy(&analysis);
@@ -2948,6 +3041,33 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
                                                     error_out)) {
       free(final_text);
       final_text = NULL;
+    }
+    if (pending_round_call_id > 0LL) {
+      char *wall_error;
+      long long round_completed_ms;
+
+      wall_error = NULL;
+      round_completed_ms = strappy_responses_now_ms();
+      if (!strappy_responses_finish_round_wall_duration(
+            session_db_path,
+            pending_round_call_id,
+            prompt_group_key,
+            round_started_ms,
+            round_completed_ms,
+            callback,
+            callback_data,
+            &wall_error)) {
+        if ((error_out != NULL) && (*error_out == NULL)) {
+          strappy_set_error(
+            error_out,
+            (wall_error != NULL) ? wall_error :
+              "Could not save the Responses round wall duration.");
+        }
+        free(final_text);
+        final_text = NULL;
+      }
+      free(wall_error);
+      pending_round_call_id = 0LL;
     }
     strappy_responses_emit_processing_status(callback,
                                              callback_data,
@@ -3025,6 +3145,31 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
                           "Could not exclude isolated prompt context.");
     }
     free(ignored_error);
+  }
+
+  if (pending_round_call_id > 0LL) {
+    char *wall_error;
+    long long round_completed_ms;
+
+    wall_error = NULL;
+    round_completed_ms = strappy_responses_now_ms();
+    if (!strappy_responses_finish_round_wall_duration(
+          session_db_path,
+          pending_round_call_id,
+          prompt_group_key,
+          round_started_ms,
+          round_completed_ms,
+          callback,
+          callback_data,
+          &wall_error) &&
+        (error_out != NULL) && (*error_out == NULL)) {
+      strappy_set_error(
+        error_out,
+        (wall_error != NULL) ? wall_error :
+          "Could not save the Responses round wall duration.");
+    }
+    free(wall_error);
+    pending_round_call_id = 0LL;
   }
 
   free(final_text);

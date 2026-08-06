@@ -2716,7 +2716,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "cost=document.createElement('span');cost.className='api-exchange-turn-metric api-exchange-turn-cost';",
     "cost.innerHTML=faIconHTML('solid','dollar-sign','$')+escHTML(formatCumulativeUsageCost(cumulativeUsageCost));metrics.appendChild(cost);",
     "wait=document.createElement('span');wait.className='api-exchange-turn-metric api-exchange-turn-wait';",
-    "wait.innerHTML=faIconHTML('solid','hourglass-half','Wait')+escHTML(formatCumulativeWaitDuration(cumulativeWaitDuration));",
+    "wait.innerHTML=faIconHTML('solid','hourglass-half','Wall time')+escHTML(formatCumulativeWaitDuration(cumulativeWaitDuration));",
     "metrics.appendChild(wait);h.appendChild(metrics);if(!active){h.className+=' disclosure-title';a=document.createElement('a');",
     "a.className='api-exchange-toggle';a.href='#';a.setAttribute('data-round-id',id);a.setAttribute('data-prompt-group-key',promptGroupKey(row));",
     "a.setAttribute('aria-expanded',collapsed?'false':'true');d=document.createElement('span');d.className='api-exchange-disclosure';",

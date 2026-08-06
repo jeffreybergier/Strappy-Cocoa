@@ -1218,7 +1218,7 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "faIconHTML('solid','dollar-sign','$')") &&
        harness_expect_contains(page_html,
-                               "faIconHTML('solid','hourglass-half','Wait')") &&
+                               "faIconHTML('solid','hourglass-half','Wall time')") &&
        harness_expect_contains(
          page_html,
          "context=contextInclusionState(g.rows);"

@@ -629,6 +629,11 @@ int strappy_db_finish_response_call(
   const char *db_path,
   const strappy_response_call_finish_input *input,
   char **error_out);
+int strappy_db_set_response_round_wall_duration(
+  const char *db_path,
+  long long response_call_id,
+  long long wall_duration_ms,
+  char **error_out);
 int strappy_db_mark_response_call_round_limit(
   const char *db_path,
   long long call_id,

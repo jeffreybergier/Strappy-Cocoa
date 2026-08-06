@@ -41,7 +41,8 @@ typedef struct strappy_responses_http_result {
 typedef enum strappy_responses_event_type {
   STRAPPY_RESPONSES_EVENT_CANCELLATION_POLL = 1,
   STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS = 2,
-  STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED = 3
+  STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED = 3,
+  STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED = 4
 } strappy_responses_event_type;
 
 typedef struct strappy_responses_event {

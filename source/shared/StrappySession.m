@@ -560,7 +560,8 @@ static BOOL StrappySessionRecordFromOptions(
     return [self promptCancellationRequested] ? 0 : 1;
   }
   if ((event->type != STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) &&
-      (event->type != STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED)) {
+      (event->type != STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED) &&
+      (event->type != STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED)) {
     return 1;
   }
 
@@ -588,7 +589,9 @@ static BOOL StrappySessionRecordFromOptions(
   }
   [notification setObject:
     (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) ?
-      @"processing_status" : @"ledger_changed"
+      @"processing_status" :
+      ((event->type == STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED) ?
+        @"ledger_updated" : @"ledger_changed")
                     forKey:@"stream_event"];
   [self performSelectorOnMainThread:@selector(postStreamEventAndRelease:)
                          withObject:notification
@@ -3007,7 +3010,8 @@ static BOOL StrappySessionRecordFromOptions(
       strappy_session_webview_set_processing_status_js(
         [statusJSON UTF8String]));
   }
-  if (![streamEvent isEqualToString:@"ledger_changed"]) {
+  if (![streamEvent isEqualToString:@"ledger_changed"] &&
+      ![streamEvent isEqualToString:@"ledger_updated"]) {
     return @"";
   }
 
