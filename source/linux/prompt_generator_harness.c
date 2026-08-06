@@ -634,6 +634,8 @@ static int harness_verify_assistant_set_guidance(
     strcmp(profile->identifier, STRAPPY_ASSISTANT_SET_CODING_ASSISTANT) == 0;
   if (!is_coding_assistant) {
     if ((strstr(prompt, "# Coding Assistant Conduct\n\n") != NULL) ||
+        (strstr(prompt, "NEVER delete user data or installed applications.") !=
+         NULL) ||
         (strstr(prompt, "NEVER commit or push changes.") != NULL) ||
         (strstr(prompt, "## Altivec on-device iOS toolchain\n\n") != NULL) ||
         (strstr(prompt, "altivec-sdk install 8.4") != NULL) ||
@@ -670,6 +672,16 @@ static int harness_verify_assistant_set_guidance(
       (strstr(prompt,
               "Double-check the final diff and verification results.") ==
        NULL) ||
+      (strstr(prompt, "NEVER delete user data or installed applications.") ==
+       NULL) ||
+      (strstr(prompt,
+              "NEVER use `rm`, `rm -r`, `rm -rf`, `find -delete`, `unlink`, "
+              "`rmdir`, or an equivalent destructive operation") == NULL) ||
+      (strstr(prompt,
+              "must resolve to a strict descendant of that directory.") ==
+       NULL) ||
+      (strstr(prompt, "/var/mobile/Applications") == NULL) ||
+      (strstr(prompt, "path that escapes through a symlink") == NULL) ||
       (strstr(prompt, "NEVER commit or push changes.") == NULL) ||
       (strstr(prompt, "## Altivec on-device iOS toolchain\n\n") == NULL) ||
       (strstr(prompt, "command -v altivec-sdk") == NULL) ||

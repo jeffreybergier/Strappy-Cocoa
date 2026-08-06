@@ -202,7 +202,7 @@
       "type": "function",
       "function": {
         "name": "bash",
-        "description": "Bash tool for executing commands on the device. Each tool call is always a fresh session in the user's selected working directory. The shell state does not persist between calls. stdin is closed, stdout and stderr are returned together in arrival order, and shell state does not persist between calls.",
+        "description": "Bash tool for executing commands on the device. Each tool call is always a fresh session in the user's selected working directory. The shell state does not persist between calls. stdin is closed, and stdout and stderr are returned together in arrival order. NEVER delete user data or installed applications. NEVER use rm, rm -r, rm -rf, find -delete, unlink, rmdir, or an equivalent destructive operation on a target outside the current working directory reported by pwd. A deletion target inside the current working directory must resolve to a strict descendant of that directory. Never target the working directory itself, a parent directory, ~, /Applications, /var/mobile/Applications, or a path that escapes through a symlink. If the target or authorization is unclear, do not execute the command and ask the user.",
         "strict": false,
         "parameters": {
           "type": "object",

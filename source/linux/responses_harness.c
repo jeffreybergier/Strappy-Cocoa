@@ -111,6 +111,20 @@
   "ALWAYS call this tool when converting ISO 8601 datetimes to numeric " \
   "timestamps. Returns a JSON array of timestamp strings in input order."
 
+#define HARNESS_BASH_DESCRIPTION \
+  "Bash tool for executing commands on the device. Each tool call is always " \
+  "a fresh session in the user's selected working directory. The shell state " \
+  "does not persist between calls. stdin is closed, and stdout and stderr are " \
+  "returned together in arrival order. NEVER delete user data or installed " \
+  "applications. NEVER use rm, rm -r, rm -rf, find -delete, unlink, rmdir, " \
+  "or an equivalent destructive operation on a target outside the " \
+  "current working directory reported by pwd. A deletion target inside the " \
+  "current working directory must resolve to a strict descendant of that " \
+  "directory. Never target the working directory itself, a parent directory, " \
+  "~, /Applications, /var/mobile/Applications, or a path that escapes through " \
+  "a symlink. If the target or authorization is unclear, do not execute the " \
+  "command and ask the user."
+
 #define HARNESS_UNICODE_EMOJI_ANSWER \
   "Initial answer. \xF0\x9F\x98\x80"
 
@@ -773,6 +787,9 @@ static int harness_test_request_surfaces(void)
       tools,
       STRAPPY_TOOL_FONTAWESOME_CONFIRM,
       HARNESS_FONTAWESOME_CONFIRM_DESCRIPTION) &&
+    harness_tool_description_equals(tools,
+                                    STRAPPY_TOOL_BASH,
+                                    HARNESS_BASH_DESCRIPTION) &&
     harness_database_query_parameters_match_contract(tools) &&
     harness_tool_has_required_nonempty_string_array_parameter(
       tools,
