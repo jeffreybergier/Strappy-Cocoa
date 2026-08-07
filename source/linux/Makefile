@@ -5,6 +5,7 @@
 # source vendored in the Altivec tree.
 
 CC := clang
+NODE ?= node
 CJSON_DIR ?= /altivec/libs/core/third_party/cJSON
 FONTAWESOME_FONT_DIR ?= /altivec/libs/cocoa/Resources/Fonts
 SHARED_DIR := ../shared
@@ -25,6 +26,7 @@ THREAD_LIBS ?= -pthread
 DATABASE_QUERY_HARNESS := $(BUILD_DIR)/database_query_harness
 BASH_HARNESS := $(BUILD_DIR)/bash_harness
 WEBVIEW_HARNESS := $(BUILD_DIR)/webview_harness
+WEBVIEW_PAGE_FIXTURE := $(BUILD_DIR)/webview-page.html
 RESPONSES_HARNESS := $(BUILD_DIR)/responses_harness
 PROMPT_GENERATOR_HARNESS := $(BUILD_DIR)/prompt_generator_harness
 PROMPT_OUTPUT_DIR ?= $(BUILD_DIR)/system-prompts
@@ -114,7 +116,8 @@ PROMPT_GENERATOR_HARNESS_SOURCES = \
 test: $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS)
 	./$(DATABASE_QUERY_HARNESS)
 	./$(BASH_HARNESS)
-	./$(WEBVIEW_HARNESS)
+	STRAPPY_WEBVIEW_PAGE_OUTPUT=$(WEBVIEW_PAGE_FIXTURE) ./$(WEBVIEW_HARNESS)
+	$(NODE) webview_behavior_harness.js $(WEBVIEW_PAGE_FIXTURE)
 	./$(RESPONSES_HARNESS)
 	./$(PROMPT_GENERATOR_HARNESS) $(SHARED_DIR)/Resources --check
 

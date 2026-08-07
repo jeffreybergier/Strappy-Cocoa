@@ -21,6 +21,7 @@
   NSMutableString          *pendingStreamJavaScript_;
   NSTimer                  *streamEventFlushTimer_;
   NSString                 *newestRenderedTimelineCursor_;
+  BOOL                      webViewReloadRequired_;
   BOOL                      sending_;
   BOOL                      cancelPromptRequested_;
 }

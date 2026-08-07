@@ -46,9 +46,11 @@ typedef struct StrappySessionResponsesContext {
   NSDictionary *context;
   /* Presentation state belongs to the prompt worker, never to a WebView. */
   NSString *timelineCursor;
+  strappy_session_webview_render_context *webViewRenderContext;
   NSString *terminalAppendJavaScript;
   NSString *terminalUpdateJavaScript;
   NSString *terminalMessageKey;
+  BOOL presentationReloadRequired;
 } StrappySessionResponsesContext;
 
 static void StrappySessionResponsesContextClearTerminal(
@@ -75,6 +77,9 @@ static void StrappySessionResponsesContextDestroy(
   context->context = nil;
   [context->timelineCursor release];
   context->timelineCursor = nil;
+  strappy_session_webview_render_context_destroy(
+    context->webViewRenderContext);
+  context->webViewRenderContext = NULL;
   StrappySessionResponsesContextClearTerminal(context);
 }
 
@@ -132,6 +137,19 @@ static NSString *StrappySessionStringFromCString(char *value)
 - (void)updateProcessingStatusJSON:(NSString *)statusJSON;
 - (int)handleResponsesEvent:(const strappy_responses_event *)event
            responsesContext:(StrappySessionResponsesContext *)context;
+- (NSString *)webViewAppendMessagesJavaScriptAfterTimelineCursor:
+                (NSString *)timelineCursor
+                                      nextTimelineCursor:
+                (NSString **)nextTimelineCursor
+                                    appendedMessageCount:
+                (NSUInteger *)appendedMessageCount
+                                           renderContext:
+                (const strappy_session_webview_render_context *)renderContext
+                                                   error:(NSError **)error;
+- (NSString *)webViewJavaScriptForStreamEvent:(NSDictionary *)event
+                                renderContext:
+                (const strappy_session_webview_render_context *)renderContext
+                                        error:(NSError **)error;
 - (void)postStreamEventAndRelease:(NSDictionary *)event;
 - (NSDictionary *)submitPrompt:(NSString *)prompt
                        context:(NSDictionary *)context
@@ -585,6 +603,7 @@ static BOOL StrappySessionRecordFromOptions(
   NSDictionary *contextDictionary;
   NSMutableDictionary *notification;
   NSMutableString *mutations;
+  NSError *renderError;
   NSString *appendJavaScript;
   NSString *javaScript;
   NSString *messageKey;
@@ -592,7 +611,7 @@ static BOOL StrappySessionRecordFromOptions(
   NSString *statusJSON;
   NSString *streamEvent;
   NSString *updateJavaScript;
-  NSUInteger appendedCount;
+  BOOL eventRenderFailed;
   BOOL terminalPending;
 
   if (event == NULL) {
@@ -610,17 +629,18 @@ static BOOL StrappySessionRecordFromOptions(
   contextDictionary = (responsesContext != NULL) ?
     responsesContext->context : nil;
   notification = [[NSMutableDictionary alloc] init];
-  appendJavaScript = @"";
-  javaScript = @"";
+  appendJavaScript = nil;
+  javaScript = nil;
   messageKey = nil;
   nextCursor = nil;
+  renderError = nil;
   statusJSON = nil;
   streamEvent = (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) ?
     @"processing_status" :
     ((event->type == STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED) ?
       @"ledger_updated" : @"ledger_changed");
-  updateJavaScript = @"";
-  appendedCount = 0U;
+  updateJavaScript = nil;
+  eventRenderFailed = NO;
   if (contextDictionary != nil) {
     [notification setObject:contextDictionary forKey:@"context"];
   }
@@ -650,12 +670,25 @@ static BOOL StrappySessionRecordFromOptions(
       webViewAppendMessagesJavaScriptAfterTimelineCursor:
         ((responsesContext != NULL) ? responsesContext->timelineCursor : nil)
                                       nextTimelineCursor:&nextCursor
-                                    appendedMessageCount:&appendedCount
-                                                   error:nil];
+                                    appendedMessageCount:NULL
+                                          renderContext:
+        ((responsesContext != NULL) ?
+          responsesContext->webViewRenderContext : NULL)
+                                                   error:&renderError];
+    if (![appendJavaScript isKindOfClass:[NSString class]]) {
+      eventRenderFailed = YES;
+      appendJavaScript = @"";
+      NSLog(@"StrappyResponses could not render a WebView append: %@",
+            ([renderError localizedDescription] != nil) ?
+              [renderError localizedDescription] : @"unknown render error");
+    }
     if ([nextCursor isKindOfClass:[NSString class]] &&
         (responsesContext != NULL)) {
       [responsesContext->timelineCursor release];
       responsesContext->timelineCursor = [nextCursor copy];
+    }
+    if (eventRenderFailed && (responsesContext != NULL)) {
+      responsesContext->presentationReloadRequired = YES;
     }
     if (event->is_terminal && (responsesContext != NULL)) {
       /* Publish the final append only after its late status update arrives. */
@@ -669,19 +702,52 @@ static BOOL StrappySessionRecordFromOptions(
       return 1;
     }
 
-    updateJavaScript =
-      [self webViewJavaScriptForStreamEvent:notification error:nil];
+    if (!strappy_session_webview_event_requires_message_update(event)) {
+      /* The request is visible in the append above, but a running HTTP
+       * attempt intentionally has no response-call timeline row yet. */
+      updateJavaScript = @"";
+    } else {
+      renderError = nil;
+      updateJavaScript = [self
+        webViewJavaScriptForStreamEvent:notification
+                          renderContext:
+          ((responsesContext != NULL) ?
+            responsesContext->webViewRenderContext : NULL)
+                                  error:&renderError];
+      if (![updateJavaScript isKindOfClass:[NSString class]]) {
+        eventRenderFailed = YES;
+        updateJavaScript = @"";
+        NSLog(@"StrappyResponses could not render a WebView update: %@",
+              ([renderError localizedDescription] != nil) ?
+                [renderError localizedDescription] : @"unknown render error");
+      }
+    }
     mutations = [NSMutableString string];
-    if ([appendJavaScript isKindOfClass:[NSString class]]) {
-      [mutations appendString:appendJavaScript];
-    }
-    if ([updateJavaScript isKindOfClass:[NSString class]]) {
-      [mutations appendString:updateJavaScript];
-    }
+    [mutations appendString:appendJavaScript];
+    [mutations appendString:updateJavaScript];
     javaScript =
       [StrappySession webViewBatchedJavaScriptForJavaScript:mutations];
+    if (([mutations length] > 0U) && ([javaScript length] == 0U)) {
+      eventRenderFailed = YES;
+    }
   } else {
-    javaScript = [self webViewJavaScriptForStreamEvent:notification error:nil];
+    javaScript = [self
+      webViewJavaScriptForStreamEvent:notification
+                        renderContext:
+        ((responsesContext != NULL) ?
+          responsesContext->webViewRenderContext : NULL)
+                                error:&renderError];
+    if (![javaScript isKindOfClass:[NSString class]]) {
+      eventRenderFailed = YES;
+      javaScript = @"";
+      NSLog(@"StrappyResponses could not render a WebView event: %@",
+            ([renderError localizedDescription] != nil) ?
+              [renderError localizedDescription] : @"unknown render error");
+    }
+  }
+
+  if (eventRenderFailed && (responsesContext != NULL)) {
+    responsesContext->presentationReloadRequired = YES;
   }
 
   terminalPending = (responsesContext != NULL) &&
@@ -712,6 +778,10 @@ static BOOL StrappySessionRecordFromOptions(
     }
     javaScript =
       [StrappySession webViewBatchedJavaScriptForJavaScript:mutations];
+    if (([mutations length] > 0U) && ([javaScript length] == 0U) &&
+        (responsesContext != NULL)) {
+      responsesContext->presentationReloadRequired = YES;
+    }
     [notification setObject:@"terminal_delta" forKey:@"stream_event"];
     [notification setObject:[NSNumber numberWithBool:YES]
                      forKey:@"is_terminal"];
@@ -727,6 +797,11 @@ static BOOL StrappySessionRecordFromOptions(
       [responsesContext->timelineCursor isKindOfClass:[NSString class]]) {
     [notification setObject:responsesContext->timelineCursor
                      forKey:@"timeline_cursor"];
+  }
+  if ((responsesContext != NULL) &&
+      responsesContext->presentationReloadRequired) {
+    [notification setObject:[NSNumber numberWithBool:YES]
+                     forKey:@"webview_reload_required"];
   }
   [self performSelectorOnMainThread:@selector(postStreamEventAndRelease:)
                          withObject:notification
@@ -3065,6 +3140,24 @@ static BOOL StrappySessionRecordFromOptions(
                 (NSUInteger *)appendedMessageCount
                                                    error:(NSError **)error
 {
+  return [self
+    webViewAppendMessagesJavaScriptAfterTimelineCursor:timelineCursor
+                                    nextTimelineCursor:nextTimelineCursor
+                                  appendedMessageCount:appendedMessageCount
+                                         renderContext:NULL
+                                                 error:error];
+}
+
+- (NSString *)webViewAppendMessagesJavaScriptAfterTimelineCursor:
+                (NSString *)timelineCursor
+                                      nextTimelineCursor:
+                (NSString **)nextTimelineCursor
+                                    appendedMessageCount:
+                (NSUInteger *)appendedMessageCount
+                                           renderContext:
+                (const strappy_session_webview_render_context *)renderContext
+                                                   error:(NSError **)error
+{
   NSString *databasePath;
   NSString *resourcePath;
   char *javaScript;
@@ -3080,26 +3173,38 @@ static BOOL StrappySessionRecordFromOptions(
     *nextTimelineCursor = nil;
   }
 
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return nil;
+  databasePath = nil;
+  resourcePath = nil;
+  if (renderContext == NULL) {
+    databasePath = [StrappySession sessionsDatabasePath];
+    if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                          error:error]) {
+      return nil;
+    }
+    resourcePath = [[NSBundle mainBundle] resourcePath];
   }
-  resourcePath = [[NSBundle mainBundle] resourcePath];
 
   sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
     [sessionIdentifier_ longLongValue] : 0LL;
   storedAppendedMessageCount = 0U;
   storedNextTimelineCursor = NULL;
   strappyError = NULL;
-  javaScript = strappy_session_webview_append_messages_js_for_session(
-    [databasePath fileSystemRepresentation],
-    sessionId,
-    [resourcePath fileSystemRepresentation],
-    StrappySessionOptionalCString(timelineCursor),
-    &storedAppendedMessageCount,
-    &storedNextTimelineCursor,
-    &strappyError);
+  javaScript = (renderContext != NULL) ?
+    strappy_session_webview_append_messages_js_with_render_context(
+      renderContext,
+      sessionId,
+      StrappySessionOptionalCString(timelineCursor),
+      &storedAppendedMessageCount,
+      &storedNextTimelineCursor,
+      &strappyError) :
+    strappy_session_webview_append_messages_js_for_session(
+      [databasePath fileSystemRepresentation],
+      sessionId,
+      [resourcePath fileSystemRepresentation],
+      StrappySessionOptionalCString(timelineCursor),
+      &storedAppendedMessageCount,
+      &storedNextTimelineCursor,
+      &strappyError);
   if (appendedMessageCount != NULL) {
     *appendedMessageCount = (NSUInteger)storedAppendedMessageCount;
   }
@@ -3122,7 +3227,90 @@ static BOOL StrappySessionRecordFromOptions(
   return StrappySessionStringFromCString(javaScript);
 }
 
+- (NSString *)webViewReconcileMessagesJavaScriptAfterTimelineCursor:
+                (NSString *)timelineCursor
+                                      nextTimelineCursor:
+                (NSString **)nextTimelineCursor
+                                  reconciledMessageCount:
+                (NSUInteger *)reconciledMessageCount
+                                                   error:(NSError **)error
+{
+  NSString *databasePath;
+  NSString *resourcePath;
+  char *javaScript;
+  char *storedNextTimelineCursor;
+  char *strappyError;
+  long long sessionId;
+  size_t storedReconciledMessageCount;
+
+  if (reconciledMessageCount != NULL) {
+    *reconciledMessageCount = 0U;
+  }
+  if (nextTimelineCursor != NULL) {
+    *nextTimelineCursor = nil;
+  }
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+  resourcePath = [[NSBundle mainBundle] resourcePath];
+  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
+    [sessionIdentifier_ longLongValue] : 0LL;
+  storedReconciledMessageCount = 0U;
+  storedNextTimelineCursor = NULL;
+  strappyError = NULL;
+  javaScript = strappy_session_webview_reconcile_messages_js_for_session(
+    [databasePath fileSystemRepresentation],
+    sessionId,
+    [resourcePath fileSystemRepresentation],
+    StrappySessionOptionalCString(timelineCursor),
+    &storedReconciledMessageCount,
+    &storedNextTimelineCursor,
+    &strappyError);
+  if (reconciledMessageCount != NULL) {
+    *reconciledMessageCount = (NSUInteger)storedReconciledMessageCount;
+  }
+  if (javaScript == NULL) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(storedNextTimelineCursor);
+    strappy_session_free_string(strappyError);
+    return nil;
+  }
+
+  if (nextTimelineCursor != NULL) {
+    *nextTimelineCursor =
+      StrappySessionStringFromCString(storedNextTimelineCursor);
+  } else {
+    strappy_session_free_string(storedNextTimelineCursor);
+  }
+  strappy_session_free_string(strappyError);
+  return StrappySessionStringFromCString(javaScript);
+}
+
 - (NSString *)webViewJavaScriptForStreamEvent:(NSDictionary *)event
+                                        error:(NSError **)error
+{
+  return [self webViewJavaScriptForStreamEvent:event
+                                  renderContext:NULL
+                                          error:error];
+}
+
+- (NSString *)webViewClearProcessingStatusJavaScript
+{
+  char *javaScript;
+
+  javaScript = strappy_session_webview_set_processing_status_js("");
+  return (javaScript != NULL) ?
+    StrappySessionStringFromCString(javaScript) : nil;
+}
+
+- (NSString *)webViewJavaScriptForStreamEvent:(NSDictionary *)event
+                                renderContext:
+                (const strappy_session_webview_render_context *)renderContext
                                         error:(NSError **)error
 {
   NSString *databasePath;
@@ -3150,9 +3338,15 @@ static BOOL StrappySessionRecordFromOptions(
     if (![statusJSON isKindOfClass:[NSString class]]) {
       statusJSON = @"";
     }
-    return StrappySessionStringFromCString(
-      strappy_session_webview_set_processing_status_js(
-        [statusJSON UTF8String]));
+    js = strappy_session_webview_set_processing_status_js(
+      [statusJSON UTF8String]);
+    if (js == NULL) {
+      if (error != nil) {
+        *error = [StrappySession errorFromCString:NULL];
+      }
+      return nil;
+    }
+    return StrappySessionStringFromCString(js);
   }
   if (![streamEvent isEqualToString:@"ledger_changed"] &&
       ![streamEvent isEqualToString:@"ledger_updated"]) {
@@ -3162,31 +3356,45 @@ static BOOL StrappySessionRecordFromOptions(
   sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
     [sessionIdentifier_ longLongValue] : 0LL;
   if (sessionId <= 0) {
-    return @"";
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:NULL];
+    }
+    return nil;
   }
 
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return @"";
+  databasePath = nil;
+  resourcePath = nil;
+  if (renderContext == NULL) {
+    databasePath = [StrappySession sessionsDatabasePath];
+    if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                          error:error]) {
+      return nil;
+    }
+    resourcePath = [[NSBundle mainBundle] resourcePath];
   }
-  resourcePath = [[NSBundle mainBundle] resourcePath];
 
   strappyError = NULL;
-  js = strappy_session_webview_message_update_js_for_key(
-    [databasePath UTF8String],
-    sessionId,
-    [resourcePath fileSystemRepresentation],
-    [messageKey UTF8String],
-    &strappyError);
+  js = (renderContext != NULL) ?
+    strappy_session_webview_message_update_js_with_render_context(
+      renderContext,
+      sessionId,
+      [messageKey UTF8String],
+      &strappyError) :
+    strappy_session_webview_message_update_js_for_key(
+      [databasePath fileSystemRepresentation],
+      sessionId,
+      [resourcePath fileSystemRepresentation],
+      [messageKey UTF8String],
+      &strappyError);
   if (js == NULL) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
     strappy_session_free_string(strappyError);
-    return @"";
+    return nil;
   }
 
+  strappy_session_free_string(strappyError);
   return StrappySessionStringFromCString(js);
 }
 
@@ -3454,6 +3662,7 @@ static BOOL StrappySessionRecordFromOptions(
   NSString *apiEndpoint;
   NSString *apiToken;
   char *cursorError;
+  char *renderContextError;
   char *strappyError;
   char *timelineCursor;
   long long sessionId;
@@ -3521,6 +3730,17 @@ static BOOL StrappySessionRecordFromOptions(
     }
   }
   strappy_session_free_string(cursorError);
+  renderContextError = NULL;
+  responsesContext.webViewRenderContext =
+    strappy_session_webview_render_context_create(
+      [databasePath fileSystemRepresentation],
+      [guidanceResourceDirectory fileSystemRepresentation],
+      &renderContextError);
+  if (responsesContext.webViewRenderContext == NULL) {
+    NSLog(@"StrappyResponses could not cache its WebView render context: %s",
+          (renderContextError != NULL) ? renderContextError : "unknown error");
+  }
+  strappy_session_free_string(renderContextError);
   apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
   apiToken = [[StrappyKeychain sharedKeychain] apiToken];
 

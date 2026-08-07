@@ -194,6 +194,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 @property (nonatomic, strong) NSTimer *streamEventFlushTimer;
 @property (nonatomic, copy) NSString *newestRenderedTimelineCursor;
 @property (nonatomic, assign) BOOL webViewContentLoaded;
+@property (nonatomic, assign) BOOL webViewReloadRequired;
 @property (nonatomic, assign) BOOL sending;
 @property (nonatomic, assign) BOOL cancelPromptRequested;
 @property (nonatomic, assign) CGFloat composeBarBottomY;
@@ -228,6 +229,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)streamEventFlushTimerDidFire:(NSTimer *)timer;
 - (void)flushPendingStreamEvents;
 - (void)cancelPendingStreamEventFlush;
+- (BOOL)reconcileRenderedMessages;
 - (BOOL)sessionPromptIsInFlight;
 - (void)updateSendingStateFromSession;
 - (void)beginSendingPrompt:(NSString *)prompt;
@@ -1087,6 +1089,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self setSending:YES];
   [self setPromptCancellationRequested:NO];
   [self setStatusText:nil];
+  [self setWebViewReloadRequired:NO];
   [[self sendBar] setSending:YES];
   [[self sendBar] setCancellationRequested:NO];
   [self clearRequestState];
@@ -1133,7 +1136,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 {
   NSDictionary *event;
   NSString *javaScript;
-  NSString *nextCursor;
   NSString *streamEvent;
 
   if ([self tearingDown]) {
@@ -1150,11 +1152,18 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
 
   [self updateSendingStateFromSession];
-  streamEvent = [event objectForKey:@"stream_event"];
-  nextCursor = [event objectForKey:@"timeline_cursor"];
-  if ([nextCursor isKindOfClass:[NSString class]]) {
-    [self setNewestRenderedTimelineCursor:nextCursor];
+  if ([[event objectForKey:@"webview_reload_required"] boolValue]) {
+    if (![self webViewReloadRequired]) {
+      [self cancelPendingStreamEventFlush];
+      [self setWebViewReloadRequired:YES];
+      [self reloadContent];
+    }
+    return;
   }
+  if ([self webViewReloadRequired]) {
+    return;
+  }
+  streamEvent = [event objectForKey:@"stream_event"];
   if ([streamEvent isEqualToString:@"ledger_changed"] ||
       [streamEvent isEqualToString:@"terminal_delta"]) {
     [self logLifecycleEvent:@"sessionLedgerDidChange"];
@@ -1171,6 +1180,9 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
 - (void)sessionPromptDidFinish:(NSNotification *)notification
 {
+  NSDictionary *result;
+  BOOL databaseStudy;
+
   if ([self tearingDown]) {
     return;
   }
@@ -1178,8 +1190,21 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     return;
   }
   [self logLifecycleEvent:@"sessionPromptDidFinish begin"];
-  [self flushPendingStreamEvents];
-  [self sendPromptDidFinish:[notification userInfo]];
+  result = [notification userInfo];
+  databaseStudy = [[result objectForKey:@"database_study"] boolValue];
+  if ([self webViewReloadRequired]) {
+    [self cancelPendingStreamEventFlush];
+  } else {
+    [self flushPendingStreamEvents];
+    if (!databaseStudy && ![self reconcileRenderedMessages]) {
+      [self setWebViewReloadRequired:YES];
+    }
+  }
+  [self sendPromptDidFinish:result];
+  if ([self webViewReloadRequired] && !databaseStudy) {
+    [self reloadContent];
+  }
+  [self setWebViewReloadRequired:NO];
   [self updatePromptIdleTimerAssertion];
   [self logLifecycleEvent:@"sessionPromptDidFinish end"];
 }
@@ -1310,6 +1335,54 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     [self setStreamEventFlushTimer:nil];
   }
   [self setPendingStreamJavaScript:nil];
+}
+
+- (BOOL)reconcileRenderedMessages
+{
+  NSError *error;
+  NSString *batchJavaScript;
+  NSString *clearJavaScript;
+  NSString *javaScript;
+  NSString *nextCursor;
+  NSMutableString *reconciliation;
+  NSUInteger reconciledCount;
+
+  if (([self session] == nil) || ![self webViewContentLoaded]) {
+    return NO;
+  }
+  error = nil;
+  nextCursor = nil;
+  reconciledCount = 0U;
+  javaScript = [[self session]
+    webViewReconcileMessagesJavaScriptAfterTimelineCursor:
+      [self newestRenderedTimelineCursor]
+                                    nextTimelineCursor:&nextCursor
+                                reconciledMessageCount:&reconciledCount
+                                                 error:&error];
+  if (![javaScript isKindOfClass:[NSString class]] ||
+      ((reconciledCount > 0U) && ([javaScript length] == 0U))) {
+    NSLog(@"StrappyResponses could not reconcile the WebView: %@",
+          ([error localizedDescription] != nil) ?
+            [error localizedDescription] : @"empty reconciliation");
+    return NO;
+  }
+  clearJavaScript =
+    [[self session] webViewClearProcessingStatusJavaScript];
+  if ([clearJavaScript length] == 0U) {
+    return NO;
+  }
+  reconciliation = [NSMutableString stringWithString:javaScript];
+  [reconciliation appendString:clearJavaScript];
+  batchJavaScript =
+    [StrappySession webViewBatchedJavaScriptForJavaScript:reconciliation];
+  if ([batchJavaScript length] == 0U) {
+    return NO;
+  }
+  [[self webView] stringByEvaluatingJavaScriptFromString:batchJavaScript];
+  if ([nextCursor isKindOfClass:[NSString class]]) {
+    [self setNewestRenderedTimelineCursor:nextCursor];
+  }
+  return YES;
 }
 
 - (BOOL)webView:(UIWebView *)webView

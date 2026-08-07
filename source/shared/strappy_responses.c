@@ -3070,7 +3070,6 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
         final_text = NULL;
       }
       free(wall_error);
-      pending_round_call_id = 0LL;
     }
     strappy_responses_emit_processing_status(callback,
                                              callback_data,
@@ -3172,7 +3171,6 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
           "Could not save the Responses round wall duration.");
     }
     free(wall_error);
-    pending_round_call_id = 0LL;
   }
 
   free(final_text);

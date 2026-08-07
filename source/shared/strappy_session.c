@@ -670,6 +670,12 @@ typedef struct strappy_session_database_display_context {
   size_t count;
 } strappy_session_database_display_context;
 
+struct strappy_session_webview_render_context {
+  char *db_path;
+  strappy_session_database_display_context database_display;
+  strappy_webview_render_context *webview;
+};
+
 static void strappy_session_database_display_context_init(
   strappy_session_database_display_context *context)
 {
@@ -742,6 +748,69 @@ static int strappy_session_database_display_context_load(
     context->count++;
   }
   return 1;
+}
+
+strappy_session_webview_render_context *
+strappy_session_webview_render_context_create(
+  const char *db_path,
+  const char *resource_dir,
+  char **error_out)
+{
+  strappy_session_webview_render_context *context;
+  char *display_registry_error;
+  char *display_registry_json;
+
+  if ((db_path == NULL) || (db_path[0] == '\0')) {
+    strappy_set_error(error_out, "WebView render database path is empty.");
+    return NULL;
+  }
+  context = (strappy_session_webview_render_context *)calloc(
+    1U,
+    sizeof(*context));
+  if (context == NULL) {
+    strappy_set_error(error_out, "Could not allocate WebView render context.");
+    return NULL;
+  }
+  strappy_session_database_display_context_init(&context->database_display);
+  context->db_path = strappy_string_duplicate(db_path);
+  if ((context->db_path == NULL) ||
+      !strappy_session_database_display_context_load(
+        db_path,
+        &context->database_display,
+        error_out)) {
+    strappy_session_webview_render_context_destroy(context);
+    if ((error_out == NULL) || (*error_out == NULL)) {
+      strappy_set_error(error_out, "Could not prepare WebView render context.");
+    }
+    return NULL;
+  }
+
+  display_registry_error = NULL;
+  display_registry_json =
+    strappy_tools_display_registry_json(resource_dir, &display_registry_error);
+  context->webview = strappy_webview_render_context_create(
+    (display_registry_json != NULL) ? display_registry_json : "{}");
+  strappy_free_string(display_registry_json);
+  strappy_free_string(display_registry_error);
+  if (context->webview == NULL) {
+    strappy_session_webview_render_context_destroy(context);
+    strappy_set_error(error_out,
+                      "Could not allocate the WebView display registry.");
+    return NULL;
+  }
+  return context;
+}
+
+void strappy_session_webview_render_context_destroy(
+  strappy_session_webview_render_context *context)
+{
+  if (context == NULL) {
+    return;
+  }
+  free(context->db_path);
+  strappy_session_database_display_context_destroy(&context->database_display);
+  strappy_webview_render_context_destroy(context->webview);
+  free(context);
 }
 
 static char *strappy_session_webview_messages_page_html_with_content(
@@ -841,53 +910,53 @@ static void strappy_session_webview_message_from_record(
   message->is_error = record->is_error ? 1 : 0;
 }
 
-static char *strappy_session_webview_messages_html_for_record_range(
+static int strappy_session_webview_messages_for_record_range(
   const strappy_session_message_record_list *list,
   size_t start_index,
   size_t end_index,
   const strappy_webview_database_display_name *database_display_names,
   size_t database_display_name_count,
   const char *tool_display_registry_json,
+  strappy_webview_message **messages_out,
+  size_t *message_count_out,
   char **error_out)
 {
   strappy_webview_message *messages;
-  char *messages_html;
   size_t count;
   size_t index;
 
+  if ((messages_out == NULL) || (message_count_out == NULL)) {
+    strappy_set_error(error_out, "WebView messages have no output.");
+    return 0;
+  }
+  *messages_out = NULL;
+  *message_count_out = 0U;
   if (list == NULL) {
     strappy_set_error(error_out, "WebView message records are missing.");
-    return NULL;
+    return 0;
   }
   if ((start_index > end_index) || (end_index > list->count)) {
     strappy_set_error(error_out, "WebView message range is invalid.");
-    return NULL;
+    return 0;
   }
 
   count = end_index - start_index;
   if (count == 0U) {
-    messages_html = strappy_webview_messages_html(
-      NULL,
-      0U,
-      strappy_webview_localized_labels());
-    if (messages_html == NULL) {
-      strappy_set_error(error_out, "Could not allocate empty WebView HTML.");
-    }
-    return messages_html;
+    return 1;
   }
   if (list->records == NULL) {
     strappy_set_error(error_out, "WebView message records are missing.");
-    return NULL;
+    return 0;
   }
   if (count > (((size_t)-1) / sizeof(*messages))) {
     strappy_set_error(error_out, "WebView message range is too large.");
-    return NULL;
+    return 0;
   }
 
   messages = (strappy_webview_message *)calloc(count, sizeof(*messages));
   if (messages == NULL) {
     strappy_set_error(error_out, "Could not allocate WebView messages.");
-    return NULL;
+    return 0;
   }
 
   for (index = 0U; index < count; index++) {
@@ -898,10 +967,48 @@ static char *strappy_session_webview_messages_html_for_record_range(
       database_display_name_count,
       tool_display_registry_json);
   }
-  messages_html = strappy_webview_messages_html(
-    messages,
-    count,
-    strappy_webview_localized_labels());
+  *messages_out = messages;
+  *message_count_out = count;
+  return 1;
+}
+
+static char *strappy_session_webview_messages_html_for_record_range(
+  const strappy_session_message_record_list *list,
+  size_t start_index,
+  size_t end_index,
+  const strappy_webview_database_display_name *database_display_names,
+  size_t database_display_name_count,
+  const char *tool_display_registry_json,
+  const strappy_webview_render_context *render_context,
+  char **error_out)
+{
+  strappy_webview_message *messages;
+  char *messages_html;
+  size_t count;
+
+  messages = NULL;
+  count = 0U;
+  if (!strappy_session_webview_messages_for_record_range(
+        list,
+        start_index,
+        end_index,
+        database_display_names,
+        database_display_name_count,
+        tool_display_registry_json,
+        &messages,
+        &count,
+        error_out)) {
+    return NULL;
+  }
+  messages_html = (render_context != NULL) ?
+    strappy_webview_messages_html_with_render_context(
+      messages,
+      count,
+      strappy_webview_localized_labels(),
+      render_context) :
+    strappy_webview_messages_html(messages,
+                                  count,
+                                  strappy_webview_localized_labels());
   free(messages);
   if (messages_html == NULL) {
     strappy_set_error(error_out, "Could not render WebView messages.");
@@ -1001,26 +1108,16 @@ char *strappy_session_timeline_cursor_for_session(
   long long session_id,
   char **error_out)
 {
-  strappy_session_message_record_list list;
   strappy_response_timeline_cursor cursor;
-  char *value;
 
-  strappy_session_message_record_list_init(&list);
   strappy_response_timeline_cursor_init(&cursor);
-  cursor.session_id = session_id;
-  if (!strappy_session_list_message_records(db_path,
-                                            session_id,
-                                            &list,
-                                            error_out)) {
-    strappy_session_message_record_list_destroy(&list);
+  if (!strappy_db_load_response_timeline_cursor(db_path,
+                                                session_id,
+                                                &cursor,
+                                                error_out)) {
     return NULL;
   }
-  if (list.count > 0U) {
-    cursor = list.records[list.count - 1U].timeline_cursor;
-  }
-  value = strappy_session_timeline_cursor_string(&cursor, error_out);
-  strappy_session_message_record_list_destroy(&list);
-  return value;
+  return strappy_session_timeline_cursor_string(&cursor, error_out);
 }
 
 char *strappy_session_webview_messages_page_html_for_session(
@@ -1116,6 +1213,7 @@ char *strappy_session_webview_messages_page_html_for_session(
     database_display.names,
     database_display.count,
     (display_registry_json != NULL) ? display_registry_json : "{}",
+    NULL,
     error_out);
   strappy_session_message_record_list_destroy(&list);
   if (messages_html == NULL) {
@@ -1150,6 +1248,197 @@ char *strappy_session_webview_messages_page_html_for_session(
   return page_html;
 }
 
+static char *strappy_session_webview_delta_js_with_render_context(
+  const strappy_session_webview_render_context *context,
+  long long session_id,
+  const char *timeline_cursor,
+  size_t *message_count_out,
+  char **next_timeline_cursor_out,
+  int reconcile,
+  char **error_out)
+{
+  strappy_session_message_record_list list;
+  strappy_response_timeline_cursor after_cursor;
+  strappy_response_timeline_cursor next_cursor;
+  strappy_webview_message *messages;
+  char *messages_html;
+  char *script;
+  size_t message_count;
+
+  if (message_count_out != NULL) {
+    *message_count_out = 0U;
+  }
+  if (next_timeline_cursor_out != NULL) {
+    *next_timeline_cursor_out = NULL;
+  }
+  if ((context == NULL) || (context->db_path == NULL) ||
+      (context->webview == NULL)) {
+    strappy_set_error(error_out, "WebView render context is not valid.");
+    return NULL;
+  }
+
+  strappy_session_message_record_list_init(&list);
+  strappy_response_timeline_cursor_init(&after_cursor);
+  strappy_response_timeline_cursor_init(&next_cursor);
+  if (!strappy_session_parse_timeline_cursor(timeline_cursor,
+                                             session_id,
+                                             &after_cursor,
+                                             error_out) ||
+      !strappy_session_list_message_records_after(
+        context->db_path,
+        session_id,
+        after_cursor.valid ? &after_cursor : NULL,
+        &list,
+        &next_cursor,
+        error_out)) {
+    strappy_session_message_record_list_destroy(&list);
+    return NULL;
+  }
+
+  if (message_count_out != NULL) {
+    *message_count_out = list.count;
+  }
+  if (next_timeline_cursor_out != NULL) {
+    *next_timeline_cursor_out =
+      strappy_session_timeline_cursor_string(&next_cursor, error_out);
+    if (*next_timeline_cursor_out == NULL) {
+      strappy_session_message_record_list_destroy(&list);
+      return NULL;
+    }
+  }
+  if (list.count == 0U) {
+    strappy_session_message_record_list_destroy(&list);
+    script = strappy_string_duplicate("");
+    if (script == NULL) {
+      if (next_timeline_cursor_out != NULL) {
+        free(*next_timeline_cursor_out);
+        *next_timeline_cursor_out = NULL;
+      }
+      strappy_set_error(error_out,
+                        "Could not allocate empty WebView JavaScript.");
+    }
+    return script;
+  }
+
+  script = NULL;
+  if (reconcile) {
+    messages = NULL;
+    message_count = 0U;
+    if (strappy_session_webview_messages_for_record_range(
+          &list,
+          0U,
+          list.count,
+          context->database_display.names,
+          context->database_display.count,
+          NULL,
+          &messages,
+          &message_count,
+          error_out)) {
+      script = strappy_webview_reconcile_messages_js_with_render_context(
+        messages,
+        message_count,
+        strappy_webview_localized_labels(),
+        context->webview);
+    }
+    free(messages);
+  } else {
+    messages_html = strappy_session_webview_messages_html_for_record_range(
+      &list,
+      0U,
+      list.count,
+      context->database_display.names,
+      context->database_display.count,
+      NULL,
+      context->webview,
+      error_out);
+    if (messages_html != NULL) {
+      script = strappy_webview_append_message_js(messages_html);
+      free(messages_html);
+    }
+  }
+  strappy_session_message_record_list_destroy(&list);
+  if (script == NULL) {
+    if (next_timeline_cursor_out != NULL) {
+      free(*next_timeline_cursor_out);
+      *next_timeline_cursor_out = NULL;
+    }
+    if ((error_out == NULL) || (*error_out == NULL)) {
+      strappy_set_error(
+        error_out,
+        reconcile ? "Could not render WebView reconciliation JavaScript." :
+          "Could not render WebView append JavaScript.");
+    }
+  }
+  return script;
+}
+
+char *strappy_session_webview_append_messages_js_with_render_context(
+  const strappy_session_webview_render_context *context,
+  long long session_id,
+  const char *timeline_cursor,
+  size_t *appended_message_count_out,
+  char **next_timeline_cursor_out,
+  char **error_out)
+{
+  return strappy_session_webview_delta_js_with_render_context(
+    context,
+    session_id,
+    timeline_cursor,
+    appended_message_count_out,
+    next_timeline_cursor_out,
+    0,
+    error_out);
+}
+
+char *strappy_session_webview_reconcile_messages_js_with_render_context(
+  const strappy_session_webview_render_context *context,
+  long long session_id,
+  const char *timeline_cursor,
+  size_t *reconciled_message_count_out,
+  char **next_timeline_cursor_out,
+  char **error_out)
+{
+  return strappy_session_webview_delta_js_with_render_context(
+    context,
+    session_id,
+    timeline_cursor,
+    reconciled_message_count_out,
+    next_timeline_cursor_out,
+    1,
+    error_out);
+}
+
+static char *strappy_session_webview_delta_js_for_session(
+  const char *db_path,
+  long long session_id,
+  const char *resource_dir,
+  const char *timeline_cursor,
+  size_t *message_count_out,
+  char **next_timeline_cursor_out,
+  int reconcile,
+  char **error_out)
+{
+  strappy_session_webview_render_context *context;
+  char *script;
+
+  context = strappy_session_webview_render_context_create(db_path,
+                                                          resource_dir,
+                                                          error_out);
+  if (context == NULL) {
+    return NULL;
+  }
+  script = strappy_session_webview_delta_js_with_render_context(
+    context,
+    session_id,
+    timeline_cursor,
+    message_count_out,
+    next_timeline_cursor_out,
+    reconcile,
+    error_out);
+  strappy_session_webview_render_context_destroy(context);
+  return script;
+}
+
 char *strappy_session_webview_append_messages_js_for_session(
   const char *db_path,
   long long session_id,
@@ -1159,113 +1448,90 @@ char *strappy_session_webview_append_messages_js_for_session(
   char **next_timeline_cursor_out,
   char **error_out)
 {
-  strappy_session_database_display_context database_display;
-  strappy_session_message_record_list list;
-  strappy_response_timeline_cursor after_cursor;
-  strappy_response_timeline_cursor next_cursor;
-  char *display_registry_error;
-  char *display_registry_json;
-  char *messages_html;
+  return strappy_session_webview_delta_js_for_session(
+    db_path,
+    session_id,
+    resource_dir,
+    timeline_cursor,
+    appended_message_count_out,
+    next_timeline_cursor_out,
+    0,
+    error_out);
+}
+
+char *strappy_session_webview_reconcile_messages_js_for_session(
+  const char *db_path,
+  long long session_id,
+  const char *resource_dir,
+  const char *timeline_cursor,
+  size_t *reconciled_message_count_out,
+  char **next_timeline_cursor_out,
+  char **error_out)
+{
+  return strappy_session_webview_delta_js_for_session(
+    db_path,
+    session_id,
+    resource_dir,
+    timeline_cursor,
+    reconciled_message_count_out,
+    next_timeline_cursor_out,
+    1,
+    error_out);
+}
+
+int strappy_session_webview_event_requires_message_update(
+  const strappy_responses_event *event)
+{
+  if (event == NULL) {
+    return 0;
+  }
+  if (event->type == STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED) {
+    return 1;
+  }
+  if (event->type != STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED) {
+    return 0;
+  }
+  return (event->status_kind == NULL) ||
+    (strcmp(event->status_kind, "running") != 0);
+}
+
+char *strappy_session_webview_message_update_js_with_render_context(
+  const strappy_session_webview_render_context *context,
+  long long session_id,
+  const char *message_key,
+  char **error_out)
+{
+  strappy_session_message_record record;
+  strappy_webview_message message;
   char *script;
 
-  if (appended_message_count_out != NULL) {
-    *appended_message_count_out = 0U;
-  }
-  if (next_timeline_cursor_out != NULL) {
-    *next_timeline_cursor_out = NULL;
-  }
-
-  strappy_session_database_display_context_init(&database_display);
-  strappy_session_message_record_list_init(&list);
-  strappy_response_timeline_cursor_init(&after_cursor);
-  strappy_response_timeline_cursor_init(&next_cursor);
-  display_registry_error = NULL;
-  display_registry_json = NULL;
-  if (!strappy_session_parse_timeline_cursor(timeline_cursor,
-                                             session_id,
-                                             &after_cursor,
-                                             error_out) ||
-      !strappy_session_list_message_records_after(
-        db_path,
-        session_id,
-        after_cursor.valid ? &after_cursor : NULL,
-        &list,
-        &next_cursor,
-        error_out)) {
-    strappy_session_message_record_list_destroy(&list);
-    strappy_session_database_display_context_destroy(&database_display);
+  if ((context == NULL) || (context->db_path == NULL) ||
+      (context->webview == NULL)) {
+    strappy_set_error(error_out, "WebView render context is not valid.");
     return NULL;
   }
-
-  if (appended_message_count_out != NULL) {
-    *appended_message_count_out = list.count;
-  }
-  if (next_timeline_cursor_out != NULL) {
-    *next_timeline_cursor_out =
-      strappy_session_timeline_cursor_string(&next_cursor, error_out);
-    if (*next_timeline_cursor_out == NULL) {
-      strappy_session_message_record_list_destroy(&list);
-      strappy_session_database_display_context_destroy(&database_display);
-      return NULL;
-    }
-  }
-  if (list.count == 0U) {
-    strappy_session_message_record_list_destroy(&list);
-    strappy_session_database_display_context_destroy(&database_display);
-    script = strappy_string_duplicate("");
-    if (script == NULL) {
-      if (next_timeline_cursor_out != NULL) {
-        free(*next_timeline_cursor_out);
-        *next_timeline_cursor_out = NULL;
-      }
-      strappy_set_error(error_out, "Could not allocate empty WebView JavaScript.");
-    }
-    return script;
-  }
-
-  if (!strappy_session_database_display_context_load(
-        db_path,
-        &database_display,
-        error_out)) {
-    if (next_timeline_cursor_out != NULL) {
-      free(*next_timeline_cursor_out);
-      *next_timeline_cursor_out = NULL;
-    }
-    strappy_session_message_record_list_destroy(&list);
+  strappy_session_message_record_init(&record);
+  if (!strappy_session_load_message_record_by_key(context->db_path,
+                                                  session_id,
+                                                  message_key,
+                                                  &record,
+                                                  error_out)) {
+    strappy_session_message_record_destroy(&record);
     return NULL;
   }
-  display_registry_json =
-    strappy_tools_display_registry_json(resource_dir, &display_registry_error);
-  messages_html = strappy_session_webview_messages_html_for_record_range(
-    &list,
-    0U,
-    list.count,
-    database_display.names,
-    database_display.count,
-    (display_registry_json != NULL) ? display_registry_json : "{}",
-    error_out);
-  strappy_session_message_record_list_destroy(&list);
-  strappy_session_database_display_context_destroy(&database_display);
-  if (messages_html == NULL) {
-    if (next_timeline_cursor_out != NULL) {
-      free(*next_timeline_cursor_out);
-      *next_timeline_cursor_out = NULL;
-    }
-    strappy_free_string(display_registry_json);
-    strappy_free_string(display_registry_error);
-    return NULL;
-  }
-
-  script = strappy_webview_append_message_js(messages_html);
-  free(messages_html);
-  strappy_free_string(display_registry_json);
-  strappy_free_string(display_registry_error);
-  if (script == NULL) {
-    if (next_timeline_cursor_out != NULL) {
-      free(*next_timeline_cursor_out);
-      *next_timeline_cursor_out = NULL;
-    }
-    strappy_set_error(error_out, "Could not render WebView append JavaScript.");
+  strappy_session_webview_message_from_record(
+    &record,
+    &message,
+    context->database_display.names,
+    context->database_display.count,
+    NULL);
+  script = strappy_webview_message_update_js_with_render_context(
+    &message,
+    strappy_webview_localized_labels(),
+    context->webview);
+  strappy_session_message_record_destroy(&record);
+  if ((script == NULL) && ((error_out == NULL) || (*error_out == NULL))) {
+    strappy_set_error(error_out, "Could not render WebView update JavaScript.");
   }
   return script;
 }
@@ -1277,48 +1543,20 @@ char *strappy_session_webview_message_update_js_for_key(
   const char *message_key,
   char **error_out)
 {
-  strappy_session_database_display_context database_display;
-  strappy_session_message_record record;
-  strappy_webview_message message;
-  char *display_registry_error;
-  char *display_registry_json;
+  strappy_session_webview_render_context *context;
   char *script;
 
-  strappy_session_database_display_context_init(&database_display);
-  strappy_session_message_record_init(&record);
-  display_registry_error = NULL;
-  display_registry_json = NULL;
-  if (!strappy_session_load_message_record_by_key(db_path,
-                                                  session_id,
-                                                  message_key,
-                                                  &record,
-                                                  error_out)) {
-    strappy_session_message_record_destroy(&record);
-    strappy_session_database_display_context_destroy(&database_display);
+  context = strappy_session_webview_render_context_create(db_path,
+                                                          resource_dir,
+                                                          error_out);
+  if (context == NULL) {
     return NULL;
   }
-
-  if (!strappy_session_database_display_context_load(
-        db_path,
-        &database_display,
-        error_out)) {
-    strappy_session_message_record_destroy(&record);
-    return NULL;
-  }
-  display_registry_json =
-    strappy_tools_display_registry_json(resource_dir, &display_registry_error);
-  strappy_session_webview_message_from_record(
-    &record,
-    &message,
-    database_display.names,
-    database_display.count,
-    (display_registry_json != NULL) ? display_registry_json : "{}");
-  script = strappy_webview_message_update_js(
-    &message,
-    strappy_webview_localized_labels());
-  strappy_free_string(display_registry_json);
-  strappy_free_string(display_registry_error);
-  strappy_session_database_display_context_destroy(&database_display);
-  strappy_session_message_record_destroy(&record);
+  script = strappy_session_webview_message_update_js_with_render_context(
+    context,
+    session_id,
+    message_key,
+    error_out);
+  strappy_session_webview_render_context_destroy(context);
   return script;
 }

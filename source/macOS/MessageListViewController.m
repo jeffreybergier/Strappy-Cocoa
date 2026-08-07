@@ -142,6 +142,7 @@ static BOOL StrappyContextRoundActionValues(
 - (void)streamEventFlushTimerDidFire:(NSTimer *)timer;
 - (void)flushPendingStreamEvents;
 - (void)cancelPendingStreamEventFlush;
+- (BOOL)reconcileRenderedMessages;
 - (BOOL)sessionPromptIsInFlight;
 - (void)updateSendingStateFromSession;
 - (void)beginSendingPrompt:(NSString *)prompt;
@@ -671,6 +672,7 @@ static BOOL StrappyContextRoundActionValues(
   [self setPromptCancellationRequested:NO];
   [statusText_ release];
   statusText_ = nil;
+  webViewReloadRequired_ = NO;
   [sendController_ setSending:YES];
   [sendController_ setCancellationRequested:NO];
 
@@ -714,7 +716,6 @@ static BOOL StrappyContextRoundActionValues(
 {
   NSDictionary *event;
   NSString *js;
-  NSString *nextCursor;
   NSString *streamEvent;
 
   if ([notification object] != session_) {
@@ -727,12 +728,18 @@ static BOOL StrappyContextRoundActionValues(
   }
 
   [self updateSendingStateFromSession];
-  streamEvent = [event objectForKey:@"stream_event"];
-  nextCursor = [event objectForKey:@"timeline_cursor"];
-  if ([nextCursor isKindOfClass:[NSString class]]) {
-    [newestRenderedTimelineCursor_ release];
-    newestRenderedTimelineCursor_ = [nextCursor copy];
+  if ([[event objectForKey:@"webview_reload_required"] boolValue]) {
+    if (!webViewReloadRequired_) {
+      [self cancelPendingStreamEventFlush];
+      webViewReloadRequired_ = YES;
+      [self reloadContent];
+    }
+    return;
   }
+  if (webViewReloadRequired_) {
+    return;
+  }
+  streamEvent = [event objectForKey:@"stream_event"];
   if ([streamEvent isEqualToString:@"ledger_changed"] ||
       [streamEvent isEqualToString:@"terminal_delta"]) {
     [self flushPendingStreamEvents];
@@ -747,11 +754,27 @@ static BOOL StrappyContextRoundActionValues(
 
 - (void)sessionPromptDidFinish:(NSNotification *)notification
 {
+  NSDictionary *result;
+  BOOL databaseStudy;
+
   if ([notification object] != session_) {
     return;
   }
-  [self flushPendingStreamEvents];
-  [self sendPromptDidFinish:[notification userInfo]];
+  result = [notification userInfo];
+  databaseStudy = [[result objectForKey:@"database_study"] boolValue];
+  if (webViewReloadRequired_) {
+    [self cancelPendingStreamEventFlush];
+  } else {
+    [self flushPendingStreamEvents];
+    if (!databaseStudy && ![self reconcileRenderedMessages]) {
+      webViewReloadRequired_ = YES;
+    }
+  }
+  [self sendPromptDidFinish:result];
+  if (webViewReloadRequired_ && !databaseStudy) {
+    [self reloadContent];
+  }
+  webViewReloadRequired_ = NO;
 }
 
 - (void)sendPromptDidFinish:(NSDictionary *)result
@@ -875,6 +898,54 @@ static BOOL StrappyContextRoundActionValues(
     [pendingStreamJavaScript_ release];
     pendingStreamJavaScript_ = nil;
   }
+}
+
+- (BOOL)reconcileRenderedMessages
+{
+  NSError *error;
+  NSString *batchJS;
+  NSString *clearJS;
+  NSString *js;
+  NSString *nextCursor;
+  NSMutableString *reconciliation;
+  NSUInteger reconciledCount;
+
+  if (session_ == nil) {
+    return NO;
+  }
+  error = nil;
+  nextCursor = nil;
+  reconciledCount = 0U;
+  js = [session_
+    webViewReconcileMessagesJavaScriptAfterTimelineCursor:
+      newestRenderedTimelineCursor_
+                                    nextTimelineCursor:&nextCursor
+                                reconciledMessageCount:&reconciledCount
+                                                 error:&error];
+  if (![js isKindOfClass:[NSString class]] ||
+      ((reconciledCount > 0U) && ([js length] == 0U))) {
+    NSLog(@"StrappyResponses could not reconcile the WebView: %@",
+          ([error localizedDescription] != nil) ?
+            [error localizedDescription] : @"empty reconciliation");
+    return NO;
+  }
+  clearJS = [session_ webViewClearProcessingStatusJavaScript];
+  if ([clearJS length] == 0U) {
+    return NO;
+  }
+  reconciliation = [NSMutableString stringWithString:js];
+  [reconciliation appendString:clearJS];
+  batchJS = [StrappySession
+    webViewBatchedJavaScriptForJavaScript:reconciliation];
+  if ([batchJS length] == 0U) {
+    return NO;
+  }
+  [self pushJavaScript:batchJS];
+  if ([nextCursor isKindOfClass:[NSString class]]) {
+    [newestRenderedTimelineCursor_ release];
+    newestRenderedTimelineCursor_ = [nextCursor copy];
+  }
+  return YES;
 }
 
 - (void)dealloc

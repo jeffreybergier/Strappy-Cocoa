@@ -21,6 +21,10 @@ struct strappy_webview_script_batch {
   int finished;
 };
 
+struct strappy_webview_render_context {
+  cJSON *tool_display_registry;
+};
+
 static char *g_strappy_webview_font_dir = NULL;
 
 typedef enum strappy_webview_label_index {
@@ -1408,6 +1412,30 @@ static cJSON *strappy_webview_parse_json_object(const char *json)
   return value;
 }
 
+strappy_webview_render_context *strappy_webview_render_context_create(
+  const char *tool_display_registry_json)
+{
+  strappy_webview_render_context *context;
+
+  context = (strappy_webview_render_context *)calloc(1U, sizeof(*context));
+  if (context == NULL) {
+    return NULL;
+  }
+  context->tool_display_registry =
+    strappy_webview_parse_json_object(tool_display_registry_json);
+  return context;
+}
+
+void strappy_webview_render_context_destroy(
+  strappy_webview_render_context *context)
+{
+  if (context == NULL) {
+    return;
+  }
+  cJSON_Delete(context->tool_display_registry);
+  free(context);
+}
+
 static char *strappy_webview_json_display_text(const cJSON *value)
 {
   if ((value == NULL) || cJSON_IsNull(value)) {
@@ -1599,7 +1627,8 @@ static char *strappy_webview_tool_display_title(
   }
   label = cJSON_IsObject(display) ?
     cJSON_GetObjectItemCaseSensitive(display, "label") : NULL;
-  base_title = (cJSON_IsString(label) && (label->valuestring != NULL) &&
+  base_title = ((label != NULL) && cJSON_IsString(label) &&
+                (label->valuestring != NULL) &&
                 (label->valuestring[0] != '\0')) ? label->valuestring : tool_key;
   promoted = NULL;
   arguments = NULL;
@@ -1612,7 +1641,8 @@ static char *strappy_webview_tool_display_title(
   if (cJSON_IsArray(path) && (cJSON_GetArraySize(path) > 0)) {
     item = strappy_webview_response_item_object(message);
     value = strappy_webview_json_path_value(item, path);
-  } else if (cJSON_IsString(promoted_argument) &&
+  } else if ((promoted_argument != NULL) &&
+             cJSON_IsString(promoted_argument) &&
              (promoted_argument->valuestring != NULL)) {
     arguments = strappy_webview_parse_json_object(message->arguments_json);
     if (arguments != NULL) {
@@ -1623,7 +1653,7 @@ static char *strappy_webview_tool_display_title(
   }
   transform_value = cJSON_IsObject(display) ?
     cJSON_GetObjectItemCaseSensitive(display, "transform") : NULL;
-  transform = (cJSON_IsString(transform_value) &&
+  transform = ((transform_value != NULL) && cJSON_IsString(transform_value) &&
                (transform_value->valuestring != NULL)) ?
     transform_value->valuestring : "text";
   if (value != NULL) {
@@ -4693,18 +4723,57 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
                                    const char *state,
                                    const char *status_html)
 {
-  cJSON *display_registry;
+  strappy_webview_render_context *context;
   char *html;
 
-  display_registry = strappy_webview_parse_json_object(
+  context = strappy_webview_render_context_create(
     (message != NULL) ? message->tool_display_registry_json : NULL);
   html = strappy_webview_message_html_with_display_registry(message,
                                                             labels,
                                                             state,
                                                             status_html,
-                                                            display_registry);
-  cJSON_Delete(display_registry);
+                                                            (context != NULL) ?
+                                                              context->tool_display_registry :
+                                                              NULL);
+  strappy_webview_render_context_destroy(context);
   return html;
+}
+
+char *strappy_webview_messages_html_with_render_context(
+  const strappy_webview_message *messages,
+  size_t count,
+  const strappy_webview_labels *labels,
+  const strappy_webview_render_context *context)
+{
+  strappy_webview_buffer buffer;
+  char *message_html;
+  size_t index;
+
+  if ((messages == NULL) && (count > 0U)) {
+    return NULL;
+  }
+
+  strappy_webview_buffer_init(&buffer);
+  for (index = 0U; index < count; index++) {
+    message_html = strappy_webview_message_html_with_display_registry(
+      &messages[index],
+      labels,
+      NULL,
+      NULL,
+      (context != NULL) ? context->tool_display_registry : NULL);
+    if (message_html == NULL) {
+      strappy_webview_buffer_destroy(&buffer);
+      return NULL;
+    }
+    if (!strappy_webview_buffer_append_cstring(&buffer, message_html)) {
+      free(message_html);
+      strappy_webview_buffer_destroy(&buffer);
+      return NULL;
+    }
+    free(message_html);
+  }
+
+  return strappy_webview_buffer_finish(&buffer);
 }
 
 char *strappy_webview_messages_html(
@@ -4712,16 +4781,14 @@ char *strappy_webview_messages_html(
   size_t count,
   const strappy_webview_labels *labels)
 {
-  strappy_webview_buffer buffer;
-  cJSON *display_registry;
-  char *message_html;
+  strappy_webview_render_context *context;
   const char *display_registry_json;
+  char *html;
   size_t index;
 
   if ((messages == NULL) && (count > 0U)) {
     return NULL;
   }
-
   display_registry_json = NULL;
   for (index = 0U; index < count; index++) {
     if ((messages[index].tool_display_registry_json != NULL) &&
@@ -4730,31 +4797,16 @@ char *strappy_webview_messages_html(
       break;
     }
   }
-  display_registry = strappy_webview_parse_json_object(display_registry_json);
-  strappy_webview_buffer_init(&buffer);
-  for (index = 0U; index < count; index++) {
-    message_html = strappy_webview_message_html_with_display_registry(
-      &messages[index],
-      labels,
-      NULL,
-      NULL,
-      display_registry);
-    if (message_html == NULL) {
-      cJSON_Delete(display_registry);
-      strappy_webview_buffer_destroy(&buffer);
-      return NULL;
-    }
-    if (!strappy_webview_buffer_append_cstring(&buffer, message_html)) {
-      free(message_html);
-      cJSON_Delete(display_registry);
-      strappy_webview_buffer_destroy(&buffer);
-      return NULL;
-    }
-    free(message_html);
+  context = strappy_webview_render_context_create(display_registry_json);
+  if (context == NULL) {
+    return NULL;
   }
-
-  cJSON_Delete(display_registry);
-  return strappy_webview_buffer_finish(&buffer);
+  html = strappy_webview_messages_html_with_render_context(messages,
+                                                            count,
+                                                            labels,
+                                                            context);
+  strappy_webview_render_context_destroy(context);
+  return html;
 }
 
 char *strappy_webview_pending_message_html(
@@ -5037,15 +5089,21 @@ static char *strappy_webview_message_element_id(
   return strappy_webview_buffer_finish(&buffer);
 }
 
-char *strappy_webview_message_update_js(
+char *strappy_webview_message_update_js_with_render_context(
   const strappy_webview_message *message,
-  const strappy_webview_labels *labels)
+  const strappy_webview_labels *labels,
+  const strappy_webview_render_context *context)
 {
   char *element_id;
   char *message_html;
   char *js;
 
-  message_html = strappy_webview_message_html(message, labels, NULL, NULL);
+  message_html = strappy_webview_message_html_with_display_registry(
+    message,
+    labels,
+    NULL,
+    NULL,
+    (context != NULL) ? context->tool_display_registry : NULL);
   if (message_html == NULL) {
     return NULL;
   }
@@ -5060,6 +5118,74 @@ char *strappy_webview_message_update_js(
   free(element_id);
   free(message_html);
   return js;
+}
+
+char *strappy_webview_message_update_js(
+  const strappy_webview_message *message,
+  const strappy_webview_labels *labels)
+{
+  strappy_webview_render_context *context;
+  char *js;
+
+  context = strappy_webview_render_context_create(
+    (message != NULL) ? message->tool_display_registry_json : NULL);
+  if (context == NULL) {
+    return NULL;
+  }
+  js = strappy_webview_message_update_js_with_render_context(message,
+                                                              labels,
+                                                              context);
+  strappy_webview_render_context_destroy(context);
+  return js;
+}
+
+char *strappy_webview_reconcile_messages_js_with_render_context(
+  const strappy_webview_message *messages,
+  size_t count,
+  const strappy_webview_labels *labels,
+  const strappy_webview_render_context *context)
+{
+  strappy_webview_buffer buffer;
+  char *element_id;
+  char *messages_html;
+  char *append_js;
+  size_t index;
+
+  if ((messages == NULL) && (count > 0U)) {
+    return NULL;
+  }
+  strappy_webview_buffer_init(&buffer);
+  for (index = 0U; index < count; index++) {
+    element_id = strappy_webview_message_element_id(&messages[index]);
+    if ((element_id == NULL) ||
+        !strappy_webview_buffer_append_cstring(&buffer, "removeMessage(") ||
+        !strappy_webview_append_js_string(&buffer, element_id) ||
+        !strappy_webview_buffer_append_cstring(&buffer, ");")) {
+      free(element_id);
+      strappy_webview_buffer_destroy(&buffer);
+      return NULL;
+    }
+    free(element_id);
+  }
+  messages_html = strappy_webview_messages_html_with_render_context(
+    messages,
+    count,
+    labels,
+    context);
+  if (messages_html == NULL) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  append_js = strappy_webview_append_message_js(messages_html);
+  free(messages_html);
+  if ((append_js == NULL) ||
+      !strappy_webview_buffer_append_cstring(&buffer, append_js)) {
+    free(append_js);
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  free(append_js);
+  return strappy_webview_buffer_finish(&buffer);
 }
 
 char *strappy_webview_replace_message_js(const char *element_id,

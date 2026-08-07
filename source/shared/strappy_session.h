@@ -12,6 +12,9 @@ extern "C" {
 
 void strappy_session_free_string(char *value);
 
+typedef struct strappy_session_webview_render_context
+  strappy_session_webview_render_context;
+
 int strappy_session_configure_process(const char *ca_cert_path,
                                       const char *font_dir,
                                       char **error_out);
@@ -207,8 +210,39 @@ char *strappy_session_webview_append_messages_js_for_session(
   size_t *appended_message_count_out,
   char **next_timeline_cursor_out,
   char **error_out);
+strappy_session_webview_render_context *
+strappy_session_webview_render_context_create(
+  const char *db_path,
+  const char *resource_dir,
+  char **error_out);
+void strappy_session_webview_render_context_destroy(
+  strappy_session_webview_render_context *context);
+char *strappy_session_webview_append_messages_js_with_render_context(
+  const strappy_session_webview_render_context *context,
+  long long session_id,
+  const char *timeline_cursor,
+  size_t *appended_message_count_out,
+  char **next_timeline_cursor_out,
+  char **error_out);
+char *strappy_session_webview_reconcile_messages_js_for_session(
+  const char *db_path,
+  long long session_id,
+  const char *resource_dir,
+  const char *timeline_cursor,
+  size_t *reconciled_message_count_out,
+  char **next_timeline_cursor_out,
+  char **error_out);
+char *strappy_session_webview_reconcile_messages_js_with_render_context(
+  const strappy_session_webview_render_context *context,
+  long long session_id,
+  const char *timeline_cursor,
+  size_t *reconciled_message_count_out,
+  char **next_timeline_cursor_out,
+  char **error_out);
 char *strappy_session_webview_set_processing_status_js(
   const char *status_json);
+int strappy_session_webview_event_requires_message_update(
+  const strappy_responses_event *event);
 char *strappy_session_webview_set_round_context_inclusion_js(
   long long model_request_id,
   int include_in_context,
@@ -217,6 +251,11 @@ char *strappy_session_webview_message_update_js_for_key(
   const char *db_path,
   long long session_id,
   const char *resource_dir,
+  const char *message_key,
+  char **error_out);
+char *strappy_session_webview_message_update_js_with_render_context(
+  const strappy_session_webview_render_context *context,
+  long long session_id,
   const char *message_key,
   char **error_out);
 

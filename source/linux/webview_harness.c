@@ -223,6 +223,86 @@ static int harness_check_message_batch(void)
   return ok;
 }
 
+static int harness_check_render_context_reconciliation(void)
+{
+  strappy_webview_message messages[2];
+  strappy_webview_render_context *context;
+  const char *first_remove;
+  const char *second_remove;
+  const char *append;
+  char *html;
+  char *reconcile_js;
+  char *update_js;
+  int ok;
+
+  memset(messages, 0, sizeof(messages));
+  messages[0].element_id = "cached-tool";
+  messages[0].role = "api_function_call";
+  messages[0].kind = "function_call";
+  messages[0].tool_name = "database_query";
+  messages[0].arguments_json = "{\"database_id\":\"db_7\"}";
+  messages[0].text = messages[0].arguments_json;
+  messages[0].database_display_names = harness_database_display_names;
+  messages[0].database_display_name_count =
+    HARNESS_DATABASE_DISPLAY_NAME_COUNT;
+  messages[1].element_id = "cached-answer";
+  messages[1].role = "assistant";
+  messages[1].text = "Final cached answer";
+
+  context = strappy_webview_render_context_create(
+    harness_tool_display_registry_json);
+  if (context == NULL) {
+    fprintf(stderr, "Could not create cached WebView render context.\n");
+    return 0;
+  }
+  html = strappy_webview_messages_html_with_render_context(
+    messages,
+    2U,
+    NULL,
+    context);
+  update_js = strappy_webview_message_update_js_with_render_context(
+    &messages[0],
+    NULL,
+    context);
+  reconcile_js = strappy_webview_reconcile_messages_js_with_render_context(
+    messages,
+    2U,
+    NULL,
+    context);
+
+  first_remove = (reconcile_js != NULL) ?
+    strstr(reconcile_js, "removeMessage('cached-tool');") : NULL;
+  second_remove = (reconcile_js != NULL) ?
+    strstr(reconcile_js, "removeMessage('cached-answer');") : NULL;
+  append = (reconcile_js != NULL) ?
+    strstr(reconcile_js, "appendMessage(") : NULL;
+  ok = (html != NULL) && (update_js != NULL) && (reconcile_js != NULL) &&
+       harness_expect_contains(
+         html,
+         "database_query · Contacts &amp; &quot;Notes&quot;.sqlite") &&
+       harness_expect_contains(html, "Final cached answer") &&
+       harness_expect_contains(update_js,
+                               "replaceMessage('cached-tool',") &&
+       harness_expect_contains(
+         update_js,
+         "database_query · Contacts &amp; &quot;Notes&quot;.sqlite") &&
+       (first_remove != NULL) && (second_remove != NULL) &&
+       (append != NULL) && (first_remove < second_remove) &&
+       (second_remove < append) &&
+       harness_expect_contains(reconcile_js, "Final cached answer") &&
+       (strstr(append + 1, "appendMessage(") == NULL);
+  if (!ok) {
+    fprintf(stderr,
+            "Cached WebView rendering did not produce an atomic upsert.\n");
+  }
+
+  strappy_webview_free(reconcile_js);
+  strappy_webview_free(update_js);
+  strappy_webview_free(html);
+  strappy_webview_render_context_destroy(context);
+  return ok;
+}
+
 static int harness_check_database_display_names(void)
 {
   strappy_webview_message message;
@@ -302,6 +382,8 @@ static int harness_check_page_scripts(void)
   char *context_js;
   char *message_html;
   char *page_html;
+  const char *page_output_path;
+  FILE *page_output;
   int ok;
 
   memset(&message, 0, sizeof(message));
@@ -1862,6 +1944,26 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "prompt-group-harness") &&
        harness_expect_contains(page_html, "data-prompt-group-key=\"prompt-group-page\"") &&
        harness_expect_contains(page_html, "reasoning-collapsed .reasoning-label");
+
+  page_output_path = getenv("STRAPPY_WEBVIEW_PAGE_OUTPUT");
+  if ((page_output_path != NULL) && (page_output_path[0] != '\0')) {
+    page_output = fopen(page_output_path, "wb");
+    if (page_output == NULL) {
+      fprintf(stderr, "Could not write generated WebView behavior fixture.\n");
+      ok = 0;
+    } else {
+      if (fwrite(page_html, 1U, strlen(page_html), page_output) !=
+          strlen(page_html)) {
+        fprintf(stderr,
+                "Could not write the complete WebView behavior fixture.\n");
+        ok = 0;
+      }
+      if (fclose(page_output) != 0) {
+        fprintf(stderr, "Could not close the WebView behavior fixture.\n");
+        ok = 0;
+      }
+    }
+  }
 
   strappy_webview_free(context_js);
   strappy_webview_free(page_html);
@@ -3509,6 +3611,9 @@ int main(void)
     return 1;
   }
   if (!harness_check_message_batch()) {
+    return 1;
+  }
+  if (!harness_check_render_context_reconciliation()) {
     return 1;
   }
   if (!harness_check_database_display_names()) {

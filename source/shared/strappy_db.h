@@ -681,6 +681,11 @@ int strappy_db_list_response_timeline_after(
   strappy_session_message_record_list *list,
   strappy_response_timeline_cursor *next_cursor_out,
   char **error_out);
+int strappy_db_load_response_timeline_cursor(
+  const char *db_path,
+  long long session_id,
+  strappy_response_timeline_cursor *cursor_out,
+  char **error_out);
 int strappy_db_update_model_request_include_in_context(
   const char *db_path,
   long long session_id,

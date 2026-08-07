@@ -896,7 +896,14 @@ typedef struct harness_ledger_event_recorder {
   long long processing_started_ms;
   long long answer_quality_count;
   long long wall_duration_update_count;
+  long long message_update_required_count;
+  long long message_update_skipped_count;
   long long terminal_count;
+  long long event_sequence;
+  long long terminal_call_id;
+  long long terminal_ledger_sequence;
+  long long terminal_wall_duration_sequence;
+  long long terminal_clear_sequence;
   size_t timeline_count;
   long clear_count;
   int valid;
@@ -1066,6 +1073,7 @@ static int harness_record_ledger_event(
     }
     return 1;
   }
+  recorder->event_sequence++;
 
   if (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) {
     cJSON *root;
@@ -1074,6 +1082,9 @@ static int harness_record_ledger_event(
     cJSON *started;
     long long started_ms;
 
+    if (strappy_session_webview_event_requires_message_update(event)) {
+      recorder->valid = 0;
+    }
     root = (event->status_json != NULL) ?
       cJSON_Parse(event->status_json) : NULL;
     active = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "active") : NULL;
@@ -1086,6 +1097,10 @@ static int harness_record_ledger_event(
     if (cJSON_IsFalse(active)) {
       if (recorder->started_count != recorder->count) {
         recorder->valid = 0;
+      }
+      if ((recorder->terminal_call_id > 0LL) &&
+          (recorder->terminal_clear_sequence == 0LL)) {
+        recorder->terminal_clear_sequence = recorder->event_sequence;
       }
       recorder->clear_count++;
       recorder->processing_count++;
@@ -1142,6 +1157,7 @@ static int harness_record_ledger_event(
       (call_id > 0LL) &&
       (event->status_kind != NULL) &&
       (strcmp(event->status_kind, "wall_duration") == 0) &&
+      strappy_session_webview_event_requires_message_update(event) &&
       (sqlite3_open(recorder->db_path, &db) == SQLITE_OK);
     if (event_ok) {
       rc = sqlite3_prepare_v2(
@@ -1169,6 +1185,12 @@ static int harness_record_ledger_event(
     }
     if (event_ok) {
       recorder->wall_duration_update_count++;
+      recorder->message_update_required_count++;
+      if ((call_id == recorder->terminal_call_id) &&
+          (recorder->terminal_wall_duration_sequence == 0LL)) {
+        recorder->terminal_wall_duration_sequence =
+          recorder->event_sequence;
+      }
     } else {
       recorder->valid = 0;
     }
@@ -1205,6 +1227,8 @@ static int harness_record_ledger_event(
             &extra) == 1) &&
     (call_id > 0LL) &&
     (event->status_kind != NULL) &&
+    (strappy_session_webview_event_requires_message_update(event) ==
+      !running) &&
     opened;
   if (event_ok) {
     int rc;
@@ -1271,12 +1295,72 @@ static int harness_record_ledger_event(
   }
   if (!event_ok) {
     recorder->valid = 0;
+  } else {
+    if (running) {
+      recorder->message_update_skipped_count++;
+    } else {
+      recorder->message_update_required_count++;
+    }
+    if (event->is_terminal) {
+      if (recorder->terminal_call_id != 0LL) {
+        recorder->valid = 0;
+      }
+      recorder->terminal_call_id = call_id;
+      recorder->terminal_ledger_sequence = recorder->event_sequence;
+    }
   }
   recorder->answer_quality_count = answer_quality_count;
   if (db != NULL) {
     sqlite3_close(db);
   }
   return 1;
+}
+
+static int harness_terminal_event_order_is_valid(
+  const harness_ledger_event_recorder *recorder)
+{
+  return (recorder != NULL) &&
+    (recorder->terminal_count == 1LL) &&
+    (recorder->terminal_call_id > 0LL) &&
+    (recorder->terminal_ledger_sequence > 0LL) &&
+    (recorder->terminal_wall_duration_sequence >
+      recorder->terminal_ledger_sequence) &&
+    (recorder->terminal_clear_sequence >
+      recorder->terminal_wall_duration_sequence);
+}
+
+static int harness_direct_timeline_cursor_matches(
+  const char *db_path,
+  long long session_id,
+  const strappy_session_message_record_list *timeline,
+  char **error_out)
+{
+  const strappy_response_timeline_cursor *expected;
+  strappy_response_timeline_cursor actual;
+
+  if (timeline == NULL) {
+    return 0;
+  }
+  strappy_response_timeline_cursor_init(&actual);
+  if (!strappy_db_load_response_timeline_cursor(db_path,
+                                                session_id,
+                                                &actual,
+                                                error_out)) {
+    return 0;
+  }
+  if (timeline->count == 0U) {
+    return !actual.valid && (actual.session_id == session_id);
+  }
+  expected = &timeline->records[timeline->count - 1U].timeline_cursor;
+  return actual.valid &&
+    (actual.session_id == expected->session_id) &&
+    (actual.request_id == expected->request_id) &&
+    (actual.group_phase == expected->group_phase) &&
+    (actual.attempt_index == expected->attempt_index) &&
+    (actual.attempt_phase == expected->attempt_phase) &&
+    (actual.item_index == expected->item_index) &&
+    (actual.entry_type == expected->entry_type) &&
+    (actual.row_id == expected->row_id);
 }
 
 #define HARNESS_HTTP_MAX_REQUEST_BYTES (4U * 1024U * 1024U)
@@ -4436,7 +4520,7 @@ static int harness_test_answer_quality_disabled(void)
   ok = (result != NULL) && (strcmp(result, answer) == 0) && server_ok &&
     events.valid && (events.count == 1LL) &&
     (events.wall_duration_update_count == 1LL) &&
-    (events.terminal_count == 1LL) &&
+    harness_terminal_event_order_is_valid(&events) &&
     (events.answer_quality_count == 0LL) && events.saw_thinking &&
     !events.saw_tools && (events.clear_count == 1L);
 
@@ -4729,7 +4813,11 @@ static int harness_test_answer_quality_report(void)
       harness_answer_quality_precedes_assistant(&timeline,
                                                 HARNESS_UNICODE_EMOJI_ANSWER,
                                                 "\"outcome\":\"failed\"") &&
-      (timeline.count >= 3U);
+      (timeline.count >= 3U) &&
+      harness_direct_timeline_cursor_matches(path,
+                                             session_id,
+                                             &timeline,
+                                             &error);
   }
   if (ok) {
     tail_cursor = timeline.records[timeline.count - 3U].timeline_cursor;
@@ -5829,6 +5917,8 @@ static int harness_test_function_tool_continuation(void)
     (strcmp(result, "Function tool final answer.") == 0) &&
     server_ok && events.valid && (events.count == 2LL) &&
     (events.wall_duration_update_count == 2LL) &&
+    (events.message_update_skipped_count == 2LL) &&
+    (events.message_update_required_count == 4LL) &&
     (events.answer_quality_count == 1LL) && events.saw_thinking &&
     events.saw_tools && (events.clear_count == 1L);
   free(result);
@@ -8155,8 +8245,12 @@ static int harness_test_session_webview_rendering(void)
   strappy_response_call_finish_input finish;
   strappy_response_timeline_cursor final_cursor;
   strappy_response_timeline_cursor request_cursor;
+  strappy_session_webview_render_context *render_context;
   strappy_session_message_record_list range;
+  const char *first_remove;
   const char *first_position;
+  const char *reconcile_append;
+  const char *second_remove;
   const char *second_position;
   char *append_script;
   char *append_timeline_cursor;
@@ -8170,11 +8264,15 @@ static int harness_test_session_webview_rendering(void)
   char *invalid_timeline_cursor;
   char *page_html;
   char *page_timeline_cursor;
+  char *reconcile_script;
+  char *reconcile_timeline_cursor;
   char *request_script;
   char *request_timeline_cursor;
+  char *update_script;
   long long call_id;
   long long session_id;
   size_t message_count;
+  size_t reconcile_message_count;
   size_t request_message_count;
   int ok;
 
@@ -8194,10 +8292,15 @@ static int harness_test_session_webview_rendering(void)
   invalid_timeline_cursor = NULL;
   page_html = NULL;
   page_timeline_cursor = NULL;
+  reconcile_script = NULL;
+  reconcile_timeline_cursor = NULL;
+  render_context = NULL;
   request_script = NULL;
   request_timeline_cursor = NULL;
+  update_script = NULL;
   session_id = 0LL;
   message_count = 0U;
+  reconcile_message_count = 0U;
   request_message_count = 0U;
   strappy_response_timeline_cursor_init(&final_cursor);
   strappy_response_timeline_cursor_init(&request_cursor);
@@ -8248,6 +8351,31 @@ static int harness_test_session_webview_rendering(void)
             (error != NULL) ? error : "unexpected output");
     goto cleanup;
   }
+  current_timeline_cursor = strappy_session_timeline_cursor_for_session(
+    path,
+    session_id,
+    &error);
+  if ((current_timeline_cursor == NULL) ||
+      (strcmp(current_timeline_cursor, initial_cursor) != 0)) {
+    fprintf(stderr,
+            "Direct empty timeline cursor did not match the rendered page.\n");
+    ok = 0;
+    goto cleanup;
+  }
+  strappy_session_free_string(current_timeline_cursor);
+  current_timeline_cursor = NULL;
+
+  render_context = strappy_session_webview_render_context_create(
+    path,
+    "../shared/Resources",
+    &error);
+  if (render_context == NULL) {
+    fprintf(stderr,
+            "Could not cache the session WebView render context: %s\n",
+            (error != NULL) ? error : "unknown error");
+    ok = 0;
+    goto cleanup;
+  }
 
   memset(&begin, 0, sizeof(begin));
   begin.session_id = session_id;
@@ -8288,14 +8416,14 @@ static int harness_test_session_webview_rendering(void)
     goto cleanup;
   }
 
-  request_script = strappy_session_webview_append_messages_js_for_session(
-    path,
-    session_id,
-    "../shared/Resources",
-    initial_cursor,
-    &request_message_count,
-    &request_timeline_cursor,
-    &error);
+  request_script =
+    strappy_session_webview_append_messages_js_with_render_context(
+      render_context,
+      session_id,
+      initial_cursor,
+      &request_message_count,
+      &request_timeline_cursor,
+      &error);
   ok = (request_script != NULL) && (request_message_count == 1U) &&
        (request_timeline_cursor != NULL) &&
        (strstr(request_script, "appendMessage(") != NULL) &&
@@ -8346,6 +8474,17 @@ static int harness_test_session_webview_rendering(void)
        (strcmp(range.records[1].direction, "response") == 0) &&
        (range.records[1].content != NULL) &&
        (strcmp(range.records[1].content, second_text) == 0);
+  if (ok) {
+    update_script =
+      strappy_session_webview_message_update_js_with_render_context(
+        render_context,
+        session_id,
+        range.records[1].message_key,
+        &error);
+    ok = (update_script != NULL) &&
+         (strstr(update_script, second_display_text) != NULL) &&
+         (strstr(update_script, second_text) == NULL);
+  }
   strappy_session_message_record_list_destroy(&range);
   if (!ok) {
     fprintf(stderr,
@@ -8429,6 +8568,34 @@ static int harness_test_session_webview_rendering(void)
     goto cleanup;
   }
 
+  reconcile_script =
+    strappy_session_webview_reconcile_messages_js_with_render_context(
+      render_context,
+      session_id,
+      request_timeline_cursor,
+      &reconcile_message_count,
+      &reconcile_timeline_cursor,
+      &error);
+  first_remove = (reconcile_script != NULL) ?
+    strstr(reconcile_script, "removeMessage(") : NULL;
+  second_remove = (first_remove != NULL) ?
+    strstr(first_remove + 1, "removeMessage(") : NULL;
+  reconcile_append = (reconcile_script != NULL) ?
+    strstr(reconcile_script, "appendMessage(") : NULL;
+  ok = (reconcile_script != NULL) && (reconcile_message_count == 2U) &&
+       (reconcile_timeline_cursor != NULL) &&
+       (strcmp(reconcile_timeline_cursor, page_timeline_cursor) == 0) &&
+       (first_remove != NULL) && (second_remove != NULL) &&
+       (strstr(second_remove + 1, "removeMessage(") == NULL) &&
+       (reconcile_append != NULL) && (second_remove < reconcile_append) &&
+       (strstr(reconcile_script, second_display_text) != NULL);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not reconcile the final WebView range: %s\n",
+            (error != NULL) ? error : "unexpected output");
+    goto cleanup;
+  }
+
   empty_script = strappy_session_webview_append_messages_js_for_session(
     path,
     session_id,
@@ -8480,6 +8647,10 @@ cleanup:
   strappy_session_free_string(invalid_timeline_cursor);
   strappy_session_free_string(request_script);
   strappy_session_free_string(request_timeline_cursor);
+  strappy_session_free_string(reconcile_script);
+  strappy_session_free_string(reconcile_timeline_cursor);
+  strappy_session_free_string(update_script);
+  strappy_session_webview_render_context_destroy(render_context);
   strappy_session_free_string(error);
   unlink(pending_database_path);
   unlink(database_path);

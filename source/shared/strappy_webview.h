@@ -103,6 +103,7 @@ typedef struct strappy_webview_message {
 } strappy_webview_message;
 
 typedef struct strappy_webview_script_batch strappy_webview_script_batch;
+typedef struct strappy_webview_render_context strappy_webview_render_context;
 
 int strappy_webview_configure_localized_labels(char **error_out);
 const strappy_webview_labels *strappy_webview_localized_labels(void);
@@ -120,6 +121,11 @@ int strappy_webview_script_batch_has_js(
 char *strappy_webview_script_batch_finish_js(
   strappy_webview_script_batch *batch);
 
+strappy_webview_render_context *strappy_webview_render_context_create(
+  const char *tool_display_registry_json);
+void strappy_webview_render_context_destroy(
+  strappy_webview_render_context *context);
+
 char *strappy_webview_status_html(const char *text,
                                   int retry,
                                   const strappy_webview_labels *labels);
@@ -131,9 +137,23 @@ char *strappy_webview_messages_html(
   const strappy_webview_message *messages,
   size_t count,
   const strappy_webview_labels *labels);
+char *strappy_webview_messages_html_with_render_context(
+  const strappy_webview_message *messages,
+  size_t count,
+  const strappy_webview_labels *labels,
+  const strappy_webview_render_context *context);
 char *strappy_webview_message_update_js(
   const strappy_webview_message *message,
   const strappy_webview_labels *labels);
+char *strappy_webview_message_update_js_with_render_context(
+  const strappy_webview_message *message,
+  const strappy_webview_labels *labels,
+  const strappy_webview_render_context *context);
+char *strappy_webview_reconcile_messages_js_with_render_context(
+  const strappy_webview_message *messages,
+  size_t count,
+  const strappy_webview_labels *labels,
+  const strappy_webview_render_context *context);
 char *strappy_webview_pending_message_html(
   const char *prompt,
   const char *element_id,

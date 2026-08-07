@@ -18980,6 +18980,113 @@ int strappy_db_list_response_timeline_after(
                                                     error_out);
 }
 
+int strappy_db_load_response_timeline_cursor(
+  const char *db_path,
+  long long session_id,
+  strappy_response_timeline_cursor *cursor_out,
+  char **error_out)
+{
+  /* Keep these cursor fields and ordering aligned with the timeline query. */
+  static const char *sql =
+    "SELECT entry_type, row_id, request_id, group_phase, attempt_index, "
+    "attempt_phase, item_index FROM ("
+    "SELECT 0 AS entry_type, a.id AS row_id, r.id AS request_id, "
+    "1 AS group_phase, a.attempt_index, 0 AS attempt_phase, "
+    "-1 AS item_index "
+    "FROM http_attempts a JOIN model_requests r ON r.id = a.request_id "
+    "JOIN turns t ON t.id = r.turn_id "
+    "WHERE t.session_id = ?1 AND a.state NOT IN ('pending','running') "
+    "UNION ALL "
+    "SELECT 2, i.id, r.id, 0, -1, 0, i.source_item_index "
+    "FROM conversation_items i "
+    "JOIN model_requests r ON r.id = i.introduced_request_id "
+    "JOIN turns t ON t.id = r.turn_id "
+    "WHERE i.session_id = ?2 AND i.timeline_visible = 1 "
+    "UNION ALL "
+    "SELECT 1, q.id, r.id, 1, a.attempt_index, 1, "
+    "COALESCE((SELECT MIN(ci.source_item_index) "
+      "FROM conversation_items ci "
+      "JOIN message_items mi ON mi.item_id = ci.id "
+      "WHERE ci.source_attempt_id = a.id AND mi.role = 'assistant'), "
+      "2147483647) "
+    "FROM answer_quality_audits q "
+    "JOIN http_attempts a ON a.id = q.response_attempt_id "
+    "JOIN model_requests r ON r.id = a.request_id "
+    "JOIN turns t ON t.id = r.turn_id "
+    "WHERE t.session_id = ?3 AND a.state NOT IN ('pending','running') "
+    "UNION ALL "
+    "SELECT 2, i.id, r.id, 1, a.attempt_index, 1, i.source_item_index "
+    "FROM conversation_items i "
+    "JOIN http_attempts a ON a.id = i.source_attempt_id "
+    "JOIN model_requests r ON r.id = a.request_id "
+    "JOIN turns t ON t.id = r.turn_id "
+    "WHERE i.session_id = ?4 AND i.timeline_visible = 1 "
+    "AND a.state NOT IN ('pending','running')"
+    ") AS timeline ORDER BY request_id DESC, group_phase DESC, "
+    "attempt_index DESC, attempt_phase DESC, item_index DESC, "
+    "entry_type DESC, row_id DESC LIMIT 1;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (cursor_out == NULL) {
+    strappy_set_error(error_out, "Responses timeline cursor has no output.");
+    return 0;
+  }
+  strappy_response_timeline_cursor_init(cursor_out);
+  cursor_out->session_id = session_id;
+  if (session_id <= 0LL) {
+    strappy_set_error(error_out, "Session id is not valid.");
+    return 0;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)session_id) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 4,
+                          (sqlite3_int64)session_id) != SQLITE_OK)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not prepare timeline cursor query: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    cursor_out->entry_type = (long long)sqlite3_column_int64(stmt, 0);
+    cursor_out->row_id = (long long)sqlite3_column_int64(stmt, 1);
+    cursor_out->request_id = (long long)sqlite3_column_int64(stmt, 2);
+    cursor_out->group_phase = (long long)sqlite3_column_int64(stmt, 3);
+    cursor_out->attempt_index = (long long)sqlite3_column_int64(stmt, 4);
+    cursor_out->attempt_phase = (long long)sqlite3_column_int64(stmt, 5);
+    cursor_out->item_index = (long long)sqlite3_column_int64(stmt, 6);
+    cursor_out->valid = 1;
+  } else if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read timeline cursor: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+
+  sqlite3_finalize(stmt);
+  strappy_db_release(db);
+  return 1;
+}
+
 int strappy_db_update_model_request_include_in_context(
   const char *db_path,
   long long session_id,

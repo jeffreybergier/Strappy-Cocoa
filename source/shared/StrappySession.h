@@ -167,6 +167,14 @@ enum {
                                     appendedMessageCount:
                 (NSUInteger *)appendedMessageCount
                                                    error:(NSError **)error;
+- (NSString *)webViewReconcileMessagesJavaScriptAfterTimelineCursor:
+                (NSString *)timelineCursor
+                                      nextTimelineCursor:
+                (NSString **)nextTimelineCursor
+                                  reconciledMessageCount:
+                (NSUInteger *)reconciledMessageCount
+                                                   error:(NSError **)error;
+- (NSString *)webViewClearProcessingStatusJavaScript;
 - (NSString *)webViewJavaScriptForStreamEvent:(NSDictionary *)event
                                         error:(NSError **)error;
 - (NSString *)webViewJavaScriptForModelRequestIdentifier:
