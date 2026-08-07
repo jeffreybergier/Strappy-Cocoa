@@ -28,6 +28,7 @@
 - (id<SessionListViewControllerDelegate>)delegate;
 - (void)reloadData;
 - (void)reloadSessionIdentifier:(NSNumber *)sessionIdentifier select:(BOOL)select;
+- (void)applySessionSummary:(NSDictionary *)summary select:(BOOL)select;
 - (void)selectSessionIdentifier:(NSNumber *)sessionIdentifier;
 - (void)addSession:(id)sender;
 - (BOOL)canCloseActiveSession;

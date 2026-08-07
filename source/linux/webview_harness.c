@@ -1612,14 +1612,46 @@ static int harness_check_page_scripts(void)
                                "decorateAPIToolGroupsForRows("
                                "rowsForPromptGroup(group));") &&
        harness_expect_contains(page_html,
+                               "function finishProcessingStatusNow(){"
+                               "var group=strappyProcessingPromptGroupKey;"
+                               "strappyProcessingFinishAfterScrollGroup='';"
+                               "strappyProcessingFinishAfterScrollRequested=0;"
                                "collapseAPIRoundsForPrompt(group);"
                                "strappyProcessingStatus=null;"
                                "syncProcessingInteractionState(0,group);"
-                               "strappyProcessingStatusDirty=1;"
                                "decorateAPIExchangesForRows("
                                "rowsForPromptGroup(group));"
                                "decorateAPIToolGroupsForRows("
-                               "rowsForPromptGroup(group));") &&
+                               "rowsForPromptGroup(group));"
+                               "clearProcessingStatusNode();"
+                               "strappyProcessingStatusDirty=0;"
+                               "strappyProcessingNextTick=0;") &&
+       harness_expect_contains(page_html,
+                               "function clearProcessingStatus(){"
+                               "var group=strappyProcessingPromptGroupKey;"
+                               "if(group!==''&&group==="
+                               "strappyProcessingFinishAfterScrollGroup){"
+                               "strappyProcessingFinishAfterScrollRequested=1;") &&
+       harness_expect_contains(page_html,
+                               "strappyProcessingStatus=null;"
+                               "strappyProcessingStatusDirty=0;"
+                               "strappyProcessingNextTick=0;"
+                               "if(strappyUpdateTimer!==null){"
+                               "clearTimeout(strappyUpdateTimer);"
+                               "strappyUpdateTimer=null;}"
+                               "strappyUpdateDue=0;"
+                               "removeProcessingStatusNode();") &&
+       harness_expect_contains(page_html,
+                               "if(!strappyAutoScrollEnabled||"
+                               "(strappyBatchDepth===0&&"
+                               "strappyScrollAnimationTimer===null))"
+                               "completeProcessingFinishAfterScroll();"
+                               "return;}finishProcessingStatusNow();}") &&
+       harness_expect_contains(page_html,
+                               "if(group===''||group!=="
+                               "strappyProcessingPromptGroupKey)return;"
+                               "finishProcessingStatusNow();}"
+                               "function clearProcessingStatus()") &&
        harness_expect_contains(page_html,
                                "function toggleAPIExchange(a){"
                                "var id=a&&a.getAttribute?") &&
@@ -1664,8 +1696,9 @@ static int harness_check_page_scripts(void)
        harness_expect_not_contains(page_html, "Disable autoscroll") &&
        harness_expect_not_contains(page_html, "Enable autoscroll") &&
        harness_expect_contains(page_html,
-                               "if(!strappyAutoScrollEnabled)"
-                               "cancelScrollBottomAnimation();") &&
+                               "if(!strappyAutoScrollEnabled){"
+                               "cancelScrollBottomAnimation();"
+                               "completeProcessingFinishAfterScroll();}") &&
        harness_expect_contains(
          page_html,
          "if(strappyProcessingStatus&&strappyProcessingStatus.active)"
@@ -1704,9 +1737,40 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "function scrollBottomAnimated(){"
                                "var start,target,started,g;"
-                               "if(!strappyAutoScrollEnabled)return;"
+                               "if(!strappyAutoScrollEnabled){"
+                               "completeProcessingFinishAfterScroll();return;}"
                                "if(strappyBatchDepth>0){"
                                "strappyBatchShouldScroll=1;return;}") &&
+       harness_expect_contains(page_html,
+                               "setScrollTopPosition(target);"
+                               "strappyScrollAnimationTimer=null;"
+                               "completeProcessingFinishAfterScroll();return;") &&
+       harness_expect_contains(page_html,
+                               "function rowsHaveResponseFunctionCall(rows,id)") &&
+       harness_expect_contains(page_html,
+                               "apiRoundId(rows[i])==id&&"
+                               "apiExchangeDirection(rows[i])=='response'&&"
+                               "apiExchangeKind(rows[i])=='function_call'") &&
+       harness_expect_contains(page_html,
+                               "function processingFinalAnswerGroup(rows)") &&
+       harness_expect_contains(page_html,
+                               "if(!rowIsAPIExchangeAnswer(row))continue;"
+                               "id=apiRoundId(row);") &&
+       harness_expect_contains(page_html,
+                               "existing=rowsForRound(id);"
+                               "if(id===''||"
+                               "rowsHaveResponseFunctionCall(rows,id)||"
+                               "rowsHaveResponseFunctionCall(existing,id))"
+                               "continue;") &&
+       harness_expect_contains(page_html,
+                               "d=nodesFromHTML(html);"
+                               "group=processingFinalAnswerGroup(d.childNodes);"
+                               "while(d.firstChild)") &&
+       harness_expect_contains(page_html,
+                               "if(!added.length)return;"
+                               "if(group!=='')"
+                               "beginProcessingFinishAfterScroll(group);"
+                               "flushPendingToolTargets();") &&
        harness_expect_contains(page_html,
                                "shouldScroll=strappyBatchShouldScroll;"
                                "strappyBatchShouldScroll=0;"
@@ -1728,10 +1792,20 @@ static int harness_check_page_scripts(void)
                                "key=rowMessageKey(n);"
                                "rowIdentifier=rowId(n);") &&
        harness_expect_contains(page_html,
+                               "m.insertBefore(n,before);"
+                               "if(hasClass(n,'row')){"
+                               "indexMessageRow(n,before);"
+                               "added[added.length]=n;}}"
                                "if(!added.length)return;"
+                               "if(group!=='')"
+                               "beginProcessingFinishAfterScroll(group);"
                                "flushPendingToolTargets();"
                                "renderAfterMutation(added);"
                                "scrollBottomAnimated();") &&
+       harness_expect_contains(page_html,
+                               "group=processingFinalAnswerGroup(d.childNodes);"
+                               "while(d.firstChild){n=d.firstChild;"
+                               "key=rowMessageKey(n);") &&
        harness_expect_contains(page_html,
                                "renderAfterMutation([old,next]);}}"
                                "function insertMessageBefore") &&

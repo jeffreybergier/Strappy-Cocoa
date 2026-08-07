@@ -251,7 +251,7 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
     return;
   }
 
-  [sessionsController_ reloadSessionIdentifier:identifier select:NO];
+  [sessionsController_ applySessionSummary:session select:NO];
 }
 
 - (void)messageListViewController:(MessageListViewController *)controller

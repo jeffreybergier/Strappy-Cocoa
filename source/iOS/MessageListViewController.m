@@ -233,7 +233,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)beginSendingPrompt:(NSString *)prompt;
 - (void)setPromptCancellationRequested:(BOOL)requested;
 - (BOOL)promptCancellationRequested;
-- (BOOL)appendNewMessagesToWebView;
 - (void)handleActionURL:(NSURL *)url;
 - (void)reloadContent;
 - (NSString *)writeCurrentHTML;
@@ -1133,6 +1132,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)sessionStreamEvent:(NSNotification *)notification
 {
   NSDictionary *event;
+  NSString *javaScript;
+  NSString *nextCursor;
   NSString *streamEvent;
 
   if ([self tearingDown]) {
@@ -1150,11 +1151,17 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
   [self updateSendingStateFromSession];
   streamEvent = [event objectForKey:@"stream_event"];
-  if ([streamEvent isEqualToString:@"ledger_changed"]) {
+  nextCursor = [event objectForKey:@"timeline_cursor"];
+  if ([nextCursor isKindOfClass:[NSString class]]) {
+    [self setNewestRenderedTimelineCursor:nextCursor];
+  }
+  if ([streamEvent isEqualToString:@"ledger_changed"] ||
+      [streamEvent isEqualToString:@"terminal_delta"]) {
     [self logLifecycleEvent:@"sessionLedgerDidChange"];
-    if (![self appendNewMessagesToWebView]) {
-      NSLog(@"StrappyResponses could not append committed ledger rows for session %@",
-            [[[self session] sessionIdentifier] description]);
+    [self flushPendingStreamEvents];
+    javaScript = [self javaScriptForStreamEvent:event];
+    if ([javaScript length] > 0U) {
+      [[self webView] stringByEvaluatingJavaScriptFromString:javaScript];
     }
     return;
   }
@@ -1202,8 +1209,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self updateSendingStateFromSession];
   if ([[result objectForKey:@"database_study"] boolValue]) {
     [self reloadContent];
-  } else {
-    [self appendNewMessagesToWebView];
   }
 }
 
@@ -1211,11 +1216,11 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 {
   NSString *javaScript;
 
-  if (([self session] == nil) || ![event isKindOfClass:[NSDictionary class]]) {
+  if (![event isKindOfClass:[NSDictionary class]]) {
     return @"";
   }
 
-  javaScript = [[self session] webViewJavaScriptForStreamEvent:event error:nil];
+  javaScript = [event objectForKey:@"webview_javascript"];
   return [javaScript isKindOfClass:[NSString class]] ? javaScript : @"";
 }
 
@@ -1305,43 +1310,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     [self setStreamEventFlushTimer:nil];
   }
   [self setPendingStreamJavaScript:nil];
-}
-
-- (BOOL)appendNewMessagesToWebView
-{
-  NSUInteger appendedCount;
-  NSString *cursor;
-  NSString *javaScript;
-  NSString *nextCursor;
-
-  if ([self session] == nil) {
-    return NO;
-  }
-
-  cursor = [self newestRenderedTimelineCursor];
-  appendedCount = 0U;
-  nextCursor = nil;
-  javaScript = [[self session]
-    webViewAppendMessagesJavaScriptAfterTimelineCursor:cursor
-                                    nextTimelineCursor:&nextCursor
-                                  appendedMessageCount:&appendedCount
-                                                 error:nil];
-  if (![javaScript isKindOfClass:[NSString class]]) {
-    return NO;
-  }
-  if (appendedCount == 0U) {
-    [self setNewestRenderedTimelineCursor:nextCursor];
-    return YES;
-  }
-
-  if ([javaScript length] == 0U) {
-    return NO;
-  }
-
-  [self flushPendingStreamEvents];
-  [[self webView] stringByEvaluatingJavaScriptFromString:javaScript];
-  [self setNewestRenderedTimelineCursor:nextCursor];
-  return YES;
 }
 
 - (BOOL)webView:(UIWebView *)webView

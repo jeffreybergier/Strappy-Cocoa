@@ -186,6 +186,10 @@ int strappy_session_send_isolated_prompt_with_events_and_load(
   char **error_out);
 
 char *strappy_session_webview_batched_js(const char *java_script);
+char *strappy_session_timeline_cursor_for_session(
+  const char *db_path,
+  long long session_id,
+  char **error_out);
 char *strappy_session_webview_messages_page_html_for_session(
   const char *db_path,
   long long session_id,

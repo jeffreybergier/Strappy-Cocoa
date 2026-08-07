@@ -44,7 +44,39 @@ static BOOL StrappySessionModelCatalogRefreshInFlight = NO;
 typedef struct StrappySessionResponsesContext {
   StrappySession *session;
   NSDictionary *context;
+  /* Presentation state belongs to the prompt worker, never to a WebView. */
+  NSString *timelineCursor;
+  NSString *terminalAppendJavaScript;
+  NSString *terminalUpdateJavaScript;
+  NSString *terminalMessageKey;
 } StrappySessionResponsesContext;
+
+static void StrappySessionResponsesContextClearTerminal(
+  StrappySessionResponsesContext *context)
+{
+  if (context == NULL) {
+    return;
+  }
+  [context->terminalAppendJavaScript release];
+  context->terminalAppendJavaScript = nil;
+  [context->terminalUpdateJavaScript release];
+  context->terminalUpdateJavaScript = nil;
+  [context->terminalMessageKey release];
+  context->terminalMessageKey = nil;
+}
+
+static void StrappySessionResponsesContextDestroy(
+  StrappySessionResponsesContext *context)
+{
+  if (context == NULL) {
+    return;
+  }
+  [context->context release];
+  context->context = nil;
+  [context->timelineCursor release];
+  context->timelineCursor = nil;
+  StrappySessionResponsesContextClearTerminal(context);
+}
 
 static const char *StrappySessionOptionalCString(NSString *string)
 {
@@ -99,7 +131,7 @@ static NSString *StrappySessionStringFromCString(char *value)
 - (NSString *)currentProcessingStatusJSON;
 - (void)updateProcessingStatusJSON:(NSString *)statusJSON;
 - (int)handleResponsesEvent:(const strappy_responses_event *)event
-                    context:(NSDictionary *)context;
+           responsesContext:(StrappySessionResponsesContext *)context;
 - (void)postStreamEventAndRelease:(NSDictionary *)event;
 - (NSDictionary *)submitPrompt:(NSString *)prompt
                        context:(NSDictionary *)context
@@ -130,7 +162,7 @@ static int StrappySessionHandleResponsesEvent(
   }
 
   pool = [[NSAutoreleasePool alloc] init];
-  result = [session handleResponsesEvent:event context:context->context];
+  result = [session handleResponsesEvent:event responsesContext:context];
   [pool release];
   return result;
 }
@@ -548,10 +580,20 @@ static BOOL StrappySessionRecordFromOptions(
 }
 
 - (int)handleResponsesEvent:(const strappy_responses_event *)event
-                    context:(NSDictionary *)contextDictionary
+           responsesContext:(StrappySessionResponsesContext *)responsesContext
 {
+  NSDictionary *contextDictionary;
   NSMutableDictionary *notification;
+  NSMutableString *mutations;
+  NSString *appendJavaScript;
+  NSString *javaScript;
+  NSString *messageKey;
+  NSString *nextCursor;
   NSString *statusJSON;
+  NSString *streamEvent;
+  NSString *updateJavaScript;
+  NSUInteger appendedCount;
+  BOOL terminalPending;
 
   if (event == NULL) {
     return 1;
@@ -565,14 +607,24 @@ static BOOL StrappySessionRecordFromOptions(
     return 1;
   }
 
+  contextDictionary = (responsesContext != NULL) ?
+    responsesContext->context : nil;
   notification = [[NSMutableDictionary alloc] init];
+  appendJavaScript = @"";
+  javaScript = @"";
+  messageKey = nil;
+  nextCursor = nil;
   statusJSON = nil;
+  streamEvent = (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) ?
+    @"processing_status" :
+    ((event->type == STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED) ?
+      @"ledger_updated" : @"ledger_changed");
+  updateJavaScript = @"";
+  appendedCount = 0U;
   if (contextDictionary != nil) {
     [notification setObject:contextDictionary forKey:@"context"];
   }
   if (event->message_key != NULL) {
-    NSString *messageKey;
-
     messageKey = [NSString stringWithUTF8String:event->message_key];
     if (messageKey != nil) {
       [notification setObject:messageKey forKey:@"message_key"];
@@ -587,15 +639,103 @@ static BOOL StrappySessionRecordFromOptions(
   if (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) {
     [self updateProcessingStatusJSON:statusJSON];
   }
-  [notification setObject:
-    (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) ?
-      @"processing_status" :
-      ((event->type == STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED) ?
-        @"ledger_updated" : @"ledger_changed")
-                    forKey:@"stream_event"];
+  [notification setObject:streamEvent forKey:@"stream_event"];
+  if (event->is_terminal) {
+    [notification setObject:[NSNumber numberWithBool:YES]
+                     forKey:@"is_terminal"];
+  }
+
+  if (event->type == STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED) {
+    appendJavaScript = [self
+      webViewAppendMessagesJavaScriptAfterTimelineCursor:
+        ((responsesContext != NULL) ? responsesContext->timelineCursor : nil)
+                                      nextTimelineCursor:&nextCursor
+                                    appendedMessageCount:&appendedCount
+                                                   error:nil];
+    if ([nextCursor isKindOfClass:[NSString class]] &&
+        (responsesContext != NULL)) {
+      [responsesContext->timelineCursor release];
+      responsesContext->timelineCursor = [nextCursor copy];
+    }
+    if (event->is_terminal && (responsesContext != NULL)) {
+      /* Publish the final append only after its late status update arrives. */
+      StrappySessionResponsesContextClearTerminal(responsesContext);
+      responsesContext->terminalAppendJavaScript =
+        [([appendJavaScript isKindOfClass:[NSString class]] ?
+          appendJavaScript : @"") copy];
+      responsesContext->terminalMessageKey =
+        [([messageKey isKindOfClass:[NSString class]] ? messageKey : @"") copy];
+      [notification release];
+      return 1;
+    }
+
+    updateJavaScript =
+      [self webViewJavaScriptForStreamEvent:notification error:nil];
+    mutations = [NSMutableString string];
+    if ([appendJavaScript isKindOfClass:[NSString class]]) {
+      [mutations appendString:appendJavaScript];
+    }
+    if ([updateJavaScript isKindOfClass:[NSString class]]) {
+      [mutations appendString:updateJavaScript];
+    }
+    javaScript =
+      [StrappySession webViewBatchedJavaScriptForJavaScript:mutations];
+  } else {
+    javaScript = [self webViewJavaScriptForStreamEvent:notification error:nil];
+  }
+
+  terminalPending = (responsesContext != NULL) &&
+    (responsesContext->terminalMessageKey != nil);
+  if (terminalPending &&
+      (event->type == STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED) &&
+      [messageKey isEqualToString:responsesContext->terminalMessageKey]) {
+    [responsesContext->terminalUpdateJavaScript release];
+    responsesContext->terminalUpdateJavaScript =
+      [([javaScript isKindOfClass:[NSString class]] ? javaScript : @"") copy];
+    [notification release];
+    return 1;
+  }
+
+  if (terminalPending &&
+      (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) &&
+      (event->status_kind == NULL)) {
+    /* Keep rounds expanded through the final append and its scroll animation. */
+    mutations = [NSMutableString string];
+    if ([responsesContext->terminalUpdateJavaScript length] > 0U) {
+      [mutations appendString:responsesContext->terminalUpdateJavaScript];
+    }
+    if ([responsesContext->terminalAppendJavaScript length] > 0U) {
+      [mutations appendString:responsesContext->terminalAppendJavaScript];
+    }
+    if ([javaScript isKindOfClass:[NSString class]]) {
+      [mutations appendString:javaScript];
+    }
+    javaScript =
+      [StrappySession webViewBatchedJavaScriptForJavaScript:mutations];
+    [notification setObject:@"terminal_delta" forKey:@"stream_event"];
+    [notification setObject:[NSNumber numberWithBool:YES]
+                     forKey:@"is_terminal"];
+    [notification setObject:responsesContext->terminalMessageKey
+                     forKey:@"message_key"];
+  }
+
+  if ([javaScript isKindOfClass:[NSString class]] &&
+      ([javaScript length] > 0U)) {
+    [notification setObject:javaScript forKey:@"webview_javascript"];
+  }
+  if ((responsesContext != NULL) &&
+      [responsesContext->timelineCursor isKindOfClass:[NSString class]]) {
+    [notification setObject:responsesContext->timelineCursor
+                     forKey:@"timeline_cursor"];
+  }
   [self performSelectorOnMainThread:@selector(postStreamEventAndRelease:)
                          withObject:notification
                       waitUntilDone:NO];
+  if (terminalPending &&
+      (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) &&
+      (event->status_kind == NULL)) {
+    StrappySessionResponsesContextClearTerminal(responsesContext);
+  }
   return 1;
 }
 
@@ -3313,7 +3453,9 @@ static BOOL StrappySessionRecordFromOptions(
   NSString *guidanceResourceDirectory;
   NSString *apiEndpoint;
   NSString *apiToken;
+  char *cursorError;
   char *strappyError;
+  char *timelineCursor;
   long long sessionId;
   strappy_session_record record;
   NSDictionary *session;
@@ -3361,8 +3503,24 @@ static BOOL StrappySessionRecordFromOptions(
     return nil;
   }
 
+  memset(&responsesContext, 0, sizeof(responsesContext));
   responsesContext.session = self;
   responsesContext.context = [context retain];
+  cursorError = NULL;
+  timelineCursor = strappy_session_timeline_cursor_for_session(
+    [databasePath UTF8String],
+    sessionId,
+    &cursorError);
+  if (timelineCursor != NULL) {
+    responsesContext.timelineCursor =
+      [StrappySessionStringFromCString(timelineCursor) copy];
+  } else {
+    if (cursorError != NULL) {
+      NSLog(@"StrappyResponses could not prepare its presentation cursor: %s",
+            cursorError);
+    }
+  }
+  strappy_session_free_string(cursorError);
   apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
   apiToken = [[StrappyKeychain sharedKeychain] apiToken];
 
@@ -3391,7 +3549,7 @@ static BOOL StrappySessionRecordFromOptions(
           &responsesContext,
           &record,
           &strappyError))) {
-    [responsesContext.context release];
+    StrappySessionResponsesContextDestroy(&responsesContext);
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
@@ -3399,7 +3557,7 @@ static BOOL StrappySessionRecordFromOptions(
     strappy_session_record_destroy(&record);
     return nil;
   }
-  [responsesContext.context release];
+  StrappySessionResponsesContextDestroy(&responsesContext);
 
   session = [StrappySession dictionaryFromSessionRecord:&record];
   strappy_session_record_destroy(&record);
@@ -3657,12 +3815,11 @@ static BOOL StrappySessionRecordFromOptions(
     [userInfo addEntriesFromDictionary:result];
   }
 
-  summary = nil;
-  if ([userInfo objectForKey:@"error"] == nil) {
-    summary = [self summaryWithError:nil];
-    if (summary != nil) {
-      [userInfo setObject:summary forKey:@"session"];
-    }
+  summary = [userInfo objectForKey:@"session"];
+  if ([summary isKindOfClass:[NSDictionary class]]) {
+    [self updateCachedSummary:summary];
+  } else {
+    summary = nil;
   }
 
   @synchronized(self) {

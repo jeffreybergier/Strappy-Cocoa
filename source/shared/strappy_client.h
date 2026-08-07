@@ -61,6 +61,8 @@ typedef struct strappy_responses_event {
   unsigned int retry_after_seconds;
   unsigned int retry_attempt;
   unsigned int retry_max_attempts;
+  /* A completed, tool-free response that ends the prompt loop. */
+  int is_terminal;
 } strappy_responses_event;
 
 typedef int (*strappy_responses_event_callback)(

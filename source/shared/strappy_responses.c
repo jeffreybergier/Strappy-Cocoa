@@ -2153,6 +2153,9 @@ static void strappy_responses_call_did_finish(
   event.render_role = (strcmp(state, "completed") == 0) ?
     "api_call" : "api_error";
   event.status_kind = state;
+  event.is_terminal = ((strcmp(state, "completed") == 0) &&
+                       (analysis != NULL) &&
+                       (analysis->tool_call_count == 0U)) ? 1 : 0;
   if (http != NULL) {
     event.status_started_ms = http->started_at_ms;
     event.status_updated_ms = http->completed_at_ms;

@@ -147,7 +147,6 @@ static BOOL StrappyContextRoundActionValues(
 - (void)beginSendingPrompt:(NSString *)prompt;
 - (void)setPromptCancellationRequested:(BOOL)requested;
 - (BOOL)promptCancellationRequested;
-- (BOOL)appendNewMessagesToWebView;
 - (NSString *)writeCurrentHTML;
 - (void)layoutWebViewAndPromptBar;
 - (void)clearRequestState;
@@ -714,6 +713,8 @@ static BOOL StrappyContextRoundActionValues(
 - (void)sessionStreamEvent:(NSNotification *)notification
 {
   NSDictionary *event;
+  NSString *js;
+  NSString *nextCursor;
   NSString *streamEvent;
 
   if ([notification object] != session_) {
@@ -727,8 +728,18 @@ static BOOL StrappyContextRoundActionValues(
 
   [self updateSendingStateFromSession];
   streamEvent = [event objectForKey:@"stream_event"];
-  if ([streamEvent isEqualToString:@"ledger_changed"]) {
-    [self appendNewMessagesToWebView];
+  nextCursor = [event objectForKey:@"timeline_cursor"];
+  if ([nextCursor isKindOfClass:[NSString class]]) {
+    [newestRenderedTimelineCursor_ release];
+    newestRenderedTimelineCursor_ = [nextCursor copy];
+  }
+  if ([streamEvent isEqualToString:@"ledger_changed"] ||
+      [streamEvent isEqualToString:@"terminal_delta"]) {
+    [self flushPendingStreamEvents];
+    js = [self javaScriptForStreamEvent:event];
+    if ([js length] > 0U) {
+      [self pushJavaScript:js];
+    }
     return;
   }
   [self queueJavaScriptForStreamEvent:event];
@@ -766,22 +777,17 @@ static BOOL StrappyContextRoundActionValues(
   [self updateSendingStateFromSession];
   if ([[result objectForKey:@"database_study"] boolValue]) {
     [self reloadContent];
-  } else {
-    [self appendNewMessagesToWebView];
   }
 }
 
 - (NSString *)javaScriptForStreamEvent:(NSDictionary *)event
 {
   NSString *js;
-  NSError *error;
-
-  if ((session_ == nil) || ![event isKindOfClass:[NSDictionary class]]) {
+  if (![event isKindOfClass:[NSDictionary class]]) {
     return @"";
   }
 
-  error = nil;
-  js = [session_ webViewJavaScriptForStreamEvent:event error:&error];
+  js = [event objectForKey:@"webview_javascript"];
   if ([js length] == 0U) {
     return @"";
   }
@@ -869,42 +875,6 @@ static BOOL StrappyContextRoundActionValues(
     [pendingStreamJavaScript_ release];
     pendingStreamJavaScript_ = nil;
   }
-}
-
-- (BOOL)appendNewMessagesToWebView
-{
-  NSUInteger appendedCount;
-  NSString *js;
-  NSString *nextCursor;
-
-  if (session_ == nil) {
-    return NO;
-  }
-  appendedCount = 0U;
-  nextCursor = nil;
-  js = [session_
-    webViewAppendMessagesJavaScriptAfterTimelineCursor:
-      newestRenderedTimelineCursor_
-                                    nextTimelineCursor:&nextCursor
-                                  appendedMessageCount:&appendedCount
-                                                 error:nil];
-  if (![js isKindOfClass:[NSString class]]) {
-    return NO;
-  }
-  if (appendedCount == 0U) {
-    [newestRenderedTimelineCursor_ release];
-    newestRenderedTimelineCursor_ = [nextCursor copy];
-    return YES;
-  }
-
-  if ([js length] == 0U) {
-    return NO;
-  }
-  [self flushPendingStreamEvents];
-  [self pushJavaScript:js];
-  [newestRenderedTimelineCursor_ release];
-  newestRenderedTimelineCursor_ = [nextCursor copy];
-  return YES;
 }
 
 - (void)dealloc

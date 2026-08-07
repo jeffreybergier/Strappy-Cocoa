@@ -89,6 +89,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 @property (nonatomic, copy) NSNumber *pendingDeleteSessionIdentifier;
 @property (nonatomic, assign) BOOL creatingSession;
 - (void)strappySessionDidUpdate:(NSNotification *)notification;
+- (void)applySessionSummary:(NSDictionary *)summary select:(BOOL)select;
 - (void)sessionPromptActivityDidChange:(NSNotification *)notification;
 - (void)modelCatalogDidChange:(NSNotification *)notification;
 - (NSIndexPath *)indexPathForSessionIdentifier:(NSNumber *)sessionIdentifier;
@@ -218,21 +219,12 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 {
   NSError *error;
   NSDictionary *summary;
-  NSMutableArray *mutableSessions;
-  NSArray *sortDescriptors;
-  NSIndexPath *oldIndexPath;
-  NSIndexPath *newIndexPath;
-
-  if (select) {
-    [self setSelectedSessionId:sessionIdentifier];
-  }
 
   if (![sessionIdentifier isKindOfClass:[NSNumber class]]) {
     [self reloadData];
     return;
   }
 
-  oldIndexPath = [self indexPathForSessionIdentifier:sessionIdentifier];
   error = nil;
   summary =
     [StrappySession sessionListSummaryForSessionIdentifier:sessionIdentifier
@@ -242,6 +234,29 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
     return;
   }
 
+  [self applySessionSummary:summary select:select];
+}
+
+- (void)applySessionSummary:(NSDictionary *)summary select:(BOOL)select
+{
+  NSNumber *sessionIdentifier;
+  NSMutableArray *mutableSessions;
+  NSArray *sortDescriptors;
+  NSIndexPath *oldIndexPath;
+  NSIndexPath *newIndexPath;
+
+  if (![summary isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
+  sessionIdentifier = [summary objectForKey:@"id"];
+  if (![sessionIdentifier isKindOfClass:[NSNumber class]]) {
+    return;
+  }
+  if (select) {
+    [self setSelectedSessionId:sessionIdentifier];
+  }
+
+  oldIndexPath = [self indexPathForSessionIdentifier:sessionIdentifier];
   mutableSessions = [NSMutableArray arrayWithArray:[self sessions]];
   if (oldIndexPath != nil) {
     [mutableSessions replaceObjectAtIndex:(NSUInteger)[oldIndexPath row]
@@ -367,7 +382,9 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   }
 
   identifier = [session objectForKey:@"id"];
-  [self reloadSessionIdentifier:identifier select:NO];
+  if ([identifier isKindOfClass:[NSNumber class]]) {
+    [self applySessionSummary:session select:NO];
+  }
 }
 
 - (void)sessionPromptActivityDidChange:(NSNotification *)notification

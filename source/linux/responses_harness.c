@@ -896,6 +896,7 @@ typedef struct harness_ledger_event_recorder {
   long long processing_started_ms;
   long long answer_quality_count;
   long long wall_duration_update_count;
+  long long terminal_count;
   size_t timeline_count;
   long clear_count;
   int valid;
@@ -1178,6 +1179,12 @@ static int harness_record_ledger_event(
   extra = '\0';
   running = (event->status_kind != NULL) &&
     (strcmp(event->status_kind, "running") == 0);
+  if (event->is_terminal) {
+    if (running) {
+      recorder->valid = 0;
+    }
+    recorder->terminal_count++;
+  }
   db = NULL;
   opened = sqlite3_open(recorder->db_path, &db) == SQLITE_OK;
   stmt = NULL;
@@ -4429,6 +4436,7 @@ static int harness_test_answer_quality_disabled(void)
   ok = (result != NULL) && (strcmp(result, answer) == 0) && server_ok &&
     events.valid && (events.count == 1LL) &&
     (events.wall_duration_update_count == 1LL) &&
+    (events.terminal_count == 1LL) &&
     (events.answer_quality_count == 0LL) && events.saw_thinking &&
     !events.saw_tools && (events.clear_count == 1L);
 
@@ -8152,6 +8160,7 @@ static int harness_test_session_webview_rendering(void)
   const char *second_position;
   char *append_script;
   char *append_timeline_cursor;
+  char *current_timeline_cursor;
   char *empty_script;
   char *empty_timeline_cursor;
   char *error;
@@ -8174,6 +8183,7 @@ static int harness_test_session_webview_rendering(void)
   unlink(pending_database_path);
   append_script = NULL;
   append_timeline_cursor = NULL;
+  current_timeline_cursor = NULL;
   call_id = 0LL;
   empty_script = NULL;
   empty_timeline_cursor = NULL;
@@ -8383,6 +8393,19 @@ static int harness_test_session_webview_rendering(void)
     goto cleanup;
   }
 
+  current_timeline_cursor = strappy_session_timeline_cursor_for_session(
+    path,
+    session_id,
+    &error);
+  if ((current_timeline_cursor == NULL) ||
+      (strcmp(current_timeline_cursor, page_timeline_cursor) != 0)) {
+    fprintf(stderr,
+            "Could not capture the current presentation timeline cursor: %s\n",
+            (error != NULL) ? error : "unexpected output");
+    ok = 0;
+    goto cleanup;
+  }
+
   append_script = strappy_session_webview_append_messages_js_for_session(
     path,
     session_id,
@@ -8448,6 +8471,7 @@ cleanup:
   strappy_session_free_string(page_timeline_cursor);
   strappy_session_free_string(append_script);
   strappy_session_free_string(append_timeline_cursor);
+  strappy_session_free_string(current_timeline_cursor);
   strappy_session_free_string(empty_script);
   strappy_session_free_string(empty_timeline_cursor);
   strappy_session_free_string(initial_cursor);

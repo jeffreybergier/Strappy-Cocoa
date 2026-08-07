@@ -996,6 +996,33 @@ static int strappy_session_parse_timeline_cursor(
   return 1;
 }
 
+char *strappy_session_timeline_cursor_for_session(
+  const char *db_path,
+  long long session_id,
+  char **error_out)
+{
+  strappy_session_message_record_list list;
+  strappy_response_timeline_cursor cursor;
+  char *value;
+
+  strappy_session_message_record_list_init(&list);
+  strappy_response_timeline_cursor_init(&cursor);
+  cursor.session_id = session_id;
+  if (!strappy_session_list_message_records(db_path,
+                                            session_id,
+                                            &list,
+                                            error_out)) {
+    strappy_session_message_record_list_destroy(&list);
+    return NULL;
+  }
+  if (list.count > 0U) {
+    cursor = list.records[list.count - 1U].timeline_cursor;
+  }
+  value = strappy_session_timeline_cursor_string(&cursor, error_out);
+  strappy_session_message_record_list_destroy(&list);
+  return value;
+}
+
 char *strappy_session_webview_messages_page_html_for_session(
   const char *db_path,
   long long session_id,

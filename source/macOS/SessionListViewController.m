@@ -790,16 +790,6 @@ static void StrappyDrawTintedImage(NSImage *image,
 {
   NSError *error;
   NSDictionary *summary;
-  NSMutableArray *summaries;
-  NSMutableArray *displayRows;
-  NSArray *sortDescriptors;
-  NSUInteger index;
-  BOOL replaced;
-
-  if (select) {
-    [selectedSessionId_ release];
-    selectedSessionId_ = [sessionIdentifier retain];
-  }
 
   if (sessionIdentifier == nil) {
     [self reloadData];
@@ -813,6 +803,31 @@ static void StrappyDrawTintedImage(NSImage *image,
   if (summary == nil) {
     [self reloadData];
     return;
+  }
+
+  [self applySessionSummary:summary select:select];
+}
+
+- (void)applySessionSummary:(NSDictionary *)summary select:(BOOL)select
+{
+  NSNumber *sessionIdentifier;
+  NSMutableArray *summaries;
+  NSMutableArray *displayRows;
+  NSArray *sortDescriptors;
+  NSUInteger index;
+  BOOL replaced;
+
+  if (![summary isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
+  sessionIdentifier = [summary objectForKey:@"id"];
+  if (![sessionIdentifier isKindOfClass:[NSNumber class]]) {
+    return;
+  }
+
+  if (select) {
+    [selectedSessionId_ release];
+    selectedSessionId_ = [sessionIdentifier retain];
   }
 
   summaries = [NSMutableArray array];
