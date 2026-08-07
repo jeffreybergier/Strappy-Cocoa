@@ -208,9 +208,9 @@ static UITextField *XPUIKitFindTextField(UIView *view)
 
 + (UIColor *)messagesBackgroundColor
 {
-  return [UIColor colorWithRed:220.0f/255.0f
-                         green:226.0f/255.0f
-                          blue:236.0f/255.0f
+  return [UIColor colorWithRed:251.0f/255.0f
+                         green:250.0f/255.0f
+                          blue:252.0f/255.0f
                          alpha:1.0f];
 }
 

@@ -430,15 +430,17 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(
          page_html,
          ".bash-terminal{box-sizing:border-box;margin:0;overflow:hidden;"
-         "border:1px solid #225c2d;border-radius:3px;"
-         "background:#050805;color:#70ff83;") &&
+         "border:1px solid #837b86;border-radius:2px;"
+         "background:#f7f5f8;color:#2a282b;") &&
        harness_expect_contains(page_html,
                                ".bash-terminal-error{border:2px solid "
-                               "#d64242;}") &&
+                               "#9a3e47;}") &&
        harness_expect_contains(page_html,
-                               ".bash-terminal-truncated{color:#ffd166;}") &&
+                               ".bash-terminal-truncated{color:#755a00;}") &&
        harness_expect_contains(page_html,
-                               ".bash-terminal-prompt{color:#49d864;") &&
+                               ".bash-terminal-prompt{color:#5d5262;") &&
+       harness_expect_not_contains(page_html, "background:#050805") &&
+       harness_expect_not_contains(page_html, "color:#70ff83") &&
        harness_expect_contains(page_html,
                                "function toolPanel(body,raw,cls)") &&
        harness_expect_not_contains(page_html, "tool-heading") &&
@@ -459,9 +461,9 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, ".tool-error-icon{") &&
        harness_expect_contains(page_html, "vertical-align:0;}") &&
        harness_expect_not_contains(page_html,
-                                   ".tool-column-error{border-top-color:#d99") &&
+                                   ".tool-column-error{border-top-color:#e7c8cc") &&
        harness_expect_not_contains(page_html,
-                                   ".tool-error{border-color:#d99") &&
+                                   ".tool-error{border-color:#e7c8cc") &&
        harness_expect_not_contains(page_html,
                                    ".api-exchange-row .tool-error{") &&
        harness_expect_contains(page_html, "\"heart\":'F004'") &&
@@ -650,23 +652,23 @@ static int harness_check_page_scripts(void)
        harness_expect_not_contains(page_html,
                                    ".api-attempt-details-toggle{") &&
        harness_expect_contains(page_html,
-                               ".response-status-toggle{color:#4e5961;"
+                               ".response-status-toggle{color:#5d5262;"
                                "text-decoration:none;}") &&
        harness_expect_contains(page_html,
-                               ".response-metadata-toggle{color:#4e5961;"
+                               ".response-metadata-toggle{color:#5d5262;"
                                "text-decoration:none;}") &&
        harness_expect_contains(page_html,
-                               ".tool-column-toggle{color:#4e5961;"
+                               ".tool-column-toggle{color:#5d5262;"
                                "text-decoration:none;}") &&
        harness_expect_contains(page_html,
                                ".processing-status-active .disclosure-title{"
                                "cursor:default;") &&
        harness_expect_contains(page_html,
                                ".tool-rail-title{font-size:12px;font-weight:bold;"
-                               "line-height:1.3;color:#30363b;margin:0 0 8px;}") &&
+                               "line-height:1.3;color:#302e31;margin:0 0 8px;}") &&
        harness_expect_contains(page_html,
                                ".reasoning-label{font-size:12px;font-weight:bold;"
-                               "line-height:1.3;color:#30363b;margin:0 0 8px;}") &&
+                               "line-height:1.3;color:#302e31;margin:0 0 8px;}") &&
        harness_expect_not_contains(page_html,
                                    ".api-attempt-details-title{") &&
        harness_expect_not_contains(page_html,
@@ -674,8 +676,8 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                ".tool-card-toggle{display:block;"
                                "box-sizing:border-box;width:100%;"
-                               "padding:4px 0;background:#dfe4e8;"
-                               "color:#30363b;text-decoration:none;"
+                               "padding:4px 0;background:#f0edf2;"
+                               "color:#302e31;text-decoration:none;"
                                "font-weight:bold;white-space:nowrap;"
                                "overflow:hidden;text-overflow:ellipsis;}") &&
        harness_expect_contains(page_html,
@@ -694,11 +696,11 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                ".api-exchange-turn-metric{margin-left:4px;}") &&
        harness_expect_contains(page_html,
-                               ".user .role{background:#c1c8ce;color:#30363b;"
+                               ".user .role{background:#d7d1d9;color:#302e31;"
                                "margin:0 -12px;padding:8px 12px;") &&
        harness_expect_contains(page_html,
-                               ".harness .role,.developer .role{background:#c1c8ce;"
-                               "color:#30363b;margin:0 -12px;"
+                               ".harness .role,.developer .role{background:#d7d1d9;"
+                               "color:#302e31;margin:0 -12px;"
                                "padding:8px 12px;") &&
        harness_expect_contains(page_html,
                                ".api-exchange-item>.role,"
@@ -706,7 +708,7 @@ static int harness_check_page_scripts(void)
                                ".response-status-section>.role{"
                                "display:block;box-sizing:border-box;width:auto;"
                                "margin:0 -10px;padding:3px 10px;"
-                               "background:#dfe4e8;") &&
+                               "background:#f0edf2;") &&
        harness_expect_contains(page_html,
                                ".api-exchange-item>.bubble{margin:0 -10px;}") &&
        harness_expect_contains(page_html, ".api-exchange-status{") &&
@@ -733,13 +735,13 @@ static int harness_check_page_scripts(void)
                                ".tool-card-open .tool-card-body{display:block;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row{position:relative;border-top:0;"
-                               "background:#dfe4e8;color:#30363b;"
+                               "background:#f0edf2;color:#302e31;"
                                "padding:0 10px;}") &&
        harness_expect_not_contains(page_html, "border-left:5px solid") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row:before{content:'';"
                                "position:absolute;left:0;right:0;top:0;"
-                               "height:1px;background:#68727a;"
+                               "height:1px;background:#716a73;"
                                "pointer-events:none;display:none;z-index:1;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-start{margin-top:0;"
@@ -770,13 +772,13 @@ static int harness_check_page_scripts(void)
                                    "function apiExchangeColorClass") &&
        harness_expect_not_contains(page_html, "api-exchange-color-") &&
        harness_expect_contains(page_html,
-                               "border-bottom:1px solid #959fa7;"
-                               "background:#a3adb5;color:#30363b;") &&
+                               "border-bottom:1px solid #a49da6;"
+                               "background:#b9b2bc;color:#302e31;") &&
        harness_expect_contains(page_html,
                                ".api-exchange-section-label{margin:0 -10px;"
                                "padding:4px 10px;font-size:12px;"
                                "line-height:1.2;font-weight:bold;"
-                               "color:#30363b;background:#c1c8ce;}") &&
+                               "color:#302e31;background:#d7d1d9;}") &&
        harness_expect_not_contains(page_html,
                                    ".api-exchange-section-label{"
                                    "margin:0 -10px;padding:6px") &&
@@ -878,7 +880,7 @@ static int harness_check_page_scripts(void)
                                "quality-check-label\"") &&
        harness_expect_contains(page_html,
                                ".answer-quality-check-failed "
-                               ".answer-quality-check-status{color:#8a1111;}") &&
+                               ".answer-quality-check-status{color:#9a3e47;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-status{padding-top:0;"
                                "padding-bottom:0;}") &&
@@ -886,7 +888,7 @@ static int harness_check_page_scripts(void)
                                ".api-exchange-status>"
                                ".response-status-section{box-sizing:border-box;"
                                "margin:0;padding:0 0 4px;"
-                               "background:#dfe4e8;}") &&
+                               "background:#f0edf2;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-status."
                                "response-status-collapsed>"
@@ -903,7 +905,7 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                ".response-metadata{max-width:none;"
                                "box-sizing:border-box;border:0;"
-                               "background:#dfe4e8;color:#30363b;"
+                               "background:#f0edf2;color:#302e31;"
                                "padding:0 0 4px;") &&
        harness_expect_contains(page_html,
                                ".response-metadata-collapsed{"
@@ -916,7 +918,7 @@ static int harness_check_page_scripts(void)
                                ".api-exchange-row>.role,"
                                ".api-exchange-row>"
                                ".response-status-section>.role{"
-                               "background:#dfe4e8;}") &&
+                               "background:#f0edf2;}") &&
        harness_expect_not_contains(page_html,
                                    ".api-exchange-row.api_reasoning>.role{") &&
        harness_expect_contains(page_html,
@@ -924,28 +926,28 @@ static int harness_check_page_scripts(void)
                                ".api-exchange-row>.reasoning,"
                                ".api-exchange-row>.response-status-section,"
                                ".api-exchange-row>.response-metadata{"
-                               "background:#dfe4e8;}") &&
+                               "background:#f0edf2;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row>.tool-column{"
-                               "background:#dfe4e8;}") &&
+                               "background:#f0edf2;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row .tool-table-wrap,"
                                ".api-exchange-row .tool-pill,"
                                ".api-exchange-row .tool-raw{"
-                               "background:#dfe4e8;border-color:#959fa7;}") &&
+                               "background:#f0edf2;border-color:#a49da6;}") &&
        harness_expect_not_contains(
          page_html,
          ".api-exchange-row .tool-card-body,"
          ".api-exchange-row .tool-table-wrap") &&
        harness_expect_contains(page_html,
                                ".state-error .bubble{"
-                               "border-top-color:#959fa7;"
-                               "border-bottom-color:#959fa7;"
-                               "background:#dfe4e8;}") &&
+                               "border-top-color:#a49da6;"
+                               "border-bottom-color:#a49da6;"
+                               "background:#f0edf2;}") &&
        harness_expect_contains(page_html,
                                ".tool-column-error>.tool-rail-title,"
                                ".tool-error>.tool-card-toggle{"
-                               "background:#d99;}") &&
+                               "background:#e7c8cc;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-item>.tool-error>"
                                ".tool-card-toggle{width:auto;"
@@ -962,15 +964,15 @@ static int harness_check_page_scripts(void)
                                ".response-status-section>.role,"
                                ".api-exchange-status.state-error>"
                                ".response-status-section>.role{"
-                               "background:#d99;}") &&
+                               "background:#e7c8cc;}") &&
        harness_expect_not_contains(page_html,
                                    ".response-status-section{"
-                                   "background:#d99") &&
+                                   "background:#e7c8cc") &&
        harness_expect_not_contains(page_html,
                                    ".response-status-section>.bubble{"
-                                   "background:#d99") &&
+                                   "background:#e7c8cc") &&
        harness_expect_not_contains(page_html,
-                                   ".tool-card-body{background:#d99") &&
+                                   ".tool-card-body{background:#e7c8cc") &&
        harness_expect_not_contains(page_html, "#fff7f7") &&
        harness_expect_not_contains(page_html, "#4f7f9e") &&
        harness_expect_not_contains(page_html, "#7b6995") &&
@@ -990,8 +992,8 @@ static int harness_check_page_scripts(void)
        harness_expect_not_contains(page_html, "#a22") &&
        harness_expect_contains(page_html,
                                ".assistant .bubble{background:#fff;"
-                               "border-top-color:#959fa7;"
-                               "border-bottom-color:#959fa7;"
+                               "border-top-color:#a49da6;"
+                               "border-bottom-color:#a49da6;"
                                "font-size:16px;line-height:1.45;}") &&
        harness_expect_contains(page_html,
                                ".user .bubble{background:#fff;border-top:0;"
@@ -1011,10 +1013,24 @@ static int harness_check_page_scripts(void)
                                "line-height:1.45;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row.assistant>.bubble *{"
-                               "color:#222;}") &&
+                               "color:#302e31;}") &&
        harness_expect_contains(page_html,
                                ".api-exchange-row.assistant>.bubble a{"
-                               "color:#2468a8;}") &&
+                               "color:#8e1bcf;}") &&
+       harness_expect_contains(page_html,
+                               ".bubble a,.reasoning-body a{color:#8e1bcf;"
+                               "text-decoration:none;}") &&
+       harness_expect_contains(page_html,
+                               ".bubble a:active,.reasoning-body a:active{"
+                               "color:#7216a6;}") &&
+       harness_expect_contains(page_html,
+                               ".status a{color:#8e1bcf;"
+                               "text-decoration:none;}") &&
+       harness_expect_contains(page_html,
+                               ".status a:active{color:#7216a6;}") &&
+       harness_expect_contains(page_html,
+                               ".api-exchange-row.assistant>.bubble a:active{"
+                               "color:#7216a6;}") &&
        harness_expect_contains(page_html,
                                ".assistant .role{display:block;}") &&
        harness_expect_not_contains(page_html,
@@ -1338,7 +1354,7 @@ static int harness_check_page_scripts(void)
        harness_expect_not_contains(page_html, "behavior:'smooth'") &&
        harness_expect_contains(page_html,
                                "html,body{margin:0;padding:0;"
-                               "background:#fff;") &&
+                               "background:#fbfafc;") &&
        harness_expect_contains(page_html, ".page{padding:0;}") &&
        harness_expect_not_contains(page_html,
                                    "body.processing-status-active .page") &&
@@ -1350,9 +1366,9 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "font-weight:bold;line-height:32px;height:34px;") &&
        harness_expect_contains(page_html,
-                               "border:1px solid #959fa7;") &&
+                               "border:1px solid #a49da6;") &&
        harness_expect_contains(page_html,
-                               "background:#dfe4e8;color:#30363b;") &&
+                               "background:#f0edf2;color:#302e31;") &&
        harness_expect_contains(page_html,
                                "padding:0 42px 0 7px;") &&
        harness_expect_contains(page_html,
@@ -1372,16 +1388,16 @@ static int harness_check_page_scripts(void)
                                "line-height:12px;") &&
        harness_expect_contains(
          page_html,
-         "border:1px solid #959fa7;background:#dfe4e8;color:#4e5961;") &&
+         "border:1px solid #a49da6;background:#f0edf2;color:#5d5262;") &&
        harness_expect_contains(
          page_html,
-         ".processing-autoscroll-on{background:#a3adb5;"
-         "border-color:#68727a;") &&
+         ".processing-autoscroll-on{background:#b9b2bc;"
+         "border-color:#716a73;") &&
        harness_expect_contains(
          page_html,
          ".processing-status-retry_wait,.processing-status-retrying{"
-         "border-color:#959fa7;background:#c1c8ce;"
-         "color:#30363b;}") &&
+         "border-color:#a49da6;background:#d7d1d9;"
+         "color:#302e31;}") &&
        harness_expect_contains(page_html,
                                ".processing-status-active .tool-column-toggle,") &&
        harness_expect_not_contains(page_html,
