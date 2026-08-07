@@ -113,16 +113,14 @@ static int harness_check_localized_labels(void)
                             "Autoscroll on") &&
        harness_expect_equal(labels->processing_autoscroll_off,
                             "Autoscroll off") &&
-       harness_expect_equal(labels->response_metadata, "Response Metadata") &&
-       harness_expect_equal(labels->waiting_for_response,
-                            "Waiting for response...") &&
+       harness_expect_equal(labels->response_metadata, "Metadata") &&
        harness_expect_equal(labels->no_http_response,
                             "No HTTP response") &&
        harness_expect_equal(labels->tool, "Tool") &&
        harness_expect_equal(labels->tool_call, "Tool Request") &&
        harness_expect_equal(labels->tool_result, "Tool Response") &&
        harness_expect_equal(labels->retry, "Retry") &&
-       harness_expect_equal(labels->response_status, "Response Status") &&
+       harness_expect_equal(labels->response_status, "Status") &&
        harness_expect_equal(labels->api_error, "API Error") &&
        harness_expect_equal(labels->response_item, "Response Item") &&
        harness_expect_equal(labels->request, "Request") &&
@@ -1083,7 +1081,7 @@ static int harness_check_page_scripts(void)
                                "active=promptGroupIsProcessing("
                                "promptGroupKey(row))") &&
        harness_expect_contains(page_html,
-                               "if(resolved&&!active)") &&
+                               "if(!active)") &&
        harness_expect_contains(page_html,
                                "setRowClass(row,'response-status-collapsed',"
                                "collapsed);") &&
@@ -1174,22 +1172,23 @@ static int harness_check_page_scripts(void)
          "if(active&&rowIsAPIExchangeError(row))return '';") &&
        harness_expect_not_contains(page_html,
                                    "function formatAPIExchangeHTTPStatus") &&
-       harness_expect_contains(page_html,
-                               "function formatAPIExchangeAttemptState(value)") &&
+       harness_expect_not_contains(page_html,
+                                   "function formatAPIExchangeAttemptState") &&
+       harness_expect_not_contains(page_html,
+                                   "function responseStatusState") &&
+       harness_expect_not_contains(page_html,
+                                   "function responseStatusResolved") &&
        harness_expect_contains(page_html,
                                "function responseAttemptSummary(row)") &&
        harness_expect_contains(page_html,
                                "function responseStatusSummary(row)") &&
        harness_expect_contains(page_html,
-                               "if(!responseStatusResolved(row))return "
-                               "label+': '") &&
-       harness_expect_contains(page_html,
-                               "label+=': '+(http!==''?'HTTP '+http") &&
+                               "return label+': '+") &&
        harness_expect_contains(page_html,
                                "http!==''?'HTTP '+http") &&
-       harness_expect_contains(page_html,
-                               "if(state!=='')label+=' \\u00b7 '+"
-                               "formatAPIExchangeAttemptState(state)") &&
+       harness_expect_not_contains(page_html, "data-attempt-state") &&
+       harness_expect_not_contains(page_html,
+                                   "data-waiting-for-response-label") &&
        harness_expect_contains(page_html,
                                "function formatCumulativeUsageCost(value){"
                                "return value!==''?value:'0.00';}") &&
@@ -1577,7 +1576,7 @@ static int harness_check_page_scripts(void)
                                "if(id===''||promptGroupIsProcessing(group))"
                                "return false;") &&
        harness_expect_contains(page_html,
-                               "if(resolved&&!active){a=document.createElement"
+                               "if(!active){a=document.createElement"
                                "('a');a.className='response-status-toggle'") &&
        harness_expect_not_contains(page_html,
                                    "function toggleAPIToolGroup(a)") &&
@@ -2440,7 +2439,6 @@ static int harness_check_api_exchange_status_states(void)
   message.round_number = 1L;
   message.attempt_number = 1L;
   message.http_status = 200L;
-  message.attempt_state = "completed";
   message.request_method = "POST";
   message.request_endpoint = "/responses";
   message.role = "api_call";
@@ -2458,7 +2456,6 @@ static int harness_check_api_exchange_status_states(void)
   message.round_number = 2L;
   message.attempt_number = 1L;
   message.http_status = 400L;
-  message.attempt_state = "http_error";
   message.request_method = "POST";
   message.request_endpoint = "/responses";
   message.role = "api_error";
@@ -2477,7 +2474,6 @@ static int harness_check_api_exchange_status_states(void)
   message.api_call_id = 22LL;
   message.round_number = 3L;
   message.attempt_number = 1L;
-  message.attempt_state = "transport_error";
   message.request_method = "POST";
   message.request_endpoint = "/responses";
   message.role = "api_error";
@@ -2493,26 +2489,25 @@ static int harness_check_api_exchange_status_states(void)
                                "class=\"row api_call\"") &&
        harness_expect_contains(success_html,
                                "<div class=\"response-status-section\">"
-                               "<div class=\"role\">Response Status</div>"
+                               "<div class=\"role\">Status</div>"
                                "<div class=\"bubble\">") &&
        harness_expect_contains(success_html,
-                               "<div class=\"role\">Response Status</div>") &&
+                               "<div class=\"role\">Status</div>") &&
        harness_expect_not_contains(success_html,
                                    "completed / HTTP 200") &&
-       harness_expect_contains(success_html,
-                               "data-attempt-state=\"completed\"") &&
+       harness_expect_not_contains(success_html,
+                                   "data-attempt-state=") &&
        harness_expect_contains(success_html,
                                "data-http-status=\"200\"") &&
        harness_expect_contains(success_html,
                                "data-response-status-label="
-                               "\"Response Status\"") &&
+                               "\"Status\"") &&
        harness_expect_contains(success_html,
                                "data-request-method=\"POST\"") &&
        harness_expect_contains(success_html,
                                "data-request-endpoint=\"/responses\"") &&
-       harness_expect_contains(success_html,
-                               "data-waiting-for-response-label="
-                               "\"Waiting for response...\"") &&
+       harness_expect_not_contains(success_html,
+                                   "data-waiting-for-response-label=") &&
        harness_expect_contains(success_html,
                                "data-no-http-response-label="
                                "\"No HTTP response\"") &&
@@ -2535,7 +2530,7 @@ static int harness_check_api_exchange_status_states(void)
                                "fa-angle-right") &&
        harness_expect_contains(success_html,
                                "</span></a><span class=\"response-metadata-"
-                               "error-slot\"></span>Response Metadata</div>") &&
+                               "error-slot\"></span>Metadata</div>") &&
        harness_expect_contains(success_html,
                                "class=\"response-metadata-body\"></div>") &&
        harness_expect_not_contains(success_html,
@@ -2546,19 +2541,19 @@ static int harness_check_api_exchange_status_states(void)
        harness_expect_contains(error_html,
                                "class=\"row api_error state-error\"") &&
        harness_expect_contains(error_html,
-                               "<div class=\"role\">Response Status</div>") &&
+                               "<div class=\"role\">Status</div>") &&
        harness_expect_not_contains(error_html,
                                    "<div class=\"meta status\">HTTP 400</div>") &&
-       harness_expect_contains(error_html,
-                               "data-attempt-state=\"http_error\"") &&
+       harness_expect_not_contains(error_html,
+                                   "data-attempt-state=") &&
        harness_expect_contains(error_html,
                                "data-http-status=\"400\"") &&
        harness_expect_contains(error_html,
                                "data-response-status-label="
-                               "\"Response Status\"") &&
+                               "\"Status\"") &&
        harness_expect_contains(error_html, "response-metadata") &&
-       harness_expect_contains(transport_html,
-                               "data-attempt-state=\"transport_error\"") &&
+       harness_expect_not_contains(transport_html,
+                                   "data-attempt-state=") &&
        harness_expect_not_contains(transport_html, "response-metadata");
 
   strappy_webview_free(transport_html);
@@ -2596,7 +2591,6 @@ static int harness_check_round_metric_formatting(void)
     message.round_number = 1L;
     message.role = "api_call";
     message.kind = "response_api_call";
-    message.attempt_state = "completed";
     message.cumulative_usage_cost = cases[index].cost;
     message.has_cumulative_usage_cost = 1;
     message.cumulative_wait_ms = cases[index].wait_ms;
@@ -2680,7 +2674,6 @@ static int harness_check_responses_items(void)
   message.round_number = 3L;
   message.attempt_number = 2L;
   message.http_status = 200L;
-  message.attempt_state = "completed";
   message.request_method = "POST";
   message.request_endpoint = "/responses";
   message.cumulative_usage_cost = 0.00003;
@@ -2900,10 +2893,10 @@ static int harness_check_responses_items(void)
        harness_expect_not_contains(call_html,
                                    "data-include-in-context=") &&
        harness_expect_contains(call_html,
-                               "<div class=\"role\">Response Status</div>") &&
+                               "<div class=\"role\">Status</div>") &&
        harness_expect_contains(call_html, "response-metadata") &&
-       harness_expect_contains(call_html,
-                               "data-attempt-state=\"completed\"") &&
+       harness_expect_not_contains(call_html,
+                                   "data-attempt-state=") &&
        harness_expect_contains(call_html,
                                "data-http-status=\"200\"") &&
        harness_expect_contains(reasoning_html,

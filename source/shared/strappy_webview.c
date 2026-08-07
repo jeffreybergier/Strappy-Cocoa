@@ -50,7 +50,6 @@ typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_PROCESSING_AUTOSCROLL_ON,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_AUTOSCROLL_OFF,
   STRAPPY_WEBVIEW_LABEL_RESPONSE_METADATA,
-  STRAPPY_WEBVIEW_LABEL_WAITING_FOR_RESPONSE,
   STRAPPY_WEBVIEW_LABEL_NO_HTTP_RESPONSE,
   STRAPPY_WEBVIEW_LABEL_TOOL,
   STRAPPY_WEBVIEW_LABEL_TOOL_CALL,
@@ -112,14 +111,13 @@ static const char * const g_strappy_webview_label_keys[
   "[fa:shower] Regretting",
   "Autoscroll on",
   "Autoscroll off",
-  "Response Metadata",
-  "Waiting for response...",
+  "Metadata",
   "No HTTP response",
   "Tool",
   "Tool Request",
   "Tool Response",
   "Retry",
-  "Response Status",
+  "Status",
   "API Error",
   "Response Item",
   "Request",
@@ -179,8 +177,6 @@ static void strappy_webview_assign_localized_labels(
   labels->processing_autoscroll_off =
     values[STRAPPY_WEBVIEW_LABEL_PROCESSING_AUTOSCROLL_OFF];
   labels->response_metadata = values[STRAPPY_WEBVIEW_LABEL_RESPONSE_METADATA];
-  labels->waiting_for_response =
-    values[STRAPPY_WEBVIEW_LABEL_WAITING_FOR_RESPONSE];
   labels->no_http_response =
     values[STRAPPY_WEBVIEW_LABEL_NO_HTTP_RESPONSE];
   labels->tool = values[STRAPPY_WEBVIEW_LABEL_TOOL];
@@ -955,18 +951,7 @@ static const char *strappy_webview_response_metadata_label(
       (labels->response_metadata[0] != '\0')) {
     return labels->response_metadata;
   }
-  return "Response Metadata";
-}
-
-static const char *strappy_webview_waiting_for_response_label(
-  const strappy_webview_labels *labels)
-{
-  if ((labels != NULL) &&
-      (labels->waiting_for_response != NULL) &&
-      (labels->waiting_for_response[0] != '\0')) {
-    return labels->waiting_for_response;
-  }
-  return "Waiting for response...";
+  return "Metadata";
 }
 
 static const char *strappy_webview_no_http_response_label(
@@ -1029,7 +1014,7 @@ static const char *strappy_webview_response_status_label(
       (labels->response_status[0] != '\0')) {
     return labels->response_status;
   }
-  return "Response Status";
+  return "Status";
 }
 
 static const char *strappy_webview_response_item_label(
@@ -2641,9 +2626,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(value!=='')return value;}return '';}",
     "function formatCumulativeUsageCost(value){return value!==''?value:'0.00';}",
     "function formatCumulativeWaitDuration(value){return value!==''?value:'00:00';}",
-    "function formatAPIExchangeAttemptState(value){var words=jsonText(value).replace(/_/g,' ').split(' ');var i;",
-    "if(!words.length||words[0]==='')return 'Unknown state';for(i=0;i<words.length;i++){",
-    "if(words[i]!=='')words[i]=words[i].charAt(0).toUpperCase()+words[i].substring(1);}return words.join(' ');}",
     "function rowIsResponseStatus(row){return apiExchangeKind(row)=='response_api_call'||hasClass(row,'api_call')||hasClass(row,'api_error');}",
     "function rowIsAPIExchangeItem(row){var d=apiExchangeDirection(row);return d=='request'||d=='response';}",
     "function rowIsAPIExchangeAnswer(row){return hasClass(row,'assistant')&&apiExchangeDirection(row)=='response';}",
@@ -2677,23 +2659,19 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "strappyAPIRoundCollapsed[id]=apiRoundDefaultCollapsed(rows,id);}strappyAPIRoundSettled[group]=1;}",
     "function apiRoundCollapsed(id,promptKey,rows){if(promptGroupIsProcessing(promptKey))return 0;",
     "return typeof strappyAPIRoundCollapsed[id]=='undefined'?apiRoundDefaultCollapsed(rows,id):(strappyAPIRoundCollapsed[id]?1:0);}",
-    "function responseStatusState(row){return row&&row.getAttribute?row.getAttribute('data-attempt-state')||'':'';}",
     "function responseStatusHTTPStatus(row){return row&&row.getAttribute?row.getAttribute('data-http-status')||'':'';}",
-    "function responseStatusResolved(row){var state=responseStatusState(row);return state!==''&&state!='pending'&&state!='running';}",
-    "function responseStatusCollapsed(row){var id=apiExchangeId(row);if(!responseStatusResolved(row))return 0;",
+    "function responseStatusCollapsed(row){var id=apiExchangeId(row);",
     "return typeof strappyResponseStatusCollapsed[id]=='undefined'?(rowIsAPIExchangeError(row)?0:1):(strappyResponseStatusCollapsed[id]?1:0);}",
     "function responseAttemptSummary(row){var label=apiExchangeSectionLabel(row,'response');",
     "var attempt=row.getAttribute('data-attempt-number')||'1';var attemptLabel=row.getAttribute('data-attempt-label')||'Attempt';",
     "return label+' \\u00b7 '+attemptLabel+' '+attempt;}",
-    "function responseStatusSummary(row){var label=row.getAttribute('data-response-status-label')||'Response Status';",
-    "var state=responseStatusState(row);var http=responseStatusHTTPStatus(row);if(!responseStatusResolved(row))return label+': '+",
-    "(row.getAttribute('data-waiting-for-response-label')||'Waiting for response...');",
-    "label+=': '+(http!==''?'HTTP '+http:(row.getAttribute('data-no-http-response-label')||'No HTTP response'));",
-    "if(state!=='')label+=' \\u00b7 '+formatAPIExchangeAttemptState(state);return label;}",
-    "function decorateResponseStatusRow(row){var role,a,d,summary,collapsed,active,resolved,id;if(!row)return;",
+    "function responseStatusSummary(row){var label=row.getAttribute('data-response-status-label')||'Status';",
+    "var http=responseStatusHTTPStatus(row);return label+': '+",
+    "(http!==''?'HTTP '+http:(row.getAttribute('data-no-http-response-label')||'No HTTP response'));}",
+    "function decorateResponseStatusRow(row){var role,a,d,summary,collapsed,active,id;if(!row)return;",
     "role=firstByClass(row,'role');if(!role)return;collapsed=responseStatusCollapsed(row);active=promptGroupIsProcessing(promptGroupKey(row));",
-    "resolved=responseStatusResolved(row);id=apiExchangeId(row);role.onclick=null;setClass(role,'disclosure-title',0);role.innerHTML='';",
-    "if(resolved&&!active){a=document.createElement('a');a.className='response-status-toggle';a.href='#';a.setAttribute('data-api-call-id',id);",
+    "id=apiExchangeId(row);role.onclick=null;setClass(role,'disclosure-title',0);role.innerHTML='';",
+    "if(!active){a=document.createElement('a');a.className='response-status-toggle';a.href='#';a.setAttribute('data-api-call-id',id);",
     "a.setAttribute('aria-expanded',collapsed?'false':'true');d=document.createElement('span');d.className='response-status-disclosure';",
     "d.innerHTML=disclosureIconHTML(collapsed);a.appendChild(d);role.appendChild(a);setClass(role,'disclosure-title',1);",
     "role.onclick=function(){return toggleResponseStatus(a);};}summary=document.createElement('span');summary.className='response-status-summary';",
@@ -3896,10 +3874,6 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
        strappy_webview_append_data_attribute(&buffer,
                                              "attempt-number",
                                              attempt_number_text) &&
-       strappy_webview_append_data_attribute(
-         &buffer,
-         "attempt-state",
-         (message != NULL) ? message->attempt_state : NULL) &&
        strappy_webview_append_data_attribute(&buffer,
                                              "http-status",
                                              http_status_value) &&
@@ -3946,11 +3920,6 @@ char *strappy_webview_message_html(const strappy_webview_message *message,
          "response-label",
          (round_id_text[0] != '\0') ?
            strappy_webview_response_label(labels) : NULL) &&
-       strappy_webview_append_data_attribute(
-         &buffer,
-         "waiting-for-response-label",
-         (api_call_id_text[0] != '\0') ?
-           strappy_webview_waiting_for_response_label(labels) : NULL) &&
        strappy_webview_append_data_attribute(
          &buffer,
          "no-http-response-label",

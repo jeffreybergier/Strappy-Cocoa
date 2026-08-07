@@ -812,7 +812,6 @@ static void strappy_session_webview_message_from_record(
   message->round_number = record->round_index + 1L;
   message->attempt_number = record->attempt_index + 1L;
   message->http_status = record->http_status;
-  message->attempt_state = record->attempt_state;
   message->cumulative_usage_cost = record->cumulative_usage_cost;
   message->has_cumulative_usage_cost = record->has_cumulative_usage_cost;
   message->cumulative_wait_ms = record->cumulative_wait_ms;

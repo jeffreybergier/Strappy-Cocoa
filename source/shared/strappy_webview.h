@@ -21,7 +21,6 @@ typedef struct strappy_webview_labels {
   const char *processing_autoscroll_on;
   const char *processing_autoscroll_off;
   const char *response_metadata;
-  const char *waiting_for_response;
   const char *no_http_response;
   const char *tool;
   const char *tool_call;
@@ -67,7 +66,6 @@ typedef struct strappy_webview_message {
   long round_number;
   long attempt_number;
   long http_status;
-  const char *attempt_state;
   double cumulative_usage_cost;
   int has_cumulative_usage_cost;
   long long cumulative_wait_ms;

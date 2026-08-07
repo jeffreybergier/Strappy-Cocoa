@@ -13,7 +13,7 @@
 "Tool" = "ツール";
 "Tool Request" = "ツールリクエスト";
 "Tool Response" = "ツールレスポンス";
-"Response Status" = "レスポンス状態";
+"Status" = "状態";
 "API Error" = "API エラー";
 "Response Item" = "レスポンス項目";
 "Request" = "リクエスト";
@@ -211,8 +211,7 @@
 "Prompt request is already running." = "プロンプトリクエストはすでに実行中です。";
 "Prompts" = "プロンプト";
 "Refresh" = "更新";
-"Response Metadata" = "レスポンスメタデータ";
-"Waiting for response..." = "レスポンスを待機中...";
+"Metadata" = "メタデータ";
 "No HTTP response" = "HTTP レスポンスなし";
 "Retry" = "再試行";
 "[fa:gears] Grinding" = "[fa:gears] Grinding";

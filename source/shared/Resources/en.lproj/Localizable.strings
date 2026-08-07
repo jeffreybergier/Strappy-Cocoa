@@ -13,7 +13,7 @@
 "Tool" = "Tool";
 "Tool Request" = "Tool Request";
 "Tool Response" = "Tool Response";
-"Response Status" = "Response Status";
+"Status" = "Status";
 "API Error" = "API Error";
 "Response Item" = "Response Item";
 "Request" = "Request";
@@ -211,8 +211,7 @@
 "Prompt request is already running." = "Prompt request is already running.";
 "Prompts" = "Prompts";
 "Refresh" = "Refresh";
-"Response Metadata" = "Response Metadata";
-"Waiting for response..." = "Waiting for response...";
+"Metadata" = "Metadata";
 "No HTTP response" = "No HTTP response";
 "Retry" = "Retry";
 "[fa:gears] Grinding" = "[fa:gears] Grinding";
