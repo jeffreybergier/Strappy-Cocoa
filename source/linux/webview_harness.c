@@ -427,6 +427,18 @@ static int harness_check_page_scripts(void)
          "opacity 0.3s ease;transition:opacity 0.3s ease;}") &&
        harness_expect_contains(page_html,
                                ".tool-panel{line-height:1.3;") &&
+       harness_expect_contains(
+         page_html,
+         ".bash-terminal{box-sizing:border-box;margin:0;overflow:hidden;"
+         "border:1px solid #225c2d;border-radius:3px;"
+         "background:#050805;color:#70ff83;") &&
+       harness_expect_contains(page_html,
+                               ".bash-terminal-error{border:2px solid "
+                               "#d64242;}") &&
+       harness_expect_contains(page_html,
+                               ".bash-terminal-truncated{color:#ffd166;}") &&
+       harness_expect_contains(page_html,
+                               ".bash-terminal-prompt{color:#49d864;") &&
        harness_expect_contains(page_html,
                                "function toolPanel(body,raw,cls)") &&
        harness_expect_not_contains(page_html, "tool-heading") &&
@@ -469,10 +481,33 @@ static int harness_check_page_scripts(void)
                                "node._strappyToolBodyRendered=0") &&
        harness_expect_contains(
          page_html,
-         "body.innerHTML=toolPanel(toolInputBodyHTML(raw),raw,'')") &&
+         "body.innerHTML=name=='bash'?bashCommandBody(raw,error):"
+         "toolPanel(toolInputBodyHTML(raw),raw,'')") &&
        harness_expect_contains(
          page_html,
          "body.innerHTML=toolOutputBody(raw,name,error)") &&
+       harness_expect_contains(page_html,
+                               "function bashTerminalHTML(") &&
+       harness_expect_contains(page_html,
+                               "function bashCommandBody(raw,error)") &&
+       harness_expect_contains(page_html,
+                               "function bashOutputBody(raw,error)") &&
+       harness_expect_contains(
+         page_html,
+         "truncated=o.output_truncated===true||"
+         "o.output_truncated===1") &&
+       harness_expect_contains(page_html,
+                               "TRUNCATED &middot; TAIL SHOWN") &&
+       harness_expect_contains(page_html,
+                               "bash-terminal-failed\">FAILED</span>") &&
+       harness_expect_contains(page_html,
+                               "if(name=='bash')return "
+                               "bashOutputBody(raw,error)") &&
+       harness_expect_contains(
+         page_html,
+         "if(name=='bash'){body.innerHTML=(data.outputOnly?'':"
+         "bashCommandBody(data.args||'',data.error))+"
+         "bashOutputBody(data.output||'',data.error)") &&
        harness_expect_not_contains(
          page_html,
          "body.innerHTML=toolPanel(toolInputHTML(") &&
@@ -2637,6 +2672,8 @@ static int harness_check_responses_items(void)
   char *bash_function_html;
   char *output_html;
   char *bash_output_html;
+  char *truncated_bash_output_html;
+  char *error_bash_output_html;
   char *error_output_html;
   char *ok_false_output_html;
   char *search_html;
@@ -2813,6 +2850,43 @@ static int harness_check_responses_items(void)
     strappy_webview_message_html(&message, &labels, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
+  message.element_id = "response-bash-output-truncated-1";
+  message.round_id = 4LL;
+  message.round_number = 4L;
+  message.direction = "request";
+  message.role = "api_function_output";
+  message.kind = "function_call_output";
+  message.tool_display_registry_json = harness_tool_display_registry_json;
+  message.tool_call_id = "call-bash-truncated";
+  message.tool_name = "bash";
+  message.arguments_json = "{\"command\":\"many-lines\"}";
+  message.result_json =
+    "{\"output\":\"captured output tail\","
+    "\"output_truncated\":true}";
+  message.text = message.result_json;
+  truncated_bash_output_html =
+    strappy_webview_message_html(&message, &labels, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "response-bash-output-error-1";
+  message.round_id = 4LL;
+  message.round_number = 4L;
+  message.direction = "request";
+  message.role = "api_function_output";
+  message.kind = "function_call_output";
+  message.tool_display_registry_json = harness_tool_display_registry_json;
+  message.tool_call_id = "call-bash-error";
+  message.tool_name = "bash";
+  message.arguments_json = "{\"command\":\"exit 7\"}";
+  message.result_json =
+    "{\"output\":\"Error: Command exited with code 7.\","
+    "\"output_truncated\":false}";
+  message.text = message.result_json;
+  message.is_error = 1;
+  error_bash_output_html =
+    strappy_webview_message_html(&message, &labels, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
   message.element_id = "response-output-error-1";
   message.round_id = 4LL;
   message.round_number = 4L;
@@ -2919,6 +2993,8 @@ static int harness_check_responses_items(void)
        (function_html != NULL) && (confirm_function_html != NULL) &&
        (bash_function_html != NULL) &&
        (output_html != NULL) && (bash_output_html != NULL) &&
+       (truncated_bash_output_html != NULL) &&
+       (error_bash_output_html != NULL) &&
        (error_output_html != NULL) && (ok_false_output_html != NULL) &&
        (search_html != NULL) && (fetch_html != NULL) &&
        (developer_html != NULL) && (quality_html != NULL) &&
@@ -3151,6 +3227,37 @@ static int harness_check_responses_items(void)
        harness_expect_contains(bash_output_html,
                                "data-tool-error=\"0\"") &&
        harness_expect_not_contains(bash_output_html, "state-error") &&
+       harness_expect_contains(
+         truncated_bash_output_html,
+         "id=\"response-bash-output-truncated-1\" class=\"row "
+         "api_function_output\"") &&
+       harness_expect_contains(truncated_bash_output_html,
+                               "data-tool-name=\"bash\"") &&
+       harness_expect_contains(
+         truncated_bash_output_html,
+         "&quot;output_truncated&quot;:true}") &&
+       harness_expect_contains(truncated_bash_output_html,
+                               "data-tool-error=\"0\"") &&
+       harness_expect_contains(
+         truncated_bash_output_html,
+         "class=\"bubble api-tool-card tool-card tool-card-open\"") &&
+       harness_expect_not_contains(truncated_bash_output_html,
+                                   "state-error") &&
+       harness_expect_contains(
+         error_bash_output_html,
+         "id=\"response-bash-output-error-1\" class=\"row "
+         "api_function_output state-error\"") &&
+       harness_expect_contains(error_bash_output_html,
+                               "data-tool-name=\"bash\"") &&
+       harness_expect_contains(error_bash_output_html,
+                               "data-tool-error=\"1\"") &&
+       harness_expect_contains(
+         error_bash_output_html,
+         "&quot;output&quot;:&quot;Error: Command exited with code "
+         "7.&quot;") &&
+       harness_expect_contains(
+         error_bash_output_html,
+         "class=\"bubble api-tool-card tool-card tool-card-open\"") &&
        harness_expect_contains(error_output_html,
                                "class=\"row api_function_output state-error\"") &&
        harness_expect_contains(error_output_html,
@@ -3291,6 +3398,8 @@ static int harness_check_responses_items(void)
   strappy_webview_free(search_html);
   strappy_webview_free(ok_false_output_html);
   strappy_webview_free(error_output_html);
+  strappy_webview_free(error_bash_output_html);
+  strappy_webview_free(truncated_bash_output_html);
   strappy_webview_free(bash_output_html);
   strappy_webview_free(output_html);
   strappy_webview_free(bash_function_html);
