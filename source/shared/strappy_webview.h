@@ -99,6 +99,7 @@ typedef struct strappy_webview_message {
   int is_error;
   const strappy_webview_database_display_name *database_display_names;
   size_t database_display_name_count;
+  const char *tool_display_registry_json;
 } strappy_webview_message;
 
 typedef struct strappy_webview_script_batch strappy_webview_script_batch;

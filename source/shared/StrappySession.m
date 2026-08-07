@@ -2926,6 +2926,7 @@ static BOOL StrappySessionRecordFromOptions(
                                                    error:(NSError **)error
 {
   NSString *databasePath;
+  NSString *resourcePath;
   char *javaScript;
   char *storedNextTimelineCursor;
   char *strappyError;
@@ -2944,6 +2945,7 @@ static BOOL StrappySessionRecordFromOptions(
                                                         error:error]) {
     return nil;
   }
+  resourcePath = [[NSBundle mainBundle] resourcePath];
 
   sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
     [sessionIdentifier_ longLongValue] : 0LL;
@@ -2953,6 +2955,7 @@ static BOOL StrappySessionRecordFromOptions(
   javaScript = strappy_session_webview_append_messages_js_for_session(
     [databasePath fileSystemRepresentation],
     sessionId,
+    [resourcePath fileSystemRepresentation],
     StrappySessionOptionalCString(timelineCursor),
     &storedAppendedMessageCount,
     &storedNextTimelineCursor,
@@ -2984,6 +2987,7 @@ static BOOL StrappySessionRecordFromOptions(
 {
   NSString *databasePath;
   NSString *messageKey;
+  NSString *resourcePath;
   NSString *statusJSON;
   NSString *streamEvent;
   char *strappyError;
@@ -3026,11 +3030,13 @@ static BOOL StrappySessionRecordFromOptions(
                                                         error:error]) {
     return @"";
   }
+  resourcePath = [[NSBundle mainBundle] resourcePath];
 
   strappyError = NULL;
   js = strappy_session_webview_message_update_js_for_key(
     [databasePath UTF8String],
     sessionId,
+    [resourcePath fileSystemRepresentation],
     [messageKey UTF8String],
     &strappyError);
   if (js == NULL) {

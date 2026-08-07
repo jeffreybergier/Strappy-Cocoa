@@ -198,6 +198,7 @@ char *strappy_session_webview_messages_page_html_for_session(
 char *strappy_session_webview_append_messages_js_for_session(
   const char *db_path,
   long long session_id,
+  const char *resource_dir,
   const char *timeline_cursor,
   size_t *appended_message_count_out,
   char **next_timeline_cursor_out,
@@ -211,6 +212,7 @@ char *strappy_session_webview_set_round_context_inclusion_js(
 char *strappy_session_webview_message_update_js_for_key(
   const char *db_path,
   long long session_id,
+  const char *resource_dir,
   const char *message_key,
   char **error_out);
 

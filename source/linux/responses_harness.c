@@ -5033,6 +5033,7 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
       strappy_session_webview_append_messages_js_for_session(
         path,
         session_id,
+        "../shared/Resources",
         first_timeline_cursor,
         &appended_message_count,
         &next_timeline_cursor,
@@ -5898,7 +5899,9 @@ static int harness_test_function_tool_continuation(void)
         (strcmp(record->tool_call_id,
                 "call-database-context-error") == 0)) {
       saw_named_output = (record->tool_name != NULL) &&
-        (strcmp(record->tool_name, "database_context") == 0);
+        (strcmp(record->tool_name, "database_context") == 0) &&
+        (record->arguments_json != NULL) &&
+        (strcmp(record->arguments_json, "{\"unexpected\":true}") == 0);
     }
   }
   if (ok && !saw_named_output) {
@@ -7525,6 +7528,7 @@ static int harness_verify_invalid_structured_text_webview_recovery(
   append_script = strappy_session_webview_append_messages_js_for_session(
     path,
     session_id,
+    "../shared/Resources",
     before_cursor,
     &append_count,
     &append_cursor,
@@ -8277,6 +8281,7 @@ static int harness_test_session_webview_rendering(void)
   request_script = strappy_session_webview_append_messages_js_for_session(
     path,
     session_id,
+    "../shared/Resources",
     initial_cursor,
     &request_message_count,
     &request_timeline_cursor,
@@ -8381,6 +8386,7 @@ static int harness_test_session_webview_rendering(void)
   append_script = strappy_session_webview_append_messages_js_for_session(
     path,
     session_id,
+    "../shared/Resources",
     request_timeline_cursor,
     &message_count,
     &append_timeline_cursor,
@@ -8403,6 +8409,7 @@ static int harness_test_session_webview_rendering(void)
   empty_script = strappy_session_webview_append_messages_js_for_session(
     path,
     session_id,
+    "../shared/Resources",
     page_timeline_cursor,
     &message_count,
     &empty_timeline_cursor,
@@ -8423,6 +8430,7 @@ static int harness_test_session_webview_rendering(void)
   invalid_script = strappy_session_webview_append_messages_js_for_session(
     path,
     session_id,
+    "../shared/Resources",
     "not-a-timeline-cursor",
     &message_count,
     &invalid_timeline_cursor,

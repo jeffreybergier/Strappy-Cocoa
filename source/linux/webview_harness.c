@@ -247,6 +247,7 @@ static int harness_check_database_display_names(void)
   message.element_id = "database-display-tool";
   message.role = "api_function_call";
   message.tool_name = "database_query";
+  message.tool_display_registry_json = harness_tool_display_registry_json;
   message.arguments_json =
     "{\"database_id\":\"db_7\",\"note\":\"db_70 & db_8\"}";
   message.text = message.arguments_json;
@@ -278,6 +279,10 @@ static int harness_check_database_display_names(void)
          "data-arguments-json=\"{&quot;database_id&quot;:&quot;Contacts "
          "&amp; \\&quot;Notes\\&quot;.sqlite&quot;,&quot;note&quot;:"
          "&quot;Archive.sqlite &amp; db_8&quot;}\"") &&
+       harness_expect_contains(
+         tool_html,
+         "data-tool-display-title=\"database_query · Contacts &amp; "
+         "&quot;Notes&quot;.sqlite\"") &&
        harness_expect_not_contains(tool_html, "db_7") &&
        harness_expect_not_contains(tool_html, "db_70") &&
        harness_expect_contains(
@@ -455,12 +460,16 @@ static int harness_check_page_scripts(void)
          "if(v.invalid_utf8)m[m.length]='invalid UTF-8'") &&
        harness_expect_contains(page_html, "function toolObjectArrayTable") &&
        harness_expect_contains(page_html, "function toolInputBodyHTML") &&
-       harness_expect_contains(page_html, "function toolOutputHasError") &&
+       harness_expect_not_contains(page_html, "function toolOutputHasError") &&
        harness_expect_contains(page_html, "function renderAPIToolRows") &&
+       harness_expect_contains(page_html, "function ensureToolCardRendered") &&
+       harness_expect_contains(page_html,
+                               "else{ensureToolCardRendered(p);") &&
+       harness_expect_contains(page_html,
+                               "node._strappyToolBodyRendered=0") &&
        harness_expect_contains(
          page_html,
-         "body.innerHTML=toolPanel(toolInputBodyHTML("
-         "name,raw,strappyDatabaseNames),raw,'')") &&
+         "body.innerHTML=toolPanel(toolInputBodyHTML(raw),raw,'')") &&
        harness_expect_contains(
          page_html,
          "body.innerHTML=toolOutputBody(raw,name,error)") &&
@@ -470,18 +479,12 @@ static int harness_check_page_scripts(void)
        harness_expect_not_contains(
          page_html,
          "body.innerHTML=toolOutputHTML(") &&
-       harness_expect_contains(
-         page_html,
-         "if(!card.outputOnly)h+=toolInputHTML(") &&
        harness_expect_contains(page_html,
-                               "h+=toolOutputHTML(card.output,name,card.error)") &&
+                               "data.outputOnly?'':toolInputHTML("
+                               "data.args||'')") &&
        harness_expect_contains(page_html,
-                               "error=hasClass(row,'state-error')||"
-                               "toolOutputHasError(raw)") &&
+                               "error=apiToolHasError(row)") &&
        harness_expect_contains(page_html, "function apiToolLabel(row)") &&
-       harness_expect_contains(page_html,
-                               "setToolCardSummary(summary,apiToolLabel(row)+"
-                               "': '+title,0)") &&
        harness_expect_contains(page_html,
                                "setToolCardSummary(summary,apiToolLabel(row)+"
                                "': '+title,error)") &&
@@ -1245,18 +1248,15 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                ".api-tool-card .tool-card-body") &&
        harness_expect_contains(page_html,
-                               "c.error=hasClass(row,'state-error')||"
-                               "toolOutputHasError(raw)") &&
-       harness_expect_contains(
-         page_html,
-         "var strappyToolDisplayRegistry={\"database_query\":") &&
-       harness_expect_contains(page_html, "function toolDisplaySpec") &&
-       harness_expect_contains(page_html, "function toolPathValue") &&
-       harness_expect_contains(page_html, "function toolPromotedValue") &&
-       harness_expect_contains(page_html, "function toolDisplayTitle") &&
-       harness_expect_contains(page_html, "transform=='comma_separated'") &&
-       harness_expect_contains(page_html, "parts.join(', ')") &&
-       harness_expect_contains(page_html, "transform=='database_filename'") &&
+                               "c.error=hasClass(row,'state-error')") &&
+       harness_expect_not_contains(page_html,
+                                   "strappyDatabaseNames") &&
+       harness_expect_not_contains(page_html,
+                                   "strappyToolDisplayRegistry") &&
+       harness_expect_not_contains(page_html,
+                                   "function collectDatabaseNames") &&
+       harness_expect_not_contains(page_html,
+                                   "function toolDisplayTitle") &&
        harness_expect_contains(page_html, "function responseItemObject") &&
        harness_expect_contains(page_html,
                                "function renderAPIServerToolRows") &&
@@ -1267,7 +1267,7 @@ static int harness_check_page_scripts(void)
                                ".api_server_tool .bubble,"
                                ".answer_quality .bubble{") &&
        harness_expect_not_contains(page_html, "response-item-content") &&
-       harness_expect_contains(page_html, "calls[id].args") &&
+       harness_expect_not_contains(page_html, "calls[id].args") &&
        harness_expect_contains(page_html,
                                "white-space:nowrap;overflow:hidden;"
                                "text-overflow:ellipsis;") &&
@@ -2079,6 +2079,9 @@ static int harness_check_tool_event_text(void)
   }
 
   ok = harness_expect_contains(event_text, "\"tool_name\":\"memory_read\"") &&
+       harness_expect_contains(event_text,
+                               "\"display_title\":\"memory_read\"") &&
+       harness_expect_contains(event_text, "\"is_error\":false") &&
        harness_expect_contains(event_text, "\\\"records\\\"") &&
        harness_expect_contains(script, "appendToolEventText");
 
@@ -2630,10 +2633,12 @@ static int harness_check_responses_items(void)
   char *secondary_reasoning_html;
   char *request_reasoning_html;
   char *function_html;
+  char *confirm_function_html;
   char *bash_function_html;
   char *output_html;
   char *bash_output_html;
   char *error_output_html;
+  char *ok_false_output_html;
   char *search_html;
   char *fetch_html;
   char *developer_html;
@@ -2725,6 +2730,7 @@ static int harness_check_responses_items(void)
   message.direction = "response";
   message.role = "api_function_call";
   message.kind = "function_call";
+  message.tool_display_registry_json = harness_tool_display_registry_json;
   message.can_include_in_context = 1;
   message.include_in_context = 1;
   message.tool_call_id = "call-database-query";
@@ -2735,12 +2741,28 @@ static int harness_check_responses_items(void)
   function_html = strappy_webview_message_html(&message, &labels, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
+  message.element_id = "response-function-confirm-1";
+  message.round_id = 3LL;
+  message.direction = "response";
+  message.role = "api_function_call";
+  message.kind = "function_call";
+  message.tool_display_registry_json = harness_tool_display_registry_json;
+  message.tool_call_id = "call-fontawesome-confirm";
+  message.tool_name = "fontawesome_confirm";
+  message.arguments_json =
+    "{\"shortcodes\":[\"heart\",\"fa:solid:star\"]}";
+  message.text = message.arguments_json;
+  confirm_function_html =
+    strappy_webview_message_html(&message, &labels, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
   message.element_id = "response-bash-function-1";
   message.round_id = 3LL;
   message.api_call_id = 1LL;
   message.direction = "response";
   message.role = "api_function_call";
   message.kind = "function_call";
+  message.tool_display_registry_json = harness_tool_display_registry_json;
   message.can_include_in_context = 1;
   message.include_in_context = 1;
   message.tool_call_id = "call-bash";
@@ -2757,9 +2779,13 @@ static int harness_check_responses_items(void)
   message.direction = "request";
   message.role = "api_function_output";
   message.kind = "function_call_output";
+  message.tool_display_registry_json = harness_tool_display_registry_json;
   message.can_include_in_context = 1;
   message.include_in_context = 0;
   message.tool_call_id = "call-database-query";
+  message.tool_name = "database_query";
+  message.arguments_json =
+    "{\"database_id\":\"database-1\",\"sql\":\"SELECT 1\"}";
   message.result_json =
     "{\"columns\":[\"value\"],\"rows\":[[1]],"
     "\"rows_truncated\":false}";
@@ -2773,10 +2799,12 @@ static int harness_check_responses_items(void)
   message.direction = "request";
   message.role = "api_function_output";
   message.kind = "function_call_output";
+  message.tool_display_registry_json = harness_tool_display_registry_json;
   message.can_include_in_context = 1;
   message.include_in_context = 1;
   message.tool_call_id = "call-bash";
   message.tool_name = "bash";
+  message.arguments_json = "{\"command\":\"pwd\"}";
   message.result_json =
     "{\"output\":\"/private/var/mobile\","
     "\"output_truncated\":false}";
@@ -2791,13 +2819,30 @@ static int harness_check_responses_items(void)
   message.direction = "request";
   message.role = "api_function_output";
   message.kind = "function_call_output";
+  message.tool_display_registry_json = harness_tool_display_registry_json;
   message.can_include_in_context = 1;
   message.include_in_context = 1;
   message.tool_call_id = "call-database-query-error";
-  message.result_json = "Error: Tool failed.";
-  message.text = "Error: Tool failed.";
-  message.is_error = 1;
+  message.tool_name = "database_query";
+  message.arguments_json = "{\"database_id\":\"database-1\"}";
+  message.result_json = "{\"error\":\"Tool failed.\"}";
+  message.text = message.result_json;
   error_output_html =
+    strappy_webview_message_html(&message, &labels, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "response-output-ok-false-1";
+  message.round_id = 4LL;
+  message.direction = "request";
+  message.role = "api_function_output";
+  message.kind = "function_call_output";
+  message.tool_display_registry_json = harness_tool_display_registry_json;
+  message.tool_call_id = "call-database-query-ok-false";
+  message.tool_name = "database_query";
+  message.arguments_json = "{\"database_id\":\"database-1\"}";
+  message.result_json = "{\"ok\":false}";
+  message.text = message.result_json;
+  ok_false_output_html =
     strappy_webview_message_html(&message, &labels, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
@@ -2807,6 +2852,7 @@ static int harness_check_responses_items(void)
   message.direction = "response";
   message.role = "api_item";
   message.kind = "openrouter:web_search";
+  message.tool_display_registry_json = harness_tool_display_registry_json;
   message.can_include_in_context = 1;
   message.include_in_context = 1;
   message.response_item_action_json =
@@ -2824,6 +2870,7 @@ static int harness_check_responses_items(void)
   message.direction = "response";
   message.role = "api_item";
   message.kind = "openrouter:web_fetch";
+  message.tool_display_registry_json = harness_tool_display_registry_json;
   message.can_include_in_context = 1;
   message.include_in_context = 1;
   message.response_item_url = "https://example.com/article";
@@ -2869,9 +2916,10 @@ static int harness_check_responses_items(void)
   ok = (call_html != NULL) && (reasoning_html != NULL) &&
        (secondary_reasoning_html != NULL) &&
        (request_reasoning_html != NULL) &&
-       (function_html != NULL) && (bash_function_html != NULL) &&
+       (function_html != NULL) && (confirm_function_html != NULL) &&
+       (bash_function_html != NULL) &&
        (output_html != NULL) && (bash_output_html != NULL) &&
-       (error_output_html != NULL) &&
+       (error_output_html != NULL) && (ok_false_output_html != NULL) &&
        (search_html != NULL) && (fetch_html != NULL) &&
        (developer_html != NULL) && (quality_html != NULL) &&
        harness_expect_contains(call_html, "class=\"row api_call\"") &&
@@ -2993,6 +3041,11 @@ static int harness_check_responses_items(void)
          "Context\"") &&
        harness_expect_contains(function_html,
                                "data-tool-label=\"Localized Tool Request\"") &&
+       harness_expect_contains(
+         function_html,
+         "data-tool-display-title=\"database_query · database-1\"") &&
+       harness_expect_contains(function_html,
+                               "data-tool-error=\"0\"") &&
        harness_expect_contains(function_html,
                                "data-arguments-json=\"{&quot;database_id&quot;:") &&
        harness_expect_contains(function_html,
@@ -3001,7 +3054,7 @@ static int harness_check_responses_items(void)
                                "class=\"tool-card-toggle disclosure-title\"") &&
        harness_expect_contains(function_html,
                                "class=\"tool-card-summary\">Localized Tool Request: "
-                               "database_query</span>") &&
+                               "database_query · database-1</span>") &&
        harness_expect_contains(function_html,
                                "aria-expanded=\"false\"") &&
        harness_expect_contains(function_html,
@@ -3010,9 +3063,17 @@ static int harness_check_responses_items(void)
                                "fa-angle-right") &&
        harness_expect_contains(function_html,
                                "class=\"tool-card-body\"") &&
+       harness_expect_contains(function_html,
+                               "class=\"api-tool-fallback\"") &&
+       harness_expect_not_contains(function_html,
+                                   "class=\"tool-panel") &&
        harness_expect_not_contains(function_html,
                                    "tool-card-open") &&
        harness_expect_not_contains(function_html, "class=\"row tool_call\"") &&
+       harness_expect_contains(
+         confirm_function_html,
+         "data-tool-display-title=\"fontawesome_confirm · heart, "
+         "fa:solid:star\"") &&
        harness_expect_contains(bash_function_html,
                                "class=\"row api_function_call\"") &&
        harness_expect_contains(bash_function_html,
@@ -3023,7 +3084,9 @@ static int harness_check_responses_items(void)
        harness_expect_contains(bash_function_html,
                                "aria-expanded=\"true\"") &&
        harness_expect_contains(bash_function_html, "fa-angle-down") &&
-       harness_expect_not_contains(bash_function_html, "tool-error") &&
+       harness_expect_contains(bash_function_html,
+                               "data-tool-error=\"0\"") &&
+       harness_expect_not_contains(bash_function_html, "state-error") &&
        harness_expect_contains(output_html,
                                "class=\"row api_function_output\"") &&
        harness_expect_contains(output_html,
@@ -3042,6 +3105,11 @@ static int harness_check_responses_items(void)
                                "data-tool-call-id=\"call-database-query\"") &&
        harness_expect_contains(output_html,
                                "data-tool-label=\"Localized Tool Response\"") &&
+       harness_expect_contains(
+         output_html,
+         "data-tool-display-title=\"database_query · database-1\"") &&
+       harness_expect_contains(output_html,
+                               "data-tool-error=\"0\"") &&
        harness_expect_contains(output_html,
                                "data-result-json=\"{&quot;columns&quot;:") &&
        harness_expect_contains(output_html,
@@ -3050,7 +3118,7 @@ static int harness_check_responses_items(void)
                                "class=\"tool-card-toggle disclosure-title\"") &&
        harness_expect_contains(output_html,
                                "class=\"tool-card-summary\">Localized Tool Response: "
-                               "Localized Tool Response</span>") &&
+                               "database_query · database-1</span>") &&
        harness_expect_contains(output_html,
                                "aria-expanded=\"false\"") &&
        harness_expect_contains(output_html,
@@ -3059,6 +3127,10 @@ static int harness_check_responses_items(void)
                                "fa-angle-right") &&
        harness_expect_contains(output_html,
                                "class=\"tool-card-body\"") &&
+       harness_expect_contains(output_html,
+                               "class=\"api-tool-fallback\"") &&
+       harness_expect_not_contains(output_html,
+                                   "class=\"tool-panel") &&
        harness_expect_not_contains(output_html,
                                    "tool-card-open") &&
        harness_expect_contains(bash_output_html,
@@ -3076,19 +3148,38 @@ static int harness_check_responses_items(void)
        harness_expect_contains(bash_output_html,
                                "aria-expanded=\"true\"") &&
        harness_expect_contains(bash_output_html, "fa-angle-down") &&
-       harness_expect_not_contains(bash_output_html, "tool-error") &&
+       harness_expect_contains(bash_output_html,
+                               "data-tool-error=\"0\"") &&
+       harness_expect_not_contains(bash_output_html, "state-error") &&
        harness_expect_contains(error_output_html,
                                "class=\"row api_function_output state-error\"") &&
        harness_expect_contains(error_output_html,
-                               "data-result-json=\"Error: Tool failed.\"") &&
+                               "data-tool-error=\"1\"") &&
+       harness_expect_contains(error_output_html,
+                               "data-result-json=\"{&quot;error&quot;:"
+                               "&quot;Tool failed.&quot;}\"") &&
        harness_expect_contains(error_output_html,
                                "class=\"bubble api-tool-card tool-card\"") &&
+       harness_expect_contains(
+         ok_false_output_html,
+         "class=\"row api_function_output state-error\"") &&
+       harness_expect_contains(ok_false_output_html,
+                               "data-tool-error=\"1\"") &&
+       harness_expect_contains(ok_false_output_html,
+                               "data-result-json=\"{&quot;ok&quot;:false}\"") &&
        harness_expect_contains(search_html,
                                "class=\"row api_item\"") &&
        harness_expect_contains(search_html,
                                "data-kind=\"openrouter:web_search\"") &&
        harness_expect_contains(search_html,
                                "data-tool-label=\"Localized Tool\"") &&
+       harness_expect_contains(search_html,
+                               "data-tool-display-title=\"Web Search · "
+                               "Strappy Cocoa\"") &&
+       harness_expect_contains(search_html,
+                               "data-tool-error=\"0\"") &&
+       harness_expect_contains(search_html,
+                               "data-tool-response-item=\"1\"") &&
        harness_expect_contains(
          search_html,
          "data-response-item-action-json=\"{&quot;type&quot;:"
@@ -3099,6 +3190,13 @@ static int harness_check_responses_items(void)
                                "class=\"row api_item\"") &&
        harness_expect_contains(fetch_html,
                                "data-kind=\"openrouter:web_fetch\"") &&
+       harness_expect_contains(fetch_html,
+                               "data-tool-display-title=\"Web Fetch · "
+                               "https://example.com/article\"") &&
+       harness_expect_contains(fetch_html,
+                               "data-tool-error=\"0\"") &&
+       harness_expect_contains(fetch_html,
+                               "data-tool-response-item=\"1\"") &&
        harness_expect_contains(
          fetch_html,
          "data-response-item-url=\"https://example.com/article\"") &&
@@ -3191,10 +3289,12 @@ static int harness_check_responses_items(void)
   strappy_webview_free(developer_html);
   strappy_webview_free(fetch_html);
   strappy_webview_free(search_html);
+  strappy_webview_free(ok_false_output_html);
   strappy_webview_free(error_output_html);
   strappy_webview_free(bash_output_html);
   strappy_webview_free(output_html);
   strappy_webview_free(bash_function_html);
+  strappy_webview_free(confirm_function_html);
   strappy_webview_free(function_html);
   strappy_webview_free(request_reasoning_html);
   strappy_webview_free(secondary_reasoning_html);

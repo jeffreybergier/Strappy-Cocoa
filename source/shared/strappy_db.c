@@ -18427,37 +18427,69 @@ static int strappy_db_semantic_finalize_ranged_timeline_totals(
   return 1;
 }
 
-static char *strappy_db_semantic_function_output_tool_name(
+static int strappy_db_semantic_function_output_tool_context(
   sqlite3 *db,
   long long item_id,
+  char **tool_name_out,
+  char **arguments_json_out,
   char **error_out)
 {
   static const char *sql =
-    "SELECT c.tool_name FROM function_outputs o "
+    "SELECT c.item_id, c.tool_name FROM function_outputs o "
     "JOIN function_calls c ON c.item_id = o.function_call_item_id "
     "WHERE o.item_id = ?;";
   sqlite3_stmt *stmt;
+  cJSON *arguments;
+  long long function_call_item_id;
+  char *arguments_json;
   char *tool_name;
   int rc;
 
+  if ((tool_name_out == NULL) || (arguments_json_out == NULL)) {
+    strappy_set_error(error_out,
+                      "Function output tool context has no output.");
+    return 0;
+  }
+  *tool_name_out = NULL;
+  *arguments_json_out = NULL;
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   if ((rc != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)item_id) != SQLITE_OK) ||
       (sqlite3_step(stmt) != SQLITE_ROW)) {
     strappy_set_formatted_error(error_out,
-                                "Could not read function output tool name: %s",
+                                "Could not read function output tool context: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
-    return NULL;
+    return 0;
   }
-  tool_name = strappy_db_column_string(stmt, 0);
+  function_call_item_id = (long long)sqlite3_column_int64(stmt, 0);
+  tool_name = strappy_db_column_string(stmt, 1);
   sqlite3_finalize(stmt);
   if (tool_name == NULL) {
     strappy_set_error(error_out,
                       "Could not allocate function output tool name.");
+    return 0;
   }
-  return tool_name;
+  arguments = strappy_db_semantic_load_document(db,
+                                                function_call_item_id,
+                                                "arguments",
+                                                error_out);
+  if (arguments == NULL) {
+    free(tool_name);
+    return 0;
+  }
+  arguments_json = cJSON_PrintUnformatted(arguments);
+  cJSON_Delete(arguments);
+  if (arguments_json == NULL) {
+    free(tool_name);
+    strappy_set_error(error_out,
+                      "Could not serialize function output tool arguments.");
+    return 0;
+  }
+  *tool_name_out = tool_name;
+  *arguments_json_out = arguments_json;
+  return 1;
 }
 
 static int strappy_db_semantic_populate_timeline_item(
@@ -18469,6 +18501,8 @@ static int strappy_db_semantic_populate_timeline_item(
   cJSON *item;
   cJSON *value;
   const char *role;
+  char *output_arguments_json;
+  char *output_tool_name;
 
   item = strappy_db_semantic_load_item(
     db, (long long)sqlite3_column_int64(stmt, 5), error_out);
@@ -18496,19 +18530,24 @@ static int strappy_db_semantic_populate_timeline_item(
   if (cJSON_IsString(value)) {
     record->tool_name = strappy_string_duplicate(value->valuestring);
   }
-  if ((record->tool_name == NULL) &&
-      (strcmp(role, "api_function_output") == 0)) {
-    record->tool_name = strappy_db_semantic_function_output_tool_name(
-      db,
-      (long long)sqlite3_column_int64(stmt, 5),
-      error_out);
-    if (record->tool_name == NULL) {
+  if (strcmp(role, "api_function_output") == 0) {
+    output_arguments_json = NULL;
+    output_tool_name = NULL;
+    if (!strappy_db_semantic_function_output_tool_context(
+          db,
+          (long long)sqlite3_column_int64(stmt, 5),
+          &output_tool_name,
+          &output_arguments_json,
+          error_out)) {
       cJSON_Delete(item);
       return 0;
     }
+    free(record->tool_name);
+    record->tool_name = output_tool_name;
+    record->arguments_json = output_arguments_json;
   }
   value = cJSON_GetObjectItem(item, "arguments");
-  if (cJSON_IsString(value)) {
+  if ((record->arguments_json == NULL) && cJSON_IsString(value)) {
     record->arguments_json = strappy_string_duplicate(value->valuestring);
   }
   value = cJSON_GetObjectItem(item, "output");

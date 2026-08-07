@@ -62,7 +62,8 @@ WEBVIEW_HARNESS_SOURCES = \
 	webview_harness.c \
 	$(SHARED_DIR)/strappy_webview.c \
 	$(SHARED_DIR)/strappy_cocoa.c \
-	$(SHARED_DIR)/strappy_core.c
+	$(SHARED_DIR)/strappy_core.c \
+	$(CJSON_DIR)/cJSON.c
 
 RESPONSES_HARNESS_SOURCES = \
 	responses_harness.c \
