@@ -25,6 +25,11 @@
 + (void)XP_setAppearanceOnTintColorIfAvailable:(UIColor *)onTintColor;
 @end
 
+@interface UITableView (XPUIKit)
++ (void)XP_setSectionHeaderFooterAppearanceTintColorIfAvailable:
+  (UIColor *)tintColor;
+@end
+
 @interface UIScrollView (XPUIKit)
 - (void)XP_setKeyboardDismissModeOnDrag;
 @end

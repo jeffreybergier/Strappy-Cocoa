@@ -11,6 +11,8 @@
 - (instancetype)initWithActionIcon:(AIFontAwesomeIcon)actionIcon
                             target:(id)target
                             action:(SEL)action;
+- (void)setActionButtonIcon:(AIFontAwesomeIcon)actionIcon
+                      style:(AIFontAwesomeStyle)style;
 - (void)setActionButtonTitle:(NSString *)title;
 - (void)layoutForToolbar:(UIToolbar *)toolbar
           containingItem:(UIBarButtonItem *)toolbarItem

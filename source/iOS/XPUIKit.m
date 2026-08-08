@@ -300,6 +300,26 @@ static UITextField *XPUIKitFindTextField(UIView *view)
 
 @end
 
+@implementation UITableView (XPUIKit)
+
++ (void)XP_setSectionHeaderFooterAppearanceTintColorIfAvailable:
+  (UIColor *)tintColor
+{
+  Class headerFooterViewClass;
+  id appearanceProxy;
+
+  headerFooterViewClass = NSClassFromString(@"UITableViewHeaderFooterView");
+  appearanceProxy = XPUIKitAppearanceProxyForClass(headerFooterViewClass);
+  if (XPUIKitAppearanceProxyCanForwardSelector(
+        appearanceProxy,
+        @selector(setTintColor:))) {
+    [appearanceProxy performSelector:@selector(setTintColor:)
+                          withObject:tintColor];
+  }
+}
+
+@end
+
 @implementation UIScrollView (XPUIKit)
 
 - (void)XP_setKeyboardDismissModeOnDrag

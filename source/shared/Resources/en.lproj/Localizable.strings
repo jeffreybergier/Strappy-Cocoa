@@ -104,8 +104,9 @@
 "Quick Scan" = "Quick Scan";
 "Full Scan" = "Full Scan";
 "Scan" = "Scan";
-"Quick Scan skips files with unrelated extensions. Full Scan checks every file on the disk to see if it is a SQLite database and can take quite a long time." = "Quick Scan skips files with unrelated extensions. Full Scan checks every file on the disk to see if it is a SQLite database and can take quite a long time.";
+"Scans your home folder for SQLite databases. After scanning, whitelist desired databases so Strappy can read their data. Full Scan, scans every file in your home folder. Quick Scan, saved time by only scanning files with common file extensions used for SQLite databases." = "Scans your home folder for SQLite databases. After scanning, whitelist desired databases so Strappy can read their data. Full Scan, scans every file in your home folder. Quick Scan, saved time by only scanning files with common file extensions used for SQLite databases.";
 "Study" = "Study";
+"Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu." = "Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu.";
 "Reset" = "Reset";
 "Could Not Delete Study" = "Could Not Delete Study";
 "Description" = "Description";

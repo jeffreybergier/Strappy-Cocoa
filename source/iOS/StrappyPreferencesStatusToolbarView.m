@@ -3,6 +3,8 @@
 #import "StrappyAppearance.h"
 #import "XPUIKit.h"
 
+#import <QuartzCore/QuartzCore.h>
+
 static const CGFloat kStrappyPreferencesToolbarSideItemWidth = 44.0f;
 static const CGFloat kStrappyPreferencesToolbarLabelHeight = 30.0f;
 static const CGFloat kStrappyPreferencesToolbarFallbackHeight = 44.0f;
@@ -16,6 +18,7 @@ static const CGFloat kStrappyPreferencesToolbarTextActionWidth = 64.0f;
 @property (nonatomic, strong) UIActivityIndicatorView *activityIndicatorView;
 @property (nonatomic, copy) NSString *primaryActionTitle;
 @property (nonatomic, assign) AIFontAwesomeIcon actionIcon;
+@property (nonatomic, assign) AIFontAwesomeStyle actionStyle;
 @property (nonatomic, assign) CGFloat toolbarWidth;
 @property (nonatomic, assign) CGFloat toolbarContentOffsetX;
 - (void)buildStatusLabel;
@@ -47,6 +50,7 @@ static const CGFloat kStrappyPreferencesToolbarTextActionWidth = 64.0f;
     [self setBackgroundColor:[UIColor clearColor]];
     [self setOpaque:NO];
     [self setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
+    [self setActionStyle:AIFontAwesomeStyleSolid];
     [self setToolbarWidth:CGRectGetWidth(frame)];
     [self setToolbarContentOffsetX:0.0f];
     [self buildStatusLabel];
@@ -132,6 +136,16 @@ static const CGFloat kStrappyPreferencesToolbarTextActionWidth = 64.0f;
   [self setNeedsLayout];
 }
 
+- (void)setActionButtonIcon:(AIFontAwesomeIcon)actionIcon
+                      style:(AIFontAwesomeStyle)style
+{
+  [self setPrimaryActionTitle:nil];
+  [self setActionIcon:actionIcon];
+  [self setActionStyle:style];
+  [self refreshAppearanceForToolbar:nil];
+  [self setNeedsLayout];
+}
+
 - (void)setWorking:(BOOL)working
 {
   if (_working == working) {
@@ -159,8 +173,10 @@ static const CGFloat kStrappyPreferencesToolbarTextActionWidth = 64.0f;
 
 - (void)refreshAppearanceForToolbar:(UIToolbar *)toolbar
 {
+  CALayer *actionImageLayer;
   UIColor *actionColor;
   BOOL usesIOS7Appearance;
+  BOOL usesIconAction;
 
   usesIOS7Appearance = [[UIDevice currentDevice]
     XP_isOperatingSystemAtLeastMajorVersion:7];
@@ -185,7 +201,8 @@ static const CGFloat kStrappyPreferencesToolbarTextActionWidth = 64.0f;
   }
 
   if ([self actionButton] != nil) {
-    if ([[self primaryActionTitle] length] > 0U) {
+    usesIconAction = ([[self primaryActionTitle] length] == 0U) ? YES : NO;
+    if (!usesIconAction) {
       [[self actionButton] setImage:nil forState:UIControlStateNormal];
       [[self actionButton] setTitle:[self primaryActionTitle]
                           forState:UIControlStateNormal];
@@ -200,12 +217,27 @@ static const CGFloat kStrappyPreferencesToolbarTextActionWidth = 64.0f;
 
       [[self actionButton] setTitle:nil forState:UIControlStateNormal];
       actionImage = [AIFontAwesome imageForIcon:[self actionIcon]
-                                          style:AIFontAwesomeStyleSolid
+                                          style:[self actionStyle]
                                        iconSize:kStrappyPreferencesToolbarActionIconSize
                                      canvasSize:kStrappyPreferencesToolbarSideItemWidth
                                           color:actionColor
                                           scale:0.0f];
       [[self actionButton] setImage:actionImage forState:UIControlStateNormal];
+    }
+
+    actionImageLayer = [[[self actionButton] imageView] layer];
+    if (usesIconAction && !usesIOS7Appearance) {
+      [actionImageLayer
+        setShadowColor:[[[self statusLabel] shadowColor] CGColor]];
+      [actionImageLayer
+        setShadowOffset:[[self statusLabel] shadowOffset]];
+      [actionImageLayer setShadowOpacity:1.0f];
+      [actionImageLayer setShadowRadius:0.0f];
+    } else {
+      [actionImageLayer setShadowColor:nil];
+      [actionImageLayer setShadowOffset:CGSizeZero];
+      [actionImageLayer setShadowOpacity:0.0f];
+      [actionImageLayer setShadowRadius:0.0f];
     }
   }
   [self refreshWorkingState];

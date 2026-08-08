@@ -14,7 +14,7 @@ static UIImage *StrappyDatabaseHiddenIconImage(void)
 
   if (image == nil) {
     image = [AIFontAwesome imageForIcon:AIFAEyeSlash
-                                  style:AIFontAwesomeStyleSolid
+                                  style:AIFontAwesomeStyleRegular
                                iconSize:kStrappyDatabaseHiddenIconSize
                              canvasSize:kStrappyDatabaseHiddenIconCanvasSize
                                   color:[UIColor blackColor]
@@ -404,8 +404,8 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 @property (nonatomic, assign) BOOL scanning;
 @property (nonatomic, assign) BOOL hiddenMode;
 @property (nonatomic, copy) NSArray *databaseSections;
-@property (nonatomic, strong) UIBarButtonItem *hiddenModeButton;
-- (void)hiddenModeButtonPressed:(id)sender;
+@property (nonatomic, strong) UIBarButtonItem *scanButton;
+- (void)scanButtonPressed:(id)sender;
 - (void)updateHiddenModeButton;
 - (void)beginDatabaseScanWithMode:(FileScannerDatabaseScanMode)scanMode;
 - (void)databaseCatalogScanDidStart:(NSNotification *)notification;
@@ -422,10 +422,18 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 
 - (void)viewDidLoad
 {
+  UIBarButtonItem *scanButton;
+
   [super viewDidLoad];
 
-  [[self statusToolbarView]
-    setActionButtonTitle:NSLocalizedString(@"Scan", nil)];
+  scanButton = [[UIBarButtonItem alloc]
+    initWithTitle:NSLocalizedString(@"Scan", nil)
+            style:UIBarButtonItemStyleBordered
+           target:self
+           action:@selector(scanButtonPressed:)];
+  [self setScanButton:scanButton];
+  [[self navigationItem] setRightBarButtonItem:scanButton];
+  [StrappyAppearance applyLegacyTintToBarButtonItem:scanButton];
 
   [[NSNotificationCenter defaultCenter]
     addObserver:self
@@ -443,12 +451,6 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
            name:FileScannerDatabaseCatalogScanDidFinishNotification
          object:nil];
 
-  [self setHiddenModeButton:
-    [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Hidden", nil)
-                                     style:UIBarButtonItemStyleBordered
-                                    target:self
-                                    action:@selector(hiddenModeButtonPressed:)]];
-  [[self navigationItem] setRightBarButtonItem:[self hiddenModeButton]];
   [self updateHiddenModeButton];
   [self setScanning:[FileScanner isDatabaseCatalogScanInFlight]];
 }
@@ -464,7 +466,7 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
   [self applyRows];
 }
 
-- (void)hiddenModeButtonPressed:(id)sender
+- (void)actionButtonPressed:(id)sender
 {
   (void)sender;
   [self setHiddenMode:![self hiddenMode]];
@@ -472,14 +474,11 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 
 - (void)updateHiddenModeButton
 {
-  [[self hiddenModeButton] setTitle:NSLocalizedString(@"Hidden", nil)];
-  [[self hiddenModeButton] setStyle:[self hiddenMode] ?
-    UIBarButtonItemStyleDone : UIBarButtonItemStyleBordered];
-  [StrappyAppearance applyLegacyTintToBarButtonItem:
-    [self hiddenModeButton]];
-  [[self hiddenModeButton] setAccessibilityLabel:[self hiddenMode] ?
-    NSLocalizedString(@"Editing hidden databases", nil) :
-    NSLocalizedString(@"Edit hidden databases", nil)];
+  [[self statusToolbarView]
+    setActionButtonIcon:[self hiddenMode] ? AIFAEyeSlash : AIFAEye
+                  style:AIFontAwesomeStyleRegular];
+  [[self statusToolbarView]
+    setActionAccessibilityLabel:[self actionButtonAccessibilityLabel]];
 }
 
 - (NSArray *)loadAllRowsWithError:(NSError **)error
@@ -567,11 +566,14 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 
 - (void)setScanning:(BOOL)scanning
 {
+  scanning = scanning ? YES : NO;
   if (_scanning == scanning) {
+    [[self scanButton] setEnabled:scanning ? NO : YES];
     return;
   }
 
-  _scanning = scanning ? YES : NO;
+  _scanning = scanning;
+  [[self scanButton] setEnabled:_scanning ? NO : YES];
   [self setWorking:_scanning];
   [[self tableView] reloadData];
   [self refreshStatusToolbar];
@@ -594,7 +596,9 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 
 - (NSString *)actionButtonAccessibilityLabel
 {
-  return NSLocalizedString(@"Scan", nil);
+  return [self hiddenMode] ?
+    NSLocalizedString(@"Hide hidden databases", nil) :
+    NSLocalizedString(@"Show hidden databases", nil);
 }
 
 - (void)configureCell:(UITableViewCell *)cell withRow:(NSDictionary *)row
@@ -758,7 +762,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   }
 }
 
-- (void)actionButtonPressed:(id)sender
+- (void)scanButtonPressed:(id)sender
 {
   UIActionSheet *actionSheet;
 
@@ -769,7 +773,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
   actionSheet = [[UIActionSheet alloc]
     initWithTitle:NSLocalizedString(
-      @"Quick Scan skips files with unrelated extensions. Full Scan checks every file on the disk to see if it is a SQLite database and can take quite a long time.",
+      @"Scans your home folder for SQLite databases. After scanning, whitelist desired databases so Strappy can read their data. Full Scan, scans every file in your home folder. Quick Scan, saved time by only scanning files with common file extensions used for SQLite databases.",
       nil)
          delegate:self
 cancelButtonTitle:NSLocalizedString(@"Cancel", nil)
@@ -914,7 +918,7 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
 - (void)dealloc
 {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [[self hiddenModeButton] setTarget:nil];
+  [[self scanButton] setTarget:nil];
 }
 
 @end

@@ -14,6 +14,7 @@
 - (instancetype)initWithTitle:(NSString *)title;
 - (void)reloadRows;
 - (void)applyRows;
+- (BOOL)showsStatusToolbarActionButton;
 - (void)buildStatusToolbar;
 - (void)refreshStatusToolbar;
 - (StrappyPreferencesStatusToolbarView *)statusToolbarView;

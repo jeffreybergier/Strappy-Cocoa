@@ -354,7 +354,7 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows)
 
   studyActionButton_ = [[UIBarButtonItem alloc]
     initWithTitle:NSLocalizedString(@"Study", nil)
-            style:UIBarButtonItemStyleDone
+            style:UIBarButtonItemStyleBordered
            target:self
            action:@selector(studyAction:)];
   [[self navigationItem] setRightBarButtonItem:studyActionButton_];
@@ -471,8 +471,7 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows)
 {
   [studyActionButton_ setTitle:allStudied ?
     NSLocalizedString(@"Reset", nil) : NSLocalizedString(@"Study", nil)];
-  [studyActionButton_ setStyle:allStudied ?
-    UIBarButtonItemStyleBordered : UIBarButtonItemStyleDone];
+  [studyActionButton_ setStyle:UIBarButtonItemStyleBordered];
   [StrappyAppearance
     applyLegacyTintToBarButtonItem:studyActionButton_];
   [studyActionButton_ setAction:allStudied ?
@@ -854,7 +853,7 @@ otherButtonTitles:NSLocalizedString(@"Reset", nil), nil];
 
   actionSheet = [[UIActionSheet alloc]
     initWithTitle:NSLocalizedString(
-      @"The default model will be used to study approved databases that are currently not studied.",
+      @"Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu.",
       nil)
             delegate:self
    cancelButtonTitle:NSLocalizedString(@"Cancel", nil)

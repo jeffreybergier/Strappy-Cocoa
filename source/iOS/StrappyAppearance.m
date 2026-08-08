@@ -230,6 +230,24 @@ static UIRectCorner StrappyLegacySelectionRoundedCornersForView(
   [UITableViewCell
     strappy_setAppearanceSelectionBackgroundColorIfAvailable:
       [self legacyBarTintColor]];
+  [self applyIOS6TableSectionHeaderTintColor:[self legacyBarTintColor]];
+}
+
++ (void)applyIOS6TableSectionHeaderTintColor:(UIColor *)tintColor
+{
+  UIDevice *device;
+
+  if (tintColor == nil) {
+    return;
+  }
+  device = [UIDevice currentDevice];
+  if (![device XP_isOperatingSystemAtLeastMajorVersion:6] ||
+      [device XP_isOperatingSystemAtLeastMajorVersion:7]) {
+    return;
+  }
+
+  [UITableView
+    XP_setSectionHeaderFooterAppearanceTintColorIfAvailable:tintColor];
 }
 
 + (void)applyApplicationTintToWindow:(UIWindow *)window

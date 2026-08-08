@@ -7,6 +7,7 @@
 + (UIColor *)legacyBarTintColor;
 + (UIColor *)modernBarBackgroundColor;
 + (void)configureAppearance;
++ (void)applyIOS6TableSectionHeaderTintColor:(UIColor *)tintColor;
 + (void)applyApplicationTintToWindow:(UIWindow *)window;
 + (void)applyLegacyTintToBarButtonItem:
   (UIBarButtonItem *)barButtonItem;

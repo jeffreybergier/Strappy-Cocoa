@@ -105,18 +105,27 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
   StrappyPreferencesStatusToolbarView *toolbarView;
   UIBarButtonItem *toolbarItem;
 
-  toolbarView = [[StrappyPreferencesStatusToolbarView alloc]
-    initWithActionIcon:AIFAArrowsRotate
-                target:self
-                action:@selector(actionButtonPressed:)];
-  [toolbarView
-    setActionAccessibilityLabel:[self actionButtonAccessibilityLabel]];
+  if ([self showsStatusToolbarActionButton]) {
+    toolbarView = [[StrappyPreferencesStatusToolbarView alloc]
+      initWithActionIcon:AIFAArrowsRotate
+                  target:self
+                  action:@selector(actionButtonPressed:)];
+    [toolbarView
+      setActionAccessibilityLabel:[self actionButtonAccessibilityLabel]];
+  } else {
+    toolbarView = [[StrappyPreferencesStatusToolbarView alloc] init];
+  }
   toolbarItem = [[UIBarButtonItem alloc] initWithCustomView:toolbarView];
 
   [self setStatusToolbarView:toolbarView];
   [self setStatusToolbarItem:toolbarItem];
   [self setToolbarItems:[NSArray arrayWithObject:toolbarItem]];
   [self refreshStatusToolbar];
+}
+
+- (BOOL)showsStatusToolbarActionButton
+{
+  return YES;
 }
 
 - (void)refreshStatusToolbar

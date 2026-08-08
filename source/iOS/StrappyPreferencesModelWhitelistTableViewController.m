@@ -1,6 +1,7 @@
 #import "StrappyPreferencesModelWhitelistTableViewController.h"
 
 #import "AIFontAwesome.h"
+#import "StrappyAppearance.h"
 #import "StrappyModelCellFormatter.h"
 #import "StrappySession.h"
 
@@ -227,6 +228,7 @@ static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
 
 @interface StrappyPreferencesModelWhitelistTableViewController ()
 @property (nonatomic, assign) BOOL refreshingModels;
+@property (nonatomic, strong) UIBarButtonItem *updateButton;
 @end
 @implementation StrappyPreferencesModelWhitelistTableViewController
 
@@ -239,7 +241,20 @@ static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
 
 - (void)viewDidLoad
 {
+  UIBarButtonItem *updateButton;
+
   [super viewDidLoad];
+
+  updateButton = [[UIBarButtonItem alloc]
+    initWithTitle:NSLocalizedString(@"Update", nil)
+            style:UIBarButtonItemStyleBordered
+           target:self
+           action:@selector(actionButtonPressed:)];
+  [updateButton
+    setAccessibilityLabel:NSLocalizedString(@"Update Models", nil)];
+  [self setUpdateButton:updateButton];
+  [[self navigationItem] setRightBarButtonItem:updateButton];
+  [StrappyAppearance applyLegacyTintToBarButtonItem:updateButton];
 
   [[NSNotificationCenter defaultCenter]
     addObserver:self
@@ -314,9 +329,14 @@ static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
   return nil;
 }
 
+- (BOOL)showsStatusToolbarActionButton
+{
+  return NO;
+}
+
 - (NSString *)actionButtonAccessibilityLabel
 {
-  return NSLocalizedString(@"Fetch Models", nil);
+  return NSLocalizedString(@"Update Models", nil);
 }
 
 - (void)configureCell:(UITableViewCell *)cell withRow:(NSDictionary *)row
@@ -356,6 +376,7 @@ static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
 - (void)setRefreshingModels:(BOOL)refreshingModels
 {
   _refreshingModels = refreshingModels;
+  [[self updateButton] setEnabled:refreshingModels ? NO : YES];
   [self setWorking:refreshingModels];
   [[self tableView] reloadData];
   [self refreshStatusToolbar];
@@ -418,6 +439,7 @@ static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
 - (void)dealloc
 {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [[self updateButton] setTarget:nil];
 }
 
 @end
