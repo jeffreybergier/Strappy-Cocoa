@@ -60,6 +60,29 @@ const sandbox = {
 vm.createContext(sandbox);
 vm.runInContext(pageScript, sandbox, { filename: 'generated-webview.js' });
 
+function responseAttemptRow(attempt, responseLabel, attemptLabel) {
+  return {
+    getAttribute(name) {
+      if (name === 'data-attempt-number') return attempt;
+      if (name === 'data-response-label') return responseLabel;
+      if (name === 'data-attempt-label') return attemptLabel;
+      return null;
+    }
+  };
+}
+
+expect(sandbox.responseAttemptSummary(
+  responseAttemptRow('1', 'Response', 'Attempt')) === 'Response',
+  'The first response displayed an unnecessary attempt number.');
+expect(sandbox.responseAttemptSummary(
+  responseAttemptRow('2', 'Response', 'Attempt')) ===
+    'Response \u00b7 Attempt 2',
+  'A retry did not display its attempt number.');
+expect(sandbox.responseAttemptSummary(
+  responseAttemptRow('3', 'Localized Response', 'Localized Attempt')) ===
+    'Localized Response \u00b7 Localized Attempt 3',
+  'A retry did not use the localized response and attempt labels.');
+
 let collapsedGroups = [];
 let interactionStates = [];
 let removedStatusCount = 0;

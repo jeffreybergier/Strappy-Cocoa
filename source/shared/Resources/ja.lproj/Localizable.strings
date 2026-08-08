@@ -214,24 +214,41 @@
 "Metadata" = "メタデータ";
 "No HTTP response" = "HTTP レスポンスなし";
 "Retry" = "再試行";
+/* Suggested Japanese: [fa:gears] すり合わせ中… */
 "[fa:gears] Grinding" = "[fa:gears] Grinding";
+/* Suggested Japanese: [fa:martini-glass] 潤滑中… */
 "[fa:martini-glass] Hydrating" = "[fa:martini-glass] Hydrating";
-"[fa:hands-holding-circle] Fondling" = "[fa:hands-holding-circle] Fondling";
+/* Suggested Japanese: [fa:shoe-prints] アピール中… */
+"[fa:shoe-prints] Strutting" = "[fa:shoe-prints] Strutting";
+/* Suggested Japanese: [fa:hands-holding-circle] 接触中… */
+"[fa:hands-holding-circle] Touching" = "[fa:hands-holding-circle] Touching";
+/* Suggested Japanese: [fa:spoon] 密着中… */
 "[fa:spoon] Spooning" = "[fa:spoon] Spooning";
-"[fa:hand-holding-droplet] Stroking" = "[fa:hand-holding-droplet] Stroking";
-"[fa:socks] Undressing" = "[fa:socks] Undressing";
+/* Suggested Japanese: [fa:socks] 脱皮中… */
+"[fa:socks] Shedding" = "[fa:socks] Shedding";
+/* Suggested Japanese: [fa:hand-lizard] 品定め中… */
 "[fa:hand-lizard] Judging" = "[fa:hand-lizard] Judging";
-"[fa:wind] Blowing" = "[fa:wind] Blowing";
+/* Suggested Japanese: [fa:hand-holding-droplet] なでなで中… */
+"[fa:hand-holding-droplet] Stroking" = "[fa:hand-holding-droplet] Stroking";
+/* Suggested Japanese: [fa:ring] 寸止め中… */
 "[fa:ring] Edging" = "[fa:ring] Edging";
-"[fa:bed-pulse] Fantasizing" = "[fa:bed-pulse] Fantasizing";
+/* Suggested Japanese: [fa:horse] 騎乗中… */
 "[fa:horse] Riding" = "[fa:horse] Riding";
-"[fa:table-tennis-paddle-ball] Spanking" = "[fa:table-tennis-paddle-ball] Spanking";
-"[fa:bore-hole] Thrusting" = "[fa:bore-hole] Thrusting";
+/* Suggested Japanese: [fa:bore-hole] 穴あけ中… */
+"[fa:bore-hole] Drilling" = "[fa:bore-hole] Drilling";
+/* Suggested Japanese: [fa:bed-pulse] ドキドキ中… */
+"[fa:bed-pulse] Pulsing" = "[fa:bed-pulse] Pulsing";
+/* Suggested Japanese: [fa:hands-bound] 拘束中… */
+"[fa:hands-bound] Binding" = "[fa:hands-bound] Binding";
+/* Suggested Japanese: [fa:table-tennis-paddle-ball] お仕置き中… */
+"[fa:table-tennis-paddle-ball] Paddling" = "[fa:table-tennis-paddle-ball] Paddling";
+/* Suggested Japanese: [fa:thumbtack] 差し込み中… */
 "[fa:thumbtack] Pegging" = "[fa:thumbtack] Pegging";
-"[fa:hand-back-fist] Fisting" = "[fa:hand-back-fist] Fisting";
-"[fa:hands-bound] Choking" = "[fa:hands-bound] Choking";
-"[fa:shoe-prints] Dominating" = "[fa:shoe-prints] Dominating";
-"[fa:droplet] Finishing" = "[fa:droplet] Finishing";
+/* Suggested Japanese: [fa:hand-back-fist] 制圧中… */
+"[fa:hand-back-fist] Dominating" = "[fa:hand-back-fist] Dominating";
+/* Suggested Japanese: [fa:droplet] 放出中… */
+"[fa:droplet] Climaxing" = "[fa:droplet] Climaxing";
+/* Suggested Japanese: [fa:shower] 反省中… */
 "[fa:shower] Regretting" = "[fa:shower] Regretting";
 "Autoscroll on" = "自動スクロール オン";
 "Autoscroll off" = "自動スクロール オフ";

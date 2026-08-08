@@ -29,22 +29,21 @@ static const strappy_webview_database_display_name
 static const char * const harness_processing_waiting_labels[
   STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT] = {
   "[fa:martini-glass] Hydrating",
-  "[fa:hands-holding-circle] Fondling",
+  "[fa:shoe-prints] Strutting",
+  "[fa:hands-holding-circle] Touching",
   "[fa:spoon] Spooning",
-  "[fa:hand-holding-droplet] Stroking",
-  "[fa:socks] Undressing",
+  "[fa:socks] Shedding",
   "[fa:hand-lizard] Judging",
-  "[fa:wind] Blowing",
+  "[fa:hand-holding-droplet] Stroking",
   "[fa:ring] Edging",
-  "[fa:bed-pulse] Fantasizing",
   "[fa:horse] Riding",
-  "[fa:table-tennis-paddle-ball] Spanking",
-  "[fa:bore-hole] Thrusting",
+  "[fa:bore-hole] Drilling",
+  "[fa:bed-pulse] Pulsing",
+  "[fa:hands-bound] Binding",
+  "[fa:table-tennis-paddle-ball] Paddling",
   "[fa:thumbtack] Pegging",
-  "[fa:hand-back-fist] Fisting",
-  "[fa:hands-bound] Choking",
-  "[fa:shoe-prints] Dominating",
-  "[fa:droplet] Finishing",
+  "[fa:hand-back-fist] Dominating",
+  "[fa:droplet] Climaxing",
   "[fa:shower] Regretting"
 };
 
@@ -1351,6 +1350,8 @@ static int harness_check_page_scripts(void)
        harness_expect_not_contains(page_html,
                                    "parseInt(attemptNumber,10)") &&
        harness_expect_contains(page_html,
+                               "if(attempt==='1')return label;") &&
+       harness_expect_contains(page_html,
                                "return label+' \\u00b7 '+attemptLabel+' '+"
                                "attempt;") &&
        harness_expect_not_contains(page_html,
@@ -1577,7 +1578,7 @@ static int harness_check_page_scripts(void)
                                "data-processing-tools-label="
                                "\"[fa:gears] Grinding\"") &&
        harness_expect_contains(page_html,
-                               "data-processing-waiting-count=\"18\"") &&
+                               "data-processing-waiting-count=\"17\"") &&
        harness_expect_contains(
          page_html,
          "data-processing-waiting-0-label="
@@ -1585,15 +1586,19 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(
          page_html,
          "data-processing-waiting-6-label="
-         "\"[fa:wind] Blowing\"") &&
+         "\"[fa:hand-holding-droplet] Stroking\"") &&
+       harness_expect_contains(
+         page_html,
+         "data-processing-waiting-15-label="
+         "\"[fa:droplet] Climaxing\"") &&
        harness_expect_contains(
          page_html,
          "data-processing-waiting-16-label="
-         "\"[fa:droplet] Finishing\"") &&
-       harness_expect_contains(
-         page_html,
-         "data-processing-waiting-17-label="
          "\"[fa:shower] Regretting\"") &&
+       harness_expect_not_contains(page_html,
+                                   "data-processing-waiting-17-label") &&
+       harness_expect_not_contains(page_html,
+                                   "[fa:wind] Blowing") &&
        harness_expect_not_contains(page_html,
                                    "data-processing-pondering-label") &&
        harness_expect_contains(page_html,
@@ -2768,7 +2773,8 @@ static int harness_check_api_exchange_status_states(void)
                                "fa-angle-right") &&
        harness_expect_contains(success_html,
                                "</span></a><span class=\"response-metadata-"
-                               "error-slot\"></span>Metadata</div>") &&
+                               "error-slot\"></span>Metadata: OpenRouter"
+                               "</div>") &&
        harness_expect_contains(success_html,
                                "class=\"response-metadata-body\"></div>") &&
        harness_expect_not_contains(success_html,
