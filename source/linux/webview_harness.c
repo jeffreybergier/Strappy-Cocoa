@@ -1327,14 +1327,22 @@ static int harness_check_page_scripts(void)
                                    "data-waiting-for-response-label") &&
        harness_expect_contains(page_html,
                                "function formatCumulativeUsageCost(value){"
-                               "return value!==''?value:'0.00';}") &&
+                               "return value!==''?value:'';}") &&
        harness_expect_contains(page_html,
                                "function apiExchangeCumulativeWaitDuration") &&
        harness_expect_contains(page_html,
                                "data-cumulative-wait-duration") &&
        harness_expect_contains(page_html,
                                "function formatCumulativeWaitDuration(value){"
-                               "return value!==''?value:'00:00';}") &&
+                               "return value!==''?value:'';}") &&
+       harness_expect_contains(page_html,
+                               "if(cumulativeUsageCost!==''){") &&
+       harness_expect_contains(page_html,
+                               "if(cumulativeWaitDuration!==''){") &&
+       harness_expect_contains(
+         page_html,
+         "if(cumulativeUsageCost!==''||cumulativeWaitDuration!=='')"
+         "h.appendChild(metrics);") &&
        harness_expect_not_contains(page_html,
                                    "value!==''?value:'-'") &&
        harness_expect_contains(page_html,

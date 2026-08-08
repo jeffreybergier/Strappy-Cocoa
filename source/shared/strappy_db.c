@@ -18291,14 +18291,17 @@ static void strappy_db_semantic_finalize_timeline_totals(
     long long model_request_id;
     size_t group_end;
     size_t index;
+    int group_has_finalized_attempt;
 
     model_request_id = list->records[group_start].model_request_id;
     group_end = group_start;
+    group_has_finalized_attempt = 0;
     while ((group_end < list->count) &&
            (list->records[group_end].model_request_id == model_request_id)) {
       if ((list->records[group_end].kind != NULL) &&
           (strcmp(list->records[group_end].kind,
                   "response_api_call") == 0)) {
+        group_has_finalized_attempt = 1;
         if (list->records[group_end].has_cumulative_usage_cost) {
           cumulative_cost +=
             list->records[group_end].cumulative_usage_cost;
@@ -18317,10 +18320,14 @@ static void strappy_db_semantic_finalize_timeline_totals(
       group_end++;
     }
     for (index = group_start; index < group_end; index++) {
-      list->records[index].cumulative_usage_cost = cumulative_cost;
-      list->records[index].has_cumulative_usage_cost = has_cumulative_cost;
-      list->records[index].cumulative_wait_ms = cumulative_wait_ms;
-      list->records[index].has_cumulative_wait_ms = has_cumulative_wait;
+      list->records[index].cumulative_usage_cost =
+        group_has_finalized_attempt ? cumulative_cost : 0.0;
+      list->records[index].has_cumulative_usage_cost =
+        group_has_finalized_attempt && has_cumulative_cost;
+      list->records[index].cumulative_wait_ms =
+        group_has_finalized_attempt ? cumulative_wait_ms : 0LL;
+      list->records[index].has_cumulative_wait_ms =
+        group_has_finalized_attempt && has_cumulative_wait;
     }
     group_start = group_end;
   }
@@ -18383,10 +18390,15 @@ static int strappy_db_semantic_finalize_ranged_timeline_totals(
     long long model_request_id;
     size_t group_end;
     size_t index;
+    int group_has_finalized_attempt;
 
     model_request_id = list->records[group_start].model_request_id;
+    group_has_finalized_attempt = 0;
     while ((rc == SQLITE_ROW) &&
            ((long long)sqlite3_column_int64(stmt, 0) <= model_request_id)) {
+      if ((long long)sqlite3_column_int64(stmt, 0) == model_request_id) {
+        group_has_finalized_attempt = 1;
+      }
       if (sqlite3_column_type(stmt, 1) != SQLITE_NULL) {
         cumulative_cost +=
           (double)sqlite3_column_int64(stmt, 1) / 1000000000.0;
@@ -18416,10 +18428,14 @@ static int strappy_db_semantic_finalize_ranged_timeline_totals(
       group_end++;
     }
     for (index = group_start; index < group_end; index++) {
-      list->records[index].cumulative_usage_cost = cumulative_cost;
-      list->records[index].has_cumulative_usage_cost = has_cumulative_cost;
-      list->records[index].cumulative_wait_ms = cumulative_wait_ms;
-      list->records[index].has_cumulative_wait_ms = has_cumulative_wait;
+      list->records[index].cumulative_usage_cost =
+        group_has_finalized_attempt ? cumulative_cost : 0.0;
+      list->records[index].has_cumulative_usage_cost =
+        group_has_finalized_attempt && has_cumulative_cost;
+      list->records[index].cumulative_wait_ms =
+        group_has_finalized_attempt ? cumulative_wait_ms : 0LL;
+      list->records[index].has_cumulative_wait_ms =
+        group_has_finalized_attempt && has_cumulative_wait;
     }
     group_start = group_end;
   }

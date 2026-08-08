@@ -41,6 +41,9 @@ typedef struct strappy_responses_http_result {
 typedef enum strappy_responses_event_type {
   STRAPPY_RESPONSES_EVENT_CANCELLATION_POLL = 1,
   STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS = 2,
+  /* Ledger events invalidate a DB-backed timeline range. One event may make
+   * multiple committed changes visible when adjacent round transitions are
+   * deliberately coalesced. */
   STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED = 3,
   STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED = 4
 } strappy_responses_event_type;

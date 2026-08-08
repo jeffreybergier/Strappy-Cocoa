@@ -2073,21 +2073,38 @@ static void strappy_responses_log_call_started(
          (unsigned long)((request_json != NULL) ? strlen(request_json) : 0U));
 }
 
-static void strappy_responses_call_did_begin(
+typedef struct strappy_responses_deferred_call_event {
+  long long call_id;
+  long long status_started_ms;
+  long long status_updated_ms;
+} strappy_responses_deferred_call_event;
+
+static void strappy_responses_deferred_call_event_init(
+  strappy_responses_deferred_call_event *event)
+{
+  if (event == NULL) {
+    return;
+  }
+  memset(event, 0, sizeof(*event));
+}
+
+static void strappy_responses_emit_call_ledger_changed(
   long long call_id,
   const char *prompt_group_key,
+  const char *state,
+  const char *render_role,
+  int is_terminal,
+  long long status_started_ms,
+  long long status_updated_ms,
   strappy_responses_event_callback callback,
   void *callback_data)
 {
   strappy_responses_event event;
   char message_key[64];
-  long long now_ms;
 
-  if (callback == NULL) {
+  if ((callback == NULL) || (call_id <= 0LL) || (state == NULL)) {
     return;
   }
-
-  now_ms = strappy_responses_now_ms();
   snprintf(message_key,
            sizeof(message_key),
            "response-call-%lld",
@@ -2098,11 +2115,58 @@ static void strappy_responses_call_did_begin(
   event.actor = "api";
   event.kind = "response_api_call";
   event.message_key = message_key;
-  event.render_role = "api_call";
-  event.status_kind = "running";
-  event.status_started_ms = now_ms;
-  event.status_updated_ms = now_ms;
+  event.render_role = (render_role != NULL) ? render_role : "api_call";
+  event.status_kind = state;
+  event.status_started_ms = status_started_ms;
+  event.status_updated_ms = status_updated_ms;
+  event.is_terminal = is_terminal ? 1 : 0;
   (void)callback(&event, callback_data);
+}
+
+static void strappy_responses_flush_deferred_call_event(
+  strappy_responses_deferred_call_event *deferred,
+  const char *prompt_group_key,
+  strappy_responses_event_callback callback,
+  void *callback_data)
+{
+  if ((deferred == NULL) || (deferred->call_id <= 0LL)) {
+    return;
+  }
+  strappy_responses_emit_call_ledger_changed(
+    deferred->call_id,
+    prompt_group_key,
+    "completed",
+    "api_call",
+    0,
+    deferred->status_started_ms,
+    deferred->status_updated_ms,
+    callback,
+    callback_data);
+  strappy_responses_deferred_call_event_init(deferred);
+}
+
+static void strappy_responses_call_did_begin(
+  long long call_id,
+  const char *prompt_group_key,
+  strappy_responses_event_callback callback,
+  void *callback_data,
+  strappy_responses_deferred_call_event *deferred)
+{
+  long long now_ms;
+
+  now_ms = strappy_responses_now_ms();
+  strappy_responses_emit_call_ledger_changed(call_id,
+                                             prompt_group_key,
+                                             "running",
+                                             "api_call",
+                                             0,
+                                             now_ms,
+                                             now_ms,
+                                             callback,
+                                             callback_data);
+  /* The new request notification exposes every committed timeline row since
+   * the consumer's cursor, including a deferred response and wall duration. */
+  strappy_responses_deferred_call_event_init(deferred);
 }
 
 static void strappy_responses_call_did_finish(
@@ -2114,12 +2178,15 @@ static void strappy_responses_call_did_finish(
   const strappy_responses_http_result *http,
   const strappy_responses_analysis *analysis,
   int client_ok,
+  int defer_successful_tool_completion,
   strappy_responses_event_callback callback,
-  void *callback_data)
+  void *callback_data,
+  strappy_responses_deferred_call_event *deferred)
 {
-  strappy_responses_event event;
   const char *state;
-  char message_key[64];
+  int is_terminal;
+  long long status_started_ms;
+  long long status_updated_ms;
 
   state = strappy_responses_call_state(http, analysis, client_ok);
   syslog(LOG_NOTICE,
@@ -2136,31 +2203,32 @@ static void strappy_responses_call_did_finish(
          (http != NULL) ? http->response_bytes : 0LL,
          (http != NULL) ? http->total_seconds : 0.0);
 
-  if (callback == NULL) {
+  status_started_ms = (http != NULL) ? http->started_at_ms : 0LL;
+  status_updated_ms = (http != NULL) ? http->completed_at_ms : 0LL;
+  is_terminal = ((strcmp(state, "completed") == 0) &&
+                 (analysis != NULL) &&
+                 (analysis->tool_call_count == 0U)) ? 1 : 0;
+  if (defer_successful_tool_completion &&
+      (strcmp(state, "completed") == 0) &&
+      (analysis != NULL) &&
+      (analysis->tool_call_count > 0U) &&
+      (deferred != NULL)) {
+    deferred->call_id = call_id;
+    deferred->status_started_ms = status_started_ms;
+    deferred->status_updated_ms = status_updated_ms;
     return;
   }
 
-  snprintf(message_key,
-           sizeof(message_key),
-           "response-call-%lld",
-           call_id);
-  memset(&event, 0, sizeof(event));
-  event.type = STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED;
-  event.prompt_group_key = prompt_group_key;
-  event.actor = "api";
-  event.kind = "response_api_call";
-  event.message_key = message_key;
-  event.render_role = (strcmp(state, "completed") == 0) ?
-    "api_call" : "api_error";
-  event.status_kind = state;
-  event.is_terminal = ((strcmp(state, "completed") == 0) &&
-                       (analysis != NULL) &&
-                       (analysis->tool_call_count == 0U)) ? 1 : 0;
-  if (http != NULL) {
-    event.status_started_ms = http->started_at_ms;
-    event.status_updated_ms = http->completed_at_ms;
-  }
-  (void)callback(&event, callback_data);
+  strappy_responses_emit_call_ledger_changed(
+    call_id,
+    prompt_group_key,
+    state,
+    (strcmp(state, "completed") == 0) ? "api_call" : "api_error",
+    is_terminal,
+    status_started_ms,
+    status_updated_ms,
+    callback,
+    callback_data);
 }
 
 static void strappy_responses_round_wall_duration_did_finish(
@@ -2476,8 +2544,10 @@ static int strappy_responses_send_round(
   long long processing_started_ms,
   strappy_responses_http_result *http_out,
   strappy_responses_analysis *analysis_out,
+  int defer_successful_tool_completion,
   strappy_responses_event_callback callback,
   void *callback_data,
+  strappy_responses_deferred_call_event *deferred,
   char **error_out)
 {
   static const char *request_headers_json =
@@ -2551,7 +2621,8 @@ static int strappy_responses_send_round(
     strappy_responses_call_did_begin(call_id,
                                      prompt_group_key,
                                      callback,
-                                     callback_data);
+                                     callback_data,
+                                     deferred);
     client_ok = strappy_client_send_responses_json(
       &runtime->config,
       request_json,
@@ -2580,8 +2651,10 @@ static int strappy_responses_send_round(
                                           &http,
                                           &analysis,
                                           0,
+                                          0,
                                           callback,
-                                          callback_data);
+                                          callback_data,
+                                          deferred);
       }
       *http_out = http;
       *analysis_out = analysis;
@@ -2641,8 +2714,10 @@ static int strappy_responses_send_round(
                                       &http,
                                       &analysis,
                                       client_ok,
+                                      defer_successful_tool_completion,
                                       callback,
-                                      callback_data);
+                                      callback_data,
+                                      deferred);
     if (previous_call_id_io != NULL) {
       *previous_call_id_io = call_id;
     }
@@ -2796,6 +2871,7 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
 {
   strappy_responses_runtime runtime;
   strappy_responses_owned_items new_items;
+  strappy_responses_deferred_call_event deferred_call_event;
   char *prompt_group_key;
   char *final_text;
   char *last_model;
@@ -2817,6 +2893,7 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
 
   strappy_responses_runtime_init(&runtime);
   strappy_responses_owned_items_init(&new_items);
+  strappy_responses_deferred_call_event_init(&deferred_call_event);
   prompt_group_key = NULL;
   final_text = NULL;
   last_model = NULL;
@@ -2935,8 +3012,11 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
                                       processing_started_ms,
                                       &http,
                                       &analysis,
+                                      ((round_index + 1L) <
+                                        runtime.round_limit) ? 1 : 0,
                                       callback,
                                       callback_data,
+                                      &deferred_call_event,
                                       error_out);
     free(request_json);
     if (round_call_id > 0LL) {
@@ -3001,7 +3081,7 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
               prompt_group_key,
               round_started_ms,
               round_completed_ms,
-              callback,
+              (deferred_call_event.call_id > 0LL) ? NULL : callback,
               callback_data,
               error_out)) {
           strappy_responses_analysis_destroy(&analysis);
@@ -3161,7 +3241,7 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
           prompt_group_key,
           round_started_ms,
           round_completed_ms,
-          callback,
+          (deferred_call_event.call_id > 0LL) ? NULL : callback,
           callback_data,
           &wall_error) &&
         (error_out != NULL) && (*error_out == NULL)) {
@@ -3173,6 +3253,10 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
     free(wall_error);
   }
 
+  strappy_responses_flush_deferred_call_event(&deferred_call_event,
+                                               prompt_group_key,
+                                               callback,
+                                               callback_data);
   free(final_text);
   strappy_responses_emit_processing_status(callback,
                                            callback_data,

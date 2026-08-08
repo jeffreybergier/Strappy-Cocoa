@@ -892,6 +892,9 @@ typedef struct harness_ledger_event_recorder {
   const char *db_path;
   long long count;
   long long started_count;
+  long long completion_event_count;
+  long long coalesced_transition_count;
+  long long last_started_request_id;
   long long processing_count;
   long long processing_started_ms;
   long long answer_quality_count;
@@ -929,7 +932,8 @@ static int harness_ledger_timeline_matches(
   long long request_id,
   long long call_id,
   long long attempt_index,
-  int running)
+  int running,
+  long long coalesced_previous_request_id)
 {
   strappy_session_message_record_list timeline;
   char *error;
@@ -937,12 +941,16 @@ static int harness_ledger_timeline_matches(
   size_t current_attempt_count;
   size_t suffix_start;
   size_t index;
+  int saw_coalesced_current_request;
+  int saw_coalesced_previous_response;
   int ok;
 
   strappy_session_message_record_list_init(&timeline);
   error = NULL;
   current_request_count = 0U;
   current_attempt_count = 0U;
+  saw_coalesced_current_request = 0;
+  saw_coalesced_previous_response = 0;
   suffix_start = recorder->timeline_count;
   ok = strappy_db_list_response_timeline(recorder->db_path,
                                          session_id,
@@ -986,14 +994,38 @@ static int harness_ledger_timeline_matches(
       (current_attempt_count == 0U);
     if (attempt_index == 0LL) {
       ok = ok && (suffix_start < timeline.count);
-      for (index = suffix_start; ok && (index < timeline.count); index++) {
-        const strappy_session_message_record *record;
+      if (coalesced_previous_request_id > 0LL) {
+        ok = ok && (coalesced_previous_request_id != request_id);
+        for (index = suffix_start; ok && (index < timeline.count); index++) {
+          const strappy_session_message_record *record;
 
-        record = &timeline.records[index];
-        ok = (record->model_request_id == request_id) &&
-          (record->http_attempt_id == 0LL) &&
-          (record->direction != NULL) &&
-          (strcmp(record->direction, "request") == 0);
+          record = &timeline.records[index];
+          if (record->model_request_id == request_id) {
+            saw_coalesced_current_request = 1;
+            ok = (record->http_attempt_id == 0LL) &&
+              (record->direction != NULL) &&
+              (strcmp(record->direction, "request") == 0);
+          } else if (record->model_request_id ==
+                     coalesced_previous_request_id) {
+            saw_coalesced_previous_response = 1;
+            ok = (record->direction == NULL) ||
+              (strcmp(record->direction, "request") != 0);
+          } else {
+            ok = 0;
+          }
+        }
+        ok = ok && saw_coalesced_current_request &&
+          saw_coalesced_previous_response;
+      } else {
+        for (index = suffix_start; ok && (index < timeline.count); index++) {
+          const strappy_session_message_record *record;
+
+          record = &timeline.records[index];
+          ok = (record->model_request_id == request_id) &&
+            (record->http_attempt_id == 0LL) &&
+            (record->direction != NULL) &&
+            (strcmp(record->direction, "request") == 0);
+        }
       }
     } else {
       ok = ok && recorder->saw_timeline &&
@@ -1042,12 +1074,14 @@ static int harness_record_ledger_event(
   char extra;
   long long call_id;
   long long call_count;
+  long long completed_call_count;
   long long pending_count;
   long long answer_quality_count;
   long long request_id;
   long long attempt_index;
   long long session_id;
   int event_ok;
+  int coalesced_transition;
   int opened;
   int running;
 
@@ -1211,6 +1245,7 @@ static int harness_record_ledger_event(
   opened = sqlite3_open(recorder->db_path, &db) == SQLITE_OK;
   stmt = NULL;
   call_count = 0LL;
+  completed_call_count = 0LL;
   pending_count = 0LL;
   answer_quality_count = 0LL;
   request_id = 0LL;
@@ -1265,33 +1300,57 @@ static int harness_record_ledger_event(
                       &call_count) &&
     harness_query_int(db,
                       "SELECT COUNT(*) FROM http_attempts "
+                      "WHERE state NOT IN ('pending','running');",
+                      &completed_call_count) &&
+    harness_query_int(db,
+                      "SELECT COUNT(*) FROM http_attempts "
                       "WHERE state IN ('pending','running');",
                       &pending_count) &&
     harness_query_int(db,
                       "SELECT COUNT(*) FROM answer_quality_audits;",
                       &answer_quality_count);
+  coalesced_transition = event_ok && running &&
+    (recorder->started_count == (recorder->count + 1LL));
   if (event_ok && running) {
-    event_ok = (recorder->started_count == recorder->count) &&
+    event_ok = ((recorder->started_count == recorder->count) ||
+                (coalesced_transition &&
+                 (recorder->last_started_request_id > 0LL))) &&
       (call_count == (recorder->started_count + 1LL)) &&
+      (completed_call_count == recorder->started_count) &&
       (pending_count == 1LL) &&
       harness_ledger_timeline_matches(recorder,
                                       session_id,
                                       request_id,
                                       call_id,
                                       attempt_index,
-                                      1);
-    recorder->started_count++;
+                                      1,
+                                      coalesced_transition ?
+                                        recorder->last_started_request_id :
+                                        0LL);
+    if (event_ok) {
+      if (coalesced_transition) {
+        recorder->count++;
+        recorder->coalesced_transition_count++;
+      }
+      recorder->started_count++;
+      recorder->last_started_request_id = request_id;
+    }
   } else if (event_ok) {
     event_ok = (recorder->started_count == (recorder->count + 1LL)) &&
       (call_count == (recorder->count + 1LL)) &&
+      (completed_call_count == (recorder->count + 1LL)) &&
       (pending_count == 0LL) &&
       harness_ledger_timeline_matches(recorder,
                                       session_id,
                                       request_id,
                                       call_id,
                                       attempt_index,
-                                      0);
-    recorder->count++;
+                                      0,
+                                      0LL);
+    if (event_ok) {
+      recorder->count++;
+      recorder->completion_event_count++;
+    }
   }
   if (!event_ok) {
     recorder->valid = 0;
@@ -5916,9 +5975,11 @@ static int harness_test_function_tool_continuation(void)
   ok = (result != NULL) &&
     (strcmp(result, "Function tool final answer.") == 0) &&
     server_ok && events.valid && (events.count == 2LL) &&
-    (events.wall_duration_update_count == 2LL) &&
+    (events.completion_event_count == 1LL) &&
+    (events.coalesced_transition_count == 1LL) &&
+    (events.wall_duration_update_count == 1LL) &&
     (events.message_update_skipped_count == 2LL) &&
-    (events.message_update_required_count == 4LL) &&
+    (events.message_update_required_count == 2LL) &&
     (events.answer_quality_count == 1LL) && events.saw_thinking &&
     events.saw_tools && (events.clear_count == 1L);
   free(result);
@@ -6007,8 +6068,19 @@ static int harness_test_function_tool_continuation(void)
   }
   if (!ok) {
     fprintf(stderr,
-            "Function-tool continuation failed: %s\n",
-            (error != NULL) ? error : "request or ledger mismatch");
+            "Function-tool continuation failed: %s "
+            "valid=%d calls=%lld starts=%lld completion_events=%lld "
+            "coalesced=%lld wall_updates=%lld update_skipped=%lld "
+            "update_required=%lld\n",
+            (error != NULL) ? error : "request or ledger mismatch",
+            events.valid,
+            events.count,
+            events.started_count,
+            events.completion_event_count,
+            events.coalesced_transition_count,
+            events.wall_duration_update_count,
+            events.message_update_skipped_count,
+            events.message_update_required_count);
   }
   strappy_session_message_record_list_destroy(&timeline);
   free(error);
@@ -6139,7 +6211,7 @@ static int harness_test_round_limit(void)
   ok = (result == NULL) && (error != NULL) &&
     (strcmp(error, "Response round limit reached.") == 0) && server_ok &&
     events.valid && (events.error_update_count == 1L) &&
-    (events.wall_update_count == 2L);
+    (events.wall_update_count == 1L);
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,
@@ -6647,7 +6719,9 @@ static int harness_test_bash_tool_cancellation(void)
   ok = (result == NULL) && server_ok && events.valid &&
     events.saw_cancellation_poll && events.saw_tools &&
     (events.count == 1LL) &&
-    (events.wall_duration_update_count == 1LL) &&
+    (events.completion_event_count == 1LL) &&
+    (events.coalesced_transition_count == 0LL) &&
+    (events.wall_duration_update_count == 0LL) &&
     (events.clear_count == 1L) &&
     (error != NULL) && (strstr(error, "cancelled") != NULL) &&
     (elapsed_ms < 3000LL);
@@ -6768,7 +6842,9 @@ static int harness_test_retry_attempt_ledger(void)
   ok = (result != NULL) &&
     (strcmp(result, "Retry final answer.") == 0) &&
     server_ok && events.valid && (events.count == 3LL) &&
-    (events.wall_duration_update_count == 2LL) &&
+    (events.completion_event_count == 2LL) &&
+    (events.coalesced_transition_count == 1LL) &&
+    (events.wall_duration_update_count == 1LL) &&
     (events.answer_quality_count == 1LL) && events.saw_thinking &&
     events.saw_tools && events.saw_retry_wait && events.saw_retrying &&
     (events.clear_count == 1L);
@@ -6833,8 +6909,16 @@ static int harness_test_retry_attempt_ledger(void)
   }
   if (!ok) {
     fprintf(stderr,
-            "Retry attempt ledger failed: %s\n",
-            (error != NULL) ? error : "request or ledger mismatch");
+            "Retry attempt ledger failed: %s valid=%d calls=%lld "
+            "starts=%lld completion_events=%lld coalesced=%lld "
+            "wall_updates=%lld\n",
+            (error != NULL) ? error : "request or ledger mismatch",
+            events.valid,
+            events.count,
+            events.started_count,
+            events.completion_event_count,
+            events.coalesced_transition_count,
+            events.wall_duration_update_count);
   }
   strappy_session_message_record_list_destroy(&timeline);
   free(error);
@@ -7325,11 +7409,24 @@ static int harness_test_cumulative_session_metrics(void)
     "{\"id\":\"cost-final\",\"status\":\"completed\","
     "\"model\":\"test/model\",\"output\":[],"
     "\"usage\":{\"cost\":0.0005}}";
+  static const char *pending_request =
+    "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
+    "\"instructions\":\"System\",\"input\":[{\"type\":\"message\","
+    "\"role\":\"user\",\"content\":[{\"type\":\"input_text\","
+    "\"text\":\"Pending metrics\"}]}]}";
+  static const char *pending_response =
+    "{\"id\":\"cost-pending\",\"status\":\"completed\","
+    "\"model\":\"test/model\",\"output\":[],"
+    "\"usage\":{\"cost\":0.001}}";
   char path[] = "/tmp/strappy-cumulative-cost-XXXXXX";
+  strappy_response_call_begin_input pending_begin;
+  strappy_response_call_finish_input pending_finish;
+  strappy_response_timeline_cursor pending_cursor;
   strappy_response_timeline_cursor range_cursor;
   strappy_session_message_record_list ranged_timeline;
   strappy_session_message_record_list timeline;
   char *error;
+  long long pending_call_id;
   long long session_id;
   long long previous_call_id;
   int fd;
@@ -7343,8 +7440,10 @@ static int harness_test_cumulative_session_metrics(void)
   unlink(path);
 
   error = NULL;
+  pending_call_id = 0LL;
   session_id = 0LL;
   previous_call_id = 0LL;
+  strappy_response_timeline_cursor_init(&pending_cursor);
   strappy_response_timeline_cursor_init(&range_cursor);
   strappy_session_message_record_list_init(&timeline);
   strappy_session_message_record_list_init(&ranged_timeline);
@@ -7418,12 +7517,31 @@ static int harness_test_cumulative_session_metrics(void)
                                    1000LL,
                                    2000LL,
                                    &previous_call_id,
-                                   &error) &&
-    strappy_db_list_response_timeline(path,
-                                      session_id,
-                                      &timeline,
-                                      &error) &&
-    (timeline.count == 5U) &&
+                                   &error);
+  if (ok) {
+    memset(&pending_begin, 0, sizeof(pending_begin));
+    pending_begin.session_id = session_id;
+    pending_begin.previous_call_id = previous_call_id;
+    pending_begin.prompt_group_key = "group-three";
+    pending_begin.request_kind = "user";
+    pending_begin.round_index = 0L;
+    pending_begin.attempt_index = 0L;
+    pending_begin.new_input_start_index = 0L;
+    pending_begin.request_method = "POST";
+    pending_begin.request_url = "https://openrouter.ai/api/v1/responses";
+    pending_begin.request_headers_json = "{}";
+    pending_begin.request_json = pending_request;
+    ok = strappy_db_begin_response_call(path,
+                                        &pending_begin,
+                                        &pending_call_id,
+                                        &error);
+  }
+  if (ok) {
+    ok = strappy_db_list_response_timeline(path,
+                                           session_id,
+                                           &timeline,
+                                           &error) &&
+    (timeline.count == 6U) &&
     (timeline.records[0].prompt_index == 0L) &&
     timeline.records[0].has_cumulative_usage_cost &&
     timeline.records[0].has_cumulative_wait_ms &&
@@ -7451,9 +7569,18 @@ static int harness_test_cumulative_session_metrics(void)
     (timeline.records[3].cumulative_wait_ms == 409500LL) &&
     harness_double_matches(timeline.records[3].cumulative_usage_cost, 0.0075) &&
     (timeline.records[4].cumulative_wait_ms == 411500LL) &&
-    harness_double_matches(timeline.records[4].cumulative_usage_cost, 0.008);
+    harness_double_matches(timeline.records[4].cumulative_usage_cost, 0.008) &&
+    (timeline.records[5].direction != NULL) &&
+    (strcmp(timeline.records[5].direction, "request") == 0) &&
+    (timeline.records[5].http_attempt_id == 0LL) &&
+    !timeline.records[5].has_cumulative_usage_cost &&
+    !timeline.records[5].has_cumulative_wait_ms &&
+    (timeline.records[5].cumulative_usage_cost == 0.0) &&
+    (timeline.records[5].cumulative_wait_ms == 0LL);
+  }
 
   if (ok) {
+    pending_cursor = timeline.records[5].timeline_cursor;
     range_cursor = timeline.records[1].timeline_cursor;
     ok = strappy_db_list_response_timeline_after(path,
                                                  session_id,
@@ -7461,7 +7588,7 @@ static int harness_test_cumulative_session_metrics(void)
                                                  &ranged_timeline,
                                                  NULL,
                                                  &error) &&
-      (ranged_timeline.count == 3U) &&
+      (ranged_timeline.count == 4U) &&
       harness_double_matches(
         ranged_timeline.records[0].cumulative_usage_cost, 0.0075) &&
       (ranged_timeline.records[0].cumulative_wait_ms == 9500LL) &&
@@ -7470,7 +7597,47 @@ static int harness_test_cumulative_session_metrics(void)
       (ranged_timeline.records[1].cumulative_wait_ms == 409500LL) &&
       harness_double_matches(
         ranged_timeline.records[2].cumulative_usage_cost, 0.008) &&
-      (ranged_timeline.records[2].cumulative_wait_ms == 411500LL);
+      (ranged_timeline.records[2].cumulative_wait_ms == 411500LL) &&
+      !ranged_timeline.records[3].has_cumulative_usage_cost &&
+      !ranged_timeline.records[3].has_cumulative_wait_ms &&
+      (ranged_timeline.records[3].cumulative_usage_cost == 0.0) &&
+      (ranged_timeline.records[3].cumulative_wait_ms == 0LL);
+  }
+
+  if (ok) {
+    strappy_session_message_record_list_destroy(&ranged_timeline);
+    strappy_session_message_record_list_init(&ranged_timeline);
+    memset(&pending_finish, 0, sizeof(pending_finish));
+    pending_finish.call_id = pending_call_id;
+    pending_finish.state = "completed";
+    pending_finish.output_is_canonical = 1;
+    pending_finish.http_status = 200L;
+    pending_finish.started_at_ms = pending_call_id * 1000LL;
+    pending_finish.completed_at_ms = pending_finish.started_at_ms + 500LL;
+    pending_finish.request_bytes = (long long)strlen(pending_request);
+    pending_finish.response_bytes = (long long)strlen(pending_response);
+    pending_finish.total_seconds = 0.5;
+    pending_finish.effective_url = pending_begin.request_url;
+    pending_finish.content_type = "application/json";
+    pending_finish.response_headers = "";
+    pending_finish.response_json = pending_response;
+    ok = strappy_db_finish_response_call(path, &pending_finish, &error) &&
+      strappy_db_set_response_round_wall_duration(path,
+                                                  pending_call_id,
+                                                  3000LL,
+                                                  &error) &&
+      strappy_db_list_response_timeline_after(path,
+                                               session_id,
+                                               &pending_cursor,
+                                               &ranged_timeline,
+                                               NULL,
+                                               &error) &&
+      (ranged_timeline.count == 1U) &&
+      ranged_timeline.records[0].has_cumulative_usage_cost &&
+      ranged_timeline.records[0].has_cumulative_wait_ms &&
+      harness_double_matches(
+        ranged_timeline.records[0].cumulative_usage_cost, 0.009) &&
+      (ranged_timeline.records[0].cumulative_wait_ms == 414500LL);
   }
 
   if (!ok) {
