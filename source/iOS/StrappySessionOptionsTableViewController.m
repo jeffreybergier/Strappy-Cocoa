@@ -521,7 +521,7 @@ titleForHeaderInSection:(NSInteger)section
       [[cell textLabel] setNumberOfLines:1];
     }
     [[cell textLabel] setText:NSLocalizedString(
-      @"Answer Quality Check", nil)];
+      @"Check Answer Quality", nil)];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
     [[self answerQualitySwitch]
       setOn:[[self sessionOptions] answerQualityEnabled]

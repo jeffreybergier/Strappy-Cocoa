@@ -47,13 +47,14 @@
 "Limits" = "制限";
 "Search Provider" = "検索プロバイダー";
 "Limit to 1 Tool" = "ツールを 1 つに制限";
-"Answer Quality Check" = "回答品質チェック";
+"Check Answer Quality" = "回答品質チェック";
 "Round Limit" = "ラウンド上限";
 "World Knowledge" = "世界知識";
 "General knowledge and web research" = "一般知識と Web リサーチ";
 "Personal Assistant" = "パーソナルアシスタント";
 "Personal databases and assistance" = "個人データベースとアシスタント機能";
 "Coding Assistant" = "コーディングアシスタント";
+"Code inspection and development" = "コードの調査と開発";
 "Coming Soon" = "近日公開";
 "Assistant is not selected." = "アシスタントが選択されていません。";
 "Failed to Save Changes" = "変更を保存できませんでした";
@@ -78,7 +79,6 @@
 "Context" = "コンテキスト";
 "Cost In (1M)" = "入力コスト (100万)";
 "Cost Out (1M)" = "出力コスト (100万)";
-"Prompt" = "プロンプト";
 "Completion" = "補完";
 "Default model for new chats" = "新規チャットの既定モデル";
 "Default Model" = "既定モデル";
@@ -104,7 +104,7 @@
 "Quick Scan" = "簡易スキャン";
 "Full Scan" = "完全スキャン";
 "Scan" = "スキャン";
-"Scans your home folder for SQLite databases. After scanning, whitelist desired databases so Strappy can read their data. Full Scan, scans every file in your home folder. Quick Scan, saved time by only scanning files with common file extensions used for SQLite databases." = "ホームフォルダ内の SQLite データベースをスキャンします。スキャン後、Strappy がデータを読み取れるよう、使用するデータベースを許可してください。完全スキャンはホームフォルダ内のすべてのファイルをスキャンします。簡易スキャンは、SQLite データベースで一般的に使われる拡張子のファイルだけをスキャンするため、時間を節約できます。";
+"Scans your home folder for SQLite databases. After scanning, whitelist desired databases so Strappy can read their data. Quick Scan saves time by only scanning files with common file extensions used for SQLite databases." = "ホームフォルダ内の SQLite データベースをスキャンします。スキャン後、Strappy がデータを読み取れるよう、使用するデータベースを許可してください。簡易スキャンでは、SQLite データベースで一般的に使われる拡張子のファイルだけをスキャンするため、時間を節約できます。";
 "Study" = "調査";
 "Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu." = "データベースを調査しておくと、今後 Strappy がクエリを実行する際の時間とトークンを節約できます。調査セッションでは「セッションのデフォルト」メニューで設定した既定モデルを使用します。";
 "Reset" = "リセット";
@@ -219,42 +219,24 @@
 "Metadata" = "メタデータ";
 "No HTTP response" = "HTTP レスポンスなし";
 "Retry" = "再試行";
-/* Suggested Japanese: [fa:gears] すり合わせ中… */
-"[fa:gears] Grinding" = "[fa:gears] Grinding";
-/* Suggested Japanese: [fa:martini-glass] 潤滑中… */
-"[fa:martini-glass] Hydrating" = "[fa:martini-glass] Hydrating";
-/* Suggested Japanese: [fa:shoe-prints] アピール中… */
-"[fa:shoe-prints] Strutting" = "[fa:shoe-prints] Strutting";
-/* Suggested Japanese: [fa:hands-holding-circle] 接触中… */
-"[fa:hands-holding-circle] Touching" = "[fa:hands-holding-circle] Touching";
-/* Suggested Japanese: [fa:spoon] 密着中… */
-"[fa:spoon] Spooning" = "[fa:spoon] Spooning";
-/* Suggested Japanese: [fa:socks] 脱皮中… */
-"[fa:socks] Shedding" = "[fa:socks] Shedding";
-/* Suggested Japanese: [fa:hand-lizard] 品定め中… */
-"[fa:hand-lizard] Judging" = "[fa:hand-lizard] Judging";
-/* Suggested Japanese: [fa:hand-holding-droplet] なでなで中… */
-"[fa:hand-holding-droplet] Stroking" = "[fa:hand-holding-droplet] Stroking";
-/* Suggested Japanese: [fa:ring] 寸止め中… */
-"[fa:ring] Edging" = "[fa:ring] Edging";
-/* Suggested Japanese: [fa:horse] 騎乗中… */
-"[fa:horse] Riding" = "[fa:horse] Riding";
-/* Suggested Japanese: [fa:bore-hole] 穴あけ中… */
-"[fa:bore-hole] Drilling" = "[fa:bore-hole] Drilling";
-/* Suggested Japanese: [fa:bed-pulse] ドキドキ中… */
-"[fa:bed-pulse] Pulsing" = "[fa:bed-pulse] Pulsing";
-/* Suggested Japanese: [fa:hands-bound] 拘束中… */
-"[fa:hands-bound] Binding" = "[fa:hands-bound] Binding";
-/* Suggested Japanese: [fa:table-tennis-paddle-ball] お仕置き中… */
-"[fa:table-tennis-paddle-ball] Paddling" = "[fa:table-tennis-paddle-ball] Paddling";
-/* Suggested Japanese: [fa:thumbtack] 差し込み中… */
-"[fa:thumbtack] Pegging" = "[fa:thumbtack] Pegging";
-/* Suggested Japanese: [fa:hand-back-fist] 制圧中… */
-"[fa:hand-back-fist] Dominating" = "[fa:hand-back-fist] Dominating";
-/* Suggested Japanese: [fa:droplet] 放出中… */
-"[fa:droplet] Climaxing" = "[fa:droplet] Climaxing";
-/* Suggested Japanese: [fa:shower] 反省中… */
-"[fa:shower] Regretting" = "[fa:shower] Regretting";
+"[fa:gears] Grinding" = "[fa:gears] すり合わせ中…";
+"[fa:martini-glass] Hydrating" = "[fa:martini-glass] 潤滑中…";
+"[fa:shoe-prints] Strutting" = "[fa:shoe-prints] アピール中…";
+"[fa:hands-holding-circle] Touching" = "[fa:hands-holding-circle] 接触中…";
+"[fa:spoon] Spooning" = "[fa:spoon] 密着中…";
+"[fa:socks] Shedding" = "[fa:socks] 脱皮中…";
+"[fa:hand-lizard] Judging" = "[fa:hand-lizard] 品定め中…";
+"[fa:hand-holding-droplet] Stroking" = "[fa:hand-holding-droplet] なでなで中…";
+"[fa:ring] Edging" = "[fa:ring] 寸止め中…";
+"[fa:horse] Riding" = "[fa:horse] 騎乗中…";
+"[fa:bore-hole] Drilling" = "[fa:bore-hole] 穴あけ中…";
+"[fa:bed-pulse] Pulsing" = "[fa:bed-pulse] ドキドキ中…";
+"[fa:hands-bound] Binding" = "[fa:hands-bound] 拘束中…";
+"[fa:table-tennis-paddle-ball] Paddling" = "[fa:table-tennis-paddle-ball] お仕置き中…";
+"[fa:thumbtack] Pegging" = "[fa:thumbtack] 差し込み中…";
+"[fa:hand-back-fist] Dominating" = "[fa:hand-back-fist] 制圧中…";
+"[fa:droplet] Climaxing" = "[fa:droplet] 放出中…";
+"[fa:shower] Regretting" = "[fa:shower] 反省中…";
 "Autoscroll on" = "自動スクロール オン";
 "Autoscroll off" = "自動スクロール オフ";
 "Save" = "保存";
@@ -303,3 +285,56 @@
 "This will permanently delete \"%@\" and all of its messages. This cannot be undone." = "「%@」とそのすべてのメッセージを完全に削除します。この操作は取り消せません。";
 "Transformations" = "変換";
 "Use Selection for Find" = "選択部分を検索に使用";
+
+/* Additional localized source keys */
+"%lu databases" = "%lu 個のデータベース";
+"%lu of %lu" = "%lu / %lu";
+"1 database" = "1 個のデータベース";
+"A Database Study session is already running." = "データベース調査セッションはすでに実行中です。";
+"API endpoint and token are required." = "API エンドポイントとトークンが必要です。";
+"All currently approved databases are studied." = "現在許可されているデータベースはすべて調査済みです。";
+"Application" = "アプリケーション";
+"Context: %@" = "コンテキスト: %@";
+"Could Not Load Study" = "データベース調査を読み込めませんでした";
+"Could Not Reset Study" = "データベース調査をリセットできませんでした";
+"Could Not Save Credentials" = "認証情報を保存できませんでした";
+"Could Not Start Study" = "データベース調査を開始できませんでした";
+"Could not create conversation" = "会話を作成できませんでした";
+"Could not load default options" = "デフォルト設定を読み込めませんでした";
+"Could not load models" = "モデルを読み込めませんでした";
+"Credentials Required" = "認証情報が必要です";
+"Database Study could not complete every database after three attempts." = "3 回試行しましたが、データベース調査ですべてのデータベースを完了できませんでした。";
+"Database Study progress has no output." = "データベース調査の進捗に出力がありません。";
+"Database Study prompt is not valid text." = "データベース調査のプロンプトが有効なテキストではありません。";
+"Database Study request failed." = "データベース調査のリクエストに失敗しました。";
+"Database Study was cancelled." = "データベース調査がキャンセルされました。";
+"Database Study working directory is unavailable." = "データベース調査の作業ディレクトリを利用できません。";
+"Default session options are invalid." = "デフォルトのセッション設定が無効です。";
+"Default session options could not be loaded." = "デフォルトのセッション設定を読み込めませんでした。";
+"Default working directory is unavailable." = "デフォルトの作業ディレクトリを利用できません。";
+"Fetching..." = "取得中...";
+"Generated system prompt is not valid UTF-8." = "生成されたシステムプロンプトは有効な UTF-8 ではありません。";
+"Hide hidden databases" = "非表示のデータベースを隠す";
+"In: %@" = "入力: %@";
+"No databases available." = "利用できるデータベースはありません。";
+"No messages yet" = "メッセージはまだありません";
+"No models have been fetched yet." = "モデルはまだ取得されていません。";
+"Other" = "その他";
+"Out: %@" = "出力: %@";
+"Prompt guidance resources are missing from the app bundle." = "プロンプトガイダンスのリソースがアプリバンドルにありません。";
+"Reset Database Study?" = "データベース調査をリセットしますか？";
+"Rows could not be loaded." = "行を読み込めませんでした。";
+"Saved default session options could not be loaded." = "保存されたデフォルトのセッション設定を読み込めませんでした。";
+"Saved session options could not be loaded." = "保存されたセッション設定を読み込めませんでした。";
+"Scanning..." = "スキャン中...";
+"Session options are invalid." = "セッション設定が無効です。";
+"Session options could not be loaded." = "セッション設定を読み込めませんでした。";
+"Show hidden databases" = "非表示のデータベースを表示";
+"Study Databases?" = "データベースを調査しますか？";
+"System prompt could not be generated." = "システムプロンプトを生成できませんでした。";
+"The default model will be used to study approved databases that are currently not studied." = "まだ調査されていない許可済みデータベースの調査には、既定モデルが使用されます。";
+"The request failed." = "リクエストに失敗しました。";
+"This clears every stored database description and context." = "保存されているすべてのデータベースの説明とコンテキストが消去されます。";
+"Update" = "更新";
+"Update Models" = "モデルを更新";
+"— of —" = "— / —";

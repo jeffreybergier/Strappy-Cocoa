@@ -773,7 +773,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
   actionSheet = [[UIActionSheet alloc]
     initWithTitle:NSLocalizedString(
-      @"Scans your home folder for SQLite databases. After scanning, whitelist desired databases so Strappy can read their data. Full Scan, scans every file in your home folder. Quick Scan, saved time by only scanning files with common file extensions used for SQLite databases.",
+      @"Scans your home folder for SQLite databases. After scanning, whitelist desired databases so Strappy can read their data. Quick Scan saves time by only scanning files with common file extensions used for SQLite databases.",
       nil)
          delegate:self
 cancelButtonTitle:NSLocalizedString(@"Cancel", nil)
