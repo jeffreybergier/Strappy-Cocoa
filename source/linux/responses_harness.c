@@ -129,14 +129,14 @@
   "Initial answer. \xF0\x9F\x98\x80"
 
 #define HARNESS_WORLD_PREFLIGHT_ASSISTANT_TEXT \
-  "Strappy here! Your favorite world knowledge babe. Let me read any stored " \
-  "memories before kicking things off!"
+  "Strappy here, babe. Facts, line up. Let me check my memories and tools " \
+  "before I put the world in order."
 #define HARNESS_PERSONAL_PREFLIGHT_ASSISTANT_TEXT \
-  "Strappy here! Your favorite database sleuth! Let me see what I have to " \
-  "work with before kicking things off!"
+  "Strappy here, babe. Databases, behave. Let me inspect my memories, skills, " \
+  "and approved data before I interrogate the evidence."
 #define HARNESS_CODING_PREFLIGHT_ASSISTANT_TEXT \
-  "Strappy here! Your strap-on coding master. Let me check out the " \
-  "environment we are working with before kicking things off!"
+  "Strappy here, babe. Code, heel. Let me inspect the environment, review my " \
+  "tools, and find out exactly what needs discipline."
 #define HARNESS_DATABASE_STUDY_PREFLIGHT_ASSISTANT_TEXT \
   "Starting the internal database study workflow."
 

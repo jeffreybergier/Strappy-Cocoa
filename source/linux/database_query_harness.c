@@ -2967,8 +2967,8 @@ static int harness_run_assistant_set_tests(void)
     (strcmp(world.preflight_when,
             STRAPPY_ASSISTANT_SET_PREFLIGHT_FIRST_USER_PROMPT) == 0) &&
     (strcmp(world.preflight_assistant_text,
-            "Strappy here! Your favorite world knowledge babe. Let me read "
-            "any stored memories before kicking things off!") == 0) &&
+            "Strappy here, babe. Facts, line up. Let me check my memories and "
+            "tools before I put the world in order.") == 0) &&
     (strcmp(world.preflight_calls[0].tool_name,
             STRAPPY_TOOL_MEMORY_READ) == 0) &&
     (strcmp(world.preflight_calls[0].arguments_json, "{}") == 0) &&
@@ -3024,8 +3024,9 @@ static int harness_run_assistant_set_tests(void)
     (strcmp(personal.preflight_when,
             STRAPPY_ASSISTANT_SET_PREFLIGHT_FIRST_USER_PROMPT) == 0) &&
     (strcmp(personal.preflight_assistant_text,
-            "Strappy here! Your favorite database sleuth! Let me see what I "
-            "have to work with before kicking things off!") == 0) &&
+            "Strappy here, babe. Databases, behave. Let me inspect my memories, "
+            "skills, and approved data before I interrogate the evidence.") ==
+     0) &&
     (strcmp(personal.preflight_calls[0].tool_name,
             STRAPPY_TOOL_MEMORY_READ) == 0) &&
     (strcmp(personal.preflight_calls[0].arguments_json, "{}") == 0) &&
@@ -3148,8 +3149,8 @@ static int harness_run_assistant_set_tests(void)
     (strcmp(coding.preflight_when,
             STRAPPY_ASSISTANT_SET_PREFLIGHT_FIRST_USER_PROMPT) == 0) &&
     (strcmp(coding.preflight_assistant_text,
-            "Strappy here! Your strap-on coding master. Let me check out the "
-            "environment we are working with before kicking things off!") ==
+            "Strappy here, babe. Code, heel. Let me inspect the environment, "
+            "review my tools, and find out exactly what needs discipline.") ==
      0) &&
     (strcmp(coding.preflight_calls[0].tool_name,
             STRAPPY_TOOL_MEMORY_READ) == 0) &&
