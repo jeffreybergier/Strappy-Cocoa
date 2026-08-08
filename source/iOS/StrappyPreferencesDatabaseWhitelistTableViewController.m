@@ -3,6 +3,7 @@
 #import "AIFontAwesome.h"
 #import "FileScanner.h"
 #import "StrappyAppearance.h"
+#import "StrappyPreferencesStatusToolbarView.h"
 
 static const CGFloat kStrappyDatabaseHiddenIconCanvasSize = 24.0f;
 static const CGFloat kStrappyDatabaseHiddenIconSize = 20.0f;
@@ -399,12 +400,14 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 }
 
 @interface StrappyPreferencesDatabaseWhitelistTableViewController ()
+  <UIActionSheetDelegate>
 @property (nonatomic, assign) BOOL scanning;
 @property (nonatomic, assign) BOOL hiddenMode;
 @property (nonatomic, copy) NSArray *databaseSections;
 @property (nonatomic, strong) UIBarButtonItem *hiddenModeButton;
 - (void)hiddenModeButtonPressed:(id)sender;
 - (void)updateHiddenModeButton;
+- (void)beginDatabaseScanWithMode:(FileScannerDatabaseScanMode)scanMode;
 - (void)databaseCatalogScanDidStart:(NSNotification *)notification;
 - (void)databaseCatalogDidChange:(NSNotification *)notification;
 - (void)databaseCatalogScanDidFinish:(NSNotification *)notification;
@@ -420,6 +423,9 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 - (void)viewDidLoad
 {
   [super viewDidLoad];
+
+  [[self statusToolbarView]
+    setActionButtonTitle:NSLocalizedString(@"Scan", nil)];
 
   [[NSNotificationCenter defaultCenter]
     addObserver:self
@@ -588,7 +594,7 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 
 - (NSString *)actionButtonAccessibilityLabel
 {
-  return NSLocalizedString(@"Scan Databases", nil);
+  return NSLocalizedString(@"Scan", nil);
 }
 
 - (void)configureCell:(UITableViewCell *)cell withRow:(NSDictionary *)row
@@ -754,10 +760,48 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
 - (void)actionButtonPressed:(id)sender
 {
+  UIActionSheet *actionSheet;
+
+  (void)sender;
+  if ([self scanning]) {
+    return;
+  }
+
+  actionSheet = [[UIActionSheet alloc]
+    initWithTitle:NSLocalizedString(
+      @"Quick Scan skips files with unrelated extensions. Full Scan checks every file on the disk to see if it is a SQLite database and can take quite a long time.",
+      nil)
+         delegate:self
+cancelButtonTitle:NSLocalizedString(@"Cancel", nil)
+destructiveButtonTitle:nil
+otherButtonTitles:NSLocalizedString(@"Quick Scan", nil),
+                  NSLocalizedString(@"Full Scan", nil),
+                  nil];
+  [actionSheet showFromToolbar:[[self navigationController] toolbar]];
+}
+
+- (void)actionSheet:(UIActionSheet *)actionSheet
+clickedButtonAtIndex:(NSInteger)buttonIndex
+{
+  NSInteger firstOtherButtonIndex;
+
+  if (buttonIndex == [actionSheet cancelButtonIndex]) {
+    return;
+  }
+
+  firstOtherButtonIndex = [actionSheet firstOtherButtonIndex];
+  if (buttonIndex == firstOtherButtonIndex) {
+    [self beginDatabaseScanWithMode:FileScannerDatabaseScanModeQuick];
+  } else if (buttonIndex == (firstOtherButtonIndex + 1)) {
+    [self beginDatabaseScanWithMode:FileScannerDatabaseScanModeFull];
+  }
+}
+
+- (void)beginDatabaseScanWithMode:(FileScannerDatabaseScanMode)scanMode
+{
   NSError *error;
   NSString *rootPath;
 
-  (void)sender;
   if ([self scanning]) {
     return;
   }
@@ -765,7 +809,9 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   rootPath = NSHomeDirectory();
   [self setStatusMessage:nil];
   error = nil;
-  if (![FileScanner beginDatabaseCatalogScanAtPath:rootPath error:&error]) {
+  if (![FileScanner beginDatabaseCatalogScanAtPath:rootPath
+                                          scanMode:scanMode
+                                             error:&error]) {
     [self showError:error
               title:NSLocalizedString(@"Could not scan databases", nil)];
     return;

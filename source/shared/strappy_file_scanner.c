@@ -136,6 +136,93 @@ static const char *strappy_file_scanner_basename(const char *path)
   return (slash != NULL) ? slash + 1 : path;
 }
 
+static int strappy_file_scanner_name_may_be_sqlite(const char *name)
+{
+  /* Conventional SQLite suffixes plus formats observed in iOS scan catalogs. */
+  static const char *const sqlite_suffixes[] = {
+    ".adlib",
+    ".cache",
+    ".db",
+    ".db3",
+    ".gcdata",
+    ".helplib",
+    ".localstorage",
+    ".s3db",
+    ".sl3",
+    ".sql",
+    ".sqlite",
+    ".sqlite3",
+    ".sqlitedb",
+    ".store"
+  };
+  const char *suffix;
+  size_t index;
+
+  if ((name == NULL) || (name[0] == '\0')) {
+    return 0;
+  }
+
+  suffix = strrchr(name, '.');
+  if ((suffix == NULL) || (suffix == name) || (suffix[1] == '\0')) {
+    return 1;
+  }
+
+  for (index = 0U;
+       index < (sizeof(sqlite_suffixes) / sizeof(sqlite_suffixes[0]));
+       index++) {
+    if (strappy_file_scanner_case_insensitive_equal(suffix,
+                                                    sqlite_suffixes[index])) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int strappy_file_scanner_compare_path_pointers(const void *left_value,
+                                                       const void *right_value)
+{
+  const char *const *left;
+  const char *const *right;
+
+  left = (const char *const *)left_value;
+  right = (const char *const *)right_value;
+  return strcmp(*left, *right);
+}
+
+static int strappy_file_scanner_sorted_paths_contain(
+  const char *const *paths,
+  size_t path_count,
+  const char *path)
+{
+  size_t low;
+  size_t high;
+
+  if ((paths == NULL) || (path_count == 0U) || (path == NULL)) {
+    return 0;
+  }
+
+  low = 0U;
+  high = path_count;
+  while (low < high) {
+    size_t middle;
+    int comparison;
+
+    middle = low + ((high - low) / 2U);
+    comparison = strcmp(path, paths[middle]);
+    if (comparison == 0) {
+      return 1;
+    }
+    if (comparison < 0) {
+      high = middle;
+    } else {
+      low = middle + 1U;
+    }
+  }
+
+  return 0;
+}
+
 static int strappy_file_scanner_is_index_database_name(const char *name)
 {
   size_t length;
@@ -1368,6 +1455,7 @@ void strappy_file_scanner_options_init(strappy_file_scanner_options *options)
 
   options->root_path = NULL;
   options->validate_candidates = 1;
+  options->use_filename_filter = 0;
   options->max_files = 0L;
   options->max_results = 0L;
   options->max_depth = -1;
@@ -1728,9 +1816,12 @@ static int strappy_file_scanner_validate_sqlite(const char *path,
   return ok;
 }
 
-int strappy_file_scanner_scan(const strappy_file_scanner_options *options,
-                              strappy_file_scanner_record_list *list,
-                              char **error_out)
+static int strappy_file_scanner_scan_with_prior_catalog_paths(
+  const strappy_file_scanner_options *options,
+  strappy_file_scanner_record_list *list,
+  const char *const *prior_catalog_paths,
+  size_t prior_catalog_path_count,
+  char **error_out)
 {
   strappy_file_scanner_metadata_context metadata_context;
   char *root_path;
@@ -1819,7 +1910,13 @@ int strappy_file_scanner_scan(const strappy_file_scanner_options *options,
       }
 
       progress.files_examined++;
-      if ((entry->fts_statp != NULL) && (entry->fts_statp->st_size >= 16)) {
+      if ((!options->use_filename_filter ||
+           strappy_file_scanner_name_may_be_sqlite(entry->fts_name) ||
+           strappy_file_scanner_sorted_paths_contain(
+             prior_catalog_paths,
+             prior_catalog_path_count,
+             entry->fts_path)) &&
+          (entry->fts_statp != NULL) && (entry->fts_statp->st_size >= 16)) {
         header_status = strappy_file_scanner_has_sqlite_header(entry->fts_path);
         if (header_status < 0) {
           progress.errors_seen++;
@@ -1907,6 +2004,17 @@ int strappy_file_scanner_scan(const strappy_file_scanner_options *options,
   }
 
   return 1;
+}
+
+int strappy_file_scanner_scan(const strappy_file_scanner_options *options,
+                              strappy_file_scanner_record_list *list,
+                              char **error_out)
+{
+  return strappy_file_scanner_scan_with_prior_catalog_paths(options,
+                                                            list,
+                                                            NULL,
+                                                            0U,
+                                                            error_out);
 }
 
 static void strappy_file_scanner_discovered_database_input_from_record(
@@ -2021,17 +2129,88 @@ int strappy_file_scanner_save_discovered_database_batch(
                                                                   error_out);
 }
 
+static int strappy_file_scanner_load_prior_catalog_paths(
+  const char *db_path,
+  const char *scan_root,
+  strappy_discovered_database_record_list *catalog_list,
+  const char ***paths_out,
+  size_t *path_count_out,
+  char **error_out)
+{
+  const char **paths;
+  size_t index;
+  size_t path_count;
+
+  if ((catalog_list == NULL) || (paths_out == NULL) ||
+      (path_count_out == NULL)) {
+    strappy_set_error(error_out, "Prior database catalog output is missing.");
+    return 0;
+  }
+  *paths_out = NULL;
+  *path_count_out = 0U;
+  strappy_discovered_database_record_list_init(catalog_list);
+
+  if (!strappy_db_list_discovered_databases(db_path,
+                                            catalog_list,
+                                            error_out)) {
+    strappy_discovered_database_record_list_destroy(catalog_list);
+    return 0;
+  }
+  if (catalog_list->count == 0U) {
+    return 1;
+  }
+  if (catalog_list->count > (((size_t)-1) / sizeof(*paths))) {
+    strappy_set_error(error_out, "Prior database catalog is too large.");
+    strappy_discovered_database_record_list_destroy(catalog_list);
+    return 0;
+  }
+
+  paths = (const char **)malloc(catalog_list->count * sizeof(*paths));
+  if (paths == NULL) {
+    strappy_set_error(error_out,
+                      "Could not allocate prior database catalog paths.");
+    strappy_discovered_database_record_list_destroy(catalog_list);
+    return 0;
+  }
+
+  path_count = 0U;
+  for (index = 0U; index < catalog_list->count; index++) {
+    const strappy_discovered_database_record *record;
+
+    record = &catalog_list->records[index];
+    if ((record->path != NULL) && (record->scan_root != NULL) &&
+        (scan_root != NULL) && (strcmp(record->scan_root, scan_root) == 0)) {
+      paths[path_count++] = record->path;
+    }
+  }
+  if (path_count > 1U) {
+    qsort(paths,
+          path_count,
+          sizeof(*paths),
+          strappy_file_scanner_compare_path_pointers);
+  }
+
+  *paths_out = paths;
+  *path_count_out = path_count;
+  return 1;
+}
+
 int strappy_file_scanner_scan_and_save_discovered_databases(
   const char *db_path,
   const strappy_file_scanner_options *options,
   strappy_file_scanner_record_list *list,
   char **error_out)
 {
+  strappy_discovered_database_record_list prior_catalog;
+  const char **prior_catalog_paths;
   const char *scan_root;
   const char *finish_state;
   const char *scan_error;
   char *finish_error;
   long long scan_run_id;
+  size_t prior_catalog_path_count;
+  int begin_ok;
+  int reconcile_unseen_locations;
   int scan_ok;
   int finish_ok;
 
@@ -2052,28 +2231,70 @@ int strappy_file_scanner_scan_and_save_discovered_databases(
     scan_root = NULL;
   }
 
+  strappy_discovered_database_record_list_init(&prior_catalog);
+  prior_catalog_paths = NULL;
+  prior_catalog_path_count = 0U;
+  if (options->use_filename_filter && (scan_root != NULL) &&
+      !strappy_file_scanner_load_prior_catalog_paths(
+        db_path,
+        scan_root,
+        &prior_catalog,
+        &prior_catalog_paths,
+        &prior_catalog_path_count,
+        error_out)) {
+    return 0;
+  }
+
   scan_run_id = 0LL;
-  if (!strappy_db_begin_discovered_database_scan(db_path,
-                                                 scan_root,
-                                                 &scan_run_id,
-                                                 error_out)) {
+  if (options->use_filename_filter) {
+    begin_ok = strappy_db_begin_incremental_discovered_database_scan(
+      db_path,
+      scan_root,
+      &scan_run_id,
+      error_out);
+  } else {
+    begin_ok = strappy_db_begin_discovered_database_scan(db_path,
+                                                         scan_root,
+                                                         &scan_run_id,
+                                                         error_out);
+  }
+  if (!begin_ok) {
+    free(prior_catalog_paths);
+    strappy_discovered_database_record_list_destroy(&prior_catalog);
     return 0;
   }
 
   list->scan_run_id = scan_run_id;
-  scan_ok = strappy_file_scanner_scan(options, list, error_out);
+  scan_ok = strappy_file_scanner_scan_with_prior_catalog_paths(
+    options,
+    list,
+    prior_catalog_paths,
+    prior_catalog_path_count,
+    error_out);
   scan_error = ((error_out != NULL) && (*error_out != NULL)) ?
     *error_out : NULL;
   finish_state = scan_ok ? "completed" :
     (((scan_error != NULL) && (strcmp(scan_error, "Scan was cancelled.") == 0)) ?
       "cancelled" : "error");
   finish_error = NULL;
-  finish_ok = strappy_db_finish_discovered_database_scan(
-    db_path,
-    scan_run_id,
-    finish_state,
-    scan_error,
-    &finish_error);
+  reconcile_unseen_locations = options->use_filename_filter &&
+    (options->max_files <= 0L) && (options->max_results <= 0L) &&
+    (options->max_depth < 0);
+  if (reconcile_unseen_locations) {
+    finish_ok = strappy_db_finish_incremental_discovered_database_scan(
+      db_path,
+      scan_run_id,
+      finish_state,
+      scan_error,
+      &finish_error);
+  } else {
+    finish_ok = strappy_db_finish_discovered_database_scan(
+      db_path,
+      scan_run_id,
+      finish_state,
+      scan_error,
+      &finish_error);
+  }
   list->scan_run_id = 0LL;
   if (!finish_ok && scan_ok) {
     strappy_set_error(error_out,
@@ -2081,5 +2302,7 @@ int strappy_file_scanner_scan_and_save_discovered_databases(
                         "Could not finish database scan.");
   }
   free(finish_error);
+  free(prior_catalog_paths);
+  strappy_discovered_database_record_list_destroy(&prior_catalog);
   return scan_ok && finish_ok;
 }

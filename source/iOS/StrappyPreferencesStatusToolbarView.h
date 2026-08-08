@@ -11,6 +11,7 @@
 - (instancetype)initWithActionIcon:(AIFontAwesomeIcon)actionIcon
                             target:(id)target
                             action:(SEL)action;
+- (void)setActionButtonTitle:(NSString *)title;
 - (void)layoutForToolbar:(UIToolbar *)toolbar
           containingItem:(UIBarButtonItem *)toolbarItem
            fallbackWidth:(CGFloat)fallbackWidth;

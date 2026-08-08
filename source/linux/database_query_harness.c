@@ -888,6 +888,29 @@ static int harness_create_user_database(const char *database_path)
   return ok;
 }
 
+static int harness_replace_with_non_database_file(const char *path)
+{
+  static const char contents[] = "not a sqlite database";
+  FILE *file;
+  int ok;
+
+  file = fopen(path, "wb");
+  if (file == NULL) {
+    fprintf(stderr, "Could not replace database fixture: %s\n", path);
+    return 0;
+  }
+
+  ok = (fwrite(contents, 1U, sizeof(contents) - 1U, file) ==
+        (sizeof(contents) - 1U)) ? 1 : 0;
+  if (fclose(file) != 0) {
+    ok = 0;
+  }
+  if (!ok) {
+    fprintf(stderr, "Could not write non-database fixture: %s\n", path);
+  }
+  return ok;
+}
+
 static int harness_create_wide_column_database(const char *database_path)
 {
   sqlite3 *db;
@@ -4151,6 +4174,15 @@ typedef struct harness_scanner_batch_context {
   size_t callback_count;
 } harness_scanner_batch_context;
 
+static int harness_cancel_file_scanner(
+  const strappy_file_scanner_progress *progress,
+  void *user_data)
+{
+  (void)progress;
+  (void)user_data;
+  return 0;
+}
+
 static int harness_save_scanner_batch(strappy_file_scanner_record_list *list,
                                       void *user_data,
                                       char **error_out)
@@ -4752,6 +4784,394 @@ static int harness_run_file_scanner_batch_catalog_tests(
   harness_unlink_sqlite_files(stale_path);
   rmdir(documents_dir);
   rmdir(scan_root);
+  return ok;
+}
+
+static int harness_run_file_scanner_filename_filter_tests(
+  const harness_context *context)
+{
+  static const char *const included_names[] = {
+    "database",
+    ".hidden-database",
+    "database.",
+    "database.adlib",
+    "database.cache",
+    "database.db",
+    "database.db3",
+    "database.gcdata",
+    "database.helplib",
+    "database.localstorage",
+    "database.s3db",
+    "database.sl3",
+    "database.sql",
+    "database.sqlite",
+    "database.SQLITE3",
+    "database.sqlitedb",
+    "database.store"
+  };
+  static const char *const excluded_names[] = {
+    "database.db-wal",
+    "database.json",
+    "database.plist",
+    "database.sqlite.backup",
+    "database.txt"
+  };
+  char catalog_path[1200];
+  char scan_root[1200];
+  char path[1400];
+  strappy_file_scanner_options options;
+  strappy_file_scanner_record_list scan_list;
+  harness_scanner_batch_context batch_context;
+  char *error;
+  size_t index;
+  size_t record_index;
+  int found;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  catalog_path[0] = '\0';
+  scan_root[0] = '\0';
+  path[0] = '\0';
+  strappy_file_scanner_record_list_init(&scan_list);
+  error = NULL;
+  ok = 0;
+
+  if (!harness_join_path(catalog_path,
+                         sizeof(catalog_path),
+                         context->temp_dir,
+                         "scanner-filename-filter-catalog.sqlite") ||
+      !harness_join_path(scan_root,
+                         sizeof(scan_root),
+                         context->temp_dir,
+                         "scanner-filename-filter-root")) {
+    fprintf(stderr, "Could not build scanner filename filter path.\n");
+    goto cleanup;
+  }
+  harness_unlink_sqlite_files(catalog_path);
+  if (!harness_ensure_directory(scan_root,
+                                "mkdir scanner filename filter root")) {
+    goto cleanup;
+  }
+
+  for (index = 0U;
+       index < (sizeof(included_names) / sizeof(included_names[0]));
+       index++) {
+    if (!harness_join_path(path,
+                           sizeof(path),
+                           scan_root,
+                           included_names[index]) ||
+        !harness_create_user_database(path)) {
+      fprintf(stderr, "Could not create included scanner filename fixture.\n");
+      goto cleanup;
+    }
+  }
+  for (index = 0U;
+       index < (sizeof(excluded_names) / sizeof(excluded_names[0]));
+       index++) {
+    if (!harness_join_path(path,
+                           sizeof(path),
+                           scan_root,
+                           excluded_names[index]) ||
+        !harness_create_user_database(path)) {
+      fprintf(stderr, "Could not create excluded scanner filename fixture.\n");
+      goto cleanup;
+    }
+  }
+
+  strappy_file_scanner_options_init(&options);
+  options.root_path = scan_root;
+  options.validate_candidates = 1;
+  if (!strappy_file_scanner_scan(&options, &scan_list, &error)) {
+    fprintf(stderr,
+            "Could not run full scanner filename test: %s\n",
+            (error != NULL) ? error : "unknown");
+    goto cleanup;
+  }
+  if (scan_list.count !=
+      ((sizeof(included_names) / sizeof(included_names[0])) +
+       (sizeof(excluded_names) / sizeof(excluded_names[0])))) {
+    fprintf(stderr, "Full scanner did not inspect every filename.\n");
+    goto cleanup;
+  }
+  strappy_file_scanner_record_list_destroy(&scan_list);
+
+  options.use_filename_filter = 1;
+  if (!strappy_file_scanner_scan(&options, &scan_list, &error)) {
+    fprintf(stderr,
+            "Could not run scanner filename filter test: %s\n",
+            (error != NULL) ? error : "unknown");
+    goto cleanup;
+  }
+
+  if (scan_list.count !=
+      (sizeof(included_names) / sizeof(included_names[0]))) {
+    fprintf(stderr,
+            "Scanner filename filter returned an unexpected record count.\n");
+    goto cleanup;
+  }
+
+  for (index = 0U;
+       index < (sizeof(included_names) / sizeof(included_names[0]));
+       index++) {
+    if (!harness_join_path(path,
+                           sizeof(path),
+                           scan_root,
+                           included_names[index])) {
+      goto cleanup;
+    }
+    found = 0;
+    for (record_index = 0U;
+         record_index < scan_list.count;
+         record_index++) {
+      if ((scan_list.records[record_index].path != NULL) &&
+          (strcmp(scan_list.records[record_index].path, path) == 0) &&
+          scan_list.records[record_index].is_valid_sqlite) {
+        found = 1;
+        break;
+      }
+    }
+    if (!found) {
+      fprintf(stderr,
+              "Scanner filename filter skipped included fixture %s.\n",
+              included_names[index]);
+      goto cleanup;
+    }
+  }
+
+  for (index = 0U;
+       index < (sizeof(excluded_names) / sizeof(excluded_names[0]));
+       index++) {
+    if (!harness_join_path(path,
+                           sizeof(path),
+                           scan_root,
+                           excluded_names[index])) {
+      goto cleanup;
+    }
+    for (record_index = 0U;
+         record_index < scan_list.count;
+         record_index++) {
+      if ((scan_list.records[record_index].path != NULL) &&
+          (strcmp(scan_list.records[record_index].path, path) == 0)) {
+        fprintf(stderr,
+                "Scanner filename filter included excluded fixture %s.\n",
+                excluded_names[index]);
+        goto cleanup;
+      }
+    }
+  }
+
+  strappy_file_scanner_record_list_destroy(&scan_list);
+  strappy_file_scanner_options_init(&options);
+  options.root_path = scan_root;
+  options.validate_candidates = 1;
+  options.record_batch_size = 4U;
+  options.record_batch_callback = harness_save_scanner_batch;
+  options.record_batch_user_data = &batch_context;
+  batch_context.catalog_path = catalog_path;
+  batch_context.scan_root = scan_root;
+  batch_context.scan_run_id = 0LL;
+  batch_context.callback_count = 0U;
+  if (!strappy_file_scanner_scan_and_save_discovered_databases(
+        catalog_path,
+        &options,
+        &scan_list,
+        &error) ||
+      !harness_expect_catalog_integer(
+        catalog_path,
+        "SELECT COUNT(*) FROM database_locations WHERE active = 1;",
+        (long long)((sizeof(included_names) / sizeof(included_names[0])) +
+                    (sizeof(excluded_names) / sizeof(excluded_names[0]))),
+        "full filename scan catalog")) {
+    fprintf(stderr,
+            "Full filename scan did not catalog every database: %s\n",
+            (error != NULL) ? error : "unknown");
+    goto cleanup;
+  }
+
+  options.use_filename_filter = 1;
+  if (!harness_join_path(path,
+                         sizeof(path),
+                         scan_root,
+                         included_names[0])) {
+    goto cleanup;
+  }
+  harness_unlink_sqlite_files(path);
+  options.progress_callback = harness_cancel_file_scanner;
+  batch_context.scan_run_id = 0LL;
+  batch_context.callback_count = 0U;
+  if (strappy_file_scanner_scan_and_save_discovered_databases(
+        catalog_path,
+        &options,
+        &scan_list,
+        &error)) {
+    fprintf(stderr, "Quick filename scan did not cancel.\n");
+    goto cleanup;
+  }
+  if ((error == NULL) || (strcmp(error, "Scan was cancelled.") != 0)) {
+    fprintf(stderr,
+            "Quick filename scan returned an unexpected cancellation: %s\n",
+            (error != NULL) ? error : "unknown");
+    goto cleanup;
+  }
+  free(error);
+  error = NULL;
+  options.progress_callback = NULL;
+  if (!harness_expect_catalog_integer(
+        catalog_path,
+        "SELECT COUNT(*) FROM database_locations WHERE active = 1;",
+        (long long)((sizeof(included_names) / sizeof(included_names[0])) +
+                    (sizeof(excluded_names) / sizeof(excluded_names[0]))),
+        "cancelled quick filename scan preserved catalog") ||
+      !harness_expect_catalog_integer(
+        catalog_path,
+        "SELECT COUNT(*) FROM scan_runs WHERE id = "
+        "(SELECT MAX(id) FROM scan_runs) AND state = 'cancelled';",
+        1LL,
+        "cancelled quick filename scan state") ||
+      !harness_create_user_database(path)) {
+    goto cleanup;
+  }
+
+  batch_context.scan_run_id = 0LL;
+  batch_context.callback_count = 0U;
+  if (!strappy_file_scanner_scan_and_save_discovered_databases(
+        catalog_path,
+        &options,
+        &scan_list,
+        &error) ||
+      !harness_expect_catalog_integer(
+        catalog_path,
+        "SELECT COUNT(*) FROM database_locations WHERE active = 1;",
+        (long long)((sizeof(included_names) / sizeof(included_names[0])) +
+                    (sizeof(excluded_names) / sizeof(excluded_names[0]))),
+        "quick filename scan preserved full results") ||
+      !harness_expect_catalog_integer(
+        catalog_path,
+        "SELECT COUNT(*) FROM scan_runs WHERE id = "
+        "(SELECT MAX(id) FROM scan_runs) AND candidate_count = 22 "
+        "AND database_count = 22;",
+        1LL,
+        "quick filename scan counts")) {
+    fprintf(stderr,
+            "Quick filename scan did not preserve full scan results: %s\n",
+            (error != NULL) ? error : "unknown");
+    goto cleanup;
+  }
+
+  if (!harness_join_path(path,
+                         sizeof(path),
+                         scan_root,
+                         included_names[0])) {
+    goto cleanup;
+  }
+  harness_unlink_sqlite_files(path);
+  if (!harness_join_path(path,
+                         sizeof(path),
+                         scan_root,
+                         included_names[1]) ||
+      !harness_replace_with_non_database_file(path)) {
+    goto cleanup;
+  }
+  if (!harness_join_path(path,
+                         sizeof(path),
+                         scan_root,
+                         excluded_names[0])) {
+    goto cleanup;
+  }
+  harness_unlink_sqlite_files(path);
+
+  batch_context.scan_run_id = 0LL;
+  batch_context.callback_count = 0U;
+  if (!strappy_file_scanner_scan_and_save_discovered_databases(
+        catalog_path,
+        &options,
+        &scan_list,
+        &error) ||
+      !harness_expect_catalog_integer(
+        catalog_path,
+        "SELECT COUNT(*) FROM database_locations WHERE active = 1;",
+        (long long)((sizeof(included_names) / sizeof(included_names[0])) +
+                    (sizeof(excluded_names) / sizeof(excluded_names[0])) - 3U),
+        "quick filename scan reconciled prior results") ||
+      !harness_expect_catalog_integer(
+        catalog_path,
+        "SELECT COUNT(*) FROM database_locations WHERE active = 0;",
+        3LL,
+        "quick filename scan inactive prior results") ||
+      !harness_expect_catalog_integer(
+        catalog_path,
+        "SELECT COUNT(*) FROM scan_runs WHERE id = "
+        "(SELECT MAX(id) FROM scan_runs) AND candidate_count = 19 "
+        "AND database_count = 19;",
+        1LL,
+        "quick filename rescan counts")) {
+    fprintf(stderr,
+            "Quick filename scan did not reconcile prior results: %s\n",
+            (error != NULL) ? error : "unknown");
+    goto cleanup;
+  }
+
+  for (index = 0U;
+       index < (sizeof(excluded_names) / sizeof(excluded_names[0]));
+       index++) {
+    if (harness_join_path(path,
+                          sizeof(path),
+                          scan_root,
+                          excluded_names[index])) {
+      harness_unlink_sqlite_files(path);
+    }
+  }
+  options.use_filename_filter = 0;
+  batch_context.scan_run_id = 0LL;
+  batch_context.callback_count = 0U;
+  if (!strappy_file_scanner_scan_and_save_discovered_databases(
+        catalog_path,
+        &options,
+        &scan_list,
+        &error) ||
+      !harness_expect_catalog_integer(
+        catalog_path,
+        "SELECT COUNT(*) FROM database_locations WHERE active = 1;",
+        (long long)((sizeof(included_names) / sizeof(included_names[0])) - 2U),
+        "full filename rescan replacement")) {
+    fprintf(stderr,
+            "Full filename rescan did not reconcile deleted databases: %s\n",
+            (error != NULL) ? error : "unknown");
+    goto cleanup;
+  }
+
+  ok = 1;
+
+cleanup:
+  free(error);
+  strappy_file_scanner_record_list_destroy(&scan_list);
+  harness_unlink_sqlite_files(catalog_path);
+  if (scan_root[0] != '\0') {
+    for (index = 0U;
+         index < (sizeof(included_names) / sizeof(included_names[0]));
+         index++) {
+      if (harness_join_path(path,
+                            sizeof(path),
+                            scan_root,
+                            included_names[index])) {
+        harness_unlink_sqlite_files(path);
+      }
+    }
+    for (index = 0U;
+         index < (sizeof(excluded_names) / sizeof(excluded_names[0]));
+         index++) {
+      if (harness_join_path(path,
+                            sizeof(path),
+                            scan_root,
+                            excluded_names[index])) {
+        harness_unlink_sqlite_files(path);
+      }
+    }
+    rmdir(scan_root);
+  }
   return ok;
 }
 
@@ -11181,6 +11601,7 @@ int main(void)
        harness_run_fresh_catalog_schema_tests(&context) &&
        harness_run_session_settings_upgrade_test(&context) &&
        harness_run_discovered_database_replacement_tests(&context) &&
+       harness_run_file_scanner_filename_filter_tests(&context) &&
        harness_run_file_scanner_batch_catalog_tests(&context) &&
        harness_run_file_scanner_hidden_tests(&context) &&
        harness_run_empty_database_list_tests(&context) &&

@@ -101,6 +101,10 @@
 "Database scan failed." = "データベーススキャンに失敗しました。";
 "System Prompt" = "システムプロンプト";
 "Scan Databases" = "データベースをスキャン";
+"Quick Scan" = "簡易スキャン";
+"Full Scan" = "完全スキャン";
+"Scan" = "スキャン";
+"Quick Scan skips files with unrelated extensions. Full Scan checks every file on the disk to see if it is a SQLite database and can take quite a long time." = "簡易スキャンは関係のない拡張子のファイルをスキップします。完全スキャンはディスク上のすべてのファイルが SQLite データベースかどうかを確認するため、かなり時間がかかることがあります。";
 "Study" = "調査";
 "Reset" = "リセット";
 "Could Not Delete Study" = "データベース調査を削除できませんでした";
@@ -255,6 +259,8 @@
 "Save" = "保存";
 "Scan path is empty." = "スキャンパスが空です。";
 "Scan your home folder for SQLite databases." = "ホームフォルダ内の SQLite データベースをスキャンします。";
+"Scan likely SQLite database filenames." = "SQLite データベースの可能性が高いファイル名をスキャンします。";
+"Scan every file for SQLite databases." = "すべてのファイルから SQLite データベースを検索します。";
 "Scanning databases..." = "データベースをスキャン中...";
 "Search" = "検索";
 "Search Web" = "Web を検索";

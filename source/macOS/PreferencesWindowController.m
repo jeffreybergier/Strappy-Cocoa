@@ -556,7 +556,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)setScanning:(BOOL)scanning;
 - (void)databaseSearchChanged:(id)sender;
 - (void)databaseSearchTextDidChange:(NSNotification *)notification;
-- (void)scanDatabasesInBackground:(NSString *)rootPath;
+- (void)beginDatabaseScanWithMode:(FileScannerDatabaseScanMode)scanMode;
+- (void)scanDatabasesInBackground:(NSDictionary *)request;
 - (void)scanDatabasesDidFinish:(NSDictionary *)result;
 - (void)refreshDatabaseStatus;
 - (void)whitelistTableViewDidPressSpace:(NSTableView *)tableView;
@@ -686,6 +687,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   databaseSearchField_ = [[databaseWhitelistView_ searchField] retain];
   databaseTableView_ = [[databaseWhitelistView_ tableView] retain];
   scanButton_ = [[databaseWhitelistView_ scanButton] retain];
+  fullScanButton_ = [[databaseWhitelistView_ fullScanButton] retain];
   scanProgressIndicator_ = [[databaseWhitelistView_ progressIndicator] retain];
   databaseStatusLabel_ = [[databaseWhitelistView_ statusLabel] retain];
   [[NSNotificationCenter defaultCenter]
@@ -1552,6 +1554,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 {
   scanning_ = scanning;
   [scanButton_ setEnabled:(scanning_ ? NO : YES)];
+  [fullScanButton_ setEnabled:(scanning_ ? NO : YES)];
   if (scanning_) {
     [scanProgressIndicator_ startAnimation:self];
   } else {
@@ -1639,30 +1642,56 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)scanDatabases:(id)sender
 {
-  NSString *rootPath;
-
   (void)sender;
+  [self beginDatabaseScanWithMode:FileScannerDatabaseScanModeQuick];
+}
+
+- (void)fullScanDatabases:(id)sender
+{
+  (void)sender;
+  [self beginDatabaseScanWithMode:FileScannerDatabaseScanModeFull];
+}
+
+- (void)beginDatabaseScanWithMode:(FileScannerDatabaseScanMode)scanMode
+{
+  NSDictionary *request;
+
   if (scanning_) {
     return;
   }
 
-  rootPath = [NSHomeDirectory() copy];
+  scanMode = (scanMode == FileScannerDatabaseScanModeQuick) ?
+    FileScannerDatabaseScanModeQuick : FileScannerDatabaseScanModeFull;
+  request = [[NSDictionary alloc] initWithObjectsAndKeys:
+    NSHomeDirectory(), @"path",
+    [NSNumber XP_numberWithInteger:(XPInteger)scanMode], @"scan_mode",
+    nil];
   [self setScanning:YES];
   [self retain];
   [NSThread detachNewThreadSelector:@selector(scanDatabasesInBackground:)
                            toTarget:self
-                         withObject:rootPath];
-  [rootPath release];
+                         withObject:request];
+  [request release];
 }
 
-- (void)scanDatabasesInBackground:(NSString *)rootPath
+- (void)scanDatabasesInBackground:(NSDictionary *)request
 {
   NSAutoreleasePool *pool;
   NSArray *rows;
   NSMutableDictionary *result;
+  NSString *rootPath;
+  NSNumber *scanModeNumber;
+  FileScannerDatabaseScanMode scanMode;
 
   pool = [[NSAutoreleasePool alloc] init];
+  rootPath = [request objectForKey:@"path"];
+  scanModeNumber = [request objectForKey:@"scan_mode"];
+  scanMode = ([scanModeNumber isKindOfClass:[NSNumber class]] &&
+              ([scanModeNumber XP_integerValue] ==
+               FileScannerDatabaseScanModeQuick)) ?
+    FileScannerDatabaseScanModeQuick : FileScannerDatabaseScanModeFull;
   rows = [[FileScanner sharedScanner] scanDirectoryForSQLiteDatabasesAtPath:rootPath
+                                                                   scanMode:scanMode
                                             savingResultsToCatalogWithError:nil];
   result = [[NSMutableDictionary alloc] init];
   if (rows != nil) {
@@ -2251,6 +2280,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [databaseStudyPaneView_ release];
   [databaseStudyTextView_ release];
   [scanButton_ release];
+  [fullScanButton_ release];
   [scanProgressIndicator_ release];
   [databaseStatusLabel_ release];
   [allModelRows_ release];

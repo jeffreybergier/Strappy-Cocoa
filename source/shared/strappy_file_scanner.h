@@ -53,6 +53,8 @@ typedef int (*strappy_file_scanner_record_batch_callback)(
 typedef struct strappy_file_scanner_options {
   const char *root_path;
   int validate_candidates;
+  /* Zero checks every regular file; nonzero checks likely database names. */
+  int use_filename_filter;
   long max_files;
   long max_results;
   int max_depth;

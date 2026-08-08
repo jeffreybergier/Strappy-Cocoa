@@ -6279,6 +6279,7 @@ static int strappy_db_catalog_save_one(sqlite3 *db,
 static int strappy_db_catalog_begin_scan(sqlite3 *db,
                                          const char *scan_root,
                                          long long now_ms,
+                                         int reset_existing_locations,
                                          long long *scan_run_id_out,
                                          char **error_out)
 {
@@ -6341,18 +6342,20 @@ static int strappy_db_catalog_begin_scan(sqlite3 *db,
   *scan_run_id_out = (long long)sqlite3_last_insert_rowid(db);
   sqlite3_finalize(stmt);
 
-  stmt = NULL;
-  rc = sqlite3_prepare_v2(db, deactivate_sql, -1, &stmt, NULL);
-  if ((rc != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)root_id) != SQLITE_OK) ||
-      (sqlite3_step(stmt) != SQLITE_DONE)) {
-    strappy_set_formatted_error(error_out,
-                                "Could not reset scan locations: %s",
-                                sqlite3_errmsg(db));
+  if (reset_existing_locations) {
+    stmt = NULL;
+    rc = sqlite3_prepare_v2(db, deactivate_sql, -1, &stmt, NULL);
+    if ((rc != SQLITE_OK) ||
+        (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)root_id) != SQLITE_OK) ||
+        (sqlite3_step(stmt) != SQLITE_DONE)) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not reset scan locations: %s",
+                                  sqlite3_errmsg(db));
+      sqlite3_finalize(stmt);
+      return 0;
+    }
     sqlite3_finalize(stmt);
-    return 0;
   }
-  sqlite3_finalize(stmt);
 
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, start_root_sql, -1, &stmt, NULL);
@@ -6376,8 +6379,14 @@ static int strappy_db_catalog_finish_scan(sqlite3 *db,
                                           const char *state,
                                           const char *error_message,
                                           long long now_ms,
+                                          int reconcile_unseen_locations,
                                           char **error_out)
 {
+  static const char *reconcile_locations_sql =
+    "UPDATE database_locations SET active = 0 WHERE scan_root_id = "
+    "(SELECT scan_root_id FROM scan_runs WHERE id = ? AND state = 'running') "
+    "AND active = 1 AND "
+    "(last_scan_run_id IS NULL OR last_scan_run_id <> ?);";
   static const char *finish_run_sql =
     "UPDATE scan_runs SET state = ?, completed_at_ms = ?, error_message = ? "
     "WHERE id = ? AND state = 'running';";
@@ -6393,6 +6402,22 @@ static int strappy_db_catalog_finish_scan(sqlite3 *db,
        (strcmp(state, "cancelled") != 0))) {
     strappy_set_error(error_out, "Database scan finish is incomplete.");
     return 0;
+  }
+
+  if (reconcile_unseen_locations && (strcmp(state, "completed") == 0)) {
+    stmt = NULL;
+    rc = sqlite3_prepare_v2(db, reconcile_locations_sql, -1, &stmt, NULL);
+    if ((rc != SQLITE_OK) ||
+        (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)scan_run_id) != SQLITE_OK) ||
+        (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)scan_run_id) != SQLITE_OK) ||
+        (sqlite3_step(stmt) != SQLITE_DONE)) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not reconcile scan locations: %s",
+                                  sqlite3_errmsg(db));
+      sqlite3_finalize(stmt);
+      return 0;
+    }
+    sqlite3_finalize(stmt);
   }
 
   stmt = NULL;
@@ -6461,6 +6486,7 @@ static int strappy_db_catalog_save(sqlite3 *db,
     ok = strappy_db_catalog_begin_scan(db,
                                        scan_root,
                                        now_ms,
+                                       1,
                                        &run_id,
                                        error_out);
   }
@@ -6477,6 +6503,7 @@ static int strappy_db_catalog_save(sqlite3 *db,
                                         "completed",
                                         NULL,
                                         now_ms,
+                                        0,
                                         error_out);
   }
   if (ok) {
@@ -6625,9 +6652,10 @@ int strappy_db_initialize(const char *db_path, char **error_out)
   return ok;
 }
 
-int strappy_db_begin_discovered_database_scan(
+static int strappy_db_begin_discovered_database_scan_with_policy(
   const char *db_path,
   const char *scan_root,
+  int reset_existing_locations,
   long long *scan_run_id_out,
   char **error_out)
 {
@@ -6657,6 +6685,7 @@ int strappy_db_begin_discovered_database_scan(
   ok = strappy_db_catalog_begin_scan(db,
                                      scan_root,
                                      strappy_db_now_ms(),
+                                     reset_existing_locations,
                                      scan_run_id_out,
                                      error_out);
   if (ok) {
@@ -6676,11 +6705,40 @@ int strappy_db_begin_discovered_database_scan(
   return ok;
 }
 
-int strappy_db_finish_discovered_database_scan(
+int strappy_db_begin_discovered_database_scan(
+  const char *db_path,
+  const char *scan_root,
+  long long *scan_run_id_out,
+  char **error_out)
+{
+  return strappy_db_begin_discovered_database_scan_with_policy(
+    db_path,
+    scan_root,
+    1,
+    scan_run_id_out,
+    error_out);
+}
+
+int strappy_db_begin_incremental_discovered_database_scan(
+  const char *db_path,
+  const char *scan_root,
+  long long *scan_run_id_out,
+  char **error_out)
+{
+  return strappy_db_begin_discovered_database_scan_with_policy(
+    db_path,
+    scan_root,
+    0,
+    scan_run_id_out,
+    error_out);
+}
+
+static int strappy_db_finish_discovered_database_scan_with_policy(
   const char *db_path,
   long long scan_run_id,
   const char *state,
   const char *error_message,
+  int reconcile_unseen_locations,
   char **error_out)
 {
   sqlite3 *db;
@@ -6702,6 +6760,7 @@ int strappy_db_finish_discovered_database_scan(
                                       state,
                                       error_message,
                                       strappy_db_now_ms(),
+                                      reconcile_unseen_locations,
                                       error_out);
   if (ok) {
     ok = strappy_db_exec(db,
@@ -6717,6 +6776,38 @@ int strappy_db_finish_discovered_database_scan(
   }
   strappy_db_release(db);
   return ok;
+}
+
+int strappy_db_finish_discovered_database_scan(
+  const char *db_path,
+  long long scan_run_id,
+  const char *state,
+  const char *error_message,
+  char **error_out)
+{
+  return strappy_db_finish_discovered_database_scan_with_policy(
+    db_path,
+    scan_run_id,
+    state,
+    error_message,
+    0,
+    error_out);
+}
+
+int strappy_db_finish_incremental_discovered_database_scan(
+  const char *db_path,
+  long long scan_run_id,
+  const char *state,
+  const char *error_message,
+  char **error_out)
+{
+  return strappy_db_finish_discovered_database_scan_with_policy(
+    db_path,
+    scan_run_id,
+    state,
+    error_message,
+    1,
+    error_out);
 }
 
 int strappy_db_save_discovered_databases_for_scan_run(

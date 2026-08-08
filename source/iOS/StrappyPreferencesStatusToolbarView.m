@@ -8,11 +8,13 @@ static const CGFloat kStrappyPreferencesToolbarLabelHeight = 30.0f;
 static const CGFloat kStrappyPreferencesToolbarFallbackHeight = 44.0f;
 static const CGFloat kStrappyPreferencesToolbarFallbackWidth = 320.0f;
 static const CGFloat kStrappyPreferencesToolbarActionIconSize = 18.0f;
+static const CGFloat kStrappyPreferencesToolbarTextActionWidth = 64.0f;
 
 @interface StrappyPreferencesStatusToolbarView ()
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, strong) UIButton *actionButton;
 @property (nonatomic, strong) UIActivityIndicatorView *activityIndicatorView;
+@property (nonatomic, copy) NSString *primaryActionTitle;
 @property (nonatomic, assign) AIFontAwesomeIcon actionIcon;
 @property (nonatomic, assign) CGFloat toolbarWidth;
 @property (nonatomic, assign) CGFloat toolbarContentOffsetX;
@@ -122,6 +124,14 @@ static const CGFloat kStrappyPreferencesToolbarActionIconSize = 18.0f;
   [[self actionButton] setAccessibilityLabel:actionAccessibilityLabel];
 }
 
+- (void)setActionButtonTitle:(NSString *)title
+{
+  [self setPrimaryActionTitle:title];
+  [[self actionButton] setAccessibilityLabel:title];
+  [self refreshAppearanceForToolbar:nil];
+  [self setNeedsLayout];
+}
+
 - (void)setWorking:(BOOL)working
 {
   if (_working == working) {
@@ -175,15 +185,28 @@ static const CGFloat kStrappyPreferencesToolbarActionIconSize = 18.0f;
   }
 
   if ([self actionButton] != nil) {
-    UIImage *actionImage;
+    if ([[self primaryActionTitle] length] > 0U) {
+      [[self actionButton] setImage:nil forState:UIControlStateNormal];
+      [[self actionButton] setTitle:[self primaryActionTitle]
+                          forState:UIControlStateNormal];
+      [[self actionButton] setTitleColor:actionColor
+                               forState:UIControlStateNormal];
+      [[self actionButton] setTitleColor:[actionColor colorWithAlphaComponent:0.5f]
+                               forState:UIControlStateDisabled];
+      [[[self actionButton] titleLabel]
+        setFont:[UIFont boldSystemFontOfSize:12.0f]];
+    } else {
+      UIImage *actionImage;
 
-    actionImage = [AIFontAwesome imageForIcon:[self actionIcon]
-                                        style:AIFontAwesomeStyleSolid
-                                     iconSize:kStrappyPreferencesToolbarActionIconSize
-                                   canvasSize:kStrappyPreferencesToolbarSideItemWidth
-                                        color:actionColor
-                                        scale:0.0f];
-    [[self actionButton] setImage:actionImage forState:UIControlStateNormal];
+      [[self actionButton] setTitle:nil forState:UIControlStateNormal];
+      actionImage = [AIFontAwesome imageForIcon:[self actionIcon]
+                                          style:AIFontAwesomeStyleSolid
+                                       iconSize:kStrappyPreferencesToolbarActionIconSize
+                                     canvasSize:kStrappyPreferencesToolbarSideItemWidth
+                                          color:actionColor
+                                          scale:0.0f];
+      [[self actionButton] setImage:actionImage forState:UIControlStateNormal];
+    }
   }
   [self refreshWorkingState];
 }
@@ -239,6 +262,7 @@ static const CGFloat kStrappyPreferencesToolbarActionIconSize = 18.0f;
 - (void)layoutSubviews
 {
   CGFloat buttonX;
+  CGFloat primaryButtonWidth;
   CGFloat contentOffsetX;
   CGFloat height;
   CGFloat labelHeight;
@@ -263,11 +287,14 @@ static const CGFloat kStrappyPreferencesToolbarActionIconSize = 18.0f;
     sideWidth = toolbarWidth * 0.5f;
   }
 
+  primaryButtonWidth = ([[self primaryActionTitle] length] > 0U) ?
+    kStrappyPreferencesToolbarTextActionWidth : sideWidth;
+
   labelX = sideWidth - contentOffsetX;
   if (labelX < 0.0f) {
     labelX = 0.0f;
   }
-  buttonX = width - sideWidth;
+  buttonX = width - primaryButtonWidth;
   if (buttonX < 0.0f) {
     buttonX = 0.0f;
   }
@@ -281,9 +308,12 @@ static const CGFloat kStrappyPreferencesToolbarActionIconSize = 18.0f;
   [[self statusLabel] setFrame:
     CGRectMake(labelX, labelY, labelWidth, labelHeight)];
   [[self actionButton] setFrame:
-    CGRectMake(buttonX, 0.0f, sideWidth, height)];
+    CGRectMake(buttonX, 0.0f, primaryButtonWidth, height)];
   [[self activityIndicatorView] setFrame:
-    CGRectMake(buttonX, 0.0f, sideWidth, height)];
+    CGRectMake(buttonX,
+               0.0f,
+               primaryButtonWidth,
+               height)];
 }
 
 @end

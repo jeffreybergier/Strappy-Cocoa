@@ -1,6 +1,7 @@
 #import "FileScanner.h"
 
 #import "StrappySession.h"
+#import "XPFoundation.h"
 #import "strappy_core.h"
 #import "strappy_db.h"
 #import "strappy_file_scanner.h"
@@ -27,6 +28,7 @@ typedef struct StrappyFileScannerCatalogBatchContext {
 
 + (NSError *)errorFromCString:(char *)message;
 + (void)databaseCatalogDidChange:(NSDictionary *)result;
++ (void)databaseCatalogScanInBackground:(NSDictionary *)request;
 
 @end
 
@@ -122,7 +124,16 @@ static int StrappyFileScannerSaveCatalogBatch(
 + (BOOL)beginDatabaseCatalogScanAtPath:(NSString *)path
                                  error:(NSError **)error
 {
-  NSString *scanPath;
+  return [self beginDatabaseCatalogScanAtPath:path
+                                     scanMode:FileScannerDatabaseScanModeFull
+                                        error:error];
+}
+
++ (BOOL)beginDatabaseCatalogScanAtPath:(NSString *)path
+                              scanMode:(FileScannerDatabaseScanMode)scanMode
+                                 error:(NSError **)error
+{
+  NSDictionary *scanRequest;
   NSDictionary *userInfo;
 
   if (![path isKindOfClass:[NSString class]] || ([path length] == 0U)) {
@@ -152,37 +163,55 @@ static int StrappyFileScannerSaveCatalogBatch(
     FileScannerDatabaseCatalogScanInFlight = YES;
   }
 
+  scanMode = (scanMode == FileScannerDatabaseScanModeQuick) ?
+    FileScannerDatabaseScanModeQuick : FileScannerDatabaseScanModeFull;
+  scanRequest = [[NSDictionary alloc] initWithObjectsAndKeys:
+    path, @"path",
+    [NSNumber XP_numberWithInteger:(XPInteger)scanMode], @"scan_mode",
+    nil];
+
   [[NSNotificationCenter defaultCenter]
     postNotificationName:FileScannerDatabaseCatalogScanDidStartNotification
                   object:self
-                userInfo:[NSDictionary dictionaryWithObject:path forKey:@"path"]];
+                userInfo:scanRequest];
 
-  scanPath = [path copy];
   [NSThread detachNewThreadSelector:@selector(databaseCatalogScanInBackground:)
                            toTarget:self
-                         withObject:scanPath];
-  [scanPath release];
+                         withObject:scanRequest];
+  [scanRequest release];
   return YES;
 }
 
-+ (void)databaseCatalogScanInBackground:(NSString *)path
++ (void)databaseCatalogScanInBackground:(NSDictionary *)request
 {
   NSAutoreleasePool *pool;
   NSError *error;
   NSArray *rows;
   NSMutableDictionary *result;
   NSString *message;
+  NSString *path;
+  NSNumber *scanModeNumber;
+  FileScannerDatabaseScanMode scanMode;
 
   pool = [[NSAutoreleasePool alloc] init];
+  path = [request objectForKey:@"path"];
+  scanModeNumber = [request objectForKey:@"scan_mode"];
+  scanMode = ([scanModeNumber isKindOfClass:[NSNumber class]] &&
+              ([scanModeNumber XP_integerValue] ==
+               FileScannerDatabaseScanModeQuick)) ?
+    FileScannerDatabaseScanModeQuick : FileScannerDatabaseScanModeFull;
   error = nil;
   rows = [[FileScanner sharedScanner]
     scanDirectoryForSQLiteDatabasesAtPath:path
+                                 scanMode:scanMode
            savingResultsToCatalogWithError:&error];
 
   result = [[NSMutableDictionary alloc] init];
   if ([path isKindOfClass:[NSString class]]) {
     [result setObject:path forKey:@"path"];
   }
+  [result setObject:[NSNumber XP_numberWithInteger:(XPInteger)scanMode]
+             forKey:@"scan_mode"];
   if (rows != nil) {
     [result setObject:rows forKey:@"rows"];
   } else {
@@ -487,6 +516,15 @@ static int StrappyFileScannerSaveCatalogBatch(
 - (NSArray *)scanDirectoryForSQLiteDatabasesAtPath:(NSString *)path
                                              error:(NSError **)error
 {
+  return [self scanDirectoryForSQLiteDatabasesAtPath:path
+                                            scanMode:FileScannerDatabaseScanModeFull
+                                               error:error];
+}
+
+- (NSArray *)scanDirectoryForSQLiteDatabasesAtPath:(NSString *)path
+                                          scanMode:(FileScannerDatabaseScanMode)scanMode
+                                             error:(NSError **)error
+{
   strappy_file_scanner_options options;
   strappy_file_scanner_record_list list;
   NSMutableArray *records;
@@ -508,6 +546,8 @@ static int StrappyFileScannerSaveCatalogBatch(
   strappy_file_scanner_options_init(&options);
   options.root_path = [path fileSystemRepresentation];
   options.validate_candidates = 1;
+  options.use_filename_filter =
+    (scanMode == FileScannerDatabaseScanModeQuick) ? 1 : 0;
 
   strappy_file_scanner_record_list_init(&list);
   strappyError = NULL;
@@ -533,6 +573,15 @@ static int StrappyFileScannerSaveCatalogBatch(
 }
 
 - (NSArray *)scanDirectoryForSQLiteDatabasesAtPath:(NSString *)path
+                   savingResultsToCatalogWithError:(NSError **)error
+{
+  return [self scanDirectoryForSQLiteDatabasesAtPath:path
+                                            scanMode:FileScannerDatabaseScanModeFull
+                     savingResultsToCatalogWithError:error];
+}
+
+- (NSArray *)scanDirectoryForSQLiteDatabasesAtPath:(NSString *)path
+                                          scanMode:(FileScannerDatabaseScanMode)scanMode
                    savingResultsToCatalogWithError:(NSError **)error
 {
   NSString *databasePath;
@@ -565,6 +614,8 @@ static int StrappyFileScannerSaveCatalogBatch(
   strappy_file_scanner_options_init(&options);
   options.root_path = batchContext.scanRoot;
   options.validate_candidates = 1;
+  options.use_filename_filter =
+    (scanMode == FileScannerDatabaseScanModeQuick) ? 1 : 0;
   options.record_batch_size = StrappyFileScannerCatalogBatchSize;
   options.record_batch_callback = StrappyFileScannerSaveCatalogBatch;
   options.record_batch_user_data = &batchContext;

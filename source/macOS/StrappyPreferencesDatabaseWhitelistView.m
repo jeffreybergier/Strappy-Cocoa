@@ -2,6 +2,9 @@
 
 #import "XPAppKit.h"
 
+static const CGFloat kStrappyDatabaseScanButtonWidth = 88.0;
+static const CGFloat kStrappyDatabaseScanControlGap = 8.0;
+
 static NSString *StrappyDatabaseWhitelistPathForRow(NSDictionary *row)
 {
   NSString *path;
@@ -128,14 +131,60 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
          dataSource:(id)dataSource
            delegate:(id)delegate
 {
-  return [super initWithFrame:frame
-                       target:target
-                refreshAction:@selector(scanDatabases:)
-                 searchAction:NULL
-               refreshToolTip:NSLocalizedString(
-                 @"Scan your home folder for SQLite databases.", nil)
-                   dataSource:dataSource
-                     delegate:delegate];
+  NSButton *quickScanButton;
+  NSProgressIndicator *progressIndicator;
+  NSTextField *statusLabel;
+  NSRect controlFrame;
+  NSRect progressFrame;
+  NSRect statusFrame;
+
+  if ((self = [super initWithFrame:frame
+                            target:target
+                     refreshAction:@selector(scanDatabases:)
+                      searchAction:NULL
+                    refreshToolTip:NSLocalizedString(
+                      @"Scan likely SQLite database filenames.", nil)
+                        dataSource:dataSource
+                          delegate:delegate])) {
+    quickScanButton = [self refreshButton];
+    controlFrame = [quickScanButton frame];
+    controlFrame.size.width = kStrappyDatabaseScanButtonWidth;
+    [quickScanButton setFrame:controlFrame];
+    [quickScanButton setImage:nil];
+    [quickScanButton setImagePosition:NSNoImage];
+    [quickScanButton setBezelStyle:XPBezelStyleRounded];
+    [quickScanButton setTitle:NSLocalizedString(@"Quick Scan", nil)];
+
+    controlFrame.origin.x = NSMaxX(controlFrame) +
+      kStrappyDatabaseScanControlGap;
+    fullScanButton_ = [[NSButton alloc] initWithFrame:controlFrame];
+    [fullScanButton_ setAutoresizingMask:NSViewMaxXMargin | NSViewMaxYMargin];
+    [fullScanButton_ setBezelStyle:XPBezelStyleRounded];
+    [fullScanButton_ setButtonType:XPButtonTypeMomentaryLight];
+    [fullScanButton_ setTitle:NSLocalizedString(@"Full Scan", nil)];
+    [fullScanButton_ setToolTip:NSLocalizedString(
+      @"Scan every file for SQLite databases.", nil)];
+    [fullScanButton_ setTarget:target];
+    [fullScanButton_ setAction:@selector(fullScanDatabases:)];
+    [self addSubview:fullScanButton_];
+
+    progressIndicator = [self progressIndicator];
+    progressFrame = [progressIndicator frame];
+    progressFrame.origin.x = NSMaxX([fullScanButton_ frame]) +
+      kStrappyDatabaseScanControlGap;
+    [progressIndicator setFrame:progressFrame];
+
+    statusLabel = [self statusLabel];
+    statusFrame = [statusLabel frame];
+    statusFrame.origin.x = NSMaxX(progressFrame);
+    statusFrame.size.width = NSWidth([self bounds]) - statusFrame.origin.x -
+      NSMinX([quickScanButton frame]);
+    if (statusFrame.size.width < 0.0) {
+      statusFrame.size.width = 0.0;
+    }
+    [statusLabel setFrame:statusFrame];
+  }
+  return self;
 }
 
 - (void)addTableColumnsToTableView:(NSTableView *)tableView
@@ -318,6 +367,17 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
 - (NSButton *)scanButton
 {
   return [self refreshButton];
+}
+
+- (NSButton *)fullScanButton
+{
+  return fullScanButton_;
+}
+
+- (void)dealloc
+{
+  [fullScanButton_ release];
+  [super dealloc];
 }
 
 @end

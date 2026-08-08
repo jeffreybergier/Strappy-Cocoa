@@ -101,6 +101,10 @@
 "Database scan failed." = "Database scan failed.";
 "System Prompt" = "System Prompt";
 "Scan Databases" = "Scan Databases";
+"Quick Scan" = "Quick Scan";
+"Full Scan" = "Full Scan";
+"Scan" = "Scan";
+"Quick Scan skips files with unrelated extensions. Full Scan checks every file on the disk to see if it is a SQLite database and can take quite a long time." = "Quick Scan skips files with unrelated extensions. Full Scan checks every file on the disk to see if it is a SQLite database and can take quite a long time.";
 "Study" = "Study";
 "Reset" = "Reset";
 "Could Not Delete Study" = "Could Not Delete Study";
@@ -237,6 +241,8 @@
 "Save" = "Save";
 "Scan path is empty." = "Scan path is empty.";
 "Scan your home folder for SQLite databases." = "Scan your home folder for SQLite databases.";
+"Scan likely SQLite database filenames." = "Scan likely SQLite database filenames.";
+"Scan every file for SQLite databases." = "Scan every file for SQLite databases.";
 "Scanning databases..." = "Scanning databases...";
 "Search" = "Search";
 "Search Web" = "Search Web";

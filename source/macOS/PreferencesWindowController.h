@@ -30,6 +30,7 @@
   StrappyPreferencesDatabaseStudyView *databaseStudyPaneView_;
   NSTextView          *databaseStudyTextView_;
   NSButton            *scanButton_;
+  NSButton            *fullScanButton_;
   NSProgressIndicator *scanProgressIndicator_;
   NSTextField         *databaseStatusLabel_;
   NSArray             *allModelRows_;
@@ -42,6 +43,7 @@
 
 - (id)init;
 - (void)scanDatabases:(id)sender;
+- (void)fullScanDatabases:(id)sender;
 - (void)refreshModels:(id)sender;
 
 @end

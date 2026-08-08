@@ -1,5 +1,7 @@
 #import <UIKit/UIKit.h>
 
+@class StrappyPreferencesStatusToolbarView;
+
 @interface StrappyPreferencesWhitelistTableViewController :
     UITableViewController <UISearchBarDelegate>
 
@@ -14,6 +16,7 @@
 - (void)applyRows;
 - (void)buildStatusToolbar;
 - (void)refreshStatusToolbar;
+- (StrappyPreferencesStatusToolbarView *)statusToolbarView;
 - (NSArray *)loadAllRowsWithError:(NSError **)error;
 - (NSArray *)preparedRowsForRows:(NSArray *)rows;
 - (NSArray *)sortedRows:(NSArray *)rows;

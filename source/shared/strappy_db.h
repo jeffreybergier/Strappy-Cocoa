@@ -407,7 +407,21 @@ int strappy_db_begin_discovered_database_scan(
   const char *scan_root,
   long long *scan_run_id_out,
   char **error_out);
+/* Starts a scan run without deactivating locations unseen by this run. */
+int strappy_db_begin_incremental_discovered_database_scan(
+  const char *db_path,
+  const char *scan_root,
+  long long *scan_run_id_out,
+  char **error_out);
 int strappy_db_finish_discovered_database_scan(
+  const char *db_path,
+  long long scan_run_id,
+  const char *state,
+  const char *error_message,
+  char **error_out);
+/* On successful completion, deactivates locations unseen by this scan run.
+ * The caller must have considered every previously active path for the root. */
+int strappy_db_finish_incremental_discovered_database_scan(
   const char *db_path,
   long long scan_run_id,
   const char *state,
