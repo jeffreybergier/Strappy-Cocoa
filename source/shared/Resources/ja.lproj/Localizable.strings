@@ -62,6 +62,7 @@
 "Send" = "送信";
 "Send Prompt" = "プロンプトを送信";
 "Sending prompt..." = "プロンプトを送信中...";
+"Prompt completed." = "プロンプトが完了しました。";
 "Prompt failed." = "プロンプトに失敗しました。";
 
 "Preferences" = "環境設定";

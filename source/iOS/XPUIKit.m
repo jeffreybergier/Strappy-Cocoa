@@ -1,4 +1,5 @@
 #import "XPUIKit.h"
+#import <objc/message.h>
 
 @implementation NSString (XPUIKit)
 
@@ -460,6 +461,122 @@ static UITextField *XPUIKitFindTextField(UIView *view)
   XPUIKitInvokeIntegerSetter(self,
                              @selector(setTextAlignment:),
                              (NSInteger)UITextAlignmentRight);
+}
+
+@end
+
+@interface XPUserNotificationCenter ()
+- (void)deliverTitle:(NSString *)title body:(NSString *)body;
+@end
+
+@implementation XPUserNotificationCenter
+
++ (XPUserNotificationCenter *)defaultCenter
+{
+  static XPUserNotificationCenter *instance = nil;
+
+  if (instance == nil) {
+    instance = [[XPUserNotificationCenter alloc] init];
+  }
+  return instance;
+}
+
+- (void)requestAuthorization
+{
+  @try {
+    UIApplication *application;
+    Class settingsClass;
+    id settings;
+    SEL registerSelector;
+
+    application = [UIApplication sharedApplication];
+    registerSelector = @selector(registerUserNotificationSettings:);
+    if (![application respondsToSelector:registerSelector]) {
+      return;
+    }
+
+    settingsClass = NSClassFromString(@"UIUserNotificationSettings");
+    if (settingsClass == Nil) {
+      return;
+    }
+    /* UIUserNotificationTypeSound (2) | UIUserNotificationTypeAlert (4). */
+    settings = ((id (*)(id, SEL, NSUInteger, id))objc_msgSend)(
+      (id)settingsClass,
+      @selector(settingsForTypes:categories:),
+      (NSUInteger)6,
+      nil);
+    ((void (*)(id, SEL, id))objc_msgSend)(application,
+                                          registerSelector,
+                                          settings);
+  } @catch (NSException *exception) {
+    NSLog(@"StrappyNotifications authorization request failed: %@", exception);
+  }
+}
+
+- (XPNotificationAuthStatus)authorizationStatus
+{
+  UIApplication *application;
+  id settings;
+  NSUInteger types;
+  SEL currentSettingsSelector;
+
+  application = [UIApplication sharedApplication];
+  currentSettingsSelector = @selector(currentUserNotificationSettings);
+  if (![application respondsToSelector:currentSettingsSelector]) {
+    return XPNotificationAuthStatusAuthorized;
+  }
+
+  settings = ((id (*)(id, SEL))objc_msgSend)(application,
+                                              currentSettingsSelector);
+  if (settings == nil) {
+    return XPNotificationAuthStatusNotDetermined;
+  }
+  types = ((NSUInteger (*)(id, SEL))objc_msgSend)(settings, @selector(types));
+  return (types != 0U) ? XPNotificationAuthStatusAuthorized :
+                         XPNotificationAuthStatusDenied;
+}
+
+- (void)postNotificationWithTitle:(NSString *)title body:(NSString *)body
+{
+  if (![body isKindOfClass:[NSString class]] || ([body length] == 0U)) {
+    return;
+  }
+
+  @try {
+    [self deliverTitle:[title isKindOfClass:[NSString class]] ? title : @""
+                  body:body];
+  } @catch (NSException *exception) {
+    NSLog(@"StrappyNotifications delivery failed: %@", exception);
+  }
+}
+
+- (void)deliverTitle:(NSString *)title body:(NSString *)body
+{
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+  UILocalNotification *notification;
+
+  notification = [[UILocalNotification alloc] init];
+  [notification setSoundName:UILocalNotificationDefaultSoundName];
+  if (([title length] > 0U) &&
+      [notification respondsToSelector:@selector(setAlertTitle:)]) {
+    [notification setAlertBody:body];
+    [notification setValue:title forKey:@"alertTitle"];
+  } else {
+    [notification setAlertBody:([title length] > 0U) ?
+      [NSString stringWithFormat:@"%@: %@", title, body] : body];
+  }
+  /* TODO: UILocalNotification alerts do not display for non-sandboxed iOS
+   * apps installed as system applications. SpringBoard accepts the request
+   * but excludes the app from BulletinBoard.
+   */
+  [[UIApplication sharedApplication]
+    presentLocalNotificationNow:notification];
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 }
 
 @end

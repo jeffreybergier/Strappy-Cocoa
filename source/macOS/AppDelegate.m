@@ -4,12 +4,47 @@
 #import "StrappySession.h"
 #import <AltivecCore/AltivecCore.h>
 
+static NSString *StrappyPromptCompletionNotificationTitle(
+  NSNotification *notification)
+{
+  NSDictionary *summary;
+  StrappySession *session;
+  id name;
+
+  summary = [[notification userInfo] objectForKey:@"session"];
+  session = [notification object];
+  if (![summary isKindOfClass:[NSDictionary class]] &&
+      [session isKindOfClass:[StrappySession class]]) {
+    summary = [session cachedSummary];
+  }
+  name = [summary objectForKey:@"name"];
+  if ([name isKindOfClass:[NSString class]] && ([name length] > 0U)) {
+    return name;
+  }
+  return NSLocalizedString(@"Strappy", nil);
+}
+
+static NSString *StrappyPromptCompletionNotificationBody(
+  NSNotification *notification)
+{
+  id errorMessage;
+
+  errorMessage = [[notification userInfo] objectForKey:@"error"];
+  if ([errorMessage isKindOfClass:[NSString class]] &&
+      ([errorMessage length] > 0U)) {
+    return NSLocalizedString(@"Prompt failed.", nil);
+  }
+  return NSLocalizedString(@"Prompt completed.", nil);
+}
+
 @interface AppDelegate (Private)
 - (void)setupMenu;
 - (void)showMainWindow;
 - (void)populateModelMenu:(NSMenu *)menu;
 - (void)strappySessionPromptDidStart:(NSNotification *)notification;
 - (void)strappySessionPromptDidFinish:(NSNotification *)notification;
+- (void)postPromptCompletionNotificationIfNeeded:
+  (NSNotification *)notification;
 - (void)releaseFinishedPromptSession:(StrappySession *)session;
 - (void)terminateIfPendingInFlightSessionsFinished;
 @end
@@ -519,12 +554,29 @@
 
   session = [notification object];
   if ([session isKindOfClass:[StrappySession class]]) {
+    [self postPromptCompletionNotificationIfNeeded:notification];
     [self performSelectorOnMainThread:@selector(releaseFinishedPromptSession:)
                            withObject:session
                         waitUntilDone:NO];
     return;
   }
   [self terminateIfPendingInFlightSessionsFinished];
+}
+
+- (void)postPromptCompletionNotificationIfNeeded:
+  (NSNotification *)notification
+{
+  NSString *body;
+  NSString *title;
+
+  if ([NSApp isActive]) {
+    return;
+  }
+  title = StrappyPromptCompletionNotificationTitle(notification);
+  body = StrappyPromptCompletionNotificationBody(notification);
+  [[XPUserNotificationCenter defaultCenter]
+    postNotificationWithTitle:title
+                         body:body];
 }
 
 - (void)strappySessionPromptDidStart:(NSNotification *)notification

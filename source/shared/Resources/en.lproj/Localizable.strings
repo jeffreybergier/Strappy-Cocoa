@@ -62,6 +62,7 @@
 "Send" = "Send";
 "Send Prompt" = "Send Prompt";
 "Sending prompt..." = "Sending prompt...";
+"Prompt completed." = "Prompt completed.";
 "Prompt failed." = "Prompt failed.";
 
 "Preferences" = "Preferences";

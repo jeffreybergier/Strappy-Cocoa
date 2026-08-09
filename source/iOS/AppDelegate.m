@@ -5,6 +5,7 @@
 #import "StrappyRootCoordinator.h"
 #import "StrappyIdleTimerAssertion.h"
 #import "StrappySession.h"
+#import "XPUIKit.h"
 #import <AltivecCore/AltivecCore.h>
 
 static NSString *StrappyApplicationStateName(UIApplicationState state)
@@ -33,6 +34,39 @@ static void StrappyLogApplicationLifecycle(NSString *event,
         [application backgroundTimeRemaining]);
 }
 
+static NSString *StrappyPromptCompletionNotificationTitle(
+  NSNotification *notification)
+{
+  NSDictionary *summary;
+  StrappySession *session;
+  id name;
+
+  summary = [[notification userInfo] objectForKey:@"session"];
+  session = [notification object];
+  if (![summary isKindOfClass:[NSDictionary class]] &&
+      [session isKindOfClass:[StrappySession class]]) {
+    summary = [session cachedSummary];
+  }
+  name = [summary objectForKey:@"name"];
+  if ([name isKindOfClass:[NSString class]] && ([name length] > 0U)) {
+    return name;
+  }
+  return NSLocalizedString(@"Strappy", nil);
+}
+
+static NSString *StrappyPromptCompletionNotificationBody(
+  NSNotification *notification)
+{
+  id errorMessage;
+
+  errorMessage = [[notification userInfo] objectForKey:@"error"];
+  if ([errorMessage isKindOfClass:[NSString class]] &&
+      ([errorMessage length] > 0U)) {
+    return NSLocalizedString(@"Prompt failed.", nil);
+  }
+  return NSLocalizedString(@"Prompt completed.", nil);
+}
+
 @interface AppDelegate ()
 @property (nonatomic, strong) StrappyRootCoordinator *coordinator;
 @property (nonatomic, assign) UIBackgroundTaskIdentifier longRunningWorkBackgroundTaskIdentifier;
@@ -42,6 +76,9 @@ static void StrappyLogApplicationLifecycle(NSString *event,
   BOOL longRunningWorkNetworkActivityIndicatorEnabled;
 - (void)observeLongRunningWorkLifecycle;
 - (void)longRunningWorkLifecycleDidChange:(NSNotification *)notification;
+- (void)configurePromptCompletionNotifications;
+- (void)postPromptCompletionNotificationIfNeeded:
+  (NSNotification *)notification;
 - (BOOL)longRunningWorkIsActive;
 - (void)updateLongRunningWorkAssertions;
 - (void)setLongRunningWorkIdleTimerAssertionEnabled:(BOOL)enabled;
@@ -86,6 +123,7 @@ static void StrappyLogApplicationLifecycle(NSString *event,
   [self.coordinator start];
   [self.window makeKeyAndVisible];
 
+  [self configurePromptCompletionNotifications];
   [self updateLongRunningWorkAssertions];
   StrappyLogApplicationLifecycle(@"didFinishLaunching end", application);
   return YES;
@@ -168,7 +206,47 @@ static void StrappyLogApplicationLifecycle(NSString *event,
         (unsigned long)[StrappySession inFlightSessionCount],
         [StrappySession isModelCatalogRefreshInFlight] ? @"YES" : @"NO",
         [FileScanner isDatabaseCatalogScanInFlight] ? @"YES" : @"NO");
+  if ([name isEqualToString:StrappySessionPromptDidFinishNotification]) {
+    /* Deliver before updateLongRunningWorkAssertions can release the final
+     * background task and let iOS suspend the process. */
+    [self postPromptCompletionNotificationIfNeeded:notification];
+  }
   [self updateLongRunningWorkAssertions];
+}
+
+- (void)configurePromptCompletionNotifications
+{
+  XPNotificationAuthStatus status;
+  XPUserNotificationCenter *center;
+
+  center = [XPUserNotificationCenter defaultCenter];
+  status = [center authorizationStatus];
+  NSLog(@"StrappyNotifications authorizationStatus=%d", (int)status);
+  if (status == XPNotificationAuthStatusNotDetermined) {
+    [center requestAuthorization];
+  }
+}
+
+- (void)postPromptCompletionNotificationIfNeeded:
+  (NSNotification *)notification
+{
+  UIApplication *application;
+  XPUserNotificationCenter *center;
+  NSString *body;
+  NSString *title;
+
+  application = [UIApplication sharedApplication];
+  if ([application applicationState] != UIApplicationStateBackground) {
+    return;
+  }
+
+  center = [XPUserNotificationCenter defaultCenter];
+  if ([center authorizationStatus] != XPNotificationAuthStatusAuthorized) {
+    return;
+  }
+  title = StrappyPromptCompletionNotificationTitle(notification);
+  body = StrappyPromptCompletionNotificationBody(notification);
+  [center postNotificationWithTitle:title body:body];
 }
 
 - (BOOL)longRunningWorkIsActive

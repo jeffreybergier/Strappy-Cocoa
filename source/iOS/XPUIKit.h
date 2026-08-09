@@ -59,3 +59,20 @@
 @interface UITextField (XPUIKit)
 - (void)XP_setTextAlignmentRight;
 @end
+
+/* Instant local notifications backed by UILocalNotification. iOS 8+ requires
+ * user-notification authorization; older supported releases have no permission
+ * prompt and are treated as authorized. The implementation runtime-dispatches
+ * the iOS 8 APIs so Strappy keeps its iOS 4.3 deployment floor. */
+typedef enum {
+  XPNotificationAuthStatusNotDetermined = 0,
+  XPNotificationAuthStatusDenied        = 1,
+  XPNotificationAuthStatusAuthorized    = 2
+} XPNotificationAuthStatus;
+
+@interface XPUserNotificationCenter : NSObject
++ (XPUserNotificationCenter *)defaultCenter;
+- (void)requestAuthorization;
+- (XPNotificationAuthStatus)authorizationStatus;
+- (void)postNotificationWithTitle:(NSString *)title body:(NSString *)body;
+@end
