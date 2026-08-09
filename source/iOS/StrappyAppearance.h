@@ -6,6 +6,7 @@
 + (UIColor *)highlightedPrimaryTintColor;
 + (UIColor *)legacyBarTintColor;
 + (UIColor *)modernBarBackgroundColor;
++ (UIColor *)tableSectionHeaderTintColor;
 + (void)configureAppearance;
 + (void)applyIOS6TableSectionHeaderTintColor:(UIColor *)tintColor;
 + (void)applyApplicationTintToWindow:(UIWindow *)window;

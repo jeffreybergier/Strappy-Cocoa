@@ -198,6 +198,14 @@ static UIRectCorner StrappyLegacySelectionRoundedCornersForView(
                          alpha:1.0f];
 }
 
++ (UIColor *)tableSectionHeaderTintColor
+{
+  return [UIColor colorWithRed:(STRAPPY_SECTION_HEADER_TINT_RED / 255.0f)
+                         green:(STRAPPY_SECTION_HEADER_TINT_GREEN / 255.0f)
+                          blue:(STRAPPY_SECTION_HEADER_TINT_BLUE / 255.0f)
+                         alpha:1.0f];
+}
+
 + (void)configureAppearance
 {
   UIDevice *device;
@@ -230,7 +238,8 @@ static UIRectCorner StrappyLegacySelectionRoundedCornersForView(
   [UITableViewCell
     strappy_setAppearanceSelectionBackgroundColorIfAvailable:
       [self legacyBarTintColor]];
-  [self applyIOS6TableSectionHeaderTintColor:[self legacyBarTintColor]];
+  [self applyIOS6TableSectionHeaderTintColor:
+    [self tableSectionHeaderTintColor]];
 }
 
 + (void)applyIOS6TableSectionHeaderTintColor:(UIColor *)tintColor
