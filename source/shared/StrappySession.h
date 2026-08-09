@@ -9,6 +9,7 @@ extern NSString * const StrappySessionModelCatalogRefreshDidFinishNotification;
 extern NSString * const StrappySessionModelCatalogDidChangeNotification;
 extern NSString * const StrappySessionChangeKindKey;
 extern NSString * const StrappySessionChangeKindActivity;
+extern NSString * const StrappySessionChangeKindName;
 extern NSString * const StrappySessionChangeKindOptions;
 extern NSString * const StrappySessionOptionsKey;
 extern NSString * const StrappySessionChangedOptionsKey;

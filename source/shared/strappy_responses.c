@@ -2145,6 +2145,25 @@ static void strappy_responses_flush_deferred_call_event(
   strappy_responses_deferred_call_event_init(deferred);
 }
 
+static void strappy_responses_emit_session_name_updated(
+  const char *prompt_group_key,
+  strappy_responses_event_callback callback,
+  void *callback_data)
+{
+  strappy_responses_event event;
+
+  if (callback == NULL) {
+    return;
+  }
+  memset(&event, 0, sizeof(event));
+  event.type = STRAPPY_RESPONSES_EVENT_SESSION_UPDATED;
+  event.prompt_group_key = prompt_group_key;
+  event.actor = "application";
+  event.kind = "session";
+  event.status_kind = "name";
+  (void)callback(&event, callback_data);
+}
+
 static void strappy_responses_call_did_begin(
   long long call_id,
   const char *prompt_group_key,
@@ -2402,6 +2421,7 @@ static long strappy_responses_retry_delay_ms(
 static int strappy_responses_execute_tool_calls(
   const char *session_db_path,
   long long session_id,
+  const char *prompt_group_key,
   const char *resource_dir,
   long long response_call_id,
   const strappy_responses_analysis *analysis,
@@ -2494,6 +2514,12 @@ static int strappy_responses_execute_tool_calls(
       free(tool_error);
       strappy_responses_owned_items_destroy(outputs);
       return 0;
+    }
+    if (tool_succeeded &&
+        (strcmp(call->name, STRAPPY_TOOL_SESSION_RENAME) == 0)) {
+      strappy_responses_emit_session_name_updated(prompt_group_key,
+                                                  callback,
+                                                  callback_data);
     }
     if (tool_succeeded) {
       strappy_responses_audit_record_completed_tool(audit, call->name);
@@ -3059,6 +3085,7 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
       if (!strappy_responses_execute_tool_calls(
             session_db_path,
             session_id,
+            prompt_group_key,
             runtime.config.guidance_resource_dir,
             round_call_id,
             &analysis,

@@ -5587,6 +5587,61 @@ static int harness_test_empty_answer_quality_report(void)
   return ok;
 }
 
+typedef struct harness_session_update_events {
+  const char *db_path;
+  long count;
+  int valid;
+} harness_session_update_events;
+
+static int harness_record_session_update_event(
+  const strappy_responses_event *event,
+  void *user_data)
+{
+  harness_session_update_events *events;
+  sqlite3 *db;
+  long long named_session_count;
+  long long tool_execution_count;
+  int event_ok;
+
+  events = (harness_session_update_events *)user_data;
+  if ((events == NULL) || (event == NULL) ||
+      (event->type != STRAPPY_RESPONSES_EVENT_SESSION_UPDATED)) {
+    return 1;
+  }
+
+  db = NULL;
+  named_session_count = 0LL;
+  tool_execution_count = 0LL;
+  event_ok =
+    (event->prompt_group_key != NULL) &&
+    (event->prompt_group_key[0] != '\0') &&
+    (event->actor != NULL) &&
+    (strcmp(event->actor, "application") == 0) &&
+    (event->kind != NULL) &&
+    (strcmp(event->kind, "session") == 0) &&
+    (event->status_kind != NULL) &&
+    (strcmp(event->status_kind, "name") == 0) &&
+    !strappy_session_webview_event_requires_message_update(event) &&
+    (sqlite3_open(events->db_path, &db) == SQLITE_OK) &&
+    harness_query_int(db,
+                      "SELECT COUNT(*) FROM sessions "
+                      "WHERE name='Empty Answer Audit';",
+                      &named_session_count) &&
+    harness_query_int(db,
+                      "SELECT COUNT(*) FROM tool_executions;",
+                      &tool_execution_count) &&
+    (named_session_count == 1LL) &&
+    (tool_execution_count == 2LL);
+  if (db != NULL) {
+    sqlite3_close(db);
+  }
+  if (!event_ok) {
+    events->valid = 0;
+  }
+  events->count++;
+  return 1;
+}
+
 static int harness_test_empty_answer_after_tools_quality_report(void)
 {
   char path[] = "/tmp/strappy-responses-empty-after-tools-XXXXXX";
@@ -5597,6 +5652,7 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
   sqlite3 *db;
   long long session_id;
   long long value;
+  harness_session_update_events events;
   pid_t server_pid;
   int fd;
   int database_fd;
@@ -5616,6 +5672,9 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
   close(database_fd);
   error = NULL;
   session_id = 0LL;
+  memset(&events, 0, sizeof(events));
+  events.db_path = path;
+  events.valid = 1;
   if (!harness_create_session_database(path, &session_id, &error) ||
       !harness_create_approved_preflight_database(path,
                                                    database_path,
@@ -5634,7 +5693,7 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
     return 0;
   }
 
-  result = strappy_responses_send_prompt_for_session_and_store(
+  result = strappy_responses_send_prompt_for_session_and_store_with_events(
     "Audit empty answer after tools",
     "/dev/null",
     endpoint,
@@ -5642,10 +5701,12 @@ static int harness_test_empty_answer_after_tools_quality_report(void)
     "../shared/Resources",
     path,
     session_id,
+    harness_record_session_update_event,
+    &events,
     &error);
   server_ok = harness_wait_for_server(server_pid, result == NULL);
   ok = (result != NULL) && (result[0] == '\0') &&
-    server_ok && (error == NULL);
+    server_ok && (error == NULL) && events.valid && (events.count == 1L);
   free(result);
   if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
     ok = harness_query_int(db,

@@ -25,6 +25,7 @@ NSString * const StrappySessionModelCatalogDidChangeNotification =
   @"StrappySessionModelCatalogDidChangeNotification";
 NSString * const StrappySessionChangeKindKey = @"change_kind";
 NSString * const StrappySessionChangeKindActivity = @"activity";
+NSString * const StrappySessionChangeKindName = @"name";
 NSString * const StrappySessionChangeKindOptions = @"options";
 NSString * const StrappySessionOptionsKey = @"options";
 NSString * const StrappySessionChangedOptionsKey = @"changed_options";
@@ -150,6 +151,7 @@ static NSString *StrappySessionStringFromCString(char *value)
                                 renderContext:
                 (const strappy_session_webview_render_context *)renderContext
                                         error:(NSError **)error;
+- (void)postSessionUpdateAndRelease:(NSDictionary *)update;
 - (void)postStreamEventAndRelease:(NSDictionary *)event;
 - (NSDictionary *)submitPrompt:(NSString *)prompt
                        context:(NSDictionary *)context
@@ -620,6 +622,32 @@ static BOOL StrappySessionRecordFromOptions(
   if (event->type == STRAPPY_RESPONSES_EVENT_CANCELLATION_POLL) {
     return [self promptCancellationRequested] ? 0 : 1;
   }
+  if (event->type == STRAPPY_RESPONSES_EVENT_SESSION_UPDATED) {
+    NSDictionary *summary;
+    NSDictionary *update;
+    NSError *summaryError;
+
+    /* Session metadata is native UI state. Reload it from SQLite and never
+     * route this event through the WebView stream or JavaScript renderer. */
+    summaryError = nil;
+    summary = [StrappySession
+      sessionSummaryForSessionIdentifier:[self sessionIdentifier]
+                                   error:&summaryError];
+    if ([summary isKindOfClass:[NSDictionary class]]) {
+      update = [[NSDictionary alloc] initWithObjectsAndKeys:
+        summary, @"session",
+        StrappySessionChangeKindName, StrappySessionChangeKindKey,
+        nil];
+      [self performSelectorOnMainThread:@selector(postSessionUpdateAndRelease:)
+                             withObject:update
+                          waitUntilDone:NO];
+    } else {
+      NSLog(@"StrappyResponses could not refresh the renamed session: %@",
+            ([summaryError localizedDescription] != nil) ?
+              [summaryError localizedDescription] : @"unknown summary error");
+    }
+    return 1;
+  }
   if ((event->type != STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) &&
       (event->type != STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED) &&
       (event->type != STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED)) {
@@ -1083,6 +1111,21 @@ static BOOL StrappySessionRecordFromOptions(
                   userInfo:event];
   }
   [event release];
+}
+
+- (void)postSessionUpdateAndRelease:(NSDictionary *)update
+{
+  NSDictionary *summary;
+
+  summary = [update objectForKey:@"session"];
+  if ([summary isKindOfClass:[NSDictionary class]]) {
+    [self updateCachedSummary:summary];
+    [[NSNotificationCenter defaultCenter]
+      postNotificationName:StrappySessionDidUpdateNotification
+                    object:self
+                  userInfo:update];
+  }
+  [update release];
 }
 
 + (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath

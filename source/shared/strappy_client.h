@@ -45,7 +45,10 @@ typedef enum strappy_responses_event_type {
    * multiple committed changes visible when adjacent round transitions are
    * deliberately coalesced. */
   STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED = 3,
-  STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED = 4
+  STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED = 4,
+  /* A durable session field changed outside the conversation ledger.
+   * Consumers should reload the session summary from SQLite. */
+  STRAPPY_RESPONSES_EVENT_SESSION_UPDATED = 5
 } strappy_responses_event_type;
 
 typedef struct strappy_responses_event {

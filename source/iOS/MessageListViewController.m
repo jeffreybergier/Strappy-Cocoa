@@ -218,6 +218,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
                            duration:(NSTimeInterval)duration
                       resizeWebView:(BOOL)resizeWebView;
 - (void)setWebViewScrollsToTop:(BOOL)scrollsToTop;
+- (void)strappySessionDidUpdate:(NSNotification *)notification;
 - (void)sessionStreamEvent:(NSNotification *)notification;
 - (void)sessionPromptDidStart:(NSNotification *)notification;
 - (void)sessionPromptDidFinish:(NSNotification *)notification;
@@ -708,6 +709,9 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     [self clearRequestState];
     if (oldSession != nil) {
       [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                      name:StrappySessionDidUpdateNotification
+                                                    object:oldSession];
+      [[NSNotificationCenter defaultCenter] removeObserver:self
                                                       name:StrappySessionPromptDidStartNotification
                                                     object:oldSession];
       [[NSNotificationCenter defaultCenter] removeObserver:self
@@ -719,6 +723,11 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     }
     [self setSession:session];
     if (session != nil) {
+      [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(strappySessionDidUpdate:)
+               name:StrappySessionDidUpdateNotification
+             object:session];
       [[NSNotificationCenter defaultCenter]
         addObserver:self
            selector:@selector(sessionPromptDidStart:)
@@ -1121,6 +1130,14 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self logLifecycleEvent:@"sessionPromptDidStart"];
   [self updateSendingStateFromSession];
   [self updatePromptIdleTimerAssertion];
+}
+
+- (void)strappySessionDidUpdate:(NSNotification *)notification
+{
+  if ([self tearingDown] || ([notification object] != [self session])) {
+    return;
+  }
+  [self updateTitleFromSession];
 }
 
 - (void)modelCatalogDidChange:(NSNotification *)notification
