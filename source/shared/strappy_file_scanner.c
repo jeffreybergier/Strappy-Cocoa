@@ -260,17 +260,11 @@ static int strappy_file_scanner_database_should_be_hidden(
   if (strappy_file_scanner_case_insensitive_contains(path, ".localstorage")) {
     return 1;
   }
-  if (strappy_file_scanner_case_insensitive_equal(name, "ApplicationCache.db") ||
-      strappy_file_scanner_case_insensitive_equal(name, "MapTiles.sqlitedb") ||
+  if (strappy_file_scanner_case_insensitive_equal(name, "MapTiles.sqlitedb") ||
       strappy_file_scanner_case_insensitive_equal(name, "SafeBrowsing.db")) {
     return 1;
   }
-  if ((strcmp(name, "Cache.db") == 0) ||
-      strappy_file_scanner_case_insensitive_equal(name, "nsurlcache")) {
-    return 1;
-  }
-  if ((strcmp(name, "cache.db") == 0) &&
-      strappy_file_scanner_case_insensitive_contains(path, "/Caches/")) {
+  if (strappy_file_scanner_case_insensitive_contains(name, "cache")) {
     return 1;
   }
   if (strappy_file_scanner_case_insensitive_contains(path, "/Library/Caches/")) {

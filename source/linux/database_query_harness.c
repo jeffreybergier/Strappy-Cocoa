@@ -5200,6 +5200,7 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
   char third_party_templates_dir[1200];
   char third_party_template_dir[1200];
   char normal_path[1200];
+  char named_cache_path[1200];
   char cache_path[1200];
   char app_library_path[1200];
   char apple_index_path[1200];
@@ -5210,6 +5211,7 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
   char *error;
   size_t index;
   int found_normal;
+  int found_named_cache;
   int found_cache;
   int found_app_library;
   int found_apple_index;
@@ -5242,6 +5244,7 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
   third_party_templates_dir[0] = '\0';
   third_party_template_dir[0] = '\0';
   normal_path[0] = '\0';
+  named_cache_path[0] = '\0';
   cache_path[0] = '\0';
   app_library_path[0] = '\0';
   apple_index_path[0] = '\0';
@@ -5250,6 +5253,7 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
   strappy_discovered_database_record_list_init(&catalog_list);
   error = NULL;
   found_normal = 0;
+  found_named_cache = 0;
   found_cache = 0;
   found_app_library = 0;
   found_apple_index = 0;
@@ -5284,6 +5288,10 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
                          sizeof(normal_path),
                          normal_dir,
                          "primary.sqlite") ||
+      !harness_join_path(named_cache_path,
+                         sizeof(named_cache_path),
+                         normal_dir,
+                         "SessionCACHEStore.sqlite") ||
       !harness_join_path(cache_path,
                          sizeof(cache_path),
                          cache_owner_dir,
@@ -5394,6 +5402,7 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
   }
 
   if (!harness_create_user_database(normal_path) ||
+      !harness_create_user_database(named_cache_path) ||
       !harness_create_user_database(cache_path) ||
       !harness_create_user_database(app_library_path) ||
       !harness_create_user_database(apple_index_path) ||
@@ -5423,6 +5432,16 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
          (scan_list.records[index].location_tail != NULL) &&
          (strcmp(scan_list.records[index].location_tail, "primary.sqlite") == 0)) ?
         1 : 0;
+    }
+    if ((scan_list.records[index].path != NULL) &&
+        (strcmp(scan_list.records[index].path, named_cache_path) == 0)) {
+      found_named_cache =
+        ((scan_list.records[index].hidden == 1) &&
+         (scan_list.records[index].origin_kind != NULL) &&
+         (strcmp(scan_list.records[index].origin_kind, "documents") == 0) &&
+         (scan_list.records[index].location_tail != NULL) &&
+         (strcmp(scan_list.records[index].location_tail,
+                 "SessionCACHEStore.sqlite") == 0)) ? 1 : 0;
     }
     if ((scan_list.records[index].path != NULL) &&
         (strcmp(scan_list.records[index].path, cache_path) == 0)) {
@@ -5534,7 +5553,8 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
                  "ThirdParty.app/Templates/Report/index-iso.db") == 0)) ? 1 : 0;
     }
   }
-  if (!found_normal || !found_cache || !found_app_library ||
+  if (!found_normal || !found_named_cache || !found_cache ||
+      !found_app_library ||
       !found_apple_index || !found_third_party_index) {
     fprintf(stderr, "Scanner display classification did not match expected paths.\n");
     goto cleanup;
@@ -5564,6 +5584,7 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
   }
 
   found_normal = 0;
+  found_named_cache = 0;
   found_cache = 0;
   found_app_library = 0;
   found_apple_index = 0;
@@ -5578,6 +5599,16 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
          (catalog_list.records[index].location_tail != NULL) &&
          (strcmp(catalog_list.records[index].location_tail,
                  "primary.sqlite") == 0)) ? 1 : 0;
+    }
+    if ((catalog_list.records[index].path != NULL) &&
+        (strcmp(catalog_list.records[index].path, named_cache_path) == 0)) {
+      found_named_cache =
+        ((catalog_list.records[index].hidden == 1) &&
+         (catalog_list.records[index].origin_kind != NULL) &&
+         (strcmp(catalog_list.records[index].origin_kind, "documents") == 0) &&
+         (catalog_list.records[index].location_tail != NULL) &&
+         (strcmp(catalog_list.records[index].location_tail,
+                 "SessionCACHEStore.sqlite") == 0)) ? 1 : 0;
     }
     if ((catalog_list.records[index].path != NULL) &&
         (strcmp(catalog_list.records[index].path, cache_path) == 0)) {
@@ -5620,7 +5651,8 @@ static int harness_run_file_scanner_hidden_tests(const harness_context *context)
                  "ThirdParty.app/Templates/Report/index-iso.db") == 0)) ? 1 : 0;
     }
   }
-  if (!found_normal || !found_cache || !found_app_library ||
+  if (!found_normal || !found_named_cache || !found_cache ||
+      !found_app_library ||
       !found_apple_index || !found_third_party_index) {
     fprintf(stderr, "Scanner display metadata was not persisted to the catalog.\n");
     goto cleanup;
@@ -5633,6 +5665,7 @@ cleanup:
   strappy_file_scanner_record_list_destroy(&scan_list);
   strappy_discovered_database_record_list_destroy(&catalog_list);
   harness_unlink_sqlite_files(normal_path);
+  harness_unlink_sqlite_files(named_cache_path);
   harness_unlink_sqlite_files(cache_path);
   harness_unlink_sqlite_files(app_library_path);
   harness_unlink_sqlite_files(apple_index_path);
