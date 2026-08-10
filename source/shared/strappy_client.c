@@ -552,11 +552,19 @@ static int strappy_responses_transfer_poll_cancelled(
   return 0;
 }
 
+#if LIBCURL_VERSION_NUM >= 0x072000
+static int strappy_responses_transfer_progress_callback(void *clientp,
+                                                        curl_off_t dltotal,
+                                                        curl_off_t dlnow,
+                                                        curl_off_t ultotal,
+                                                        curl_off_t ulnow)
+#else
 static int strappy_responses_transfer_progress_callback(void *clientp,
                                                         double dltotal,
                                                         double dlnow,
                                                         double ultotal,
                                                         double ulnow)
+#endif
 {
   (void)dltotal;
   (void)dlnow;
@@ -825,10 +833,17 @@ int strappy_client_send_responses_json(
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response_buffer);
   curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, curl_error);
   curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+#if LIBCURL_VERSION_NUM >= 0x072000
+  curl_easy_setopt(curl,
+                   CURLOPT_XFERINFOFUNCTION,
+                   strappy_responses_transfer_progress_callback);
+  curl_easy_setopt(curl, CURLOPT_XFERINFODATA, (void *)&transfer_context);
+#else
   curl_easy_setopt(curl,
                    CURLOPT_PROGRESSFUNCTION,
                    strappy_responses_transfer_progress_callback);
   curl_easy_setopt(curl, CURLOPT_PROGRESSDATA, (void *)&transfer_context);
+#endif
   curl_easy_setopt(curl, CURLOPT_USERAGENT, "Strappy/0.1");
   curl_easy_setopt(curl,
                    CURLOPT_TIMEOUT,

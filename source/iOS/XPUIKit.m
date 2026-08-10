@@ -1,5 +1,12 @@
 #import "XPUIKit.h"
-#import <objc/message.h>
+
+/* The legacy and modern UIKit text-alignment enums use the same ABI-stable
+ * values. Naming either enum warns at one end of Strappy's supported range:
+ * UITextAlignment is deprecated in the 8.4 SDK, while NSTextAlignment is not
+ * available on the 4.3 deployment floor. Keep the compatibility values in the
+ * XP layer as plain NSInteger constants. */
+static const NSInteger XPUIKitTextAlignmentCenter = 1;
+static const NSInteger XPUIKitTextAlignmentRight = 2;
 
 @implementation NSString (XPUIKit)
 
@@ -161,6 +168,166 @@ static BOOL XPUIKitInvokeBoolGetter(id target, SEL selector)
   value = NO;
   [invocation getReturnValue:&value];
   return value ? YES : NO;
+}
+
+static id XPUIKitInvokeObjectGetter(id target, SEL selector)
+{
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+  __unsafe_unretained id value;
+
+  if ((target == nil) || ![target respondsToSelector:selector]) {
+    return nil;
+  }
+  signature = [target methodSignatureForSelector:selector];
+  if ((signature == nil) || ([signature numberOfArguments] != 2U)) {
+    return nil;
+  }
+  invocation = [NSInvocation invocationWithMethodSignature:signature];
+  [invocation setTarget:target];
+  [invocation setSelector:selector];
+  [invocation invoke];
+  value = nil;
+  [invocation getReturnValue:&value];
+  return value;
+}
+
+static void XPUIKitInvokeObjectSetter(id target, SEL selector, id value)
+{
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+  __unsafe_unretained id argument;
+
+  if ((target == nil) || ![target respondsToSelector:selector]) {
+    return;
+  }
+  signature = [target methodSignatureForSelector:selector];
+  if ((signature == nil) || ([signature numberOfArguments] != 3U)) {
+    return;
+  }
+  invocation = [NSInvocation invocationWithMethodSignature:signature];
+  [invocation setTarget:target];
+  [invocation setSelector:selector];
+  argument = value;
+  [invocation setArgument:&argument atIndex:2];
+  [invocation invoke];
+}
+
+static NSUInteger XPUIKitInvokeUnsignedIntegerGetter(id target, SEL selector)
+{
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+  NSUInteger value;
+
+  if ((target == nil) || ![target respondsToSelector:selector]) {
+    return 0U;
+  }
+  signature = [target methodSignatureForSelector:selector];
+  if ((signature == nil) || ([signature numberOfArguments] != 2U)) {
+    return 0U;
+  }
+  invocation = [NSInvocation invocationWithMethodSignature:signature];
+  [invocation setTarget:target];
+  [invocation setSelector:selector];
+  [invocation invoke];
+  value = 0U;
+  [invocation getReturnValue:&value];
+  return value;
+}
+
+static id XPUIKitCreateNotificationSettings(Class settingsClass,
+                                             NSUInteger types)
+{
+  SEL selector;
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+  __unsafe_unretained id categoriesArgument;
+  __unsafe_unretained id value;
+
+  selector = @selector(settingsForTypes:categories:);
+  if ((settingsClass == Nil) ||
+      ![(id)settingsClass respondsToSelector:selector]) {
+    return nil;
+  }
+  signature = [(id)settingsClass methodSignatureForSelector:selector];
+  if ((signature == nil) || ([signature numberOfArguments] != 4U)) {
+    return nil;
+  }
+  invocation = [NSInvocation invocationWithMethodSignature:signature];
+  [invocation setTarget:settingsClass];
+  [invocation setSelector:selector];
+  categoriesArgument = nil;
+  [invocation setArgument:&types atIndex:2];
+  [invocation setArgument:&categoriesArgument atIndex:3];
+  [invocation invoke];
+  value = nil;
+  [invocation getReturnValue:&value];
+  return value;
+}
+
+static BOOL XPUIKitInvokePresentViewController(UIViewController *target,
+                                               SEL selector,
+                                               UIViewController *controller,
+                                               BOOL animated,
+                                               BOOL hasCompletion)
+{
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+  __unsafe_unretained id controllerArgument;
+
+  if ((target == nil) || (controller == nil) ||
+      ![target respondsToSelector:selector]) {
+    return NO;
+  }
+  signature = [target methodSignatureForSelector:selector];
+  if ((signature == nil) ||
+      ([signature numberOfArguments] != (hasCompletion ? 5U : 4U))) {
+    return NO;
+  }
+  invocation = [NSInvocation invocationWithMethodSignature:signature];
+  [invocation setTarget:target];
+  [invocation setSelector:selector];
+  controllerArgument = controller;
+  [invocation setArgument:&controllerArgument atIndex:2];
+  [invocation setArgument:&animated atIndex:3];
+  if (hasCompletion) {
+    __unsafe_unretained id completionArgument;
+
+    completionArgument = nil;
+    [invocation setArgument:&completionArgument atIndex:4];
+  }
+  [invocation invoke];
+  return YES;
+}
+
+static BOOL XPUIKitInvokeDismissViewController(UIViewController *target,
+                                               SEL selector,
+                                               BOOL animated,
+                                               BOOL hasCompletion)
+{
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+
+  if ((target == nil) || ![target respondsToSelector:selector]) {
+    return NO;
+  }
+  signature = [target methodSignatureForSelector:selector];
+  if ((signature == nil) ||
+      ([signature numberOfArguments] != (hasCompletion ? 4U : 3U))) {
+    return NO;
+  }
+  invocation = [NSInvocation invocationWithMethodSignature:signature];
+  [invocation setTarget:target];
+  [invocation setSelector:selector];
+  [invocation setArgument:&animated atIndex:2];
+  if (hasCompletion) {
+    __unsafe_unretained id completionArgument;
+
+    completionArgument = nil;
+    [invocation setArgument:&completionArgument atIndex:3];
+  }
+  [invocation invoke];
+  return YES;
 }
 
 static UIScrollView *XPUIKitFindScrollView(UIView *view)
@@ -418,6 +585,36 @@ static UITextField *XPUIKitFindTextField(UIView *view)
 
 @implementation UIViewController (XPUIKit)
 
+- (void)XP_presentViewController:(UIViewController *)viewController
+                         animated:(BOOL)animated
+{
+  SEL selector;
+
+  selector = @selector(presentViewController:animated:completion:);
+  if (XPUIKitInvokePresentViewController(
+        self, selector, viewController, animated, YES)) {
+    return;
+  }
+  XPUIKitInvokePresentViewController(
+    self,
+    @selector(presentModalViewController:animated:),
+    viewController,
+    animated,
+    NO);
+}
+
+- (void)XP_dismissViewControllerAnimated:(BOOL)animated
+{
+  SEL selector;
+
+  selector = @selector(dismissViewControllerAnimated:completion:);
+  if (XPUIKitInvokeDismissViewController(self, selector, animated, YES)) {
+    return;
+  }
+  XPUIKitInvokeDismissViewController(
+    self, @selector(dismissModalViewControllerAnimated:), animated, NO);
+}
+
 - (BOOL)XP_isMovingFromParentViewController
 {
   return XPUIKitInvokeBoolGetter(self,
@@ -444,7 +641,7 @@ static UITextField *XPUIKitFindTextField(UIView *view)
 {
   XPUIKitInvokeIntegerSetter(self,
                              @selector(setTextAlignment:),
-                             (NSInteger)UITextAlignmentCenter);
+                             (NSInteger)XPUIKitTextAlignmentCenter);
 }
 
 - (void)XP_setLineBreakModeWordWrapping
@@ -460,7 +657,7 @@ static UITextField *XPUIKitFindTextField(UIView *view)
 {
   XPUIKitInvokeIntegerSetter(self,
                              @selector(setTextAlignment:),
-                             (NSInteger)UITextAlignmentRight);
+                             (NSInteger)XPUIKitTextAlignmentRight);
 }
 
 @end
@@ -500,14 +697,10 @@ static UITextField *XPUIKitFindTextField(UIView *view)
       return;
     }
     /* UIUserNotificationTypeSound (2) | UIUserNotificationTypeAlert (4). */
-    settings = ((id (*)(id, SEL, NSUInteger, id))objc_msgSend)(
-      (id)settingsClass,
-      @selector(settingsForTypes:categories:),
-      (NSUInteger)6,
-      nil);
-    ((void (*)(id, SEL, id))objc_msgSend)(application,
-                                          registerSelector,
-                                          settings);
+    settings = XPUIKitCreateNotificationSettings(settingsClass, (NSUInteger)6);
+    if (settings != nil) {
+      XPUIKitInvokeObjectSetter(application, registerSelector, settings);
+    }
   } @catch (NSException *exception) {
     NSLog(@"StrappyNotifications authorization request failed: %@", exception);
   }
@@ -526,12 +719,11 @@ static UITextField *XPUIKitFindTextField(UIView *view)
     return XPNotificationAuthStatusAuthorized;
   }
 
-  settings = ((id (*)(id, SEL))objc_msgSend)(application,
-                                              currentSettingsSelector);
+  settings = XPUIKitInvokeObjectGetter(application, currentSettingsSelector);
   if (settings == nil) {
     return XPNotificationAuthStatusNotDetermined;
   }
-  types = ((NSUInteger (*)(id, SEL))objc_msgSend)(settings, @selector(types));
+  types = XPUIKitInvokeUnsignedIntegerGetter(settings, @selector(types));
   return (types != 0U) ? XPNotificationAuthStatusAuthorized :
                          XPNotificationAuthStatusDenied;
 }

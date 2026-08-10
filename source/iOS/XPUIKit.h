@@ -44,6 +44,9 @@
 @end
 
 @interface UIViewController (XPUIKit)
+- (void)XP_presentViewController:(UIViewController *)viewController
+                         animated:(BOOL)animated;
+- (void)XP_dismissViewControllerAnimated:(BOOL)animated;
 - (BOOL)XP_isMovingFromParentViewController;
 @end
 

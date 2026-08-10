@@ -10,6 +10,7 @@
 #import "StrappyPreferencesSystemPromptsTableViewController.h"
 #import "StrappySession.h"
 #import "StrappySessionOptionsTableViewController.h"
+#import "XPUIKit.h"
 
 static NSString *StrappyPreferencesTrimmedString(NSString *string)
 {
@@ -244,7 +245,7 @@ enum {
   if (![self saveAuthenticationIfNeeded]) {
     return;
   }
-  [self dismissModalViewControllerAnimated:YES];
+  [self XP_dismissViewControllerAnimated:YES];
 }
 
 - (BOOL)saveAuthenticationIfNeeded

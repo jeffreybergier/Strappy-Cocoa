@@ -188,7 +188,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   preferences = [[PreferencesTableViewController alloc] init];
   navigationController =
     [[UINavigationController alloc] initWithRootViewController:preferences];
-  [self presentModalViewController:navigationController animated:YES];
+  [self XP_presentViewController:navigationController animated:YES];
 }
 
 - (void)setControlsEnabled:(BOOL)enabled

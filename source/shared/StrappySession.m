@@ -1658,21 +1658,9 @@ static BOOL StrappySessionRecordFromOptions(
 + (BOOL)ensureSessionsDirectoryForDatabasePath:(NSString *)databasePath
                                          error:(NSError **)error
 {
-  typedef BOOL (*StrappyModernCreateDirectoryFunction)(id,
-                                                       SEL,
-                                                       NSString *,
-                                                       BOOL,
-                                                       NSDictionary *,
-                                                       NSError **);
-  typedef BOOL (*StrappyLegacyCreateDirectoryFunction)(id,
-                                                       SEL,
-                                                       NSString *,
-                                                       NSDictionary *);
   NSFileManager *fileManager;
   NSString *directoryPath;
   BOOL isDirectory;
-  SEL modernSelector;
-  SEL legacySelector;
 
   fileManager = [NSFileManager defaultManager];
   directoryPath = [databasePath stringByDeletingLastPathComponent];
@@ -1694,39 +1682,14 @@ static BOOL StrappySessionRecordFromOptions(
     return NO;
   }
 
-  modernSelector =
-    @selector(createDirectoryAtPath:withIntermediateDirectories:attributes:error:);
-  if ([fileManager respondsToSelector:modernSelector]) {
-    StrappyModernCreateDirectoryFunction createDirectory;
-
-    createDirectory =
-      (StrappyModernCreateDirectoryFunction)[fileManager methodForSelector:modernSelector];
-    if (createDirectory(fileManager,
-                        modernSelector,
-                        directoryPath,
-                        YES,
-                        nil,
-                        error)) {
-      return YES;
-    }
-    return NO;
+  if ([fileManager XP_createDirectoryAtPath:directoryPath
+                withIntermediateDirectories:YES
+                                 attributes:nil
+                                      error:error]) {
+    return YES;
   }
 
-  legacySelector = @selector(createDirectoryAtPath:attributes:);
-  if ([fileManager respondsToSelector:legacySelector]) {
-    StrappyLegacyCreateDirectoryFunction createDirectory;
-
-    createDirectory =
-      (StrappyLegacyCreateDirectoryFunction)[fileManager methodForSelector:legacySelector];
-    if (createDirectory(fileManager,
-                        legacySelector,
-                        directoryPath,
-                        [NSDictionary dictionary])) {
-      return YES;
-    }
-  }
-
-  if (error != nil) {
+  if ((error != nil) && (*error == nil)) {
     NSDictionary *userInfo =
       [NSDictionary dictionaryWithObject:NSLocalizedString(@"Could not create session directory.", nil)
                                   forKey:NSLocalizedDescriptionKey];

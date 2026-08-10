@@ -849,7 +849,7 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
   [self setOptionsController:nil];
   [self setOptionsNavigationController:nil];
   if (navigationController != nil) {
-    [navigationController dismissModalViewControllerAnimated:animated];
+    [navigationController XP_dismissViewControllerAnimated:animated];
   }
 }
 
@@ -884,8 +884,8 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
     [[UINavigationController alloc] initWithRootViewController:optionsController];
   [self setOptionsController:optionsController];
   [self setOptionsNavigationController:navigationController];
-  [presentingController presentModalViewController:navigationController
-                                          animated:YES];
+  [presentingController XP_presentViewController:navigationController
+                                         animated:YES];
 }
 
 - (void)textViewDidChange:(UITextView *)textView

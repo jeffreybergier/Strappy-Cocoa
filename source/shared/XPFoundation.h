@@ -9,6 +9,15 @@
   #define XPUInteger NSUInteger
 #endif
 
+@interface NSFileManager (XPFoundation)
+
+- (BOOL)XP_createDirectoryAtPath:(NSString *)path
+     withIntermediateDirectories:(BOOL)createIntermediates
+                      attributes:(NSDictionary *)attributes
+                           error:(NSError **)error;
+
+@end
+
 @interface NSNumber (XPFoundation)
 
 /* NSNumber's NSInteger/NSUInteger convenience selectors are newer than the

@@ -899,7 +899,7 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
     [self showError:error title:NSLocalizedString(@"Could Not Start Study", nil)];
     return;
   }
-  [self dismissModalViewControllerAnimated:YES];
+  [self XP_dismissViewControllerAnimated:YES];
 }
 
 - (void)showError:(NSError *)error title:(NSString *)title
