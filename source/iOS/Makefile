@@ -66,18 +66,16 @@ $(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
 
 VALIDATE_PATHS = . $(SHARED_DIR)
 
-# Import common Phone build engine.
+# The common Phone engine also exposes IPA packaging targets. Keep that engine
+# private so Strappy's public build targets only produce Debian packages.
+ifeq ($(STRAPPY_PHONE_INTERNAL_BUILD),1)
 include /altivec/altivec_common_phone.mk
 
-.DEFAULT_GOAL := deb
+.DEFAULT_GOAL := __deb
 
-deb: validate
-	@echo "--- Building Phone Debian Package ($(OPT_FLAGS)) ---"
-	@$(MAKE) --no-print-directory build-release/$(APP_NAME).deb BUILD_DIR=build-release OPT_FLAGS=-O3
-
-debug-deb: validate
-	@echo "--- Building Phone Debug Debian Package (-O0) ---"
-	@$(MAKE) --no-print-directory build-debug/$(APP_NAME).deb BUILD_DIR=build-debug OPT_FLAGS=-O0
+__deb: validate
+	@echo "--- Building Phone $(DEB_BUILD_LABEL) Debian Package ($(OPT_FLAGS)) ---"
+	@$(MAKE) --no-print-directory $(PHONE_DEB) BUILD_DIR=$(BUILD_DIR) OPT_FLAGS=$(OPT_FLAGS)
 
 $(PHONE_DEB): $(APP_BUNDLE)
 	@echo " [5/5] Packaging Debian archive..."
@@ -148,4 +146,23 @@ $(PHONE_DEB): $(APP_BUNDLE)
 	@chmod 0755 "$(DEB_STAGE)/Applications/$(APP_NAME).app/$(APP_NAME)"
 	@fakeroot sh -c 'chown -R 0:0 "$$1" && dpkg-deb -Z"$$3" --build "$$1" "$$2"' sh "$(DEB_STAGE)" "$@" "$(DEB_COMPRESSION)"
 
-.PHONY: deb debug-deb
+.PHONY: __deb
+
+else
+
+.DEFAULT_GOAL := release
+
+release:
+	@$(MAKE) --no-print-directory STRAPPY_PHONE_INTERNAL_BUILD=1 __deb \
+		BUILD_DIR=build-release OPT_FLAGS=-O3 DEB_BUILD_LABEL=Release
+
+debug:
+	@$(MAKE) --no-print-directory STRAPPY_PHONE_INTERNAL_BUILD=1 __deb \
+		BUILD_DIR=build-debug OPT_FLAGS=-O0 DEB_BUILD_LABEL=Debug
+
+clean analyze:
+	@$(MAKE) --no-print-directory STRAPPY_PHONE_INTERNAL_BUILD=1 $@
+
+.PHONY: clean debug release analyze
+
+endif

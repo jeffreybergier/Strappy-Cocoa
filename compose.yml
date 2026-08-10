@@ -20,3 +20,13 @@ services:
       - ~/.altivec:/root
       - .:/repo/Strappy
     working_dir: /repo/Strappy
+
+  make:
+    image: ghcr.io/jeffreybergier/altivec-intelligence:latest
+    profiles:
+      - tools
+    volumes:
+      - ~/.altivec:/root
+      - .:/repo/Strappy
+    working_dir: /repo/Strappy
+    entrypoint: ["make", "-C", "source"]

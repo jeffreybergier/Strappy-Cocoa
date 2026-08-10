@@ -114,12 +114,26 @@ PROMPT_GENERATOR_HARNESS_SOURCES = \
 .PHONY: test prompts review-prompts clean
 
 test: $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS)
+	@echo "--- Running Linux shared-core test suite ---"
+	@echo " [1/6] RUN  database_query_harness"
 	./$(DATABASE_QUERY_HARNESS)
+	@echo " [1/6] PASS database_query_harness"
+	@echo " [2/6] RUN  bash_harness"
 	./$(BASH_HARNESS)
+	@echo " [2/6] PASS bash_harness"
+	@echo " [3/6] RUN  webview_harness"
 	STRAPPY_WEBVIEW_PAGE_OUTPUT=$(WEBVIEW_PAGE_FIXTURE) ./$(WEBVIEW_HARNESS)
+	@echo " [3/6] PASS webview_harness"
+	@echo " [4/6] RUN  webview_behavior_harness.js"
 	$(NODE) webview_behavior_harness.js $(WEBVIEW_PAGE_FIXTURE)
+	@echo " [4/6] PASS webview_behavior_harness.js"
+	@echo " [5/6] RUN  responses_harness"
 	./$(RESPONSES_HARNESS)
+	@echo " [5/6] PASS responses_harness"
+	@echo " [6/6] RUN  prompt_generator_harness"
 	./$(PROMPT_GENERATOR_HARNESS) $(SHARED_DIR)/Resources --check
+	@echo " [6/6] PASS prompt_generator_harness"
+	@echo "--- PASS: all 6 Linux shared-core checks completed ---"
 
 prompts: $(PROMPT_GENERATOR_HARNESS)
 	mkdir -p $(PROMPT_OUTPUT_DIR)
