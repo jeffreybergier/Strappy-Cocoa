@@ -26,6 +26,6 @@ targets:
     workdir: source/iOS
     build:
       - make clean
-      - make release
-    artifact: source/iOS/build-release/Strappy.ipa
-    asset_name: Strappy-{version}-iOS.ipa
+      - make release DEB_VERSION="$(altivec-release current)"
+    artifact: source/iOS/build-release/Strappy.deb
+    asset_name: Strappy-{version}-iOS.deb
