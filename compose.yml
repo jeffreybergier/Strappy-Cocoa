@@ -5,6 +5,8 @@ services:
     tty: true
     environment:
       - IS_SANDBOX=1
+      - TERM=xterm-256color
+      - COLORTERM=${COLORTERM:-}
     volumes:
       - ~/.altivec:/root
       - .:/repo/Strappy
