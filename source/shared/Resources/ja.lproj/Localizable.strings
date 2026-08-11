@@ -120,8 +120,13 @@
 "Scan" = "スキャン";
 "Scans your home folder for SQLite databases. After scanning, whitelist desired databases so Strappy can read their data. Quick Scan saves time by only scanning files with common file extensions used for SQLite databases." = "ホームフォルダ内の SQLite データベースをスキャンします。スキャン後、Strappy がデータを読み取れるよう、使用するデータベースを許可してください。簡易スキャンでは、SQLite データベースで一般的に使われる拡張子のファイルだけをスキャンするため、時間を節約できます。";
 "Study" = "調査";
+"Studied" = "調査済み";
+"Last Studied" = "最終調査";
 "Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu." = "データベースを調査しておくと、今後 Strappy がクエリを実行する際の時間とトークンを節約できます。調査セッションでは「セッションのデフォルト」メニューで設定した既定モデルを使用します。";
 "Reset" = "リセット";
+"Delete Study..." = "調査データを削除…";
+"Delete Study for \"%@\"?" = "「%@」の調査データを削除しますか？";
+"This clears the stored description and context for this database. You can study it again later." = "このデータベースに保存されている説明とコンテキストを消去します。後で再度調査できます。";
 "Could Not Delete Study" = "データベース調査を削除できませんでした";
 "Description" = "説明";
 "Shows the recorded description and context." = "記録された説明とコンテキストを表示します。";

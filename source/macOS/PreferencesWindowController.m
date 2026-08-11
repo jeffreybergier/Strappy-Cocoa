@@ -159,6 +159,44 @@ static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
     YES : NO;
 }
 
+static NSString *StrappyDatabaseStudyStringForRow(NSDictionary *row,
+                                                  NSString *key)
+{
+  NSString *value;
+
+  value = [row objectForKey:key];
+  return [value isKindOfClass:[NSString class]] ? value : @"";
+}
+
+static NSString *StrappyDatabaseStudyNameForRow(NSDictionary *row)
+{
+  NSString *name;
+  NSString *path;
+
+  path = StrappyDatabaseStudyStringForRow(row, @"path");
+  name = [path lastPathComponent];
+  return ([name length] > 0U) ?
+    name : StrappyDatabaseStudyStringForRow(row, @"database_id");
+}
+
+static NSString *StrappyDatabaseStudyAppNameForRow(NSDictionary *row)
+{
+  NSString *appName;
+
+  appName = StrappyDatabaseStudyStringForRow(row, @"app_name");
+  return ([appName length] > 0U) ?
+    appName : NSLocalizedString(@"Other", nil);
+}
+
+static BOOL StrappyDatabaseStudyRowIsStudied(NSDictionary *row)
+{
+  NSNumber *studied;
+
+  studied = [row objectForKey:@"studied"];
+  return ([studied isKindOfClass:[NSNumber class]] && [studied boolValue]) ?
+    YES : NO;
+}
+
 static NSString *StrappyStringForModelRow(NSDictionary *row, NSString *key)
 {
   NSString *value;
@@ -341,9 +379,35 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)refreshAPITokenStatusWithSaved:(BOOL)saved;
 - (void)loadSystemPrompt;
 - (void)loadDatabaseStudy;
+- (NSString *)currentDatabaseStudySearchText;
+- (NSArray *)databaseStudyRows:(NSArray *)rows
+  matchingSearchText:(NSString *)searchText;
+- (void)applyDatabaseStudyRows;
+- (NSString *)selectedDatabaseStudyIdentifier;
+- (void)selectDatabaseStudyRowWithIdentifier:(NSString *)databaseIdentifier;
+- (void)updateDatabaseStudyProgress;
+- (void)updateDatabaseStudyActionButtonForAllStudied:(BOOL)allStudied;
+- (NSString *)databaseStudyDateForRow:(NSDictionary *)row;
+- (BOOL)databaseStudyRowIsExpanded:(NSDictionary *)row;
+- (void)databaseStudyRowClicked:(id)sender;
+- (void)databaseStudySearchTextDidChange:(NSNotification *)notification;
+- (NSMenu *)whitelistTableView:(NSTableView *)tableView
+             contextMenuForRow:(NSInteger)row;
+- (void)whitelistTableViewDidPressDelete:(NSTableView *)tableView;
+- (void)deleteDatabaseStudyMenuItem:(id)sender;
+- (void)confirmDeleteDatabaseStudyForRow:(NSDictionary *)row;
+- (void)databaseStudyDeleteAlertDidEnd:(NSAlert *)alert
+                            returnCode:(NSInteger)returnCode
+                           contextInfo:(void *)contextInfo;
 - (void)showDatabaseStudyError:(NSError *)error title:(NSString *)title;
 - (void)resetDatabaseStudy:(id)sender;
+- (void)databaseStudyResetAlertDidEnd:(NSAlert *)alert
+                           returnCode:(NSInteger)returnCode
+                          contextInfo:(void *)contextInfo;
 - (void)beginDatabaseStudy:(id)sender;
+- (void)databaseStudyRunAlertDidEnd:(NSAlert *)alert
+                         returnCode:(NSInteger)returnCode
+                        contextInfo:(void *)contextInfo;
 - (NSString *)currentModelSearchText;
 - (NSArray *)modelRows:(NSArray *)rows matchingSearchText:(NSString *)searchText;
 - (void)applyModelRows;
@@ -420,6 +484,13 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     modelRows_ = [[NSArray alloc] init];
     allDatabaseRows_ = [[NSArray alloc] init];
     databaseRows_ = [[NSArray alloc] init];
+    allDatabaseStudyRows_ = [[NSArray alloc] init];
+    databaseStudyRows_ = [[NSArray alloc] init];
+    databaseStudyDateFormatter_ = [[NSDateFormatter alloc] init];
+    [databaseStudyDateFormatter_
+      setFormatterBehavior:NSDateFormatterBehavior10_4];
+    [databaseStudyDateFormatter_ setDateStyle:NSDateFormatterShortStyle];
+    [databaseStudyDateFormatter_ setTimeStyle:NSDateFormatterShortStyle];
     [self setupToolbar];
     [[NSNotificationCenter defaultCenter]
       addObserver:self
@@ -513,8 +584,21 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
   databaseStudyPaneView_ =
     [[StrappyPreferencesDatabaseStudyView alloc] initWithFrame:paneFrame
-                                                        target:self];
-  databaseStudyTextView_ = [[databaseStudyPaneView_ textView] retain];
+                                                        target:self
+                                                    dataSource:self
+                                                      delegate:self];
+  databaseStudySearchField_ =
+    [[databaseStudyPaneView_ searchField] retain];
+  databaseStudyTableView_ = [[databaseStudyPaneView_ tableView] retain];
+  databaseStudyActionButton_ =
+    [[databaseStudyPaneView_ studyButton] retain];
+  databaseStudyStatusLabel_ =
+    [[databaseStudyPaneView_ statusLabel] retain];
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(databaseStudySearchTextDidChange:)
+           name:NSControlTextDidChangeNotification
+         object:databaseStudySearchField_];
   [self loadDatabaseStudy];
 
   systemPromptsPaneView_ =
@@ -686,32 +770,427 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   return item;
 }
 
-#pragma mark - Authentication
+#pragma mark - Database Study
 
 - (void)loadDatabaseStudy
 {
   NSError *error;
-  NSString *json;
+  NSArray *rows;
 
-  if (databaseStudyTextView_ == nil) {
+  if (databaseStudyTableView_ == nil) {
     return;
   }
   error = nil;
-  json = [StrappySession databaseStudyJSONWithError:&error];
-  if (json == nil) {
-    [databaseStudyTextView_ setString:@""];
+  rows = [StrappySession databaseStudyRowsWithError:&error];
+  if (![rows isKindOfClass:[NSArray class]]) {
+    [allDatabaseStudyRows_ release];
+    allDatabaseStudyRows_ = [[NSArray alloc] init];
+    [databaseStudyRows_ release];
+    databaseStudyRows_ = [[NSArray alloc] init];
+    [expandedDatabaseStudyIdentifier_ release];
+    expandedDatabaseStudyIdentifier_ = nil;
+    [databaseStudyTableView_ deselectAll:self];
+    [databaseStudyTableView_ reloadData];
+    [self updateDatabaseStudyActionButtonForAllStudied:NO];
+    [databaseStudyStatusLabel_ setStringValue:NSLocalizedString(@"— of —", nil)];
     [self showDatabaseStudyError:error
                            title:NSLocalizedString(@"Could Not Load Study", nil)];
     return;
   }
-  [databaseStudyTextView_ setString:json];
-  [databaseStudyTextView_ scrollRangeToVisible:NSMakeRange(0U, 0U)];
+
+  [allDatabaseStudyRows_ release];
+  allDatabaseStudyRows_ = [rows copy];
+  [self updateDatabaseStudyProgress];
+  [self applyDatabaseStudyRows];
+}
+
+- (NSString *)currentDatabaseStudySearchText
+{
+  NSString *searchText;
+
+  if (databaseStudySearchField_ == nil) {
+    return nil;
+  }
+  searchText = [[databaseStudySearchField_ stringValue]
+    stringByTrimmingCharactersInSet:
+      [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  return ([searchText length] > 0U) ? searchText : nil;
+}
+
+- (NSArray *)databaseStudyRows:(NSArray *)rows
+  matchingSearchText:(NSString *)searchText
+{
+  NSArray *keys;
+  NSMutableArray *matchingRows;
+  NSUInteger rowIndex;
+
+  if (![rows isKindOfClass:[NSArray class]]) {
+    return [NSArray array];
+  }
+  if ([searchText length] == 0U) {
+    return rows;
+  }
+
+  keys = [NSArray arrayWithObjects:
+    @"database_id", @"path", @"app_group_key", @"app_name",
+    @"app_bundle_id", @"description", @"context", nil];
+  matchingRows = [NSMutableArray arrayWithCapacity:[rows count]];
+  for (rowIndex = 0U; rowIndex < [rows count]; rowIndex++) {
+    NSDictionary *row;
+    BOOL matches;
+    NSUInteger keyIndex;
+
+    row = [rows objectAtIndex:rowIndex];
+    if (![row isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+
+    matches = ([StrappyDatabaseStudyNameForRow(row)
+      rangeOfString:searchText
+            options:NSCaseInsensitiveSearch].location != NSNotFound) ?
+      YES : NO;
+    for (keyIndex = 0U; !matches && (keyIndex < [keys count]); keyIndex++) {
+      NSString *value;
+
+      value = StrappyDatabaseStudyStringForRow(
+        row,
+        [keys objectAtIndex:keyIndex]);
+      if ([value rangeOfString:searchText
+                      options:NSCaseInsensitiveSearch].location != NSNotFound) {
+        matches = YES;
+      }
+    }
+    if (matches) {
+      [matchingRows addObject:row];
+    }
+  }
+  return matchingRows;
+}
+
+- (void)applyDatabaseStudyRows
+{
+  NSArray *rows;
+  NSString *selectedIdentifier;
+  BOOL expandedRowIsVisible;
+  NSUInteger index;
+
+  selectedIdentifier = [[self selectedDatabaseStudyIdentifier] retain];
+  rows = [self databaseStudyRows:allDatabaseStudyRows_
+              matchingSearchText:[self currentDatabaseStudySearchText]];
+  rows = [databaseStudyPaneView_ sortedRows:rows];
+  [databaseStudyRows_ release];
+  databaseStudyRows_ = [rows copy];
+
+  expandedRowIsVisible = NO;
+  for (index = 0U;
+       ([expandedDatabaseStudyIdentifier_ length] > 0U) &&
+         (index < [databaseStudyRows_ count]);
+       index++) {
+    NSDictionary *row;
+
+    row = [databaseStudyRows_ objectAtIndex:index];
+    if (StrappyDatabaseStudyRowIsStudied(row) &&
+        [StrappyDatabaseStudyStringForRow(row, @"database_id")
+          isEqualToString:expandedDatabaseStudyIdentifier_]) {
+      expandedRowIsVisible = YES;
+    }
+  }
+  if (!expandedRowIsVisible) {
+    [expandedDatabaseStudyIdentifier_ release];
+    expandedDatabaseStudyIdentifier_ = nil;
+  }
+  [databaseStudyTableView_ reloadData];
+  [self selectDatabaseStudyRowWithIdentifier:selectedIdentifier];
+  [selectedIdentifier release];
+}
+
+- (NSString *)selectedDatabaseStudyIdentifier
+{
+  NSDictionary *row;
+  NSInteger rowIndex;
+
+  rowIndex = [databaseStudyTableView_ selectedRow];
+  if ((rowIndex < 0) ||
+      (rowIndex >= (NSInteger)[databaseStudyRows_ count])) {
+    return nil;
+  }
+  row = [databaseStudyRows_ objectAtIndex:(NSUInteger)rowIndex];
+  if (!StrappyDatabaseStudyRowIsStudied(row)) {
+    return nil;
+  }
+  return StrappyDatabaseStudyStringForRow(row, @"database_id");
+}
+
+- (void)selectDatabaseStudyRowWithIdentifier:(NSString *)databaseIdentifier
+{
+  NSUInteger index;
+
+  [databaseStudyTableView_ deselectAll:self];
+  if ([databaseIdentifier length] == 0U) {
+    return;
+  }
+
+  for (index = 0U; index < [databaseStudyRows_ count]; index++) {
+    NSDictionary *row;
+
+    row = [databaseStudyRows_ objectAtIndex:index];
+    if (StrappyDatabaseStudyRowIsStudied(row) &&
+        [StrappyDatabaseStudyStringForRow(row, @"database_id")
+          isEqualToString:databaseIdentifier]) {
+      [databaseStudyTableView_
+        selectRowIndexes:[NSIndexSet indexSetWithIndex:index]
+        byExtendingSelection:NO];
+      return;
+    }
+  }
+}
+
+- (void)updateDatabaseStudyProgress
+{
+  BOOL allStudied;
+  NSUInteger index;
+  NSUInteger studiedCount;
+
+  studiedCount = 0U;
+  for (index = 0U; index < [allDatabaseStudyRows_ count]; index++) {
+    id row;
+
+    row = [allDatabaseStudyRows_ objectAtIndex:index];
+    if ([row isKindOfClass:[NSDictionary class]] &&
+        StrappyDatabaseStudyRowIsStudied(row)) {
+      studiedCount++;
+    }
+  }
+  allStudied = ([allDatabaseStudyRows_ count] > 0U) &&
+    (studiedCount == [allDatabaseStudyRows_ count]);
+  [self updateDatabaseStudyActionButtonForAllStudied:allStudied];
+  [databaseStudyStatusLabel_ setStringValue:[NSString stringWithFormat:
+    NSLocalizedString(@"%lu of %lu", nil),
+    (unsigned long)studiedCount,
+    (unsigned long)[allDatabaseStudyRows_ count]]];
+}
+
+- (void)updateDatabaseStudyActionButtonForAllStudied:(BOOL)allStudied
+{
+  [databaseStudyActionButton_ setTitle:allStudied ?
+    NSLocalizedString(@"Reset", nil) : NSLocalizedString(@"Study", nil)];
+  [databaseStudyActionButton_ setAction:allStudied ?
+    @selector(resetDatabaseStudy:) : @selector(beginDatabaseStudy:)];
+  [databaseStudyActionButton_ setToolTip:allStudied ?
+    NSLocalizedString(
+      @"This clears every stored database description and context.", nil) :
+    NSLocalizedString(
+      @"Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu.",
+      nil)];
+}
+
+- (NSString *)databaseStudyDateForRow:(NSDictionary *)row
+{
+  NSDate *date;
+  NSNumber *studiedAt;
+  NSTimeInterval seconds;
+
+  if (!StrappyDatabaseStudyRowIsStudied(row)) {
+    return @"";
+  }
+  studiedAt = [row objectForKey:@"studied_at_ms"];
+  if (![studiedAt isKindOfClass:[NSNumber class]] ||
+      ([studiedAt longLongValue] <= 0LL)) {
+    return @"";
+  }
+  seconds = (NSTimeInterval)[studiedAt longLongValue] / 1000.0;
+  date = [NSDate dateWithTimeIntervalSince1970:seconds];
+  return [databaseStudyDateFormatter_ stringFromDate:date];
+}
+
+- (BOOL)databaseStudyRowIsExpanded:(NSDictionary *)row
+{
+  NSString *databaseIdentifier;
+
+  if (!StrappyDatabaseStudyRowIsStudied(row) ||
+      ([expandedDatabaseStudyIdentifier_ length] == 0U)) {
+    return NO;
+  }
+  databaseIdentifier =
+    StrappyDatabaseStudyStringForRow(row, @"database_id");
+  return [databaseIdentifier
+    isEqualToString:expandedDatabaseStudyIdentifier_] ? YES : NO;
+}
+
+- (void)databaseStudyRowClicked:(id)sender
+{
+  NSString *databaseIdentifier;
+  NSDictionary *row;
+  NSInteger rowIndex;
+
+  if (sender != databaseStudyTableView_) {
+    return;
+  }
+  rowIndex = [databaseStudyTableView_ clickedRow];
+  if (rowIndex < 0) {
+    rowIndex = [databaseStudyTableView_ selectedRow];
+  }
+  if ((rowIndex < 0) ||
+      (rowIndex >= (NSInteger)[databaseStudyRows_ count])) {
+    return;
+  }
+
+  row = [databaseStudyRows_ objectAtIndex:(NSUInteger)rowIndex];
+  if (!StrappyDatabaseStudyRowIsStudied(row)) {
+    [databaseStudyTableView_ deselectAll:self];
+    return;
+  }
+
+  databaseIdentifier =
+    StrappyDatabaseStudyStringForRow(row, @"database_id");
+  if ([databaseIdentifier
+        isEqualToString:expandedDatabaseStudyIdentifier_]) {
+    [expandedDatabaseStudyIdentifier_ release];
+    expandedDatabaseStudyIdentifier_ = nil;
+  } else {
+    [expandedDatabaseStudyIdentifier_ release];
+    expandedDatabaseStudyIdentifier_ = [databaseIdentifier copy];
+  }
+  [databaseStudyTableView_ reloadData];
+}
+
+- (void)databaseStudySearchTextDidChange:(NSNotification *)notification
+{
+  if ([notification object] == databaseStudySearchField_) {
+    [self applyDatabaseStudyRows];
+  }
+}
+
+- (NSMenu *)whitelistTableView:(NSTableView *)tableView
+             contextMenuForRow:(NSInteger)rowIndex
+{
+  NSDictionary *row;
+  NSMenu *menu;
+  NSMenuItem *item;
+
+  if ((tableView != databaseStudyTableView_) || (rowIndex < 0) ||
+      (rowIndex >= (NSInteger)[databaseStudyRows_ count])) {
+    return nil;
+  }
+  row = [databaseStudyRows_ objectAtIndex:(NSUInteger)rowIndex];
+  if (!StrappyDatabaseStudyRowIsStudied(row)) {
+    return nil;
+  }
+
+  menu = [[[NSMenu alloc] initWithTitle:@""] autorelease];
+  item = [[[NSMenuItem alloc]
+    initWithTitle:NSLocalizedString(@"Delete Study...", nil)
+            action:@selector(deleteDatabaseStudyMenuItem:)
+     keyEquivalent:@""] autorelease];
+  [item setTarget:self];
+  [item setRepresentedObject:row];
+  [menu addItem:item];
+  return menu;
+}
+
+- (void)whitelistTableViewDidPressDelete:(NSTableView *)tableView
+{
+  NSInteger rowIndex;
+
+  if (tableView != databaseStudyTableView_) {
+    return;
+  }
+  rowIndex = [databaseStudyTableView_ selectedRow];
+  if ((rowIndex < 0) ||
+      (rowIndex >= (NSInteger)[databaseStudyRows_ count])) {
+    return;
+  }
+  [self confirmDeleteDatabaseStudyForRow:
+    [databaseStudyRows_ objectAtIndex:(NSUInteger)rowIndex]];
+}
+
+- (void)deleteDatabaseStudyMenuItem:(id)sender
+{
+  id row;
+
+  row = [sender respondsToSelector:@selector(representedObject)] ?
+    [sender representedObject] : nil;
+  if ([row isKindOfClass:[NSDictionary class]]) {
+    [self confirmDeleteDatabaseStudyForRow:row];
+  }
+}
+
+- (void)confirmDeleteDatabaseStudyForRow:(NSDictionary *)row
+{
+  NSString *databaseIdentifier;
+  NSString *databaseName;
+  NSAlert *alert;
+  NSWindow *window;
+
+  if (!StrappyDatabaseStudyRowIsStudied(row)) {
+    return;
+  }
+  databaseIdentifier =
+    StrappyDatabaseStudyStringForRow(row, @"database_id");
+  if ([databaseIdentifier length] == 0U) {
+    NSBeep();
+    return;
+  }
+  window = [self window];
+  if (window == nil) {
+    NSBeep();
+    return;
+  }
+
+  databaseName = StrappyDatabaseStudyNameForRow(row);
+  alert = [[[NSAlert alloc] init] autorelease];
+  [alert setMessageText:[NSString stringWithFormat:
+    NSLocalizedString(@"Delete Study for \"%@\"?", nil), databaseName]];
+  [alert setInformativeText:NSLocalizedString(
+    @"This clears the stored description and context for this database. You can study it again later.",
+    nil)];
+  [alert addButtonWithTitle:NSLocalizedString(@"Delete", nil)];
+  [alert addButtonWithTitle:NSLocalizedString(@"Cancel", nil)];
+  [alert XP_beginSheetModalForWindow:window
+                       modalDelegate:self
+                      didEndSelector:@selector(databaseStudyDeleteAlertDidEnd:returnCode:contextInfo:)
+                         contextInfo:[databaseIdentifier retain]];
+}
+
+- (void)databaseStudyDeleteAlertDidEnd:(NSAlert *)alert
+                            returnCode:(NSInteger)returnCode
+                           contextInfo:(void *)contextInfo
+{
+  NSString *databaseIdentifier;
+  NSError *error;
+
+  (void)alert;
+  databaseIdentifier = (NSString *)contextInfo;
+  if (returnCode != NSAlertFirstButtonReturn) {
+    [databaseIdentifier release];
+    return;
+  }
+
+  error = nil;
+  if (![StrappySession deleteDatabaseStudyValuesForDatabaseIdentifier:
+        databaseIdentifier
+                                                               error:&error]) {
+    [databaseIdentifier release];
+    [self showDatabaseStudyError:error
+                           title:NSLocalizedString(@"Could Not Delete Study", nil)];
+    return;
+  }
+
+  if ([expandedDatabaseStudyIdentifier_
+        isEqualToString:databaseIdentifier]) {
+    [expandedDatabaseStudyIdentifier_ release];
+    expandedDatabaseStudyIdentifier_ = nil;
+  }
+  [databaseIdentifier release];
+  [databaseStudyTableView_ deselectAll:self];
+  [self loadDatabaseStudy];
 }
 
 - (void)showDatabaseStudyError:(NSError *)error title:(NSString *)title
 {
   NSAlert *alert;
   NSString *message;
+  NSWindow *window;
 
   message = [error localizedDescription];
   if ([message length] == 0U) {
@@ -720,22 +1199,50 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   alert = [[[NSAlert alloc] init] autorelease];
   [alert setMessageText:title];
   [alert setInformativeText:message];
-  [alert runModal];
+  [alert addButtonWithTitle:NSLocalizedString(@"OK", nil)];
+  window = [self window];
+  if (window == nil) {
+    NSBeep();
+    return;
+  }
+  [alert XP_beginSheetModalForWindow:window
+                       modalDelegate:nil
+                      didEndSelector:NULL
+                         contextInfo:NULL];
 }
 
 - (void)resetDatabaseStudy:(id)sender
 {
   NSAlert *alert;
-  NSError *error;
+  NSWindow *window;
 
   (void)sender;
+  window = [self window];
+  if (window == nil) {
+    NSBeep();
+    return;
+  }
   alert = [[[NSAlert alloc] init] autorelease];
   [alert setMessageText:NSLocalizedString(@"Reset Database Study?", nil)];
   [alert setInformativeText:NSLocalizedString(
     @"This clears every stored database description and context.", nil)];
   [alert addButtonWithTitle:NSLocalizedString(@"Reset", nil)];
   [alert addButtonWithTitle:NSLocalizedString(@"Cancel", nil)];
-  if ([alert runModal] != NSAlertFirstButtonReturn) {
+  [alert XP_beginSheetModalForWindow:window
+                       modalDelegate:self
+                      didEndSelector:@selector(databaseStudyResetAlertDidEnd:returnCode:contextInfo:)
+                         contextInfo:NULL];
+}
+
+- (void)databaseStudyResetAlertDidEnd:(NSAlert *)alert
+                           returnCode:(NSInteger)returnCode
+                          contextInfo:(void *)contextInfo
+{
+  NSError *error;
+
+  (void)alert;
+  (void)contextInfo;
+  if (returnCode != NSAlertFirstButtonReturn) {
     return;
   }
   error = nil;
@@ -750,17 +1257,36 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)beginDatabaseStudy:(id)sender
 {
   NSAlert *alert;
-  NSError *error;
+  NSWindow *window;
 
   (void)sender;
+  window = [self window];
+  if (window == nil) {
+    NSBeep();
+    return;
+  }
   alert = [[[NSAlert alloc] init] autorelease];
   [alert setMessageText:NSLocalizedString(@"Study Databases?", nil)];
   [alert setInformativeText:NSLocalizedString(
-    @"The default model will be used to study approved databases that are currently not studied.",
+    @"Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu.",
     nil)];
   [alert addButtonWithTitle:NSLocalizedString(@"Study", nil)];
   [alert addButtonWithTitle:NSLocalizedString(@"Cancel", nil)];
-  if ([alert runModal] != NSAlertFirstButtonReturn) {
+  [alert XP_beginSheetModalForWindow:window
+                       modalDelegate:self
+                      didEndSelector:@selector(databaseStudyRunAlertDidEnd:returnCode:contextInfo:)
+                         contextInfo:NULL];
+}
+
+- (void)databaseStudyRunAlertDidEnd:(NSAlert *)alert
+                         returnCode:(NSInteger)returnCode
+                        contextInfo:(void *)contextInfo
+{
+  NSError *error;
+
+  (void)alert;
+  (void)contextInfo;
+  if (returnCode != NSAlertFirstButtonReturn) {
     return;
   }
   error = nil;
@@ -771,6 +1297,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
   [[self window] close];
 }
+
+#pragma mark - Authentication
 
 - (void)refreshAPITokenStatusWithSaved:(BOOL)saved
 {
@@ -1648,6 +2176,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   if (tableView == modelTableView_) {
     return (NSInteger)[modelRows_ count];
   }
+  if (tableView == databaseStudyTableView_) {
+    return (NSInteger)[databaseStudyRows_ count];
+  }
   return (NSInteger)[databaseRows_ count];
 }
 
@@ -1668,6 +2199,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     [self applyDatabaseRows];
     [self selectDatabaseTableRowsWithPaths:selectedDatabasePaths];
     [selectedDatabasePaths release];
+    return;
+  }
+
+  if (tableView == databaseStudyTableView_) {
+    [self applyDatabaseStudyRows];
   }
 }
 
@@ -1703,6 +2239,35 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     }
     if ([identifier isEqualToString:@"model_completion_price"]) {
       return StrappyModelPricingString(model, @"pricing_completion");
+    }
+    return nil;
+  }
+
+  if (tableView == databaseStudyTableView_) {
+    if ((row < 0) || (row >= (NSInteger)[databaseStudyRows_ count])) {
+      return nil;
+    }
+
+    database = [databaseStudyRows_ objectAtIndex:(NSUInteger)row];
+    identifier = [tableColumn identifier];
+    if ([identifier isEqualToString:@"study_studied"]) {
+      return [NSNumber numberWithBool:
+        StrappyDatabaseStudyRowIsStudied(database)];
+    }
+    if ([identifier isEqualToString:@"study_application"]) {
+      return StrappyDatabaseStudyAppNameForRow(database);
+    }
+    if ([identifier isEqualToString:@"study_name"]) {
+      return StrappyDatabaseStudyNameForRow(database);
+    }
+    if ([identifier isEqualToString:@"study_last_studied"]) {
+      return [self databaseStudyDateForRow:database];
+    }
+    if ([identifier isEqualToString:@"study_description"]) {
+      return StrappyDatabaseStudyStringForRow(database, @"description");
+    }
+    if ([identifier isEqualToString:@"study_context"]) {
+      return StrappyDatabaseStudyStringForRow(database, @"context");
     }
     return nil;
   }
@@ -1778,6 +2343,45 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return @"";
   }
 
+  if (tableView == databaseStudyTableView_) {
+    if ((row < 0) || (row >= (NSInteger)[databaseStudyRows_ count])) {
+      return @"";
+    }
+
+    database = [databaseStudyRows_ objectAtIndex:(NSUInteger)row];
+    identifier = [tableColumn identifier];
+    if ([identifier isEqualToString:@"study_studied"]) {
+      if (!StrappyDatabaseStudyRowIsStudied(database)) {
+        return @"";
+      }
+      return [self databaseStudyRowIsExpanded:database] ?
+        NSLocalizedString(@"Hides the recorded description and context.", nil) :
+        NSLocalizedString(@"Shows the recorded description and context.", nil);
+    }
+    if ([identifier isEqualToString:@"study_application"]) {
+      NSString *bundleIdentifier;
+
+      bundleIdentifier = StrappyDatabaseStudyStringForRow(
+        database,
+        @"app_bundle_id");
+      return ([bundleIdentifier length] > 0U) ?
+        bundleIdentifier : StrappyDatabaseStudyAppNameForRow(database);
+    }
+    if ([identifier isEqualToString:@"study_name"]) {
+      return StrappyDatabaseStudyStringForRow(database, @"path");
+    }
+    if ([identifier isEqualToString:@"study_last_studied"]) {
+      return [self databaseStudyDateForRow:database];
+    }
+    if ([identifier isEqualToString:@"study_description"]) {
+      return StrappyDatabaseStudyStringForRow(database, @"description");
+    }
+    if ([identifier isEqualToString:@"study_context"]) {
+      return StrappyDatabaseStudyStringForRow(database, @"context");
+    }
+    return @"";
+  }
+
   if ((row < 0) || (row >= (NSInteger)[databaseRows_ count])) {
     return @"";
   }
@@ -1811,6 +2415,37 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 }
 
+- (BOOL)tableView:(NSTableView *)tableView shouldSelectRow:(NSInteger)row
+{
+  if (tableView != databaseStudyTableView_) {
+    return YES;
+  }
+  if ((row < 0) || (row >= (NSInteger)[databaseStudyRows_ count])) {
+    return NO;
+  }
+  return StrappyDatabaseStudyRowIsStudied(
+    [databaseStudyRows_ objectAtIndex:(NSUInteger)row]);
+}
+
+- (CGFloat)tableView:(NSTableView *)tableView heightOfRow:(NSInteger)row
+{
+  NSDictionary *studyRow;
+
+  if ((tableView != databaseStudyTableView_) || (row < 0) ||
+      (row >= (NSInteger)[databaseStudyRows_ count])) {
+    return [tableView rowHeight];
+  }
+  studyRow = [databaseStudyRows_ objectAtIndex:(NSUInteger)row];
+  if (![self databaseStudyRowIsExpanded:studyRow]) {
+    return [tableView rowHeight];
+  }
+  return [databaseStudyPaneView_
+    expandedRowHeightForDescription:
+      StrappyDatabaseStudyStringForRow(studyRow, @"description")
+                           context:
+      StrappyDatabaseStudyStringForRow(studyRow, @"context")];
+}
+
 - (void)tableView:(NSTableView *)tableView
    setObjectValue:(id)object
    forTableColumn:(NSTableColumn *)tableColumn
@@ -1826,6 +2461,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   identifier = [tableColumn identifier];
   checked = ([object respondsToSelector:@selector(boolValue)] &&
              [object boolValue]) ? YES : NO;
+
+  if (tableView == databaseStudyTableView_) {
+    return;
+  }
 
   if (tableView == modelTableView_) {
     NSString *modelId;
@@ -1902,6 +2541,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 {
   NSDictionary *database;
 
+  if (tableView == databaseStudyTableView_) {
+    return NO;
+  }
+
   if (tableView == modelTableView_) {
     NSDictionary *model;
 
@@ -1935,6 +2578,44 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
               row:(NSInteger)row
 {
   NSDictionary *database;
+
+  if (tableView == databaseStudyTableView_) {
+    BOOL expanded;
+    BOOL studied;
+    NSString *identifier;
+
+    if ((row < 0) || (row >= (NSInteger)[databaseStudyRows_ count])) {
+      return;
+    }
+    database = [databaseStudyRows_ objectAtIndex:(NSUInteger)row];
+    identifier = [tableColumn identifier];
+    studied = StrappyDatabaseStudyRowIsStudied(database);
+    expanded = [self databaseStudyRowIsExpanded:database];
+
+    if ([identifier isEqualToString:@"study_name"] &&
+        [cell respondsToSelector:@selector(setFont:)]) {
+      [cell setFont:studied ? [NSFont boldSystemFontOfSize:12.0] :
+                              [NSFont systemFontOfSize:12.0]];
+    }
+    if (([identifier isEqualToString:@"study_name"] ||
+         [identifier isEqualToString:@"study_application"] ||
+         [identifier isEqualToString:@"study_last_studied"] ||
+         [identifier isEqualToString:@"study_description"] ||
+         [identifier isEqualToString:@"study_context"]) &&
+        [cell respondsToSelector:@selector(setTextColor:)]) {
+      [cell setTextColor:studied ? [NSColor controlTextColor] :
+                                  [NSColor disabledControlTextColor]];
+    }
+    if (([identifier isEqualToString:@"study_description"] ||
+         [identifier isEqualToString:@"study_context"]) &&
+        [cell respondsToSelector:@selector(setWraps:)] &&
+        [cell respondsToSelector:@selector(setLineBreakMode:)]) {
+      [cell setWraps:expanded];
+      [cell setLineBreakMode:expanded ? NSLineBreakByWordWrapping :
+                                        NSLineBreakByTruncatingTail];
+    }
+    return;
+  }
 
   if (tableView == modelTableView_) {
     NSDictionary *model;
@@ -2033,7 +2714,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [databaseTableView_ release];
   [databaseWhitelistView_ release];
   [databaseStudyPaneView_ release];
-  [databaseStudyTextView_ release];
+  [databaseStudySearchField_ release];
+  [databaseStudyTableView_ release];
+  [databaseStudyActionButton_ release];
+  [databaseStudyStatusLabel_ release];
   [scanButton_ release];
   [showHiddenDatabasesButton_ release];
   [scanProgressIndicator_ release];
@@ -2042,6 +2726,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [modelRows_ release];
   [allDatabaseRows_ release];
   [databaseRows_ release];
+  [allDatabaseStudyRows_ release];
+  [databaseStudyRows_ release];
+  [databaseStudyDateFormatter_ release];
+  [expandedDatabaseStudyIdentifier_ release];
   [super dealloc];
 }
 

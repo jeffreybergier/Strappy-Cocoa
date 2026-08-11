@@ -8,10 +8,43 @@ static const CGFloat kStrappyWhitelistBottomGap = 8.0;
 static const CGFloat kStrappyWhitelistTopControlGap = 8.0;
 static const CGFloat kStrappyWhitelistProgressSize = 20.0;
 
+@protocol StrappyPreferencesWhitelistTableMenu <NSObject>
+- (NSMenu *)whitelistTableView:(NSTableView *)tableView
+             contextMenuForRow:(NSInteger)row;
+@end
+
 @interface StrappyPreferencesWhitelistTableView : NSTableView
 @end
 
 @implementation StrappyPreferencesWhitelistTableView
+
+- (NSMenu *)menuForEvent:(NSEvent *)event
+{
+  NSPoint point;
+  NSInteger row;
+  id<StrappyPreferencesWhitelistTableMenu> dataSource;
+  SEL selector;
+  NSMenu *menu;
+
+  point = [self convertPoint:[event locationInWindow] fromView:nil];
+  row = [self rowAtPoint:point];
+  if (row < 0) {
+    return nil;
+  }
+
+  dataSource = (id<StrappyPreferencesWhitelistTableMenu>)[self dataSource];
+  selector = @selector(whitelistTableView:contextMenuForRow:);
+  if (![dataSource respondsToSelector:selector]) {
+    return [super menuForEvent:event];
+  }
+
+  menu = [dataSource whitelistTableView:self contextMenuForRow:row];
+  if (menu != nil) {
+    [self selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)row]
+        byExtendingSelection:NO];
+  }
+  return menu;
+}
 
 - (void)keyDown:(NSEvent *)event
 {
@@ -25,6 +58,17 @@ static const CGFloat kStrappyWhitelistProgressSize = 20.0;
       ([[self selectedRowIndexes] count] > 0U)) {
     delegate = [self delegate];
     selector = @selector(whitelistTableViewDidPressSpace:);
+    if ([delegate respondsToSelector:selector]) {
+      [delegate performSelector:selector withObject:self];
+      return;
+    }
+  }
+  if (([characters length] == 1U) &&
+      (([characters characterAtIndex:0] == NSDeleteCharacter) ||
+       ([characters characterAtIndex:0] == NSBackspaceCharacter)) &&
+      ([[self selectedRowIndexes] count] > 0U)) {
+    delegate = [self delegate];
+    selector = @selector(whitelistTableViewDidPressDelete:);
     if ([delegate respondsToSelector:selector]) {
       [delegate performSelector:selector withObject:self];
       return;

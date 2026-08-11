@@ -1,13 +1,16 @@
-#import <AppKit/AppKit.h>
+#import "StrappyPreferencesWhitelistView.h"
 
-@interface StrappyPreferencesDatabaseStudyView : NSView {
+@interface StrappyPreferencesDatabaseStudyView : StrappyPreferencesWhitelistView {
  @private
-  NSTextView *textView_;
-  NSButton   *resetButton_;
-  NSButton   *studyButton_;
+  NSButton *studyButton_;
 }
 
-- (id)initWithFrame:(NSRect)frame target:(id)target;
-- (NSTextView *)textView;
+- (id)initWithFrame:(NSRect)frame
+             target:(id)target
+         dataSource:(id)dataSource
+           delegate:(id)delegate;
+- (NSButton *)studyButton;
+- (CGFloat)expandedRowHeightForDescription:(NSString *)description
+                                    context:(NSString *)context;
 
 @end

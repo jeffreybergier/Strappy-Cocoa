@@ -27,7 +27,10 @@
   NSTableView         *databaseTableView_;
   StrappyPreferencesDatabaseWhitelistView *databaseWhitelistView_;
   StrappyPreferencesDatabaseStudyView *databaseStudyPaneView_;
-  NSTextView          *databaseStudyTextView_;
+  NSSearchField       *databaseStudySearchField_;
+  NSTableView         *databaseStudyTableView_;
+  NSButton            *databaseStudyActionButton_;
+  NSTextField         *databaseStudyStatusLabel_;
   NSButton            *scanButton_;
   NSButton            *showHiddenDatabasesButton_;
   NSProgressIndicator *scanProgressIndicator_;
@@ -36,6 +39,10 @@
   NSArray             *modelRows_;
   NSArray             *allDatabaseRows_;
   NSArray             *databaseRows_;
+  NSArray             *allDatabaseStudyRows_;
+  NSArray             *databaseStudyRows_;
+  NSDateFormatter      *databaseStudyDateFormatter_;
+  NSString            *expandedDatabaseStudyIdentifier_;
   BOOL                 scanning_;
   BOOL                 refreshingModels_;
 }

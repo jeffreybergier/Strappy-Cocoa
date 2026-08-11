@@ -120,8 +120,13 @@
 "Scan" = "Scan";
 "Scans your home folder for SQLite databases. After scanning, whitelist desired databases so Strappy can read their data. Quick Scan saves time by only scanning files with common file extensions used for SQLite databases." = "Scans your home folder for SQLite databases. After scanning, whitelist desired databases so Strappy can read their data. Quick Scan saves time by only scanning files with common file extensions used for SQLite databases.";
 "Study" = "Study";
+"Studied" = "Studied";
+"Last Studied" = "Last Studied";
 "Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu." = "Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu.";
 "Reset" = "Reset";
+"Delete Study..." = "Delete Study...";
+"Delete Study for \"%@\"?" = "Delete Study for \"%@\"?";
+"This clears the stored description and context for this database. You can study it again later." = "This clears the stored description and context for this database. You can study it again later.";
 "Could Not Delete Study" = "Could Not Delete Study";
 "Description" = "Description";
 "Shows the recorded description and context." = "Shows the recorded description and context.";
