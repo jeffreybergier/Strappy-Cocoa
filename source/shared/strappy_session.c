@@ -819,7 +819,8 @@ static char *strappy_session_webview_messages_page_html_with_content(
   const strappy_webview_database_display_name *database_display_names,
   size_t database_display_name_count,
   const char *error_text,
-  const char *processing_status_json)
+  const char *processing_status_json,
+  strappy_webview_palette palette)
 {
   return strappy_webview_messages_page_html(
     messages_html,
@@ -827,7 +828,8 @@ static char *strappy_session_webview_messages_page_html_with_content(
     database_display_names,
     database_display_name_count,
     error_text,
-    processing_status_json);
+    processing_status_json,
+    palette);
 }
 
 char *strappy_session_webview_set_processing_status_js(
@@ -1126,6 +1128,7 @@ char *strappy_session_webview_messages_page_html_for_session(
   const char *resource_dir,
   const char *error_text,
   const char *processing_status_json,
+  strappy_webview_palette palette,
   size_t *message_count_out,
   char **timeline_cursor_out,
   char **error_out)
@@ -1166,7 +1169,8 @@ char *strappy_session_webview_messages_page_html_for_session(
       NULL,
       0U,
       display_error,
-      processing_status_json);
+      processing_status_json,
+      palette);
     if (page_html == NULL) {
       strappy_set_error(error_out,
                         (list_error != NULL) ? list_error :
@@ -1233,7 +1237,8 @@ char *strappy_session_webview_messages_page_html_for_session(
     database_display.names,
     database_display.count,
     error_text,
-    processing_status_json);
+    processing_status_json,
+    palette);
   free(messages_html);
   strappy_free_string(display_registry_json);
   strappy_free_string(display_registry_error);

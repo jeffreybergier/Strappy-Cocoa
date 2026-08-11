@@ -23,6 +23,11 @@ extern const NSUInteger StrappySessionMaximumLimit;
 
 typedef NSUInteger StrappySessionOptionMask;
 
+typedef enum StrappyWebViewPalette {
+  StrappyWebViewPaletteApplicationTinted = 0,
+  StrappyWebViewPaletteNeutral
+} StrappyWebViewPalette;
+
 enum {
   StrappySessionOptionModel = 1U << 0,
   StrappySessionOptionAssistantSet = 1U << 1,
@@ -158,6 +163,7 @@ enum {
 - (NSDictionary *)summaryWithError:(NSError **)error;
 - (NSArray *)messagesWithError:(NSError **)error;
 - (NSString *)webViewMessagesPageHTMLWithErrorText:(NSString *)errorText
+                                           palette:(StrappyWebViewPalette)palette
                                       messageCount:(NSUInteger *)messageCount
                                     timelineCursor:(NSString **)timelineCursor
                                              error:(NSError **)error;

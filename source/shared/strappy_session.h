@@ -199,6 +199,7 @@ char *strappy_session_webview_messages_page_html_for_session(
   const char *resource_dir,
   const char *error_text,
   const char *processing_status_json,
+  strappy_webview_palette palette,
   size_t *message_count_out,
   char **timeline_cursor_out,
   char **error_out);

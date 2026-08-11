@@ -341,7 +341,8 @@ static int harness_check_database_display_names(void)
     harness_database_display_names,
     HARNESS_DATABASE_DISPLAY_NAME_COUNT,
     "Could not open db_7; leave db_8 unchanged.",
-    NULL);
+    NULL,
+    STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED);
 
   ok = (assistant_html != NULL) &&
        (tool_html != NULL) &&
@@ -404,7 +405,8 @@ static int harness_check_page_scripts(void)
     harness_database_display_names,
     HARNESS_DATABASE_DISPLAY_NAME_COUNT,
     "",
-    NULL);
+    NULL,
+    STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED);
   strappy_webview_free(message_html);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate messages page HTML.\n");
@@ -1983,6 +1985,71 @@ static int harness_check_page_scripts(void)
   return ok;
 }
 
+static int harness_check_palettes(void)
+{
+  char *neutral_html;
+  char *tinted_html;
+  int ok;
+
+  tinted_html = strappy_webview_messages_page_html(
+    "",
+    "{}",
+    NULL,
+    0U,
+    "",
+    NULL,
+    STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED);
+  neutral_html = strappy_webview_messages_page_html(
+    "",
+    "{}",
+    NULL,
+    0U,
+    "",
+    NULL,
+    STRAPPY_WEBVIEW_PALETTE_NEUTRAL);
+  ok = (tinted_html != NULL) &&
+       (neutral_html != NULL) &&
+       harness_expect_contains(tinted_html, "background:#fbfafc") &&
+       harness_expect_contains(tinted_html, "color:#302e31") &&
+       harness_expect_contains(tinted_html, "color:#8e1bcf") &&
+       harness_expect_contains(neutral_html, "background:#f5f5f5") &&
+       harness_expect_contains(neutral_html, "color:#242424") &&
+       harness_expect_contains(neutral_html, "background:#ededed") &&
+       harness_expect_contains(neutral_html, "color:#626262") &&
+       harness_expect_contains(neutral_html, "color:#3f5f7f") &&
+       harness_expect_contains(neutral_html, "background:#dcdcdc") &&
+       harness_expect_contains(neutral_html, "border-color:#b5b5b5") &&
+       harness_expect_contains(neutral_html, "background:#c8c8c8") &&
+       harness_expect_contains(neutral_html, "color:#1f5f99") &&
+       harness_expect_contains(neutral_html, "color:#174a78") &&
+       harness_expect_contains(neutral_html, "background:#e2e2e2") &&
+       harness_expect_contains(neutral_html, "border:1px solid #8a8a8a") &&
+       harness_expect_contains(neutral_html, "background:#f4f4f4") &&
+       harness_expect_contains(neutral_html, "color:#252525") &&
+       harness_expect_contains(neutral_html, "background:#dedede") &&
+       harness_expect_contains(neutral_html, "color:#9a3e47") &&
+       harness_expect_not_contains(neutral_html, "#fbfafc") &&
+       harness_expect_not_contains(neutral_html, "#302e31") &&
+       harness_expect_not_contains(neutral_html, "#f0edf2") &&
+       harness_expect_not_contains(neutral_html, "#676268") &&
+       harness_expect_not_contains(neutral_html, "#5d5262") &&
+       harness_expect_not_contains(neutral_html, "#d7d1d9") &&
+       harness_expect_not_contains(neutral_html, "#a49da6") &&
+       harness_expect_not_contains(neutral_html, "#b9b2bc") &&
+       harness_expect_not_contains(neutral_html, "#716a73") &&
+       harness_expect_not_contains(neutral_html, "#8e1bcf") &&
+       harness_expect_not_contains(neutral_html, "#7216a6") &&
+       harness_expect_not_contains(neutral_html, "#e7c8cc") &&
+       harness_expect_not_contains(neutral_html, "#837b86") &&
+       harness_expect_not_contains(neutral_html, "#f7f5f8") &&
+       harness_expect_not_contains(neutral_html, "#2a282b") &&
+       harness_expect_not_contains(neutral_html, "#ddd8e0");
+
+  strappy_webview_free(neutral_html);
+  strappy_webview_free(tinted_html);
+  return ok;
+}
+
 static int harness_check_timeline_error_state(void)
 {
   char *empty_page_html;
@@ -1995,7 +2062,8 @@ static int harness_check_timeline_error_state(void)
     NULL,
     0U,
     "",
-    NULL);
+    NULL,
+    STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED);
   if (empty_page_html == NULL) {
     fprintf(stderr, "Could not generate blank timeline page HTML.\n");
     return 0;
@@ -2006,7 +2074,8 @@ static int harness_check_timeline_error_state(void)
     NULL,
     0U,
     "Timeline failed <retry> & \"later\"",
-    NULL);
+    NULL,
+    STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate timeline error page HTML.\n");
     strappy_webview_free(empty_page_html);
@@ -2058,7 +2127,8 @@ static int harness_check_fontawesome_rendering(void)
     NULL,
     0U,
     "",
-    NULL);
+    NULL,
+    STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED);
   strappy_webview_free(message_html);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate Font Awesome page HTML.\n");
@@ -2361,7 +2431,8 @@ static int harness_check_processing_status_scripts(void)
     "",
     "{\"active\":true,\"message_key\":\"prompt-group-initial\","
     "\"status_kind\":\"thinking\",\"started_ms\":1000,"
-    "\"retry_reason\":\"wait </script> & continue\"}");
+    "\"retry_reason\":\"wait </script> & continue\"}",
+    STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate initial processing status HTML.\n");
     strappy_webview_free(clear_script);
@@ -2515,7 +2586,8 @@ static int harness_check_harness_prompt_group_collapse(void)
     NULL,
     0U,
     "",
-    NULL);
+    NULL,
+    STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED);
   free(messages_html);
   if (page_html == NULL) {
     fprintf(stderr, "Could not generate prompt group collapse page HTML.\n");
@@ -3634,6 +3706,9 @@ int main(void)
     return 1;
   }
   if (!harness_check_page_scripts()) {
+    return 1;
+  }
+  if (!harness_check_palettes()) {
     return 1;
   }
   if (!harness_check_timeline_error_state()) {

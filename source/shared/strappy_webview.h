@@ -102,6 +102,11 @@ typedef struct strappy_webview_message {
   const char *tool_display_registry_json;
 } strappy_webview_message;
 
+typedef enum strappy_webview_palette {
+  STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED = 0,
+  STRAPPY_WEBVIEW_PALETTE_NEUTRAL
+} strappy_webview_palette;
+
 typedef struct strappy_webview_script_batch strappy_webview_script_batch;
 typedef struct strappy_webview_render_context strappy_webview_render_context;
 
@@ -192,7 +197,8 @@ char *strappy_webview_messages_page_html(
   const strappy_webview_database_display_name *database_display_names,
   size_t database_display_name_count,
   const char *error_text,
-  const char *processing_status_json);
+  const char *processing_status_json,
+  strappy_webview_palette palette);
 
 char *strappy_webview_append_message_js(const char *message_html);
 char *strappy_webview_replace_message_js(const char *element_id,

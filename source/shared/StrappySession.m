@@ -3067,6 +3067,7 @@ static BOOL StrappySessionRecordFromOptions(
 }
 
 - (NSString *)webViewMessagesPageHTMLWithErrorText:(NSString *)errorText
+                                           palette:(StrappyWebViewPalette)palette
                                       messageCount:(NSUInteger *)messageCount
                                     timelineCursor:(NSString **)timelineCursor
                                              error:(NSError **)error
@@ -3080,6 +3081,7 @@ static BOOL StrappySessionRecordFromOptions(
   char *storedTimelineCursor;
   long long sessionId;
   size_t storedMessageCount;
+  strappy_webview_palette webViewPalette;
 
   if (messageCount != NULL) {
     *messageCount = 0U;
@@ -3108,12 +3110,17 @@ static BOOL StrappySessionRecordFromOptions(
   storedMessageCount = 0U;
   storedTimelineCursor = NULL;
   strappyError = NULL;
+  webViewPalette =
+    (palette == StrappyWebViewPaletteNeutral) ?
+      STRAPPY_WEBVIEW_PALETTE_NEUTRAL :
+      STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED;
   pageHTML = strappy_session_webview_messages_page_html_for_session(
     [databasePath fileSystemRepresentation],
     sessionId,
     [resourcePath fileSystemRepresentation],
     displayErrorText,
     StrappySessionOptionalCString(processingStatusJSON),
+    webViewPalette,
     &storedMessageCount,
     &storedTimelineCursor,
     &strappyError);

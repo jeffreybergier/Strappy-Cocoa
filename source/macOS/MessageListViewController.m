@@ -545,6 +545,7 @@ static BOOL StrappyContextRoundActionValues(
   timelineCursor = nil;
   renderError = nil;
   html = [session_ webViewMessagesPageHTMLWithErrorText:errorText
+                                                palette:StrappyWebViewPaletteNeutral
                                            messageCount:NULL
                                          timelineCursor:&timelineCursor
                                                   error:&renderError];

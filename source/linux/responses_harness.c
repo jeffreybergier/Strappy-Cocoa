@@ -5154,6 +5154,7 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
         "../shared/Resources",
         NULL,
         NULL,
+        STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED,
         &first_message_count,
         &first_timeline_cursor,
         &error);
@@ -7776,6 +7777,7 @@ static int harness_verify_invalid_structured_text_webview_recovery(
     "../shared/Resources",
     NULL,
     NULL,
+    STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED,
     &before_count,
     &before_cursor,
     error_out);
@@ -7848,6 +7850,7 @@ static int harness_verify_invalid_structured_text_webview_recovery(
     "../shared/Resources",
     NULL,
     NULL,
+    STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED,
     &page_count,
     &page_cursor,
     error_out);
@@ -8569,6 +8572,7 @@ static int harness_test_session_webview_rendering(void)
       "../shared/Resources",
       NULL,
       NULL,
+      STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED,
       &message_count,
       &initial_cursor,
       &error);
@@ -8728,6 +8732,7 @@ static int harness_test_session_webview_rendering(void)
     NULL,
     "{\"active\":true,\"message_key\":\"session-processing\","
     "\"status_kind\":\"thinking\",\"started_ms\":1000}",
+    STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED,
     &message_count,
     &page_timeline_cursor,
     &error);

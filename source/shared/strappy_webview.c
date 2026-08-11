@@ -25,6 +25,83 @@ struct strappy_webview_render_context {
   cJSON *tool_display_registry;
 };
 
+typedef enum strappy_webview_color_role {
+  STRAPPY_WEBVIEW_COLOR_PAGE_BACKGROUND = 0,
+  STRAPPY_WEBVIEW_COLOR_PRIMARY_TEXT,
+  STRAPPY_WEBVIEW_COLOR_PANEL_BACKGROUND,
+  STRAPPY_WEBVIEW_COLOR_SECONDARY_TEXT,
+  STRAPPY_WEBVIEW_COLOR_CONTROL_TEXT,
+  STRAPPY_WEBVIEW_COLOR_SECTION_BACKGROUND,
+  STRAPPY_WEBVIEW_COLOR_SURFACE_BACKGROUND,
+  STRAPPY_WEBVIEW_COLOR_BORDER,
+  STRAPPY_WEBVIEW_COLOR_STRONG_SURFACE,
+  STRAPPY_WEBVIEW_COLOR_STRONG_BORDER,
+  STRAPPY_WEBVIEW_COLOR_LINK,
+  STRAPPY_WEBVIEW_COLOR_ACTIVE_LINK,
+  STRAPPY_WEBVIEW_COLOR_ERROR,
+  STRAPPY_WEBVIEW_COLOR_ERROR_BACKGROUND,
+  STRAPPY_WEBVIEW_COLOR_WARNING,
+  STRAPPY_WEBVIEW_COLOR_TERMINAL_BORDER,
+  STRAPPY_WEBVIEW_COLOR_TERMINAL_BACKGROUND,
+  STRAPPY_WEBVIEW_COLOR_TERMINAL_TEXT,
+  STRAPPY_WEBVIEW_COLOR_TERMINAL_HEADER,
+  STRAPPY_WEBVIEW_COLOR_COUNT
+} strappy_webview_color_role;
+
+typedef struct strappy_webview_palette_colors {
+  const char *values[STRAPPY_WEBVIEW_COLOR_COUNT];
+} strappy_webview_palette_colors;
+
+/* The stylesheet is authored with the application-tinted values below. During
+   page generation those values are translated by semantic role when the host
+   requests the neutral palette. This keeps the emitted CSS compatible with the
+   pre-CSS-custom-property WebKit used by iOS 4. */
+static const strappy_webview_palette_colors
+  g_strappy_webview_application_palette = {{
+    "#fbfafc",
+    "#302e31",
+    "#f0edf2",
+    "#676268",
+    "#5d5262",
+    "#d7d1d9",
+    "#fff",
+    "#a49da6",
+    "#b9b2bc",
+    "#716a73",
+    "#8e1bcf",
+    "#7216a6",
+    "#9a3e47",
+    "#e7c8cc",
+    "#755a00",
+    "#837b86",
+    "#f7f5f8",
+    "#2a282b",
+    "#ddd8e0"
+  }};
+
+static const strappy_webview_palette_colors
+  g_strappy_webview_neutral_palette = {{
+    "#f5f5f5",
+    "#242424",
+    "#ededed",
+    "#626262",
+    "#3f5f7f",
+    "#dcdcdc",
+    "#fff",
+    "#b5b5b5",
+    "#c8c8c8",
+    "#808080",
+    "#1f5f99",
+    "#174a78",
+    "#9a3e47",
+    "#e2e2e2",
+    "#755a00",
+    "#8a8a8a",
+    "#f4f4f4",
+    "#252525",
+    "#dedede"
+  }};
+
 static char *g_strappy_webview_font_dir = NULL;
 
 typedef enum strappy_webview_label_index {
@@ -782,6 +859,87 @@ static int strappy_webview_append_chunks(strappy_webview_buffer *buffer,
     }
   }
 
+  return 1;
+}
+
+static const strappy_webview_palette_colors *
+strappy_webview_colors_for_palette(strappy_webview_palette palette)
+{
+  if (palette == STRAPPY_WEBVIEW_PALETTE_NEUTRAL) {
+    return &g_strappy_webview_neutral_palette;
+  }
+  return &g_strappy_webview_application_palette;
+}
+
+static int strappy_webview_is_ascii_hex_digit(char value)
+{
+  return ((value >= '0') && (value <= '9')) ||
+         ((value >= 'a') && (value <= 'f')) ||
+         ((value >= 'A') && (value <= 'F'));
+}
+
+static int strappy_webview_append_palette_chunk(
+  strappy_webview_buffer *buffer,
+  const char *chunk,
+  const strappy_webview_palette_colors *colors)
+{
+  const char *cursor;
+  size_t role;
+
+  if ((buffer == NULL) || (chunk == NULL) || (colors == NULL)) {
+    return 0;
+  }
+
+  cursor = chunk;
+  while (*cursor != '\0') {
+    int matched;
+
+    matched = 0;
+    for (role = 0U; role < STRAPPY_WEBVIEW_COLOR_COUNT; role++) {
+      const char *application_color;
+      size_t color_length;
+
+      application_color = g_strappy_webview_application_palette.values[role];
+      color_length = strlen(application_color);
+      if ((strncmp(cursor, application_color, color_length) == 0) &&
+          !strappy_webview_is_ascii_hex_digit(cursor[color_length])) {
+        if (!strappy_webview_buffer_append_cstring(buffer,
+                                                   colors->values[role])) {
+          return 0;
+        }
+        cursor += color_length;
+        matched = 1;
+        break;
+      }
+    }
+    if (!matched) {
+      if (!strappy_webview_buffer_append_char(buffer, *cursor)) {
+        return 0;
+      }
+      cursor++;
+    }
+  }
+  return 1;
+}
+
+static int strappy_webview_append_palette_chunks(
+  strappy_webview_buffer *buffer,
+  const char * const *chunks,
+  strappy_webview_palette palette)
+{
+  const strappy_webview_palette_colors *colors;
+  size_t index;
+
+  if ((buffer == NULL) || (chunks == NULL)) {
+    return 0;
+  }
+
+  colors = strappy_webview_colors_for_palette(palette);
+  for (index = 0U; chunks[index] != NULL; index++) {
+    if (!strappy_webview_append_palette_chunk(buffer, chunks[index], colors)) {
+      return 0;
+    }
+  }
   return 1;
 }
 
@@ -2122,7 +2280,8 @@ static int strappy_webview_append_font_faces(strappy_webview_buffer *buffer)
     ".fa-brands{font-family:'FA7B';}");
 }
 
-static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
+static int strappy_webview_append_styles(strappy_webview_buffer *buffer,
+                                         strappy_webview_palette palette)
 {
   static const char * const chunks[] = {
     "html,body{margin:0;padding:0;background:#fbfafc;color:#302e31;",
@@ -2587,7 +2746,7 @@ static int strappy_webview_append_styles(strappy_webview_buffer *buffer)
 
   return strappy_webview_buffer_append_cstring(buffer, "<style>") &&
          strappy_webview_append_font_faces(buffer) &&
-         strappy_webview_append_chunks(buffer, chunks);
+         strappy_webview_append_palette_chunks(buffer, chunks, palette);
 }
 
 static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
@@ -4968,7 +5127,8 @@ char *strappy_webview_messages_page_html(
   const strappy_webview_database_display_name *database_display_names,
   size_t database_display_name_count,
   const char *error_text,
-  const char *processing_status_json)
+  const char *processing_status_json,
+  strappy_webview_palette palette)
 {
   strappy_webview_buffer buffer;
   const strappy_webview_labels *labels;
@@ -4984,7 +5144,7 @@ char *strappy_webview_messages_page_html(
          &buffer,
        "<!doctype html><html><head><meta charset=\"utf-8\">"
          "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">") &&
-       strappy_webview_append_styles(&buffer) &&
+       strappy_webview_append_styles(&buffer, palette) &&
        strappy_webview_append_scripts(&buffer) &&
        strappy_webview_buffer_append_cstring(
          &buffer,

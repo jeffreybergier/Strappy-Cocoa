@@ -998,6 +998,10 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   renderError = nil;
   html = [[self session]
     webViewMessagesPageHTMLWithErrorText:errorText
+                               palette:([[UIDevice currentDevice]
+                                 XP_isOperatingSystemAtLeastMajorVersion:5] ?
+                                   StrappyWebViewPaletteApplicationTinted :
+                                   StrappyWebViewPaletteNeutral)
                             messageCount:NULL
                           timelineCursor:&timelineCursor
                                    error:&renderError];
