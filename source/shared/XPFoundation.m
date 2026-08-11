@@ -1,4 +1,6 @@
 #import "XPFoundation.h"
+#import <objc/message.h>
+#include <stdlib.h>
 
 @implementation NSFileManager (XPFoundation)
 
@@ -56,6 +58,24 @@
   result = NO;
   [invocation getReturnValue:&result];
   return result;
+}
+
+@end
+
+@implementation NSString (XPFoundation)
+
+- (long long)XP_longLongValue
+{
+  SEL selector;
+  const char *value;
+
+  selector = @selector(longLongValue);
+  if ([self respondsToSelector:selector]) {
+    return ((long long (*)(id, SEL))objc_msgSend)(self, selector);
+  }
+
+  value = [self UTF8String];
+  return (value != NULL) ? strtoll(value, NULL, 10) : 0LL;
 }
 
 @end

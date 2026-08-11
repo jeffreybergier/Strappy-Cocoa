@@ -2,12 +2,14 @@
 #import "AICookieCutterWindowController.h"
 #import "SessionListViewController.h"
 #import "MessageListViewController.h"
+#import "StrappySessionOptionsViewController.h"
 
 @interface SessionWindowController : AICookieCutterWindowController
     <SessionListViewControllerDelegate, MessageListViewControllerDelegate> {
  @private
   SessionListViewController *sessionsController_;
   MessageListViewController *messagesController_;
+  StrappySessionOptionsViewController *optionsController_;
 }
 
 - (id)init;

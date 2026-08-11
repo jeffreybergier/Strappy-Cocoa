@@ -1,81 +1,23 @@
 #import "PromptSendViewController.h"
 #import "AIFontAwesome.h"
 #import "StrappyBottomToolbarView.h"
-#import "StrappySession.h"
 
 static const CGFloat kPromptSendHeightCollapsed = 32.0;
 static const CGFloat kPromptSendHeightExpanded = 108.0;
 static const CGFloat kPromptSendPad = 4.0;
 static const CGFloat kPromptActionButtonHeight = 24.0;
-static const CGFloat kPromptSendGlyphSize = 14.0;
-static const CGFloat kPromptSendGlyphCanvasSize = 20.0;
+static const CGFloat kPromptActionGlyphSize = 14.0;
+static const CGFloat kPromptActionGlyphCanvasSize = 20.0;
 
 enum {
-  kPromptActionSegmentOptions = 0,
-  kPromptActionSegmentSend = 1
+  kPromptActionSegmentClose = 0,
+  kPromptActionSegmentInspector = 1,
+  kPromptActionSegmentSend = 2
 };
 
 static NSColor *StrappyInputBezelBackgroundColor(void) { return [NSColor controlBackgroundColor]; }
 static NSColor *StrappyInputBezelBorderColor(void) { return [NSColor gridColor]; }
 static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHighlight; }
-
-static NSString *StrappyPromptStringForModelRow(NSDictionary *row,
-                                                NSString *key)
-{
-  id value;
-
-  if (![row isKindOfClass:[NSDictionary class]]) {
-    return @"";
-  }
-
-  value = [row objectForKey:key];
-  if (![value isKindOfClass:[NSString class]]) {
-    return @"";
-  }
-  return value;
-}
-
-static NSString *StrappyPromptDisplayNameForModelRow(NSDictionary *row)
-{
-  NSString *name;
-  NSString *modelId;
-
-  name = StrappyPromptStringForModelRow(row, @"name");
-  if ([name length] > 0U) {
-    return name;
-  }
-
-  modelId = StrappyPromptStringForModelRow(row, @"id");
-  return ([modelId length] > 0U) ? modelId : NSLocalizedString(@"Model", nil);
-}
-
-static NSArray *StrappyPromptWebProviders(void)
-{
-  return [NSArray arrayWithObjects:
-    StrappyWebProviderNone,
-    StrappyWebProviderAuto,
-    StrappyWebProviderNative,
-    StrappyWebProviderExa,
-    StrappyWebProviderParallel,
-    nil];
-}
-
-static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
-{
-  if ([webProvider isEqualToString:StrappyWebProviderAuto]) {
-    return NSLocalizedString(@"Auto", nil);
-  }
-  if ([webProvider isEqualToString:StrappyWebProviderNative]) {
-    return NSLocalizedString(@"Native", nil);
-  }
-  if ([webProvider isEqualToString:StrappyWebProviderExa]) {
-    return @"Exa";
-  }
-  if ([webProvider isEqualToString:StrappyWebProviderParallel]) {
-    return @"Parallel";
-  }
-  return NSLocalizedString(@"None", nil);
-}
 
 @interface StrappyPromptInputBezelView : NSView
 @end
@@ -110,20 +52,14 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 
 @interface PromptSendViewController ()
 - (void)layoutPromptViews;
-- (void)sizeActionSegmentedControlToFit;
 - (void)updateExpansion;
 - (void)updateActionControls;
 - (void)updateSendButtonAppearance;
-- (void)updateOptionsSegmentTitle:(NSString *)title;
-- (void)selectCurrentModelMenuItem;
+- (void)rebuildActionSegmentIcons;
 - (void)barDidMoveToWindow:(id)sender;
 - (void)barViewFrameDidChange:(NSNotification *)notification;
-- (void)modelMenuItemClicked:(id)sender;
 - (void)actionSegmentClicked:(id)sender;
 - (void)sendButtonClicked:(id)sender;
-- (void)webProviderMenuItemClicked:(id)sender;
-- (BOOL)updateSessionOptions:(StrappySessionOptions *)options
-               changedFields:(StrappySessionOptionMask)changedFields;
 @end
 
 @implementation PromptSendViewController
@@ -132,15 +68,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
 {
   if ((self = [super init])) {
     enabled_ = YES;
-    sessionOptions_ = [[StrappySessionOptions alloc]
-      initWithModelIdentifier:@""
-       assistantSetIdentifier:@""
-                  webProvider:StrappyWebProviderNone
-             webSearchEnabled:NO
-                  bashEnabled:NO
-               limitToOneTool:NO
-                   roundLimit:StrappySessionDefaultRoundLimit
-             workingDirectory:@""];
   }
   return self;
 }
@@ -211,24 +138,21 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   [textView_ setDelegate:self];
   [scrollView_ setDocumentView:textView_];
 
-  optionsMenu_ = [[NSMenu alloc]
-      initWithTitle:NSLocalizedString(@"Prompt Options", nil)];
-  [optionsMenu_ setAutoenablesItems:NO];
-
+  /* Match ENIL's compact composer action control: icon-only Close and
+   * Inspector segments followed by an icon-and-label Send segment. Momentary
+   * tracking makes all three segments act like ordinary push buttons. The
+   * toolbar segment style is runtime-probed by XPAppKit, leaving Tiger on its
+   * native Aqua segmented-control appearance. */
   actionSegmented_ = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
-  [actionSegmented_ setSegmentCount:2];
-  [[actionSegmented_ cell] setTrackingMode:NSSegmentSwitchTrackingMomentary];
+  [actionSegmented_ setSegmentCount:3];
+  [[actionSegmented_ cell]
+    setTrackingMode:NSSegmentSwitchTrackingMomentary];
   [actionSegmented_ XP_setToolbarSegmentStyle];
-  [self sizeActionSegmentedControlToFit];
-  [actionSegmented_ setMenu:optionsMenu_
-                 forSegment:kPromptActionSegmentOptions];
   [actionSegmented_ setTarget:self];
   [actionSegmented_ setAction:@selector(actionSegmentClicked:)];
-  [actionSegmented_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
-  [actionSegmented_ XP_setToolTip:NSLocalizedString(@"Prompt Options", nil)
-                       forSegment:kPromptActionSegmentOptions];
+  [actionSegmented_
+    setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
   [barView_ addSubview:actionSegmented_];
-  [self reloadOptionsMenu];
   [self updateSendButtonAppearance];
 
   [barView_ setPostsFrameChangedNotifications:YES];
@@ -281,18 +205,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   [scrollView_ setFrame:[bezelView_ bounds]];
 }
 
-- (void)sizeActionSegmentedControlToFit
-{
-  if (actionSegmented_ == nil) {
-    return;
-  }
-
-  [actionSegmented_ setWidth:0.0 forSegment:kPromptActionSegmentOptions];
-  [actionSegmented_ setWidth:0.0 forSegment:kPromptActionSegmentSend];
-  [actionSegmented_ sizeToFit];
-  [self layoutPromptViews];
-}
-
 - (CGFloat)preferredHeight
 {
   return expanded_ ? kPromptSendHeightExpanded : kPromptSendHeightCollapsed;
@@ -304,238 +216,94 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   [self updateExpansion];
 }
 
-- (void)barDidMoveToWindow:(id)sender
-{
-  (void)sender;
-  [self updateSendButtonAppearance];
-}
-
 - (void)updateSendButtonAppearance
 {
+  if (actionSegmented_ == nil) {
+    return;
+  }
+
+  if (sending_) {
+    [actionSegmented_ setLabel:NSLocalizedString(@"Cancel", nil)
+                    forSegment:kPromptActionSegmentSend];
+  } else {
+    [actionSegmented_ setLabel:NSLocalizedString(@"Send", nil)
+                    forSegment:kPromptActionSegmentSend];
+  }
+  [self rebuildActionSegmentIcons];
+}
+
+- (void)rebuildActionSegmentIcons
+{
   CGFloat scale;
-  AIFontAwesomeIcon icon;
-  NSImage *image;
+  AIFontAwesomeIcon sendIcon;
+  AIFontAwesomeStyle sendStyle;
 
   if (actionSegmented_ == nil) {
     return;
   }
 
-  scale = 1.0;
-  if ([[barView_ window] respondsToSelector:@selector(XP_backingScaleFactor)]) {
-    scale = [[barView_ window] XP_backingScaleFactor];
-  }
+  scale = [[barView_ window] XP_backingScaleFactor];
   if (scale < 1.0) {
     scale = 1.0;
   }
 
-  if (sending_) {
-    icon = AIFAHandMiddleFinger;
-    [actionSegmented_ setLabel:NSLocalizedString(@"Cancel", nil)
-                    forSegment:kPromptActionSegmentSend];
-    [actionSegmented_ XP_setToolTip:NSLocalizedString(@"Cancel Prompt", nil)
-                         forSegment:kPromptActionSegmentSend];
-  } else {
-    icon = AIFAMarsStroke;
-    [actionSegmented_ setLabel:NSLocalizedString(@"Send", nil)
-                    forSegment:kPromptActionSegmentSend];
-    [actionSegmented_ XP_setToolTip:NSLocalizedString(@"Send Prompt", nil)
-                         forSegment:kPromptActionSegmentSend];
-  }
-  image = [AIFontAwesome imageForIcon:icon
-                                style:AIFontAwesomeStyleSolid
-                             iconSize:kPromptSendGlyphSize
-                           canvasSize:kPromptSendGlyphCanvasSize
-                                scale:scale];
-  [actionSegmented_ setImage:image forSegment:kPromptActionSegmentSend];
-  [self sizeActionSegmentedControlToFit];
+  [actionSegmented_
+    setImage:[AIFontAwesome imageForIcon:AIFACircleXmark
+                                   style:AIFontAwesomeStyleRegular
+                                iconSize:kPromptActionGlyphSize
+                              canvasSize:kPromptActionGlyphCanvasSize
+                                   scale:scale]
+  forSegment:kPromptActionSegmentClose];
+  [actionSegmented_
+    setImage:[AIFontAwesome imageForIcon:AIFAGear
+                                   style:AIFontAwesomeStyleSolid
+                                iconSize:kPromptActionGlyphSize
+                              canvasSize:kPromptActionGlyphCanvasSize
+                                   scale:scale]
+  forSegment:kPromptActionSegmentInspector];
+
+  sendIcon = sending_ ? AIFAStop : AIFAPaperPlane;
+  sendStyle = sending_ ?
+    AIFontAwesomeStyleSolid : AIFontAwesomeStyleRegular;
+  [actionSegmented_
+    setImage:[AIFontAwesome imageForIcon:sendIcon
+                                   style:sendStyle
+                                iconSize:kPromptActionGlyphSize
+                              canvasSize:kPromptActionGlyphCanvasSize
+                                   scale:scale]
+  forSegment:kPromptActionSegmentSend];
+
+  [actionSegmented_ XP_setToolTip:NSLocalizedString(@"Close Chat", nil)
+                       forSegment:kPromptActionSegmentClose];
+  [actionSegmented_ XP_setToolTip:NSLocalizedString(@"Session Options", nil)
+                       forSegment:kPromptActionSegmentInspector];
+  [actionSegmented_ XP_setToolTip:NSLocalizedString(
+      sending_ ? @"Cancel Prompt" : @"Send Prompt", nil)
+                       forSegment:kPromptActionSegmentSend];
+
+  [actionSegmented_ sizeToFit];
+  [self layoutPromptViews];
 }
 
-- (void)updateOptionsSegmentTitle:(NSString *)title
+- (void)barDidMoveToWindow:(id)sender
+{
+  (void)sender;
+  [self rebuildActionSegmentIcons];
+}
+
+- (void)updateActionControls
 {
   if (actionSegmented_ == nil) {
     return;
   }
 
-  [actionSegmented_ setLabel:(([title length] > 0U) ?
-                              title : NSLocalizedString(@"Model", nil))
-                  forSegment:kPromptActionSegmentOptions];
-  [self sizeActionSegmentedControlToFit];
-}
-
-- (void)reloadOptionsMenu
-{
-  NSArray *models;
-  NSString *selectedModelIdentifier;
-  NSString *selectedTitle;
-  NSUInteger index;
-  BOOL foundSelectedModel;
-
-  if (optionsMenu_ == nil) {
-    return;
-  }
-
-  models = nil;
-  selectedModelIdentifier = [sessionOptions_ modelIdentifier];
-  if (delegate_ != nil) {
-    models = [delegate_ allowedModelsForPromptSendViewController:self];
-  }
-  if (![models isKindOfClass:[NSArray class]]) {
-    models = [NSArray array];
-  }
-
-  if (![selectedModelIdentifier isKindOfClass:[NSString class]]) {
-    selectedModelIdentifier = @"";
-  }
-
-  foundSelectedModel = NO;
-  selectedTitle = nil;
-  [webProviderMenuItem_ release];
-  webProviderMenuItem_ = nil;
-  [webProviderMenu_ release];
-  webProviderMenu_ = nil;
-  while ([optionsMenu_ numberOfItems] > 0) {
-    [optionsMenu_ removeItemAtIndex:0];
-  }
-
-  for (index = 0U; index < [models count]; index++) {
-    NSDictionary *model;
-    NSString *modelIdentifier;
-    NSString *title;
-    NSMenuItem *item;
-
-    model = [models objectAtIndex:index];
-    modelIdentifier = StrappyPromptStringForModelRow(model, @"id");
-    if ([modelIdentifier length] == 0U) {
-      continue;
-    }
-
-    title = StrappyPromptDisplayNameForModelRow(model);
-    item = [optionsMenu_ addItemWithTitle:title
-                                   action:@selector(modelMenuItemClicked:)
-                            keyEquivalent:@""];
-    [item setTarget:self];
-    [item setRepresentedObject:modelIdentifier];
-    if ([modelIdentifier isEqualToString:selectedModelIdentifier]) {
-      [item setState:XPControlStateValueOn];
-      selectedTitle = title;
-      foundSelectedModel = YES;
-    } else {
-      [item setState:XPControlStateValueOff];
-    }
-  }
-
-  if (!foundSelectedModel && ([selectedModelIdentifier length] > 0U)) {
-    NSMenuItem *item;
-
-    item = [optionsMenu_ addItemWithTitle:selectedModelIdentifier
-                                   action:nil
-                            keyEquivalent:@""];
-    [item setEnabled:NO];
-    [item setRepresentedObject:selectedModelIdentifier];
-    [item setState:XPControlStateValueOn];
-    selectedTitle = selectedModelIdentifier;
-  }
-
-  if ([optionsMenu_ numberOfItems] == 0) {
-    NSMenuItem *item;
-
-    selectedTitle = NSLocalizedString(@"Model", nil);
-    item = [optionsMenu_ addItemWithTitle:selectedTitle
-                                   action:nil
-                            keyEquivalent:@""];
-    [item setEnabled:NO];
-  }
-
-  if ([optionsMenu_ numberOfItems] > 0) {
-    [optionsMenu_ addItem:[NSMenuItem separatorItem]];
-  }
-
-  webProviderMenuItem_ = [[optionsMenu_
-      addItemWithTitle:NSLocalizedString(@"Web Search", nil)
-                action:nil
-         keyEquivalent:@""] retain];
-  webProviderMenu_ = [[NSMenu alloc]
-    initWithTitle:NSLocalizedString(@"Web Search", nil)];
-  for (index = 0U; index < [StrappyPromptWebProviders() count]; index++) {
-    NSString *provider;
-    NSMenuItem *item;
-
-    provider = [StrappyPromptWebProviders() objectAtIndex:index];
-    item = [webProviderMenu_
-      addItemWithTitle:StrappyPromptWebProviderTitle(provider)
-                action:@selector(webProviderMenuItemClicked:)
-         keyEquivalent:@""];
-    [item setTarget:self];
-    [item setRepresentedObject:provider];
-  }
-  [webProviderMenuItem_ setSubmenu:webProviderMenu_];
-  [self updateOptionsSegmentTitle:selectedTitle];
-  [self updateActionControls];
-}
-
-- (void)selectCurrentModelMenuItem
-{
-  NSString *selectedModelIdentifier;
-  NSInteger count;
-  NSInteger index;
-  NSString *selectedTitle;
-
-  if (optionsMenu_ == nil) {
-    return;
-  }
-
-  selectedModelIdentifier = [sessionOptions_ modelIdentifier];
-  if (![selectedModelIdentifier isKindOfClass:[NSString class]]) {
-    selectedModelIdentifier = @"";
-  }
-
-  selectedTitle = nil;
-  count = [optionsMenu_ numberOfItems];
-  for (index = 0; index < count; index++) {
-    NSMenuItem *item;
-    id representedObject;
-
-    item = [optionsMenu_ itemAtIndex:index];
-    representedObject = [item representedObject];
-    if ([representedObject isKindOfClass:[NSString class]] &&
-        ([(NSString *)representedObject length] > 0U) &&
-        [representedObject isEqualToString:selectedModelIdentifier]) {
-      [item setState:XPControlStateValueOn];
-      selectedTitle = [item title];
-    } else if (item != webProviderMenuItem_) {
-      [item setState:XPControlStateValueOff];
-    }
-  }
-
-  if (([selectedTitle length] == 0U) && (count > 0)) {
-    selectedTitle = [[optionsMenu_ itemAtIndex:0] title];
-  }
-  [self updateOptionsSegmentTitle:selectedTitle];
-}
-
-- (void)updateActionControls
-{
-  [self updateSendButtonAppearance];
-
-  [actionSegmented_ setEnabled:(enabled_ && !studyLocked_ && !sending_)
-                    forSegment:kPromptActionSegmentOptions];
-  [self selectCurrentModelMenuItem];
-  if (webProviderMenuItem_ != nil) {
-    NSInteger count;
-    NSInteger index;
-
-    [webProviderMenuItem_ setEnabled:
-      (enabled_ && !studyLocked_ && !sending_)];
-    count = [webProviderMenu_ numberOfItems];
-    for (index = 0; index < count; index++) {
-      NSMenuItem *item;
-
-      item = [webProviderMenu_ itemAtIndex:index];
-      [item setState:[[item representedObject]
-        isEqualToString:[sessionOptions_ webProvider]] ?
-          XPControlStateValueOn : XPControlStateValueOff];
-    }
-  }
+  [actionSegmented_ setEnabled:enabled_
+                    forSegment:kPromptActionSegmentClose];
+  /* The inspector is a window-visibility control, so it remains usable even
+   * when no session is selected; the inspector itself presents its empty
+   * state and independently disables settings that cannot be edited. */
+  [actionSegmented_ setEnabled:YES
+                    forSegment:kPromptActionSegmentInspector];
   [actionSegmented_ setEnabled:(sending_ ?
     ((enabled_ || studyLocked_) && !cancellationRequested_) :
     [self canSendCurrentPrompt])
@@ -608,35 +376,13 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   if (!sending_) {
     cancellationRequested_ = NO;
   }
+  [self updateSendButtonAppearance];
   [self updateActionControls];
 }
 
 - (void)setCancellationRequested:(BOOL)requested
 {
   cancellationRequested_ = requested ? YES : NO;
-  [self updateActionControls];
-}
-
-- (void)setSessionOptions:(StrappySessionOptions *)options
-{
-  StrappySessionOptions *value;
-  StrappySessionOptions *valueCopy;
-
-  value = options;
-  if (value == nil) {
-    value = [[[StrappySessionOptions alloc]
-      initWithModelIdentifier:@""
-       assistantSetIdentifier:@""
-                  webProvider:StrappyWebProviderNone
-             webSearchEnabled:NO
-                  bashEnabled:NO
-               limitToOneTool:NO
-                   roundLimit:StrappySessionDefaultRoundLimit
-             workingDirectory:@""] autorelease];
-  }
-  valueCopy = [value copy];
-  [sessionOptions_ release];
-  sessionOptions_ = valueCopy;
   [self updateActionControls];
 }
 
@@ -655,31 +401,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   return ([trimmed length] > 0U) ? YES : NO;
 }
 
-- (void)actionSegmentClicked:(id)sender
-{
-  NSEvent *event;
-  NSInteger segment;
-
-  if (![sender isKindOfClass:[NSSegmentedControl class]]) {
-    return;
-  }
-
-  segment = [(NSSegmentedControl *)sender selectedSegment];
-  if (segment == kPromptActionSegmentSend) {
-    [self sendButtonClicked:sender];
-  } else if ((segment == kPromptActionSegmentOptions) &&
-             (optionsMenu_ != nil) &&
-             ([optionsMenu_ numberOfItems] > 0)) {
-    event = [NSApp currentEvent];
-    if (event == nil) {
-      return;
-    }
-    [NSMenu popUpContextMenu:optionsMenu_
-                   withEvent:event
-                     forView:actionSegmented_];
-  }
-}
-
 - (void)sendButtonClicked:(id)sender
 {
   if (sending_) {
@@ -695,77 +416,22 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   [self performSend:sender];
 }
 
-- (void)modelMenuItemClicked:(id)sender
+- (void)actionSegmentClicked:(id)sender
 {
-  NSString *modelIdentifier;
-  StrappySessionOptions *options;
-  BOOL changed;
+  NSInteger segment;
 
-  if (sending_) {
-    return;
-  }
-  if (![sender respondsToSelector:@selector(representedObject)]) {
+  if (![sender isKindOfClass:[NSSegmentedControl class]]) {
     return;
   }
 
-  modelIdentifier = [sender representedObject];
-  if (![modelIdentifier isKindOfClass:[NSString class]] ||
-      ([modelIdentifier length] == 0U)) {
-    return;
+  segment = [(NSSegmentedControl *)sender selectedSegment];
+  if (segment == kPromptActionSegmentClose) {
+    [[self nextResponder] tryToPerform:@selector(closeCurrentChat:) with:self];
+  } else if (segment == kPromptActionSegmentInspector) {
+    [[self nextResponder] tryToPerform:@selector(toggleInspector:) with:self];
+  } else if (segment == kPromptActionSegmentSend) {
+    [self sendButtonClicked:sender];
   }
-
-  options = [sessionOptions_ copy];
-  [options setModelIdentifier:modelIdentifier];
-  changed = [self updateSessionOptions:options
-                         changedFields:StrappySessionOptionModel];
-  [options release];
-  if (changed) {
-    [self reloadOptionsMenu];
-  } else {
-    [self updateActionControls];
-  }
-}
-
-- (void)webProviderMenuItemClicked:(id)sender
-{
-  StrappySessionOptions *options;
-  BOOL changed;
-  NSString *webProvider;
-
-  if (sending_) {
-    return;
-  }
-  webProvider = [sender representedObject];
-  if (![StrappyPromptWebProviders() containsObject:webProvider]) {
-    return;
-  }
-  options = [sessionOptions_ copy];
-  [options setWebProvider:webProvider];
-  changed = [self updateSessionOptions:options
-                         changedFields:StrappySessionOptionWebProvider];
-  [options release];
-  (void)changed;
-  [self updateActionControls];
-}
-
-- (BOOL)updateSessionOptions:(StrappySessionOptions *)options
-               changedFields:(StrappySessionOptionMask)changedFields
-{
-  StrappySessionOptions *previousOptions;
-  BOOL updated;
-
-  if (options == nil || changedFields == 0U || delegate_ == nil) {
-    return NO;
-  }
-  previousOptions = [sessionOptions_ retain];
-  updated = [delegate_ promptSendViewController:self
-                            updateSessionOptions:options
-                                   changedFields:changedFields];
-  if (updated && (sessionOptions_ == previousOptions)) {
-    [self setSessionOptions:options];
-  }
-  [previousOptions release];
-  return updated;
 }
 
 - (void)performSend:(id)sender
@@ -829,10 +495,6 @@ static NSString *StrappyPromptWebProviderTitle(NSString *webProvider)
   [scrollView_ release];
   [textView_ release];
   [actionSegmented_ release];
-  [optionsMenu_ release];
-  [webProviderMenuItem_ release];
-  [webProviderMenu_ release];
-  [sessionOptions_ release];
   [super dealloc];
 }
 

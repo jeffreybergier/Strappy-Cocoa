@@ -8,6 +8,7 @@
   #define XPTableViewDataSource NSTableViewDataSource
   #define XPTableViewDelegate   NSTableViewDelegate
   #define XPTextViewDelegate    NSTextViewDelegate
+  #define XPTextFieldDelegate   NSTextFieldDelegate
   #define XPToolbarDelegate     NSToolbarDelegate
   #define XPMenuDelegate        NSMenuDelegate
 #else
@@ -15,6 +16,7 @@
   @protocol XPTableViewDataSource @end
   @protocol XPTableViewDelegate   @end
   @protocol XPTextViewDelegate    @end
+  @protocol XPTextFieldDelegate   @end
   @protocol XPToolbarDelegate     @end
   @protocol XPMenuDelegate        @end
 #endif

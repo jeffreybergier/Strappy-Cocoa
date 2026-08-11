@@ -8,6 +8,7 @@ SOURCES = main.m AppDelegate.m XPAppKit.m PreferencesWindowController.m \
           StrappyPreferencesDatabaseStudyView.m \
           StrappyPreferencesSystemPromptsView.m \
           SessionWindowController.m \
+          StrappySessionOptionsViewController.m \
           SessionListViewController.m MessageListViewController.m \
           PromptSendViewController.m StrappyWindowAwareView.m \
           StrappyBottomToolbarView.m

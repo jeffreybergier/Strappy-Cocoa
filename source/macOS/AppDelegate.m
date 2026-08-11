@@ -440,6 +440,15 @@ static NSString *StrappyPromptCompletionNotificationBody(
                                                  XPEventModifierFlagOption)];
     [toggleSidebar setTarget:nil];
   }
+  {
+    NSMenuItem *toggleInspector =
+      [viewMenu addItemWithTitle:NSLocalizedString(@"Show Inspector", nil)
+                          action:@selector(toggleInspector:)
+                   keyEquivalent:@"i"];
+    [toggleInspector setKeyEquivalentModifierMask:
+      (XPEventModifierFlagCommand | XPEventModifierFlagOption)];
+    [toggleInspector setTarget:nil];
+  }
   [viewMenu addItem:[NSMenuItem separatorItem]];
   {
     NSMenuItem *fullScreen =

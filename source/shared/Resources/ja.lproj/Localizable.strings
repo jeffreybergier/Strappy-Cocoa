@@ -41,7 +41,17 @@
 "Options" = "オプション";
 "Prompt Options" = "プロンプトオプション";
 "Session Options" = "セッションオプション";
+"Select a chat to edit its options." = "チャットを選択してオプションを編集します。";
+"Options are fixed for Database Study." = "データベース調査のオプションは固定されています。";
+"Options are unavailable while a prompt is running." = "プロンプトの実行中はオプションを変更できません。";
+"Changes apply to the selected chat." = "変更は選択中のチャットに適用されます。";
 "Assistant" = "アシスタント";
+"Model & Assistant" = "モデルとアシスタント";
+"World" = "世界";
+"Personal" = "個人";
+"Coding" = "コード";
+"Choose an Assistant" = "アシスタントを選択";
+"No Assistants Available" = "利用可能なアシスタントがありません";
 "Tools" = "ツール";
 "Enable Web Search" = "Web 検索を有効にする";
 "Limits" = "制限";
@@ -49,6 +59,9 @@
 "Limit to 1 Tool" = "ツールを 1 つに制限";
 "Check Answer Quality" = "回答品質チェック";
 "Round Limit" = "ラウンド上限";
+"Round Limit must be between 1 and %lu." = "ラウンド上限は 1 から %lu の間で指定してください。";
+"Choose a Model" = "モデルを選択";
+"No Models Available" = "利用可能なモデルがありません";
 "World Knowledge" = "世界知識";
 "General knowledge and web research" = "一般知識と Web リサーチ";
 "Personal Assistant" = "パーソナルアシスタント";
@@ -197,6 +210,7 @@
 "Edit hidden databases" = "隠すデータベースを編集";
 "Editing hidden databases" = "隠すデータベースを編集中";
 "Hide Sidebar" = "サイドバーを隠す";
+"Hide Inspector" = "インスペクタを隠す";
 "Jump to Selection" = "選択部分へ移動";
 "Location" = "場所";
 "Make Lower Case" = "小文字にする";
@@ -260,6 +274,7 @@
 "Services" = "サービス";
 "Session path is not a directory." = "セッションパスがディレクトリではありません。";
 "Show Chat Window" = "チャットウインドウを表示";
+"Show Inspector" = "インスペクタを表示";
 "Show Sidebar" = "サイドバーを表示";
 "Show Spelling and Grammar" = "スペルと文法を表示";
 "Show Substitutions" = "置換を表示";

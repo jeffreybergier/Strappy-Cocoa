@@ -117,7 +117,7 @@ static BOOL StrappyContextRoundActionValues(
       return NO;
     }
   }
-  identifierValue = [identifierText longLongValue];
+  identifierValue = [identifierText XP_longLongValue];
   if (identifierValue <= 0LL) {
     return NO;
   }
@@ -134,7 +134,6 @@ static BOOL StrappyContextRoundActionValues(
 - (void)sessionStreamEvent:(NSNotification *)notification;
 - (void)sessionPromptDidStart:(NSNotification *)notification;
 - (void)sessionPromptDidFinish:(NSNotification *)notification;
-- (void)modelCatalogDidChange:(NSNotification *)notification;
 - (void)sendPromptDidFinish:(NSDictionary *)result;
 - (NSString *)javaScriptForStreamEvent:(NSDictionary *)event;
 - (void)queueJavaScriptForStreamEvent:(NSDictionary *)event;
@@ -151,6 +150,8 @@ static BOOL StrappyContextRoundActionValues(
 - (NSString *)writeCurrentHTML;
 - (void)layoutWebViewAndPromptBar;
 - (void)clearRequestState;
+- (BOOL)updateSessionOptions:(StrappySessionOptions *)options
+               changedFields:(StrappySessionOptionMask)changedFields;
 @end
 
 @implementation MessageListViewController
@@ -168,11 +169,6 @@ static BOOL StrappyContextRoundActionValues(
     htmlDirectoryPath_ = [directoryPath copy];
     sendController_ = [[PromptSendViewController alloc] init];
     [sendController_ setDelegate:self];
-    [[NSNotificationCenter defaultCenter]
-      addObserver:self
-         selector:@selector(modelCatalogDidChange:)
-             name:StrappySessionModelCatalogDidChangeNotification
-           object:nil];
     [self setDrawsBackground:NO];
   }
   return self;
@@ -266,7 +262,6 @@ static BOOL StrappyContextRoundActionValues(
 
 - (void)reloadWithSession:(StrappySession *)session
 {
-  StrappySessionOptions *sessionOptions;
   BOOL sessionChanged;
   BOOL studyLocked;
 
@@ -313,10 +308,6 @@ static BOOL StrappyContextRoundActionValues(
   [sendController_ setEnabled:(session_ != nil)];
   [sendController_ setStudyLocked:studyLocked];
   [self updateSendingStateFromSession];
-  sessionOptions = (session_ != nil) ?
-    [session_ optionsWithError:nil] : nil;
-  [sendController_ setSessionOptions:sessionOptions];
-  [sendController_ reloadOptionsMenu];
   if (sessionChanged) {
     [self reloadContent];
   }
@@ -401,13 +392,6 @@ static BOOL StrappyContextRoundActionValues(
   return (models != nil) ? models : [NSArray array];
 }
 
-- (NSArray *)allowedModelsForPromptSendViewController:
-    (PromptSendViewController *)controller
-{
-  (void)controller;
-  return [self availableModels];
-}
-
 - (NSString *)selectedModelIdentifier
 {
   StrappySessionOptions *options;
@@ -439,21 +423,15 @@ static BOOL StrappyContextRoundActionValues(
     return NO;
   }
   [options setModelIdentifier:modelIdentifier];
-  changed = [self promptSendViewController:sendController_
-                      updateSessionOptions:options
-                             changedFields:StrappySessionOptionModel];
+  changed = [self updateSessionOptions:options
+                         changedFields:StrappySessionOptionModel];
   [options release];
-  if (changed) {
-    [sendController_ reloadOptionsMenu];
-  }
   return changed;
 }
 
-- (BOOL)promptSendViewController:(PromptSendViewController *)controller
-            updateSessionOptions:(StrappySessionOptions *)options
-                   changedFields:(StrappySessionOptionMask)changedFields
+- (BOOL)updateSessionOptions:(StrappySessionOptions *)options
+               changedFields:(StrappySessionOptionMask)changedFields
 {
-  StrappySessionOptions *savedOptions;
   NSError *error;
 
   if (![self canSelectModel] || options == nil || changedFields == 0U) {
@@ -466,8 +444,6 @@ static BOOL StrappyContextRoundActionValues(
                           error:&error]) {
     NSString *errorMessage;
 
-    savedOptions = [session_ optionsWithError:nil];
-    [controller setSessionOptions:savedOptions];
     errorMessage = [error localizedDescription];
     if ([errorMessage length] == 0U) {
       errorMessage = NSLocalizedString(@"Your changes could not be saved.", nil);
@@ -477,8 +453,6 @@ static BOOL StrappyContextRoundActionValues(
     return NO;
   }
 
-  savedOptions = [session_ optionsWithError:nil];
-  [controller setSessionOptions:savedOptions];
   [statusText_ release];
   statusText_ = nil;
   return YES;
@@ -704,12 +678,6 @@ static BOOL StrappyContextRoundActionValues(
     return;
   }
   [self updateSendingStateFromSession];
-}
-
-- (void)modelCatalogDidChange:(NSNotification *)notification
-{
-  (void)notification;
-  [sendController_ reloadOptionsMenu];
 }
 
 - (void)sessionStreamEvent:(NSNotification *)notification

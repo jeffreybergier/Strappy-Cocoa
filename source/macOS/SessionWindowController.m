@@ -42,13 +42,16 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
                       autosaveName:@"StrappySessions"])) {
     sessionsController_ = [[SessionListViewController alloc] init];
     messagesController_ = [[MessageListViewController alloc] init];
+    optionsController_ = [[StrappySessionOptionsViewController alloc] init];
 
     [sessionsController_ setDelegate:self];
     [messagesController_ setDelegate:self];
 
     [self setSidebarViewController:sessionsController_];
     [self setDetailViewController:messagesController_];
+    [self setInspectorViewController:optionsController_];
     [self setSidebarWidthLimits:AIMinMidMaxMake(180.0, 260.0, 360.0)];
+    [self setInspectorWidthLimits:AIMinMidMaxMake(240.0, 300.0, 480.0)];
     [self setSplitViewAutosaveName:@"StrappySessionSplit"];
 
     [[NSNotificationCenter defaultCenter]
@@ -221,6 +224,7 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
 {
   (void)controller;
   [messagesController_ reloadWithSession:session];
+  [optionsController_ reloadWithSession:session];
 }
 
 - (void)strappySessionDidUpdate:(NSNotification *)notification
@@ -235,7 +239,7 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
     changedOptions = [[notification userInfo]
       objectForKey:StrappySessionChangedOptionsKey];
     if (![changedOptions isKindOfClass:[NSNumber class]] ||
-        (([changedOptions unsignedIntegerValue] &
+        (([changedOptions XP_unsignedIntegerValue] &
           (StrappySessionOptionModel | StrappySessionOptionAssistantSet)) ==
          0U)) {
       return;
@@ -280,6 +284,11 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
       NSLocalizedString(@"Show Sidebar", nil) :
       NSLocalizedString(@"Hide Sidebar", nil))];
     return YES;
+  } else if (action == @selector(toggleInspector:)) {
+    [item setTitle:([self isInspectorCollapsed] ?
+      NSLocalizedString(@"Show Inspector", nil) :
+      NSLocalizedString(@"Hide Inspector", nil))];
+    return YES;
   } else if (action == @selector(selectCurrentModel:)) {
     NSString *modelIdentifier;
     NSString *selectedModelIdentifier;
@@ -302,6 +311,7 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [sessionsController_ release];
   [messagesController_ release];
+  [optionsController_ release];
   [super dealloc];
 }
 

@@ -3644,7 +3644,7 @@ static BOOL StrappySessionRecordFromOptions(
 
     userInfo = [NSMutableDictionary dictionaryWithObjectsAndKeys:
       savedOptions, StrappySessionOptionsKey,
-      [NSNumber numberWithUnsignedInteger:
+      [NSNumber XP_numberWithUnsignedInteger:
         (NSUInteger)actualChangedFields], StrappySessionChangedOptionsKey,
       StrappySessionChangeKindOptions, StrappySessionChangeKindKey,
       nil];

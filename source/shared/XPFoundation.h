@@ -29,3 +29,11 @@
 - (XPUInteger)XP_unsignedIntegerValue;
 
 @end
+
+@interface NSString (XPFoundation)
+
+/* NSString gained -longLongValue after Tiger. Prefer it where present and
+ * retain full-width parsing through strtoll on the 10.4 runtime. */
+- (long long)XP_longLongValue;
+
+@end

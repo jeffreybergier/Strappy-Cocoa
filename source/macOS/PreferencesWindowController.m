@@ -249,7 +249,7 @@ static NSArray *StrappyDatabaseRowsWithGroupHeaders(NSArray *rows)
     }
     appName = StrappyDatabaseAppNameForRow(row);
     count = [nameCounts objectForKey:appName];
-    [nameCounts setObject:[NSNumber numberWithUnsignedInteger:
+    [nameCounts setObject:[NSNumber XP_numberWithUnsignedInteger:
       ([count isKindOfClass:[NSNumber class]] ?
         [count XP_unsignedIntegerValue] + 1U : 1U)]
                     forKey:appName];
