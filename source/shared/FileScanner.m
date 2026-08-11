@@ -18,6 +18,21 @@ NSString * const FileScannerDatabaseCatalogDidChangeNotification =
 static BOOL FileScannerDatabaseCatalogScanInFlight = NO;
 static const size_t StrappyFileScannerCatalogBatchSize = 100U;
 
+static strappy_file_scanner_platform_profile
+StrappyFileScannerPlatformProfile(void)
+{
+  XPPlatformFamily family;
+
+  family = [[NSProcessInfo processInfo] XP_platformFamily];
+  if (family == XPPlatformFamilyIOS) {
+    return STRAPPY_FILE_SCANNER_PLATFORM_IOS;
+  }
+  if (family == XPPlatformFamilyMacOS) {
+    return STRAPPY_FILE_SCANNER_PLATFORM_MACOS;
+  }
+  return STRAPPY_FILE_SCANNER_PLATFORM_GENERIC;
+}
+
 typedef struct StrappyFileScannerCatalogBatchContext {
   NSString *databasePath;
   NSString *rootPath;
@@ -383,6 +398,9 @@ static int StrappyFileScannerSaveCatalogBatch(
   StrappyFileScannerAddCString(dictionary,
                                @"location_tail",
                                record->location_tail);
+  StrappyFileScannerAddCString(dictionary,
+                               @"hidden_reason",
+                               record->hidden_reason);
 
   return dictionary;
 }
@@ -397,6 +415,8 @@ static int StrappyFileScannerSaveCatalogBatch(
   NSNumber *inode;
   NSNumber *isValidSQLite;
   NSNumber *hidden;
+  NSNumber *autoHidden;
+  NSNumber *hiddenOverride;
   NSString *assistantDatabaseId;
   NSString *path;
   NSString *validationError;
@@ -411,6 +431,7 @@ static int StrappyFileScannerSaveCatalogBatch(
   NSString *appSource;
   NSString *originKind;
   NSString *locationTail;
+  NSString *hiddenReason;
   NSString *firstSeenAt;
   NSString *lastSeenAt;
   NSString *lastScannedAt;
@@ -427,6 +448,9 @@ static int StrappyFileScannerSaveCatalogBatch(
   inode = [NSNumber numberWithUnsignedLongLong:record->inode];
   isValidSQLite = [NSNumber numberWithBool:(record->is_valid_sqlite ? YES : NO)];
   hidden = [NSNumber numberWithBool:(record->hidden ? YES : NO)];
+  autoHidden = [NSNumber numberWithBool:(record->auto_hidden ? YES : NO)];
+  hiddenOverride = record->has_hidden_override ?
+    [NSNumber numberWithBool:(record->hidden_override ? YES : NO)] : nil;
   assistantDatabaseId =
     [FileScanner stringFromCStringOrEmpty:record->assistant_database_id];
   path = [FileScanner stringFromCStringOrEmpty:record->path];
@@ -445,6 +469,7 @@ static int StrappyFileScannerSaveCatalogBatch(
   appSource = [FileScanner stringFromCStringOrEmpty:record->app_source];
   originKind = [FileScanner stringFromCStringOrEmpty:record->origin_kind];
   locationTail = [FileScanner stringFromCStringOrEmpty:record->location_tail];
+  hiddenReason = [FileScanner stringFromCStringOrEmpty:record->hidden_reason];
   firstSeenAt = [FileScanner stringFromCStringOrEmpty:record->first_seen_at];
   lastSeenAt = [FileScanner stringFromCStringOrEmpty:record->last_seen_at];
   lastScannedAt =
@@ -464,6 +489,7 @@ static int StrappyFileScannerSaveCatalogBatch(
     inode, @"inode",
     isValidSQLite, @"is_valid_sqlite",
     hidden, @"hidden",
+    autoHidden, @"auto_hidden",
     scanStatus, @"scan_status",
     userDecision, @"user_decision",
     firstSeenAt, @"first_seen_at",
@@ -499,6 +525,12 @@ static int StrappyFileScannerSaveCatalogBatch(
   }
   if ([locationTail length] > 0U) {
     [dictionary setObject:locationTail forKey:@"location_tail"];
+  }
+  if (hiddenOverride != nil) {
+    [dictionary setObject:hiddenOverride forKey:@"hidden_override"];
+  }
+  if ([hiddenReason length] > 0U) {
+    [dictionary setObject:hiddenReason forKey:@"hidden_reason"];
   }
 
   return dictionary;
@@ -545,6 +577,7 @@ static int StrappyFileScannerSaveCatalogBatch(
 
   strappy_file_scanner_options_init(&options);
   options.root_path = [path fileSystemRepresentation];
+  options.platform_profile = StrappyFileScannerPlatformProfile();
   options.validate_candidates = 1;
   options.use_filename_filter =
     (scanMode == FileScannerDatabaseScanModeQuick) ? 1 : 0;
@@ -613,6 +646,7 @@ static int StrappyFileScannerSaveCatalogBatch(
 
   strappy_file_scanner_options_init(&options);
   options.root_path = batchContext.scanRoot;
+  options.platform_profile = StrappyFileScannerPlatformProfile();
   options.validate_candidates = 1;
   options.use_filename_filter =
     (scanMode == FileScannerDatabaseScanModeQuick) ? 1 : 0;

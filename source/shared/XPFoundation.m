@@ -1,7 +1,23 @@
 #import "XPFoundation.h"
+#import <TargetConditionals.h>
 #import <objc/message.h>
 #include <pthread.h>
 #include <stdlib.h>
+
+@implementation NSProcessInfo (XPFoundation)
+
+- (XPPlatformFamily)XP_platformFamily
+{
+#if TARGET_OS_IPHONE
+  return XPPlatformFamilyIOS;
+#elif TARGET_OS_MAC
+  return XPPlatformFamilyMacOS;
+#else
+  return XPPlatformFamilyGeneric;
+#endif
+}
+
+@end
 
 @implementation NSThread (XPFoundation)
 

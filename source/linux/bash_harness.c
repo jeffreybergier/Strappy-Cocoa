@@ -282,6 +282,7 @@ static int harness_run(void)
   char *output;
   char *result_output;
   char *log_path;
+  const char *temp_base;
   long long session_id;
   long long started_ms;
   long long elapsed_ms;
@@ -305,9 +306,15 @@ static int harness_run(void)
   cancelled = 0;
   output_truncated = -1;
   ok = 0;
+  temp_base = getenv("TMPDIR");
+  if ((temp_base == NULL) || (temp_base[0] == '\0')) {
+    fprintf(stderr, "bash_harness requires TMPDIR.\n");
+    return 0;
+  }
   written = snprintf(temp_dir,
                      sizeof(temp_dir),
-                     "/tmp/strappy-bash-harness-XXXXXX");
+                     "%s/strappy-bash-harness-XXXXXX",
+                     temp_base);
   if ((written <= 0) || ((size_t)written >= sizeof(temp_dir)) ||
       (mkdtemp(temp_dir) == NULL)) {
     perror("Could not create bash harness directory");

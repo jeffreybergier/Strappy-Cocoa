@@ -24,6 +24,8 @@ typedef struct strappy_file_scanner_record {
   char *origin_kind;
   char *location_tail;
   int hidden;
+  char *hidden_reason;
+  int platform_profile;
 } strappy_file_scanner_record;
 
 typedef struct strappy_file_scanner_record_list {
@@ -50,8 +52,30 @@ typedef int (*strappy_file_scanner_record_batch_callback)(
   void *user_data,
   char **error_out);
 
+typedef enum strappy_file_scanner_platform_profile {
+  STRAPPY_FILE_SCANNER_PLATFORM_GENERIC = 0,
+  STRAPPY_FILE_SCANNER_PLATFORM_IOS = 1,
+  STRAPPY_FILE_SCANNER_PLATFORM_MACOS = 2
+} strappy_file_scanner_platform_profile;
+
+typedef int (*strappy_file_scanner_bundle_info_callback)(
+  const char *bundle_path,
+  char **name_out,
+  char **bundle_identifier_out,
+  void *user_data,
+  char **error_out);
+
+typedef int (*strappy_file_scanner_container_info_callback)(
+  const char *container_path,
+  char **identifier_out,
+  char **creator_out,
+  char **bundle_path_out,
+  void *user_data,
+  char **error_out);
+
 typedef struct strappy_file_scanner_options {
   const char *root_path;
+  strappy_file_scanner_platform_profile platform_profile;
   int validate_candidates;
   /* Zero checks every regular file; nonzero checks likely database names. */
   int use_filename_filter;
@@ -63,6 +87,9 @@ typedef struct strappy_file_scanner_options {
   size_t record_batch_size;
   strappy_file_scanner_record_batch_callback record_batch_callback;
   void *record_batch_user_data;
+  strappy_file_scanner_bundle_info_callback bundle_info_callback;
+  strappy_file_scanner_container_info_callback container_info_callback;
+  void *metadata_user_data;
 } strappy_file_scanner_options;
 
 void strappy_file_scanner_options_init(strappy_file_scanner_options *options);

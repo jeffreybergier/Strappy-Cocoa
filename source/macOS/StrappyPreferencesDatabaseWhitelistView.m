@@ -2,10 +2,9 @@
 
 #import "XPAppKit.h"
 
-static const CGFloat kStrappyDatabaseScanButtonWidth = 88.0;
-static const CGFloat kStrappyDatabaseScanControlGap = 8.0;
+static const CGFloat kStrappyDatabaseScanButtonWidth = 72.0;
 static const CGFloat kStrappyDatabaseShowHiddenButtonWidth = 170.0;
-static const CGFloat kStrappyDatabaseTopControlHeight = 24.0;
+static const CGFloat kStrappyDatabaseControlHeight = 24.0;
 
 static NSString *StrappyDatabaseWhitelistPathForRow(NSDictionary *row)
 {
@@ -142,65 +141,15 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
          dataSource:(id)dataSource
            delegate:(id)delegate
 {
-  NSButton *quickScanButton;
-  NSProgressIndicator *progressIndicator;
-  NSTextField *statusLabel;
-  NSRect controlFrame;
-  NSRect progressFrame;
-  NSRect statusFrame;
-
-  if ((self = [super initWithFrame:frame
-                            target:target
-                     refreshAction:@selector(scanDatabases:)
-                      searchAction:NULL
-                    refreshToolTip:NSLocalizedString(
-                      @"Scan likely SQLite database filenames.", nil)
-                        dataSource:dataSource
-                          delegate:delegate])) {
-    quickScanButton = [self refreshButton];
-    controlFrame = [quickScanButton frame];
-    controlFrame.size.width = kStrappyDatabaseScanButtonWidth;
-    [quickScanButton setFrame:controlFrame];
-    [quickScanButton setImage:nil];
-    [quickScanButton setImagePosition:NSNoImage];
-    [quickScanButton setBezelStyle:XPBezelStyleRounded];
-    [quickScanButton setTitle:NSLocalizedString(@"Quick Scan", nil)];
-
-    controlFrame.origin.x = NSMaxX(controlFrame) +
-      kStrappyDatabaseScanControlGap;
-    fullScanButton_ = [[NSButton alloc] initWithFrame:controlFrame];
-    [fullScanButton_ setAutoresizingMask:NSViewMaxXMargin | NSViewMaxYMargin];
-    [fullScanButton_ setBezelStyle:XPBezelStyleRounded];
-    [fullScanButton_ setButtonType:XPButtonTypeMomentaryLight];
-    [fullScanButton_ setTitle:NSLocalizedString(@"Full Scan", nil)];
-    [fullScanButton_ setToolTip:NSLocalizedString(
-      @"Scan every file for SQLite databases.", nil)];
-    [fullScanButton_ setTarget:target];
-    [fullScanButton_ setAction:@selector(fullScanDatabases:)];
-    [self addSubview:fullScanButton_];
-
-    progressIndicator = [self progressIndicator];
-    progressFrame = [progressIndicator frame];
-    progressFrame.origin.x = NSMaxX([fullScanButton_ frame]) +
-      kStrappyDatabaseScanControlGap;
-    [progressIndicator setFrame:progressFrame];
-
-    statusLabel = [self statusLabel];
-    statusFrame = [statusLabel frame];
-    statusFrame.origin.x = NSMaxX(progressFrame);
-    statusFrame.size.width = NSWidth([self bounds]) - statusFrame.origin.x -
-      NSMinX([quickScanButton frame]);
-    if (statusFrame.size.width < 0.0) {
-      statusFrame.size.width = 0.0;
-    }
-    [statusLabel setFrame:statusFrame];
-  }
-  return self;
+  return [super initWithFrame:frame
+                       target:target
+                   dataSource:dataSource
+                     delegate:delegate];
 }
 
 - (CGFloat)topAccessoryTrailingControlWidth
 {
-  return kStrappyDatabaseShowHiddenButtonWidth;
+  return kStrappyDatabaseScanButtonWidth;
 }
 
 - (void)configureTopAccessoryView:(NSView *)view target:(id)target
@@ -208,14 +157,39 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
   NSRect bounds;
 
   bounds = [view bounds];
+  scanButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(
+    NSWidth(bounds) - kStrappyDatabaseScanButtonWidth,
+    NSMaxY(bounds) - kStrappyDatabaseControlHeight,
+    kStrappyDatabaseScanButtonWidth,
+    kStrappyDatabaseControlHeight)];
+  [scanButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
+  [scanButton_ setBezelStyle:XPBezelStyleRounded];
+  [scanButton_ setButtonType:XPButtonTypeMomentaryLight];
+  [scanButton_ setTitle:NSLocalizedString(@"Scan", nil)];
+  [scanButton_ setToolTip:NSLocalizedString(
+    @"Choose a quick or full scan for SQLite databases.", nil)];
+  [scanButton_ setTarget:target];
+  [scanButton_ setAction:@selector(scanDatabases:)];
+  [view addSubview:scanButton_];
+}
+
+- (CGFloat)bottomAccessoryLeadingControlWidth
+{
+  return kStrappyDatabaseShowHiddenButtonWidth;
+}
+
+- (void)configureBottomAccessoryView:(NSView *)view target:(id)target
+{
+  NSRect bounds;
+
+  bounds = [view bounds];
   showHiddenDatabasesButton_ =
-    [[NSButton alloc] initWithFrame:NSMakeRect(
-      NSWidth(bounds) - kStrappyDatabaseShowHiddenButtonWidth,
-      NSMaxY(bounds) - kStrappyDatabaseTopControlHeight,
+    [[NSButton alloc] initWithFrame:NSMakeRect(0.0,
+      NSMaxY(bounds) - kStrappyDatabaseControlHeight,
       kStrappyDatabaseShowHiddenButtonWidth,
-      kStrappyDatabaseTopControlHeight)];
+      kStrappyDatabaseControlHeight)];
   [showHiddenDatabasesButton_ setAutoresizingMask:
-    NSViewMinXMargin | NSViewMinYMargin];
+    NSViewMaxXMargin | NSViewMinYMargin];
   [showHiddenDatabasesButton_ setButtonType:XPButtonTypeSwitch];
   [showHiddenDatabasesButton_ setTitle:
     NSLocalizedString(@"Show hidden databases", nil)];
@@ -302,21 +276,6 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
   [nameColumn setDataCell:nameCell];
   [tableView addTableColumn:nameColumn];
 
-  locationColumn =
-    [[[NSTableColumn alloc] initWithIdentifier:@"location"] autorelease];
-  [[locationColumn headerCell] setStringValue:NSLocalizedString(@"Location", nil)];
-  [locationColumn setWidth:270.0];
-  [locationColumn setMinWidth:160.0];
-  [locationColumn setEditable:NO];
-  [locationColumn setSortDescriptorPrototype:
-    [[[NSSortDescriptor alloc] initWithKey:@"location"
-                                 ascending:YES] autorelease]];
-  locationCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
-  [locationCell setLineBreakMode:NSLineBreakByTruncatingMiddle];
-  [locationCell setTextColor:[NSColor disabledControlTextColor]];
-  [locationColumn setDataCell:locationCell];
-  [tableView addTableColumn:locationColumn];
-
   sizeColumn = [[[NSTableColumn alloc] initWithIdentifier:@"size"] autorelease];
   [[sizeColumn headerCell] setStringValue:NSLocalizedString(@"Size", nil)];
   [sizeColumn setWidth:76.0];
@@ -329,6 +288,20 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
   [sizeCell setAlignment:XPTextAlignmentRight];
   [sizeColumn setDataCell:sizeCell];
   [tableView addTableColumn:sizeColumn];
+
+  locationColumn =
+    [[[NSTableColumn alloc] initWithIdentifier:@"location"] autorelease];
+  [[locationColumn headerCell] setStringValue:NSLocalizedString(@"Location", nil)];
+  [locationColumn setWidth:270.0];
+  [locationColumn setMinWidth:160.0];
+  [locationColumn setEditable:NO];
+  [locationColumn setSortDescriptorPrototype:
+    [[[NSSortDescriptor alloc] initWithKey:@"location"
+                                 ascending:YES] autorelease]];
+  locationCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
+  [locationCell setLineBreakMode:NSLineBreakByTruncatingMiddle];
+  [locationColumn setDataCell:locationCell];
+  [tableView addTableColumn:locationColumn];
 
   [tableView setSortDescriptors:[NSArray arrayWithObjects:
     [[[NSSortDescriptor alloc] initWithKey:@"application"
@@ -353,16 +326,11 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
   return [NSArray arrayWithObjects:
     [[[NSSortDescriptor alloc] initWithKey:@"database_priority"
                                  ascending:NO] autorelease],
-    [[[NSSortDescriptor alloc] initWithKey:@"location"
-                                 ascending:YES] autorelease],
     [[[NSSortDescriptor alloc] initWithKey:@"size"
                                  ascending:NO] autorelease],
+    [[[NSSortDescriptor alloc] initWithKey:@"location"
+                                 ascending:YES] autorelease],
     nil];
-}
-
-- (NSString *)stableSortKey
-{
-  return @"path";
 }
 
 - (BOOL)sortKeyIsKnown:(NSString *)key
@@ -373,8 +341,7 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
           [key isEqualToString:@"application"] ||
           [key isEqualToString:@"name"] ||
           [key isEqualToString:@"location"] ||
-          [key isEqualToString:@"size"] ||
-          [key isEqualToString:@"path"]) ? YES : NO;
+          [key isEqualToString:@"size"]) ? YES : NO;
 }
 
 - (NSComparisonResult)compareRow:(NSDictionary *)left
@@ -421,22 +388,12 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
       [leftValue isKindOfClass:[NSNumber class]] ? [leftValue longLongValue] : 0LL,
       [rightValue isKindOfClass:[NSNumber class]] ? [rightValue longLongValue] : 0LL);
   }
-  if ([key isEqualToString:@"path"]) {
-    return StrappyDatabaseWhitelistCompareStrings(
-      StrappyDatabaseWhitelistPathForRow(left),
-      StrappyDatabaseWhitelistPathForRow(right));
-  }
   return NSOrderedSame;
 }
 
 - (NSButton *)scanButton
 {
-  return [self refreshButton];
-}
-
-- (NSButton *)fullScanButton
-{
-  return fullScanButton_;
+  return scanButton_;
 }
 
 - (NSButton *)showHiddenDatabasesButton
@@ -446,7 +403,7 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
 
 - (void)dealloc
 {
-  [fullScanButton_ release];
+  [scanButton_ release];
   [showHiddenDatabasesButton_ release];
   [super dealloc];
 }

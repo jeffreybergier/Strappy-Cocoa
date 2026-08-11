@@ -3,7 +3,7 @@
 #import "XPAppKit.h"
 
 static const CGFloat kStrappyModelControlHeight = 24.0;
-static const CGFloat kStrappyModelDefaultPopupWidth = 260.0;
+static const CGFloat kStrappyModelFetchButtonWidth = 72.0;
 
 static NSString *StrappyModelWhitelistStringForRow(NSDictionary *row,
                                                    NSString *key)
@@ -102,42 +102,39 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
 {
   return [super initWithFrame:frame
                        target:target
-                refreshAction:@selector(refreshModels:)
-                 searchAction:NULL
-               refreshToolTip:NSLocalizedString(
-                 @"Refresh the OpenRouter model list.", nil)
                    dataSource:dataSource
                      delegate:delegate];
 }
 
 - (CGFloat)topAccessoryTrailingControlWidth
 {
-  return kStrappyModelDefaultPopupWidth;
+  return kStrappyModelFetchButtonWidth;
 }
 
 - (void)configureTopAccessoryView:(NSView *)view target:(id)target
 {
   NSRect bounds;
   CGFloat controlY;
+  CGFloat fetchX;
 
   bounds = [view bounds];
   controlY = NSMaxY(bounds) - kStrappyModelControlHeight;
+  fetchX = NSWidth(bounds) - kStrappyModelFetchButtonWidth;
 
-  defaultModelPopUpButton_ =
-    [[NSPopUpButton alloc] initWithFrame:NSMakeRect(NSWidth(bounds) -
-                                                      kStrappyModelDefaultPopupWidth,
-                                                    controlY,
-                                                    kStrappyModelDefaultPopupWidth,
-                                                    kStrappyModelControlHeight)
-                               pullsDown:NO];
-  [defaultModelPopUpButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
-  [defaultModelPopUpButton_ setBezelStyle:XPBezelStyleRounded];
-  [defaultModelPopUpButton_ setToolTip:
-    NSLocalizedString(@"Default model for new chats", nil)];
-  [defaultModelPopUpButton_ setTarget:target];
-  [defaultModelPopUpButton_ setAction:@selector(defaultModelPopUpButtonChanged:)];
-  [[defaultModelPopUpButton_ menu] setAutoenablesItems:NO];
-  [view addSubview:defaultModelPopUpButton_];
+  fetchButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(
+    fetchX,
+    controlY,
+    kStrappyModelFetchButtonWidth,
+    kStrappyModelControlHeight)];
+  [fetchButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
+  [fetchButton_ setBezelStyle:XPBezelStyleRounded];
+  [fetchButton_ setButtonType:XPButtonTypeMomentaryLight];
+  [fetchButton_ setTitle:NSLocalizedString(@"Fetch", nil)];
+  [fetchButton_ setToolTip:
+    NSLocalizedString(@"Fetch the latest OpenRouter model list.", nil)];
+  [fetchButton_ setTarget:target];
+  [fetchButton_ setAction:@selector(refreshModels:)];
+  [view addSubview:fetchButton_];
 }
 
 - (void)addTableColumnsToTableView:(NSTableView *)tableView
@@ -326,19 +323,14 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
   return NSOrderedSame;
 }
 
-- (NSPopUpButton *)defaultModelPopUpButton
-{
-  return defaultModelPopUpButton_;
-}
-
 - (NSButton *)fetchButton
 {
-  return [self refreshButton];
+  return fetchButton_;
 }
 
 - (void)dealloc
 {
-  [defaultModelPopUpButton_ release];
+  [fetchButton_ release];
   [super dealloc];
 }
 

@@ -275,6 +275,7 @@ typedef struct strappy_discovered_database_input {
   const char *origin_kind;
   const char *location_tail;
   int hidden;
+  const char *hidden_reason;
 } strappy_discovered_database_input;
 
 typedef struct strappy_discovered_database_record {
@@ -299,6 +300,10 @@ typedef struct strappy_discovered_database_record {
   char *origin_kind;
   char *location_tail;
   int hidden;
+  int auto_hidden;
+  int has_hidden_override;
+  int hidden_override;
+  char *hidden_reason;
   char *first_seen_at;
   char *last_seen_at;
   char *last_scanned_at;

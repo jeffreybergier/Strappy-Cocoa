@@ -1,13 +1,11 @@
 #import "StrappyPreferencesWhitelistView.h"
 
-#import "AIFontAwesome.h"
 #import "XPAppKit.h"
 
 static const CGFloat kStrappyPreferencesInset = 12.0;
 static const CGFloat kStrappyWhitelistControlHeight = 24.0;
 static const CGFloat kStrappyWhitelistBottomGap = 8.0;
 static const CGFloat kStrappyWhitelistTopControlGap = 8.0;
-static const CGFloat kStrappyWhitelistRefreshButtonWidth = 28.0;
 static const CGFloat kStrappyWhitelistProgressSize = 20.0;
 
 @interface StrappyPreferencesWhitelistTableView : NSTableView
@@ -206,12 +204,8 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
 
 @interface StrappyPreferencesWhitelistView ()
 - (void)buildViewWithTarget:(id)target
-              refreshAction:(SEL)refreshAction
-               searchAction:(SEL)searchAction
-             refreshToolTip:(NSString *)refreshToolTip
                  dataSource:(id)dataSource
                    delegate:(id)delegate;
-- (NSImage *)refreshButtonImage;
 @end
 
 @implementation StrappyPreferencesWhitelistView
@@ -220,37 +214,25 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
 {
   return [self initWithFrame:frame
                       target:nil
-               refreshAction:NULL
-                searchAction:NULL
-              refreshToolTip:nil
                   dataSource:nil
                     delegate:nil];
 }
 
 - (id)initWithFrame:(NSRect)frame
              target:(id)target
-      refreshAction:(SEL)refreshAction
-       searchAction:(SEL)searchAction
-     refreshToolTip:(NSString *)refreshToolTip
          dataSource:(id)dataSource
            delegate:(id)delegate
 {
   if ((self = [super initWithFrame:frame])) {
     [self setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
     [self buildViewWithTarget:target
-                refreshAction:refreshAction
-                 searchAction:searchAction
-               refreshToolTip:refreshToolTip
-                   dataSource:dataSource
-                     delegate:delegate];
+                    dataSource:dataSource
+                      delegate:delegate];
   }
   return self;
 }
 
 - (void)buildViewWithTarget:(id)target
-              refreshAction:(SEL)refreshAction
-               searchAction:(SEL)searchAction
-             refreshToolTip:(NSString *)refreshToolTip
                  dataSource:(id)dataSource
                    delegate:(id)delegate
 {
@@ -263,7 +245,7 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
   CGFloat searchWidth;
   CGFloat statusX;
   CGFloat statusWidth;
-  NSImage *refreshImage;
+  CGFloat bottomLeadingWidth;
 
   bounds = [self bounds];
   topAccessoryHeight = [self topAccessoryHeight];
@@ -293,10 +275,6 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
                                                       searchWidth,
                                                       kStrappyWhitelistControlHeight)];
     [searchField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
-    if (searchAction != NULL) {
-      [searchField_ setTarget:target];
-      [searchField_ setAction:searchAction];
-    }
     [[searchField_ cell] setPlaceholderString:NSLocalizedString(@"Search", nil)];
     [topAccessoryView_ addSubview:searchField_];
     [self configureTopAccessoryView:topAccessoryView_ target:target];
@@ -337,48 +315,41 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
   [scrollView_ setDocumentView:tableView_];
   [self addSubview:scrollView_];
 
-  refreshButton_ =
-    [[NSButton alloc] initWithFrame:NSMakeRect(kStrappyPreferencesInset,
-                                               kStrappyPreferencesInset,
-                                               kStrappyWhitelistRefreshButtonWidth,
-                                               kStrappyWhitelistControlHeight)];
-  [refreshButton_ setAutoresizingMask:NSViewMaxXMargin | NSViewMaxYMargin];
-  [refreshButton_ setBezelStyle:XPBezelStyleSmallSquare];
-  [refreshButton_ setButtonType:XPButtonTypeMomentaryLight];
-  [refreshButton_ setToolTip:(refreshToolTip != nil) ? refreshToolTip :
-    NSLocalizedString(@"Refresh", nil)];
-  [refreshButton_ setTarget:target];
-  [refreshButton_ setAction:refreshAction];
-  refreshImage = [self refreshButtonImage];
-  if (refreshImage != nil) {
-    [refreshButton_ setImage:refreshImage];
-    [refreshButton_ setImagePosition:NSImageOnly];
-    [refreshButton_ setTitle:@""];
-  } else {
-    [refreshButton_ setTitle:@"R"];
-    [refreshButton_ setFont:[NSFont boldSystemFontOfSize:12.0]];
-  }
-  [self addSubview:refreshButton_];
+  bottomAccessoryView_ =
+    [[NSView alloc] initWithFrame:NSMakeRect(kStrappyPreferencesInset,
+                                             kStrappyPreferencesInset,
+                                             NSWidth(bounds) -
+                                               (kStrappyPreferencesInset * 2.0),
+                                             kStrappyWhitelistControlHeight)];
+  [bottomAccessoryView_ setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
+  [self configureBottomAccessoryView:bottomAccessoryView_ target:target];
+  [self addSubview:bottomAccessoryView_];
 
+  bottomLeadingWidth = [self bottomAccessoryLeadingControlWidth];
+  if (bottomLeadingWidth < 0.0) {
+    bottomLeadingWidth = 0.0;
+  }
   progressIndicator_ = [[NSProgressIndicator alloc]
-      initWithFrame:NSMakeRect(NSMaxX([refreshButton_ frame]) + 8.0,
-                               kStrappyPreferencesInset + 2.0,
+      initWithFrame:NSMakeRect(bottomLeadingWidth > 0.0 ?
+                                 bottomLeadingWidth + kStrappyWhitelistTopControlGap :
+                                 0.0,
+                               2.0,
                                kStrappyWhitelistProgressSize,
                                kStrappyWhitelistProgressSize)];
   [progressIndicator_ setAutoresizingMask:NSViewMaxXMargin | NSViewMaxYMargin];
   [progressIndicator_ setStyle:XPProgressIndicatorStyleSpinning];
   [progressIndicator_ setIndeterminate:YES];
   [progressIndicator_ setDisplayedWhenStopped:NO];
-  [self addSubview:progressIndicator_];
+  [bottomAccessoryView_ addSubview:progressIndicator_];
 
   statusX = NSMaxX([progressIndicator_ frame]);
-  statusWidth = NSWidth(bounds) - statusX - kStrappyPreferencesInset;
+  statusWidth = NSWidth([bottomAccessoryView_ bounds]) - statusX;
   if (statusWidth < 0.0) {
     statusWidth = 0.0;
   }
   statusLabel_ =
     [[NSTextField alloc] initWithFrame:NSMakeRect(statusX,
-                                                  kStrappyPreferencesInset,
+                                                  0.0,
                                                   statusWidth,
                                                   20.0)];
   [statusLabel_ setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
@@ -389,7 +360,7 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
   [statusLabel_ setAlignment:XPTextAlignmentRight];
   [statusLabel_ setFont:[NSFont systemFontOfSize:11.0]];
   [statusLabel_ setTextColor:[NSColor disabledControlTextColor]];
-  [self addSubview:statusLabel_];
+  [bottomAccessoryView_ addSubview:statusLabel_];
 }
 
 - (CGFloat)topAccessoryHeight
@@ -403,6 +374,17 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
 }
 
 - (void)configureTopAccessoryView:(NSView *)view target:(id)target
+{
+  (void)view;
+  (void)target;
+}
+
+- (CGFloat)bottomAccessoryLeadingControlWidth
+{
+  return 0.0;
+}
+
+- (void)configureBottomAccessoryView:(NSView *)view target:(id)target
 {
   (void)view;
   (void)target;
@@ -547,18 +529,14 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
   return sortedRows;
 }
 
-- (NSImage *)refreshButtonImage
-{
-  return [AIFontAwesome imageForIcon:AIFAArrowsRotate
-                               style:AIFontAwesomeStyleSolid
-                            iconSize:13.0
-                          canvasSize:18.0
-                               scale:1.0];
-}
-
 - (NSView *)topAccessoryView
 {
   return topAccessoryView_;
+}
+
+- (NSView *)bottomAccessoryView
+{
+  return bottomAccessoryView_;
 }
 
 - (NSSearchField *)searchField
@@ -576,11 +554,6 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
   return tableView_;
 }
 
-- (NSButton *)refreshButton
-{
-  return refreshButton_;
-}
-
 - (NSProgressIndicator *)progressIndicator
 {
   return progressIndicator_;
@@ -594,10 +567,10 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
 - (void)dealloc
 {
   [topAccessoryView_ release];
+  [bottomAccessoryView_ release];
   [searchField_ release];
   [scrollView_ release];
   [tableView_ release];
-  [refreshButton_ release];
   [progressIndicator_ release];
   [statusLabel_ release];
   [super dealloc];

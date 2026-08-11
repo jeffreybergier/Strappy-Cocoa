@@ -31,10 +31,6 @@ static NSString * const kStrappyPreferencesToolbarPrompts =
   @"StrappyPreferencesToolbar.Prompts";
 static NSString * const kStrappyModelSearchTextKey =
   @"_strappy_model_search_text";
-static NSString * const kStrappyDatabaseGroupHeaderKey =
-  @"_strappy_database_group_header";
-static NSString * const kStrappyDatabaseGroupTitleKey =
-  @"_strappy_database_group_title";
 
 static NSString *StrappyByteCountString(NSNumber *sizeNumber)
 {
@@ -119,15 +115,6 @@ static NSString *StrappyDatabaseLocationForRow(NSDictionary *row)
   return directory;
 }
 
-static BOOL StrappyDatabaseRowIsGroupHeader(NSDictionary *row)
-{
-  NSNumber *header;
-
-  header = [row objectForKey:kStrappyDatabaseGroupHeaderKey];
-  return ([header isKindOfClass:[NSNumber class]] && [header boolValue]) ?
-    YES : NO;
-}
-
 static NSString *StrappyDatabaseAppNameForRow(NSDictionary *row)
 {
   NSString *appName;
@@ -146,19 +133,6 @@ static NSString *StrappyDatabaseAppNameForRow(NSDictionary *row)
   return NSLocalizedString(@"Other", nil);
 }
 
-static NSString *StrappyDatabaseAppGroupKeyForRow(NSDictionary *row)
-{
-  NSString *groupKey;
-
-  groupKey = [row objectForKey:@"app_group_key"];
-  if ([groupKey isKindOfClass:[NSString class]] && ([groupKey length] > 0U)) {
-    return groupKey;
-  }
-
-  return [@"path:" stringByAppendingString:
-    [StrappyDatabaseLocationForRow(row) lowercaseString]];
-}
-
 static NSString *StrappyDatabaseBundleIdentifierForRow(NSDictionary *row)
 {
   NSString *bundleIdentifier;
@@ -166,53 +140,6 @@ static NSString *StrappyDatabaseBundleIdentifierForRow(NSDictionary *row)
   bundleIdentifier = [row objectForKey:@"app_bundle_id"];
   return ([bundleIdentifier isKindOfClass:[NSString class]] &&
           ([bundleIdentifier length] > 0U)) ? bundleIdentifier : @"";
-}
-
-static BOOL StrappyDatabaseStringHasValue(NSString *string)
-{
-  return ([string isKindOfClass:[NSString class]] && ([string length] > 0U)) ?
-    YES : NO;
-}
-
-static NSString *StrappyDatabaseGroupTitle(NSString *appName,
-                                           NSString *bundleIdentifier,
-                                           NSUInteger count,
-                                           NSUInteger allowedCount,
-                                           BOOL disambiguate)
-{
-  NSString *title;
-  NSString *countText;
-
-  title = StrappyDatabaseStringHasValue(appName) ? appName :
-    NSLocalizedString(@"Other", nil);
-  if (disambiguate && ([bundleIdentifier length] > 0U)) {
-    title = [NSString stringWithFormat:@"%@ (%@)", title, bundleIdentifier];
-  }
-
-  if (count == 1U) {
-    countText = NSLocalizedString(@"1 database", nil);
-  } else {
-    countText = [NSString stringWithFormat:
-      NSLocalizedString(@"%lu databases", nil), (unsigned long)count];
-  }
-
-  if (allowedCount > 0U) {
-    return [NSString stringWithFormat:@"%@ - %@, %lu allowed",
-      title,
-      countText,
-      (unsigned long)allowedCount];
-  }
-
-  return [NSString stringWithFormat:@"%@ - %@", title, countText];
-}
-
-static NSString *StrappyDatabaseHeaderTitleForRow(NSDictionary *row)
-{
-  NSString *title;
-
-  title = [row objectForKey:kStrappyDatabaseGroupTitleKey];
-  return ([title isKindOfClass:[NSString class]] && ([title length] > 0U)) ?
-    title : @"";
 }
 
 static BOOL StrappyDatabaseRowAllowedValue(NSDictionary *row)
@@ -230,127 +157,6 @@ static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
   hidden = [row objectForKey:@"hidden"];
   return ([hidden isKindOfClass:[NSNumber class]] && [hidden boolValue]) ?
     YES : NO;
-}
-
-static NSArray *StrappyDatabaseRowsWithGroupHeaders(NSArray *rows)
-{
-  NSMutableDictionary *nameCounts;
-  NSMutableArray *groupedRows;
-  NSString *currentGroupKey;
-  NSString *currentAppName;
-  NSString *currentBundleIdentifier;
-  NSMutableArray *currentRows;
-  NSUInteger index;
-
-  if (![rows isKindOfClass:[NSArray class]] || ([rows count] == 0U)) {
-    return [NSArray array];
-  }
-
-  nameCounts = [NSMutableDictionary dictionary];
-  for (index = 0U; index < [rows count]; index++) {
-    NSDictionary *row;
-    NSString *appName;
-    NSNumber *count;
-
-    row = [rows objectAtIndex:index];
-    if (![row isKindOfClass:[NSDictionary class]]) {
-      continue;
-    }
-    appName = StrappyDatabaseAppNameForRow(row);
-    count = [nameCounts objectForKey:appName];
-    [nameCounts setObject:[NSNumber XP_numberWithUnsignedInteger:
-      ([count isKindOfClass:[NSNumber class]] ?
-        [count XP_unsignedIntegerValue] + 1U : 1U)]
-                    forKey:appName];
-  }
-
-  groupedRows = [NSMutableArray arrayWithCapacity:[rows count] + 16U];
-  currentGroupKey = nil;
-  currentAppName = nil;
-  currentBundleIdentifier = nil;
-  currentRows = [NSMutableArray array];
-  for (index = 0U; index <= [rows count]; index++) {
-    NSDictionary *row;
-    NSString *groupKey;
-
-    row = (index < [rows count]) ? [rows objectAtIndex:index] : nil;
-    groupKey = [row isKindOfClass:[NSDictionary class]] ?
-      StrappyDatabaseAppGroupKeyForRow(row) : nil;
-    if ((currentGroupKey != nil) &&
-        ((row == nil) || ![groupKey isEqualToString:currentGroupKey])) {
-      NSUInteger rowIndex;
-      NSUInteger allowedCount;
-      BOOL disambiguate;
-      NSMutableDictionary *header;
-      NSString *title;
-      NSNumber *appNameCount;
-
-      allowedCount = 0U;
-      for (rowIndex = 0U; rowIndex < [currentRows count]; rowIndex++) {
-        if (StrappyDatabaseRowAllowedValue([currentRows objectAtIndex:rowIndex])) {
-          allowedCount++;
-        }
-      }
-      appNameCount = [nameCounts objectForKey:currentAppName];
-      disambiguate = ([appNameCount isKindOfClass:[NSNumber class]] &&
-                      ([appNameCount XP_unsignedIntegerValue] >
-                       [currentRows count])) ? YES : NO;
-      title = StrappyDatabaseGroupTitle(currentAppName,
-                                        currentBundleIdentifier,
-                                        [currentRows count],
-                                        allowedCount,
-                                        disambiguate);
-      header = [NSMutableDictionary dictionaryWithObjectsAndKeys:
-        [NSNumber numberWithBool:YES], kStrappyDatabaseGroupHeaderKey,
-        title, kStrappyDatabaseGroupTitleKey,
-        currentGroupKey, @"app_group_key",
-        currentAppName, @"app_name",
-        nil];
-      if ([currentBundleIdentifier length] > 0U) {
-        [header setObject:currentBundleIdentifier forKey:@"app_bundle_id"];
-      }
-      [groupedRows addObject:header];
-      [groupedRows addObjectsFromArray:currentRows];
-      [currentRows removeAllObjects];
-      currentGroupKey = nil;
-      currentAppName = nil;
-      currentBundleIdentifier = nil;
-    }
-
-    if ([row isKindOfClass:[NSDictionary class]]) {
-      if (currentGroupKey == nil) {
-        currentGroupKey = groupKey;
-        currentAppName = StrappyDatabaseAppNameForRow(row);
-        currentBundleIdentifier = StrappyDatabaseBundleIdentifierForRow(row);
-      }
-      [currentRows addObject:row];
-    }
-  }
-
-  return groupedRows;
-}
-
-static NSUInteger StrappyDatabaseContentRowCount(NSArray *rows)
-{
-  NSUInteger index;
-  NSUInteger count;
-
-  if (![rows isKindOfClass:[NSArray class]]) {
-    return 0U;
-  }
-
-  count = 0U;
-  for (index = 0U; index < [rows count]; index++) {
-    NSDictionary *row;
-
-    row = [rows objectAtIndex:index];
-    if ([row isKindOfClass:[NSDictionary class]] &&
-        !StrappyDatabaseRowIsGroupHeader(row)) {
-      count++;
-    }
-  }
-
-  return count;
 }
 
 static NSString *StrappyStringForModelRow(NSDictionary *row, NSString *key)
@@ -543,14 +349,12 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)applyModelRows;
 - (void)refreshModelStatus;
 - (void)loadOpenRouterModels;
-- (void)reloadDefaultModelPopUpButton;
 - (void)sortAllModelRows;
 - (NSString *)selectedModelTableRowIdentifier;
 - (void)selectModelTableRowWithIdentifier:(NSString *)modelIdentifier;
 - (NSArray *)selectedDatabaseTableRowPaths;
 - (void)selectDatabaseTableRowsWithPaths:(NSArray *)paths;
 - (void)modelSearchChanged:(id)sender;
-- (void)defaultModelPopUpButtonChanged:(id)sender;
 - (void)modelSearchTextDidChange:(NSNotification *)notification;
 - (void)setModelCatalogRefreshing:(BOOL)refreshing;
 - (void)modelCatalogRefreshDidStart:(NSNotification *)notification;
@@ -566,6 +370,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)databaseSearchChanged:(id)sender;
 - (void)showHiddenDatabasesChanged:(id)sender;
 - (void)databaseSearchTextDidChange:(NSNotification *)notification;
+- (void)databaseScanAlertDidEnd:(NSAlert *)alert
+                      returnCode:(NSInteger)returnCode
+                     contextInfo:(void *)contextInfo;
 - (void)beginDatabaseScanWithMode:(FileScannerDatabaseScanMode)scanMode;
 - (void)scanDatabasesInBackground:(NSDictionary *)request;
 - (void)scanDatabasesDidFinish:(NSDictionary *)result;
@@ -676,13 +483,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
                                                      dataSource:self
                                                        delegate:self];
   modelSearchField_ = [[modelWhitelistView_ searchField] retain];
-  defaultModelPopUpButton_ =
-    [[modelWhitelistView_ defaultModelPopUpButton] retain];
   modelTableView_ = [[modelWhitelistView_ tableView] retain];
   fetchModelsButton_ = [[modelWhitelistView_ fetchButton] retain];
   modelProgressIndicator_ = [[modelWhitelistView_ progressIndicator] retain];
   modelStatusLabel_ = [[modelWhitelistView_ statusLabel] retain];
-  [self reloadDefaultModelPopUpButton];
   [[NSNotificationCenter defaultCenter]
     addObserver:self
        selector:@selector(modelSearchTextDidChange:)
@@ -697,7 +501,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   databaseSearchField_ = [[databaseWhitelistView_ searchField] retain];
   databaseTableView_ = [[databaseWhitelistView_ tableView] retain];
   scanButton_ = [[databaseWhitelistView_ scanButton] retain];
-  fullScanButton_ = [[databaseWhitelistView_ fullScanButton] retain];
   showHiddenDatabasesButton_ =
     [[databaseWhitelistView_ showHiddenDatabasesButton] retain];
   scanProgressIndicator_ = [[databaseWhitelistView_ progressIndicator] retain];
@@ -1119,86 +922,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     allModelRows_ = [StrappyPreparedModelRowsForRows(rows) copy];
     [self sortAllModelRows];
     [self applyModelRows];
-    [self reloadDefaultModelPopUpButton];
     return;
   }
 
   [modelStatusLabel_ setStringValue:
     NSLocalizedString(@"Model list could not be loaded.", nil)];
-}
-
-- (void)reloadDefaultModelPopUpButton
-{
-  NSString *defaultModelIdentifier;
-  NSInteger selectedIndex;
-  NSUInteger index;
-
-  if (defaultModelPopUpButton_ == nil) {
-    return;
-  }
-
-  [defaultModelPopUpButton_ removeAllItems];
-  defaultModelIdentifier = @"";
-  selectedIndex = -1;
-  for (index = 0U; index < [allModelRows_ count]; index++) {
-    NSDictionary *model;
-    NSString *modelIdentifier;
-    NSString *title;
-    NSMenuItem *item;
-
-    model = [allModelRows_ objectAtIndex:index];
-    if (![model isKindOfClass:[NSDictionary class]]) {
-      continue;
-    }
-    if (![[self allowedValueForModelRow:model] boolValue]) {
-      continue;
-    }
-
-    modelIdentifier = StrappyStringForModelRow(model, @"id");
-    if ([modelIdentifier length] == 0U) {
-      continue;
-    }
-
-    title = StrappyModelDisplayNameForRow(model);
-    [defaultModelPopUpButton_ addItemWithTitle:
-      ([title length] > 0U) ? title : modelIdentifier];
-    item = [defaultModelPopUpButton_ itemAtIndex:
-      ([defaultModelPopUpButton_ numberOfItems] - 1)];
-    [item setRepresentedObject:modelIdentifier];
-    if ([self modelRowIsDefault:model]) {
-      defaultModelIdentifier = modelIdentifier;
-      selectedIndex = [defaultModelPopUpButton_ numberOfItems] - 1;
-    }
-  }
-
-  if ([defaultModelPopUpButton_ numberOfItems] == 0) {
-    [defaultModelPopUpButton_ addItemWithTitle:NSLocalizedString(@"Default Model", nil)];
-    [[defaultModelPopUpButton_ itemAtIndex:0] setEnabled:NO];
-    [defaultModelPopUpButton_ setEnabled:NO];
-    return;
-  }
-
-  if (selectedIndex < 0) {
-    defaultModelIdentifier =
-      [StrappySession defaultOpenRouterModelIdentifierWithError:nil];
-    if (![defaultModelIdentifier isKindOfClass:[NSString class]]) {
-      defaultModelIdentifier = @"";
-    }
-  }
-
-  if ((selectedIndex < 0) && ([defaultModelIdentifier length] > 0U)) {
-    [defaultModelPopUpButton_ addItemWithTitle:defaultModelIdentifier];
-    [[defaultModelPopUpButton_ itemAtIndex:
-      ([defaultModelPopUpButton_ numberOfItems] - 1)]
-        setRepresentedObject:defaultModelIdentifier];
-    selectedIndex = [defaultModelPopUpButton_ numberOfItems] - 1;
-  }
-
-  if (selectedIndex < 0) {
-    selectedIndex = 0;
-  }
-  [defaultModelPopUpButton_ selectItemAtIndex:selectedIndex];
-  [defaultModelPopUpButton_ setEnabled:YES];
 }
 
 - (void)sortAllModelRows
@@ -1346,33 +1074,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [self applyDatabaseRows];
   [self selectDatabaseTableRowsWithPaths:selectedPaths];
   [selectedPaths release];
-}
-
-- (void)defaultModelPopUpButtonChanged:(id)sender
-{
-  NSMenuItem *item;
-  NSString *modelIdentifier;
-
-  if (sender != defaultModelPopUpButton_) {
-    return;
-  }
-
-  item = [defaultModelPopUpButton_ selectedItem];
-  modelIdentifier = [item representedObject];
-  if (![modelIdentifier isKindOfClass:[NSString class]] ||
-      ([modelIdentifier length] == 0U)) {
-    [self reloadDefaultModelPopUpButton];
-    return;
-  }
-
-  if (![StrappySession setDefaultOpenRouterModelIdentifier:modelIdentifier
-                                                     error:nil]) {
-    NSBeep();
-    [self reloadDefaultModelPopUpButton];
-    return;
-  }
-
-  [self loadOpenRouterModels];
 }
 
 - (void)modelSearchTextDidChange:(NSNotification *)notification
@@ -1559,7 +1260,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   rows = [self databaseRows:rows
         matchingSearchText:[self currentDatabaseSearchText]];
   rows = [databaseWhitelistView_ sortedRows:rows];
-  rows = StrappyDatabaseRowsWithGroupHeaders(rows);
   [databaseRows_ release];
   databaseRows_ = [rows copy];
   [databaseTableView_ reloadData];
@@ -1601,7 +1301,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 {
   scanning_ = scanning;
   [scanButton_ setEnabled:(scanning_ ? NO : YES)];
-  [fullScanButton_ setEnabled:(scanning_ ? NO : YES)];
   if (scanning_) {
     [scanProgressIndicator_ startAnimation:self];
   } else {
@@ -1625,7 +1324,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
-  count = StrappyDatabaseContentRowCount(databaseRows_);
+  count = [databaseRows_ count];
   searchText = [self currentDatabaseSearchText];
   if ([searchText length] > 0U) {
     if (count == 1U) {
@@ -1689,14 +1388,46 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)scanDatabases:(id)sender
 {
+  NSAlert *alert;
+  NSWindow *window;
+
   (void)sender;
-  [self beginDatabaseScanWithMode:FileScannerDatabaseScanModeQuick];
+  if (scanning_) {
+    return;
+  }
+
+  window = [self window];
+  if (window == nil) {
+    NSBeep();
+    return;
+  }
+
+  alert = [[[NSAlert alloc] init] autorelease];
+  [alert setMessageText:NSLocalizedString(@"Scan Databases?", nil)];
+  [alert setInformativeText:NSLocalizedString(
+    @"Scans your home folder for SQLite databases. After scanning, whitelist desired databases so Strappy can read their data. Quick Scan saves time by only scanning files with common file extensions used for SQLite databases.",
+    nil)];
+  [alert addButtonWithTitle:NSLocalizedString(@"Quick Scan", nil)];
+  [alert addButtonWithTitle:NSLocalizedString(@"Full Scan", nil)];
+  [alert addButtonWithTitle:NSLocalizedString(@"Cancel", nil)];
+  [alert XP_beginSheetModalForWindow:window
+                       modalDelegate:self
+                      didEndSelector:@selector(databaseScanAlertDidEnd:returnCode:contextInfo:)
+                         contextInfo:NULL];
 }
 
-- (void)fullScanDatabases:(id)sender
+- (void)databaseScanAlertDidEnd:(NSAlert *)alert
+                      returnCode:(NSInteger)returnCode
+                     contextInfo:(void *)contextInfo
 {
-  (void)sender;
-  [self beginDatabaseScanWithMode:FileScannerDatabaseScanModeFull];
+  (void)alert;
+  (void)contextInfo;
+
+  if (returnCode == NSAlertFirstButtonReturn) {
+    [self beginDatabaseScanWithMode:FileScannerDatabaseScanModeQuick];
+  } else if (returnCode == NSAlertSecondButtonReturn) {
+    [self beginDatabaseScanWithMode:FileScannerDatabaseScanModeFull];
+  }
 }
 
 - (void)beginDatabaseScanWithMode:(FileScannerDatabaseScanMode)scanMode
@@ -1982,12 +1713,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
   database = [databaseRows_ objectAtIndex:(NSUInteger)row];
   identifier = [tableColumn identifier];
-  if (StrappyDatabaseRowIsGroupHeader(database)) {
-    if ([identifier isEqualToString:@"application"]) {
-      return StrappyDatabaseHeaderTitleForRow(database);
-    }
-    return @"";
-  }
   if ([identifier isEqualToString:@"allowed"]) {
     return [self allowedValueForDatabaseRow:database];
   }
@@ -2008,36 +1733,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   return nil;
-}
-
-- (CGFloat)tableView:(NSTableView *)tableView heightOfRow:(NSInteger)row
-{
-  NSDictionary *database;
-
-  if (tableView != databaseTableView_) {
-    return [tableView rowHeight];
-  }
-  if ((row < 0) || (row >= (NSInteger)[databaseRows_ count])) {
-    return [tableView rowHeight];
-  }
-
-  database = [databaseRows_ objectAtIndex:(NSUInteger)row];
-  return StrappyDatabaseRowIsGroupHeader(database) ? 20.0 : [tableView rowHeight];
-}
-
-- (BOOL)tableView:(NSTableView *)tableView shouldSelectRow:(NSInteger)row
-{
-  NSDictionary *database;
-
-  if (tableView != databaseTableView_) {
-    return YES;
-  }
-  if ((row < 0) || (row >= (NSInteger)[databaseRows_ count])) {
-    return NO;
-  }
-
-  database = [databaseRows_ objectAtIndex:(NSUInteger)row];
-  return StrappyDatabaseRowIsGroupHeader(database) ? NO : YES;
 }
 
 - (NSString *)tableView:(NSTableView *)tableView
@@ -2088,9 +1783,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   database = [databaseRows_ objectAtIndex:(NSUInteger)row];
-  if (StrappyDatabaseRowIsGroupHeader(database)) {
-    return StrappyDatabaseHeaderTitleForRow(database);
-  }
   identifier = [tableColumn identifier];
   if ([identifier isEqualToString:@"allowed"] &&
       ![self databaseRowCanBeAllowed:database]) {
@@ -2173,9 +1865,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   database = [databaseRows_ objectAtIndex:(NSUInteger)row];
-  if (StrappyDatabaseRowIsGroupHeader(database)) {
-    return;
-  }
   if ([identifier isEqualToString:@"allowed"] && checked &&
       ![self databaseRowCanBeAllowed:database]) {
     NSBeep();
@@ -2234,9 +1923,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   database = [databaseRows_ objectAtIndex:(NSUInteger)row];
-  if (StrappyDatabaseRowIsGroupHeader(database)) {
-    return NO;
-  }
   if ([[tableColumn identifier] isEqualToString:@"hidden"]) {
     return YES;
   }
@@ -2278,10 +1964,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   database = [databaseRows_ objectAtIndex:(NSUInteger)row];
-  if (StrappyDatabaseRowIsGroupHeader(database)) {
-    [cell setEnabled:NO];
-    return;
-  }
   if ([[tableColumn identifier] isEqualToString:@"hidden"]) {
     [cell setEnabled:YES];
   } else {
@@ -2340,7 +2022,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [apiTokenField_ release];
   [apiTokenStatusLabel_ release];
   [modelSearchField_ release];
-  [defaultModelPopUpButton_ release];
   [modelTableView_ release];
   [modelWhitelistView_ release];
   [fetchModelsButton_ release];
@@ -2354,7 +2035,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [databaseStudyPaneView_ release];
   [databaseStudyTextView_ release];
   [scanButton_ release];
-  [fullScanButton_ release];
   [showHiddenDatabasesButton_ release];
   [scanProgressIndicator_ release];
   [databaseStatusLabel_ release];

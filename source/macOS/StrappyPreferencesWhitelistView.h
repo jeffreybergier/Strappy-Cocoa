@@ -3,25 +3,24 @@
 @interface StrappyPreferencesWhitelistView : NSView {
  @private
   NSView              *topAccessoryView_;
+  NSView              *bottomAccessoryView_;
   NSSearchField       *searchField_;
   NSScrollView        *scrollView_;
   NSTableView         *tableView_;
-  NSButton            *refreshButton_;
   NSProgressIndicator *progressIndicator_;
   NSTextField         *statusLabel_;
 }
 
 - (id)initWithFrame:(NSRect)frame
              target:(id)target
-      refreshAction:(SEL)refreshAction
-       searchAction:(SEL)searchAction
-     refreshToolTip:(NSString *)refreshToolTip
          dataSource:(id)dataSource
            delegate:(id)delegate;
 
 - (CGFloat)topAccessoryHeight;
 - (CGFloat)topAccessoryTrailingControlWidth;
 - (void)configureTopAccessoryView:(NSView *)view target:(id)target;
+- (CGFloat)bottomAccessoryLeadingControlWidth;
+- (void)configureBottomAccessoryView:(NSView *)view target:(id)target;
 - (void)configureTableView:(NSTableView *)tableView;
 - (void)addTableColumnsToTableView:(NSTableView *)tableView;
 - (NSSortDescriptor *)requiredSortDescriptor;
@@ -36,10 +35,10 @@
 - (NSArray *)sortedRows:(NSArray *)rows;
 
 - (NSView *)topAccessoryView;
+- (NSView *)bottomAccessoryView;
 - (NSSearchField *)searchField;
 - (NSScrollView *)scrollView;
 - (NSTableView *)tableView;
-- (NSButton *)refreshButton;
 - (NSProgressIndicator *)progressIndicator;
 - (NSTextField *)statusLabel;
 

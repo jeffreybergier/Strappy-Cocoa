@@ -995,6 +995,175 @@ int strappy_cocoa_copy_bundle_info(const char *bundle_path,
   return 1;
 }
 
+static CFTypeRef strappy_cocoa_dictionary_value(CFDictionaryRef dictionary,
+                                                CFStringRef key)
+{
+  if ((dictionary == NULL) ||
+      (CFGetTypeID(dictionary) != CFDictionaryGetTypeID())) {
+    return NULL;
+  }
+  return CFDictionaryGetValue(dictionary, key);
+}
+
+static char *strappy_cocoa_copy_optional_dictionary_string(
+  CFDictionaryRef dictionary,
+  CFStringRef key,
+  char **error_out)
+{
+  CFTypeRef value;
+
+  value = strappy_cocoa_dictionary_value(dictionary, key);
+  if ((value == NULL) || (CFGetTypeID(value) != CFStringGetTypeID()) ||
+      (CFStringGetLength((CFStringRef)value) == 0)) {
+    return NULL;
+  }
+  return strappy_cocoa_copy_cf_string_utf8((CFStringRef)value, error_out);
+}
+
+int strappy_cocoa_copy_container_info(const char *container_path,
+                                      char **identifier_out,
+                                      char **creator_out,
+                                      char **bundle_path_out,
+                                      char **error_out)
+{
+  static const char metadata_name[] =
+    "/.com.apple.containermanagerd.metadata.plist";
+  CFDictionaryRef info;
+  CFDictionaryRef parameters;
+  CFDictionaryRef profile_info;
+  CFDictionaryRef validation_info;
+  CFPropertyListRef property_list;
+  CFDataRef data;
+  CFURLRef url;
+  CFStringRef property_error;
+  char *bundle_path;
+  char *creator;
+  char *identifier;
+  char *metadata_path;
+  size_t container_length;
+  size_t metadata_length;
+  SInt32 resource_error;
+
+  if ((identifier_out == NULL) || (creator_out == NULL) ||
+      (bundle_path_out == NULL)) {
+    strappy_set_error(error_out, "Container info output is missing.");
+    return 0;
+  }
+  *identifier_out = NULL;
+  *creator_out = NULL;
+  *bundle_path_out = NULL;
+  if (!strappy_cocoa_string_has_value(container_path)) {
+    return 1;
+  }
+
+  container_length = strlen(container_path);
+  if (container_length > (((size_t)-1) - sizeof(metadata_name))) {
+    strappy_set_error(error_out, "Container metadata path is too large.");
+    return 0;
+  }
+  metadata_length = container_length + sizeof(metadata_name);
+  metadata_path = (char *)malloc(metadata_length);
+  if (metadata_path == NULL) {
+    strappy_set_error(error_out, "Could not allocate container metadata path.");
+    return 0;
+  }
+  snprintf(metadata_path,
+           metadata_length,
+           "%s%s",
+           container_path,
+           metadata_name);
+
+  url = CFURLCreateFromFileSystemRepresentation(
+    kCFAllocatorDefault,
+    (const UInt8 *)metadata_path,
+    (CFIndex)strlen(metadata_path),
+    0);
+  free(metadata_path);
+  if (url == NULL) {
+    return 1;
+  }
+  data = NULL;
+  resource_error = 0;
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+  if (!CFURLCreateDataAndPropertiesFromResource(kCFAllocatorDefault,
+                                                 url,
+                                                 &data,
+                                                 NULL,
+                                                 NULL,
+                                                 &resource_error)) {
+    CFRelease(url);
+    return 1;
+  }
+  property_error = NULL;
+  property_list = CFPropertyListCreateFromXMLData(kCFAllocatorDefault,
+                                                   data,
+                                                   kCFPropertyListImmutable,
+                                                   &property_error);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+  if (property_error != NULL) {
+    CFRelease(property_error);
+  }
+  CFRelease(data);
+  CFRelease(url);
+  if ((property_list == NULL) ||
+      (CFGetTypeID(property_list) != CFDictionaryGetTypeID())) {
+    if (property_list != NULL) {
+      CFRelease(property_list);
+    }
+    return 1;
+  }
+
+  info = (CFDictionaryRef)property_list;
+  identifier = strappy_cocoa_copy_optional_dictionary_string(
+    info,
+    CFSTR("MCMMetadataIdentifier"),
+    error_out);
+  if ((identifier == NULL) && (error_out != NULL) && (*error_out != NULL)) {
+    CFRelease(property_list);
+    return 0;
+  }
+  creator = strappy_cocoa_copy_optional_dictionary_string(
+    info,
+    CFSTR("MCMMetadataCreator"),
+    error_out);
+  if ((creator == NULL) && (error_out != NULL) && (*error_out != NULL)) {
+    free(identifier);
+    CFRelease(property_list);
+    return 0;
+  }
+
+  profile_info = (CFDictionaryRef)strappy_cocoa_dictionary_value(
+    info,
+    CFSTR("MCMMetadataInfo"));
+  validation_info = (CFDictionaryRef)strappy_cocoa_dictionary_value(
+    profile_info,
+    CFSTR("SandboxProfileDataValidationInfo"));
+  parameters = (CFDictionaryRef)strappy_cocoa_dictionary_value(
+    validation_info,
+    CFSTR("Parameters"));
+  bundle_path = strappy_cocoa_copy_optional_dictionary_string(
+    parameters,
+    CFSTR("application_bundle"),
+    error_out);
+  if ((bundle_path == NULL) && (error_out != NULL) && (*error_out != NULL)) {
+    free(identifier);
+    free(creator);
+    CFRelease(property_list);
+    return 0;
+  }
+
+  CFRelease(property_list);
+  *identifier_out = identifier;
+  *creator_out = creator;
+  *bundle_path_out = bundle_path;
+  return 1;
+}
+
 static char *strappy_cocoa_copy_base_iso8601_timestamp(
   long long unix_seconds,
   char **error_out)
@@ -1092,6 +1261,24 @@ int strappy_cocoa_copy_bundle_info(const char *bundle_path,
   *name_out = strappy_cocoa_copy_bundle_fallback_name(bundle_path, error_out);
   *bundle_identifier_out = NULL;
   return (*name_out != NULL) ? 1 : 0;
+}
+
+int strappy_cocoa_copy_container_info(const char *container_path,
+                                      char **identifier_out,
+                                      char **creator_out,
+                                      char **bundle_path_out,
+                                      char **error_out)
+{
+  (void)container_path;
+  (void)error_out;
+  if ((identifier_out == NULL) || (creator_out == NULL) ||
+      (bundle_path_out == NULL)) {
+    return 0;
+  }
+  *identifier_out = NULL;
+  *creator_out = NULL;
+  *bundle_path_out = NULL;
+  return 1;
 }
 
 static char *strappy_cocoa_copy_base_iso8601_timestamp(

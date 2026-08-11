@@ -2,14 +2,13 @@
 
 @interface StrappyPreferencesModelWhitelistView : StrappyPreferencesWhitelistView {
  @private
-  NSPopUpButton       *defaultModelPopUpButton_;
+  NSButton            *fetchButton_;
 }
 
 - (id)initWithFrame:(NSRect)frame
              target:(id)target
          dataSource:(id)dataSource
            delegate:(id)delegate;
-- (NSPopUpButton *)defaultModelPopUpButton;
 - (NSButton *)fetchButton;
 
 @end

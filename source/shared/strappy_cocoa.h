@@ -22,6 +22,11 @@ int strappy_cocoa_copy_bundle_info(const char *bundle_path,
                                    char **name_out,
                                    char **bundle_identifier_out,
                                    char **error_out);
+int strappy_cocoa_copy_container_info(const char *container_path,
+                                      char **identifier_out,
+                                      char **creator_out,
+                                      char **bundle_path_out,
+                                      char **error_out);
 int strappy_cocoa_parse_timestamp_unit(const char *value,
                                        strappy_cocoa_timestamp_unit *unit_out,
                                        char **error_out);

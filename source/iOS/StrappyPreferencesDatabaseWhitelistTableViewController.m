@@ -321,14 +321,6 @@ static NSComparisonResult StrappyCompareStrings(NSString *left, NSString *right)
   return [left caseInsensitiveCompare:right];
 }
 
-static NSComparisonResult StrappyCompareBooleans(BOOL left, BOOL right)
-{
-  if (left == right) {
-    return NSOrderedSame;
-  }
-  return left ? NSOrderedAscending : NSOrderedDescending;
-}
-
 static NSComparisonResult StrappyCompareLongLong(long long left,
                                                   long long right)
 {
@@ -377,11 +369,6 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
   }
   result = StrappyCompareStrings(StrappyDatabaseAppGroupKeyForRow(leftRow),
                                  StrappyDatabaseAppGroupKeyForRow(rightRow));
-  if (result != NSOrderedSame) {
-    return result;
-  }
-  result = StrappyCompareBooleans(StrappyDatabaseRowIsAllowed(leftRow),
-                                  StrappyDatabaseRowIsAllowed(rightRow));
   if (result != NSOrderedSame) {
     return result;
   }

@@ -29,6 +29,7 @@ WEBVIEW_HARNESS := $(BUILD_DIR)/webview_harness
 WEBVIEW_PAGE_FIXTURE := $(BUILD_DIR)/webview-page.html
 RESPONSES_HARNESS := $(BUILD_DIR)/responses_harness
 PROMPT_GENERATOR_HARNESS := $(BUILD_DIR)/prompt_generator_harness
+SCANNER_PROFILE_HARNESS := $(BUILD_DIR)/scanner_profile_harness
 PROMPT_OUTPUT_DIR ?= $(BUILD_DIR)/system-prompts
 
 DATABASE_QUERY_HARNESS_SOURCES = \
@@ -111,29 +112,46 @@ PROMPT_GENERATOR_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_db.c \
 	$(CJSON_DIR)/cJSON.c
 
-.PHONY: test prompts review-prompts clean
+SCANNER_PROFILE_HARNESS_SOURCES = \
+	scanner_profile_harness.c \
+	$(SHARED_DIR)/strappy_file_scanner.c \
+	$(SHARED_DIR)/strappy_cocoa.c \
+	$(SHARED_DIR)/strappy_core.c
 
-test: $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS)
+ifeq ($(shell uname -s),Darwin)
+CPPFLAGS += -D_DARWIN_C_SOURCE
+PLATFORM_LIBS := -framework CoreFoundation
+endif
+
+.PHONY: test scanner-test prompts review-prompts clean
+
+test: $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS)
 	@echo "--- Running Linux shared-core test suite ---"
-	@echo " [1/6] RUN  database_query_harness"
+	@echo " [1/7] RUN  scanner_profile_harness"
+	./$(SCANNER_PROFILE_HARNESS)
+	@echo " [1/7] PASS scanner_profile_harness"
+	@echo " [2/7] RUN  database_query_harness"
 	./$(DATABASE_QUERY_HARNESS)
-	@echo " [1/6] PASS database_query_harness"
-	@echo " [2/6] RUN  bash_harness"
+	@echo " [2/7] PASS database_query_harness"
+	@echo " [3/7] RUN  bash_harness"
 	./$(BASH_HARNESS)
-	@echo " [2/6] PASS bash_harness"
-	@echo " [3/6] RUN  webview_harness"
+	@echo " [3/7] PASS bash_harness"
+	@echo " [4/7] RUN  webview_harness"
 	STRAPPY_WEBVIEW_PAGE_OUTPUT=$(WEBVIEW_PAGE_FIXTURE) ./$(WEBVIEW_HARNESS)
-	@echo " [3/6] PASS webview_harness"
-	@echo " [4/6] RUN  webview_behavior_harness.js"
+	@echo " [4/7] PASS webview_harness"
+	@echo " [5/7] RUN  webview_behavior_harness.js"
 	$(NODE) webview_behavior_harness.js $(WEBVIEW_PAGE_FIXTURE)
-	@echo " [4/6] PASS webview_behavior_harness.js"
-	@echo " [5/6] RUN  responses_harness"
+	@echo " [5/7] PASS webview_behavior_harness.js"
+	@echo " [6/7] RUN  responses_harness"
 	./$(RESPONSES_HARNESS)
-	@echo " [5/6] PASS responses_harness"
-	@echo " [6/6] RUN  prompt_generator_harness"
+	@echo " [6/7] PASS responses_harness"
+	@echo " [7/7] RUN  prompt_generator_harness"
 	./$(PROMPT_GENERATOR_HARNESS) $(SHARED_DIR)/Resources --check
-	@echo " [6/6] PASS prompt_generator_harness"
-	@echo "--- PASS: all 6 Linux shared-core checks completed ---"
+	@echo " [7/7] PASS prompt_generator_harness"
+	@echo "--- PASS: all 7 Linux shared-core checks completed ---"
+
+scanner-test: $(SCANNER_PROFILE_HARNESS)
+	./$(SCANNER_PROFILE_HARNESS)
 
 prompts: $(PROMPT_GENERATOR_HARNESS)
 	mkdir -p $(PROMPT_OUTPUT_DIR)
@@ -149,19 +167,22 @@ $(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
 	python3 $(FONTAWESOME_GENERATOR) --font-dir "$(FONTAWESOME_FONT_DIR)" --webview-map "$(FONTAWESOME_WEBVIEW_MAP)"
 
 $(DATABASE_QUERY_HARNESS): $(DATABASE_QUERY_HARNESS_SOURCES) $(FONTAWESOME_GENERATED) | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(DATABASE_QUERY_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS) -lcurl
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(DATABASE_QUERY_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS) $(PLATFORM_LIBS) -lcurl
 
 $(BASH_HARNESS): $(BASH_HARNESS_SOURCES) | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(BASH_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(BASH_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS) $(PLATFORM_LIBS)
 
 $(WEBVIEW_HARNESS): $(WEBVIEW_HARNESS_SOURCES) $(FONTAWESOME_GENERATED) | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(WEBVIEW_HARNESS_SOURCES)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(WEBVIEW_HARNESS_SOURCES) $(PLATFORM_LIBS)
 
 $(RESPONSES_HARNESS): $(RESPONSES_HARNESS_SOURCES) $(FONTAWESOME_GENERATED) | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(RESPONSES_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS) -lcurl
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(RESPONSES_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS) $(PLATFORM_LIBS) -lcurl
 
 $(PROMPT_GENERATOR_HARNESS): $(PROMPT_GENERATOR_HARNESS_SOURCES) | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(PROMPT_GENERATOR_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS) -lcurl
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(PROMPT_GENERATOR_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS) $(PLATFORM_LIBS) -lcurl
+
+$(SCANNER_PROFILE_HARNESS): $(SCANNER_PROFILE_HARNESS_SOURCES) | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(SCANNER_PROFILE_HARNESS_SOURCES) $(SQLITE_LIBS) $(PLATFORM_LIBS)
 
 clean:
 	rm -rf $(BUILD_DIR) database_query_harness webview_harness responses_harness

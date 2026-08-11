@@ -1289,7 +1289,7 @@ static int strappy_bash_supervise(const char *shell_path,
       FD_SET(output_pipe[0], &read_fds);
     }
     timeout.tv_sec = (long)(wait_ms / 1000LL);
-    timeout.tv_usec = (long)((wait_ms % 1000LL) * 1000LL);
+    timeout.tv_usec = (suseconds_t)((wait_ms % 1000LL) * 1000LL);
     selected = select(output_eof ? 0 : output_pipe[0] + 1,
                       output_eof ? NULL : &read_fds,
                       NULL,

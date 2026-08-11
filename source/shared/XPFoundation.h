@@ -9,6 +9,19 @@
   #define XPUInteger NSUInteger
 #endif
 
+typedef enum XPPlatformFamily {
+  XPPlatformFamilyGeneric = 0,
+  XPPlatformFamilyIOS = 1,
+  XPPlatformFamilyMacOS = 2
+} XPPlatformFamily;
+
+@interface NSProcessInfo (XPFoundation)
+
+/* Keep build-target platform checks inside the compatibility layer. */
+- (XPPlatformFamily)XP_platformFamily;
+
+@end
+
 @interface NSThread (XPFoundation)
 
 /* +isMainThread and +mainThread were added after Tiger. Prefer the modern

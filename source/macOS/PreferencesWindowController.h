@@ -16,7 +16,6 @@
   NSSecureTextField   *apiTokenField_;
   NSTextField         *apiTokenStatusLabel_;
   NSSearchField       *modelSearchField_;
-  NSPopUpButton       *defaultModelPopUpButton_;
   NSTableView         *modelTableView_;
   StrappyPreferencesModelWhitelistView *modelWhitelistView_;
   NSButton            *fetchModelsButton_;
@@ -30,7 +29,6 @@
   StrappyPreferencesDatabaseStudyView *databaseStudyPaneView_;
   NSTextView          *databaseStudyTextView_;
   NSButton            *scanButton_;
-  NSButton            *fullScanButton_;
   NSButton            *showHiddenDatabasesButton_;
   NSProgressIndicator *scanProgressIndicator_;
   NSTextField         *databaseStatusLabel_;
@@ -44,7 +42,6 @@
 
 - (id)init;
 - (void)scanDatabases:(id)sender;
-- (void)fullScanDatabases:(id)sender;
 - (void)refreshModels:(id)sender;
 
 @end

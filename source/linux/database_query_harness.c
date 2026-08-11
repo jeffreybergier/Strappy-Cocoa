@@ -507,6 +507,12 @@ static int harness_run_fresh_catalog_schema_tests(
            "working_directory, updated_at_ms "
            "FROM default_session_options LIMIT 0;",
            "default session options columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT database_id, decision, hidden, auto_hidden, "
+           "hidden_override, hidden_reason, updated_at_ms "
+           "FROM database_permissions LIMIT 0;",
+           "database permission classification columns") &&
          harness_expect_catalog_integer(
            context->catalog_path,
            "SELECT COUNT(*) FROM pragma_table_info('session_settings') "
@@ -718,6 +724,12 @@ static int harness_run_session_settings_upgrade_test(
     "turn_id INTEGER NOT NULL,"
     "round_index INTEGER NOT NULL"
     ");"
+    "CREATE TABLE database_permissions ("
+    "database_id INTEGER PRIMARY KEY,"
+    "decision TEXT NOT NULL DEFAULT 'unknown',"
+    "hidden INTEGER NOT NULL DEFAULT 0,"
+    "updated_at_ms INTEGER NOT NULL"
+    ");"
     "INSERT INTO sessions "
     "(id, name, created_at_ms, updated_at_ms) VALUES (1, '', 1, 1);"
     "INSERT INTO sessions "
@@ -728,6 +740,9 @@ static int harness_run_session_settings_upgrade_test(
     "INSERT INTO session_settings "
     "(session_id, web_provider, bash_enabled, updated_at_ms) "
      "VALUES (2, 'none', 0, 1);"
+    "INSERT INTO database_permissions "
+    "(database_id, decision, hidden, updated_at_ms) "
+    "VALUES (99, 'unknown', 1, 1);"
     "PRAGMA user_version = 1;";
   char path[1200];
   char *error;
@@ -795,6 +810,19 @@ static int harness_run_session_settings_upgrade_test(
       "WHERE name='parallel_tool_calls' AND dflt_value='1';",
       1LL,
       "upgraded model request parallel-tool column") &&
+    harness_expect_catalog_integer(
+      path,
+      "SELECT COUNT(*) FROM pragma_table_info('database_permissions') "
+      "WHERE name IN ('auto_hidden','hidden_override','hidden_reason');",
+      3LL,
+      "upgraded hidden classification columns") &&
+    harness_expect_catalog_integer(
+      path,
+      "SELECT COUNT(*) FROM database_permissions "
+      "WHERE database_id=99 AND hidden=1 AND auto_hidden=1 "
+      "AND hidden_override IS NULL AND hidden_reason IS NULL;",
+      1LL,
+      "preserved old hidden classification") &&
     harness_expect_catalog_integer(
       path,
       "SELECT limit_to_one_tool FROM session_settings WHERE session_id=1;",
@@ -4334,6 +4362,18 @@ static int harness_run_discovered_database_replacement_tests(
     harness_unlink_sqlite_files(catalog_path);
     return 0;
   }
+  if (!strappy_db_update_discovered_database_hidden(catalog_path,
+                                                    first_catalog_id,
+                                                    1,
+                                                    &error)) {
+    fprintf(stderr,
+            "Could not set replacement hidden override: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    free(first_database_id);
+    harness_unlink_sqlite_files(catalog_path);
+    return 0;
+  }
 
   if (!strappy_db_replace_discovered_databases_for_scan_root(catalog_path,
                                                              &inputs[1],
@@ -4785,6 +4825,122 @@ static int harness_run_file_scanner_batch_catalog_tests(
   harness_unlink_sqlite_files(stale_path);
   rmdir(documents_dir);
   rmdir(scan_root);
+  return ok;
+}
+
+static int harness_run_catalog_reclassification_tests(
+  const harness_context *context)
+{
+  char catalog_path[1200];
+  char database_path[1200];
+  strappy_discovered_database_input input;
+  strappy_discovered_database_record_list list;
+  char *error;
+  long long catalog_id;
+  int ok;
+
+  if ((context == NULL) ||
+      !harness_join_path(catalog_path,
+                         sizeof(catalog_path),
+                         context->temp_dir,
+                         "reclassification-catalog.sqlite") ||
+      !harness_join_path(database_path,
+                         sizeof(database_path),
+                         context->temp_dir,
+                         "reclassification.sqlite")) {
+    return 0;
+  }
+  harness_unlink_sqlite_files(catalog_path);
+  memset(&input, 0, sizeof(input));
+  input.path = database_path;
+  input.size = 100;
+  input.modified_at = 1;
+  input.device = 1ULL;
+  input.inode = 2ULL;
+  input.is_valid_sqlite = 1;
+  input.scan_root = context->temp_dir;
+  input.app_group_key = "bundle:com.example.Test";
+  input.app_name = "Example Test";
+  input.app_bundle_id = "com.example.Test";
+  input.app_bundle_path = "/Applications/Example Test.app";
+  input.app_source = "test";
+  input.origin_kind = "application_support";
+  input.location_tail = "reclassification.sqlite";
+  input.hidden = 1;
+  input.hidden_reason = "cache_path";
+  error = NULL;
+  if (!strappy_db_replace_discovered_databases_for_scan_root(catalog_path,
+                                                             &input,
+                                                             1U,
+                                                             context->temp_dir,
+                                                             &error)) {
+    fprintf(stderr, "Could not save initial reclassification row: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    return 0;
+  }
+
+  strappy_discovered_database_record_list_init(&list);
+  if (!strappy_db_list_discovered_databases(catalog_path, &list, &error) ||
+      (list.count != 1U)) {
+    fprintf(stderr, "Could not read initial reclassification row.\n");
+    free(error);
+    strappy_discovered_database_record_list_destroy(&list);
+    return 0;
+  }
+  catalog_id = list.records[0].catalog_id;
+  ok = (list.records[0].app_bundle_id != NULL) &&
+    (strcmp(list.records[0].app_bundle_id, "com.example.Test") == 0) &&
+    (list.records[0].hidden == 1) && (list.records[0].auto_hidden == 1) &&
+    !list.records[0].has_hidden_override &&
+    (list.records[0].hidden_reason != NULL) &&
+    (strcmp(list.records[0].hidden_reason, "cache_path") == 0);
+  strappy_discovered_database_record_list_destroy(&list);
+  if (!ok || !strappy_db_update_discovered_database_hidden(catalog_path,
+                                                           catalog_id,
+                                                           0,
+                                                           &error)) {
+    fprintf(stderr, "Could not establish hidden override for reclassification.\n");
+    free(error);
+    return 0;
+  }
+
+  input.app_group_key = NULL;
+  input.app_name = NULL;
+  input.app_bundle_id = NULL;
+  input.app_bundle_path = NULL;
+  input.app_source = NULL;
+  input.origin_kind = "other";
+  if (!strappy_db_replace_discovered_databases_for_scan_root(catalog_path,
+                                                             &input,
+                                                             1U,
+                                                             context->temp_dir,
+                                                             &error)) {
+    fprintf(stderr, "Could not reclassify catalog row: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    return 0;
+  }
+  strappy_discovered_database_record_list_init(&list);
+  if (!strappy_db_list_discovered_databases(catalog_path, &list, &error) ||
+      (list.count != 1U)) {
+    fprintf(stderr, "Could not read reclassified catalog row.\n");
+    free(error);
+    strappy_discovered_database_record_list_destroy(&list);
+    return 0;
+  }
+  ok = (list.records[0].app_group_key == NULL) &&
+    (list.records[0].app_bundle_id == NULL) &&
+    (list.records[0].hidden == 0) && (list.records[0].auto_hidden == 1) &&
+    list.records[0].has_hidden_override &&
+    (list.records[0].hidden_override == 0);
+  strappy_discovered_database_record_list_destroy(&list);
+  ok = ok && harness_expect_catalog_integer(
+    catalog_path,
+    "SELECT COUNT(*) FROM applications;",
+    0LL,
+    "orphan application count");
+  harness_unlink_sqlite_files(catalog_path);
   return ok;
 }
 
@@ -11635,6 +11791,7 @@ int main(void)
        harness_run_fresh_catalog_schema_tests(&context) &&
        harness_run_session_settings_upgrade_test(&context) &&
        harness_run_discovered_database_replacement_tests(&context) &&
+       harness_run_catalog_reclassification_tests(&context) &&
        harness_run_file_scanner_filename_filter_tests(&context) &&
        harness_run_file_scanner_batch_catalog_tests(&context) &&
        harness_run_file_scanner_hidden_tests(&context) &&

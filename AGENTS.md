@@ -17,8 +17,8 @@ analysis logs unless the user explicitly asks for them.
 Linux-only shared-core harnesses live under `source/linux`. They are fast
 developer smoke tests for portable C code and do not replace the required
 Altivec iOS/macOS clean builds. The current harness targets are
-`database_query_harness`, `bash_harness`, `webview_harness`,
-`responses_harness` and `prompt_generator_harness`, run through
+`database_query_harness`, `scanner_profile_harness`, `bash_harness`,
+`webview_harness`, `responses_harness` and `prompt_generator_harness`, run through
 `make -C source/linux clean test`.
 Use `make -C source/linux prompts` to write all assistant-set prompts with web
 search set to none, auto, native, Exa, and Parallel under

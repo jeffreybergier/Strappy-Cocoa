@@ -620,6 +620,10 @@ void strappy_discovered_database_record_init(strappy_discovered_database_record 
   record->origin_kind = NULL;
   record->location_tail = NULL;
   record->hidden = 0;
+  record->auto_hidden = 0;
+  record->has_hidden_override = 0;
+  record->hidden_override = 0;
+  record->hidden_reason = NULL;
   record->first_seen_at = NULL;
   record->last_seen_at = NULL;
   record->last_scanned_at = NULL;
@@ -645,6 +649,7 @@ void strappy_discovered_database_record_destroy(strappy_discovered_database_reco
   free(record->app_source);
   free(record->origin_kind);
   free(record->location_tail);
+  free(record->hidden_reason);
   free(record->first_seen_at);
   free(record->last_seen_at);
   free(record->last_scanned_at);
@@ -1636,6 +1641,81 @@ static int strappy_db_ensure_model_requests_parallel_tool_calls_column(
     error_out);
 }
 
+static int strappy_db_ensure_database_permission_classification_columns(
+  sqlite3 *db,
+  char **error_out)
+{
+  static const char *const column_names[] = {
+    "auto_hidden", "hidden_override", "hidden_reason"
+  };
+  static const char *const alter_sql[] = {
+    ("ALTER TABLE database_permissions ADD COLUMN "
+     "auto_hidden INTEGER NOT NULL DEFAULT 0 "
+     "CHECK(auto_hidden IN (0,1));"),
+    ("ALTER TABLE database_permissions ADD COLUMN "
+     "hidden_override INTEGER CHECK(hidden_override IN (0,1));"),
+    "ALTER TABLE database_permissions ADD COLUMN hidden_reason TEXT;"
+  };
+  size_t column_index;
+
+  for (column_index = 0U;
+       column_index < (sizeof(column_names) / sizeof(column_names[0]));
+       column_index++) {
+    sqlite3_stmt *stmt;
+    int found;
+    int rc;
+
+    stmt = NULL;
+    found = 0;
+    rc = sqlite3_prepare_v2(db,
+                            "PRAGMA table_info(database_permissions);",
+                            -1,
+                            &stmt,
+                            NULL);
+    if (rc != SQLITE_OK) {
+      strappy_set_formatted_error(
+        error_out,
+        "Could not inspect database permission schema: %s",
+        sqlite3_errmsg(db));
+      return 0;
+    }
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+      const unsigned char *name;
+
+      name = sqlite3_column_text(stmt, 1);
+      if ((name != NULL) &&
+          (strcmp((const char *)name, column_names[column_index]) == 0)) {
+        found = 1;
+        break;
+      }
+    }
+    if ((rc != SQLITE_ROW) && (rc != SQLITE_DONE)) {
+      strappy_set_formatted_error(
+        error_out,
+        "Could not inspect database permission schema: %s",
+        sqlite3_errmsg(db));
+      sqlite3_finalize(stmt);
+      return 0;
+    }
+    sqlite3_finalize(stmt);
+    if (!found &&
+        !strappy_db_exec(db,
+                         alter_sql[column_index],
+                         "Could not add database hidden classification",
+                         error_out)) {
+      return 0;
+    }
+    if (!found && (column_index == 0U) &&
+        !strappy_db_exec(db,
+                         "UPDATE database_permissions SET auto_hidden = hidden;",
+                         "Could not preserve existing hidden classification",
+                         error_out)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
 {
   static const char schema_models_sql[] =
@@ -2192,6 +2272,9 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "decision TEXT NOT NULL DEFAULT 'unknown' "
       "CHECK(decision IN ('unknown','allowed','denied')),"
     "hidden INTEGER NOT NULL DEFAULT 0 CHECK(hidden IN (0,1)),"
+    "auto_hidden INTEGER NOT NULL DEFAULT 0 CHECK(auto_hidden IN (0,1)),"
+    "hidden_override INTEGER CHECK(hidden_override IN (0,1)),"
+    "hidden_reason TEXT,"
     "updated_at_ms INTEGER NOT NULL,"
     "FOREIGN KEY(database_id) REFERENCES databases(id) ON DELETE CASCADE"
     ");"
@@ -2277,6 +2360,11 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     return 0;
   }
   if (!strappy_db_ensure_model_requests_parallel_tool_calls_column(
+        db,
+        error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_database_permission_classification_columns(
         db,
         error_out)) {
     return 0;
@@ -3755,11 +3843,15 @@ static int strappy_db_assign_discovered_database_from_statement(
   char *app_source;
   char *origin_kind;
   char *location_tail;
+  char *hidden_reason;
   char *first_seen_at;
   char *last_seen_at;
   char *last_scanned_at;
   long long catalog_id;
   int hidden;
+  int auto_hidden;
+  int has_hidden_override;
+  int hidden_override;
 
   if ((record == NULL) || (stmt == NULL)) {
     strappy_set_error(error_out, "Discovered database row request is incomplete.");
@@ -3784,18 +3876,22 @@ static int strappy_db_assign_discovered_database_from_statement(
   scan_status = strappy_db_column_string(stmt, 9);
   user_decision = strappy_db_column_string(stmt, 10);
   hidden = sqlite3_column_int(stmt, 11) ? 1 : 0;
-  scan_root = strappy_db_column_string(stmt, 12);
-  app_group_key = strappy_db_column_string(stmt, 13);
-  app_name = strappy_db_column_string(stmt, 14);
-  app_bundle_id = strappy_db_column_string(stmt, 15);
-  app_container_path = strappy_db_column_string(stmt, 16);
-  app_bundle_path = strappy_db_column_string(stmt, 17);
-  app_source = strappy_db_column_string(stmt, 18);
-  origin_kind = strappy_db_column_string(stmt, 19);
-  location_tail = strappy_db_column_string(stmt, 20);
-  first_seen_at = strappy_db_column_string(stmt, 21);
-  last_seen_at = strappy_db_column_string(stmt, 22);
-  last_scanned_at = strappy_db_column_string(stmt, 23);
+  auto_hidden = sqlite3_column_int(stmt, 12) ? 1 : 0;
+  has_hidden_override = (sqlite3_column_type(stmt, 13) != SQLITE_NULL) ? 1 : 0;
+  hidden_override = has_hidden_override && sqlite3_column_int(stmt, 13) ? 1 : 0;
+  hidden_reason = strappy_db_column_string(stmt, 14);
+  scan_root = strappy_db_column_string(stmt, 15);
+  app_group_key = strappy_db_column_string(stmt, 16);
+  app_name = strappy_db_column_string(stmt, 17);
+  app_bundle_id = strappy_db_column_string(stmt, 18);
+  app_container_path = strappy_db_column_string(stmt, 19);
+  app_bundle_path = strappy_db_column_string(stmt, 20);
+  app_source = strappy_db_column_string(stmt, 21);
+  origin_kind = strappy_db_column_string(stmt, 22);
+  location_tail = strappy_db_column_string(stmt, 23);
+  first_seen_at = strappy_db_column_string(stmt, 24);
+  last_seen_at = strappy_db_column_string(stmt, 25);
+  last_scanned_at = strappy_db_column_string(stmt, 26);
 
   if ((assistant_database_id == NULL) || (path == NULL) ||
       (scan_status == NULL) || (user_decision == NULL) ||
@@ -3815,6 +3911,7 @@ static int strappy_db_assign_discovered_database_from_statement(
     free(app_source);
     free(origin_kind);
     free(location_tail);
+    free(hidden_reason);
     free(first_seen_at);
     free(last_seen_at);
     free(last_scanned_at);
@@ -3837,6 +3934,10 @@ static int strappy_db_assign_discovered_database_from_statement(
   record->origin_kind = origin_kind;
   record->location_tail = location_tail;
   record->hidden = hidden;
+  record->auto_hidden = auto_hidden;
+  record->has_hidden_override = has_hidden_override;
+  record->hidden_override = hidden_override;
+  record->hidden_reason = hidden_reason;
   record->first_seen_at = first_seen_at;
   record->last_seen_at = last_seen_at;
   record->last_scanned_at = last_scanned_at;
@@ -5956,17 +6057,22 @@ static int strappy_db_catalog_save_one(sqlite3 *db,
     "(stable_key, application_id, display_name, origin_kind, location_tail, "
      "first_seen_at_ms, last_seen_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?);";
   static const char *update_database_sql =
-    "UPDATE databases SET application_id = COALESCE(?, application_id), "
-    "display_name = COALESCE(?, display_name), origin_kind = ?, "
-    "location_tail = COALESCE(?, location_tail), last_seen_at_ms = ? "
+    "UPDATE databases SET application_id = ?, display_name = ?, "
+    "origin_kind = ?, location_tail = ?, last_seen_at_ms = ? "
     "WHERE id = ?;";
   static const char *assistant_id_sql =
     "UPDATE databases SET assistant_database_id = ? "
     "WHERE id = ? AND assistant_database_id IS NULL;";
   static const char *permission_sql =
     "INSERT OR IGNORE INTO database_permissions "
-    "(database_id, decision, hidden, updated_at_ms) "
-    "VALUES (?, 'unknown', ?, ?);";
+    "(database_id, decision, hidden, auto_hidden, hidden_override, "
+     "hidden_reason, updated_at_ms) "
+    "VALUES (?, 'unknown', ?, ?, NULL, ?, ?);";
+  static const char *update_permission_sql =
+    "UPDATE database_permissions SET auto_hidden = ?, hidden_reason = ?, "
+    "hidden = CASE WHEN hidden_override IS NULL THEN ? "
+                   "ELSE hidden_override END "
+    "WHERE database_id = ?;";
   static const char *insert_location_sql =
     "INSERT OR IGNORE INTO database_locations "
     "(database_id, path, scan_root_id, last_scan_run_id, device, inode, "
@@ -6159,10 +6265,39 @@ static int strappy_db_catalog_save_one(sqlite3 *db,
   if ((rc != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)database_id) != SQLITE_OK) ||
       (sqlite3_bind_int(stmt, 2, record->hidden ? 1 : 0) != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)now_ms) != SQLITE_OK) ||
+      (sqlite3_bind_int(stmt, 3, record->hidden ? 1 : 0) != SQLITE_OK) ||
+      !strappy_db_bind_optional_text(db,
+                                     stmt,
+                                     4,
+                                     record->hidden_reason,
+                                     "Could not bind hidden reason",
+                                     error_out) ||
+      (sqlite3_bind_int64(stmt, 5, (sqlite3_int64)now_ms) != SQLITE_OK) ||
       (sqlite3_step(stmt) != SQLITE_DONE)) {
     strappy_set_formatted_error(error_out,
                                 "Could not save database permission: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    free(stable_key);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, update_permission_sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int(stmt, 1, record->hidden ? 1 : 0) != SQLITE_OK) ||
+      !strappy_db_bind_optional_text(db,
+                                     stmt,
+                                     2,
+                                     record->hidden_reason,
+                                     "Could not bind hidden reason update",
+                                     error_out) ||
+      (sqlite3_bind_int(stmt, 3, record->hidden ? 1 : 0) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)database_id) != SQLITE_OK) ||
+      (sqlite3_step(stmt) != SQLITE_DONE)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not update database hidden classification: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     free(stable_key);
@@ -6507,6 +6642,15 @@ static int strappy_db_catalog_save(sqlite3 *db,
                                         error_out);
   }
   if (ok) {
+    ok = strappy_db_exec(
+      db,
+      "DELETE FROM applications WHERE NOT EXISTS ("
+        "SELECT 1 FROM databases WHERE databases.application_id = "
+        "applications.id);",
+      "Could not remove unreferenced applications",
+      error_out);
+  }
+  if (ok) {
     ok = strappy_db_exec(db, "COMMIT;", "Could not commit catalog write",
                          error_out);
   }
@@ -6572,7 +6716,8 @@ static int strappy_db_semantic_update_database_permission(
     "WHERE l.database_id = database_permissions.database_id "
     "AND l.active = 1 AND l.validation_state = 'valid'));";
   static const char *hidden_sql =
-    "UPDATE database_permissions SET hidden = ?, updated_at_ms = ? "
+    "UPDATE database_permissions SET hidden = ?, hidden_override = ?, "
+    "updated_at_ms = ? "
     "WHERE database_id = ?;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
@@ -6609,8 +6754,9 @@ static int strappy_db_semantic_update_database_permission(
   }
   if (update_hidden) {
     ok = (sqlite3_bind_int(stmt, 1, hidden ? 1 : 0) == SQLITE_OK) &&
-         (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)now_ms) == SQLITE_OK) &&
-         (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)database_id) == SQLITE_OK);
+         (sqlite3_bind_int(stmt, 2, hidden ? 1 : 0) == SQLITE_OK) &&
+         (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)now_ms) == SQLITE_OK) &&
+         (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)database_id) == SQLITE_OK);
   } else {
     ok = (sqlite3_bind_text(stmt, 1, decision, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
          (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)now_ms) == SQLITE_OK) &&
@@ -7123,6 +7269,7 @@ int strappy_db_list_discovered_databases(
     "l.modified_at_s, l.device, l.inode, "
     "CASE WHEN l.validation_state = 'valid' THEN 1 ELSE 0 END, "
     "l.validation_error, l.validation_state, p.decision, p.hidden, "
+    "p.auto_hidden, p.hidden_override, p.hidden_reason, "
     "r.path, a.stable_key, COALESCE(a.name, d.display_name), "
     "a.bundle_id, a.container_path, "
     "a.bundle_path, a.source, d.origin_kind, d.location_tail, "

@@ -246,36 +246,71 @@ static int strappy_file_scanner_is_apple_bundle_identifier(
     1 : 0;
 }
 
-static int strappy_file_scanner_database_should_be_hidden(
+static const char *strappy_file_scanner_database_hidden_reason(
   const char *path,
-  const char *app_bundle_id)
+  const char *app_bundle_id,
+  strappy_file_scanner_platform_profile platform_profile)
 {
   const char *name;
 
   if ((path == NULL) || (path[0] == '\0')) {
-    return 0;
+    return NULL;
   }
 
   name = strappy_file_scanner_basename(path);
-  if (strappy_file_scanner_case_insensitive_contains(path, ".localstorage")) {
-    return 1;
+  if ((platform_profile != STRAPPY_FILE_SCANNER_PLATFORM_MACOS) &&
+      strappy_file_scanner_case_insensitive_contains(path, ".localstorage")) {
+    return "local_storage";
+  }
+  if ((platform_profile == STRAPPY_FILE_SCANNER_PLATFORM_MACOS) &&
+      strappy_file_scanner_case_insensitive_contains(
+        path,
+        "/Library/Application Support/Strappy/strappy.sqlite")) {
+    return "strappy_catalog";
+  }
+  if ((platform_profile == STRAPPY_FILE_SCANNER_PLATFORM_MACOS) &&
+      strappy_file_scanner_case_insensitive_contains(path,
+                                                     "/HTTPStorages/")) {
+    return "http_storage";
+  }
+  if ((platform_profile == STRAPPY_FILE_SCANNER_PLATFORM_MACOS) &&
+      (strappy_file_scanner_case_insensitive_equal(name, "observations.db") ||
+       strappy_file_scanner_case_insensitive_equal(name, "pcm.db")) &&
+      strappy_file_scanner_case_insensitive_contains(path, "/WebKit/")) {
+    return "webkit_tracking";
+  }
+  if ((platform_profile == STRAPPY_FILE_SCANNER_PLATFORM_MACOS) &&
+      (strappy_file_scanner_case_insensitive_contains(path, "/.tipkit/") ||
+       strappy_file_scanner_case_insensitive_contains(path, "/TipKit/"))) {
+    return "tipkit";
   }
   if (strappy_file_scanner_case_insensitive_equal(name, "MapTiles.sqlitedb") ||
       strappy_file_scanner_case_insensitive_equal(name, "SafeBrowsing.db")) {
-    return 1;
+    return "system_database";
   }
   if (strappy_file_scanner_case_insensitive_contains(name, "cache")) {
-    return 1;
+    return "cache_filename";
   }
   if (strappy_file_scanner_case_insensitive_contains(path, "/Library/Caches/")) {
-    return 1;
+    return "cache_path";
   }
   if (strappy_file_scanner_is_apple_bundle_identifier(app_bundle_id) &&
       strappy_file_scanner_is_index_database_name(name)) {
-    return 1;
+    return "apple_index";
   }
 
-  return 0;
+  return NULL;
+}
+
+static int strappy_file_scanner_database_should_be_hidden(
+  const char *path,
+  const char *app_bundle_id,
+  strappy_file_scanner_platform_profile platform_profile)
+{
+  return (strappy_file_scanner_database_hidden_reason(path,
+                                                       app_bundle_id,
+                                                       platform_profile) !=
+          NULL) ? 1 : 0;
 }
 
 static char *strappy_file_scanner_duplicate_range(const char *start,
@@ -309,6 +344,7 @@ typedef struct strappy_file_scanner_app_info {
 typedef struct strappy_file_scanner_metadata_context {
   strappy_file_scanner_app_info *apps;
   size_t app_count;
+  const strappy_file_scanner_options *options;
 } strappy_file_scanner_metadata_context;
 
 static void strappy_file_scanner_metadata_context_init(
@@ -319,6 +355,7 @@ static void strappy_file_scanner_metadata_context_init(
   }
   context->apps = NULL;
   context->app_count = 0U;
+  context->options = NULL;
 }
 
 static void strappy_file_scanner_metadata_context_destroy(
@@ -454,6 +491,73 @@ strappy_file_scanner_find_app_by_bundle_identifier(
   return NULL;
 }
 
+static const strappy_file_scanner_app_info *
+strappy_file_scanner_find_app_by_name(
+  const strappy_file_scanner_metadata_context *context,
+  const char *name)
+{
+  size_t index;
+
+  if ((context == NULL) || (name == NULL)) {
+    return NULL;
+  }
+  for (index = 0U; index < context->app_count; index++) {
+    if ((context->apps[index].name != NULL) &&
+        strappy_file_scanner_case_insensitive_equal(context->apps[index].name,
+                                                    name)) {
+      return &context->apps[index];
+    }
+  }
+  return NULL;
+}
+
+static int strappy_file_scanner_copy_bundle_info(
+  const strappy_file_scanner_metadata_context *context,
+  const char *bundle_path,
+  char **name_out,
+  char **bundle_identifier_out,
+  char **error_out)
+{
+  if ((context != NULL) && (context->options != NULL) &&
+      (context->options->bundle_info_callback != NULL)) {
+    return context->options->bundle_info_callback(
+      bundle_path,
+      name_out,
+      bundle_identifier_out,
+      context->options->metadata_user_data,
+      error_out);
+  }
+  return strappy_cocoa_copy_bundle_info(bundle_path,
+                                        name_out,
+                                        bundle_identifier_out,
+                                        error_out);
+}
+
+static int strappy_file_scanner_copy_container_info(
+  const strappy_file_scanner_metadata_context *context,
+  const char *container_path,
+  char **identifier_out,
+  char **creator_out,
+  char **bundle_path_out,
+  char **error_out)
+{
+  if ((context != NULL) && (context->options != NULL) &&
+      (context->options->container_info_callback != NULL)) {
+    return context->options->container_info_callback(
+      container_path,
+      identifier_out,
+      creator_out,
+      bundle_path_out,
+      context->options->metadata_user_data,
+      error_out);
+  }
+  return strappy_cocoa_copy_container_info(container_path,
+                                           identifier_out,
+                                           creator_out,
+                                           bundle_path_out,
+                                           error_out);
+}
+
 static int strappy_file_scanner_add_app_bundle(
   strappy_file_scanner_metadata_context *context,
   const char *bundle_path,
@@ -478,11 +582,22 @@ static int strappy_file_scanner_add_app_bundle(
   }
   name = NULL;
   bundle_identifier = NULL;
-  if (!strappy_cocoa_copy_bundle_info(bundle_path,
-                                      &name,
-                                      &bundle_identifier,
-                                      error_out)) {
+  if (!strappy_file_scanner_copy_bundle_info(context,
+                                             bundle_path,
+                                             &name,
+                                             &bundle_identifier,
+                                             error_out)) {
+    free(name);
+    free(bundle_identifier);
     return 0;
+  }
+  if ((context->options != NULL) &&
+      (context->options->platform_profile ==
+       STRAPPY_FILE_SCANNER_PLATFORM_MACOS) &&
+      ((bundle_identifier == NULL) || (bundle_identifier[0] == '\0'))) {
+    free(name);
+    free(bundle_identifier);
+    return 1;
   }
   bundle_path_copy = strappy_string_duplicate(bundle_path);
   container_path_copy =
@@ -623,19 +738,23 @@ static int strappy_file_scanner_scan_app_directory(
 
 static int strappy_file_scanner_metadata_context_prepare(
   strappy_file_scanner_metadata_context *context,
-  const char *root_path,
+  const strappy_file_scanner_options *options,
   char **error_out)
 {
-  char *directories[3];
+  char *directories[8];
   const char *home_path;
+  const char *root_path;
   size_t count;
   size_t index;
   size_t previous;
 
-  directories[0] = NULL;
-  directories[1] = NULL;
-  directories[2] = NULL;
+  for (index = 0U; index < (sizeof(directories) / sizeof(directories[0]));
+       index++) {
+    directories[index] = NULL;
+  }
   count = 0U;
+  context->options = options;
+  root_path = (options != NULL) ? options->root_path : NULL;
   home_path = getenv("HOME");
   if ((home_path != NULL) && (home_path[0] != '\0')) {
     directories[count] = strappy_file_scanner_join_path(home_path,
@@ -658,15 +777,40 @@ static int strappy_file_scanner_metadata_context_prepare(
     }
     count++;
   }
-  directories[count] = strappy_string_duplicate("/var/mobile/Applications");
-  if (directories[count] == NULL) {
-    for (index = 0U; index < count; index++) {
-      free(directories[index]);
+  if ((options != NULL) &&
+      (options->platform_profile == STRAPPY_FILE_SCANNER_PLATFORM_MACOS)) {
+    static const char *const mac_directories[] = {
+      "/Applications",
+      "/System/Applications",
+      "/System/Applications/Utilities",
+      "/System/Library/CoreServices",
+      "/System/Library/CoreServices/Applications"
+    };
+
+    for (index = 0U;
+         index < (sizeof(mac_directories) / sizeof(mac_directories[0]));
+         index++) {
+      directories[count] = strappy_string_duplicate(mac_directories[index]);
+      if (directories[count] == NULL) {
+        for (previous = 0U; previous < count; previous++) {
+          free(directories[previous]);
+        }
+        strappy_set_error(error_out, "Could not allocate Mac app scan path.");
+        return 0;
+      }
+      count++;
     }
-    strappy_set_error(error_out, "Could not allocate app scan path.");
-    return 0;
+  } else {
+    directories[count] = strappy_string_duplicate("/var/mobile/Applications");
+    if (directories[count] == NULL) {
+      for (index = 0U; index < count; index++) {
+        free(directories[index]);
+      }
+      strappy_set_error(error_out, "Could not allocate app scan path.");
+      return 0;
+    }
+    count++;
   }
-  count++;
 
   for (index = 0U; index < count; index++) {
     int duplicate;
@@ -931,6 +1075,313 @@ static int strappy_file_scanner_set_record_metadata(
   return ok;
 }
 
+static const char *strappy_file_scanner_mac_path_after_directory(
+  const strappy_file_scanner_metadata_context *context,
+  const char *path,
+  const char *directory_suffix)
+{
+  const char *root_path;
+  size_t root_length;
+  size_t suffix_length;
+
+  if ((context == NULL) || (context->options == NULL) ||
+      (context->options->platform_profile !=
+       STRAPPY_FILE_SCANNER_PLATFORM_MACOS) ||
+      (path == NULL) || (directory_suffix == NULL)) {
+    return NULL;
+  }
+  root_path = context->options->root_path;
+  if ((root_path == NULL) || (root_path[0] == '\0')) {
+    return NULL;
+  }
+  root_length = strlen(root_path);
+  while ((root_length > 1U) && (root_path[root_length - 1U] == '/')) {
+    root_length--;
+  }
+  if ((root_length == 1U) && (root_path[0] == '/')) {
+    root_length = 0U;
+  }
+  suffix_length = strlen(directory_suffix);
+  if ((strncmp(path, root_path, root_length) != 0) ||
+      (strncmp(path + root_length, directory_suffix, suffix_length) != 0)) {
+    return NULL;
+  }
+  return path + root_length + suffix_length;
+}
+
+static int strappy_file_scanner_annotate_mac_container(
+  strappy_file_scanner_metadata_context *context,
+  strappy_file_scanner_record *record,
+  const char *component,
+  int is_group_container,
+  char **error_out)
+{
+  const strappy_file_scanner_app_info *app;
+  const char *bundle_identifier;
+  const char *name;
+  const char *key_prefix;
+  const char *key_value;
+  char *bundle_path;
+  char *container_path;
+  char *creator;
+  char *identifier;
+  size_t component_length;
+  int ok;
+
+  component_length = strappy_file_scanner_component_length(component);
+  if (component_length == 0U) {
+    return 1;
+  }
+  container_path = strappy_file_scanner_duplicate_range(
+    record->path,
+    (size_t)(component - record->path) + component_length);
+  if (container_path == NULL) {
+    strappy_set_error(error_out, "Could not allocate Mac container path.");
+    return 0;
+  }
+  identifier = NULL;
+  creator = NULL;
+  bundle_path = NULL;
+  if (!strappy_file_scanner_copy_container_info(context,
+                                                container_path,
+                                                &identifier,
+                                                &creator,
+                                                &bundle_path,
+                                                error_out)) {
+    free(identifier);
+    free(creator);
+    free(bundle_path);
+    free(container_path);
+    return 0;
+  }
+  if (!is_group_container &&
+      ((creator == NULL) || (creator[0] == '\0')) &&
+      ((identifier == NULL) || (identifier[0] == '\0'))) {
+    free(identifier);
+    identifier = strappy_file_scanner_duplicate_range(component,
+                                                       component_length);
+    if (identifier == NULL) {
+      free(creator);
+      free(bundle_path);
+      free(container_path);
+      strappy_set_error(error_out,
+                        "Could not allocate Mac container identifier.");
+      return 0;
+    }
+  }
+
+  bundle_identifier = ((creator != NULL) && (creator[0] != '\0')) ?
+    creator : ((!is_group_container && (identifier != NULL) &&
+                (identifier[0] != '\0')) ? identifier : NULL);
+  app = strappy_file_scanner_find_app_by_bundle_identifier(context,
+                                                            bundle_identifier);
+  if ((app == NULL) && (bundle_path != NULL) && (bundle_path[0] != '\0')) {
+    if (!strappy_file_scanner_add_app_bundle(context,
+                                             bundle_path,
+                                             container_path,
+                                             error_out)) {
+      free(identifier);
+      free(creator);
+      free(bundle_path);
+      free(container_path);
+      return 0;
+    }
+    app = strappy_file_scanner_find_app_by_bundle_path(context, bundle_path);
+    if ((app == NULL) && (bundle_identifier != NULL)) {
+      app = strappy_file_scanner_find_app_by_bundle_identifier(
+        context,
+        bundle_identifier);
+    }
+  }
+  if ((app != NULL) && (app->bundle_identifier != NULL) &&
+      (app->bundle_identifier[0] != '\0')) {
+    bundle_identifier = app->bundle_identifier;
+  }
+  if (is_group_container && (bundle_identifier == NULL)) {
+    free(identifier);
+    free(creator);
+    free(bundle_path);
+    free(container_path);
+    return 1;
+  }
+
+  name = (app != NULL) ? app->name : bundle_identifier;
+  if (bundle_identifier != NULL) {
+    key_prefix = "bundle:";
+    key_value = bundle_identifier;
+  } else if ((identifier != NULL) && (identifier[0] != '\0')) {
+    key_prefix = is_group_container ? "group-container:" : "container:";
+    key_value = identifier;
+  } else {
+    key_prefix = is_group_container ? "group-container:" : "container:";
+    key_value = container_path;
+  }
+  ok = strappy_file_scanner_set_record_metadata(
+    record,
+    key_prefix,
+    key_value,
+    name,
+    bundle_identifier,
+    container_path,
+    (app != NULL) ? app->bundle_path : bundle_path,
+    is_group_container ? "mac_group_container_metadata" :
+                         "mac_container_metadata",
+    error_out);
+  free(identifier);
+  free(creator);
+  free(bundle_path);
+  free(container_path);
+  return ok;
+}
+
+static int strappy_file_scanner_annotate_mac_owned_directory(
+  strappy_file_scanner_metadata_context *context,
+  strappy_file_scanner_record *record,
+  const char *component,
+  const char *source,
+  int allow_name_match,
+  char **error_out)
+{
+  const strappy_file_scanner_app_info *app;
+  char *owner;
+  size_t owner_length;
+  int ok;
+
+  owner_length = strappy_file_scanner_component_length(component);
+  if (owner_length == 0U) {
+    return 1;
+  }
+  owner = strappy_file_scanner_duplicate_range(component, owner_length);
+  if (owner == NULL) {
+    strappy_set_error(error_out, "Could not allocate Mac database owner.");
+    return 0;
+  }
+  app = strappy_file_scanner_find_app_by_bundle_identifier(context, owner);
+  if ((app == NULL) && allow_name_match) {
+    app = strappy_file_scanner_find_app_by_name(context, owner);
+  }
+  if ((app == NULL) && allow_name_match &&
+      (strcmp(owner, "Strappy") == 0)) {
+    ok = strappy_file_scanner_set_record_metadata(
+      record,
+      "bundle:",
+      "com.altivecintelligence.Strappy",
+      "Strappy",
+      "com.altivecintelligence.Strappy",
+      NULL,
+      NULL,
+      source,
+      error_out);
+    free(owner);
+    return ok;
+  }
+  free(owner);
+  if (app == NULL) {
+    return 1;
+  }
+  return strappy_file_scanner_set_record_metadata(
+    record,
+    "bundle:",
+    app->bundle_identifier,
+    app->name,
+    app->bundle_identifier,
+    NULL,
+    app->bundle_path,
+    source,
+    error_out);
+}
+
+static int strappy_file_scanner_annotate_mac_record(
+  strappy_file_scanner_metadata_context *context,
+  strappy_file_scanner_record *record,
+  int *handled_out,
+  char **error_out)
+{
+  const strappy_file_scanner_app_info *app;
+  const char *component;
+
+  *handled_out = 0;
+  if (strappy_file_scanner_case_insensitive_find(record->path,
+                                                  ".photoslibrary/") != NULL) {
+    app = strappy_file_scanner_find_app_by_bundle_identifier(
+      context,
+      "com.apple.Photos");
+    *handled_out = 1;
+    return strappy_file_scanner_set_record_metadata(
+      record,
+      "bundle:",
+      "com.apple.Photos",
+      (app != NULL) ? app->name : "Photos",
+      "com.apple.Photos",
+      NULL,
+      (app != NULL) ? app->bundle_path : NULL,
+      "mac_photos_library",
+      error_out);
+  }
+  component = strappy_file_scanner_mac_path_after_directory(
+    context,
+    record->path,
+    "/Library/Containers/");
+  if (component != NULL) {
+    *handled_out = 1;
+    return strappy_file_scanner_annotate_mac_container(context,
+                                                       record,
+                                                       component,
+                                                       0,
+                                                       error_out);
+  }
+  component = strappy_file_scanner_mac_path_after_directory(
+    context,
+    record->path,
+    "/Library/Group Containers/");
+  if (component != NULL) {
+    *handled_out = 1;
+    return strappy_file_scanner_annotate_mac_container(context,
+                                                       record,
+                                                       component,
+                                                       1,
+                                                       error_out);
+  }
+  component = strappy_file_scanner_mac_path_after_directory(
+    context,
+    record->path,
+    "/Library/HTTPStorages/");
+  if (component != NULL) {
+    *handled_out = 1;
+    return strappy_file_scanner_annotate_mac_owned_directory(
+      context, record, component, "mac_http_storage_bundle_id", 0, error_out);
+  }
+  component = strappy_file_scanner_mac_path_after_directory(
+    context,
+    record->path,
+    "/Library/WebKit/");
+  if (component != NULL) {
+    *handled_out = 1;
+    return strappy_file_scanner_annotate_mac_owned_directory(
+      context, record, component, "mac_webkit_bundle_id", 0, error_out);
+  }
+  component = strappy_file_scanner_mac_path_after_directory(
+    context,
+    record->path,
+    "/Library/Caches/");
+  if (component != NULL) {
+    *handled_out = 1;
+    return strappy_file_scanner_annotate_mac_owned_directory(
+      context, record, component, "mac_cache_bundle_id", 0, error_out);
+  }
+  component = strappy_file_scanner_mac_path_after_directory(
+    context,
+    record->path,
+    "/Library/Application Support/");
+  if (component != NULL) {
+    *handled_out = 1;
+    return strappy_file_scanner_annotate_mac_owned_directory(
+      context, record, component, "mac_application_support_match", 1,
+      error_out);
+  }
+  return 1;
+}
+
 static int strappy_file_scanner_annotate_bundle_record(
   strappy_file_scanner_metadata_context *context,
   strappy_file_scanner_record *record,
@@ -982,6 +1433,13 @@ static int strappy_file_scanner_annotate_bundle_record(
   free(parent_parent_path);
 
   app = strappy_file_scanner_find_app_by_bundle_path(context, bundle_path);
+  if ((app == NULL) && (context->options != NULL) &&
+      (context->options->platform_profile ==
+       STRAPPY_FILE_SCANNER_PLATFORM_MACOS)) {
+    free(bundle_path);
+    free(container_path);
+    return 1;
+  }
   if (app == NULL) {
     if (!strappy_file_scanner_add_app_bundle(context,
                                              bundle_path,
@@ -1035,11 +1493,33 @@ static int strappy_file_scanner_annotate_record(
   char *component;
   char *container_path;
   char *fallback_name;
+  int handled;
   size_t component_length;
 
   if ((context == NULL) || (record == NULL) || (record->path == NULL)) {
     strappy_set_error(error_out, "Scanner metadata request is incomplete.");
     return 0;
+  }
+  if ((context->options != NULL) &&
+      (context->options->platform_profile ==
+       STRAPPY_FILE_SCANNER_PLATFORM_MACOS)) {
+    if (!strappy_file_scanner_annotate_mac_record(context,
+                                                  record,
+                                                  &handled,
+                                                  error_out)) {
+      return 0;
+    }
+    if (handled) {
+      return 1;
+    }
+    suffix = strappy_file_scanner_case_insensitive_find(record->path, ".app/");
+    if (suffix != NULL) {
+      return strappy_file_scanner_annotate_bundle_record(context,
+                                                         record,
+                                                         suffix,
+                                                         error_out);
+    }
+    return 1;
   }
   suffix = strappy_file_scanner_case_insensitive_find(record->path, ".app/");
   if (suffix != NULL) {
@@ -1251,7 +1731,9 @@ static int strappy_file_scanner_annotate_record(
   return 1;
 }
 
-static const char *strappy_file_scanner_database_origin_kind(const char *path)
+static const char *strappy_file_scanner_database_origin_kind(
+  const char *path,
+  strappy_file_scanner_platform_profile platform_profile)
 {
   int app_data_path;
 
@@ -1259,22 +1741,46 @@ static const char *strappy_file_scanner_database_origin_kind(const char *path)
     return "other";
   }
 
-  app_data_path =
-    ((strappy_file_scanner_case_insensitive_find(
-        path,
-        "/Containers/Data/Application/") != NULL) ||
-     (strappy_file_scanner_case_insensitive_find(
-        path,
-        "/Containers/Shared/AppGroup/") != NULL) ||
-     (strappy_file_scanner_case_insensitive_find(
-        path,
-        "/mobile/Applications/") != NULL)) ? 1 : 0;
+  if (platform_profile == STRAPPY_FILE_SCANNER_PLATFORM_MACOS) {
+    app_data_path =
+      ((strappy_file_scanner_case_insensitive_find(
+          path,
+          "/Library/Containers/") != NULL) ||
+       (strappy_file_scanner_case_insensitive_find(
+          path,
+          "/Library/Group Containers/") != NULL)) ? 1 : 0;
+  } else {
+    app_data_path =
+      ((strappy_file_scanner_case_insensitive_find(
+          path,
+          "/Containers/Data/Application/") != NULL) ||
+       (strappy_file_scanner_case_insensitive_find(
+          path,
+          "/Containers/Shared/AppGroup/") != NULL) ||
+       (strappy_file_scanner_case_insensitive_find(
+          path,
+          "/mobile/Applications/") != NULL)) ? 1 : 0;
+  }
 
-  if (strappy_file_scanner_case_insensitive_find(path, ".app/") != NULL) {
+  if ((platform_profile != STRAPPY_FILE_SCANNER_PLATFORM_MACOS) &&
+      (strappy_file_scanner_case_insensitive_find(path, ".app/") != NULL)) {
     return "app_bundle";
   }
   if (strappy_file_scanner_case_insensitive_find(path, "/Documents/") != NULL) {
     return "documents";
+  }
+  if ((platform_profile == STRAPPY_FILE_SCANNER_PLATFORM_MACOS) &&
+      (strappy_file_scanner_case_insensitive_find(path,
+                                                  ".photoslibrary/") != NULL) &&
+      (strappy_file_scanner_case_insensitive_find(path, "/Caches/") == NULL)) {
+    return "media";
+  }
+  if ((platform_profile == STRAPPY_FILE_SCANNER_PLATFORM_MACOS) &&
+      ((strappy_file_scanner_case_insensitive_find(path, "/IndexedDB/") !=
+        NULL) ||
+       (strappy_file_scanner_case_insensitive_find(path, "/LocalStorage/") !=
+        NULL))) {
+    return "web_storage";
   }
   if (strappy_file_scanner_case_insensitive_find(
         path,
@@ -1291,9 +1797,10 @@ static const char *strappy_file_scanner_database_origin_kind(const char *path)
   }
   if (strappy_file_scanner_case_insensitive_find(path, "/Library/") != NULL) {
     return (app_data_path ||
-            (strappy_file_scanner_case_insensitive_find(path,
-                                                        "/Applications/") !=
-             NULL)) ? "app_library" : "system_library";
+            ((platform_profile != STRAPPY_FILE_SCANNER_PLATFORM_MACOS) &&
+             (strappy_file_scanner_case_insensitive_find(path,
+                                                         "/Applications/") !=
+              NULL))) ? "app_library" : "system_library";
   }
 
   return "other";
@@ -1448,6 +1955,7 @@ void strappy_file_scanner_options_init(strappy_file_scanner_options *options)
   }
 
   options->root_path = NULL;
+  options->platform_profile = STRAPPY_FILE_SCANNER_PLATFORM_GENERIC;
   options->validate_candidates = 1;
   options->use_filename_filter = 0;
   options->max_files = 0L;
@@ -1458,6 +1966,9 @@ void strappy_file_scanner_options_init(strappy_file_scanner_options *options)
   options->record_batch_size = 0U;
   options->record_batch_callback = NULL;
   options->record_batch_user_data = NULL;
+  options->bundle_info_callback = NULL;
+  options->container_info_callback = NULL;
+  options->metadata_user_data = NULL;
 }
 
 void strappy_file_scanner_record_init(strappy_file_scanner_record *record)
@@ -1482,6 +1993,8 @@ void strappy_file_scanner_record_init(strappy_file_scanner_record *record)
   record->origin_kind = NULL;
   record->location_tail = NULL;
   record->hidden = 0;
+  record->hidden_reason = NULL;
+  record->platform_profile = (int)STRAPPY_FILE_SCANNER_PLATFORM_GENERIC;
 }
 
 void strappy_file_scanner_record_destroy(strappy_file_scanner_record *record)
@@ -1500,6 +2013,7 @@ void strappy_file_scanner_record_destroy(strappy_file_scanner_record *record)
   free(record->app_source);
   free(record->origin_kind);
   free(record->location_tail);
+  free(record->hidden_reason);
   strappy_file_scanner_record_init(record);
 }
 
@@ -1528,6 +2042,8 @@ int strappy_file_scanner_record_set_app_metadata(
   char *new_container_path;
   char *new_bundle_path;
   char *new_source;
+  char *new_hidden_reason;
+  const char *hidden_reason;
 
   if (record == NULL) {
     strappy_set_error(error_out, "Scanner record is missing.");
@@ -1541,6 +2057,12 @@ int strappy_file_scanner_record_set_app_metadata(
     strappy_file_scanner_duplicate_optional_string(app_container_path);
   new_bundle_path = strappy_file_scanner_duplicate_optional_string(app_bundle_path);
   new_source = strappy_file_scanner_duplicate_optional_string(app_source);
+  hidden_reason = strappy_file_scanner_database_hidden_reason(
+    record->path,
+    app_bundle_id,
+    (strappy_file_scanner_platform_profile)record->platform_profile);
+  new_hidden_reason =
+    strappy_file_scanner_duplicate_optional_string(hidden_reason);
 
   if (((app_group_key != NULL) && (app_group_key[0] != '\0') &&
        (new_group_key == NULL)) ||
@@ -1552,13 +2074,15 @@ int strappy_file_scanner_record_set_app_metadata(
       ((app_bundle_path != NULL) && (app_bundle_path[0] != '\0') &&
        (new_bundle_path == NULL)) ||
       ((app_source != NULL) && (app_source[0] != '\0') &&
-       (new_source == NULL))) {
+       (new_source == NULL)) ||
+      ((hidden_reason != NULL) && (new_hidden_reason == NULL))) {
     free(new_group_key);
     free(new_name);
     free(new_bundle_id);
     free(new_container_path);
     free(new_bundle_path);
     free(new_source);
+    free(new_hidden_reason);
     strappy_set_error(error_out, "Could not allocate scanner app metadata.");
     return 0;
   }
@@ -1569,15 +2093,18 @@ int strappy_file_scanner_record_set_app_metadata(
   free(record->app_container_path);
   free(record->app_bundle_path);
   free(record->app_source);
+  free(record->hidden_reason);
   record->app_group_key = new_group_key;
   record->app_name = new_name;
   record->app_bundle_id = new_bundle_id;
   record->app_container_path = new_container_path;
   record->app_bundle_path = new_bundle_path;
   record->app_source = new_source;
+  record->hidden_reason = new_hidden_reason;
   record->hidden =
     strappy_file_scanner_database_should_be_hidden(record->path,
-                                                   record->app_bundle_id);
+      record->app_bundle_id,
+      (strappy_file_scanner_platform_profile)record->platform_profile);
   return 1;
 }
 
@@ -1609,6 +2136,7 @@ void strappy_file_scanner_record_list_destroy(strappy_file_scanner_record_list *
 
 static int strappy_file_scanner_add_record(
   strappy_file_scanner_record_list *list,
+  const strappy_file_scanner_options *options,
   const char *path,
   const struct stat *stat_info,
   int is_valid_sqlite,
@@ -1620,6 +2148,9 @@ static int strappy_file_scanner_add_record(
   char *origin_kind;
   char *location_tail;
   const char *origin_kind_value;
+  const char *hidden_reason_value;
+  char *hidden_reason;
+  strappy_file_scanner_platform_profile platform_profile;
 
   if ((list == NULL) || (path == NULL) || (stat_info == NULL)) {
     free(validation_error);
@@ -1633,13 +2164,25 @@ static int strappy_file_scanner_add_record(
     return 0;
   }
 
-  origin_kind_value = strappy_file_scanner_database_origin_kind(path);
+  platform_profile = (options != NULL) ? options->platform_profile :
+    STRAPPY_FILE_SCANNER_PLATFORM_GENERIC;
+  origin_kind_value = strappy_file_scanner_database_origin_kind(
+    path,
+    platform_profile);
   origin_kind = strappy_string_duplicate(origin_kind_value);
   location_tail =
     strappy_file_scanner_database_location_tail(path, origin_kind_value);
-  if ((origin_kind == NULL) || (location_tail == NULL)) {
+  hidden_reason_value = strappy_file_scanner_database_hidden_reason(
+    path,
+    NULL,
+    platform_profile);
+  hidden_reason =
+    strappy_file_scanner_duplicate_optional_string(hidden_reason_value);
+  if ((origin_kind == NULL) || (location_tail == NULL) ||
+      ((hidden_reason_value != NULL) && (hidden_reason == NULL))) {
     free(origin_kind);
     free(location_tail);
+    free(hidden_reason);
     free(validation_error);
     strappy_set_error(error_out, "Could not allocate scanner display metadata.");
     return 0;
@@ -1651,6 +2194,7 @@ static int strappy_file_scanner_add_record(
   if (records == NULL) {
     free(origin_kind);
     free(location_tail);
+    free(hidden_reason);
     free(validation_error);
     strappy_set_error(error_out, "Could not allocate scanner record.");
     return 0;
@@ -1664,6 +2208,7 @@ static int strappy_file_scanner_add_record(
   if (record->path == NULL) {
     free(origin_kind);
     free(location_tail);
+    free(hidden_reason);
     free(validation_error);
     strappy_set_error(error_out, "Could not allocate scanner path.");
     return 0;
@@ -1677,7 +2222,12 @@ static int strappy_file_scanner_add_record(
   record->validation_error = validation_error;
   record->origin_kind = origin_kind;
   record->location_tail = location_tail;
-  record->hidden = strappy_file_scanner_database_should_be_hidden(path, NULL);
+  record->hidden_reason = hidden_reason;
+  record->platform_profile = (int)platform_profile;
+  record->hidden = strappy_file_scanner_database_should_be_hidden(
+    path,
+    NULL,
+    platform_profile);
   list->count++;
   return 1;
 }
@@ -1859,7 +2409,7 @@ static int strappy_file_scanner_scan_with_prior_catalog_paths(
     return 0;
   }
   if (!strappy_file_scanner_metadata_context_prepare(&metadata_context,
-                                                      options->root_path,
+                                                      options,
                                                       error_out)) {
     fts_close(fts);
     free(root_path);
@@ -1931,6 +2481,7 @@ static int strappy_file_scanner_scan_with_prior_catalog_paths(
           }
 
           if (!strappy_file_scanner_add_record(list,
+                                               options,
                                                entry->fts_path,
                                                entry->fts_statp,
                                                is_valid_sqlite,
@@ -2033,6 +2584,7 @@ static void strappy_file_scanner_discovered_database_input_from_record(
   input->origin_kind = record->origin_kind;
   input->location_tail = record->location_tail;
   input->hidden = record->hidden;
+  input->hidden_reason = record->hidden_reason;
 }
 
 static int strappy_file_scanner_save_discovered_databases_with_mode(
