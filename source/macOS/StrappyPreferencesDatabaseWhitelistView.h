@@ -3,6 +3,7 @@
 @interface StrappyPreferencesDatabaseWhitelistView : StrappyPreferencesWhitelistView {
  @private
   NSButton *fullScanButton_;
+  NSButton *showHiddenDatabasesButton_;
 }
 
 - (id)initWithFrame:(NSRect)frame
@@ -11,5 +12,6 @@
            delegate:(id)delegate;
 - (NSButton *)scanButton;
 - (NSButton *)fullScanButton;
+- (NSButton *)showHiddenDatabasesButton;
 
 @end

@@ -31,6 +31,7 @@
   NSTextView          *databaseStudyTextView_;
   NSButton            *scanButton_;
   NSButton            *fullScanButton_;
+  NSButton            *showHiddenDatabasesButton_;
   NSProgressIndicator *scanProgressIndicator_;
   NSTextField         *databaseStatusLabel_;
   NSArray             *allModelRows_;

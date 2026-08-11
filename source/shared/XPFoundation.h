@@ -9,6 +9,15 @@
   #define XPUInteger NSUInteger
 #endif
 
+@interface NSThread (XPFoundation)
+
+/* +isMainThread and +mainThread were added after Tiger. Prefer the modern
+ * Foundation query where available and fall back to Darwin's Tiger-safe
+ * pthread_main_np(). */
++ (BOOL)XP_isMainThread;
+
+@end
+
 @interface NSFileManager (XPFoundation)
 
 - (BOOL)XP_createDirectoryAtPath:(NSString *)path

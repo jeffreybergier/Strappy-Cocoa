@@ -4,6 +4,8 @@
 
 static const CGFloat kStrappyDatabaseScanButtonWidth = 88.0;
 static const CGFloat kStrappyDatabaseScanControlGap = 8.0;
+static const CGFloat kStrappyDatabaseShowHiddenButtonWidth = 170.0;
+static const CGFloat kStrappyDatabaseTopControlHeight = 24.0;
 
 static NSString *StrappyDatabaseWhitelistPathForRow(NSDictionary *row)
 {
@@ -81,6 +83,15 @@ static BOOL StrappyDatabaseWhitelistRowIsAllowed(NSDictionary *row)
 
   decision = [row objectForKey:@"user_decision"];
   return [decision isEqualToString:@"allowed"];
+}
+
+static BOOL StrappyDatabaseWhitelistRowIsHidden(NSDictionary *row)
+{
+  NSNumber *hidden;
+
+  hidden = [row objectForKey:@"hidden"];
+  return ([hidden isKindOfClass:[NSNumber class]] && [hidden boolValue]) ?
+    YES : NO;
 }
 
 static NSComparisonResult StrappyDatabaseWhitelistCompareStrings(NSString *left,
@@ -187,14 +198,45 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
   return self;
 }
 
+- (CGFloat)topAccessoryTrailingControlWidth
+{
+  return kStrappyDatabaseShowHiddenButtonWidth;
+}
+
+- (void)configureTopAccessoryView:(NSView *)view target:(id)target
+{
+  NSRect bounds;
+
+  bounds = [view bounds];
+  showHiddenDatabasesButton_ =
+    [[NSButton alloc] initWithFrame:NSMakeRect(
+      NSWidth(bounds) - kStrappyDatabaseShowHiddenButtonWidth,
+      NSMaxY(bounds) - kStrappyDatabaseTopControlHeight,
+      kStrappyDatabaseShowHiddenButtonWidth,
+      kStrappyDatabaseTopControlHeight)];
+  [showHiddenDatabasesButton_ setAutoresizingMask:
+    NSViewMinXMargin | NSViewMinYMargin];
+  [showHiddenDatabasesButton_ setButtonType:XPButtonTypeSwitch];
+  [showHiddenDatabasesButton_ setTitle:
+    NSLocalizedString(@"Show hidden databases", nil)];
+  [showHiddenDatabasesButton_ setToolTip:
+    NSLocalizedString(@"Show hidden databases", nil)];
+  [showHiddenDatabasesButton_ setTarget:target];
+  [showHiddenDatabasesButton_ setAction:
+    @selector(showHiddenDatabasesChanged:)];
+  [view addSubview:showHiddenDatabasesButton_];
+}
+
 - (void)addTableColumnsToTableView:(NSTableView *)tableView
 {
   NSTableColumn *allowedColumn;
+  NSTableColumn *hiddenColumn;
   NSTableColumn *appColumn;
   NSTableColumn *nameColumn;
   NSTableColumn *locationColumn;
   NSTableColumn *sizeColumn;
   NSButtonCell *allowedCell;
+  NSButtonCell *hiddenCell;
   NSTextFieldCell *appCell;
   NSTextFieldCell *nameCell;
   NSTextFieldCell *locationCell;
@@ -216,6 +258,23 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
   [allowedCell setAlignment:XPTextAlignmentCenter];
   [allowedColumn setDataCell:allowedCell];
   [tableView addTableColumn:allowedColumn];
+
+  hiddenColumn =
+    [[[NSTableColumn alloc] initWithIdentifier:@"hidden"] autorelease];
+  [[hiddenColumn headerCell] setStringValue:NSLocalizedString(@"Hidden", nil)];
+  [hiddenColumn setWidth:62.0];
+  [hiddenColumn setMinWidth:56.0];
+  [hiddenColumn setMaxWidth:72.0];
+  [hiddenColumn setEditable:YES];
+  [hiddenColumn setSortDescriptorPrototype:
+    [[[NSSortDescriptor alloc] initWithKey:@"hidden"
+                                 ascending:NO] autorelease]];
+  hiddenCell = [[[NSButtonCell alloc] init] autorelease];
+  [hiddenCell setButtonType:XPButtonTypeSwitch];
+  [hiddenCell setTitle:@""];
+  [hiddenCell setAlignment:XPTextAlignmentCenter];
+  [hiddenColumn setDataCell:hiddenCell];
+  [tableView addTableColumn:hiddenColumn];
 
   appColumn = [[[NSTableColumn alloc] initWithIdentifier:@"application"] autorelease];
   [[appColumn headerCell] setStringValue:NSLocalizedString(@"Application", nil)];
@@ -309,6 +368,7 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
 - (BOOL)sortKeyIsKnown:(NSString *)key
 {
   return ([key isEqualToString:@"allowed"] ||
+          [key isEqualToString:@"hidden"] ||
           [key isEqualToString:@"database_priority"] ||
           [key isEqualToString:@"application"] ||
           [key isEqualToString:@"name"] ||
@@ -325,6 +385,11 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
     return StrappyDatabaseWhitelistCompareLongLong(
       StrappyDatabaseWhitelistRowIsAllowed(left) ? 1LL : 0LL,
       StrappyDatabaseWhitelistRowIsAllowed(right) ? 1LL : 0LL);
+  }
+  if ([key isEqualToString:@"hidden"]) {
+    return StrappyDatabaseWhitelistCompareLongLong(
+      StrappyDatabaseWhitelistRowIsHidden(left) ? 1LL : 0LL,
+      StrappyDatabaseWhitelistRowIsHidden(right) ? 1LL : 0LL);
   }
   if ([key isEqualToString:@"database_priority"]) {
     return StrappyDatabaseWhitelistCompareLongLong(
@@ -374,9 +439,15 @@ static long long StrappyDatabaseWhitelistPriorityForRow(NSDictionary *row)
   return fullScanButton_;
 }
 
+- (NSButton *)showHiddenDatabasesButton
+{
+  return showHiddenDatabasesButton_;
+}
+
 - (void)dealloc
 {
   [fullScanButton_ release];
+  [showHiddenDatabasesButton_ release];
   [super dealloc];
 }
 

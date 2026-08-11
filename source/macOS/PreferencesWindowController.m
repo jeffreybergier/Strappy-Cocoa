@@ -223,6 +223,15 @@ static BOOL StrappyDatabaseRowAllowedValue(NSDictionary *row)
   return [decision isEqualToString:@"allowed"];
 }
 
+static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
+{
+  NSNumber *hidden;
+
+  hidden = [row objectForKey:@"hidden"];
+  return ([hidden isKindOfClass:[NSNumber class]] && [hidden boolValue]) ?
+    YES : NO;
+}
+
 static NSArray *StrappyDatabaseRowsWithGroupHeaders(NSArray *rows)
 {
   NSMutableDictionary *nameCounts;
@@ -555,6 +564,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)databaseCatalogDidChange:(NSNotification *)notification;
 - (void)setScanning:(BOOL)scanning;
 - (void)databaseSearchChanged:(id)sender;
+- (void)showHiddenDatabasesChanged:(id)sender;
 - (void)databaseSearchTextDidChange:(NSNotification *)notification;
 - (void)beginDatabaseScanWithMode:(FileScannerDatabaseScanMode)scanMode;
 - (void)scanDatabasesInBackground:(NSDictionary *)request;
@@ -688,6 +698,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   databaseTableView_ = [[databaseWhitelistView_ tableView] retain];
   scanButton_ = [[databaseWhitelistView_ scanButton] retain];
   fullScanButton_ = [[databaseWhitelistView_ fullScanButton] retain];
+  showHiddenDatabasesButton_ =
+    [[databaseWhitelistView_ showHiddenDatabasesButton] retain];
   scanProgressIndicator_ = [[databaseWhitelistView_ progressIndicator] retain];
   databaseStatusLabel_ = [[databaseWhitelistView_ statusLabel] retain];
   [[NSNotificationCenter defaultCenter]
@@ -1322,6 +1334,20 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [self applyDatabaseRows];
 }
 
+- (void)showHiddenDatabasesChanged:(id)sender
+{
+  NSArray *selectedPaths;
+
+  if (sender != showHiddenDatabasesButton_) {
+    return;
+  }
+
+  selectedPaths = [[self selectedDatabaseTableRowPaths] retain];
+  [self applyDatabaseRows];
+  [self selectDatabaseTableRowsWithPaths:selectedPaths];
+  [selectedPaths release];
+}
+
 - (void)defaultModelPopUpButtonChanged:(id)sender
 {
   NSMenuItem *item;
@@ -1507,9 +1533,30 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)applyDatabaseRows
 {
+  NSMutableArray *visibleRows;
   NSArray *rows;
+  NSUInteger index;
 
-  rows = [self databaseRows:allDatabaseRows_
+  rows = allDatabaseRows_;
+  if ([showHiddenDatabasesButton_ state] != XPControlStateValueOn) {
+    visibleRows = [NSMutableArray arrayWithCapacity:[allDatabaseRows_ count]];
+    for (index = 0U; index < [allDatabaseRows_ count]; index++) {
+      NSDictionary *row;
+
+      row = [allDatabaseRows_ objectAtIndex:index];
+      if (![row isKindOfClass:[NSDictionary class]]) {
+        continue;
+      }
+      if (StrappyDatabaseRowHiddenValue(row) &&
+          !StrappyDatabaseRowAllowedValue(row)) {
+        continue;
+      }
+      [visibleRows addObject:row];
+    }
+    rows = visibleRows;
+  }
+
+  rows = [self databaseRows:rows
         matchingSearchText:[self currentDatabaseSearchText]];
   rows = [databaseWhitelistView_ sortedRows:rows];
   rows = StrappyDatabaseRowsWithGroupHeaders(rows);
@@ -1944,6 +1991,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   if ([identifier isEqualToString:@"allowed"]) {
     return [self allowedValueForDatabaseRow:database];
   }
+  if ([identifier isEqualToString:@"hidden"]) {
+    return [NSNumber numberWithBool:StrappyDatabaseRowHiddenValue(database)];
+  }
   if ([identifier isEqualToString:@"application"]) {
     return StrappyDatabaseAppNameForRow(database);
   }
@@ -2078,10 +2128,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   NSDictionary *model;
   NSString *identifier;
   NSNumber *catalogId;
-  BOOL allowed;
+  NSArray *selectedPaths;
+  BOOL checked;
 
   identifier = [tableColumn identifier];
-  allowed = ([object respondsToSelector:@selector(boolValue)] &&
+  checked = ([object respondsToSelector:@selector(boolValue)] &&
              [object boolValue]) ? YES : NO;
 
   if (tableView == modelTableView_) {
@@ -2093,7 +2144,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     }
 
     model = [modelRows_ objectAtIndex:(NSUInteger)row];
-    if ([self modelRowIsDefault:model] && !allowed) {
+    if ([self modelRowIsDefault:model] && !checked) {
       NSBeep();
       [modelTableView_ reloadData];
       return;
@@ -2101,7 +2152,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
     modelId = StrappyStringForModelRow(model, @"id");
     if (([modelId length] == 0U) ||
-        ![StrappySession setOpenRouterModelAllowed:allowed
+        ![StrappySession setOpenRouterModelAllowed:checked
                                 forModelIdentifier:modelId
                                              error:nil]) {
       NSBeep();
@@ -2116,7 +2167,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   if ((row < 0) || (row >= (NSInteger)[databaseRows_ count])) {
     return;
   }
-  if (![identifier isEqualToString:@"allowed"]) {
+  if (![identifier isEqualToString:@"allowed"] &&
+      ![identifier isEqualToString:@"hidden"]) {
     return;
   }
 
@@ -2124,14 +2176,24 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   if (StrappyDatabaseRowIsGroupHeader(database)) {
     return;
   }
-  if (allowed && ![self databaseRowCanBeAllowed:database]) {
+  if ([identifier isEqualToString:@"allowed"] && checked &&
+      ![self databaseRowCanBeAllowed:database]) {
     NSBeep();
     [databaseTableView_ reloadData];
     return;
   }
 
   catalogId = [database objectForKey:@"catalog_id"];
-  if (![[FileScanner sharedScanner] setCatalogedDatabaseAllowed:allowed
+  if ([identifier isEqualToString:@"allowed"] &&
+      ![[FileScanner sharedScanner] setCatalogedDatabaseAllowed:checked
+                                            forCatalogIdentifier:catalogId
+                                                           error:nil]) {
+    NSBeep();
+    [databaseTableView_ reloadData];
+    return;
+  }
+  if ([identifier isEqualToString:@"hidden"] &&
+      ![[FileScanner sharedScanner] setCatalogedDatabaseHidden:checked
                                            forCatalogIdentifier:catalogId
                                                           error:nil]) {
     NSBeep();
@@ -2139,7 +2201,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
+  selectedPaths = [[self selectedDatabaseTableRowPaths] retain];
   [self loadCatalogedDatabases];
+  [self selectDatabaseTableRowsWithPaths:selectedPaths];
+  [selectedPaths release];
 }
 
 - (BOOL)tableView:(NSTableView *)tableView
@@ -2160,7 +2225,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return [self modelRowIsDefault:model] ? NO : YES;
   }
 
-  if (![[tableColumn identifier] isEqualToString:@"allowed"]) {
+  if (![[tableColumn identifier] isEqualToString:@"allowed"] &&
+      ![[tableColumn identifier] isEqualToString:@"hidden"]) {
     return NO;
   }
   if ((row < 0) || (row >= (NSInteger)[databaseRows_ count])) {
@@ -2170,6 +2236,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   database = [databaseRows_ objectAtIndex:(NSUInteger)row];
   if (StrappyDatabaseRowIsGroupHeader(database)) {
     return NO;
+  }
+  if ([[tableColumn identifier] isEqualToString:@"hidden"]) {
+    return YES;
   }
   return [self databaseRowCanBeAllowed:database];
 }
@@ -2198,7 +2267,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
-  if (![[tableColumn identifier] isEqualToString:@"allowed"] ||
+  if ((![[tableColumn identifier] isEqualToString:@"allowed"] &&
+       ![[tableColumn identifier] isEqualToString:@"hidden"]) ||
       ![cell respondsToSelector:@selector(setEnabled:)]) {
     return;
   }
@@ -2212,7 +2282,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     [cell setEnabled:NO];
     return;
   }
-  [cell setEnabled:[self databaseRowCanBeAllowed:database]];
+  if ([[tableColumn identifier] isEqualToString:@"hidden"]) {
+    [cell setEnabled:YES];
+  } else {
+    [cell setEnabled:[self databaseRowCanBeAllowed:database]];
+  }
 }
 
 - (NSNumber *)allowedValueForModelRow:(NSDictionary *)row
@@ -2281,6 +2355,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [databaseStudyTextView_ release];
   [scanButton_ release];
   [fullScanButton_ release];
+  [showHiddenDatabasesButton_ release];
   [scanProgressIndicator_ release];
   [databaseStatusLabel_ release];
   [allModelRows_ release];

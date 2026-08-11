@@ -84,7 +84,7 @@ static int StrappyFileScannerSaveCatalogBatch(
   if ([rows isKindOfClass:[NSArray class]]) {
     [result setObject:rows forKey:@"rows"];
   }
-  if ([NSThread currentThread] == [NSThread mainThread]) {
+  if ([NSThread XP_isMainThread]) {
     [FileScanner databaseCatalogDidChange:result];
   } else {
     [FileScanner performSelectorOnMainThread:@selector(databaseCatalogDidChange:)

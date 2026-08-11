@@ -1,6 +1,35 @@
 #import "XPFoundation.h"
 #import <objc/message.h>
+#include <pthread.h>
 #include <stdlib.h>
+
+@implementation NSThread (XPFoundation)
+
++ (BOOL)XP_isMainThread
+{
+  SEL selector;
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+  BOOL result;
+
+  selector = @selector(isMainThread);
+  if ([(id)self respondsToSelector:selector]) {
+    signature = [(id)self methodSignatureForSelector:selector];
+    if ((signature != nil) && ([signature numberOfArguments] == 2U)) {
+      invocation = [NSInvocation invocationWithMethodSignature:signature];
+      [invocation setTarget:self];
+      [invocation setSelector:selector];
+      [invocation invoke];
+      result = NO;
+      [invocation getReturnValue:&result];
+      return result;
+    }
+  }
+
+  return pthread_main_np() ? YES : NO;
+}
+
+@end
 
 @implementation NSFileManager (XPFoundation)
 
