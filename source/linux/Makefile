@@ -10,6 +10,7 @@ CJSON_DIR ?= /altivec/libs/core/third_party/cJSON
 FONTAWESOME_FONT_DIR ?= /altivec/libs/cocoa/Resources/Fonts
 SHARED_DIR := ../shared
 BUILD_DIR := build-linux
+TEST_DIR := build-test
 FONTAWESOME_GENERATOR := $(SHARED_DIR)/tools/generate_fontawesome_webview_map.py
 FONTAWESOME_ICONS_RESOURCE := $(SHARED_DIR)/Resources/FontAwesomeIcons.json
 FONTAWESOME_WEBVIEW_MAP := $(SHARED_DIR)/strappy_fontawesome_icons.inc
@@ -31,6 +32,11 @@ RESPONSES_HARNESS := $(BUILD_DIR)/responses_harness
 PROMPT_GENERATOR_HARNESS := $(BUILD_DIR)/prompt_generator_harness
 SCANNER_PROFILE_HARNESS := $(BUILD_DIR)/scanner_profile_harness
 PROMPT_OUTPUT_DIR ?= $(BUILD_DIR)/system-prompts
+
+ifeq ($(strip $(TMPDIR)),)
+TMPDIR := $(abspath $(TEST_DIR))
+endif
+export TMPDIR
 
 DATABASE_QUERY_HARNESS_SOURCES = \
 	database_query_harness.c \
@@ -125,7 +131,7 @@ endif
 
 .PHONY: test scanner-test prompts review-prompts clean
 
-test: $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS)
+test: $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS) | $(TEST_DIR)
 	@echo "--- Running Linux shared-core test suite ---"
 	@echo " [1/7] RUN  scanner_profile_harness"
 	./$(SCANNER_PROFILE_HARNESS)
@@ -150,7 +156,7 @@ test: $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEB
 	@echo " [7/7] PASS prompt_generator_harness"
 	@echo "--- PASS: all 7 Linux shared-core checks completed ---"
 
-scanner-test: $(SCANNER_PROFILE_HARNESS)
+scanner-test: $(SCANNER_PROFILE_HARNESS) | $(TEST_DIR)
 	./$(SCANNER_PROFILE_HARNESS)
 
 prompts: $(PROMPT_GENERATOR_HARNESS)
@@ -160,7 +166,10 @@ prompts: $(PROMPT_GENERATOR_HARNESS)
 review-prompts: $(PROMPT_GENERATOR_HARNESS)
 	./$(PROMPT_GENERATOR_HARNESS) $(SHARED_DIR)/Resources
 
-$(BUILD_DIR):
+$(BUILD_DIR): | $(TEST_DIR)
+	mkdir -p $@
+
+$(TEST_DIR):
 	mkdir -p $@
 
 $(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
@@ -185,4 +194,4 @@ $(SCANNER_PROFILE_HARNESS): $(SCANNER_PROFILE_HARNESS_SOURCES) | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(SCANNER_PROFILE_HARNESS_SOURCES) $(SQLITE_LIBS) $(PLATFORM_LIBS)
 
 clean:
-	rm -rf $(BUILD_DIR) database_query_harness webview_harness responses_harness
+	rm -rf $(BUILD_DIR) $(TEST_DIR) database_query_harness webview_harness responses_harness

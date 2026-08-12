@@ -3,7 +3,12 @@
 
 .PHONY: clean debug release analyze test
 
-clean debug release analyze:
+clean:
+	+$(MAKE) -C iOS $@
+	+$(MAKE) -C macOS $@
+	+$(MAKE) -C linux $@
+
+debug release analyze:
 	+$(MAKE) -C iOS $@
 	+$(MAKE) -C macOS $@
 
