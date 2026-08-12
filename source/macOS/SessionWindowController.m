@@ -30,8 +30,37 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
   return ([modelId length] > 0U) ? modelId : NSLocalizedString(@"Model", nil);
 }
 
+static NSString *StrappySessionStringForSummary(NSDictionary *summary,
+                                                NSString *key)
+{
+  id value;
+
+  if (![summary isKindOfClass:[NSDictionary class]]) {
+    return @"";
+  }
+  value = [summary objectForKey:key];
+  return [value isKindOfClass:[NSString class]] ? value : @"";
+}
+
+static NSString *StrappyWindowTitleForSessionSummary(NSDictionary *summary)
+{
+  NSString *name;
+  NSString *prompt;
+
+  name = StrappySessionStringForSummary(summary, @"name");
+  if ([name length] > 0U) {
+    return name;
+  }
+  prompt = StrappySessionStringForSummary(summary, @"prompt");
+  if ([prompt length] > 0U) {
+    return prompt;
+  }
+  return NSLocalizedString(@"New Session", nil);
+}
+
 @interface SessionWindowController ()
 - (void)strappySessionDidUpdate:(NSNotification *)notification;
+- (void)updateWindowTitleWithSessionSummary:(NSDictionary *)summary;
 @end
 
 @implementation SessionWindowController
@@ -66,7 +95,25 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
 - (void)windowDidLoad
 {
   [super windowDidLoad];
-  [[self window] setTitle:NSLocalizedString(@"Strappy", nil)];
+  [self updateWindowTitleWithSessionSummary:nil];
+}
+
+- (void)updateWindowTitleWithSessionSummary:(NSDictionary *)summary
+{
+  NSString *title;
+
+  if (selectedSession_ == nil) {
+    title = NSLocalizedString(@"Strappy", nil);
+  } else {
+    if (![summary isKindOfClass:[NSDictionary class]]) {
+      summary = [selectedSession_ cachedSummary];
+    }
+    if (![summary isKindOfClass:[NSDictionary class]]) {
+      summary = [selectedSession_ summaryWithError:nil];
+    }
+    title = StrappyWindowTitleForSessionSummary(summary);
+  }
+  [[self window] setTitle:title];
 }
 
 - (void)newSession:(id)sender
@@ -203,10 +250,10 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
     return;
   }
 
-  if (![messagesController_ canSelectModel] ||
-      ![messagesController_ setSelectedModelIdentifier:modelIdentifier]) {
-    NSBeep();
+  if (![messagesController_ canSelectModel]) {
+    return;
   }
+  [messagesController_ setSelectedModelIdentifier:modelIdentifier];
 }
 
 - (BOOL)canPrintCurrentChat
@@ -223,6 +270,11 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
                  didSelectSession:(StrappySession *)session
 {
   (void)controller;
+  if (selectedSession_ != session) {
+    [selectedSession_ release];
+    selectedSession_ = [session retain];
+  }
+  [self updateWindowTitleWithSessionSummary:nil];
   [messagesController_ reloadWithSession:session];
   [optionsController_ reloadWithSession:session];
 }
@@ -234,7 +286,20 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
   NSDictionary *session;
   NSNumber *identifier;
 
-  changeKind = [[notification userInfo] objectForKey:StrappySessionChangeKindKey];
+  session = [[notification userInfo] objectForKey:@"session"];
+  if (![session isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
+  identifier = [session objectForKey:@"id"];
+  if (![identifier isKindOfClass:[NSNumber class]]) {
+    return;
+  }
+  if ([[selectedSession_ sessionIdentifier] isEqualToNumber:identifier]) {
+    [self updateWindowTitleWithSessionSummary:session];
+  }
+
+  changeKind = [[notification userInfo]
+    objectForKey:StrappySessionChangeKindKey];
   if ([changeKind isEqualToString:StrappySessionChangeKindOptions]) {
     changedOptions = [[notification userInfo]
       objectForKey:StrappySessionChangedOptionsKey];
@@ -245,15 +310,6 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
       return;
     }
   }
-  session = [[notification userInfo] objectForKey:@"session"];
-  if (![session isKindOfClass:[NSDictionary class]]) {
-    return;
-  }
-
-  identifier = [session objectForKey:@"id"];
-  if (![identifier isKindOfClass:[NSNumber class]]) {
-    return;
-  }
 
   [sessionsController_ applySessionSummary:session select:NO];
 }
@@ -261,8 +317,14 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
 - (void)messageListViewController:(MessageListViewController *)controller
                   didUpdateSession:(NSDictionary *)session
 {
+  NSNumber *identifier;
+
   (void)controller;
-  [sessionsController_ reloadSessionIdentifier:[session objectForKey:@"id"]
+  identifier = [session objectForKey:@"id"];
+  if ([[selectedSession_ sessionIdentifier] isEqualToNumber:identifier]) {
+    [self updateWindowTitleWithSessionSummary:session];
+  }
+  [sessionsController_ reloadSessionIdentifier:identifier
                                         select:YES];
 }
 
@@ -312,6 +374,7 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
   [sessionsController_ release];
   [messagesController_ release];
   [optionsController_ release];
+  [selectedSession_ release];
   [super dealloc];
 }
 

@@ -415,17 +415,30 @@ static BOOL StrappyContextRoundActionValues(
 
 - (BOOL)setSelectedModelIdentifier:(NSString *)modelIdentifier
 {
+  NSError *error;
+  NSString *errorMessage;
   StrappySessionOptions *options;
   BOOL changed;
 
-  options = [[session_ optionsWithError:nil] copy];
+  error = nil;
+  options = [[session_ optionsWithError:&error] copy];
   if (options == nil) {
+    errorMessage = [error localizedDescription];
+    if ([errorMessage length] == 0U) {
+      errorMessage = NSLocalizedString(@"Your changes could not be saved.", nil);
+    }
+    [statusText_ release];
+    statusText_ = [errorMessage retain];
+    [self reloadContent];
     return NO;
   }
   [options setModelIdentifier:modelIdentifier];
   changed = [self updateSessionOptions:options
                          changedFields:StrappySessionOptionModel];
   [options release];
+  if (!changed) {
+    [self reloadContent];
+  }
   return changed;
 }
 

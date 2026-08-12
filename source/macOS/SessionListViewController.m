@@ -403,6 +403,9 @@ static void StrappyDrawTintedImage(NSImage *image,
                    contextInfo:(void *)contextInfo;
 - (void)deleteSessionIdentifier:(NSNumber *)sessionIdentifier;
 - (void)showDeleteError:(NSError *)error;
+- (void)showError:(NSError *)error
+            title:(NSString *)title
+  fallbackMessage:(NSString *)fallbackMessage;
 @end
 
 @implementation SessionListViewController
@@ -1060,18 +1063,30 @@ static void StrappyDrawTintedImage(NSImage *image,
 
 - (void)showDeleteError:(NSError *)error
 {
-  NSString *message;
+  [self showError:error
+            title:NSLocalizedString(@"Could Not Delete Chat", nil)
+  fallbackMessage:NSLocalizedString(@"The chat could not be deleted.", nil)];
+}
+
+- (void)showError:(NSError *)error
+            title:(NSString *)title
+  fallbackMessage:(NSString *)fallbackMessage
+{
   NSAlert *alert;
+  NSString *message;
   NSWindow *window;
 
   message = [error localizedDescription];
   if ([message length] == 0U) {
-    message = NSLocalizedString(@"The chat could not be deleted.", nil);
+    message = fallbackMessage;
   }
-
+  if ([message length] == 0U) {
+    message = NSLocalizedString(@"An unknown error occurred.", nil);
+  }
   alert = [[[NSAlert alloc] init] autorelease];
-  [alert setMessageText:NSLocalizedString(@"Could Not Delete Chat", nil)];
+  [alert setMessageText:title];
   [alert setInformativeText:message];
+  [alert addButtonWithTitle:NSLocalizedString(@"OK", nil)];
   window = [[self view] window];
   if (window != nil) {
     [alert XP_beginSheetModalForWindow:window
@@ -1105,7 +1120,9 @@ static void StrappyDrawTintedImage(NSImage *image,
 
   identifier = [session sessionIdentifier];
   if (![identifier isKindOfClass:[NSNumber class]]) {
-    NSBeep();
+    [self showError:error
+              title:NSLocalizedString(@"Could not create conversation", nil)
+    fallbackMessage:NSLocalizedString(@"An unknown error occurred.", nil)];
     return;
   }
 

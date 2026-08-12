@@ -10,6 +10,7 @@
   SessionListViewController *sessionsController_;
   MessageListViewController *messagesController_;
   StrappySessionOptionsViewController *optionsController_;
+  StrappySession *selectedSession_;
 }
 
 - (id)init;

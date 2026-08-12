@@ -37,6 +37,19 @@ static NSString * const kStrappyPreferencesToolbarPrompts =
 static NSString * const kStrappyModelSearchTextKey =
   @"_strappy_model_search_text";
 
+static NSString *StrappyPreferencesErrorMessage(NSError *error,
+                                                 NSString *fallbackMessage)
+{
+  NSString *message;
+
+  message = [error localizedDescription];
+  if ([message length] == 0U) {
+    message = fallbackMessage;
+  }
+  return ([message length] > 0U) ? message :
+    NSLocalizedString(@"The request failed.", nil);
+}
+
 static NSImage *StrappyDefaultModelIndicatorImage(CGFloat scale)
 {
   return [AIFontAwesome imageForIcon:AIFACircleCheck
@@ -391,8 +404,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
                                             icon:(AIFontAwesomeIcon)icon
                                            label:(NSString *)label;
 - (void)refreshAPITokenStatusWithSaved:(BOOL)saved;
+- (void)preferencesWindowDidBecomeKey:(NSNotification *)notification;
 - (void)loadSystemPrompt;
 - (void)loadDatabaseStudy;
+- (void)databaseStudyPromptDidFinish:(NSNotification *)notification;
 - (NSString *)currentDatabaseStudySearchText;
 - (NSArray *)databaseStudyRows:(NSArray *)rows
   matchingSearchText:(NSString *)searchText;
@@ -426,6 +441,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (NSArray *)modelRows:(NSArray *)rows matchingSearchText:(NSString *)searchText;
 - (void)applyModelRows;
 - (void)refreshModelStatus;
+- (void)setModelStatusErrorMessage:(NSString *)message;
 - (void)loadOpenRouterModels;
 - (void)sortAllModelRows;
 - (NSString *)selectedModelTableRowIdentifier;
@@ -455,6 +471,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)scanDatabasesInBackground:(NSDictionary *)request;
 - (void)scanDatabasesDidFinish:(NSDictionary *)result;
 - (void)refreshDatabaseStatus;
+- (void)setDatabaseStatusErrorMessage:(NSString *)message;
 - (void)whitelistTableViewDidPressSpace:(NSTableView *)tableView;
 - (void)toggleSelectedModelRows;
 - (void)toggleSelectedDatabaseRows;
@@ -527,6 +544,16 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
       addObserver:self
          selector:@selector(databaseCatalogDidChange:)
              name:FileScannerDatabaseCatalogDidChangeNotification
+           object:nil];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(preferencesWindowDidBecomeKey:)
+             name:NSWindowDidBecomeKeyNotification
+           object:window];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(databaseStudyPromptDidFinish:)
+             name:StrappySessionPromptDidFinishNotification
            object:nil];
     [self buildContentView];
     [self loadSystemPrompt];
@@ -805,9 +832,42 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 #pragma mark - Database Study
 
+- (void)preferencesWindowDidBecomeKey:(NSNotification *)notification
+{
+  NSString *identifier;
+
+  if ([notification object] != [self window]) {
+    return;
+  }
+  identifier = [[[self window] toolbar] selectedItemIdentifier];
+  if ([identifier isEqualToString:kStrappyPreferencesToolbarStudy]) {
+    [self loadDatabaseStudy];
+  }
+}
+
+- (void)databaseStudyPromptDidFinish:(NSNotification *)notification
+{
+  NSString *errorMessage;
+  NSDictionary *userInfo;
+
+  userInfo = [notification userInfo];
+  if (![[userInfo objectForKey:@"database_study"] boolValue]) {
+    return;
+  }
+
+  [self loadDatabaseStudy];
+  errorMessage = [userInfo objectForKey:@"error"];
+  if ([errorMessage isKindOfClass:[NSString class]] &&
+      ([errorMessage length] > 0U)) {
+    [databaseStudyStatusLabel_ setStringValue:errorMessage];
+    [databaseStudyStatusLabel_ setToolTip:errorMessage];
+  }
+}
+
 - (void)loadDatabaseStudy
 {
   NSError *error;
+  NSString *message;
   NSArray *rows;
 
   if (databaseStudyTableView_ == nil) {
@@ -825,9 +885,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     [databaseStudyTableView_ deselectAll:self];
     [databaseStudyTableView_ reloadData];
     [self updateDatabaseStudyActionButtonForAllStudied:NO];
-    [databaseStudyStatusLabel_ setStringValue:NSLocalizedString(@"— of —", nil)];
-    [self showDatabaseStudyError:error
-                           title:NSLocalizedString(@"Could Not Load Study", nil)];
+    message = StrappyPreferencesErrorMessage(
+      error,
+      NSLocalizedString(@"The request failed.", nil));
+    [databaseStudyStatusLabel_ setStringValue:message];
+    [databaseStudyStatusLabel_ setToolTip:message];
     return;
   }
 
@@ -997,6 +1059,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   allStudied = ([allDatabaseStudyRows_ count] > 0U) &&
     (studiedCount == [allDatabaseStudyRows_ count]);
   [self updateDatabaseStudyActionButtonForAllStudied:allStudied];
+  [databaseStudyStatusLabel_ setToolTip:nil];
   [databaseStudyStatusLabel_ setStringValue:[NSString stringWithFormat:
     NSLocalizedString(@"%lu of %lu", nil),
     (unsigned long)studiedCount,
@@ -1235,7 +1298,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [alert addButtonWithTitle:NSLocalizedString(@"OK", nil)];
   window = [self window];
   if (window == nil) {
-    NSBeep();
+    [alert runModal];
     return;
   }
   [alert XP_beginSheetModalForWindow:window
@@ -1446,6 +1509,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
+  [modelStatusLabel_ setToolTip:nil];
   count = [modelRows_ count];
   searchText = [self currentModelSearchText];
   if ([searchText length] > 0U) {
@@ -1473,11 +1537,25 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 }
 
+- (void)setModelStatusErrorMessage:(NSString *)message
+{
+  if (modelStatusLabel_ == nil) {
+    return;
+  }
+  if ([message length] == 0U) {
+    message = NSLocalizedString(@"Your changes could not be saved.", nil);
+  }
+  [modelStatusLabel_ setStringValue:message];
+  [modelStatusLabel_ setToolTip:message];
+}
+
 - (void)loadOpenRouterModels
 {
+  NSError *error;
   NSArray *rows;
 
-  rows = [StrappySession openRouterModelCatalogWithError:nil];
+  error = nil;
+  rows = [StrappySession openRouterModelCatalogWithError:&error];
   if (rows != nil) {
     [allModelRows_ release];
     allModelRows_ = [StrappyPreparedModelRowsForRows(rows) copy];
@@ -1486,8 +1564,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
-  [modelStatusLabel_ setStringValue:
-    NSLocalizedString(@"Model list could not be loaded.", nil)];
+  [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
+    error,
+    NSLocalizedString(@"Model list could not be loaded.", nil))];
 }
 
 - (void)sortAllModelRows
@@ -1657,6 +1736,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [fetchModelsButton_ setEnabled:(refreshingModels_ ? NO : YES)];
   if (refreshingModels_) {
     [modelProgressIndicator_ startAnimation:self];
+    [modelStatusLabel_ setToolTip:nil];
     [modelStatusLabel_ setStringValue:NSLocalizedString(@"Fetching models...", nil)];
   } else {
     [modelProgressIndicator_ stopAnimation:self];
@@ -1707,8 +1787,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [self setModelCatalogRefreshing:NO];
   if ([errorMessage isKindOfClass:[NSString class]] &&
       ([errorMessage length] > 0U)) {
-    [modelStatusLabel_ setStringValue:errorMessage];
-    NSBeep();
+    [self setModelStatusErrorMessage:errorMessage];
     return;
   }
 
@@ -1829,9 +1908,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)loadCatalogedDatabases
 {
+  NSError *error;
   NSArray *rows;
 
-  rows = [[FileScanner sharedScanner] catalogedSQLiteDatabasesWithError:nil];
+  error = nil;
+  rows = [[FileScanner sharedScanner] catalogedSQLiteDatabasesWithError:&error];
   if (rows != nil) {
     [allDatabaseRows_ release];
     allDatabaseRows_ = [rows copy];
@@ -1839,7 +1920,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
-  NSBeep();
+  [self setDatabaseStatusErrorMessage:StrappyPreferencesErrorMessage(
+    error,
+    NSLocalizedString(@"Rows could not be loaded.", nil))];
 }
 
 - (void)databaseCatalogDidChange:(NSNotification *)notification
@@ -1879,6 +1962,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
+  [databaseStatusLabel_ setToolTip:nil];
   if (scanning_) {
     [databaseStatusLabel_ setStringValue:
       NSLocalizedString(@"Scanning databases...", nil)];
@@ -1910,6 +1994,18 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
       [NSString stringWithFormat:NSLocalizedString(@"%lu databases available.", nil),
         (unsigned long)count]];
   }
+}
+
+- (void)setDatabaseStatusErrorMessage:(NSString *)message
+{
+  if (databaseStatusLabel_ == nil) {
+    return;
+  }
+  if ([message length] == 0U) {
+    message = NSLocalizedString(@"Your changes could not be saved.", nil);
+  }
+  [databaseStatusLabel_ setStringValue:message];
+  [databaseStatusLabel_ setToolTip:message];
 }
 
 - (void)saveAPICredentials:(id)sender
@@ -2016,8 +2112,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)scanDatabasesInBackground:(NSDictionary *)request
 {
   NSAutoreleasePool *pool;
+  NSError *error;
   NSArray *rows;
   NSMutableDictionary *result;
+  NSString *errorMessage;
   NSString *rootPath;
   NSNumber *scanModeNumber;
   FileScannerDatabaseScanMode scanMode;
@@ -2029,12 +2127,18 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
               ([scanModeNumber XP_integerValue] ==
                FileScannerDatabaseScanModeQuick)) ?
     FileScannerDatabaseScanModeQuick : FileScannerDatabaseScanModeFull;
+  error = nil;
   rows = [[FileScanner sharedScanner] scanDirectoryForSQLiteDatabasesAtPath:rootPath
                                                                    scanMode:scanMode
-                                            savingResultsToCatalogWithError:nil];
+                                            savingResultsToCatalogWithError:&error];
   result = [[NSMutableDictionary alloc] init];
   if (rows != nil) {
     [result setObject:rows forKey:@"rows"];
+  } else {
+    errorMessage = StrappyPreferencesErrorMessage(
+      error,
+      NSLocalizedString(@"Database scan failed.", nil));
+    [result setObject:errorMessage forKey:@"error"];
   }
 
   [self performSelectorOnMainThread:@selector(scanDatabasesDidFinish:)
@@ -2047,6 +2151,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)scanDatabasesDidFinish:(NSDictionary *)result
 {
+  NSString *errorMessage;
   NSArray *rows;
 
   rows = [result objectForKey:@"rows"];
@@ -2054,11 +2159,15 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     [allDatabaseRows_ release];
     allDatabaseRows_ = [rows copy];
     [self applyDatabaseRows];
-  } else {
-    NSBeep();
   }
 
   [self setScanning:NO];
+  if (![rows isKindOfClass:[NSArray class]]) {
+    errorMessage = [result objectForKey:@"error"];
+    [self setDatabaseStatusErrorMessage:
+      [errorMessage isKindOfClass:[NSString class]] ? errorMessage :
+        NSLocalizedString(@"Database scan failed.", nil)];
+  }
 }
 
 - (void)whitelistTableViewDidPressSpace:(NSTableView *)tableView
@@ -2072,6 +2181,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)toggleSelectedModelRows
 {
+  NSError *error;
   NSIndexSet *selectedRows;
   NSUInteger rowIndex;
   NSDictionary *model;
@@ -2104,7 +2214,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   if (eligibleCount == 0U) {
-    NSBeep();
+    [self setModelStatusErrorMessage:
+      NSLocalizedString(@"Default model is always allowed.", nil)];
     return;
   }
 
@@ -2124,12 +2235,15 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     }
 
     modelId = StrappyStringForModelRow(model, @"id");
+    error = nil;
     if (([modelId length] == 0U) ||
         ![StrappySession setOpenRouterModelAllowed:shouldAllow
                                 forModelIdentifier:modelId
-                                             error:nil]) {
-      NSBeep();
-      [modelTableView_ reloadData];
+                                             error:&error]) {
+      [self loadOpenRouterModels];
+      [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
+        error,
+        NSLocalizedString(@"Your changes could not be saved.", nil))];
       return;
     }
   }
@@ -2139,6 +2253,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)toggleSelectedDatabaseRows
 {
+  NSError *error;
   NSIndexSet *selectedRows;
   NSUInteger rowIndex;
   NSDictionary *database;
@@ -2172,7 +2287,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   if (eligibleCount == 0U) {
-    NSBeep();
+    [self setDatabaseStatusErrorMessage:
+      NSLocalizedString(@"This file is not a valid SQLite database.", nil)];
     return;
   }
 
@@ -2192,11 +2308,14 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     }
 
     catalogId = [database objectForKey:@"catalog_id"];
+    error = nil;
     if (![[FileScanner sharedScanner] setCatalogedDatabaseAllowed:shouldAllow
                                              forCatalogIdentifier:catalogId
-                                                            error:nil]) {
-      NSBeep();
-      [databaseTableView_ reloadData];
+                                                            error:&error]) {
+      [self loadCatalogedDatabases];
+      [self setDatabaseStatusErrorMessage:StrappyPreferencesErrorMessage(
+        error,
+        NSLocalizedString(@"Your changes could not be saved.", nil))];
       return;
     }
   }
@@ -2495,7 +2614,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 {
   NSDictionary *database;
   NSDictionary *model;
+  NSError *error;
   NSString *identifier;
+  NSString *validationError;
   NSNumber *catalogId;
   NSArray *selectedPaths;
   BOOL checked;
@@ -2518,18 +2639,22 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
     model = [modelRows_ objectAtIndex:(NSUInteger)row];
     if ([self modelRowIsDefault:model] && !checked) {
-      NSBeep();
       [modelTableView_ reloadData];
+      [self setModelStatusErrorMessage:
+        NSLocalizedString(@"Default model is always allowed.", nil)];
       return;
     }
 
     modelId = StrappyStringForModelRow(model, @"id");
+    error = nil;
     if (([modelId length] == 0U) ||
         ![StrappySession setOpenRouterModelAllowed:checked
                                 forModelIdentifier:modelId
-                                             error:nil]) {
-      NSBeep();
+                                             error:&error]) {
       [modelTableView_ reloadData];
+      [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
+        error,
+        NSLocalizedString(@"Your changes could not be saved.", nil))];
       return;
     }
 
@@ -2548,26 +2673,37 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   database = [databaseRows_ objectAtIndex:(NSUInteger)row];
   if ([identifier isEqualToString:@"allowed"] && checked &&
       ![self databaseRowCanBeAllowed:database]) {
-    NSBeep();
+    validationError = [database objectForKey:@"validation_error"];
+    if (![validationError isKindOfClass:[NSString class]] ||
+        ([validationError length] == 0U)) {
+      validationError =
+        NSLocalizedString(@"This file is not a valid SQLite database.", nil);
+    }
     [databaseTableView_ reloadData];
+    [self setDatabaseStatusErrorMessage:validationError];
     return;
   }
 
   catalogId = [database objectForKey:@"catalog_id"];
+  error = nil;
   if ([identifier isEqualToString:@"allowed"] &&
       ![[FileScanner sharedScanner] setCatalogedDatabaseAllowed:checked
                                             forCatalogIdentifier:catalogId
-                                                           error:nil]) {
-    NSBeep();
+                                                           error:&error]) {
     [databaseTableView_ reloadData];
+    [self setDatabaseStatusErrorMessage:StrappyPreferencesErrorMessage(
+      error,
+      NSLocalizedString(@"Your changes could not be saved.", nil))];
     return;
   }
   if ([identifier isEqualToString:@"hidden"] &&
       ![[FileScanner sharedScanner] setCatalogedDatabaseHidden:checked
                                            forCatalogIdentifier:catalogId
-                                                          error:nil]) {
-    NSBeep();
+                                                          error:&error]) {
     [databaseTableView_ reloadData];
+    [self setDatabaseStatusErrorMessage:StrappyPreferencesErrorMessage(
+      error,
+      NSLocalizedString(@"Your changes could not be saved.", nil))];
     return;
   }
 
