@@ -46,7 +46,6 @@
 "Options are unavailable while a prompt is running." = "Options are unavailable while a prompt is running.";
 "Changes apply to the selected chat." = "Changes apply to the selected chat.";
 "Assistant" = "Assistant";
-"Model & Assistant" = "Model & Assistant";
 "World" = "World";
 "Personal" = "Personal";
 "Coding" = "Coding";
@@ -59,7 +58,6 @@
 "Limit to 1 Tool" = "Limit to 1 Tool";
 "Check Answer Quality" = "Check Answer Quality";
 "Round Limit" = "Round Limit";
-"Round Limit must be between 1 and %lu." = "Round Limit must be between 1 and %lu.";
 "Choose a Model" = "Choose a Model";
 "No Models Available" = "No Models Available";
 "World Knowledge" = "World Knowledge";
@@ -79,7 +77,12 @@
 "Prompt failed." = "Prompt failed.";
 
 "Preferences" = "Preferences";
+"Auth" = "Auth";
+"Defaults" = "Defaults";
 "Session Defaults" = "Session Defaults";
+"Session defaults apply to new sessions" = "Session defaults apply to new sessions";
+"Tools & Search" = "Tools & Search";
+"Provider" = "Provider";
 "API Token" = "API Token";
 "API Endpoint:" = "API Endpoint:";
 "API Token:" = "API Token:";
@@ -89,6 +92,7 @@
 "Fetch Models" = "Fetch Models";
 "Refresh the OpenRouter model list." = "Refresh the OpenRouter model list.";
 "Use" = "Use";
+"Default" = "Default";
 "ID" = "ID";
 "Context" = "Context";
 "Cost In (1M)" = "Cost In (1M)";
@@ -98,6 +102,7 @@
 "Default Model" = "Default Model";
 "Cancel" = "Cancel";
 "Default model is always allowed." = "Default model is always allowed.";
+"Used for new chats and Database Study." = "Used for new chats and Database Study.";
 "No matching models." = "No matching models.";
 "OK" = "OK";
 "Model list could not be loaded." = "Model list could not be loaded.";
@@ -123,6 +128,7 @@
 "Studied" = "Studied";
 "Last Studied" = "Last Studied";
 "Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu." = "Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu.";
+"Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the model selected in Session Defaults." = "Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the model selected in Session Defaults.";
 "Reset" = "Reset";
 "Delete Study..." = "Delete Study...";
 "Delete Study for \"%@\"?" = "Delete Study for \"%@\"?";

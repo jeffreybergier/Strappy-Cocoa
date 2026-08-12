@@ -6,12 +6,14 @@
 @class StrappyPreferencesDatabaseStudyView;
 @class StrappyPreferencesModelWhitelistView;
 @class StrappyPreferencesSystemPromptsView;
+@class StrappySessionOptionsViewController;
 
 @interface PreferencesWindowController : NSWindowController
     <XPTableViewDataSource, XPTableViewDelegate, XPToolbarDelegate> {
  @private
   NSView              *contentPaneView_;
   StrappyPreferencesAuthenticationView *authenticationPaneView_;
+  StrappySessionOptionsViewController *sessionDefaultsController_;
   NSTextField         *apiEndpointField_;
   NSSecureTextField   *apiTokenField_;
   NSTextField         *apiTokenStatusLabel_;

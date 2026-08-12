@@ -143,7 +143,7 @@ static CGFloat StrappyStudyViewHeightForText(NSString *text, CGFloat width)
   [studyButton_ setButtonType:XPButtonTypeMomentaryLight];
   [studyButton_ setTitle:NSLocalizedString(@"Study", nil)];
   [studyButton_ setToolTip:NSLocalizedString(
-    @"Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu.",
+    @"Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the model selected in Session Defaults.",
     nil)];
   [studyButton_ setTarget:target];
   [studyButton_ setAction:@selector(beginDatabaseStudy:)];

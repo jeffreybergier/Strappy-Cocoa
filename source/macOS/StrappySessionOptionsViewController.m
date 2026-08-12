@@ -7,6 +7,9 @@ static const CGFloat kStrappyInspectorInset = 12.0;
 static const CGFloat kStrappyInspectorGap = 8.0;
 static const CGFloat kStrappyInspectorControlHeight = 24.0;
 static const CGFloat kStrappyInspectorDocumentHeight = 526.0;
+static const CGFloat kStrappyDefaultsMinimumDocumentHeight = 296.0;
+static const NSUInteger kStrappyRoundLimitSliderMinimum = 20U;
+static const NSUInteger kStrappyRoundLimitSliderMaximum = 200U;
 
 static NSArray *StrappyInspectorSearchProviders(void)
 {
@@ -61,20 +64,21 @@ static NSString *StrappyInspectorModelTitle(NSDictionary *row)
     NSLocalizedString(@"Model", nil);
 }
 
-static NSString *StrappyInspectorAssistantSegmentTitle(NSDictionary *row)
+static NSString *StrappyInspectorAssistantSegmentTitle(NSDictionary *row,
+                                                        BOOL useFullName)
 {
   NSString *identifier;
   NSString *name;
 
   identifier = StrappyInspectorStringForRow(row, @"id");
   if ([identifier isEqualToString:@"world_knowledge"]) {
-    return NSLocalizedString(@"World", nil);
+    return NSLocalizedString(useFullName ? @"World Knowledge" : @"World", nil);
   }
   if ([identifier isEqualToString:@"personal_assistant"]) {
-    return NSLocalizedString(@"Personal", nil);
+    return NSLocalizedString(useFullName ? @"Personal Assistant" : @"Personal", nil);
   }
   if ([identifier isEqualToString:@"coding_assistant"]) {
-    return NSLocalizedString(@"Coding", nil);
+    return NSLocalizedString(useFullName ? @"Coding Assistant" : @"Coding", nil);
   }
 
   name = StrappyInspectorStringForRow(row, @"name");
@@ -198,30 +202,15 @@ static BOOL StrappyInspectorPopUpHasEnabledChoice(NSPopUpButton *popUpButton)
   return NO;
 }
 
-static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
+static NSUInteger StrappyInspectorClampSliderRoundLimit(NSUInteger limit)
 {
-  NSString *trimmed;
-  NSCharacterSet *invalidCharacters;
-  long long value;
-
-  trimmed = [text stringByTrimmingCharactersInSet:
-    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  invalidCharacters = [[NSCharacterSet characterSetWithCharactersInString:
-    @"0123456789"] invertedSet];
-  if (([trimmed length] == 0U) ||
-      ([trimmed rangeOfCharacterFromSet:invalidCharacters].location !=
-       NSNotFound)) {
-    return NO;
+  if (limit < kStrappyRoundLimitSliderMinimum) {
+    return kStrappyRoundLimitSliderMinimum;
   }
-  value = [trimmed XP_longLongValue];
-  if ((value < 1LL) ||
-      (value > (long long)StrappySessionMaximumLimit)) {
-    return NO;
+  if (limit > kStrappyRoundLimitSliderMaximum) {
+    return kStrappyRoundLimitSliderMaximum;
   }
-  if (limitOut != NULL) {
-    *limitOut = (NSUInteger)value;
-  }
-  return YES;
+  return limit;
 }
 
 @interface StrappyInspectorDocumentView : NSView
@@ -238,6 +227,8 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
 
 @interface StrappySessionOptionsViewController ()
 - (void)layoutInspectorViews;
+- (void)layoutDefaultsViews;
+- (StrappySessionOptions *)currentOptions;
 - (BOOL)canEditOptions;
 - (void)populateModelPopUpWithOptions:(StrappySessionOptions *)options;
 - (void)populateAssistantSegmentsWithOptions:(StrappySessionOptions *)options;
@@ -253,7 +244,7 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
 - (void)limitToOneToolChanged:(id)sender;
 - (void)answerQualityChanged:(id)sender;
 - (void)searchProviderChanged:(id)sender;
-- (void)roundLimitChanged:(id)sender;
+- (void)roundLimitSliderChanged:(id)sender;
 - (void)documentViewFrameDidChange:(NSNotification *)notification;
 - (void)sessionDidUpdate:(NSNotification *)notification;
 - (void)sessionActivityDidChange:(NSNotification *)notification;
@@ -288,11 +279,21 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   return self;
 }
 
+- (id)initForSessionDefaults
+{
+  if ((self = [self init])) {
+    editsSessionDefaults_ = YES;
+  }
+  return self;
+}
+
 - (void)loadView
 {
   NSView *view;
 
-  view = [[NSView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 300.0, 600.0)];
+  view = [[NSView alloc] initWithFrame:editsSessionDefaults_ ?
+    NSMakeRect(0.0, 0.0, 696.0, 456.0) :
+    NSMakeRect(0.0, 0.0, 300.0, 600.0)];
   [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   [self setView:view];
   [view release];
@@ -305,7 +306,7 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   scrollView_ = [[NSScrollView alloc] initWithFrame:[[self view] bounds]];
   [scrollView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   [scrollView_ setBorderType:NSNoBorder];
-  [scrollView_ setHasVerticalScroller:YES];
+  [scrollView_ setHasVerticalScroller:!editsSessionDefaults_];
   [scrollView_ setHasHorizontalScroller:NO];
   [scrollView_ setDrawsBackground:YES];
   [scrollView_ setBackgroundColor:[NSColor windowBackgroundColor]];
@@ -324,8 +325,9 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
            object:documentView_];
 
   titleLabel_ = StrappyInspectorLabel(
-    NSLocalizedString(@"Session Options", nil),
-    [NSFont boldSystemFontOfSize:13.0]);
+    NSLocalizedString(editsSessionDefaults_ ?
+      @"Session Defaults" : @"Session Options", nil),
+    [NSFont boldSystemFontOfSize:editsSessionDefaults_ ? 14.0 : 13.0]);
   [documentView_ addSubview:titleLabel_];
 
   statusLabel_ = StrappyInspectorLabel(@"",
@@ -335,8 +337,9 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   [documentView_ addSubview:statusLabel_];
 
   modelAssistantBox_ = StrappyInspectorBox(
-    NSLocalizedString(@"Model & Assistant", nil));
-  toolsBox_ = StrappyInspectorBox(NSLocalizedString(@"Tools", nil));
+    NSLocalizedString(@"Assistant", nil));
+  toolsBox_ = StrappyInspectorBox(NSLocalizedString(editsSessionDefaults_ ?
+    @"Tools & Search" : @"Tools", nil));
   limitsBox_ = StrappyInspectorBox(NSLocalizedString(@"Limits", nil));
   searchProviderBox_ = StrappyInspectorBox(
     NSLocalizedString(@"Search Provider", nil));
@@ -359,6 +362,12 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   [assistantLabel_ setAutoresizingMask:NSViewWidthSizable];
   [documentView_ addSubview:modelLabel_];
   [documentView_ addSubview:assistantLabel_];
+
+  searchProviderLabel_ = StrappyInspectorLabel(
+    [NSString stringWithFormat:@"%@:", NSLocalizedString(@"Provider", nil)],
+    [NSFont systemFontOfSize:10.0]);
+  [searchProviderLabel_ setHidden:!editsSessionDefaults_];
+  [documentView_ addSubview:searchProviderLabel_];
 
   modelPopUpButton_ = [[NSPopUpButton alloc] initWithFrame:NSZeroRect
                                                 pullsDown:NO];
@@ -406,13 +415,34 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
     [NSFont systemFontOfSize:11.0]);
   [documentView_ addSubview:roundLimitLabel_];
 
-  roundLimitField_ = [[NSTextField alloc] initWithFrame:NSZeroRect];
-  [roundLimitField_ setFont:[NSFont systemFontOfSize:11.0]];
-  [roundLimitField_ setAlignment:XPTextAlignmentRight];
-  [roundLimitField_ setDelegate:self];
-  [roundLimitField_ setTarget:self];
-  [roundLimitField_ setAction:@selector(roundLimitChanged:)];
-  [documentView_ addSubview:roundLimitField_];
+  roundLimitValueLabel_ = StrappyInspectorLabel(
+    @"",
+    [NSFont systemFontOfSize:11.0]);
+  [roundLimitValueLabel_ setAlignment:XPTextAlignmentRight];
+  [documentView_ addSubview:roundLimitValueLabel_];
+
+  roundLimitMinimumLabel_ = StrappyInspectorLabel(
+    [NSString stringWithFormat:@"%lu",
+      (unsigned long)kStrappyRoundLimitSliderMinimum],
+    [NSFont systemFontOfSize:9.0]);
+  [roundLimitMinimumLabel_ setTextColor:[NSColor disabledControlTextColor]];
+  [documentView_ addSubview:roundLimitMinimumLabel_];
+
+  roundLimitSlider_ = [[NSSlider alloc] initWithFrame:NSZeroRect];
+  [roundLimitSlider_ setMinValue:(double)kStrappyRoundLimitSliderMinimum];
+  [roundLimitSlider_ setMaxValue:(double)kStrappyRoundLimitSliderMaximum];
+  [roundLimitSlider_ setContinuous:NO];
+  [roundLimitSlider_ setTarget:self];
+  [roundLimitSlider_ setAction:@selector(roundLimitSliderChanged:)];
+  [documentView_ addSubview:roundLimitSlider_];
+
+  roundLimitMaximumLabel_ = StrappyInspectorLabel(
+    [NSString stringWithFormat:@"%lu",
+      (unsigned long)kStrappyRoundLimitSliderMaximum],
+    [NSFont systemFontOfSize:9.0]);
+  [roundLimitMaximumLabel_ setAlignment:XPTextAlignmentRight];
+  [roundLimitMaximumLabel_ setTextColor:[NSColor disabledControlTextColor]];
+  [documentView_ addSubview:roundLimitMaximumLabel_];
 
   searchProviderPopUpButton_ = [[NSPopUpButton alloc]
     initWithFrame:NSZeroRect pullsDown:NO];
@@ -422,6 +452,7 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   [searchProviderPopUpButton_ setAction:@selector(searchProviderChanged:)];
   [documentView_ addSubview:searchProviderPopUpButton_];
 
+  [searchProviderBox_ setHidden:editsSessionDefaults_];
   [self layoutInspectorViews];
   [self reloadOptions];
 }
@@ -440,6 +471,10 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   CGFloat contentWidth;
   CGFloat y;
 
+  if (editsSessionDefaults_) {
+    [self layoutDefaultsViews];
+    return;
+  }
   if ((scrollView_ == nil) || (documentView_ == nil)) {
     return;
   }
@@ -498,7 +533,7 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
                                    20.0)];
 
   y += 88.0 + kStrappyInspectorGap;
-  [limitsBox_ setFrame:NSMakeRect(contentX, y, contentWidth, 112.0)];
+  [limitsBox_ setFrame:NSMakeRect(contentX, y, contentWidth, 132.0)];
   [limitToOneToolButton_ setFrame:NSMakeRect(contentX + 12.0,
                                              y + 25.0,
                                              contentWidth - 24.0,
@@ -507,16 +542,30 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
                                             y + 50.0,
                                             contentWidth - 24.0,
                                             20.0)];
-  [roundLimitLabel_ setFrame:NSMakeRect(contentX + 15.0,
-                                        y + 80.0,
-                                        contentWidth - 92.0,
-                                        18.0)];
-  [roundLimitField_ setFrame:NSMakeRect(contentX + contentWidth - 66.0,
-                                        y + 75.0,
-                                        54.0,
-                                        kStrappyInspectorControlHeight)];
+  [roundLimitLabel_ setFrame:NSMakeRect(contentX + 12.0,
+                                        y + 78.0,
+                                        contentWidth - 67.0,
+                                        16.0)];
+  [roundLimitValueLabel_ setFrame:NSMakeRect(
+    contentX + contentWidth - 55.0,
+    y + 78.0,
+    43.0,
+    16.0)];
+  [roundLimitMinimumLabel_ setFrame:NSMakeRect(contentX + 12.0,
+                                               y + 100.0,
+                                               24.0,
+                                               14.0)];
+  [roundLimitSlider_ setFrame:NSMakeRect(contentX + 40.0,
+                                         y + 96.0,
+                                         contentWidth - 86.0,
+                                         20.0)];
+  [roundLimitMaximumLabel_ setFrame:NSMakeRect(
+    contentX + contentWidth - 42.0,
+    y + 100.0,
+    30.0,
+    14.0)];
 
-  y += 112.0 + kStrappyInspectorGap;
+  y += 132.0 + kStrappyInspectorGap;
   [searchProviderBox_ setFrame:NSMakeRect(contentX, y, contentWidth, 72.0)];
   [searchProviderPopUpButton_ setFrame:NSMakeRect(
     contentX + 12.0,
@@ -525,8 +574,155 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
     kStrappyInspectorControlHeight)];
 }
 
+- (void)layoutDefaultsViews
+{
+  NSRect bounds;
+  NSSize contentSize;
+  CGFloat documentWidth;
+  CGFloat documentHeight;
+  CGFloat contentX;
+  CGFloat contentWidth;
+  CGFloat modelBoxY;
+  CGFloat modelBoxHeight;
+  CGFloat bottomY;
+  CGFloat bottomBoxHeight;
+  CGFloat columnGap;
+  CGFloat leftWidth;
+  CGFloat rightX;
+  CGFloat rightWidth;
+  CGFloat statusHeight;
+
+  if ((scrollView_ == nil) || (documentView_ == nil) || layingOut_) {
+    return;
+  }
+  layingOut_ = YES;
+
+  bounds = [[self view] bounds];
+  [scrollView_ setFrame:bounds];
+  [scrollView_ setHasVerticalScroller:
+    (NSHeight(bounds) < kStrappyDefaultsMinimumDocumentHeight)];
+  contentSize = [scrollView_ contentSize];
+  documentWidth = contentSize.width;
+  if (documentWidth < 440.0) {
+    documentWidth = 440.0;
+  }
+  documentHeight = contentSize.height;
+  if (documentHeight < kStrappyDefaultsMinimumDocumentHeight) {
+    documentHeight = kStrappyDefaultsMinimumDocumentHeight;
+  }
+  [documentView_ setFrame:NSMakeRect(0.0,
+                                     0.0,
+                                     documentWidth,
+                                     documentHeight)];
+
+  /* PreferencesWindowController supplies the single outer window margin.
+   * Keep this pane flush with that host view so the margin is not doubled. */
+  contentX = 0.0;
+  contentWidth = documentWidth;
+
+  [titleLabel_ setHidden:YES];
+  modelBoxY = 0.0;
+  modelBoxHeight = 126.0;
+  [modelAssistantBox_ setFrame:NSMakeRect(contentX,
+                                          modelBoxY,
+                                          contentWidth,
+                                          modelBoxHeight)];
+  [modelLabel_ setFrame:NSMakeRect(contentX + 15.0,
+                                   modelBoxY + 21.0,
+                                   contentWidth - 30.0,
+                                   16.0)];
+  [modelPopUpButton_ setFrame:NSMakeRect(
+    contentX + 12.0,
+    modelBoxY + 36.0,
+    contentWidth - 24.0,
+    kStrappyInspectorControlHeight)];
+  [assistantLabel_ setFrame:NSMakeRect(contentX + 15.0,
+                                       modelBoxY + 68.0,
+                                       contentWidth - 30.0,
+                                       16.0)];
+  [assistantSegmentedControl_ setFrame:NSMakeRect(
+    contentX + 12.0,
+    modelBoxY + 83.0,
+    contentWidth - 24.0,
+    kStrappyInspectorControlHeight)];
+  StrappyInspectorDistributeAssistantSegmentWidths(
+    assistantSegmentedControl_);
+
+  bottomY = modelBoxY + modelBoxHeight + kStrappyInspectorGap;
+  bottomBoxHeight = 126.0;
+  columnGap = 10.0;
+  leftWidth = floor((contentWidth - columnGap) / 2.0);
+  rightX = contentX + leftWidth + columnGap;
+  rightWidth = contentWidth - leftWidth - columnGap;
+
+  [toolsBox_ setFrame:NSMakeRect(
+    contentX, bottomY, leftWidth, bottomBoxHeight)];
+  [webSearchButton_ setFrame:NSMakeRect(contentX + 12.0,
+                                        bottomY + 25.0,
+                                        leftWidth - 24.0,
+                                        20.0)];
+  [searchProviderLabel_ setFrame:NSMakeRect(contentX + 15.0,
+                                            bottomY + 51.0,
+                                            leftWidth - 30.0,
+                                            16.0)];
+  [searchProviderPopUpButton_ setFrame:NSMakeRect(
+    contentX + 12.0,
+    bottomY + 66.0,
+    leftWidth - 24.0,
+    kStrappyInspectorControlHeight)];
+  [bashButton_ setFrame:NSMakeRect(contentX + 12.0,
+                                   bottomY + 99.0,
+                                   leftWidth - 24.0,
+                                   20.0)];
+
+  [limitsBox_ setFrame:NSMakeRect(
+    rightX, bottomY, rightWidth, bottomBoxHeight)];
+  [limitToOneToolButton_ setFrame:NSMakeRect(rightX + 12.0,
+                                             bottomY + 25.0,
+                                             rightWidth - 24.0,
+                                             20.0)];
+  [answerQualityButton_ setFrame:NSMakeRect(rightX + 12.0,
+                                            bottomY + 53.0,
+                                            rightWidth - 24.0,
+                                            20.0)];
+
+  [roundLimitLabel_ setFrame:NSMakeRect(rightX + 12.0,
+                                        bottomY + 78.0,
+                                        rightWidth - 67.0,
+                                        16.0)];
+  [roundLimitValueLabel_ setFrame:NSMakeRect(
+    rightX + rightWidth - 55.0,
+    bottomY + 78.0,
+    43.0,
+    16.0)];
+  [roundLimitMinimumLabel_ setFrame:NSMakeRect(rightX + 12.0,
+                                               bottomY + 100.0,
+                                               24.0,
+                                               14.0)];
+  [roundLimitSlider_ setFrame:NSMakeRect(rightX + 40.0,
+                                         bottomY + 96.0,
+                                         rightWidth - 86.0,
+                                         20.0)];
+  [roundLimitMaximumLabel_ setFrame:NSMakeRect(
+    rightX + rightWidth - 42.0,
+    bottomY + 100.0,
+    30.0,
+    14.0)];
+  statusHeight = 28.0;
+  [statusLabel_ setFrame:NSMakeRect(contentX,
+                                    documentHeight - statusHeight,
+                                    contentWidth,
+                                    statusHeight)];
+
+  layingOut_ = NO;
+}
+
 - (void)reloadWithSession:(StrappySession *)session
 {
+  if (editsSessionDefaults_) {
+    [self reloadOptions];
+    return;
+  }
   if (![session isKindOfClass:[StrappySession class]]) {
     session = nil;
   }
@@ -539,10 +735,21 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   [self reloadOptions];
 }
 
+- (StrappySessionOptions *)currentOptions
+{
+  if (editsSessionDefaults_) {
+    return defaultOptions_;
+  }
+  return (session_ != nil) ? [session_ optionsWithError:nil] : nil;
+}
+
 - (BOOL)canEditOptions
 {
   NSNumber *identifier;
 
+  if (editsSessionDefaults_) {
+    return (defaultOptions_ != nil) ? YES : NO;
+  }
   if ((session_ == nil) || [session_ isDatabaseStudySession] ||
       [session_ isPromptInFlight]) {
     return NO;
@@ -558,7 +765,10 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
 - (void)reloadOptions
 {
   StrappySessionOptions *options;
+  NSError *loadError;
+  NSString *loadErrorMessage;
   NSString *message;
+  NSUInteger roundLimit;
 
   (void)[self view];
   if (reloading_) {
@@ -566,7 +776,22 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   }
   reloading_ = YES;
 
-  options = (session_ != nil) ? [session_ optionsWithError:nil] : nil;
+  loadError = nil;
+  loadErrorMessage = nil;
+  if (editsSessionDefaults_) {
+    options = [StrappySession defaultSessionOptionsWithError:&loadError];
+    [defaultOptions_ release];
+    defaultOptions_ = [options retain];
+    if (options == nil) {
+      loadErrorMessage = [loadError localizedDescription];
+      if ([loadErrorMessage length] == 0U) {
+        loadErrorMessage = NSLocalizedString(
+          @"Default session options could not be loaded.", nil);
+      }
+    }
+  } else {
+    options = (session_ != nil) ? [session_ optionsWithError:nil] : nil;
+  }
   [self populateModelPopUpWithOptions:options];
   [self populateAssistantSegmentsWithOptions:options];
   [self populateSearchProviderPopUpWithOptions:options];
@@ -579,12 +804,23 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
     XPControlStateValueOn : XPControlStateValueOff)];
   [answerQualityButton_ setState:([options answerQualityEnabled] ?
     XPControlStateValueOn : XPControlStateValueOff)];
-  [roundLimitField_ setStringValue:(options != nil) ?
-    [NSString stringWithFormat:@"%lu", (unsigned long)[options roundLimit]] : @""];
+  roundLimit = StrappyInspectorClampSliderRoundLimit((options != nil) ?
+    [options roundLimit] : StrappySessionDefaultRoundLimit);
+  [roundLimitSlider_ setDoubleValue:(double)roundLimit];
+  [roundLimitValueLabel_ setStringValue:
+    [NSString stringWithFormat:@"%lu", (unsigned long)roundLimit]];
 
   if ([statusText_ length] > 0U) {
     message = statusText_;
     [statusLabel_ setTextColor:[NSColor redColor]];
+  } else if (editsSessionDefaults_ && (options == nil)) {
+    message = loadErrorMessage;
+    [statusLabel_ setTextColor:[NSColor redColor]];
+  } else if (editsSessionDefaults_) {
+    message = NSLocalizedString(
+      @"Session defaults apply to new sessions",
+      nil);
+    [statusLabel_ setTextColor:[NSColor disabledControlTextColor]];
   } else if (session_ == nil) {
     message = NSLocalizedString(@"Select a chat to edit its options.", nil);
     [statusLabel_ setTextColor:[NSColor disabledControlTextColor]];
@@ -599,8 +835,9 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
     message = NSLocalizedString(@"Changes apply to the selected chat.", nil);
     [statusLabel_ setTextColor:[NSColor disabledControlTextColor]];
   }
-  [statusLabel_ setStringValue:message];
+  [statusLabel_ setStringValue:(message != nil) ? message : @""];
   [self updateControlEnabledStates];
+  [self layoutInspectorViews];
   reloading_ = NO;
 }
 
@@ -689,7 +926,9 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
     [identifiers addObject:identifier];
     name = StrappyInspectorStringForRow(row, @"name");
     [assistantSegmentedControl_
-      setLabel:StrappyInspectorAssistantSegmentTitle(row)
+      setLabel:StrappyInspectorAssistantSegmentTitle(
+        row,
+        editsSessionDefaults_)
       forSegment:(NSInteger)index];
     [assistantSegmentedControl_
       XP_setToolTip:(([name length] > 0U) ? name : identifier)
@@ -758,8 +997,13 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
 - (void)updateControlEnabledStates
 {
   BOOL enabled;
+  BOOL providerEnabled;
+  StrappySessionOptions *options;
 
   enabled = [self canEditOptions];
+  options = [self currentOptions];
+  providerEnabled = enabled &&
+    (!editsSessionDefaults_ || [options webSearchEnabled]);
   [modelPopUpButton_ setEnabled:
     (enabled && StrappyInspectorPopUpHasEnabledChoice(modelPopUpButton_))];
   [assistantSegmentedControl_ setEnabled:
@@ -768,9 +1012,13 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   [bashButton_ setEnabled:enabled];
   [limitToOneToolButton_ setEnabled:enabled];
   [answerQualityButton_ setEnabled:enabled];
-  [roundLimitField_ setEnabled:enabled];
-  [searchProviderPopUpButton_ setEnabled:enabled];
+  [roundLimitSlider_ setEnabled:enabled];
+  [searchProviderPopUpButton_ setEnabled:providerEnabled];
   [roundLimitLabel_ setTextColor:enabled ?
+    [NSColor controlTextColor] : [NSColor disabledControlTextColor]];
+  [roundLimitValueLabel_ setTextColor:enabled ?
+    [NSColor controlTextColor] : [NSColor disabledControlTextColor]];
+  [searchProviderLabel_ setTextColor:providerEnabled ?
     [NSColor controlTextColor] : [NSColor disabledControlTextColor]];
 }
 
@@ -779,6 +1027,7 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
 {
   NSError *error;
   NSString *message;
+  BOOL saved;
 
   if (reloading_ || ![self canEditOptions] || (options == nil) ||
       (changedFields == 0U)) {
@@ -787,9 +1036,14 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   }
 
   error = nil;
-  if (![session_ updateOptions:options
-                  changedFields:changedFields
-                          error:&error]) {
+  saved = editsSessionDefaults_ ?
+    [StrappySession updateDefaultSessionOptions:options
+                                  changedFields:changedFields
+                                          error:&error] :
+    [session_ updateOptions:options
+              changedFields:changedFields
+                      error:&error];
+  if (!saved) {
     message = [error localizedDescription];
     if ([message length] == 0U) {
       message = NSLocalizedString(@"Your changes could not be saved.", nil);
@@ -819,7 +1073,7 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
     [self reloadOptions];
     return;
   }
-  options = [[session_ optionsWithError:nil] copy];
+  options = [[self currentOptions] copy];
   [options setModelIdentifier:identifier];
   (void)[self saveOptions:options changedFields:StrappySessionOptionModel];
   [options release];
@@ -845,7 +1099,7 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
     [self reloadOptions];
     return;
   }
-  options = [[session_ optionsWithError:nil] copy];
+  options = [[self currentOptions] copy];
   [options setAssistantSetIdentifier:identifier];
   (void)[self saveOptions:options
             changedFields:StrappySessionOptionAssistantSet];
@@ -857,7 +1111,7 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   StrappySessionOptions *options;
 
   (void)sender;
-  options = [[session_ optionsWithError:nil] copy];
+  options = [[self currentOptions] copy];
   [options setWebSearchEnabled:([webSearchButton_ state] ==
     XPControlStateValueOn)];
   (void)[self saveOptions:options
@@ -870,7 +1124,7 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   StrappySessionOptions *options;
 
   (void)sender;
-  options = [[session_ optionsWithError:nil] copy];
+  options = [[self currentOptions] copy];
   [options setBashEnabled:([bashButton_ state] == XPControlStateValueOn)];
   (void)[self saveOptions:options changedFields:StrappySessionOptionBash];
   [options release];
@@ -881,7 +1135,7 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   StrappySessionOptions *options;
 
   (void)sender;
-  options = [[session_ optionsWithError:nil] copy];
+  options = [[self currentOptions] copy];
   [options setLimitToOneTool:([limitToOneToolButton_ state] ==
     XPControlStateValueOn)];
   (void)[self saveOptions:options
@@ -894,7 +1148,7 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   StrappySessionOptions *options;
 
   (void)sender;
-  options = [[session_ optionsWithError:nil] copy];
+  options = [[self currentOptions] copy];
   [options setAnswerQualityEnabled:([answerQualityButton_ state] ==
     XPControlStateValueOn)];
   (void)[self saveOptions:options
@@ -913,54 +1167,45 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
     [self reloadOptions];
     return;
   }
-  options = [[session_ optionsWithError:nil] copy];
+  options = [[self currentOptions] copy];
   [options setWebProvider:provider];
   (void)[self saveOptions:options
             changedFields:StrappySessionOptionWebProvider];
   [options release];
 }
 
-- (void)roundLimitChanged:(id)sender
+- (void)roundLimitSliderChanged:(id)sender
 {
   StrappySessionOptions *options;
-  NSString *message;
   NSUInteger limit;
 
   (void)sender;
   if (reloading_) {
     return;
   }
-  if (!StrappyInspectorParseLimit([roundLimitField_ stringValue], &limit)) {
-    message = [NSString stringWithFormat:
-      NSLocalizedString(@"Round Limit must be between 1 and %lu.", nil),
-      (unsigned long)StrappySessionMaximumLimit];
-    [statusText_ release];
-    statusText_ = [message copy];
-    NSBeep();
+  limit = StrappyInspectorClampSliderRoundLimit(
+    (NSUInteger)floor([roundLimitSlider_ doubleValue] + 0.5));
+  [roundLimitSlider_ setDoubleValue:(double)limit];
+  [roundLimitValueLabel_ setStringValue:
+    [NSString stringWithFormat:@"%lu", (unsigned long)limit]];
+  if (limit == [[self currentOptions] roundLimit]) {
     [self reloadOptions];
     return;
   }
-  if (limit == [[session_ optionsWithError:nil] roundLimit]) {
-    [self reloadOptions];
-    return;
-  }
-  options = [[session_ optionsWithError:nil] copy];
+  options = [[self currentOptions] copy];
   [options setRoundLimit:limit];
   (void)[self saveOptions:options
             changedFields:StrappySessionOptionRoundLimit];
   [options release];
 }
 
-- (void)controlTextDidEndEditing:(NSNotification *)notification
-{
-  if ([notification object] == roundLimitField_) {
-    [self roundLimitChanged:roundLimitField_];
-  }
-}
-
 - (void)documentViewFrameDidChange:(NSNotification *)notification
 {
   (void)notification;
+  if (editsSessionDefaults_) {
+    [self layoutDefaultsViews];
+    return;
+  }
   /* The controls themselves autoresize with the document view. Segmented
    * cells do not redistribute their segments automatically, so keep the
    * three equal whenever the inspector divider is dragged. */
@@ -992,6 +1237,7 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
 {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [session_ release];
+  [defaultOptions_ release];
   [statusText_ release];
   [scrollView_ release];
   [documentView_ release];
@@ -1003,6 +1249,7 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   [searchProviderBox_ release];
   [modelLabel_ release];
   [assistantLabel_ release];
+  [searchProviderLabel_ release];
   [modelPopUpButton_ release];
   [assistantSegmentedControl_ release];
   [assistantSegmentIdentifiers_ release];
@@ -1011,7 +1258,10 @@ static BOOL StrappyInspectorParseLimit(NSString *text, NSUInteger *limitOut)
   [limitToOneToolButton_ release];
   [answerQualityButton_ release];
   [roundLimitLabel_ release];
-  [roundLimitField_ release];
+  [roundLimitValueLabel_ release];
+  [roundLimitMinimumLabel_ release];
+  [roundLimitSlider_ release];
+  [roundLimitMaximumLabel_ release];
   [searchProviderPopUpButton_ release];
   [super dealloc];
 }

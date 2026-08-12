@@ -8,11 +8,14 @@
 #import "StrappyPreferencesDatabaseStudyView.h"
 #import "StrappyPreferencesModelWhitelistView.h"
 #import "StrappyPreferencesSystemPromptsView.h"
+#import "StrappySessionOptionsViewController.h"
 #import "StrappyKeychain.h"
 
-static const CGFloat kStrappyPreferencesWidth = 720.0;
+static const CGFloat kStrappyPreferencesWidth = 640.0;
 static const CGFloat kStrappyPreferencesHeight = 480.0;
-static const CGFloat kStrappyPreferencesInset = 12.0;
+static const CGFloat kStrappyPreferencesMinimumWidth = 480.0;
+static const CGFloat kStrappyPreferencesMinimumHeight = 320.0;
+static const CGFloat kStrappyPreferencesInset = 8.0;
 static const CGFloat kStrappyPreferencesToolbarIconPoint = 24.0;
 static const CGFloat kStrappyPreferencesToolbarIconCanvas = 32.0;
 static NSString * const kStrappyPreferencesFrameAutosaveName =
@@ -21,6 +24,8 @@ static NSString * const kStrappyPreferencesToolbarIdentifier =
   @"StrappyPreferencesToolbar";
 static NSString * const kStrappyPreferencesToolbarAuthentication =
   @"StrappyPreferencesToolbar.Authentication";
+static NSString * const kStrappyPreferencesToolbarSessionDefaults =
+  @"StrappyPreferencesToolbar.SessionDefaults";
 static NSString * const kStrappyPreferencesToolbarModels =
   @"StrappyPreferencesToolbar.Models";
 static NSString * const kStrappyPreferencesToolbarDatabases =
@@ -31,6 +36,15 @@ static NSString * const kStrappyPreferencesToolbarPrompts =
   @"StrappyPreferencesToolbar.Prompts";
 static NSString * const kStrappyModelSearchTextKey =
   @"_strappy_model_search_text";
+
+static NSImage *StrappyDefaultModelIndicatorImage(CGFloat scale)
+{
+  return [AIFontAwesome imageForIcon:AIFACircleCheck
+                               style:AIFontAwesomeStyleSolid
+                            iconSize:12.0
+                          canvasSize:16.0
+                               scale:scale];
+}
 
 static NSString *StrappyByteCountString(NSNumber *sizeNumber)
 {
@@ -472,6 +486,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [window setTitle:NSLocalizedString(@"Preferences", nil)];
   [window setReleasedWhenClosed:NO];
   [window setShowsToolbarButton:NO];
+  [window setContentMinSize:NSMakeSize(kStrappyPreferencesMinimumWidth,
+                                       kStrappyPreferencesMinimumHeight)];
   if (![window setFrameUsingName:kStrappyPreferencesFrameAutosaveName]) {
     [window setContentSize:NSMakeSize(kStrappyPreferencesWidth,
                                       kStrappyPreferencesHeight)];
@@ -547,6 +563,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   apiTokenField_ = [[authenticationPaneView_ apiTokenField] retain];
   apiTokenStatusLabel_ = [[authenticationPaneView_ statusLabel] retain];
   [self refreshAPITokenStatusWithSaved:NO];
+
+  sessionDefaultsController_ =
+    [[StrappySessionOptionsViewController alloc] initForSessionDefaults];
 
   modelWhitelistView_ =
     [[StrappyPreferencesModelWhitelistView alloc] initWithFrame:paneFrame
@@ -630,6 +649,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 {
   return [NSArray arrayWithObjects:
     kStrappyPreferencesToolbarAuthentication,
+    kStrappyPreferencesToolbarSessionDefaults,
     kStrappyPreferencesToolbarModels,
     kStrappyPreferencesToolbarDatabases,
     kStrappyPreferencesToolbarStudy,
@@ -666,6 +686,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   paneView = nil;
   if ([identifier isEqualToString:kStrappyPreferencesToolbarAuthentication]) {
     paneView = authenticationPaneView_;
+  } else if ([identifier
+               isEqualToString:kStrappyPreferencesToolbarSessionDefaults]) {
+    paneView = [sessionDefaultsController_ view];
   } else if ([identifier isEqualToString:kStrappyPreferencesToolbarModels]) {
     paneView = modelWhitelistView_;
   } else if ([identifier isEqualToString:kStrappyPreferencesToolbarDatabases]) {
@@ -689,6 +712,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [paneView setFrame:[contentPaneView_ bounds]];
   [paneView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   [contentPaneView_ addSubview:paneView];
+  if ([identifier
+        isEqualToString:kStrappyPreferencesToolbarSessionDefaults]) {
+    [sessionDefaultsController_ reloadOptions];
+  }
   [[[self window] toolbar] setSelectedItemIdentifier:identifier];
 }
 
@@ -722,7 +749,13 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   if ([identifier isEqualToString:kStrappyPreferencesToolbarAuthentication]) {
     return [self makeToolbarItemWithIdentifier:identifier
                                           icon:AIFAKey
-                                         label:NSLocalizedString(@"Authentication", nil)];
+                                         label:NSLocalizedString(@"Auth", nil)];
+  }
+  if ([identifier
+        isEqualToString:kStrappyPreferencesToolbarSessionDefaults]) {
+    return [self makeToolbarItemWithIdentifier:identifier
+                                          icon:AIFASliders
+                                         label:NSLocalizedString(@"Defaults", nil)];
   }
   if ([identifier isEqualToString:kStrappyPreferencesToolbarModels]) {
     return [self makeToolbarItemWithIdentifier:identifier
@@ -980,7 +1013,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     NSLocalizedString(
       @"This clears every stored database description and context.", nil) :
     NSLocalizedString(
-      @"Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu.",
+      @"Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the model selected in Session Defaults.",
       nil)];
 }
 
@@ -1268,7 +1301,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   alert = [[[NSAlert alloc] init] autorelease];
   [alert setMessageText:NSLocalizedString(@"Study Databases?", nil)];
   [alert setInformativeText:NSLocalizedString(
-    @"Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu.",
+    @"Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the model selected in Session Defaults.",
     nil)];
   [alert addButtonWithTitle:NSLocalizedString(@"Study", nil)];
   [alert addButtonWithTitle:NSLocalizedString(@"Cancel", nil)];
@@ -2225,6 +2258,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     if ([identifier isEqualToString:@"model_allowed"]) {
       return [self allowedValueForModelRow:model];
     }
+    if ([identifier isEqualToString:@"model_default"]) {
+      return [self modelRowIsDefault:model] ?
+        StrappyDefaultModelIndicatorImage(
+          [[self window] XP_backingScaleFactor]) : nil;
+    }
     if ([identifier isEqualToString:@"model_name"]) {
       return StrappyModelDisplayNameForRow(model);
     }
@@ -2327,6 +2365,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
         return NSLocalizedString(@"Default model is always allowed.", nil);
       }
       return @"";
+    }
+    if ([identifier isEqualToString:@"model_default"]) {
+      return [self modelRowIsDefault:model] ?
+        NSLocalizedString(@"Used for new chats and Database Study.", nil) : @"";
     }
     if ([identifier isEqualToString:@"model_name"]) {
       NSString *description;
@@ -2699,6 +2741,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [toolbar setDelegate:nil];
   [contentPaneView_ release];
   [authenticationPaneView_ release];
+  [sessionDefaultsController_ release];
   [apiEndpointField_ release];
   [apiTokenField_ release];
   [apiTokenStatusLabel_ release];

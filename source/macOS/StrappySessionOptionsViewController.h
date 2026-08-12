@@ -4,8 +4,7 @@
 #import "StrappySession.h"
 #import "XPAppKit.h"
 
-@interface StrappySessionOptionsViewController : AIViewController
-    <XPTextFieldDelegate> {
+@interface StrappySessionOptionsViewController : AIViewController {
  @private
   NSScrollView *scrollView_;
   NSView *documentView_;
@@ -17,6 +16,7 @@
   NSBox *searchProviderBox_;
   NSTextField *modelLabel_;
   NSTextField *assistantLabel_;
+  NSTextField *searchProviderLabel_;
   NSPopUpButton *modelPopUpButton_;
   NSSegmentedControl *assistantSegmentedControl_;
   NSArray *assistantSegmentIdentifiers_;
@@ -25,14 +25,21 @@
   NSButton *limitToOneToolButton_;
   NSButton *answerQualityButton_;
   NSTextField *roundLimitLabel_;
-  NSTextField *roundLimitField_;
+  NSTextField *roundLimitValueLabel_;
+  NSTextField *roundLimitMinimumLabel_;
+  NSSlider *roundLimitSlider_;
+  NSTextField *roundLimitMaximumLabel_;
   NSPopUpButton *searchProviderPopUpButton_;
   StrappySession *session_;
+  StrappySessionOptions *defaultOptions_;
   NSString *statusText_;
+  BOOL editsSessionDefaults_;
+  BOOL layingOut_;
   BOOL reloading_;
 }
 
 - (id)init;
+- (id)initForSessionDefaults;
 - (void)reloadWithSession:(StrappySession *)session;
 - (void)reloadOptions;
 

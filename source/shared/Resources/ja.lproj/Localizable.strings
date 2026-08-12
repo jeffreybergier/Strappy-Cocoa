@@ -46,7 +46,6 @@
 "Options are unavailable while a prompt is running." = "プロンプトの実行中はオプションを変更できません。";
 "Changes apply to the selected chat." = "変更は選択中のチャットに適用されます。";
 "Assistant" = "アシスタント";
-"Model & Assistant" = "モデルとアシスタント";
 "World" = "世界";
 "Personal" = "個人";
 "Coding" = "コード";
@@ -59,7 +58,6 @@
 "Limit to 1 Tool" = "ツールを 1 つに制限";
 "Check Answer Quality" = "回答品質チェック";
 "Round Limit" = "ラウンド上限";
-"Round Limit must be between 1 and %lu." = "ラウンド上限は 1 から %lu の間で指定してください。";
 "Choose a Model" = "モデルを選択";
 "No Models Available" = "利用可能なモデルがありません";
 "World Knowledge" = "世界知識";
@@ -79,7 +77,12 @@
 "Prompt failed." = "プロンプトに失敗しました。";
 
 "Preferences" = "環境設定";
+"Auth" = "認証";
+"Defaults" = "デフォルト";
 "Session Defaults" = "セッションのデフォルト";
+"Session defaults apply to new sessions" = "セッションのデフォルトは新規セッションに適用されます";
+"Tools & Search" = "ツールと検索";
+"Provider" = "プロバイダー";
 "API Token" = "API トークン";
 "API Endpoint:" = "API エンドポイント:";
 "API Token:" = "API トークン:";
@@ -89,6 +92,7 @@
 "Fetch Models" = "モデルを取得";
 "Refresh the OpenRouter model list." = "OpenRouter のモデル一覧を更新します。";
 "Use" = "使用";
+"Default" = "既定";
 "ID" = "ID";
 "Context" = "コンテキスト";
 "Cost In (1M)" = "入力コスト (100万)";
@@ -98,6 +102,7 @@
 "Default Model" = "既定モデル";
 "Cancel" = "キャンセル";
 "Default model is always allowed." = "既定モデルは常に許可されます。";
+"Used for new chats and Database Study." = "新規チャットとデータベース調査に使用されます。";
 "No matching models." = "一致するモデルはありません。";
 "OK" = "OK";
 "Model list could not be loaded." = "モデル一覧を読み込めませんでした。";
@@ -123,6 +128,7 @@
 "Studied" = "調査済み";
 "Last Studied" = "最終調査";
 "Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the default model under the \"Session Defaults\" menu." = "データベースを調査しておくと、今後 Strappy がクエリを実行する際の時間とトークンを節約できます。調査セッションでは「セッションのデフォルト」メニューで設定した既定モデルを使用します。";
+"Study databases to save time and tokens when Strappy tries to query them in future prompts. Study sessions use the model selected in Session Defaults." = "データベースを調査しておくと、今後 Strappy がクエリを実行する際の時間とトークンを節約できます。調査セッションでは「セッションのデフォルト」で選択したモデルを使用します。";
 "Reset" = "リセット";
 "Delete Study..." = "調査データを削除…";
 "Delete Study for \"%@\"?" = "「%@」の調査データを削除しますか？";
