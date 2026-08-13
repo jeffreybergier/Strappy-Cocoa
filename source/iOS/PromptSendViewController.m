@@ -278,7 +278,6 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
 @property (nonatomic, strong) UIButton *optionsButton;
 @property (nonatomic, strong) UITextView *textView;
 @property (nonatomic, strong) StrappyPromptFieldInnerShadowView *textViewShadow;
-@property (nonatomic, strong) UILabel *placeholderLabel;
 @property (nonatomic, strong) StrappyPromptSendButton *sendButton;
 @property (nonatomic, strong) UINavigationController *optionsNavigationController;
 @property (nonatomic, strong) StrappySessionOptionsTableViewController *optionsController;
@@ -300,7 +299,6 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
 - (NSString *)trimmedPromptText;
 - (void)updateControls;
 - (void)updateExpansion;
-- (void)updatePlaceholderVisibility;
 - (NSArray *)currentAllowedModels;
 - (NSArray *)currentAssistantSets;
 - (BOOL)updateSessionOptions:(StrappySessionOptions *)options
@@ -388,7 +386,6 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
   UIButton *options;
   UITextView *textView;
   StrappyPromptFieldInnerShadowView *textViewShadow;
-  UILabel *placeholder;
   StrappyPromptSendButton *send;
   CGFloat hairline;
 
@@ -454,15 +451,6 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
   [self addSubview:textViewShadow];
   [self setTextViewShadow:textViewShadow];
 
-  placeholder = [[UILabel alloc] initWithFrame:CGRectZero];
-  [placeholder setText:NSLocalizedString(@"Ask Strappy", nil)];
-  [placeholder setFont:[UIFont systemFontOfSize:kStrappySendFontSize]];
-  [placeholder setTextColor:[UIColor colorWithWhite:0.58f alpha:1.0f]];
-  [placeholder setBackgroundColor:[UIColor clearColor]];
-  [placeholder setUserInteractionEnabled:NO];
-  [self addSubview:placeholder];
-  [self setPlaceholderLabel:placeholder];
-
   send = [[StrappyPromptSendButton alloc] initWithFrame:CGRectZero];
   [send setImage:[self iconImageForIcon:AIFAMarsStroke
                                   style:AIFontAwesomeStyleSolid
@@ -477,7 +465,6 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
   [self setSendButton:send];
 
   [self updateControls];
-  [self updatePlaceholderVisibility];
 }
 
 - (void)layoutSubviews
@@ -489,8 +476,6 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
   CGFloat sendX;
   CGFloat textRight;
   CGFloat textHeight;
-  CGFloat placeholderHeight;
-  CGFloat placeholderWidth;
   CGFloat hairline;
 
   [super layoutSubviews];
@@ -543,16 +528,6 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
                                        textRight - textX,
                                        textHeight)];
   [[self textViewShadow] setFrame:[[self textView] frame]];
-
-  placeholderHeight = (CGFloat)ceilf((float)[[[self textView] font] lineHeight]);
-  placeholderWidth = (textRight - textX) - 16.0f;
-  if (placeholderWidth < 0.0f) {
-    placeholderWidth = 0.0f;
-  }
-  [[self placeholderLabel] setFrame:CGRectMake(textX + 8.0f,
-                                               kStrappySendPad + 8.0f,
-                                               placeholderWidth,
-                                               placeholderHeight)];
 }
 
 - (CGFloat)preferredHeight
@@ -680,11 +655,6 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
   [[self sendButton] setDestructive:[self sending] ? YES : NO];
 }
 
-- (void)updatePlaceholderVisibility
-{
-  [[self placeholderLabel] setHidden:[[[self textView] text] length] > 0U];
-}
-
 - (void)updateExpansion
 {
   CGFloat lineHeight;
@@ -736,7 +706,6 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
   }
 
   [[self textView] setText:@""];
-  [self updatePlaceholderVisibility];
   [self updateExpansion];
   [self updateControls];
 
@@ -891,7 +860,6 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
 - (void)textViewDidChange:(UITextView *)textView
 {
   (void)textView;
-  [self updatePlaceholderVisibility];
   [self updateControls];
   [self updateExpansion];
 }

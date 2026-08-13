@@ -238,7 +238,6 @@
 "Print..." = "プリント...";
 "Prompt is empty." = "プロンプトが空です。";
 "This file is not a valid SQLite database." = "このファイルは有効な SQLite データベースではありません。";
-"Ask Strappy" = "Strappy に質問";
 "Dismiss Keyboard" = "キーボードを閉じる";
 "Prompt request is already running." = "プロンプトリクエストはすでに実行中です。";
 "Prompts" = "プロンプト";

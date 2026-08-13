@@ -4,6 +4,10 @@
 #import "StrappyModelCellFormatter.h"
 #import "XPUIKit.h"
 
+static const NSUInteger kStrappyRoundLimitSliderMinimum = 20U;
+static const NSUInteger kStrappyRoundLimitSliderMaximum = 200U;
+static const NSUInteger kStrappyRoundLimitSliderStep = 10U;
+
 static NSArray *StrappyPromptSearchProviders(void)
 {
   return [NSArray arrayWithObjects:
@@ -78,33 +82,23 @@ enum {
   kStrappyPromptOptionsLimitRowCount
 };
 
-static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
+static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
 {
-  NSString *trimmed;
-  NSCharacterSet *invalidCharacters;
-  long long value;
+  NSUInteger limit;
 
-  trimmed = [text stringByTrimmingCharactersInSet:
-    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  invalidCharacters = [[NSCharacterSet characterSetWithCharactersInString:
-    @"0123456789"] invertedSet];
-  if (([trimmed length] == 0U) ||
-      ([trimmed rangeOfCharacterFromSet:invalidCharacters].location !=
-       NSNotFound)) {
-    return NO;
+  if (value <= (double)kStrappyRoundLimitSliderMinimum) {
+    return kStrappyRoundLimitSliderMinimum;
   }
-  value = [trimmed longLongValue];
-  if ((value < 1LL) ||
-      (value > (long long)StrappySessionMaximumLimit)) {
-    return NO;
+  if (value >= (double)kStrappyRoundLimitSliderMaximum) {
+    return kStrappyRoundLimitSliderMaximum;
   }
-  if (limitOut != NULL) {
-    *limitOut = (NSUInteger)value;
-  }
-  return YES;
+  limit = (NSUInteger)(
+    (value / (double)kStrappyRoundLimitSliderStep) + 0.5) *
+    kStrappyRoundLimitSliderStep;
+  return limit;
 }
 
-@interface StrappySessionOptionsTableViewController () <UITextFieldDelegate>
+@interface StrappySessionOptionsTableViewController ()
 @property (nonatomic, assign) id<StrappySessionOptionsTableViewControllerDelegate> optionsDelegate;
 @property (nonatomic, copy) NSArray *assistantSets;
 @property (nonatomic, copy) NSArray *models;
@@ -113,13 +107,18 @@ static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
 @property (nonatomic, strong) UISwitch *bashSwitch;
 @property (nonatomic, strong) UISwitch *limitToOneToolSwitch;
 @property (nonatomic, strong) UISwitch *answerQualitySwitch;
-@property (nonatomic, strong) UITextField *roundLimitField;
+@property (nonatomic, strong) UIView *roundLimitControlView;
+@property (nonatomic, strong) UISlider *roundLimitSlider;
+@property (nonatomic, strong) UILabel *roundLimitValueLabel;
 @property (nonatomic, assign) BOOL presentedModally;
 - (instancetype)initWithOptionsDelegate:
     (id<StrappySessionOptionsTableViewControllerDelegate>)optionsDelegate
                        presentedModally:(BOOL)presentedModally;
 - (void)reloadOptionsSnapshot;
 - (void)reloadOptionsFromDelegate;
+- (void)updateRoundLimitControlValues;
+- (NSUInteger)updateRoundLimitDisplayForSlider:(UISlider *)slider;
+- (void)persistRoundLimit:(NSUInteger)limit;
 @end
 
 @implementation StrappySessionOptionsTableViewController
@@ -143,10 +142,9 @@ static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
   UISwitch *bashSwitch;
   UISwitch *limitToOneToolSwitch;
   UISwitch *answerQualitySwitch;
-  UITextField *roundLimitField;
-  UIToolbar *keyboardToolbar;
-  UIBarButtonItem *flexibleItem;
-  UIBarButtonItem *doneItem;
+  UIView *roundLimitControlView;
+  UISlider *roundLimitSlider;
+  UILabel *roundLimitValueLabel;
 
   [super viewDidLoad];
 
@@ -174,32 +172,44 @@ static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
                 forControlEvents:UIControlEventValueChanged];
   [self setAnswerQualitySwitch:answerQualitySwitch];
 
-  keyboardToolbar = [[UIToolbar alloc]
-    initWithFrame:CGRectMake(0.0f, 0.0f, 320.0f, 44.0f)];
-  flexibleItem = [[UIBarButtonItem alloc]
-    initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
-                         target:nil
-                         action:nil];
-  doneItem = [[UIBarButtonItem alloc]
-    initWithBarButtonSystemItem:UIBarButtonSystemItemDone
-                         target:self
-                         action:@selector(limitFieldDoneAction:)];
-  [StrappyAppearance applyLegacyTintToBarButtonItem:doneItem];
-  [keyboardToolbar setItems:[NSArray arrayWithObjects:
-    flexibleItem, doneItem, nil]];
+  roundLimitControlView = [[UIView alloc]
+    initWithFrame:CGRectMake(0.0f, 0.0f, 168.0f, 44.0f)];
+  [roundLimitControlView setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
+  [roundLimitControlView setBackgroundColor:[UIColor clearColor]];
 
-  roundLimitField = [[UITextField alloc]
-    initWithFrame:CGRectMake(0.0f, 0.0f, 72.0f, 30.0f)];
-  [roundLimitField setKeyboardType:UIKeyboardTypeNumberPad];
-  [roundLimitField XP_setTextAlignmentRight];
-  [roundLimitField setContentVerticalAlignment:
-    UIControlContentVerticalAlignmentCenter];
-  [roundLimitField setDelegate:self];
-  [roundLimitField setInputAccessoryView:keyboardToolbar];
-  [roundLimitField addTarget:self
-                       action:@selector(roundLimitFieldEditingDidEnd:)
-             forControlEvents:UIControlEventEditingDidEnd];
-  [self setRoundLimitField:roundLimitField];
+  roundLimitSlider = [[UISlider alloc]
+    initWithFrame:CGRectMake(0.0f, 7.0f, 124.0f, 30.0f)];
+  [roundLimitSlider setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
+  [roundLimitSlider setMinimumValue:
+    (float)kStrappyRoundLimitSliderMinimum];
+  [roundLimitSlider setMaximumValue:
+    (float)kStrappyRoundLimitSliderMaximum];
+  [roundLimitSlider setContinuous:YES];
+  [roundLimitSlider setAccessibilityLabel:
+    NSLocalizedString(@"Round Limit", nil)];
+  [roundLimitSlider addTarget:self
+                       action:@selector(roundLimitSliderChanged:)
+             forControlEvents:UIControlEventValueChanged];
+  [roundLimitSlider addTarget:self
+                       action:@selector(roundLimitSliderEditingDidEnd:)
+             forControlEvents:UIControlEventTouchUpInside |
+                              UIControlEventTouchUpOutside |
+                              UIControlEventTouchCancel];
+  [roundLimitControlView addSubview:roundLimitSlider];
+
+  roundLimitValueLabel = [[UILabel alloc]
+    initWithFrame:CGRectMake(130.0f, 7.0f, 38.0f, 30.0f)];
+  [roundLimitValueLabel setAutoresizingMask:
+    UIViewAutoresizingFlexibleLeftMargin];
+  [roundLimitValueLabel setBackgroundColor:[UIColor clearColor]];
+  [roundLimitValueLabel setFont:[UIFont systemFontOfSize:14.0f]];
+  [roundLimitValueLabel setTextColor:[UIColor darkGrayColor]];
+  [roundLimitValueLabel XP_setTextAlignmentCenter];
+  [roundLimitControlView addSubview:roundLimitValueLabel];
+
+  [self setRoundLimitControlView:roundLimitControlView];
+  [self setRoundLimitSlider:roundLimitSlider];
+  [self setRoundLimitValueLabel:roundLimitValueLabel];
 
   [self reloadOptionsFromDelegate];
 
@@ -251,9 +261,19 @@ static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
   [[self answerQualitySwitch]
     setOn:[[self sessionOptions] answerQualityEnabled]
   animated:NO];
-  [[self roundLimitField] setText:[NSString stringWithFormat:
-    @"%lu", (unsigned long)[[self sessionOptions] roundLimit]]];
+  [self updateRoundLimitControlValues];
   [[self tableView] reloadData];
+}
+
+- (void)updateRoundLimitControlValues
+{
+  NSUInteger limit;
+
+  limit = StrappyPromptSnapSliderRoundLimit(
+    (double)[[self sessionOptions] roundLimit]);
+  [[self roundLimitSlider] setValue:(float)limit animated:NO];
+  [[self roundLimitValueLabel] setText:[NSString stringWithFormat:
+    @"%lu", (unsigned long)limit]];
 }
 
 - (void)doneAction:(id)sender
@@ -297,12 +317,6 @@ static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
   [sender setEnabled:YES];
 }
 
-- (void)limitFieldDoneAction:(id)sender
-{
-  (void)sender;
-  [[self view] endEditing:YES];
-}
-
 - (void)limitToOneToolSwitchChanged:(UISwitch *)sender
 {
   id<StrappySessionOptionsTableViewControllerDelegate> optionsDelegate;
@@ -320,15 +334,41 @@ static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
   [sender setOn:[[self sessionOptions] limitToOneTool] animated:YES];
 }
 
-- (void)roundLimitFieldEditingDidEnd:(UITextField *)sender
+- (void)roundLimitSliderChanged:(UISlider *)sender
+{
+  NSUInteger limit;
+
+  limit = [self updateRoundLimitDisplayForSlider:sender];
+  if (![sender isTracking]) {
+    [self persistRoundLimit:limit];
+  }
+}
+
+- (void)roundLimitSliderEditingDidEnd:(UISlider *)sender
+{
+  [self persistRoundLimit:
+    [self updateRoundLimitDisplayForSlider:sender]];
+}
+
+- (NSUInteger)updateRoundLimitDisplayForSlider:(UISlider *)slider
+{
+  NSUInteger limit;
+
+  limit = StrappyPromptSnapSliderRoundLimit((double)[slider value]);
+  [slider setValue:(float)limit animated:NO];
+  [[self roundLimitValueLabel] setText:[NSString stringWithFormat:
+    @"%lu", (unsigned long)limit]];
+  return limit;
+}
+
+- (void)persistRoundLimit:(NSUInteger)limit
 {
   id<StrappySessionOptionsTableViewControllerDelegate> optionsDelegate;
   StrappySessionOptions *options;
-  NSUInteger limit;
 
   optionsDelegate = [self optionsDelegate];
   if ((optionsDelegate != nil) &&
-      StrappyPromptParseLimit([sender text], &limit)) {
+      (limit != [[self sessionOptions] roundLimit])) {
     options = [[optionsDelegate sessionOptions] copy];
     [options setRoundLimit:limit];
     (void)[optionsDelegate updateSessionOptions:options
@@ -336,8 +376,7 @@ static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
                                              StrappySessionOptionRoundLimit];
     [self setSessionOptions:[optionsDelegate sessionOptions]];
   }
-  [sender setText:[NSString stringWithFormat:
-    @"%lu", (unsigned long)[[self sessionOptions] roundLimit]]];
+  [self updateRoundLimitControlValues];
 }
 
 - (void)answerQualitySwitchChanged:(UISwitch *)sender
@@ -355,12 +394,6 @@ static BOOL StrappyPromptParseLimit(NSString *text, NSUInteger *limitOut)
     [self setSessionOptions:[optionsDelegate sessionOptions]];
   }
   [sender setOn:[[self sessionOptions] answerQualityEnabled] animated:YES];
-}
-
-- (BOOL)textFieldShouldReturn:(UITextField *)textField
-{
-  [textField resignFirstResponder];
-  return YES;
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
@@ -532,10 +565,8 @@ titleForHeaderInSection:(NSInteger)section
   }
 
   if ([indexPath section] == kStrappyPromptOptionsSectionLimits) {
-    UITextField *limitField;
     NSString *title;
 
-    limitField = [self roundLimitField];
     title = NSLocalizedString(@"Round Limit", nil);
     cell = [tableView dequeueReusableCellWithIdentifier:@"LimitValueCell"];
     if (cell == nil) {
@@ -547,9 +578,9 @@ titleForHeaderInSection:(NSInteger)section
     }
     [[cell textLabel] setText:title];
     [[cell textLabel] setTextColor:[UIColor blackColor]];
-    [limitField setAccessibilityLabel:title];
+    [[self roundLimitSlider] setAccessibilityLabel:title];
     [cell setAccessoryType:UITableViewCellAccessoryNone];
-    [cell setAccessoryView:limitField];
+    [cell setAccessoryView:[self roundLimitControlView]];
     return cell;
   }
 
