@@ -84,8 +84,9 @@
 "Tools & Search" = "ツールと検索";
 "Provider" = "プロバイダー";
 "API Token" = "API トークン";
-"API Endpoint:" = "API エンドポイント:";
-"API Token:" = "API トークン:";
+"OpenRouter" = "OpenRouter";
+"Endpoint" = "エンドポイント";
+"Token" = "トークン";
 "https://openrouter.ai/api/v1/responses" = "https://openrouter.ai/api/v1/responses";
 "Paste API token" = "API トークンを貼り付け";
 "Model" = "モデル";

@@ -3,7 +3,14 @@
 #import "StrappyKeychain.h"
 #import "XPAppKit.h"
 
-static const CGFloat kStrappyPreferencesInset = 12.0;
+static const CGFloat kStrappyAuthenticationControlHeight = 24.0;
+static const CGFloat kStrappyAuthenticationLabelHeight = 16.0;
+static const CGFloat kStrappyAuthenticationButtonWidth = 96.0;
+static const CGFloat kStrappyAuthenticationControlGap = 8.0;
+static const CGFloat kStrappyAuthenticationHintHeight = 38.0;
+static const CGFloat kStrappyAuthenticationBoxContentInset = 12.0;
+static const CGFloat kStrappyAuthenticationLabelTopInset = 21.0;
+static const CGFloat kStrappyAuthenticationFieldTopInset = 36.0;
 
 static NSTextField *StrappyPreferencesLabelWithFrame(NSRect frame,
                                                      NSString *text)
@@ -16,7 +23,7 @@ static NSTextField *StrappyPreferencesLabelWithFrame(NSRect frame,
   [label setDrawsBackground:NO];
   [label setEditable:NO];
   [label setSelectable:NO];
-  [label setFont:[NSFont systemFontOfSize:13.0]];
+  [label setFont:[NSFont systemFontOfSize:10.0]];
   return label;
 }
 
@@ -42,6 +49,7 @@ static NSTextField *StrappyPreferencesLabelWithFrame(NSRect frame,
 
 - (void)buildViewWithTarget:(id)target
 {
+  NSBox *openRouterBox;
   NSTextField *endpointLabel;
   NSTextField *tokenLabel;
   NSTextField *hintLabel;
@@ -49,36 +57,62 @@ static NSTextField *StrappyPreferencesLabelWithFrame(NSRect frame,
   NSString *apiEndpoint;
   NSString *apiToken;
   NSRect bounds;
-  CGFloat labelWidth;
-  CGFloat topY;
+  CGFloat endpointLabelY;
+  CGFloat endpointY;
+  CGFloat tokenLabelTop;
+  CGFloat tokenLabelY;
+  CGFloat tokenFieldTop;
   CGFloat tokenY;
-  CGFloat fieldX;
   CGFloat fieldWidth;
+  CGFloat hintTop;
+  CGFloat hintY;
+  CGFloat statusWidth;
 
+  openRouterBox = [[[NSBox alloc] initWithFrame:[self bounds]] autorelease];
+  [openRouterBox setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+  [openRouterBox setTitle:NSLocalizedString(@"OpenRouter", nil)];
+  [openRouterBox setTitlePosition:NSAtTop];
+  [self addSubview:openRouterBox];
+
+  /* Match the explicit NSBox control geometry used by Session Defaults.
+   * NSBox content-view margins vary across the supported AppKit versions. */
   bounds = [self bounds];
-  labelWidth = 104.0;
-  topY = NSMaxY(bounds) - kStrappyPreferencesInset - 28.0;
-  tokenY = topY - 34.0;
-  fieldX = kStrappyPreferencesInset + labelWidth;
-  fieldWidth = NSWidth(bounds) - fieldX - kStrappyPreferencesInset;
+  endpointLabelY = NSMaxY(bounds) - kStrappyAuthenticationLabelTopInset -
+    kStrappyAuthenticationLabelHeight;
+  endpointY = NSMaxY(bounds) - kStrappyAuthenticationFieldTopInset -
+    kStrappyAuthenticationControlHeight;
+  tokenLabelTop = kStrappyAuthenticationFieldTopInset +
+    kStrappyAuthenticationControlHeight + kStrappyAuthenticationControlGap;
+  tokenLabelY = NSMaxY(bounds) - tokenLabelTop -
+    kStrappyAuthenticationLabelHeight;
+  tokenFieldTop = tokenLabelTop + kStrappyAuthenticationFieldTopInset -
+    kStrappyAuthenticationLabelTopInset;
+  tokenY = NSMaxY(bounds) - tokenFieldTop -
+    kStrappyAuthenticationControlHeight;
+  fieldWidth = NSWidth(bounds) -
+    (2.0 * kStrappyAuthenticationBoxContentInset);
+  hintTop = tokenFieldTop + kStrappyAuthenticationControlHeight +
+    kStrappyAuthenticationControlGap;
+  hintY = NSMaxY(bounds) - hintTop - kStrappyAuthenticationHintHeight;
 
   endpointLabel = StrappyPreferencesLabelWithFrame(
-    NSMakeRect(kStrappyPreferencesInset,
-               topY + 3.0,
-               labelWidth - 8.0,
-               20.0),
-    NSLocalizedString(@"API Endpoint:", nil));
+    NSMakeRect(kStrappyAuthenticationBoxContentInset,
+               endpointLabelY,
+               fieldWidth,
+               kStrappyAuthenticationLabelHeight),
+    NSLocalizedString(@"Endpoint", nil));
+  [endpointLabel setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
   [self addSubview:endpointLabel];
 
   apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
   if ([apiEndpoint length] == 0U) {
     apiEndpoint = [StrappyKeychain defaultAPIEndpoint];
   }
-  apiEndpointField_ =
-    [[NSTextField alloc] initWithFrame:NSMakeRect(fieldX,
-                                                  topY,
-                                                  fieldWidth,
-                                                  24.0)];
+  apiEndpointField_ = [[NSTextField alloc] initWithFrame:NSMakeRect(
+    kStrappyAuthenticationBoxContentInset,
+    endpointY,
+    fieldWidth,
+    kStrappyAuthenticationControlHeight)];
   [apiEndpointField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
   [apiEndpointField_ setStringValue:(apiEndpoint != nil) ? apiEndpoint : @""];
   [[apiEndpointField_ cell] setPlaceholderString:
@@ -86,19 +120,20 @@ static NSTextField *StrappyPreferencesLabelWithFrame(NSRect frame,
   [self addSubview:apiEndpointField_];
 
   tokenLabel = StrappyPreferencesLabelWithFrame(
-    NSMakeRect(kStrappyPreferencesInset,
-               tokenY + 3.0,
-               labelWidth - 8.0,
-               20.0),
-    NSLocalizedString(@"API Token:", nil));
+    NSMakeRect(kStrappyAuthenticationBoxContentInset,
+               tokenLabelY,
+               fieldWidth,
+               kStrappyAuthenticationLabelHeight),
+    NSLocalizedString(@"Token", nil));
+  [tokenLabel setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
   [self addSubview:tokenLabel];
 
   apiToken = [[StrappyKeychain sharedKeychain] apiToken];
-  apiTokenField_ =
-    [[NSSecureTextField alloc] initWithFrame:NSMakeRect(fieldX,
-                                                        tokenY,
-                                                        fieldWidth,
-                                                        24.0)];
+  apiTokenField_ = [[NSSecureTextField alloc] initWithFrame:NSMakeRect(
+    kStrappyAuthenticationBoxContentInset,
+    tokenY,
+    fieldWidth,
+    kStrappyAuthenticationControlHeight)];
   [apiTokenField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
   [apiTokenField_ setStringValue:(apiToken != nil) ? apiToken : @""];
   [[apiTokenField_ cell] setPlaceholderString:
@@ -106,10 +141,10 @@ static NSTextField *StrappyPreferencesLabelWithFrame(NSRect frame,
   [self addSubview:apiTokenField_];
 
   hintLabel = StrappyPreferencesLabelWithFrame(
-    NSMakeRect(fieldX,
-               tokenY - 46.0,
+    NSMakeRect(kStrappyAuthenticationBoxContentInset,
+               hintY,
                fieldWidth,
-               38.0),
+               kStrappyAuthenticationHintHeight),
     NSLocalizedString(
       @"APIENDPOINT or APITOKEN in .env or the process environment overrides keychain values while set.",
       nil));
@@ -120,10 +155,12 @@ static NSTextField *StrappyPreferencesLabelWithFrame(NSRect frame,
   [self addSubview:hintLabel];
 
   saveButton = [[[NSButton alloc]
-    initWithFrame:NSMakeRect(NSMaxX(bounds) - kStrappyPreferencesInset - 96.0,
-                             kStrappyPreferencesInset,
-                             96.0,
-                             24.0)] autorelease];
+    initWithFrame:NSMakeRect(NSMaxX(bounds) -
+                               kStrappyAuthenticationBoxContentInset -
+                               kStrappyAuthenticationButtonWidth,
+                             kStrappyAuthenticationBoxContentInset,
+                             kStrappyAuthenticationButtonWidth,
+                             kStrappyAuthenticationControlHeight)] autorelease];
   [saveButton setAutoresizingMask:NSViewMinXMargin | NSViewMaxYMargin];
   [saveButton setTitle:NSLocalizedString(@"Save", nil)];
   [saveButton setBezelStyle:XPBezelStyleRounded];
@@ -133,11 +170,14 @@ static NSTextField *StrappyPreferencesLabelWithFrame(NSRect frame,
   [saveButton setAction:@selector(saveAPICredentials:)];
   [self addSubview:saveButton];
 
-  statusLabel_ =
-    [[NSTextField alloc] initWithFrame:NSMakeRect(kStrappyPreferencesInset,
-                                                  kStrappyPreferencesInset + 2.0,
-                                                  NSWidth(bounds) - 132.0,
-                                                  20.0)];
+  statusWidth = NSWidth(bounds) -
+    (2.0 * kStrappyAuthenticationBoxContentInset) -
+    kStrappyAuthenticationButtonWidth - kStrappyAuthenticationControlGap;
+  statusLabel_ = [[NSTextField alloc]
+    initWithFrame:NSMakeRect(kStrappyAuthenticationBoxContentInset,
+                             kStrappyAuthenticationBoxContentInset + 2.0,
+                             statusWidth,
+                             20.0)];
   [statusLabel_ setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
   [statusLabel_ setBezeled:NO];
   [statusLabel_ setDrawsBackground:NO];

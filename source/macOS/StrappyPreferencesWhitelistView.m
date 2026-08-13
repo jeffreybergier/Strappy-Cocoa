@@ -2,7 +2,6 @@
 
 #import "XPAppKit.h"
 
-static const CGFloat kStrappyPreferencesInset = 12.0;
 static const CGFloat kStrappyWhitelistControlHeight = 24.0;
 static const CGFloat kStrappyWhitelistBottomGap = 8.0;
 static const CGFloat kStrappyWhitelistTopControlGap = 8.0;
@@ -293,14 +292,13 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
 
   bounds = [self bounds];
   topAccessoryHeight = [self topAccessoryHeight];
-  tableTop = NSMaxY(bounds) - kStrappyPreferencesInset;
+  tableTop = NSMaxY(bounds);
 
   if (topAccessoryHeight > 0.0) {
     topAccessoryView_ =
-      [[NSView alloc] initWithFrame:NSMakeRect(kStrappyPreferencesInset,
+      [[NSView alloc] initWithFrame:NSMakeRect(0.0,
                                                tableTop - topAccessoryHeight,
-                                               NSWidth(bounds) -
-                                                 (kStrappyPreferencesInset * 2.0),
+                                               NSWidth(bounds),
                                                topAccessoryHeight)];
     [topAccessoryView_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
     trailingControlWidth = [self topAccessoryTrailingControlWidth];
@@ -326,15 +324,15 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
     tableTop = NSMinY([topAccessoryView_ frame]) - kStrappyWhitelistBottomGap;
   }
 
-  tableBottom = kStrappyPreferencesInset +
-    kStrappyWhitelistControlHeight + kStrappyWhitelistBottomGap;
+  tableBottom = kStrappyWhitelistControlHeight +
+    kStrappyWhitelistBottomGap;
   if (tableTop < tableBottom) {
     tableTop = tableBottom;
   }
 
-  scrollFrame = NSMakeRect(kStrappyPreferencesInset,
+  scrollFrame = NSMakeRect(0.0,
                            tableBottom,
-                           NSWidth(bounds) - (kStrappyPreferencesInset * 2.0),
+                           NSWidth(bounds),
                            tableTop - tableBottom);
   scrollView_ = [[NSScrollView alloc] initWithFrame:scrollFrame];
   [scrollView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
@@ -360,10 +358,9 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
   [self addSubview:scrollView_];
 
   bottomAccessoryView_ =
-    [[NSView alloc] initWithFrame:NSMakeRect(kStrappyPreferencesInset,
-                                             kStrappyPreferencesInset,
-                                             NSWidth(bounds) -
-                                               (kStrappyPreferencesInset * 2.0),
+    [[NSView alloc] initWithFrame:NSMakeRect(0.0,
+                                             0.0,
+                                             NSWidth(bounds),
                                              kStrappyWhitelistControlHeight)];
   [bottomAccessoryView_ setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
   [self configureBottomAccessoryView:bottomAccessoryView_ target:target];

@@ -84,8 +84,9 @@
 "Tools & Search" = "Tools & Search";
 "Provider" = "Provider";
 "API Token" = "API Token";
-"API Endpoint:" = "API Endpoint:";
-"API Token:" = "API Token:";
+"OpenRouter" = "OpenRouter";
+"Endpoint" = "Endpoint";
+"Token" = "Token";
 "https://openrouter.ai/api/v1/responses" = "https://openrouter.ai/api/v1/responses";
 "Paste API token" = "Paste API token";
 "Model" = "Model";

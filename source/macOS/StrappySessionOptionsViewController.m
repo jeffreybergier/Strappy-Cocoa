@@ -7,7 +7,9 @@ static const CGFloat kStrappyInspectorInset = 12.0;
 static const CGFloat kStrappyInspectorGap = 8.0;
 static const CGFloat kStrappyInspectorControlHeight = 24.0;
 static const CGFloat kStrappyInspectorDocumentHeight = 526.0;
-static const CGFloat kStrappyDefaultsMinimumDocumentHeight = 296.0;
+static const CGFloat kStrappyDefaultsModelBoxHeight = 126.0;
+static const CGFloat kStrappyDefaultsBottomBoxMinimumHeight = 126.0;
+static const CGFloat kStrappyDefaultsStatusHeight = 20.0;
 static const NSUInteger kStrappyRoundLimitSliderMinimum = 20U;
 static const NSUInteger kStrappyRoundLimitSliderMaximum = 200U;
 
@@ -211,6 +213,13 @@ static NSUInteger StrappyInspectorClampSliderRoundLimit(NSUInteger limit)
     return kStrappyRoundLimitSliderMaximum;
   }
   return limit;
+}
+
+static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
+{
+  return kStrappyDefaultsModelBoxHeight + kStrappyInspectorGap +
+    kStrappyDefaultsBottomBoxMinimumHeight + kStrappyInspectorGap +
+    kStrappyDefaultsStatusHeight;
 }
 
 @interface StrappyInspectorDocumentView : NSView
@@ -590,7 +599,7 @@ static NSUInteger StrappyInspectorClampSliderRoundLimit(NSUInteger limit)
   CGFloat leftWidth;
   CGFloat rightX;
   CGFloat rightWidth;
-  CGFloat statusHeight;
+  CGFloat minimumDocumentHeight;
 
   if ((scrollView_ == nil) || (documentView_ == nil) || layingOut_) {
     return;
@@ -599,16 +608,17 @@ static NSUInteger StrappyInspectorClampSliderRoundLimit(NSUInteger limit)
 
   bounds = [[self view] bounds];
   [scrollView_ setFrame:bounds];
+  minimumDocumentHeight = StrappyDefaultsMinimumDocumentHeight();
   [scrollView_ setHasVerticalScroller:
-    (NSHeight(bounds) < kStrappyDefaultsMinimumDocumentHeight)];
+    (NSHeight(bounds) < minimumDocumentHeight)];
   contentSize = [scrollView_ contentSize];
   documentWidth = contentSize.width;
   if (documentWidth < 440.0) {
     documentWidth = 440.0;
   }
   documentHeight = contentSize.height;
-  if (documentHeight < kStrappyDefaultsMinimumDocumentHeight) {
-    documentHeight = kStrappyDefaultsMinimumDocumentHeight;
+  if (documentHeight < minimumDocumentHeight) {
+    documentHeight = minimumDocumentHeight;
   }
   [documentView_ setFrame:NSMakeRect(0.0,
                                      0.0,
@@ -622,7 +632,7 @@ static NSUInteger StrappyInspectorClampSliderRoundLimit(NSUInteger limit)
 
   [titleLabel_ setHidden:YES];
   modelBoxY = 0.0;
-  modelBoxHeight = 126.0;
+  modelBoxHeight = kStrappyDefaultsModelBoxHeight;
   [modelAssistantBox_ setFrame:NSMakeRect(contentX,
                                           modelBoxY,
                                           contentWidth,
@@ -649,7 +659,11 @@ static NSUInteger StrappyInspectorClampSliderRoundLimit(NSUInteger limit)
     assistantSegmentedControl_);
 
   bottomY = modelBoxY + modelBoxHeight + kStrappyInspectorGap;
-  bottomBoxHeight = 126.0;
+  bottomBoxHeight = documentHeight - bottomY - kStrappyInspectorGap -
+    kStrappyDefaultsStatusHeight;
+  if (bottomBoxHeight < kStrappyDefaultsBottomBoxMinimumHeight) {
+    bottomBoxHeight = kStrappyDefaultsBottomBoxMinimumHeight;
+  }
   columnGap = 10.0;
   leftWidth = floor((contentWidth - columnGap) / 2.0);
   rightX = contentX + leftWidth + columnGap;
@@ -661,19 +675,19 @@ static NSUInteger StrappyInspectorClampSliderRoundLimit(NSUInteger limit)
                                         bottomY + 25.0,
                                         leftWidth - 24.0,
                                         20.0)];
+  [bashButton_ setFrame:NSMakeRect(contentX + 12.0,
+                                   bottomY + 53.0,
+                                   leftWidth - 24.0,
+                                   20.0)];
   [searchProviderLabel_ setFrame:NSMakeRect(contentX + 15.0,
-                                            bottomY + 51.0,
+                                            bottomY + 78.0,
                                             leftWidth - 30.0,
                                             16.0)];
   [searchProviderPopUpButton_ setFrame:NSMakeRect(
     contentX + 12.0,
-    bottomY + 66.0,
+    bottomY + 93.0,
     leftWidth - 24.0,
     kStrappyInspectorControlHeight)];
-  [bashButton_ setFrame:NSMakeRect(contentX + 12.0,
-                                   bottomY + 99.0,
-                                   leftWidth - 24.0,
-                                   20.0)];
 
   [limitsBox_ setFrame:NSMakeRect(
     rightX, bottomY, rightWidth, bottomBoxHeight)];
@@ -708,11 +722,11 @@ static NSUInteger StrappyInspectorClampSliderRoundLimit(NSUInteger limit)
     bottomY + 100.0,
     30.0,
     14.0)];
-  statusHeight = 28.0;
   [statusLabel_ setFrame:NSMakeRect(contentX,
-                                    documentHeight - statusHeight,
+                                    documentHeight -
+                                      kStrappyDefaultsStatusHeight,
                                     contentWidth,
-                                    statusHeight)];
+                                    kStrappyDefaultsStatusHeight)];
 
   layingOut_ = NO;
 }

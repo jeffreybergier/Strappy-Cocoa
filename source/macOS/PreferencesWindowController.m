@@ -15,7 +15,7 @@ static const CGFloat kStrappyPreferencesWidth = 640.0;
 static const CGFloat kStrappyPreferencesHeight = 480.0;
 static const CGFloat kStrappyPreferencesMinimumWidth = 480.0;
 static const CGFloat kStrappyPreferencesMinimumHeight = 320.0;
-static const CGFloat kStrappyPreferencesInset = 8.0;
+static const CGFloat kStrappyPreferencesWindowEdgeInset = 8.0;
 static const CGFloat kStrappyPreferencesToolbarIconPoint = 24.0;
 static const CGFloat kStrappyPreferencesToolbarIconCanvas = 32.0;
 static NSString * const kStrappyPreferencesFrameAutosaveName =
@@ -577,8 +577,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   bounds = [contentView bounds];
   contentPaneView_ =
     [[NSView alloc] initWithFrame:NSInsetRect(bounds,
-                                              kStrappyPreferencesInset,
-                                              kStrappyPreferencesInset)];
+      kStrappyPreferencesWindowEdgeInset,
+      kStrappyPreferencesWindowEdgeInset)];
   [contentPaneView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
 
   paneFrame = [contentPaneView_ bounds];

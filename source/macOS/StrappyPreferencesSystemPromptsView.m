@@ -1,7 +1,5 @@
 #import "StrappyPreferencesSystemPromptsView.h"
 
-static const CGFloat kStrappyPreferencesInset = 12.0;
-
 @interface StrappyPreferencesSystemPromptsView ()
 - (void)buildView;
 @end
@@ -22,9 +20,7 @@ static const CGFloat kStrappyPreferencesInset = 12.0;
   NSScrollView *scrollView;
 
   scrollView = [[[NSScrollView alloc]
-      initWithFrame:NSInsetRect([self bounds],
-                                kStrappyPreferencesInset,
-                                kStrappyPreferencesInset)] autorelease];
+      initWithFrame:[self bounds]] autorelease];
   [scrollView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   [scrollView setBorderType:NSBezelBorder];
   [scrollView setHasVerticalScroller:YES];
