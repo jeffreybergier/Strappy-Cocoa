@@ -1,6 +1,5 @@
 #import "XPFoundation.h"
 #import <TargetConditionals.h>
-#import <objc/message.h>
 #include <pthread.h>
 #include <stdlib.h>
 
@@ -112,11 +111,23 @@
 - (long long)XP_longLongValue
 {
   SEL selector;
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+  long long result;
   const char *value;
 
   selector = @selector(longLongValue);
   if ([self respondsToSelector:selector]) {
-    return ((long long (*)(id, SEL))objc_msgSend)(self, selector);
+    signature = [self methodSignatureForSelector:selector];
+    if ((signature != nil) && ([signature numberOfArguments] == 2U)) {
+      invocation = [NSInvocation invocationWithMethodSignature:signature];
+      [invocation setTarget:self];
+      [invocation setSelector:selector];
+      [invocation invoke];
+      result = 0LL;
+      [invocation getReturnValue:&result];
+      return result;
+    }
   }
 
   value = [self UTF8String];

@@ -1,4 +1,5 @@
 .DS_Store
+.altivec-sdk/
 
 # Xcode user state
 xcuserdata/
