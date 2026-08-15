@@ -12,6 +12,7 @@ static const CGFloat kStrappyDefaultsBottomBoxMinimumHeight = 126.0;
 static const CGFloat kStrappyDefaultsStatusHeight = 20.0;
 static const NSUInteger kStrappyRoundLimitSliderMinimum = 20U;
 static const NSUInteger kStrappyRoundLimitSliderMaximum = 200U;
+static const NSUInteger kStrappyRoundLimitSliderStep = 10U;
 
 static NSArray *StrappyInspectorSearchProviders(void)
 {
@@ -204,14 +205,19 @@ static BOOL StrappyInspectorPopUpHasEnabledChoice(NSPopUpButton *popUpButton)
   return NO;
 }
 
-static NSUInteger StrappyInspectorClampSliderRoundLimit(NSUInteger limit)
+static NSUInteger StrappyInspectorSnapSliderRoundLimit(double value)
 {
-  if (limit < kStrappyRoundLimitSliderMinimum) {
+  NSUInteger limit;
+
+  if (value <= (double)kStrappyRoundLimitSliderMinimum) {
     return kStrappyRoundLimitSliderMinimum;
   }
-  if (limit > kStrappyRoundLimitSliderMaximum) {
+  if (value >= (double)kStrappyRoundLimitSliderMaximum) {
     return kStrappyRoundLimitSliderMaximum;
   }
+  limit = (NSUInteger)(
+    (value / (double)kStrappyRoundLimitSliderStep) + 0.5) *
+    kStrappyRoundLimitSliderStep;
   return limit;
 }
 
@@ -440,7 +446,7 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   roundLimitSlider_ = [[NSSlider alloc] initWithFrame:NSZeroRect];
   [roundLimitSlider_ setMinValue:(double)kStrappyRoundLimitSliderMinimum];
   [roundLimitSlider_ setMaxValue:(double)kStrappyRoundLimitSliderMaximum];
-  [roundLimitSlider_ setContinuous:NO];
+  [roundLimitSlider_ setContinuous:YES];
   [roundLimitSlider_ setTarget:self];
   [roundLimitSlider_ setAction:@selector(roundLimitSliderChanged:)];
   [documentView_ addSubview:roundLimitSlider_];
@@ -818,8 +824,8 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
     XPControlStateValueOn : XPControlStateValueOff)];
   [answerQualityButton_ setState:([options answerQualityEnabled] ?
     XPControlStateValueOn : XPControlStateValueOff)];
-  roundLimit = StrappyInspectorClampSliderRoundLimit((options != nil) ?
-    [options roundLimit] : StrappySessionDefaultRoundLimit);
+  roundLimit = StrappyInspectorSnapSliderRoundLimit((double)((options != nil) ?
+    [options roundLimit] : StrappySessionDefaultRoundLimit));
   [roundLimitSlider_ setDoubleValue:(double)roundLimit];
   [roundLimitValueLabel_ setStringValue:
     [NSString stringWithFormat:@"%lu", (unsigned long)roundLimit]];
@@ -1197,8 +1203,8 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   if (reloading_) {
     return;
   }
-  limit = StrappyInspectorClampSliderRoundLimit(
-    (NSUInteger)floor([roundLimitSlider_ doubleValue] + 0.5));
+  limit = StrappyInspectorSnapSliderRoundLimit(
+    [roundLimitSlider_ doubleValue]);
   [roundLimitSlider_ setDoubleValue:(double)limit];
   [roundLimitValueLabel_ setStringValue:
     [NSString stringWithFormat:@"%lu", (unsigned long)limit]];
