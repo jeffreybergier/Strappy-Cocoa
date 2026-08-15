@@ -46,9 +46,6 @@ int strappy_session_refresh_openrouter_user_models(
   const char *db_path,
   char **error_out);
 
-int strappy_session_create(const char *db_path,
-                           long long *session_id_out,
-                           char **error_out);
 int strappy_session_create_with_working_directory(
   const char *db_path,
   const char *working_directory,
@@ -120,23 +117,6 @@ int strappy_session_update_default_options(
   strappy_session_options *saved_options_out,
   strappy_session_option_mask *actual_changed_fields_out,
   char **error_out);
-/* Compatibility adapters; prefer the options snapshot API above. */
-int strappy_session_update_web_provider(const char *db_path,
-                                        long long session_id,
-                                        strappy_web_provider web_provider,
-                                        char **error_out);
-int strappy_session_update_web_search_enabled(const char *db_path,
-                                              long long session_id,
-                                              int web_search_enabled,
-                                              char **error_out);
-int strappy_session_update_bash_enabled(const char *db_path,
-                                        long long session_id,
-                                        int bash_enabled,
-                                        char **error_out);
-int strappy_session_update_limit_to_one_tool(const char *db_path,
-                                             long long session_id,
-                                             int limit_to_one_tool,
-                                             char **error_out);
 int strappy_session_get_working_directory(
   const char *db_path,
   long long session_id,
@@ -156,15 +136,6 @@ int strappy_session_update_assistant_set(const char *db_path,
                                          const char *resource_dir,
                                          const char *assistant_set_id,
                                          char **error_out);
-int strappy_session_get_model(const char *db_path,
-                              long long session_id,
-                              char **model_id_out,
-                              char **error_out);
-int strappy_session_update_model(const char *db_path,
-                                 long long session_id,
-                                 const char *model_id,
-                                 char **error_out);
-
 int strappy_session_send_prompt_with_events_and_load(
   const char *prompt,
   const char *api_endpoint,

@@ -2207,18 +2207,6 @@ static BOOL StrappySessionRecordFromOptions(
   return YES;
 }
 
-+ (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error
-{
-  return [StrappySession defaultOpenRouterModelIdentifierWithError:error];
-}
-
-+ (BOOL)setSelectedOpenRouterModelIdentifier:(NSString *)modelIdentifier
-                                       error:(NSError **)error
-{
-  return [StrappySession setDefaultOpenRouterModelIdentifier:modelIdentifier
-                                                       error:error];
-}
-
 + (BOOL)setOpenRouterModelAllowed:(BOOL)allowed
                 forModelIdentifier:(NSString *)modelIdentifier
                              error:(NSError **)error
@@ -2427,30 +2415,6 @@ static BOOL StrappySessionRecordFromOptions(
                                                     summary:summary] autorelease];
 }
 
-+ (NSString *)databaseStudyJSONWithError:(NSError **)error
-{
-  NSString *databasePath;
-  char *json;
-  char *strappyError;
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return nil;
-  }
-  strappyError = NULL;
-  json = strappy_study_status_json([databasePath UTF8String], &strappyError);
-  if (json == NULL) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return nil;
-  }
-  strappy_session_free_string(strappyError);
-  return StrappySessionStringFromCString(json);
-}
-
 + (NSDictionary *)dictionaryFromDatabaseStudyStatusRecord:
     (const strappy_study_database_status_record *)record
 {
@@ -2562,85 +2526,6 @@ static BOOL StrappySessionRecordFromOptions(
   }
   strappy_session_free_string(strappyError);
   return YES;
-}
-
-+ (BOOL)databaseStudyProgressWithStudiedCount:(NSUInteger *)studiedCount
-                                approvedCount:(NSUInteger *)approvedCount
-                                        error:(NSError **)error
-{
-  NSString *databasePath;
-  char *strappyError;
-  size_t approved;
-  size_t studied;
-
-  if (studiedCount != NULL) {
-    *studiedCount = 0U;
-  }
-  if (approvedCount != NULL) {
-    *approvedCount = 0U;
-  }
-  if ((studiedCount == NULL) || (approvedCount == NULL)) {
-    if (error != nil) {
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:15
-                               userInfo:[NSDictionary dictionaryWithObject:
-        NSLocalizedString(@"Database Study progress has no output.", nil)
-                                                            forKey:NSLocalizedDescriptionKey]];
-    }
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-  approved = 0U;
-  studied = 0U;
-  strappyError = NULL;
-  if (!strappy_study_progress([databasePath UTF8String],
-                              &studied,
-                              &approved,
-                              &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-  strappy_session_free_string(strappyError);
-  *studiedCount = (NSUInteger)studied;
-  *approvedCount = (NSUInteger)approved;
-  return YES;
-}
-
-+ (NSUInteger)databaseStudyPendingDatabaseCountWithError:(NSError **)error
-{
-  NSString *databasePath;
-  strappy_study_database_id_list list;
-  char *strappyError;
-  NSUInteger count;
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return 0U;
-  }
-  strappy_study_database_id_list_init(&list);
-  strappyError = NULL;
-  if (!strappy_study_list_unstudied_database_ids([databasePath UTF8String],
-                                                  &list,
-                                                  &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return 0U;
-  }
-  count = (NSUInteger)list.count;
-  strappy_study_database_id_list_destroy(&list);
-  strappy_session_free_string(strappyError);
-  return count;
 }
 
 + (StrappySession *)beginDatabaseStudyWithError:(NSError **)error

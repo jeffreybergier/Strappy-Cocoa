@@ -3327,110 +3327,6 @@ static int strappy_tools_database_file_is_missing(const char *path)
   return ((errno == ENOENT) || (errno == ENOTDIR)) ? 1 : 0;
 }
 
-static int strappy_tools_catalog_exec(sqlite3 *db,
-                                      const char *sql,
-                                      const char *error_prefix,
-                                      char **error_out)
-{
-  char *sqlite_error;
-  int rc;
-
-  sqlite_error = NULL;
-  rc = sqlite3_exec(db, sql, NULL, NULL, &sqlite_error);
-  if (rc != SQLITE_OK) {
-    if (sqlite_error != NULL) {
-      strappy_set_formatted_error(error_out,
-                                  "%s: %s",
-                                  error_prefix,
-                                  sqlite_error);
-      sqlite3_free(sqlite_error);
-    } else {
-      strappy_set_formatted_error(error_out,
-                                  "%s: sqlite %d",
-                                  error_prefix,
-                                  rc);
-    }
-    return 0;
-  }
-
-  return 1;
-}
-
-static int strappy_tools_ensure_helper_info_schema(sqlite3 *db,
-                                                   char **error_out)
-{
-  static const char *user_info_sql =
-    "CREATE TABLE IF NOT EXISTS helper_user_info ("
-    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-    "kind TEXT NOT NULL,"
-    "subject TEXT NOT NULL,"
-    "predicate TEXT NOT NULL,"
-    "value TEXT NOT NULL,"
-    "confidence REAL NOT NULL DEFAULT 0.75,"
-    "source TEXT NOT NULL DEFAULT 'model_observed',"
-    "status TEXT NOT NULL DEFAULT 'active',"
-    "created_at TEXT NOT NULL DEFAULT "
-    "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
-    "updated_at TEXT NOT NULL DEFAULT "
-    "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
-    "last_used_at TEXT"
-    ");";
-  static const char *user_info_status_index_sql =
-    "CREATE INDEX IF NOT EXISTS helper_user_info_status_idx "
-    "ON helper_user_info(status, kind, updated_at);";
-  static const char *database_info_sql =
-    "CREATE TABLE IF NOT EXISTS helper_database_info ("
-    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-    "database_catalog_id INTEGER NOT NULL,"
-    "database_assistant_id TEXT NOT NULL,"
-    "database_size INTEGER NOT NULL DEFAULT 0,"
-    "database_modified_at INTEGER NOT NULL DEFAULT 0,"
-    "kind TEXT NOT NULL,"
-    "title TEXT NOT NULL,"
-    "content TEXT NOT NULL,"
-    "evidence TEXT,"
-    "confidence REAL NOT NULL DEFAULT 0.75,"
-    "status TEXT NOT NULL DEFAULT 'active',"
-    "created_at TEXT NOT NULL DEFAULT "
-    "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
-    "updated_at TEXT NOT NULL DEFAULT "
-    "(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
-    "last_used_at TEXT,"
-    "FOREIGN KEY(database_catalog_id) REFERENCES discovered_databases(id)"
-    ");";
-  static const char *database_info_status_index_sql =
-    "CREATE INDEX IF NOT EXISTS helper_database_info_status_idx "
-    "ON helper_database_info(database_catalog_id, status, kind, updated_at);";
-
-  if (db == NULL) {
-    strappy_set_error(error_out, "Memory database is missing.");
-    return 0;
-  }
-  return 1;
-
-  if ((db == NULL) ||
-      !strappy_tools_catalog_exec(db,
-                                  user_info_sql,
-                                  "Could not create memory user fact schema",
-                                  error_out) ||
-      !strappy_tools_catalog_exec(db,
-                                  user_info_status_index_sql,
-                                  "Could not create memory user fact index",
-                                  error_out) ||
-      !strappy_tools_catalog_exec(db,
-                                  database_info_sql,
-                                  "Could not create memory database hint schema",
-                                  error_out) ||
-      !strappy_tools_catalog_exec(db,
-                                  database_info_status_index_sql,
-                                  "Could not create memory database hint index",
-                                  error_out)) {
-    return 0;
-  }
-
-  return 1;
-}
-
 static int strappy_tools_open_helper_info_database(const char *session_db_path,
                                                   sqlite3 **db_out,
                                                   char **error_out)
@@ -3476,11 +3372,6 @@ static int strappy_tools_open_helper_info_database(const char *session_db_path,
   }
 
   sqlite3_busy_timeout(db, 5000);
-  if (!strappy_tools_ensure_helper_info_schema(db, error_out)) {
-    sqlite3_close(db);
-    return 0;
-  }
-
   *db_out = db;
   return 1;
 }

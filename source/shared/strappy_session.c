@@ -188,13 +188,6 @@ int strappy_session_refresh_openrouter_user_models(
                                                              error_out);
 }
 
-int strappy_session_create(const char *db_path,
-                           long long *session_id_out,
-                           char **error_out)
-{
-  return strappy_db_create_session(db_path, session_id_out, error_out);
-}
-
 int strappy_session_create_with_working_directory(
   const char *db_path,
   const char *working_directory,
@@ -427,50 +420,6 @@ int strappy_session_update_default_options(
     error_out);
 }
 
-int strappy_session_update_web_provider(const char *db_path,
-                                        long long session_id,
-                                        strappy_web_provider web_provider,
-                                        char **error_out)
-{
-  return strappy_db_update_session_web_provider(db_path,
-                                                session_id,
-                                                web_provider,
-                                                error_out);
-}
-
-int strappy_session_update_web_search_enabled(const char *db_path,
-                                              long long session_id,
-                                              int web_search_enabled,
-                                              char **error_out)
-{
-  return strappy_db_update_session_web_search_enabled(db_path,
-                                                      session_id,
-                                                      web_search_enabled,
-                                                      error_out);
-}
-
-int strappy_session_update_bash_enabled(const char *db_path,
-                                        long long session_id,
-                                        int bash_enabled,
-                                        char **error_out)
-{
-  return strappy_db_update_session_bash_enabled(db_path,
-                                               session_id,
-                                               bash_enabled,
-                                               error_out);
-}
-
-int strappy_session_update_limit_to_one_tool(const char *db_path,
-                                             long long session_id,
-                                             int limit_to_one_tool,
-                                             char **error_out)
-{
-  return strappy_db_update_session_limit_to_one_tool(db_path,
-                                                     session_id,
-                                                     limit_to_one_tool,
-                                                     error_out);
-}
-
 int strappy_session_get_working_directory(
   const char *db_path,
   long long session_id,
@@ -536,28 +485,6 @@ int strappy_session_update_assistant_set(const char *db_path,
                                                error_out);
   strappy_assistant_set_profile_destroy(&profile);
   return ok;
-}
-
-int strappy_session_get_model(const char *db_path,
-                              long long session_id,
-                              char **model_id_out,
-                              char **error_out)
-{
-  return strappy_db_get_session_model(db_path,
-                                     session_id,
-                                     model_id_out,
-                                     error_out);
-}
-
-int strappy_session_update_model(const char *db_path,
-                                 long long session_id,
-                                 const char *model_id,
-                                 char **error_out)
-{
-  return strappy_db_update_session_model(db_path,
-                                        session_id,
-                                        model_id,
-                                        error_out);
 }
 
 static int strappy_session_load_after_prompt(const char *db_path,

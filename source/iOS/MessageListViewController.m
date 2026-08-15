@@ -844,33 +844,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   return [self availableAssistantSets];
 }
 
-- (NSString *)selectedAssistantSetIdentifier
-{
-  StrappySessionOptions *options;
-
-  if ([self session] == nil) {
-    return @"";
-  }
-  options = [[self session] optionsWithError:nil];
-  return [[options assistantSetIdentifier] isKindOfClass:[NSString class]]
-    ? [options assistantSetIdentifier] : @"";
-}
-
-- (BOOL)setSelectedAssistantSetIdentifier:(NSString *)assistantSetIdentifier
-{
-  StrappySessionOptions *options;
-
-  options = [[self session] optionsWithError:nil];
-  if (options == nil) {
-    return NO;
-  }
-  options = [options copy];
-  [options setAssistantSetIdentifier:assistantSetIdentifier];
-  return [self promptSendViewController:[self sendBar]
-                   updateSessionOptions:options
-                          changedFields:StrappySessionOptionAssistantSet];
-}
-
 - (NSArray *)allowedModelsForPromptSendViewController:
     (PromptSendViewController *)controller
 {

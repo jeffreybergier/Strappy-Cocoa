@@ -3061,22 +3061,6 @@ int strappy_db_get_default_openrouter_model(const char *db_path,
   return ok;
 }
 
-int strappy_db_set_selected_openrouter_model(const char *db_path,
-                                             const char *model_id,
-                                             char **error_out)
-{
-  return strappy_db_set_default_openrouter_model(db_path, model_id, error_out);
-}
-
-int strappy_db_get_selected_openrouter_model(const char *db_path,
-                                             char **model_id_out,
-                                             char **error_out)
-{
-  return strappy_db_get_default_openrouter_model(db_path,
-                                                 model_id_out,
-                                                 error_out);
-}
-
 int strappy_db_update_session_model(const char *db_path,
                                     long long session_id,
                                     const char *model_id,

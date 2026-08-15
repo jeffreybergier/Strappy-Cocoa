@@ -526,20 +526,11 @@ int strappy_db_load_session_list_record(const char *db_path,
 int strappy_db_delete_session(const char *db_path,
                               long long session_id,
                               char **error_out);
-int strappy_db_list_session_messages(const char *db_path,
-                                     long long session_id,
-                                     strappy_session_message_record_list *list,
-                                     char **error_out);
 int strappy_db_load_session_message_by_key(
   const char *db_path,
   long long session_id,
   const char *message_key,
   strappy_session_message_record *record,
-  char **error_out);
-int strappy_db_list_session_context_messages(
-  const char *db_path,
-  long long session_id,
-  strappy_session_message_record_list *list,
   char **error_out);
 int strappy_db_begin_response_call(
   const char *db_path,
@@ -563,12 +554,6 @@ int strappy_db_mark_response_call_round_limit(
 int strappy_db_list_canonical_response_items(
   const char *db_path,
   long long session_id,
-  strappy_response_item_raw_record_list *list,
-  char **error_out);
-int strappy_db_list_canonical_response_items_for_prompt_group(
-  const char *db_path,
-  long long session_id,
-  const char *prompt_group_key,
   strappy_response_item_raw_record_list *list,
   char **error_out);
 int strappy_db_save_response_tool_execution(
@@ -644,12 +629,6 @@ int strappy_db_set_default_openrouter_model(const char *db_path,
 int strappy_db_get_default_openrouter_model(const char *db_path,
                                             char **model_id_out,
                                             char **error_out);
-int strappy_db_set_selected_openrouter_model(const char *db_path,
-                                             const char *model_id,
-                                             char **error_out);
-int strappy_db_get_selected_openrouter_model(const char *db_path,
-                                             char **model_id_out,
-                                             char **error_out);
 int strappy_db_update_session_model(const char *db_path,
                                     long long session_id,
                                     const char *model_id,

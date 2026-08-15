@@ -59,10 +59,6 @@
 - (void)XP_setLineBreakModeWordWrapping;
 @end
 
-@interface UITextField (XPUIKit)
-- (void)XP_setTextAlignmentRight;
-@end
-
 /* Instant local notifications backed by UILocalNotification. iOS 8+ requires
  * user-notification authorization; older supported releases have no permission
  * prompt and are treated as authorized. The implementation runtime-dispatches

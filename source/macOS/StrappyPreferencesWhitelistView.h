@@ -34,8 +34,6 @@
 - (NSArray *)effectiveSortDescriptorsForSortDescriptors:(NSArray *)descriptors;
 - (NSArray *)sortedRows:(NSArray *)rows;
 
-- (NSView *)topAccessoryView;
-- (NSView *)bottomAccessoryView;
 - (NSSearchField *)searchField;
 - (NSScrollView *)scrollView;
 - (NSTableView *)tableView;

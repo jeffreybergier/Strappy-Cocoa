@@ -570,16 +570,6 @@ static NSSortDescriptor *StrappyWhitelistPrimarySortDescriptor(
   return sortedRows;
 }
 
-- (NSView *)topAccessoryView
-{
-  return topAccessoryView_;
-}
-
-- (NSView *)bottomAccessoryView
-{
-  return bottomAccessoryView_;
-}
-
 - (NSSearchField *)searchField
 {
   return searchField_;

@@ -9499,10 +9499,10 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
   free(assistant_set_id);
 
   strappy_session_message_record_list_init(&messages);
-  ok = strappy_db_list_session_messages(context->catalog_path,
-                                        session_id,
-                                        &messages,
-                                        &error);
+  ok = strappy_db_list_response_timeline(context->catalog_path,
+                                         session_id,
+                                         &messages,
+                                         &error);
   if (!ok) {
     fprintf(stderr,
             "Could not list empty session messages: %s\n",
@@ -9586,7 +9586,6 @@ static int harness_run_openrouter_model_catalog_tests(
   strappy_session_option_mask actual_changed_fields;
   const char *fallback_working_directory;
   char *default_model;
-  char *selected_model;
   char *session_model;
   char *error;
   long long session_id;
@@ -9875,25 +9874,6 @@ static int harness_run_openrouter_model_catalog_tests(
   strappy_free_string(default_model);
   if (!ok) {
     fprintf(stderr, "Default OpenRouter model did not persist.\n");
-    return 0;
-  }
-
-  selected_model = NULL;
-  if (!strappy_db_get_selected_openrouter_model(context->catalog_path,
-                                                &selected_model,
-                                                &error)) {
-    fprintf(stderr,
-            "Could not get selected OpenRouter model: %s\n",
-            (error != NULL) ? error : "unknown");
-    strappy_free_string(error);
-    return 0;
-  }
-
-  ok = (selected_model != NULL) &&
-       (strcmp(selected_model, "openai/gpt-4.1-mini") == 0);
-  strappy_free_string(selected_model);
-  if (!ok) {
-    fprintf(stderr, "Selected OpenRouter compatibility wrapper did not persist.\n");
     return 0;
   }
 

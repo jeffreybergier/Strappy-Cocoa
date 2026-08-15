@@ -122,7 +122,6 @@
 #endif
 
 @interface NSWindow (XPAppKit)
-- (void)XP_setTitle:(NSString *)title;
 - (void)XP_setToolbarPreferenceStyle;
 - (CGFloat)XP_titlebarHeight;
 - (CGFloat)XP_backingScaleFactor;

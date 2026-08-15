@@ -1422,7 +1422,6 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "function flushWebViewUpdates") &&
        harness_expect_contains(page_html, "function scheduleStatusTick") &&
        harness_expect_contains(page_html,
-                               "var strappyUpdateInterval=300;"
                                "var strappyStatusInterval=1000;") &&
        harness_expect_contains(
          page_html,
@@ -1684,8 +1683,6 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html,
                                "var strappyProcessingPromptGroupKey='';") &&
        harness_expect_contains(page_html,
-                               "function processingNodePromptGroup") &&
-       harness_expect_contains(page_html,
                                "n=rowsForPromptGroup(group);") &&
        harness_expect_contains(page_html,
                                "function setProcessingThinkingCollapsed") &&
@@ -1811,22 +1808,8 @@ static int harness_check_page_scripts(void)
                                "shouldRenderMarkdownBubble(n[i])||"
                                "shouldRenderMarkdownReasoning(n[i])") &&
        harness_expect_contains(page_html, "_strappyMarkdownRendered") &&
-       harness_expect_contains(page_html, "function scheduleStreamingMarkdown") &&
-       harness_expect_contains(page_html,
-                               "strappyStreamingMarkdownNeedsFlush=1;"
-                               "if(strappyBatchDepth===0)"
-                               "scheduleWebViewUpdate(strappyUpdateInterval);") &&
-       harness_expect_contains(page_html, "function appendStreamingMarkdownNode") &&
-       harness_expect_contains(page_html,
-                               "q.kind=='reasoning'){if(hasClass(r,'streaming-active')") &&
-       harness_expect_contains(page_html, "queueTextAppend(id,t,'content')") &&
-       harness_expect_contains(page_html,
-                               "if(strappyBatchDepth===0){"
-                               "if(strappyTextQueuesHaveEntries())flushTextQueues();") &&
-       harness_expect_contains(page_html,
-                               "if(strappyTextQueuesHaveEntries())flushTextQueues();"
-                               "if(strappyStreamingMarkdownNeedsFlush)"
-                               "flushStreamingMarkdown();") &&
+       harness_expect_not_contains(page_html, "strappyStreamingMarkdown") &&
+       harness_expect_not_contains(page_html, "strappyTextQueues") &&
        harness_expect_contains(page_html,
                                "function beginMessageBatch(){"
                                "if(strappyBatchDepth===0)"
@@ -1885,40 +1868,13 @@ static int harness_check_page_scripts(void)
                                "renderAfterMutation(added);"
                                "scrollBottomAnimated();") &&
        harness_expect_contains(page_html,
-                               "while(d.firstChild){n=d.firstChild;"
-                               "key=rowMessageKey(n);"
-                               "rowIdentifier=rowId(n);") &&
-       harness_expect_contains(page_html,
-                               "m.insertBefore(n,before);"
-                               "if(hasClass(n,'row')){"
-                               "indexMessageRow(n,before);"
-                               "added[added.length]=n;}}"
-                               "if(!added.length)return;"
-                               "if(group!=='')"
-                               "beginProcessingFinishAfterScroll(group);"
-                               "flushPendingToolTargets();"
-                               "renderAfterMutation(added);"
-                               "scrollBottomAnimated();") &&
-       harness_expect_contains(page_html,
-                               "group=processingFinalAnswerGroup(d.childNodes);"
-                               "while(d.firstChild){n=d.firstChild;"
-                               "key=rowMessageKey(n);") &&
-       harness_expect_contains(page_html,
-                               "renderAfterMutation([old,next]);}}"
-                               "function insertMessageBefore") &&
-       harness_expect_contains(page_html,
-                               "s.parentNode.removeChild(s);}"
-                               "function setMessageThinking") &&
-       harness_expect_contains(page_html,
-                               "setMessageToolColumnCollapsed(id,1);}"
-                               "function moveMessageTextToReasoningByMessageKey") &&
-       harness_expect_contains(page_html,
                                "if(isAssistantRow(old)&&isAssistantRow(next))"
                                "preserveLiveMessageText(old,next)") &&
        harness_expect_contains(page_html, "oldRaw.indexOf(newRaw)>=0") &&
-       harness_expect_contains(page_html, "moveMessageTextToReasoningByMessageKey") &&
-       harness_expect_contains(page_html, "appendMessageTextByMessageKey") &&
-       harness_expect_contains(page_html, "appendReasoningTextByMessageKey") &&
+       harness_expect_not_contains(page_html, "insertMessageBefore") &&
+       harness_expect_not_contains(page_html, "appendMessageText") &&
+       harness_expect_not_contains(page_html, "appendReasoningText") &&
+       harness_expect_not_contains(page_html, "moveMessageTextToReasoning") &&
        harness_expect_not_contains(page_html, "setInterval(") &&
        harness_expect_not_contains(page_html, "strappyTextTimer") &&
        harness_expect_not_contains(page_html, "strappyUpdateLastFlush") &&
@@ -1941,11 +1897,11 @@ static int harness_check_page_scripts(void)
        harness_expect_contains(page_html, "tool-column-toggle") &&
        harness_expect_contains(page_html, "tool-column-collapsed .tool-count") &&
        harness_expect_contains(page_html, "streaming-active .tool-column-toggle") &&
-       harness_expect_contains(page_html, "if(!isToolRow(r))r.style.display='block'") &&
+       harness_expect_not_contains(page_html, "appendToolEventText") &&
        harness_expect_contains(page_html, "tool-column-error") &&
        harness_expect_contains(page_html, "function decoratePromptGroups") &&
        harness_expect_contains(page_html, "function togglePromptGroup") &&
-       harness_expect_contains(page_html, "function setMessagePromptGroup") &&
+       harness_expect_not_contains(page_html, "function setMessagePromptGroup") &&
        harness_expect_contains(page_html, "function promptGroupDefaultCollapsed") &&
        harness_expect_contains(page_html, "function promptGroupCollapsed") &&
        harness_expect_contains(page_html, "function rowIsActiveHarness") &&
@@ -2205,24 +2161,24 @@ static int harness_check_script_batch(void)
        !strappy_webview_script_batch_has_js(batch) &&
        strappy_webview_script_batch_append_js(
          batch,
-         "appendMessageTextByMessageKey('m','hi');") &&
+         "setProcessingStatus('{}');") &&
        strappy_webview_script_batch_append_js(
          batch,
-         "setProcessingStatus('{}');") &&
+         "setRoundContextInclusion(42,1,0);") &&
        strappy_webview_script_batch_has_js(batch);
 
   java_script = strappy_webview_script_batch_finish_js(batch);
   expected =
     "beginMessageBatch();try{"
-    "appendMessageTextByMessageKey('m','hi');"
     "setProcessingStatus('{}');"
+    "setRoundContextInclusion(42,1,0);"
     "}finally{endMessageBatch();}";
   ok = ok &&
        (java_script != NULL) &&
        (strcmp(java_script, expected) == 0) &&
        !strappy_webview_script_batch_has_js(batch) &&
        !strappy_webview_script_batch_append_js(batch,
-                                               "appendMessageText('x','y');");
+                                               "setProcessingStatus('');");
 
   if (!ok) {
     fprintf(stderr, "Script batch did not produce expected JavaScript.\n");
@@ -2257,15 +2213,15 @@ static int harness_check_tool_column_state(void)
     return 0;
   }
 
-  streaming_html = strappy_webview_streaming_assistant_message_html(
-    "assistant-streaming",
-    "",
-    "",
-    "pending",
-    "Thinking",
-    "user",
-    "prompt-group-test",
-    NULL);
+  message.element_id = "assistant-streaming";
+  message.prompt_group_key = "prompt-group-test";
+  message.text = "";
+  message.reasoning = "";
+  message.render_state_json =
+    "{\"streaming\":true,\"reasoning_render_when_empty\":true,"
+    "\"reasoning_collapsed\":false,\"tool_column_collapsed\":true}";
+  streaming_html =
+    strappy_webview_message_html(&message, NULL, "pending", "Thinking");
   if (streaming_html == NULL) {
     fprintf(stderr, "Could not generate streaming assistant message HTML.\n");
     strappy_webview_free(final_html);
@@ -2363,43 +2319,6 @@ static int harness_check_tool_column_state(void)
   return ok;
 }
 
-static int harness_check_tool_event_text(void)
-{
-  char *event_text;
-  char *script;
-  int ok;
-
-  event_text = strappy_webview_tool_event_text(
-    "result",
-    "call-1",
-    "memory_read",
-    "{\"query\":\"Alice\"}",
-    "{\"records\":[{\"kind\":\"person\",\"value\":{\"name\":\"Alice\"}}]}");
-  if (event_text == NULL) {
-    fprintf(stderr, "Could not generate tool event text.\n");
-    return 0;
-  }
-
-  script = strappy_webview_append_tool_event_text_js("streaming-tools",
-                                                     event_text);
-  if (script == NULL) {
-    fprintf(stderr, "Could not generate tool event script.\n");
-    strappy_webview_free(event_text);
-    return 0;
-  }
-
-  ok = harness_expect_contains(event_text, "\"tool_name\":\"memory_read\"") &&
-       harness_expect_contains(event_text,
-                               "\"display_title\":\"memory_read\"") &&
-       harness_expect_contains(event_text, "\"is_error\":false") &&
-       harness_expect_contains(event_text, "\\\"records\\\"") &&
-       harness_expect_contains(script, "appendToolEventText");
-
-  strappy_webview_free(script);
-  strappy_webview_free(event_text);
-  return ok;
-}
-
 static int harness_check_processing_status_scripts(void)
 {
   char *set_script;
@@ -2416,7 +2335,7 @@ static int harness_check_processing_status_scripts(void)
     return 0;
   }
 
-  clear_script = strappy_webview_clear_processing_status_js();
+  clear_script = strappy_webview_set_processing_status_js("");
   if (clear_script == NULL) {
     fprintf(stderr, "Could not generate processing status clear JS.\n");
     strappy_webview_free(set_script);
@@ -2442,7 +2361,7 @@ static int harness_check_processing_status_scripts(void)
 
   ok = harness_expect_contains(set_script, "setProcessingStatus('{\"active\":true") &&
        harness_expect_contains(set_script, "\"status_kind\":\"retry_wait\"") &&
-       harness_expect_contains(clear_script, "clearProcessingStatus();") &&
+       harness_expect_contains(clear_script, "setProcessingStatus('');") &&
        harness_expect_contains(
          page_html,
          "initProcessingStatusFromRenderState();"
@@ -2458,35 +2377,6 @@ static int harness_check_processing_status_scripts(void)
   strappy_webview_free(page_html);
   strappy_webview_free(clear_script);
   strappy_webview_free(set_script);
-  return ok;
-}
-
-static int harness_check_tool_activity_target(void)
-{
-  char *html;
-  int ok;
-
-  html = strappy_webview_tool_activity_message_html(
-    "streaming-harness-tools",
-    "",
-    "pending",
-    "Running tools...",
-    "harness",
-    "prompt-group-harness",
-    "streaming-harness-assistant",
-    NULL);
-  if (html == NULL) {
-    fprintf(stderr, "Could not generate tool activity HTML.\n");
-    return 0;
-  }
-
-  ok = harness_expect_contains(html, "class=\"row tool_call tool_activity") &&
-       harness_expect_contains(html, "data-actor=\"harness\"") &&
-       harness_expect_contains(html,
-                               "data-tool-target=\"streaming-harness-assistant\"") &&
-       harness_expect_contains(html, "style=\"display:none\"");
-
-  strappy_webview_free(html);
   return ok;
 }
 
@@ -2598,15 +2488,14 @@ static int harness_check_harness_prompt_group_collapse(void)
     return 0;
   }
 
-  streaming_harness_html = strappy_webview_streaming_assistant_message_html(
-    "collapse-harness-streaming",
-    "",
-    "",
-    "pending",
-    "Thinking",
-    "harness",
-    "prompt-group-collapse",
-    NULL);
+  message.element_id = "collapse-harness-streaming";
+  message.text = "";
+  message.reasoning = "";
+  message.render_state_json =
+    "{\"streaming\":true,\"reasoning_render_when_empty\":true,"
+    "\"reasoning_collapsed\":false,\"tool_column_collapsed\":true}";
+  streaming_harness_html =
+    strappy_webview_message_html(&message, NULL, "pending", "Thinking");
   if (streaming_harness_html == NULL) {
     fprintf(stderr, "Could not generate streaming harness group HTML.\n");
     strappy_webview_free(harness_assistant_html);
@@ -3723,13 +3612,7 @@ int main(void)
   if (!harness_check_tool_column_state()) {
     return 1;
   }
-  if (!harness_check_tool_event_text()) {
-    return 1;
-  }
   if (!harness_check_processing_status_scripts()) {
-    return 1;
-  }
-  if (!harness_check_tool_activity_target()) {
     return 1;
   }
   if (!harness_check_harness_prompt_group_collapse()) {

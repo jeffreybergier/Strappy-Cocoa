@@ -183,17 +183,6 @@ void strappy_response_item_raw_record_list_destroy(
   strappy_response_item_raw_record_list_init(list);
 }
 
-int strappy_db_list_session_messages(const char *db_path,
-                                     long long session_id,
-                                     strappy_session_message_record_list *list,
-                                     char **error_out)
-{
-  return strappy_db_list_response_timeline(db_path,
-                                           session_id,
-                                           list,
-                                           error_out);
-}
-
 int strappy_db_load_session_message_by_key(
   const char *db_path,
   long long session_id,
@@ -234,53 +223,6 @@ int strappy_db_load_session_message_by_key(
   strappy_session_message_record_list_destroy(&timeline);
   strappy_set_error(error_out, "Session message was not found.");
   return 0;
-}
-
-int strappy_db_list_session_context_messages(
-  const char *db_path,
-  long long session_id,
-  strappy_session_message_record_list *list,
-  char **error_out)
-{
-  strappy_session_message_record_list timeline;
-  size_t index;
-
-  if (list == NULL) {
-    strappy_set_error(error_out, "Session context list has no output.");
-    return 0;
-  }
-  strappy_session_message_record_list_init(list);
-  strappy_session_message_record_list_init(&timeline);
-  if (!strappy_db_list_response_timeline(db_path,
-                                         session_id,
-                                         &timeline,
-                                         error_out)) {
-    return 0;
-  }
-  for (index = 0U; index < timeline.count; index++) {
-    strappy_session_message_record *records;
-
-    if (!timeline.records[index].include_in_context ||
-        (timeline.records[index].api_role == NULL) ||
-        (timeline.records[index].api_role[0] == '\0')) {
-      continue;
-    }
-    records = (strappy_session_message_record *)realloc(
-      list->records,
-      (list->count + 1U) * sizeof(*records));
-    if (records == NULL) {
-      strappy_session_message_record_list_destroy(&timeline);
-      strappy_session_message_record_list_destroy(list);
-      strappy_set_error(error_out, "Could not allocate session context list.");
-      return 0;
-    }
-    list->records = records;
-    list->records[list->count] = timeline.records[index];
-    strappy_session_message_record_init(&timeline.records[index]);
-    list->count++;
-  }
-  strappy_session_message_record_list_destroy(&timeline);
-  return 1;
 }
 
 static cJSON *strappy_db_response_json_path(cJSON *root, const char *path)
@@ -3865,18 +3807,12 @@ static cJSON *strappy_db_semantic_load_item(sqlite3 *db,
 static int strappy_db_semantic_list_canonical_response_items(
   const char *db_path,
   long long session_id,
-  const char *prompt_group_key,
   strappy_response_item_raw_record_list *list,
   char **error_out)
 {
-  static const char *all_sql =
+  static const char *sql =
     "SELECT id FROM conversation_items "
     "WHERE session_id = ? AND include_in_context = 1 ORDER BY sequence;";
-  static const char *prompt_group_sql =
-    "SELECT i.id FROM conversation_items i "
-    "JOIN turns t ON t.id = i.turn_id "
-    "WHERE i.session_id = ?1 AND t.prompt_group_key = ?2 "
-    "AND i.include_in_context = 1 ORDER BY i.sequence;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;
@@ -3899,21 +3835,9 @@ static int strappy_db_semantic_list_canonical_response_items(
     return 0;
   }
   stmt = NULL;
-  rc = sqlite3_prepare_v2(db,
-                          (prompt_group_key != NULL) ?
-                            prompt_group_sql : all_sql,
-                          -1,
-                          &stmt,
-                          NULL);
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   if ((rc != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) != SQLITE_OK) ||
-      ((prompt_group_key != NULL) &&
-       ((prompt_group_key[0] == '\0') ||
-        (sqlite3_bind_text(stmt,
-                           2,
-                           prompt_group_key,
-                           -1,
-                           SQLITE_TRANSIENT) != SQLITE_OK)))) {
+      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) != SQLITE_OK)) {
     strappy_set_formatted_error(
       error_out,
       "Could not prepare canonical Responses item query: %s",
@@ -3991,25 +3915,6 @@ int strappy_db_list_canonical_response_items(
 {
   return strappy_db_semantic_list_canonical_response_items(db_path,
                                                            session_id,
-                                                           NULL,
-                                                           list,
-                                                           error_out);
-}
-
-int strappy_db_list_canonical_response_items_for_prompt_group(
-  const char *db_path,
-  long long session_id,
-  const char *prompt_group_key,
-  strappy_response_item_raw_record_list *list,
-  char **error_out)
-{
-  if ((prompt_group_key == NULL) || (prompt_group_key[0] == '\0')) {
-    strappy_set_error(error_out, "Responses prompt group key is empty.");
-    return 0;
-  }
-  return strappy_db_semantic_list_canonical_response_items(db_path,
-                                                           session_id,
-                                                           prompt_group_key,
                                                            list,
                                                            error_out);
 }

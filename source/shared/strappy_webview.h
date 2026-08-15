@@ -147,9 +147,6 @@ char *strappy_webview_messages_html_with_render_context(
   size_t count,
   const strappy_webview_labels *labels,
   const strappy_webview_render_context *context);
-char *strappy_webview_message_update_js(
-  const strappy_webview_message *message,
-  const strappy_webview_labels *labels);
 char *strappy_webview_message_update_js_with_render_context(
   const strappy_webview_message *message,
   const strappy_webview_labels *labels,
@@ -159,38 +156,6 @@ char *strappy_webview_reconcile_messages_js_with_render_context(
   size_t count,
   const strappy_webview_labels *labels,
   const strappy_webview_render_context *context);
-char *strappy_webview_pending_message_html(
-  const char *prompt,
-  const char *element_id,
-  const char *state,
-  const char *status_html,
-  const strappy_webview_labels *labels);
-char *strappy_webview_streaming_assistant_message_html(
-  const char *element_id,
-  const char *text,
-  const char *reasoning,
-  const char *state,
-  const char *status_html,
-  const char *actor,
-  const char *prompt_group_key,
-  const strappy_webview_labels *labels);
-char *strappy_webview_tool_activity_message_html(
-  const char *element_id,
-  const char *text,
-  const char *state,
-  const char *status_html,
-  const char *actor,
-  const char *prompt_group_key,
-  const char *target_element_id,
-  const strappy_webview_labels *labels);
-char *strappy_webview_set_message_prompt_group_js(
-  const char *element_id,
-  const char *prompt_group_key,
-  const char *actor);
-char *strappy_webview_message_html_with_reasoning(
-  const strappy_webview_message *message,
-  const char *reasoning,
-  const strappy_webview_labels *labels);
 char *strappy_webview_messages_page_html(
   const char *messages_html,
   const char *tool_display_registry_json,
@@ -203,39 +168,11 @@ char *strappy_webview_messages_page_html(
 char *strappy_webview_append_message_js(const char *message_html);
 char *strappy_webview_replace_message_js(const char *element_id,
                                          const char *message_html);
-char *strappy_webview_insert_message_before_js(const char *before_element_id,
-                                               const char *message_html);
-char *strappy_webview_set_message_state_js(const char *element_id,
-                                           const char *status_html,
-                                           const char *state);
-char *strappy_webview_set_message_thinking_js(const char *element_id,
-                                              const char *status_html);
-char *strappy_webview_append_message_text_js(const char *element_id,
-                                             const char *delta);
-char *strappy_webview_append_reasoning_text_js(const char *element_id,
-                                               const char *delta);
-char *strappy_webview_append_message_text_by_key_js(const char *message_key,
-                                                    const char *delta);
-char *strappy_webview_append_reasoning_text_by_key_js(const char *message_key,
-                                                      const char *delta);
-char *strappy_webview_move_message_text_to_reasoning_js(const char *element_id);
-char *strappy_webview_move_message_text_to_reasoning_by_key_js(
-  const char *message_key);
 char *strappy_webview_set_processing_status_js(const char *status_json);
 char *strappy_webview_set_round_context_inclusion_js(
   long long round_id,
   int include_in_context,
   int animated);
-char *strappy_webview_clear_processing_status_js(void);
-char *strappy_webview_tool_event_text(const char *event_type,
-                                      const char *tool_call_id,
-                                      const char *tool_name,
-                                      const char *arguments_json,
-                                      const char *result_json);
-char *strappy_webview_append_tool_event_text_js(const char *element_id,
-                                                const char *event_text);
-char *strappy_webview_remove_message_js(const char *element_id);
-
 #ifdef __cplusplus
 }
 #endif

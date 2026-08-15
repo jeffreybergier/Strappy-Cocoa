@@ -761,62 +761,6 @@ static int strappy_webview_append_js_string(strappy_webview_buffer *buffer,
   return strappy_webview_buffer_append_char(buffer, '\'');
 }
 
-static int strappy_webview_append_json_string(strappy_webview_buffer *buffer,
-                                              const char *text)
-{
-  const unsigned char *cursor;
-  char escaped[8];
-
-  if (!strappy_webview_buffer_append_char(buffer, '"')) {
-    return 0;
-  }
-
-  if (text != NULL) {
-    cursor = (const unsigned char *)text;
-    while (*cursor != '\0') {
-      if (*cursor == '"') {
-        if (!strappy_webview_buffer_append_cstring(buffer, "\\\"")) {
-          return 0;
-        }
-      } else if (*cursor == '\\') {
-        if (!strappy_webview_buffer_append_cstring(buffer, "\\\\")) {
-          return 0;
-        }
-      } else if (*cursor == '\b') {
-        if (!strappy_webview_buffer_append_cstring(buffer, "\\b")) {
-          return 0;
-        }
-      } else if (*cursor == '\f') {
-        if (!strappy_webview_buffer_append_cstring(buffer, "\\f")) {
-          return 0;
-        }
-      } else if (*cursor == '\n') {
-        if (!strappy_webview_buffer_append_cstring(buffer, "\\n")) {
-          return 0;
-        }
-      } else if (*cursor == '\r') {
-        if (!strappy_webview_buffer_append_cstring(buffer, "\\r")) {
-          return 0;
-        }
-      } else if (*cursor == '\t') {
-        if (!strappy_webview_buffer_append_cstring(buffer, "\\t")) {
-          return 0;
-        }
-      } else if (*cursor < 32U) {
-        snprintf(escaped, sizeof(escaped), "\\u%04x", (unsigned int)*cursor);
-        if (!strappy_webview_buffer_append_cstring(buffer, escaped)) {
-          return 0;
-        }
-      } else if (!strappy_webview_buffer_append_char(buffer, (char)*cursor)) {
-        return 0;
-      }
-      cursor++;
-    }
-  }
-
-  return strappy_webview_buffer_append_char(buffer, '"');
-}
-
 static int strappy_webview_append_inline_json(strappy_webview_buffer *buffer,
                                               const char *json)
 {
@@ -2864,16 +2808,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function renderMarkdownNode(n){if(!n)return;if(typeof n._strappyMarkdown=='undefined')",
     "n._strappyMarkdown=n.innerHTML;if(n._strappyMarkdownRendered==n._strappyMarkdown)return;",
     "n.innerHTML=mdToHTML(n._strappyMarkdown);n._strappyMarkdownRendered=n._strappyMarkdown;}",
-    "var strappyStreamingMarkdownDirty=[];var strappyStreamingMarkdownNeedsFlush=0;",
-    "function scheduleStreamingMarkdown(n){if(!n||n._strappyStreamingMarkdownDirty)return;",
-    "n._strappyStreamingMarkdownDirty=1;strappyStreamingMarkdownDirty[strappyStreamingMarkdownDirty.length]=n;",
-    "strappyStreamingMarkdownNeedsFlush=1;if(strappyBatchDepth===0)scheduleWebViewUpdate(strappyUpdateInterval);}",
-    "function flushStreamingMarkdown(){var list=strappyStreamingMarkdownDirty;var i,n;",
-    "strappyStreamingMarkdownDirty=[];strappyStreamingMarkdownNeedsFlush=0;",
-    "for(i=0;i<list.length;i++){n=list[i];if(!n)continue;n._strappyStreamingMarkdownDirty=0;",
-    "if(n.parentNode)renderMarkdownNode(n);}}",
-    "function appendStreamingMarkdownNode(n,t){if(!n)return;if(typeof n._strappyMarkdown=='undefined')",
-    "n._strappyMarkdown=n.innerHTML;n._strappyMarkdown+=t;n.innerHTML+=t;scheduleStreamingMarkdown(n);}",
     "function shouldRenderMarkdownBubble(n){return hasClass(n,'bubble')&&",
     "!hasClass(n,'bubble-status')&&ancestorHasClass(n,'assistant')&&",
     "!ancestorHasClass(n,'tool-column');}",
@@ -2899,9 +2833,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(typeof s=='string'){try{s=JSON.parse(s);}catch(e){return null;}}",
     "if(s&&s.processing_status)s=s.processing_status;return isObj(s)?s:null;}",
     "function processingPromptGroup(s){return jsonText(s&&(s.prompt_group_key||s.message_key));}",
-    "function processingNodePromptGroup(n){var v;for(;n;n=n.parentNode){",
-    "if(!n.getAttribute)continue;v=n.getAttribute('data-prompt-group-key')||'';",
-    "if(v!=='')return v;}return '';}",
     "function setProcessingThinkingCollapsed(group,collapsed){var n,e,i;",
     "if(group==='')return;n=rowsForPromptGroup(group);for(i=0;i<n.length;i++){e=n[i];",
     "if(hasClass(e,'reasoning'))setReasoningCollapsed(e,collapsed);",
@@ -3360,11 +3291,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "var group=rowsForPromptGroup(key);",
     "if(key==='')return false;strappyPromptGroupCollapsed[key]=promptGroupCollapsed(key,group)?0:1;",
     "decoratePromptGroupsForRows(group);return false;}",
-    "function setMessagePromptGroup(id,key,actor){var r=byId(id);var before,location;if(!r)return;",
-    "before=r.nextSibling;location=r._strappyIndexLocation;unindexTimelineRow(r);",
-    "if(key&&r.setAttribute)r.setAttribute('data-prompt-group-key',key);",
-    "if(actor&&r.setAttribute)r.setAttribute('data-actor',actor);",
-    "if(location=='tools')indexToolSourceRow(r);else indexMessageRow(r,before);renderAfterMutation([r]);}",
     "function setResponseMetadataCollapsed(box,collapsed){var d=firstByClass(box,'response-metadata-disclosure');",
     "var a=firstByClass(box,'response-metadata-toggle');setClass(box,'response-metadata-collapsed',collapsed);",
     "if(d)d.innerHTML=disclosureIconHTML(collapsed);if(a)a.setAttribute('aria-expanded',collapsed?'false':'true');}",
@@ -3379,9 +3305,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(d)d.innerHTML=disclosureIconHTML(1);if(a)a.setAttribute('aria-expanded','false');}",
     "else{box.className=box.className.replace(/\\sreasoning-collapsed/g,'');",
     "if(d)d.innerHTML=disclosureIconHTML(0);if(a)a.setAttribute('aria-expanded','true');}}",
-    "function setMessageReasoningCollapsed(id,collapsed){var r=byId(id);var box,body;",
-    "if(!r)return;box=firstByClass(r,'reasoning');body=firstByClass(r,'reasoning-body');",
-    "if(!box||!body||nodeText(body)==='')return;setReasoningCollapsed(box,collapsed);}",
     "function setToolColumnCollapsed(box,collapsed){var d=firstByClass(box,'tool-column-disclosure');",
     "var a=firstByClass(box,'tool-column-toggle');",
     "if(collapsed){if(!hasClass(box,'tool-column-collapsed'))box.className+=' tool-column-collapsed';",
@@ -3391,9 +3314,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function toggleToolColumn(a){if(processingInteractionsLocked())return false;",
     "var p=a;while(p&&!hasClass(p,'tool-column'))p=p.parentNode;",
     "if(!p)return false;setToolColumnCollapsed(p,hasClass(p,'tool-column-collapsed')?0:1);return false;}",
-    "function setMessageToolColumnCollapsed(id,collapsed){var r=byId(id);var box;",
-    "if(!r)return;box=firstByClass(r,'tool-column');if(!box)return;",
-    "setToolColumnCollapsed(box,collapsed);}",
     "function parseJSONSafe(raw){try{if(typeof JSON!='undefined'&&JSON.parse)",
     "return JSON.parse(raw);return eval('('+raw+')');}catch(e){return null;}}",
     "function shortText(v,n){var t=jsonText(v).replace(/\\s+/g,' ');",
@@ -3458,7 +3378,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function toolArrayTable(arr){var cols;if(arr.length===0)return '<span class=\"tool-subtle\">empty array</span>';",
     "if(toolAllRowsAreObjects(arr))return toolObjectArrayTable(arr);cols=toolArrayMaxColumns(arr);",
     "if(cols>=0)return toolArrayRowsTable(arr,cols);return toolIndexValueTable(arr);}",
-    "function toolKV(obj){return toolObjectTable(obj);}",
     "function toolPanel(body,raw,cls){return '<div class=\"tool-panel '+(cls||'')+'\">'",
     "+(body||'')+(raw?toolRaw(raw):'')+'</div>';}",
     "function toolCallsPayload(raw){var p=raw.replace(/^\\s*Tool call input:\\s*/,'');",
@@ -3702,7 +3621,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function rowsForRound(id){return copyIndex(bucketRows(strappyRowsByRound,id));}",
     "function rowsForAPICall(id){return copyIndex(bucketRows(strappyRowsByAPICall,id));}",
     "function rowByMessageKeyAny(key){return key?(strappyRowByMessageKeyIndex[indexKey(key)]||null):null;}",
-    "function rowIdByMessageKey(key){var r=rowByMessageKeyAny(key);return r?rowId(r):'';}",
     "function assistantByMessageKey(key){return key?(strappyAssistantByMessageKeyIndex[indexKey(key)]||null):null;}",
     "function explicitToolTarget(row){var key=rowTargetMessageKey(row);var target;if(key==='')return '';",
     "target=assistantByMessageKey(key);return target?rowId(target):'';}",
@@ -3766,12 +3684,11 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "else cards[cards.length]={name:'Tool Result',displayTitle:'Tool Result',id:'',args:'',output:raw,outputOnly:true,error:hasClass(row,'state-error')};}}",
     "renderToolCardsForTarget(target,cards);}",
     "function rebuildToolCardsForTargets(targets){var seen={};var i,target;for(i=0;i<targets.length;i++){",
-    "target=targets[i];if(target===''||seen[indexKey(target)])continue;seen[indexKey(target)]=1;rebuildToolCardsForTarget(target);}scrollToolRailBottom();}",
+    "target=targets[i];if(target===''||seen[indexKey(target)])continue;seen[indexKey(target)]=1;rebuildToolCardsForTarget(target);}}",
     "function rebuildToolCards(){var rows=toolSourceRows();var targets=[];var seen={};var i,target;",
     "clearToolBoxes();for(i=0;i<rows.length;i++){target=ensureToolRowTarget(rows[i]);",
     "if(target!==''&&!seen[indexKey(target)]){seen[indexKey(target)]=1;targets[targets.length]=target;}}",
     "rebuildToolCardsForTargets(targets);}",
-    "function renderToolNode(row){var target=ensureToolRowTarget(row);toolRowRaw(row);rebuildToolCardsForTarget(target);}",
     "function renderTools(root){renderAPIToolRows();renderAPIServerToolRows();moveToolRows(root);rebuildToolCards();}",
     "function answerQualityRows(){return copyIndex(strappyAnswerQualityRowIndex);}",
     "function answerQualityAttr(row,name,fallback){var v=row&&row.getAttribute?row.getAttribute('data-'+name)||'':'';return v!==''?v:fallback;}",
@@ -3833,7 +3750,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function renderMessageDecorations(root){renderMarkdown(root);renderResponseMetadata(root);renderTools(root);renderAnswerQualityRows();decorateAPIExchanges(root);decorateAPIToolGroups(root);decoratePromptGroups(root);",
     "if(processingInteractionsLocked())syncProcessingInteractionState(1,strappyProcessingPromptGroupKey);}",
     "var strappyBatchDepth=0;var strappyDirtyRows=[];var strappyBatchShouldScroll=0;",
-    "var strappyUpdateInterval=300;var strappyStatusInterval=1000;",
+    "var strappyStatusInterval=1000;",
     "var strappyUpdateTimer=null;var strappyUpdateDue=0;var strappyUpdateFlushing=0;",
     "var strappyScrollAnimationTimer=null;var strappyScrollAnimationGeneration=0;",
     "var strappyScrollAnimationDuration=500;",
@@ -3878,60 +3795,35 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "existing=rowsForRound(id);if(id===''||rowsHaveResponseFunctionCall(rows,id)||",
     "rowsHaveResponseFunctionCall(existing,id))continue;group=promptGroupKey(row);",
     "if(promptGroupIsProcessing(group))return group;}return '';}",
-    "function strappyTextQueuesHaveEntries(){var k;for(k in strappyTextQueues)return 1;return 0;}",
     "function scheduleStatusTick(){var now,delay;if(!strappyProcessingStatus||!strappyProcessingStatus.active)return;",
     "now=(new Date()).getTime();if(strappyProcessingNextTick<=now)strappyProcessingNextTick=now+strappyStatusInterval;",
     "delay=strappyProcessingNextTick-now;if(delay<0)delay=0;scheduleWebViewUpdate(delay);}",
     "function scheduleWebViewUpdate(delay){var now,due;if(strappyUpdateFlushing)return;",
-    "if(typeof delay!='number')delay=strappyUpdateInterval;if(delay<0)delay=0;now=(new Date()).getTime();due=now+delay;",
+    "if(delay<0)delay=0;now=(new Date()).getTime();due=now+delay;",
     "if(strappyUpdateTimer&&due>=strappyUpdateDue)return;if(strappyUpdateTimer)clearTimeout(strappyUpdateTimer);",
     "strappyUpdateDue=due;strappyUpdateTimer=setTimeout(flushWebViewUpdates,delay);}",
     "function flushWebViewUpdates(){var now,animate;if(strappyUpdateTimer){clearTimeout(strappyUpdateTimer);",
     "strappyUpdateTimer=null;}strappyUpdateDue=0;strappyUpdateFlushing=1;now=(new Date()).getTime();",
-    "if(strappyTextQueuesHaveEntries())flushTextQueues();",
-    "if(strappyStreamingMarkdownNeedsFlush)flushStreamingMarkdown();",
     "if(strappyProcessingStatusDirty||(strappyProcessingStatus&&strappyProcessingStatus.active&&now>=strappyProcessingNextTick)){",
     "animate=strappyProcessingStatusDirty?1:0;strappyProcessingStatusDirty=0;",
     "updateProcessingStatus(animate);strappyProcessingNextTick=now+strappyStatusInterval;}",
     "else if(strappyProcessingStatus&&strappyProcessingStatus.active)strappyProcessingNextTick=now+strappyStatusInterval;",
-    "strappyUpdateFlushing=0;",
-    "if(strappyTextQueuesHaveEntries()||strappyStreamingMarkdownNeedsFlush||strappyProcessingStatusDirty)",
-    "scheduleWebViewUpdate(strappyUpdateInterval);else scheduleStatusTick();}",
+    "strappyUpdateFlushing=0;scheduleStatusTick();}",
     "function queueDirtyRows(rows){var i,row;if(!rows)return;if(typeof rows.length=='undefined')rows=[rows];",
     "for(i=0;i<rows.length;i++){row=rows[i];if(!row||row._strappyDirtyQueued)continue;row._strappyDirtyQueued=1;strappyDirtyRows[strappyDirtyRows.length]=row;}}",
     "function takeDirtyRows(){var rows=strappyDirtyRows;var i;strappyDirtyRows=[];",
     "for(i=0;i<rows.length;i++)rows[i]._strappyDirtyQueued=0;return rows;}",
     "function beginMessageBatch(){if(strappyBatchDepth===0)strappyBatchShouldScroll=0;strappyBatchDepth++;}",
     "function endMessageBatch(){var shouldScroll=0;if(strappyBatchDepth>0)strappyBatchDepth--;",
-    "if(strappyBatchDepth===0){if(strappyTextQueuesHaveEntries())flushTextQueues();",
-    "if(strappyStreamingMarkdownNeedsFlush)flushStreamingMarkdown();",
-    "if(strappyDirtyRows.length)renderMessageDecorationsForRows(takeDirtyRows());",
+    "if(strappyBatchDepth===0){if(strappyDirtyRows.length)renderMessageDecorationsForRows(takeDirtyRows());",
     "shouldScroll=strappyBatchShouldScroll;strappyBatchShouldScroll=0;",
     "if(shouldScroll)scrollBottomAnimated();}}",
     "function renderAfterMutation(rows){if(strappyBatchDepth>0){queueDirtyRows(rows);return;}",
     "renderMessageDecorationsForRows(rows);}",
     "function clearTimelineError(){var e=byId('timeline-error');if(e)e.style.display='none';}",
     "function nodesFromHTML(html){var d=document.createElement('div');d.innerHTML=html;return d;}",
-    "function scrollToolRailBottom(){}",
     "function updateToolTargets(oldId,newId){var rows,i;if(!oldId||!newId||oldId==newId)return;",
     "rows=copyIndex(bucketRows(strappyToolRowsByTarget,oldId));for(i=0;i<rows.length;i++)setToolTarget(rows[i],newId);}",
-    "var strappyTextQueues={};",
-    "function queueTextAppend(id,t,kind){var k=kind+'|'+id;if(!strappyTextQueues[k])",
-    "strappyTextQueues[k]={id:id,kind:kind,text:''};strappyTextQueues[k].text+=escHTML(t);",
-    "if(strappyBatchDepth===0)scheduleWebViewUpdate(strappyUpdateInterval);}",
-    "function flushTextQueues(){var k,q,r,n;",
-    "for(k in strappyTextQueues){q=strappyTextQueues[k];r=byId(q.id);if(!r)continue;",
-    "n=(q.kind=='reasoning')?firstByClass(r,'reasoning-body'):firstByClass(r,'bubble');",
-    "if(!n)continue;if(q.kind=='reasoning'){if(hasClass(r,'streaming-active')){",
-    "appendStreamingMarkdownNode(n,q.text);continue;}if(typeof n._strappyMarkdown=='undefined')n._strappyMarkdown=n.innerHTML;",
-    "n._strappyMarkdown+=q.text;",
-    "if(shouldRenderMarkdownReasoning(n))renderMarkdownNode(n);",
-    "else n.innerHTML=n._strappyMarkdown;continue;}",
-    "if(hasClass(r,'streaming-active')){appendStreamingMarkdownNode(n,q.text);continue;}",
-    "if(typeof n._strappyMarkdown=='undefined')n._strappyMarkdown=n.innerHTML;",
-    "n._strappyMarkdown+=q.text;",
-    "if(shouldRenderMarkdownBubble(n))renderMarkdownNode(n);",
-    "else n.innerHTML=n._strappyMarkdown;}strappyTextQueues={};}",
     /* A committed timeline range may be replayed after overlapping UI events. */
     "function appendMessage(html){clearTimelineError();var m=byId('messages');var d,n,id,key,group,added=[];if(!m)return;",
     "if(!strappyMessageIndexesReady)initializeMessageIndexes();",
@@ -3950,7 +3842,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "preserveLongerMarkdown(firstByClass(oldRow,'bubble'),firstByClass(newRow,'bubble'));",
     "preserveLongerMarkdown(firstByClass(oldRow,'reasoning-body'),firstByClass(newRow,'reasoning-body'));}",
     "function replaceMessage(id,html){clearTimelineError();var old=byId(id);var oldId,target,wasAssistant,next,newId,before,location;",
-    "flushTextQueues();",
     "if(!old){appendMessage(html);return;}var d=nodesFromHTML(html);",
     "oldId=rowId(old);target=toolTarget(old);wasAssistant=isAssistantRow(old);before=old.nextSibling;location=old._strappyIndexLocation;",
     "if(d.firstChild){next=d.firstChild;if(target!==''&&isToolRow(next))setToolTarget(next,target);",
@@ -3958,56 +3849,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "unindexTimelineRow(old);old.parentNode.replaceChild(next,old);",
     "if(location=='tools'&&isToolRow(next))indexToolSourceRow(next);else indexMessageRow(next,before);",
     "newId=rowId(next);if(wasAssistant)updateToolTargets(oldId,newId);renderAfterMutation([old,next]);}}",
-    "function insertMessageBefore(id,html){clearTimelineError();var before=byId(id);var m=byId('messages');var n,key,rowIdentifier,group,added=[];",
-    "if(!m){return;}if(!before){appendMessage(html);return;}var d=nodesFromHTML(html);",
-    "group=processingFinalAnswerGroup(d.childNodes);",
-    "while(d.firstChild){n=d.firstChild;key=rowMessageKey(n);rowIdentifier=rowId(n);",
-    "if((key!==''&&rowByMessageKeyAny(key))||(rowIdentifier!==''&&byId(rowIdentifier))){d.removeChild(n);continue;}",
-    "m.insertBefore(n,before);if(hasClass(n,'row')){indexMessageRow(n,before);added[added.length]=n;}}",
-    "if(!added.length)return;if(group!=='')beginProcessingFinishAfterScroll(group);",
-    "flushPendingToolTargets();renderAfterMutation(added);scrollBottomAnimated();}",
-    "function setMessageState(id,status,state){var r=byId(id);var s;if(!r)return;",
-    "r.className=r.className.replace(/\\sstate-[^\\s]+/g,'');if(state)r.className+=' state-'+state;",
-    "s=firstByClass(r,'status');if(status){if(!s){s=document.createElement('div');",
-    "s.className='meta status';r.appendChild(s);}s.innerHTML=status;}else if(s&&s.parentNode)s.parentNode.removeChild(s);}",
-    "function setMessageThinking(id,status){var r=byId(id);var b;if(!r)return;",
-    "b=firstByClass(r,'bubble');if(b&&hasClass(b,'bubble-status'))b.innerHTML=status||'';}",
-    "function appendMessageText(id,t){var r=byId(id);var b;if(!r)return;",
-    "b=firstByClass(r,'bubble');if(b)b.style.display='block';",
-    "if(b&&hasClass(b,'bubble-status')){b.className=b.className.replace(/\\sbubble-status/g,'');",
-    "b._strappyMarkdown='';b.innerHTML='';}",
-    "if(!b)return;",
-    "queueTextAppend(id,t,'content');}",
-    "function appendMessageTextByMessageKey(key,t){var id=rowIdByMessageKey(key);",
-    "if(id==='')return false;appendMessageText(id,t);return true;}",
-    "function moveMessageTextToReasoning(id){var r=byId(id);var b,box,body,raw;",
-    "flushTextQueues();if(!r)return;b=firstByClass(r,'bubble');box=firstByClass(r,'reasoning');",
-    "body=firstByClass(r,'reasoning-body');if(!b||!box||!body)return;",
-    "raw=(typeof b._strappyMarkdown!='undefined')?b._strappyMarkdown:escHTML(nodeText(b));",
-    "if(raw==='')return;if(typeof body._strappyMarkdown=='undefined')body._strappyMarkdown=body.innerHTML;",
-    "if(body._strappyMarkdown!==''&&raw.charAt(0)!='\\n')raw='\\n'+raw;",
-    "if(hasClass(r,'streaming-active'))appendStreamingMarkdownNode(body,raw);",
-    "else{body._strappyMarkdown+=raw;if(shouldRenderMarkdownReasoning(body))renderMarkdownNode(body);",
-    "else body.innerHTML=body._strappyMarkdown;}",
-    "b._strappyMarkdown='';b.className=b.className.replace(/\\sbubble-status/g,'');",
-    "b.innerHTML='';b.style.display='none';",
-    "box.style.display='block';",
-    "if(!hasClass(r,'streaming-active'))r.className+=' streaming-active';",
-    "setReasoningCollapsed(box,0);setMessageToolColumnCollapsed(id,1);}",
-    "function moveMessageTextToReasoningByMessageKey(key){var id=rowIdByMessageKey(key);",
-    "if(id==='')return false;moveMessageTextToReasoning(id);return true;}",
-    "function appendReasoningText(id,t){var r=byId(id);if(!r)return;",
-    "var box=firstByClass(r,'reasoning');var body=firstByClass(r,'reasoning-body');",
-    "if(box)box.style.display='block';if(!body)return;",
-    "if(box)setReasoningCollapsed(box,0);",
-    "queueTextAppend(id,t,'reasoning');}",
-    "function appendReasoningTextByMessageKey(key,t){var id=rowIdByMessageKey(key);",
-    "if(id==='')return false;appendReasoningText(id,t);return true;}",
-    "function appendToolEventText(id,t){var r=byId(id);var b;if(!r)return;",
-    "if(!isToolRow(r))r.style.display='block';b=firstByClass(r,'bubble');if(!b)return;",
-    "if(typeof b._strappyRawText=='undefined')b._strappyRawText=nodeText(b);",
-    "b._strappyRawText+=t;renderAfterMutation([r]);}",
-    "function removeMessage(id){flushTextQueues();var r=byId(id);",
+    "function removeMessage(id){var r=byId(id);",
     "if(r&&r.parentNode){unindexTimelineRow(r);r.parentNode.removeChild(r);renderAfterMutation([r]);}}",
     "</script>",
     NULL
@@ -4968,159 +4810,6 @@ char *strappy_webview_messages_html(
   return html;
 }
 
-char *strappy_webview_pending_message_html(
-  const char *prompt,
-  const char *element_id,
-  const char *state,
-  const char *status_html,
-  const strappy_webview_labels *labels)
-{
-  strappy_webview_message message;
-
-  memset(&message, 0, sizeof(message));
-  message.element_id = element_id;
-  message.role = "user";
-  message.text = strappy_webview_string_or_empty(prompt);
-  return strappy_webview_message_html(&message, labels, state, status_html);
-}
-
-char *strappy_webview_streaming_assistant_message_html(
-  const char *element_id,
-  const char *text,
-  const char *reasoning,
-  const char *state,
-  const char *status_html,
-  const char *actor,
-  const char *prompt_group_key,
-  const strappy_webview_labels *labels)
-{
-  static const char *streaming_render_state =
-    "{\"streaming\":true,\"reasoning_render_when_empty\":true,"
-    "\"reasoning_collapsed\":false,\"tool_column_collapsed\":true}";
-  strappy_webview_message message;
-
-  if ((element_id == NULL) || (element_id[0] == '\0')) {
-    element_id = "streaming-assistant";
-  }
-
-  memset(&message, 0, sizeof(message));
-  message.element_id = element_id;
-  message.role = "assistant";
-  message.actor = actor;
-  message.prompt_group_key = prompt_group_key;
-  message.text = strappy_webview_string_or_empty(text);
-  message.reasoning = strappy_webview_string_or_empty(reasoning);
-  message.render_state_json = streaming_render_state;
-  return strappy_webview_message_html(&message, labels, state, status_html);
-}
-
-char *strappy_webview_tool_activity_message_html(
-  const char *element_id,
-  const char *text,
-  const char *state,
-  const char *status_html,
-  const char *actor,
-  const char *prompt_group_key,
-  const char *target_element_id,
-  const strappy_webview_labels *labels)
-{
-  strappy_webview_buffer buffer;
-  int has_state;
-  int has_text;
-  int ok;
-
-  if ((element_id == NULL) || (element_id[0] == '\0')) {
-    element_id = "streaming-tools";
-  }
-  has_state = (state != NULL) && (state[0] != '\0');
-  has_text = (text != NULL) && (text[0] != '\0');
-
-  strappy_webview_buffer_init(&buffer);
-  ok = strappy_webview_buffer_append_cstring(&buffer, "<div id=\"") &&
-       strappy_webview_append_html_escaped(&buffer, element_id) &&
-       strappy_webview_buffer_append_cstring(
-         &buffer,
-         "\" class=\"row tool_call tool_activity");
-  if (ok && has_state) {
-    ok = strappy_webview_buffer_append_cstring(&buffer, " state-") &&
-         strappy_webview_append_html_escaped(&buffer, state);
-  }
-  ok = ok &&
-       strappy_webview_buffer_append_cstring(&buffer, "\"") &&
-       strappy_webview_append_data_attribute(&buffer, "actor", actor) &&
-       strappy_webview_append_data_attribute(&buffer,
-                                             "prompt-group-key",
-                                             prompt_group_key) &&
-       strappy_webview_append_data_attribute(&buffer,
-                                             "tool-target",
-                                             target_element_id);
-  if (ok && !has_text) {
-    ok = strappy_webview_buffer_append_cstring(&buffer, " style=\"display:none\"");
-  }
-  ok = ok &&
-       strappy_webview_buffer_append_cstring(&buffer, "><div class=\"role\">") &&
-       strappy_webview_append_html_escaped(
-         &buffer,
-         strappy_webview_tool_call_label(labels)) &&
-       strappy_webview_buffer_append_cstring(&buffer, "</div><div class=\"bubble\">") &&
-       strappy_webview_append_html_escaped(&buffer, text) &&
-       strappy_webview_buffer_append_cstring(&buffer, "</div>");
-
-  if (ok && (status_html != NULL) && (status_html[0] != '\0')) {
-    ok = strappy_webview_buffer_append_cstring(
-           &buffer,
-           "<div class=\"meta status\">") &&
-         strappy_webview_buffer_append_cstring(&buffer, status_html) &&
-         strappy_webview_buffer_append_cstring(&buffer, "</div>");
-  }
-
-  ok = ok && strappy_webview_buffer_append_cstring(&buffer, "</div>");
-  if (!ok) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
-}
-
-char *strappy_webview_set_message_prompt_group_js(
-  const char *element_id,
-  const char *prompt_group_key,
-  const char *actor)
-{
-  strappy_webview_buffer buffer;
-
-  strappy_webview_buffer_init(&buffer);
-  if (!strappy_webview_buffer_append_cstring(&buffer, "setMessagePromptGroup(") ||
-      !strappy_webview_append_js_string(&buffer, element_id) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
-      !strappy_webview_append_js_string(&buffer, prompt_group_key) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
-      !strappy_webview_append_js_string(&buffer, actor) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
-}
-
-char *strappy_webview_message_html_with_reasoning(
-  const strappy_webview_message *message,
-  const char *reasoning,
-  const strappy_webview_labels *labels)
-{
-  strappy_webview_message copy;
-
-  if ((reasoning == NULL) || (reasoning[0] == '\0') ||
-      (message == NULL) ||
-      !strappy_webview_is_assistant_role(message->role)) {
-    return strappy_webview_message_html(message, labels, NULL, NULL);
-  }
-
-  copy = *message;
-  copy.reasoning = reasoning;
-  return strappy_webview_message_html(&copy, labels, NULL, NULL);
-}
-
 char *strappy_webview_messages_page_html(
   const char *messages_html,
   const char *tool_display_registry_json,
@@ -5280,25 +4969,6 @@ char *strappy_webview_message_update_js_with_render_context(
   return js;
 }
 
-char *strappy_webview_message_update_js(
-  const strappy_webview_message *message,
-  const strappy_webview_labels *labels)
-{
-  strappy_webview_render_context *context;
-  char *js;
-
-  context = strappy_webview_render_context_create(
-    (message != NULL) ? message->tool_display_registry_json : NULL);
-  if (context == NULL) {
-    return NULL;
-  }
-  js = strappy_webview_message_update_js_with_render_context(message,
-                                                              labels,
-                                                              context);
-  strappy_webview_render_context_destroy(context);
-  return js;
-}
-
 char *strappy_webview_reconcile_messages_js_with_render_context(
   const strappy_webview_message *messages,
   size_t count,
@@ -5365,164 +5035,6 @@ char *strappy_webview_replace_message_js(const char *element_id,
   return strappy_webview_buffer_finish(&buffer);
 }
 
-char *strappy_webview_insert_message_before_js(const char *before_element_id,
-                                               const char *message_html)
-{
-  strappy_webview_buffer buffer;
-
-  strappy_webview_buffer_init(&buffer);
-  if (!strappy_webview_buffer_append_cstring(&buffer, "insertMessageBefore(") ||
-      !strappy_webview_append_js_string(&buffer, before_element_id) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
-      !strappy_webview_append_js_string(&buffer, message_html) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
-}
-
-char *strappy_webview_set_message_state_js(const char *element_id,
-                                           const char *status_html,
-                                           const char *state)
-{
-  strappy_webview_buffer buffer;
-
-  strappy_webview_buffer_init(&buffer);
-  if (!strappy_webview_buffer_append_cstring(&buffer, "setMessageState(") ||
-      !strappy_webview_append_js_string(&buffer, element_id) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
-      !strappy_webview_append_js_string(&buffer, status_html) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
-      !strappy_webview_append_js_string(&buffer, state) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
-}
-
-char *strappy_webview_set_message_thinking_js(const char *element_id,
-                                              const char *status_html)
-{
-  strappy_webview_buffer buffer;
-
-  strappy_webview_buffer_init(&buffer);
-  if (!strappy_webview_buffer_append_cstring(&buffer, "setMessageThinking(") ||
-      !strappy_webview_append_js_string(&buffer, element_id) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
-      !strappy_webview_append_js_string(&buffer, status_html) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
-}
-
-char *strappy_webview_append_message_text_js(const char *element_id,
-                                             const char *delta)
-{
-  strappy_webview_buffer buffer;
-
-  strappy_webview_buffer_init(&buffer);
-  if (!strappy_webview_buffer_append_cstring(&buffer, "appendMessageText(") ||
-      !strappy_webview_append_js_string(&buffer, element_id) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
-      !strappy_webview_append_js_string(&buffer, delta) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
-}
-
-char *strappy_webview_append_reasoning_text_js(const char *element_id,
-                                               const char *delta)
-{
-  strappy_webview_buffer buffer;
-
-  strappy_webview_buffer_init(&buffer);
-  if (!strappy_webview_buffer_append_cstring(&buffer, "appendReasoningText(") ||
-      !strappy_webview_append_js_string(&buffer, element_id) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
-      !strappy_webview_append_js_string(&buffer, delta) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
-}
-
-char *strappy_webview_append_message_text_by_key_js(const char *message_key,
-                                                    const char *delta)
-{
-  strappy_webview_buffer buffer;
-
-  strappy_webview_buffer_init(&buffer);
-  if (!strappy_webview_buffer_append_cstring(&buffer,
-                                             "appendMessageTextByMessageKey(") ||
-      !strappy_webview_append_js_string(&buffer, message_key) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
-      !strappy_webview_append_js_string(&buffer, delta) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
-}
-
-char *strappy_webview_append_reasoning_text_by_key_js(const char *message_key,
-                                                      const char *delta)
-{
-  strappy_webview_buffer buffer;
-
-  strappy_webview_buffer_init(&buffer);
-  if (!strappy_webview_buffer_append_cstring(
-        &buffer,
-        "appendReasoningTextByMessageKey(") ||
-      !strappy_webview_append_js_string(&buffer, message_key) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
-      !strappy_webview_append_js_string(&buffer, delta) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
-}
-
-char *strappy_webview_move_message_text_to_reasoning_js(const char *element_id)
-{
-  strappy_webview_buffer buffer;
-
-  strappy_webview_buffer_init(&buffer);
-  if (!strappy_webview_buffer_append_cstring(
-        &buffer,
-        "moveMessageTextToReasoning(") ||
-      !strappy_webview_append_js_string(&buffer, element_id) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
-}
-
-char *strappy_webview_move_message_text_to_reasoning_by_key_js(
-  const char *message_key)
-{
-  strappy_webview_buffer buffer;
-
-  strappy_webview_buffer_init(&buffer);
-  if (!strappy_webview_buffer_append_cstring(
-        &buffer,
-        "moveMessageTextToReasoningByMessageKey(") ||
-      !strappy_webview_append_js_string(&buffer, message_key) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
-}
-
 char *strappy_webview_set_processing_status_js(const char *status_json)
 {
   strappy_webview_buffer buffer;
@@ -5563,87 +5075,6 @@ char *strappy_webview_set_round_context_inclusion_js(
 
   strappy_webview_buffer_init(&buffer);
   if (!strappy_webview_buffer_append_cstring(&buffer, script)) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
-}
-
-char *strappy_webview_clear_processing_status_js(void)
-{
-  strappy_webview_buffer buffer;
-
-  strappy_webview_buffer_init(&buffer);
-  if (!strappy_webview_buffer_append_cstring(&buffer,
-                                             "clearProcessingStatus();")) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
-}
-
-char *strappy_webview_tool_event_text(const char *event_type,
-                                      const char *tool_call_id,
-                                      const char *tool_name,
-                                      const char *arguments_json,
-                                      const char *result_json)
-{
-  strappy_webview_buffer buffer;
-  int is_error;
-  int ok;
-
-  is_error = ((event_type != NULL) && (strcmp(event_type, "error") == 0)) ||
-    strappy_webview_tool_result_has_error(result_json);
-  strappy_webview_buffer_init(&buffer);
-  ok = strappy_webview_buffer_append_cstring(&buffer, "{\"event\":") &&
-       strappy_webview_append_json_string(&buffer, event_type) &&
-       strappy_webview_buffer_append_cstring(&buffer, ",\"tool_call_id\":") &&
-       strappy_webview_append_json_string(&buffer, tool_call_id) &&
-       strappy_webview_buffer_append_cstring(&buffer, ",\"tool_name\":") &&
-       strappy_webview_append_json_string(&buffer, tool_name) &&
-       strappy_webview_buffer_append_cstring(&buffer, ",\"display_title\":") &&
-       strappy_webview_append_json_string(&buffer, tool_name) &&
-       strappy_webview_buffer_append_cstring(&buffer, ",\"is_error\":") &&
-       strappy_webview_buffer_append_cstring(&buffer,
-                                             is_error ? "true" : "false") &&
-       strappy_webview_buffer_append_cstring(&buffer, ",\"arguments_json\":") &&
-       strappy_webview_append_json_string(&buffer, arguments_json) &&
-       strappy_webview_buffer_append_cstring(&buffer, ",\"result_json\":") &&
-       strappy_webview_append_json_string(&buffer, result_json) &&
-       strappy_webview_buffer_append_cstring(&buffer, "}\n");
-  if (!ok) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-
-  return strappy_webview_buffer_finish(&buffer);
-}
-
-char *strappy_webview_append_tool_event_text_js(const char *element_id,
-                                                const char *event_text)
-{
-  strappy_webview_buffer buffer;
-
-  strappy_webview_buffer_init(&buffer);
-  if (!strappy_webview_buffer_append_cstring(&buffer, "appendToolEventText(") ||
-      !strappy_webview_append_js_string(&buffer, element_id) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ",") ||
-      !strappy_webview_append_js_string(&buffer, event_text) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
-    strappy_webview_buffer_destroy(&buffer);
-    return NULL;
-  }
-  return strappy_webview_buffer_finish(&buffer);
-}
-
-char *strappy_webview_remove_message_js(const char *element_id)
-{
-  strappy_webview_buffer buffer;
-
-  strappy_webview_buffer_init(&buffer);
-  if (!strappy_webview_buffer_append_cstring(&buffer, "removeMessage(") ||
-      !strappy_webview_append_js_string(&buffer, element_id) ||
-      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
     strappy_webview_buffer_destroy(&buffer);
     return NULL;
   }

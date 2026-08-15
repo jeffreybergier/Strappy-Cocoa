@@ -6,8 +6,6 @@
 #import "strappy_db.h"
 #import "strappy_file_scanner.h"
 
-#include <string.h>
-
 NSString * const FileScannerDatabaseCatalogScanDidStartNotification =
   @"FileScannerDatabaseCatalogScanDidStartNotification";
 NSString * const FileScannerDatabaseCatalogScanDidFinishNotification =
@@ -46,23 +44,6 @@ typedef struct StrappyFileScannerCatalogBatchContext {
 + (void)databaseCatalogScanInBackground:(NSDictionary *)request;
 
 @end
-
-static void StrappyFileScannerAddCString(NSMutableDictionary *dictionary,
-                                         NSString *key,
-                                         const char *value)
-{
-  NSString *string;
-
-  if ((dictionary == nil) || ![key isKindOfClass:[NSString class]] ||
-      (value == NULL) || (value[0] == '\0')) {
-    return;
-  }
-
-  string = [NSString stringWithUTF8String:value];
-  if ([string length] > 0U) {
-    [dictionary setObject:string forKey:key];
-  }
-}
 
 static int StrappyFileScannerSaveCatalogBatch(
   strappy_file_scanner_record_list *list,
@@ -302,19 +283,6 @@ static int StrappyFileScannerSaveCatalogBatch(
                          userInfo:userInfo];
 }
 
-+ (NSString *)stringFromFileSystemPath:(const char *)path
-{
-  NSFileManager *fileManager;
-
-  if (path == NULL) {
-    return nil;
-  }
-
-  fileManager = [NSFileManager defaultManager];
-  return [fileManager stringWithFileSystemRepresentation:path
-                                                  length:strlen(path)];
-}
-
 + (NSString *)stringFromCStringOrEmpty:(const char *)value
 {
   NSString *string;
@@ -329,80 +297,6 @@ static int StrappyFileScannerSaveCatalogBatch(
   }
 
   return string;
-}
-
-+ (NSDictionary *)dictionaryFromScannerRecord:
-    (const strappy_file_scanner_record *)record
-{
-  NSString *path;
-  NSString *validationError;
-  NSNumber *size;
-  NSNumber *modifiedAt;
-  NSNumber *device;
-  NSNumber *inode;
-  NSNumber *isValidSQLite;
-  NSNumber *hidden;
-  NSMutableDictionary *dictionary;
-
-  if (record == NULL) {
-    return nil;
-  }
-
-  path = [FileScanner stringFromFileSystemPath:record->path];
-  if (path == nil) {
-    return nil;
-  }
-
-  validationError = nil;
-  if (record->validation_error != NULL) {
-    validationError = [NSString stringWithUTF8String:record->validation_error];
-  }
-  if (validationError == nil) {
-    validationError = @"";
-  }
-
-  size = [NSNumber numberWithLongLong:record->size];
-  modifiedAt = [NSNumber numberWithLongLong:record->modified_at];
-  device = [NSNumber numberWithUnsignedLongLong:record->device];
-  inode = [NSNumber numberWithUnsignedLongLong:record->inode];
-  isValidSQLite = [NSNumber numberWithBool:(record->is_valid_sqlite ? YES : NO)];
-  hidden = [NSNumber numberWithBool:(record->hidden ? YES : NO)];
-
-  dictionary = [NSMutableDictionary dictionaryWithObjectsAndKeys:
-    path, @"path",
-    size, @"size",
-    modifiedAt, @"modified_at",
-    device, @"device",
-    inode, @"inode",
-    isValidSQLite, @"is_valid_sqlite",
-    hidden, @"hidden",
-    nil];
-  if ([validationError length] > 0U) {
-    [dictionary setObject:validationError forKey:@"validation_error"];
-  }
-  StrappyFileScannerAddCString(dictionary,
-                               @"app_group_key",
-                               record->app_group_key);
-  StrappyFileScannerAddCString(dictionary, @"app_name", record->app_name);
-  StrappyFileScannerAddCString(dictionary,
-                               @"app_bundle_id",
-                               record->app_bundle_id);
-  StrappyFileScannerAddCString(dictionary,
-                               @"app_container_path",
-                               record->app_container_path);
-  StrappyFileScannerAddCString(dictionary,
-                               @"app_bundle_path",
-                               record->app_bundle_path);
-  StrappyFileScannerAddCString(dictionary, @"app_source", record->app_source);
-  StrappyFileScannerAddCString(dictionary, @"origin_kind", record->origin_kind);
-  StrappyFileScannerAddCString(dictionary,
-                               @"location_tail",
-                               record->location_tail);
-  StrappyFileScannerAddCString(dictionary,
-                               @"hidden_reason",
-                               record->hidden_reason);
-
-  return dictionary;
 }
 
 + (NSDictionary *)dictionaryFromDiscoveredDatabaseRecord:
@@ -534,75 +428,6 @@ static int StrappyFileScannerSaveCatalogBatch(
   }
 
   return dictionary;
-}
-
-- (NSArray *)scanHomeDirectoryForSQLiteDatabasesWithError:(NSError **)error
-{
-  NSString *homeDirectory;
-
-  homeDirectory = NSHomeDirectory();
-  return [self scanDirectoryForSQLiteDatabasesAtPath:homeDirectory
-                                               error:error];
-}
-
-- (NSArray *)scanDirectoryForSQLiteDatabasesAtPath:(NSString *)path
-                                             error:(NSError **)error
-{
-  return [self scanDirectoryForSQLiteDatabasesAtPath:path
-                                            scanMode:FileScannerDatabaseScanModeFull
-                                               error:error];
-}
-
-- (NSArray *)scanDirectoryForSQLiteDatabasesAtPath:(NSString *)path
-                                          scanMode:(FileScannerDatabaseScanMode)scanMode
-                                             error:(NSError **)error
-{
-  strappy_file_scanner_options options;
-  strappy_file_scanner_record_list list;
-  NSMutableArray *records;
-  char *strappyError;
-  size_t index;
-
-  if (![path isKindOfClass:[NSString class]] || ([path length] == 0U)) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Scan path is empty.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"FileScannerErrorDomain"
-                                   code:2
-                               userInfo:userInfo];
-    }
-    return nil;
-  }
-
-  strappy_file_scanner_options_init(&options);
-  options.root_path = [path fileSystemRepresentation];
-  options.platform_profile = StrappyFileScannerPlatformProfile();
-  options.validate_candidates = 1;
-  options.use_filename_filter =
-    (scanMode == FileScannerDatabaseScanModeQuick) ? 1 : 0;
-
-  strappy_file_scanner_record_list_init(&list);
-  strappyError = NULL;
-  if (!strappy_file_scanner_scan(&options, &list, &strappyError)) {
-    if (error != nil) {
-      *error = [FileScanner errorFromCString:strappyError];
-    }
-    strappy_free_string(strappyError);
-    strappy_file_scanner_record_list_destroy(&list);
-    return nil;
-  }
-  records = [NSMutableArray arrayWithCapacity:list.count];
-  for (index = 0U; index < list.count; index++) {
-    NSDictionary *record =
-      [FileScanner dictionaryFromScannerRecord:&list.records[index]];
-    if (record != nil) {
-      [records addObject:record];
-    }
-  }
-
-  strappy_file_scanner_record_list_destroy(&list);
-  return records;
 }
 
 - (NSArray *)scanDirectoryForSQLiteDatabasesAtPath:(NSString *)path

@@ -163,12 +163,6 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   [self reloadData];
 }
 
-- (void)reloadDataAction:(id)sender
-{
-  (void)sender;
-  [self reloadData];
-}
-
 - (UIImage *)whiteBarIconForIcon:(AIFontAwesomeIcon)icon
 {
   return [AIFontAwesome imageForIcon:icon

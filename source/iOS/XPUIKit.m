@@ -6,7 +6,6 @@
  * available on the 4.3 deployment floor. Keep the compatibility values in the
  * XP layer as plain NSInteger constants. */
 static const NSInteger XPUIKitTextAlignmentCenter = 1;
-static const NSInteger XPUIKitTextAlignmentRight = 2;
 
 @implementation NSString (XPUIKit)
 
@@ -647,17 +646,6 @@ static UITextField *XPUIKitFindTextField(UIView *view)
 - (void)XP_setLineBreakModeWordWrapping
 {
   XPUIKitInvokeIntegerSetter(self, @selector(setLineBreakMode:), 0);
-}
-
-@end
-
-@implementation UITextField (XPUIKit)
-
-- (void)XP_setTextAlignmentRight
-{
-  XPUIKitInvokeIntegerSetter(self,
-                             @selector(setTextAlignment:),
-                             (NSInteger)XPUIKitTextAlignmentRight);
 }
 
 @end

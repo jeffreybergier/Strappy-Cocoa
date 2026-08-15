@@ -20,8 +20,6 @@
 - (void)cancelCurrentPrompt:(id)sender;
 - (NSArray *)availableModels;
 - (NSArray *)availableAssistantSets;
-- (NSString *)selectedAssistantSetIdentifier;
-- (BOOL)setSelectedAssistantSetIdentifier:(NSString *)assistantSetIdentifier;
 - (NSString *)selectedModelIdentifier;
 - (BOOL)canSelectModel;
 - (BOOL)setSelectedModelIdentifier:(NSString *)modelIdentifier;

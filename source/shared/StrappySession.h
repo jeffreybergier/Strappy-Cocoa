@@ -136,23 +136,15 @@ enum {
 + (BOOL)updateDefaultSessionOptions:(StrappySessionOptions *)options
                        changedFields:(StrappySessionOptionMask)changedFields
                                error:(NSError **)error;
-+ (NSString *)selectedOpenRouterModelIdentifierWithError:(NSError **)error;
-+ (BOOL)setSelectedOpenRouterModelIdentifier:(NSString *)modelIdentifier
-                                       error:(NSError **)error;
 + (BOOL)setOpenRouterModelAllowed:(BOOL)allowed
                 forModelIdentifier:(NSString *)modelIdentifier
                              error:(NSError **)error;
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error;
-+ (NSString *)databaseStudyJSONWithError:(NSError **)error;
 + (NSArray *)databaseStudyRowsWithError:(NSError **)error;
 + (BOOL)deleteDatabaseStudyValuesForDatabaseIdentifier:
     (NSString *)databaseIdentifier
                                                     error:(NSError **)error;
 + (BOOL)resetDatabaseStudyWithError:(NSError **)error;
-+ (BOOL)databaseStudyProgressWithStudiedCount:(NSUInteger *)studiedCount
-                                approvedCount:(NSUInteger *)approvedCount
-                                        error:(NSError **)error;
-+ (NSUInteger)databaseStudyPendingDatabaseCountWithError:(NSError **)error;
 + (StrappySession *)beginDatabaseStudyWithError:(NSError **)error;
 + (NSString *)webViewBatchedJavaScriptForJavaScript:(NSString *)javaScript;
 

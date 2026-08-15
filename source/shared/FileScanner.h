@@ -20,12 +20,6 @@ typedef enum FileScannerDatabaseScanMode {
 + (BOOL)beginDatabaseCatalogScanAtPath:(NSString *)path
                               scanMode:(FileScannerDatabaseScanMode)scanMode
                                  error:(NSError **)error;
-- (NSArray *)scanHomeDirectoryForSQLiteDatabasesWithError:(NSError **)error;
-- (NSArray *)scanDirectoryForSQLiteDatabasesAtPath:(NSString *)path
-                                             error:(NSError **)error;
-- (NSArray *)scanDirectoryForSQLiteDatabasesAtPath:(NSString *)path
-                                          scanMode:(FileScannerDatabaseScanMode)scanMode
-                                             error:(NSError **)error;
 - (NSArray *)scanDirectoryForSQLiteDatabasesAtPath:(NSString *)path
                    savingResultsToCatalogWithError:(NSError **)error;
 - (NSArray *)scanDirectoryForSQLiteDatabasesAtPath:(NSString *)path

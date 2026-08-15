@@ -180,11 +180,6 @@ static id XPAppKitLegacyWebFrameViewForView(NSView *view)
 
 @implementation NSWindow (XPAppKit)
 
-- (void)XP_setTitle:(NSString *)title
-{
-  [self setTitle:(title ? title : @"")];
-}
-
 - (CGFloat)XP_titlebarHeight
 {
   NSMethodSignature *signature;
