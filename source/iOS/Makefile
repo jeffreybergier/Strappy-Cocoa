@@ -50,7 +50,9 @@ BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
 EXTRA_BUNDLE_STEPS = @set -e; $(MAKE) -f Makefile $(FONTAWESOME_GENERATED); echo "  > copying prompt guidance resources"; for resource in $(GUIDANCE_RESOURCES); do cp "$$resource" "$@/"; done
 
 DEB_PACKAGE_ID ?= com.altivecintelligence.strappy
-DEB_VERSION ?= 0.1.0
+# Keep package metadata aligned with the plist versions managed by the release
+# helper.
+DEB_VERSION ?= $(shell altivec-release current)
 DEB_ARCH ?= iphoneos-arm
 DEB_SECTION ?= Applications
 DEB_PRIORITY ?= optional
@@ -74,6 +76,11 @@ include /altivec/altivec_common_phone.mk
 .DEFAULT_GOAL := __deb
 
 __deb: validate
+	@set -e; configured_version="$$(altivec-release current)"; \
+	if [ "$(DEB_VERSION)" != "$$configured_version" ]; then \
+	  echo " [!] ERROR: Debian version $(DEB_VERSION) does not match configured app version $$configured_version"; \
+	  exit 1; \
+	fi
 	@echo "--- Building Phone $(DEB_BUILD_LABEL) Debian Package ($(OPT_FLAGS)) ---"
 	@$(MAKE) --no-print-directory $(PHONE_DEB) BUILD_DIR=$(BUILD_DIR) OPT_FLAGS=$(OPT_FLAGS)
 

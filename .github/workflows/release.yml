@@ -3,7 +3,7 @@ name: Build Release
 on:
   push:
     tags:
-      - "*"
+      - "v*"
   workflow_dispatch:
     inputs:
       tag_name:
@@ -19,58 +19,115 @@ jobs:
     name: Build and stage release packages
     runs-on: ubuntu-22.04
     env:
-      BUILD_IMAGE: ghcr.io/jeffreybergier/altivec-intelligence:latest
+      # Altivec Intelligence v2.0.3 multi-platform manifest.
+      BUILD_IMAGE: ghcr.io/jeffreybergier/altivec-intelligence@sha256:95a44e601581ac8ffcc269af281cd014983f36610d674e29f32182d24b0bac5f
     defaults:
       run:
         shell: bash
 
     steps:
-      - name: Check out source
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
       - name: Resolve release tag
+        id: release_ref
         run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             tag="${GITHUB_REF_NAME}"
           else
             tag="${{ inputs.tag_name }}"
           fi
+          if [[ ! "$tag" =~ ^v[0-9]+([.][0-9]+){0,2}$ ]]; then
+            echo "Release tag must be v followed by a numeric version: ${tag}" >&2
+            exit 1
+          fi
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "release_tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact release tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.release_ref.outputs.release_tag }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Verify release checkout
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          tag_sha="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+          if [[ "$actual_sha" != "$tag_sha" ]]; then
+            echo "Checked out ${actual_sha}, expected release commit ${tag_sha}." >&2
+            exit 1
+          fi
+          echo "RELEASE_SHA=$actual_sha" >> "$GITHUB_ENV"
+
+      - name: Pull pinned build image
+        run: docker pull "$BUILD_IMAGE"
 
       - name: Check configured plist versions
         run: |
+          set -euo pipefail
           docker run --rm \
             --entrypoint /bin/bash \
-            -e GITHUB_REF_NAME="$RELEASE_TAG" \
+            -e RELEASE_TAG \
             -v "${{ github.workspace }}:/repo/user" \
             -w /repo/user \
             "$BUILD_IMAGE" \
-            -lc "altivec-release ci-env" > release.env
+            -lc 'altivec-release ci-env "$RELEASE_TAG"' > release.env
           cat release.env >> "$GITHUB_ENV"
           cat release.env
 
+      - name: Fetch verified SDK archives
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/.altivec-sdk"
+          docker run --rm \
+            --entrypoint altivec-sdk \
+            -e ALTIVEC_SDK_ARCHIVE_DIR=/altivec-sdk \
+            -v "${RUNNER_TEMP}/.altivec-sdk:/altivec-sdk" \
+            "$BUILD_IMAGE" \
+            fetch
+
       - name: Build configured targets and stage assets
         run: |
+          set -euo pipefail
           docker run --rm \
             --entrypoint /bin/bash \
             -e IS_SANDBOX=1 \
+            -e ALTIVEC_SDK_ARCHIVE_DIR=/altivec-sdk \
+            -e RELEASE_VERSION \
+            -v "${RUNNER_TEMP}/.altivec-sdk:/altivec-sdk:ro" \
+            --mount type=volume,target=/osxcross/legacy/target/SDK \
+            --mount type=volume,target=/osxcross/modern/SDK \
             -v "${{ github.workspace }}:/repo/user" \
             -w /repo/user \
             "$BUILD_IMAGE" \
-            -lc "\
-              altivec-release build && \
-              altivec-release stage '$RELEASE_VERSION'"
+            -lc 'altivec-sdk ensure && altivec-release build && altivec-release stage "$RELEASE_VERSION"'
           ls -lh dist
+
+      - name: Validate staged release assets
+        run: |
+          set -euo pipefail
+          mac_asset="dist/Strappy-${RELEASE_VERSION}-macOS.zip"
+          ios_asset="dist/Strappy-${RELEASE_VERSION}-iOS.deb"
+          test -s "$mac_asset"
+          test -s "$ios_asset"
+          unzip -t "$mac_asset" >/dev/null
+          dpkg-deb --info "$ios_asset" >/dev/null
+          package_version="$(dpkg-deb -f "$ios_asset" Version)"
+          if [[ "$package_version" != "$RELEASE_VERSION" ]]; then
+            echo "Debian package version ${package_version} does not match release version ${RELEASE_VERSION}." >&2
+            exit 1
+          fi
+          sha256sum "$mac_asset" "$ios_asset"
 
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" \
-              --target "$GITHUB_SHA" \
+              --target "$RELEASE_SHA" \
               --generate-notes
           fi
           gh release upload "$RELEASE_TAG" dist/* --clobber
