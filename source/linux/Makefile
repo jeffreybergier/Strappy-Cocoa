@@ -11,6 +11,11 @@ FONTAWESOME_FONT_DIR ?= /altivec/libs/cocoa/Resources/Fonts
 SHARED_DIR := ../shared
 BUILD_DIR := build-linux
 TEST_DIR := build-test
+STRAPPY_DB_SOURCES = \
+	$(SHARED_DIR)/strappy_db.c \
+	$(SHARED_DIR)/strappy_db_catalog.c \
+	$(SHARED_DIR)/strappy_db_sessions.c \
+	$(SHARED_DIR)/strappy_db_responses.c
 FONTAWESOME_GENERATOR := $(SHARED_DIR)/tools/generate_fontawesome_webview_map.py
 FONTAWESOME_ICONS_RESOURCE := $(SHARED_DIR)/Resources/FontAwesomeIcons.json
 FONTAWESOME_WEBVIEW_MAP := $(SHARED_DIR)/strappy_fontawesome_icons.inc
@@ -51,7 +56,7 @@ DATABASE_QUERY_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_file_mutation.c \
 	$(SHARED_DIR)/strappy_file_write.c \
 	$(SHARED_DIR)/strappy_file_edit.c \
-	$(SHARED_DIR)/strappy_db.c \
+	$(STRAPPY_DB_SOURCES) \
 	$(SHARED_DIR)/strappy_file_scanner.c \
 	$(SHARED_DIR)/strappy_core.c \
 	$(SHARED_DIR)/strappy_assistant_sets.c \
@@ -62,7 +67,7 @@ BASH_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_cocoa.c \
 	$(SHARED_DIR)/strappy_config.c \
-	$(SHARED_DIR)/strappy_db.c \
+	$(STRAPPY_DB_SOURCES) \
 	$(SHARED_DIR)/strappy_core.c \
 	$(SHARED_DIR)/strappy_assistant_sets.c \
 	$(CJSON_DIR)/cJSON.c
@@ -80,7 +85,7 @@ RESPONSES_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_config.c \
 	$(SHARED_DIR)/strappy_cocoa.c \
 	$(SHARED_DIR)/strappy_core.c \
-	$(SHARED_DIR)/strappy_db.c \
+	$(STRAPPY_DB_SOURCES) \
 	$(SHARED_DIR)/strappy_model_catalog.c \
 	$(SHARED_DIR)/strappy_prompt.c \
 	$(SHARED_DIR)/strappy_quality_policy.c \
@@ -115,7 +120,7 @@ PROMPT_GENERATOR_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_assistant_sets.c \
 	$(SHARED_DIR)/strappy_cocoa.c \
 	$(SHARED_DIR)/strappy_core.c \
-	$(SHARED_DIR)/strappy_db.c \
+	$(STRAPPY_DB_SOURCES) \
 	$(CJSON_DIR)/cJSON.c
 
 SCANNER_PROFILE_HARNESS_SOURCES = \
