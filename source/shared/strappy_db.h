@@ -139,32 +139,6 @@ typedef struct strappy_session_message_record_list {
   size_t count;
 } strappy_session_message_record_list;
 
-typedef struct strappy_session_message_input {
-  const char *turn_key;
-  const char *prompt_group_key;
-  const char *actor;
-  const char *context_policy;
-  const char *kind;
-  const char *api_role;
-  const char *render_role;
-  const char *role;
-  const char *content;
-  const char *model;
-  long http_status;
-  const char *metadata_json;
-  const char *render_state_json;
-  const char *message_json;
-  const char *reasoning;
-  const char *message_key;
-  const char *target_message_key;
-  const char *tool_call_id;
-  const char *tool_name;
-  const char *arguments_json;
-  const char *result_json;
-  int include_in_context;
-  int is_error;
-} strappy_session_message_input;
-
 typedef struct strappy_response_call_begin_input {
   long long session_id;
   long long previous_call_id;
@@ -455,25 +429,6 @@ int strappy_db_update_discovered_database_hidden(const char *db_path,
                                                  long long catalog_id,
                                                  int hidden,
                                                  char **error_out);
-int strappy_db_save_exchange(const char *db_path,
-                             const char *prompt,
-                             const char *response,
-                             const char *model,
-                             long http_status,
-                             const char *metadata_json,
-                             const char *message_json,
-                             const char *reasoning,
-                             char **error_out);
-int strappy_db_save_exchange_with_id(const char *db_path,
-                                     const char *prompt,
-                                     const char *response,
-                                     const char *model,
-                                     long http_status,
-                                     const char *metadata_json,
-                                     const char *message_json,
-                                     const char *reasoning,
-                                     long long *session_id_out,
-                                     char **error_out);
 int strappy_db_create_session(const char *db_path,
                               long long *session_id_out,
                               char **error_out);
@@ -571,59 +526,6 @@ int strappy_db_load_session_list_record(const char *db_path,
 int strappy_db_delete_session(const char *db_path,
                               long long session_id,
                               char **error_out);
-int strappy_db_append_exchange_to_session(const char *db_path,
-                                          long long session_id,
-                                          const char *prompt,
-                                          const char *response,
-                                          const char *model,
-                                          long http_status,
-                                          const char *metadata_json,
-                                          const char *message_json,
-                                          const char *reasoning,
-                                          char **error_out);
-int strappy_db_save_message_sequence_with_id(
-  const char *db_path,
-  const char *prompt,
-  const char *response,
-  const char *model,
-  long http_status,
-  const strappy_session_message_input *messages,
-  size_t message_count,
-  long long *session_id_out,
-  char **error_out);
-int strappy_db_append_message_sequence_to_session(
-  const char *db_path,
-  long long session_id,
-  const char *prompt,
-  const char *response,
-  const char *model,
-  long http_status,
-  const strappy_session_message_input *messages,
-  size_t message_count,
-  char **error_out);
-int strappy_db_upsert_session_message(
-  const char *db_path,
-  long long session_id,
-  const strappy_session_message_input *message,
-  char **error_out);
-int strappy_db_append_session_message_content(
-  const char *db_path,
-  long long session_id,
-  const strappy_session_message_input *message,
-  const char *content_delta,
-  const char *reasoning_delta,
-  char **error_out);
-int strappy_db_move_session_message_content_to_reasoning(
-  const char *db_path,
-  long long session_id,
-  const strappy_session_message_input *message,
-  char **error_out);
-int strappy_db_update_session_message_render_state(
-  const char *db_path,
-  long long session_id,
-  const char *message_key,
-  const char *render_state_json,
-  char **error_out);
 int strappy_db_list_session_messages(const char *db_path,
                                      long long session_id,
                                      strappy_session_message_record_list *list,
