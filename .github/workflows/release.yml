@@ -19,8 +19,7 @@ jobs:
     name: Build and stage release packages
     runs-on: ubuntu-22.04
     env:
-      # Altivec Intelligence v2.0.3 multi-platform manifest.
-      BUILD_IMAGE: ghcr.io/jeffreybergier/altivec-intelligence@sha256:95a44e601581ac8ffcc269af281cd014983f36610d674e29f32182d24b0bac5f
+      BUILD_IMAGE: ghcr.io/jeffreybergier/altivec-intelligence:latest
     defaults:
       run:
         shell: bash
