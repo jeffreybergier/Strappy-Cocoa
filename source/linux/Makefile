@@ -39,6 +39,7 @@ RESPONSES_HARNESS := $(BUILD_DIR)/responses_harness
 PROMPT_GENERATOR_HARNESS := $(BUILD_DIR)/prompt_generator_harness
 SCANNER_PROFILE_HARNESS := $(BUILD_DIR)/scanner_profile_harness
 OPENAI_OAUTH_POC := $(BUILD_DIR)/openai_oauth_poc
+OPENAI_OAUTH_HARNESS := $(BUILD_DIR)/openai_oauth_harness
 PROMPT_OUTPUT_DIR ?= $(BUILD_DIR)/system-prompts
 
 ifeq ($(strip $(TMPDIR)),)
@@ -142,38 +143,50 @@ OPENAI_OAUTH_POC_SOURCES = \
 	$(SHARED_DIR)/strappy_core.c \
 	$(CJSON_DIR)/cJSON.c
 
+OPENAI_OAUTH_HARNESS_SOURCES = \
+	openai_oauth_harness.c \
+	$(SHARED_DIR)/strappy_openai_oauth.c \
+	$(SHARED_DIR)/strappy_identity.c \
+	$(SHARED_DIR)/strappy_cocoa.c \
+	$(SHARED_DIR)/strappy_core.c \
+	$(CJSON_DIR)/cJSON.c
+
 ifeq ($(shell uname -s),Darwin)
 CPPFLAGS += -D_DARWIN_C_SOURCE
 PLATFORM_LIBS := -framework CoreFoundation
 endif
 
 .PHONY: test scanner-test prompts review-prompts manual-openai-oauth \
+	openai-oauth-test \
 	openai-oauth-poc-self-test clean
 
-test: $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS) | $(TEST_DIR)
+test: $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS) $(OPENAI_OAUTH_HARNESS) | $(TEST_DIR)
 	@echo "--- Running Linux shared-core test suite ---"
-	@echo " [1/7] RUN  scanner_profile_harness"
+	@echo " [1/8] RUN  scanner_profile_harness"
 	./$(SCANNER_PROFILE_HARNESS)
-	@echo " [1/7] PASS scanner_profile_harness"
-	@echo " [2/7] RUN  database_query_harness"
+	@echo " [1/8] PASS scanner_profile_harness"
+	@echo " [2/8] RUN  database_query_harness"
 	./$(DATABASE_QUERY_HARNESS)
-	@echo " [2/7] PASS database_query_harness"
-	@echo " [3/7] RUN  bash_harness"
+	@echo " [2/8] PASS database_query_harness"
+	@echo " [3/8] RUN  bash_harness"
 	./$(BASH_HARNESS)
-	@echo " [3/7] PASS bash_harness"
-	@echo " [4/7] RUN  webview_harness"
+	@echo " [3/8] PASS bash_harness"
+	@echo " [4/8] RUN  webview_harness"
 	STRAPPY_WEBVIEW_PAGE_OUTPUT=$(WEBVIEW_PAGE_FIXTURE) ./$(WEBVIEW_HARNESS)
-	@echo " [4/7] PASS webview_harness"
-	@echo " [5/7] RUN  webview_behavior_harness.js"
+	@echo " [4/8] PASS webview_harness"
+	@echo " [5/8] RUN  webview_behavior_harness.js"
 	$(NODE) webview_behavior_harness.js $(WEBVIEW_PAGE_FIXTURE)
-	@echo " [5/7] PASS webview_behavior_harness.js"
-	@echo " [6/7] RUN  responses_harness"
+	@echo " [5/8] PASS webview_behavior_harness.js"
+	@echo " [6/8] RUN  responses_harness"
 	./$(RESPONSES_HARNESS)
-	@echo " [6/7] PASS responses_harness"
-	@echo " [7/7] RUN  prompt_generator_harness"
+	@echo " [6/8] PASS responses_harness"
+	@echo " [7/8] RUN  prompt_generator_harness"
 	./$(PROMPT_GENERATOR_HARNESS) $(SHARED_DIR)/Resources --check
-	@echo " [7/7] PASS prompt_generator_harness"
-	@echo "--- PASS: all 7 Linux shared-core checks completed ---"
+	@echo " [7/8] PASS prompt_generator_harness"
+	@echo " [8/8] RUN  openai_oauth_harness"
+	./$(OPENAI_OAUTH_HARNESS)
+	@echo " [8/8] PASS openai_oauth_harness"
+	@echo "--- PASS: all 8 Linux shared-core checks completed ---"
 
 scanner-test: $(SCANNER_PROFILE_HARNESS) | $(TEST_DIR)
 	./$(SCANNER_PROFILE_HARNESS)
@@ -185,6 +198,9 @@ manual-openai-oauth: $(OPENAI_OAUTH_POC)
 
 openai-oauth-poc-self-test: $(OPENAI_OAUTH_POC)
 	./$(OPENAI_OAUTH_POC) --self-test
+
+openai-oauth-test: $(OPENAI_OAUTH_HARNESS)
+	./$(OPENAI_OAUTH_HARNESS)
 
 prompts: $(PROMPT_GENERATOR_HARNESS)
 	mkdir -p $(PROMPT_OUTPUT_DIR)
@@ -222,6 +238,9 @@ $(SCANNER_PROFILE_HARNESS): $(SCANNER_PROFILE_HARNESS_SOURCES) | $(BUILD_DIR)
 
 $(OPENAI_OAUTH_POC): $(OPENAI_OAUTH_POC_SOURCES) | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(OPENAI_OAUTH_POC_SOURCES) $(PLATFORM_LIBS) -lcurl
+
+$(OPENAI_OAUTH_HARNESS): $(OPENAI_OAUTH_HARNESS_SOURCES) | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(OPENAI_OAUTH_HARNESS_SOURCES) $(PLATFORM_LIBS) -lcurl
 
 clean:
 	rm -rf $(BUILD_DIR) $(TEST_DIR) database_query_harness webview_harness responses_harness

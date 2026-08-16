@@ -10,4 +10,13 @@
                                   URL:(NSString *)url
                              password:(NSString *)password;
 
++ (BOOL)findGenericPasswordDataForService:(NSString *)service
+                                  account:(NSString *)account
+                                  outData:(NSData **)outData;
++ (BOOL)deleteGenericPasswordForService:(NSString *)service
+                                account:(NSString *)account;
++ (BOOL)setGenericPasswordData:(NSData *)data
+                       service:(NSString *)service
+                       account:(NSString *)account;
+
 @end

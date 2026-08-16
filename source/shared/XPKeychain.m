@@ -4,6 +4,7 @@
 #import <TargetConditionals.h>
 
 #include <string.h>
+#include <limits.h>
 
 #ifndef errSecSuccess
 #define errSecSuccess 0
@@ -146,6 +147,111 @@ static NSString *xpkc_iosProtoForScheme(NSString *scheme)
   if (status != errSecSuccess) {
     NSLog(@"XPKeychain.setInternetPasswordForAccount SecItemAdd status=%d account=%@",
           (int)status,
+          account);
+    return NO;
+  }
+  return YES;
+}
+
++ (BOOL)findGenericPasswordDataForService:(NSString *)service
+                                  account:(NSString *)account
+                                  outData:(NSData **)outData
+{
+  NSDictionary *query;
+  CFTypeRef result;
+  OSStatus status;
+
+  if (outData != NULL) {
+    *outData = nil;
+  }
+  if (([service length] == 0U) || ([account length] == 0U)) {
+    return NO;
+  }
+
+  query = [NSDictionary dictionaryWithObjectsAndKeys:
+    (id)kSecClassGenericPassword, (id)kSecClass,
+    service,                      (id)kSecAttrService,
+    account,                      (id)kSecAttrAccount,
+    (id)kCFBooleanTrue,           (id)kSecReturnData,
+    (id)kSecMatchLimitOne,        (id)kSecMatchLimit, nil];
+  result = NULL;
+  status = SecItemCopyMatching((CFDictionaryRef)query, &result);
+  if ((status != errSecSuccess) || (result == NULL)) {
+    if (status != errSecItemNotFound) {
+      NSLog(@"XPKeychain.findGenericPasswordData status=%d service=%@ account=%@",
+            (int)status,
+            service,
+            account);
+    }
+    return NO;
+  }
+
+  if (outData != NULL) {
+    *outData = [[(NSData *)result copy] autorelease];
+  }
+  CFRelease(result);
+  return YES;
+}
+
++ (BOOL)deleteGenericPasswordForService:(NSString *)service
+                                account:(NSString *)account
+{
+  NSDictionary *query;
+  OSStatus status;
+
+  if (([service length] == 0U) || ([account length] == 0U)) {
+    return NO;
+  }
+  query = [NSDictionary dictionaryWithObjectsAndKeys:
+    (id)kSecClassGenericPassword, (id)kSecClass,
+    service,                      (id)kSecAttrService,
+    account,                      (id)kSecAttrAccount, nil];
+  status = SecItemDelete((CFDictionaryRef)query);
+  if ((status != errSecSuccess) && (status != errSecItemNotFound)) {
+    NSLog(@"XPKeychain.deleteGenericPassword status=%d service=%@ account=%@",
+          (int)status,
+          service,
+          account);
+    return NO;
+  }
+  return YES;
+}
+
++ (BOOL)setGenericPasswordData:(NSData *)data
+                       service:(NSString *)service
+                       account:(NSString *)account
+{
+  NSDictionary *query;
+  NSDictionary *update;
+  NSMutableDictionary *addition;
+  OSStatus status;
+
+  if ((data == nil) || ([service length] == 0U) ||
+      ([account length] == 0U)) {
+    return NO;
+  }
+
+  query = [NSDictionary dictionaryWithObjectsAndKeys:
+    (id)kSecClassGenericPassword, (id)kSecClass,
+    service,                      (id)kSecAttrService,
+    account,                      (id)kSecAttrAccount, nil];
+  update = [NSDictionary dictionaryWithObject:data forKey:(id)kSecValueData];
+  status = SecItemUpdate((CFDictionaryRef)query, (CFDictionaryRef)update);
+  if (status == errSecItemNotFound) {
+    addition = [NSMutableDictionary dictionaryWithDictionary:query];
+    [addition setObject:data forKey:(id)kSecValueData];
+    [addition setObject:(id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+                 forKey:(id)kSecAttrAccessible];
+    status = SecItemAdd((CFDictionaryRef)addition, NULL);
+    if (status == errSecDuplicateItem) {
+      status = SecItemUpdate((CFDictionaryRef)query,
+                             (CFDictionaryRef)update);
+    }
+  }
+  if (status != errSecSuccess) {
+    NSLog(@"XPKeychain.setGenericPasswordData status=%d service=%@ account=%@",
+          (int)status,
+          service,
           account);
     return NO;
   }
@@ -297,6 +403,12 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
                                            &passwordData,
                                            &item);
   if (status != errSecSuccess) {
+    if (passwordData != NULL) {
+      SecKeychainItemFreeContent(NULL, passwordData);
+    }
+    if (item != NULL) {
+      CFRelease(item);
+    }
     if (status != errSecItemNotFound) {
       NSLog(@"XPKeychain.findInternetPasswordForAccount status=%d account=%@",
             (int)status,
@@ -430,6 +542,218 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
   if (status != errSecSuccess) {
     NSLog(@"XPKeychain.setInternetPasswordForAccount SecKeychainAddInternetPassword status=%d account=%@",
           (int)status,
+          account);
+    return NO;
+  }
+  return YES;
+}
+
++ (BOOL)findGenericPasswordDataForService:(NSString *)service
+                                  account:(NSString *)account
+                                  outData:(NSData **)outData
+{
+  const char *serviceCString;
+  const char *accountCString;
+  size_t serviceLength;
+  size_t accountLength;
+  UInt32 passwordLength;
+  void *passwordData;
+  SecKeychainItemRef item;
+  OSStatus status;
+
+  if (outData != NULL) {
+    *outData = nil;
+  }
+  if (([service length] == 0U) || ([account length] == 0U)) {
+    return NO;
+  }
+  serviceCString = [service UTF8String];
+  accountCString = [account UTF8String];
+  serviceLength = strlen(serviceCString);
+  accountLength = strlen(accountCString);
+  if ((serviceLength > (size_t)UINT_MAX) ||
+      (accountLength > (size_t)UINT_MAX)) {
+    return NO;
+  }
+
+  passwordLength = 0U;
+  passwordData = NULL;
+  item = NULL;
+  status = SecKeychainFindGenericPassword(NULL,
+                                           (UInt32)serviceLength,
+                                           serviceCString,
+                                           (UInt32)accountLength,
+                                           accountCString,
+                                           &passwordLength,
+                                           &passwordData,
+                                           &item);
+  if (status != errSecSuccess) {
+    if (passwordData != NULL) {
+      SecKeychainItemFreeContent(NULL, passwordData);
+    }
+    if (item != NULL) {
+      CFRelease(item);
+    }
+    if (status != errSecItemNotFound) {
+      NSLog(@"XPKeychain.findGenericPasswordData status=%d service=%@ account=%@",
+            (int)status,
+            service,
+            account);
+    }
+    return NO;
+  }
+  if (outData != NULL) {
+    *outData = [[[NSData alloc] initWithBytes:passwordData
+                                      length:(NSUInteger)passwordLength]
+      autorelease];
+  }
+  SecKeychainItemFreeContent(NULL, passwordData);
+  if (item != NULL) {
+    CFRelease(item);
+  }
+  return YES;
+}
+
++ (BOOL)deleteGenericPasswordForService:(NSString *)service
+                                account:(NSString *)account
+{
+  const char *serviceCString;
+  const char *accountCString;
+  size_t serviceLength;
+  size_t accountLength;
+  SecKeychainItemRef item;
+  OSStatus status;
+
+  if (([service length] == 0U) || ([account length] == 0U)) {
+    return NO;
+  }
+  serviceCString = [service UTF8String];
+  accountCString = [account UTF8String];
+  serviceLength = strlen(serviceCString);
+  accountLength = strlen(accountCString);
+  if ((serviceLength > (size_t)UINT_MAX) ||
+      (accountLength > (size_t)UINT_MAX)) {
+    return NO;
+  }
+
+  item = NULL;
+  status = SecKeychainFindGenericPassword(NULL,
+                                           (UInt32)serviceLength,
+                                           serviceCString,
+                                           (UInt32)accountLength,
+                                           accountCString,
+                                           NULL,
+                                           NULL,
+                                           &item);
+  if (status == errSecItemNotFound) {
+    return YES;
+  }
+  if ((status != errSecSuccess) || (item == NULL)) {
+    NSLog(@"XPKeychain.deleteGenericPassword find status=%d service=%@ account=%@",
+          (int)status,
+          service,
+          account);
+    return NO;
+  }
+  status = SecKeychainItemDelete(item);
+  CFRelease(item);
+  if (status != errSecSuccess) {
+    NSLog(@"XPKeychain.deleteGenericPassword delete status=%d service=%@ account=%@",
+          (int)status,
+          service,
+          account);
+    return NO;
+  }
+  return YES;
+}
+
++ (BOOL)setGenericPasswordData:(NSData *)data
+                       service:(NSString *)service
+                       account:(NSString *)account
+{
+  const char *serviceCString;
+  const char *accountCString;
+  size_t serviceLength;
+  size_t accountLength;
+  NSUInteger dataLength;
+  SecKeychainItemRef item;
+  OSStatus status;
+
+  if ((data == nil) || ([service length] == 0U) ||
+      ([account length] == 0U)) {
+    return NO;
+  }
+  serviceCString = [service UTF8String];
+  accountCString = [account UTF8String];
+  serviceLength = strlen(serviceCString);
+  accountLength = strlen(accountCString);
+  dataLength = [data length];
+  if ((serviceLength > (size_t)UINT_MAX) ||
+      (accountLength > (size_t)UINT_MAX) ||
+      (dataLength > (NSUInteger)UINT_MAX)) {
+    return NO;
+  }
+
+  item = NULL;
+  status = SecKeychainFindGenericPassword(NULL,
+                                           (UInt32)serviceLength,
+                                           serviceCString,
+                                           (UInt32)accountLength,
+                                           accountCString,
+                                           NULL,
+                                           NULL,
+                                           &item);
+  if (status == errSecSuccess) {
+    if (item == NULL) {
+      NSLog(@"XPKeychain.setGenericPasswordData found no item service=%@ account=%@",
+            service,
+            account);
+      return NO;
+    }
+    status = SecKeychainItemModifyAttributesAndData(item,
+                                                     NULL,
+                                                     (UInt32)dataLength,
+                                                     [data bytes]);
+    CFRelease(item);
+  } else if (status == errSecItemNotFound) {
+    status = SecKeychainAddGenericPassword(NULL,
+                                            (UInt32)serviceLength,
+                                            serviceCString,
+                                            (UInt32)accountLength,
+                                            accountCString,
+                                            (UInt32)dataLength,
+                                            [data bytes],
+                                            NULL);
+    if (status == errSecDuplicateItem) {
+      item = NULL;
+      status = SecKeychainFindGenericPassword(NULL,
+                                               (UInt32)serviceLength,
+                                               serviceCString,
+                                               (UInt32)accountLength,
+                                               accountCString,
+                                               NULL,
+                                               NULL,
+                                               &item);
+      if ((status == errSecSuccess) && (item != NULL)) {
+        status = SecKeychainItemModifyAttributesAndData(
+          item,
+          NULL,
+          (UInt32)dataLength,
+          [data bytes]);
+      }
+      if (item != NULL) {
+        CFRelease(item);
+      }
+    }
+  } else {
+    if (item != NULL) {
+      CFRelease(item);
+    }
+  }
+  if (status != errSecSuccess) {
+    NSLog(@"XPKeychain.setGenericPasswordData status=%d service=%@ account=%@",
+          (int)status,
+          service,
           account);
     return NO;
   }

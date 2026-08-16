@@ -148,6 +148,33 @@
 "Could not save API credentials" = "Could not save API credentials";
 "The keychain refused the write." = "The keychain refused the write.";
 
+/* ChatGPT OAuth */
+"ChatGPT (Experimental)" = "ChatGPT (Experimental)";
+"Requesting a device code…" = "Requesting a device code…";
+"Waiting for browser approval" = "Waiting for browser approval";
+"Signed in as %@" = "Signed in as %@";
+"Signed in" = "Signed in";
+"Refreshing credentials…" = "Refreshing credentials…";
+"Authentication failed." = "Authentication failed.";
+"Sign-in cancelled" = "Sign-in cancelled";
+"Not signed in" = "Not signed in";
+"Code" = "Code";
+"Copy Code" = "Copy Code";
+"Open Browser" = "Open Browser";
+"Sign Out" = "Sign Out";
+"Retry Refresh" = "Retry Refresh";
+"Sign In with ChatGPT" = "Sign In with ChatGPT";
+"The device code was copied to the clipboard." = "The device code was copied to the clipboard.";
+"Code Copied" = "Code Copied";
+"The ChatGPT sign-in page could not be opened." = "The ChatGPT sign-in page could not be opened.";
+"Could Not Open Browser" = "Could Not Open Browser";
+"Uses the Pi-compatible device flow. Access and refresh tokens are stored together in the Keychain and refreshed automatically. Device-code login must be enabled for your ChatGPT account or workspace." = "Uses the Pi-compatible device flow. Access and refresh tokens are stored together in the Keychain and refreshed automatically. Device-code login must be enabled for your ChatGPT account or workspace.";
+"The Keychain refused the ChatGPT credential write." = "The Keychain refused the ChatGPT credential write.";
+"ChatGPT sign-in failed." = "ChatGPT sign-in failed.";
+"The Keychain refused the refreshed ChatGPT credential." = "The Keychain refused the refreshed ChatGPT credential.";
+"ChatGPT credential refresh failed." = "ChatGPT credential refresh failed.";
+"The Keychain refused to remove the ChatGPT credential." = "The Keychain refused to remove the ChatGPT credential.";
+
 "About Strappy" = "About Strappy";
 "Hide Strappy" = "Hide Strappy";
 "Hide Others" = "Hide Others";

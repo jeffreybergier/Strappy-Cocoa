@@ -1,6 +1,7 @@
 # ChatGPT Device OAuth and Subscription Backend Plan
 
-Status: proposed, 2026-08-16
+Status: in progress — iOS OAuth credential lifecycle implemented and
+live-verified, 2026-08-16
 
 This plan adds a second provider, `openai_chatgpt`, whose product label is
 "ChatGPT (Codex)". It signs in with the device-code flow and sends requests to
@@ -10,6 +11,72 @@ ChatGPT plan limits rather than an OpenAI Platform API key.
 The plan intentionally keeps OpenRouter working. It does not turn a ChatGPT
 OAuth access token into an API key, and it does not send that token to the
 public `api.openai.com/v1` API.
+
+## Implementation progress — 2026-08-16
+
+The current worktree completes the iOS login-and-credential slice of this
+plan. It does **not** yet route sessions or prompts to the ChatGPT backend;
+existing chat requests still use OpenRouter.
+
+### Completed
+
+- [x] Added `strappy_openai_oauth.[ch]` with the Pi-compatible device start,
+  immediate polling, pending/`slow_down` handling, 15-minute timeout,
+  cancellation, authorization-code exchange, refresh-token rotation, bounded
+  JSON/base64url/JWT parsing, and ChatGPT account-ID extraction.
+- [x] Added the iOS `StrappyAuthentication` coordinator with a process-lifetime
+  observable state machine, main-thread notifications, serialized login and
+  refresh operations, race-safe cancellation/sign-out, and proactive refresh
+  within five minutes of expiry when the app becomes active.
+- [x] Extended `XPKeychain` and `StrappyKeychain` to store one provider-specific,
+  versioned binary-plist credential containing the access token, rotating
+  refresh token, absolute expiry, account ID, and format version. iOS uses
+  `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, and rotation updates the
+  existing Keychain item in place rather than deleting the last credential.
+- [x] Added the iOS **ChatGPT (Experimental)** preferences section with status,
+  device code, Copy Code, Open Browser, Cancel, Retry Refresh, and Sign Out,
+  plus English and Japanese localization.
+- [x] Added a deterministic Linux mock-server harness covering device start,
+  pending polling, successful authorization, token exchange, JWT account
+  extraction, refresh rotation, and pre-network cancellation.
+- [x] Kept the OpenRouter credential and request path unchanged and made no
+  database schema or `PRAGMA user_version` changes.
+
+### Verified
+
+- [x] iOS Clang analyzer: 0 warnings and 0 errors.
+- [x] Clean iOS release build and package inspection: universal armv7/arm64
+  app in `Strappy.deb`.
+- [x] Clean macOS analyzer and release build: 0 warnings/errors and a
+  ppc/i386/x86_64/arm64 app, verifying the shared Keychain changes against all
+  supported targets.
+- [x] All eight Linux shared-core harnesses, the existing OAuth PoC parser
+  self-test, and an AddressSanitizer/UndefinedBehaviorSanitizer OAuth harness
+  run passed.
+- [x] Installed package version 1.0.2 over 1.0.0 on `gomadango` (iPhone5,2),
+  verified the transferred package checksum, and received user confirmation
+  that the live device login completed successfully.
+
+### Still open
+
+- [ ] Resolve production release authority/client identity. The current
+  experimental development build uses the client identity demonstrated by the
+  pinned Pi reference at the user's explicit direction; this is not recorded
+  here as production authorization.
+- [ ] Complete Phase 0 backend/SSE/plan-limit compatibility checks beyond the
+  now-verified live login.
+- [ ] Resolve the database gate and implement provider identity, provider-aware
+  catalogs/models/sessions, ChatGPT request routing, SSE extraction, tool
+  capability gating, and subscription billing semantics.
+- [ ] Add the matching macOS ChatGPT authentication UI. The macOS build above
+  validates shared-source compatibility only.
+- [ ] Expand deterministic and manual coverage for disabled/denied/expired
+  login, `slow_down`, network loss, malformed/oversized fields, failed
+  Keychain replacement, `invalid_grant`, concurrent refresh callers, restart,
+  live refresh, and sign-out.
+- [ ] Add the production kill switch and user documentation, complete the
+  remaining security/rollout review, and remove the temporary Pi submodule
+  before the intended implementation commit.
 
 ## Feasibility conclusion
 
@@ -102,7 +169,7 @@ by testing the endpoint string; provider identity must be first-class.
 | Credential | User API token | OAuth access + rotating refresh token |
 | Billing | Metered/API-provider rules | Eligible ChatGPT plan limits |
 | Endpoint | User-configurable Responses URL | Fixed, adapter-owned Codex backend URL |
-| Catalog | `/api/v1/models/user` | Bundled, versioned manifest until a supported catalog API exists |
+| Catalog | `/api/v1/models/user` | Bundled, versioned `BundledModels.json`; no runtime discovery unless a supported catalog API is documented |
 | Response transport | One final JSON response | SSE, terminating on a completed/done/incomplete response event |
 | Extra headers | `X-OpenRouter-*` | Account ID, beta/stream headers, and an approved Strappy originator |
 | Request extensions | OpenRouter `session_id` and tool types | Codex-compatible request fields only |
@@ -148,14 +215,40 @@ Each model needs:
 - the exact `wire_model_id` sent to the provider;
 - capability fields for reasoning, local functions, hosted tools, input types,
   context/output limits, and supported reasoning settings;
-- catalog source/revision and active/allowed state; and
+- catalog source/revision and catalog-active state; and
 - billing kind (`metered_api` or `chatgpt_plan`) independent of token counts.
 
-Catalog refresh must be provider-scoped. Refreshing OpenRouter must no longer
-mark ChatGPT models inactive. ChatGPT models should come from a small,
-versioned Strappy resource that is updated and tested at release time. Do not
-call the public OpenAI `/v1/models` endpoint with a ChatGPT access token and do
-not make production depend on files in the temporary Pi submodule.
+Add `source/shared/Resources/BundledModels.json` beside the existing shared JSON
+resources. Despite its location, it is application catalog data rather than
+prompt guidance. Its top level contains a bounded `schema_version`, a
+`catalog_revision`, and a `models` array. Each entry contains the provider ID,
+provider-qualified internal key, exact wire model ID, display name,
+capabilities, supported reasoning levels, input modalities, context/output
+limits, and billing kind. It must not contain credentials, per-user
+allowed/default choices, or monetary prices for `chatgpt_plan` models.
+
+The initial candidate set, matching the pinned Pi catalog at
+`94373d815d2b4a3a48864d5341afc824b8db45e3`, is
+`gpt-5.3-codex-spark`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.5`,
+`gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra`. Presence in Pi is not by
+itself a Strappy compatibility guarantee: omit or mark unavailable any entry
+that has not passed Strappy's request/capability fixtures before release.
+
+A shared catalog loader validates and transactionally imports this resource
+into SQLite during database initialization and whenever its revision changes.
+The import upserts only the bundled provider rows, marks removed entries
+inactive only within `openai_chatgpt`, records the imported revision, and
+preserves database-owned allowed/default preferences. Cocoa model screens query
+the unified database API and never parse the JSON resource directly.
+
+Catalog refresh and deactivation must be provider-scoped. Refreshing
+OpenRouter must no longer mark ChatGPT models inactive. ChatGPT login controls
+whether those bundled models are usable, not whether they exist in the local
+catalog. Pi likewise supplies its OpenAI Codex provider a release-generated
+static catalog and does not register a runtime model fetch. Do not call the
+public OpenAI `/v1/models` endpoint with a ChatGPT access token, probe an
+undocumented private model route, or make production depend on files in the
+temporary Pi submodule.
 
 ### Session isolation
 
@@ -322,7 +415,7 @@ transport harnesses can still proceed independently.
 
 ## Implementation phases
 
-### Phase 0 — Compatibility and release gate
+### Phase 0 — Compatibility and release gate (in progress)
 
 Build a non-shipping, manually invoked Linux probe using the existing curl/cJSON
 stack. It must not read or print API keys, persist OAuth credentials, or run in
@@ -344,24 +437,36 @@ obtain an approved identity or the backend rejects an honest Strappy client.
 Exit criterion: a short checked-in compatibility fixture/report containing no
 secrets, plus explicit approval to proceed.
 
-### Phase 1 — Provider domain and database
+### Phase 1 — Provider domain and database (blocked on database decision)
 
 - Add provider IDs, provider-qualified model keys, capabilities, and billing
   kinds to shared C types.
 - Apply the explicitly approved database reset or migration strategy.
 - Make catalog activation, whitelist/default lookup, and model queries
   provider-safe.
-- Import an initial versioned ChatGPT model manifest into SQLite.
+- Add the bounded, versioned `source/shared/Resources/BundledModels.json`
+  schema and seed it with the Pi-matched ChatGPT candidate set above.
+- Add a shared validator/importer that transactionally upserts the bundled
+  catalog, scopes deactivation to `openai_chatgpt`, records the imported
+  revision, and preserves database-owned user preferences.
+- Bundle the resource on both platforms. Rename the misleading
+  `GUIDANCE_RESOURCES` Makefile variable to a general shared-resource name when
+  adding the catalog.
 - Assign converted historical data to OpenRouter and enforce session provider
   locking.
 - Replace OpenRouter-named public model-record APIs with generic APIs, retaining
   short-lived compatibility wrappers if they reduce review risk.
 
 Exit criterion: both providers may contain the same wire model ID without
-collision; refreshing one catalog cannot change the other; all DB harness tests
-and foreign-key checks pass.
+collision; importing the same bundled revision is idempotent; a catalog upgrade
+preserves allowed/default choices; refreshing one provider cannot change the
+other; malformed resources roll back without damaging the last-known catalog;
+and all DB harness tests and foreign-key checks pass.
 
 ### Phase 2 — OAuth protocol and secure credential lifecycle
+
+Status: iOS login/storage/refresh/sign-out implemented; request snapshots and
+the full exit-criterion test matrix remain pending.
 
 - Implement bounded device-start, polling, exchange, refresh, JWT claim parsing,
   timeout, and cancellation in portable C.
@@ -377,7 +482,7 @@ and foreign-key checks pass.
 Exit criterion: deterministic mock-server tests cover every state and no secret
 appears in diagnostics, SQLite, or fixtures.
 
-### Phase 3 — Provider request adapters and SSE
+### Phase 3 — Provider request adapters and SSE (not started)
 
 - Separate generic curl transport from OpenRouter header/body policy.
 - Preserve OpenRouter byte-for-byte behavior with request snapshot tests.
@@ -390,9 +495,10 @@ Exit criterion: scripted local servers prove success, incomplete, quota error,
 malformed stream, timeout, cancellation, early terminal close, and header
 separation. Existing response-loop tests remain green.
 
-### Phase 4 — Models, tools, and session behavior
+### Phase 4 — Models, tools, and session behavior (not started)
 
-- Add the curated ChatGPT model resource and release-time update procedure.
+- Establish the release-time review, compatibility-test, and revision-bump
+  procedure for `BundledModels.json`; there is no ChatGPT runtime catalog fetch.
 - Generate request reasoning fields from model capabilities rather than the
   current OpenRouter assumptions.
 - Keep local functions available when verified; gate hosted tools by provider.
@@ -405,6 +511,9 @@ Exit criterion: request fixtures for every shipped ChatGPT model/capability and
 cross-provider history tests pass.
 
 ### Phase 5 — iOS and macOS preferences
+
+Status: the iOS OAuth section is implemented and live-verified; macOS
+authentication UI and provider-aware model/session preferences remain pending.
 
 Replace the single implicit OpenRouter credentials form with two provider
 sections:
@@ -419,14 +528,18 @@ termination may cancel the ephemeral device flow; the user simply starts again.
 No callback URL scheme is required.
 
 Group model selection/whitelisting by provider and explain why ChatGPT hosted
-web tools are unavailable in the initial release. Add accessibility labels and
+web tools are unavailable in the initial release. The Models screen reads the
+unified database catalog: OpenRouter retains its network-backed **Update**
+action, while ChatGPT shows the bundled catalog revision and has no refresh
+action. Bundled ChatGPT models remain visible while signed out but are marked
+unavailable until authentication succeeds. Add accessibility labels and
 keyboard navigation for the code and actions.
 
 Exit criterion: matched behavior and error messages on iOS and macOS, including
 disabled device login, cancellation, timeout, background/resume, restart with a
 stored credential, refresh, and sign-out.
 
-### Phase 6 — Hardening, documentation, and rollout
+### Phase 6 — Hardening, documentation, and rollout (in progress)
 
 - Add a runtime/compile-time kill switch for the ChatGPT provider while the
   protocol remains undocumented/beta.
@@ -453,10 +566,10 @@ Names are tentative, but boundaries should remain narrow.
 | Provider types/capabilities | new `source/shared/strappy_provider.[ch]` |
 | Device OAuth | new `source/shared/strappy_openai_oauth.[ch]` |
 | SSE parsing | new `source/shared/strappy_sse.[ch]` or a private ChatGPT adapter module |
-| Credential coordination | new `source/shared/StrappyAuthentication.[hm]`; extend `StrappyKeychain` and `XPKeychain` |
+| Credential coordination | iOS `source/iOS/StrappyAuthentication.[hm]`; extended shared `StrappyKeychain` and `XPKeychain` |
 | HTTP/request adapters | refactor `strappy_client.[ch]` and `strappy_responses.[ch]` |
 | Configuration | clarify legacy OpenRouter fields in `strappy_config.[ch]`; do not add OAuth-token environment variables |
-| Persistence/catalog | `strappy_db*.c`, `strappy_db*.h`, and a new versioned ChatGPT model resource |
+| Persistence/catalog | `strappy_db*.c`, `strappy_db*.h`, `strappy_model_catalog.[ch]`, and new `source/shared/Resources/BundledModels.json` |
 | Hosted tools | provider-gate `Resources/GuidanceTools.json` and request building |
 | Cocoa boundary | `StrappySession.[hm]` plus focused authentication calls |
 | iOS UI | `PreferencesTableViewController.m` and model/session option views |
@@ -501,6 +614,12 @@ Names are tentative, but boundaries should remain narrow.
 
 ### Database and catalogs
 
+- Strict bundled-manifest validation: supported schema/revision, bounded field
+  sizes and counts, unique provider-qualified keys, valid wire IDs, known
+  capabilities, and no monetary prices on `chatgpt_plan` entries.
+- First import, repeated same-revision import, revision upgrade, removed-model
+  deactivation, missing resource, malformed resource, and transactional
+  rollback while retaining the last-known good catalog.
 - Identical wire IDs under two providers.
 - Provider-scoped refresh/deactivation and whitelist/default behavior.
 - Existing-data conversion or explicit reset behavior, foreign-key checks, and

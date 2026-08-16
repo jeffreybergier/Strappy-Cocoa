@@ -1,6 +1,7 @@
 #import "AppDelegate.h"
 #import "AIFontAwesome.h"
 #import "FileScanner.h"
+#import "StrappyAuthentication.h"
 #import "StrappyAppearance.h"
 #import "StrappyRootCoordinator.h"
 #import "StrappyIdleTimerAssertion.h"
@@ -114,6 +115,7 @@ static NSString *StrappyPromptCompletionNotificationBody(
     cacert = [AltivecCore certPath];
     NSParameterAssert(cacert);
     [StrappySession bootstrapProcessWithCACertPath:cacert];
+    [StrappyAuthentication bootstrapProcessWithCACertPath:cacert];
   }
 
   [AIFontAwesome registerBundledFonts];
@@ -149,6 +151,8 @@ static NSString *StrappyPromptCompletionNotificationBody(
 - (void)applicationDidBecomeActive:(UIApplication *)application
 {
   StrappyLogApplicationLifecycle(@"applicationDidBecomeActive", application);
+  [[StrappyAuthentication sharedAuthentication]
+    refreshChatGPTCredentialsIfNeeded];
   [self updateLongRunningWorkAssertions];
 }
 

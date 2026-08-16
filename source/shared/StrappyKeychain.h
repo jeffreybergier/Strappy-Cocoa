@@ -16,6 +16,17 @@ extern NSString * const StrappyKeychainDidChangeNotification;
 - (NSString *)apiToken;
 - (BOOL)hasAPICredentials;
 - (BOOL)saveAPIEndpoint:(NSString *)apiEndpoint token:(NSString *)apiToken;
+
+- (BOOL)hasChatGPTCredentials;
+- (BOOL)loadChatGPTAccessToken:(NSString **)accessToken
+                  refreshToken:(NSString **)refreshToken
+             accountIdentifier:(NSString **)accountIdentifier
+          expiresAtMilliseconds:(long long *)expiresAtMilliseconds;
+- (BOOL)saveChatGPTAccessToken:(NSString *)accessToken
+                  refreshToken:(NSString *)refreshToken
+             accountIdentifier:(NSString *)accountIdentifier
+          expiresAtMilliseconds:(long long)expiresAtMilliseconds;
+- (BOOL)deleteChatGPTCredentials;
 - (void)reload;
 
 @end
