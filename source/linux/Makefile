@@ -9,8 +9,10 @@ NODE ?= node
 CJSON_DIR ?= /altivec/libs/core/third_party/cJSON
 FONTAWESOME_FONT_DIR ?= /altivec/libs/cocoa/Resources/Fonts
 SHARED_DIR := ../shared
+STRAPPY_INFO_PLIST_PATH ?= $(abspath ../macOS/Info.plist)
 BUILD_DIR := build-linux
 TEST_DIR := build-test
+export STRAPPY_INFO_PLIST_PATH
 STRAPPY_DB_SOURCES = \
 	$(SHARED_DIR)/strappy_db.c \
 	$(SHARED_DIR)/strappy_db_catalog.c \
@@ -36,6 +38,7 @@ WEBVIEW_PAGE_FIXTURE := $(BUILD_DIR)/webview-page.html
 RESPONSES_HARNESS := $(BUILD_DIR)/responses_harness
 PROMPT_GENERATOR_HARNESS := $(BUILD_DIR)/prompt_generator_harness
 SCANNER_PROFILE_HARNESS := $(BUILD_DIR)/scanner_profile_harness
+OPENAI_OAUTH_POC := $(BUILD_DIR)/openai_oauth_poc
 PROMPT_OUTPUT_DIR ?= $(BUILD_DIR)/system-prompts
 
 ifeq ($(strip $(TMPDIR)),)
@@ -47,6 +50,7 @@ DATABASE_QUERY_HARNESS_SOURCES = \
 	database_query_harness.c \
 	$(SHARED_DIR)/strappy_cocoa.c \
 	$(SHARED_DIR)/strappy_client.c \
+	$(SHARED_DIR)/strappy_identity.c \
 	$(SHARED_DIR)/strappy_config.c \
 	$(SHARED_DIR)/strappy_tools.c \
 	$(SHARED_DIR)/strappy_skills.c \
@@ -82,6 +86,7 @@ WEBVIEW_HARNESS_SOURCES = \
 RESPONSES_HARNESS_SOURCES = \
 	responses_harness.c \
 	$(SHARED_DIR)/strappy_client.c \
+	$(SHARED_DIR)/strappy_identity.c \
 	$(SHARED_DIR)/strappy_config.c \
 	$(SHARED_DIR)/strappy_cocoa.c \
 	$(SHARED_DIR)/strappy_core.c \
@@ -111,6 +116,7 @@ PROMPT_GENERATOR_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_skills.c \
 	$(SHARED_DIR)/strappy_study.c \
 	$(SHARED_DIR)/strappy_client.c \
+	$(SHARED_DIR)/strappy_identity.c \
 	$(SHARED_DIR)/strappy_config.c \
 	$(SHARED_DIR)/strappy_bash.c \
 	$(SHARED_DIR)/strappy_file_read.c \
@@ -129,12 +135,20 @@ SCANNER_PROFILE_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_cocoa.c \
 	$(SHARED_DIR)/strappy_core.c
 
+OPENAI_OAUTH_POC_SOURCES = \
+	openai_oauth_poc.c \
+	$(SHARED_DIR)/strappy_identity.c \
+	$(SHARED_DIR)/strappy_cocoa.c \
+	$(SHARED_DIR)/strappy_core.c \
+	$(CJSON_DIR)/cJSON.c
+
 ifeq ($(shell uname -s),Darwin)
 CPPFLAGS += -D_DARWIN_C_SOURCE
 PLATFORM_LIBS := -framework CoreFoundation
 endif
 
-.PHONY: test scanner-test prompts review-prompts clean
+.PHONY: test scanner-test prompts review-prompts manual-openai-oauth \
+	openai-oauth-poc-self-test clean
 
 test: $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS) | $(TEST_DIR)
 	@echo "--- Running Linux shared-core test suite ---"
@@ -163,6 +177,14 @@ test: $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEB
 
 scanner-test: $(SCANNER_PROFILE_HARNESS) | $(TEST_DIR)
 	./$(SCANNER_PROFILE_HARNESS)
+
+# Explicitly manual: this requires browser interaction and live ChatGPT usage.
+# It is intentionally excluded from `test` and never persists OAuth tokens.
+manual-openai-oauth: $(OPENAI_OAUTH_POC)
+	./$(OPENAI_OAUTH_POC)
+
+openai-oauth-poc-self-test: $(OPENAI_OAUTH_POC)
+	./$(OPENAI_OAUTH_POC) --self-test
 
 prompts: $(PROMPT_GENERATOR_HARNESS)
 	mkdir -p $(PROMPT_OUTPUT_DIR)
@@ -197,6 +219,9 @@ $(PROMPT_GENERATOR_HARNESS): $(PROMPT_GENERATOR_HARNESS_SOURCES) | $(BUILD_DIR)
 
 $(SCANNER_PROFILE_HARNESS): $(SCANNER_PROFILE_HARNESS_SOURCES) | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(SCANNER_PROFILE_HARNESS_SOURCES) $(SQLITE_LIBS) $(PLATFORM_LIBS)
+
+$(OPENAI_OAUTH_POC): $(OPENAI_OAUTH_POC_SOURCES) | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(OPENAI_OAUTH_POC_SOURCES) $(PLATFORM_LIBS) -lcurl
 
 clean:
 	rm -rf $(BUILD_DIR) $(TEST_DIR) database_query_harness webview_harness responses_harness

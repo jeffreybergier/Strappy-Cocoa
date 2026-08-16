@@ -16,6 +16,7 @@
 #define STRAPPY_COCOA_UNIX_MIN_SECONDS (-62167219200LL)
 #define STRAPPY_COCOA_UNIX_MAX_SECONDS 253402300799LL
 #define STRAPPY_COCOA_APPLE_EPOCH_OFFSET 978307200LL
+#define STRAPPY_COCOA_MAX_INFO_PLIST_BYTES (1024U * 1024U)
 
 static int strappy_cocoa_string_has_value(const char *value)
 {
@@ -864,6 +865,30 @@ static char *strappy_cocoa_copy_cf_string_utf8(CFStringRef string,
   return result;
 }
 
+char *strappy_cocoa_copy_app_version(char **error_out)
+{
+  CFBundleRef bundle;
+  CFTypeRef version;
+
+  bundle = CFBundleGetMainBundle();
+  if (bundle == NULL) {
+    strappy_set_error(error_out, "Could not load the main application bundle.");
+    return NULL;
+  }
+  version = CFBundleGetValueForInfoDictionaryKey(
+    bundle,
+    CFSTR("CFBundleShortVersionString"));
+  if ((version == NULL) ||
+      (CFGetTypeID(version) != CFStringGetTypeID()) ||
+      (CFStringGetLength((CFStringRef)version) == 0)) {
+    strappy_set_error(
+      error_out,
+      "The main application Info.plist has no CFBundleShortVersionString.");
+    return NULL;
+  }
+  return strappy_cocoa_copy_cf_string_utf8((CFStringRef)version, error_out);
+}
+
 char *strappy_cocoa_copy_localized_string(const char *key,
                                            char **error_out)
 {
@@ -1232,6 +1257,121 @@ static char *strappy_cocoa_copy_base_iso8601_timestamp(
   return result;
 }
 #else
+static char *strappy_cocoa_copy_file_contents(const char *path,
+                                               char **error_out)
+{
+  FILE *file;
+  char *contents;
+  long file_length;
+  size_t length;
+
+  file = fopen(path, "rb");
+  if (file == NULL) {
+    strappy_set_formatted_error(error_out,
+                                "Could not open Info.plist at %s.",
+                                path);
+    return NULL;
+  }
+  if ((fseek(file, 0L, SEEK_END) != 0) ||
+      ((file_length = ftell(file)) < 0L) ||
+      ((unsigned long)file_length >
+       (unsigned long)STRAPPY_COCOA_MAX_INFO_PLIST_BYTES) ||
+      (fseek(file, 0L, SEEK_SET) != 0)) {
+    fclose(file);
+    strappy_set_error(error_out, "Could not measure the application Info.plist.");
+    return NULL;
+  }
+
+  length = (size_t)file_length;
+  contents = (char *)malloc(length + 1U);
+  if (contents == NULL) {
+    fclose(file);
+    strappy_set_error(error_out, "Could not allocate the application Info.plist.");
+    return NULL;
+  }
+  if ((length > 0U) && (fread(contents, 1U, length, file) != length)) {
+    free(contents);
+    fclose(file);
+    strappy_set_error(error_out, "Could not read the application Info.plist.");
+    return NULL;
+  }
+  contents[length] = '\0';
+  if (fclose(file) != 0) {
+    free(contents);
+    strappy_set_error(error_out, "Could not close the application Info.plist.");
+    return NULL;
+  }
+  return contents;
+}
+
+static char *strappy_cocoa_copy_source_info_plist_version(
+  const char *path,
+  char **error_out)
+{
+  static const char version_key[] =
+    "<key>CFBundleShortVersionString</key>";
+  static const char string_start[] = "<string>";
+  static const char string_end[] = "</string>";
+  char *contents;
+  char *cursor;
+  char *end;
+  char *version;
+
+  contents = strappy_cocoa_copy_file_contents(path, error_out);
+  if (contents == NULL) {
+    return NULL;
+  }
+  cursor = strstr(contents, version_key);
+  if (cursor != NULL) {
+    cursor += sizeof(version_key) - 1U;
+    while ((*cursor == ' ') || (*cursor == '\t') ||
+           (*cursor == '\r') || (*cursor == '\n')) {
+      cursor++;
+    }
+  }
+  if ((cursor == NULL) ||
+      (strncmp(cursor, string_start, sizeof(string_start) - 1U) != 0)) {
+    free(contents);
+    strappy_set_error(
+      error_out,
+      "The application Info.plist has no CFBundleShortVersionString.");
+    return NULL;
+  }
+  cursor += sizeof(string_start) - 1U;
+  end = strstr(cursor, string_end);
+  if ((end == NULL) || (end == cursor)) {
+    free(contents);
+    strappy_set_error(
+      error_out,
+      "The application Info.plist has an invalid "
+      "CFBundleShortVersionString.");
+    return NULL;
+  }
+
+  version = strappy_string_duplicate_length(cursor,
+                                             (size_t)(end - cursor));
+  free(contents);
+  if (version == NULL) {
+    strappy_set_error(error_out, "Could not allocate the application version.");
+  }
+  return version;
+}
+
+char *strappy_cocoa_copy_app_version(char **error_out)
+{
+  const char *info_plist_path;
+
+  info_plist_path = getenv("STRAPPY_INFO_PLIST_PATH");
+  if (!strappy_cocoa_string_has_value(info_plist_path)) {
+    strappy_set_error(
+      error_out,
+      "STRAPPY_INFO_PLIST_PATH is required outside an application bundle.");
+    return NULL;
+  }
+  return strappy_cocoa_copy_source_info_plist_version(info_plist_path,
+                                                       error_out);
+}
+
 char *strappy_cocoa_copy_localized_string(const char *key,
                                            char **error_out)
 {

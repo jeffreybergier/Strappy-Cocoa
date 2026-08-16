@@ -23,6 +23,7 @@
 #include "../shared/strappy_config.h"
 #include "../shared/strappy_core.h"
 #include "../shared/strappy_db.h"
+#include "../shared/strappy_identity.h"
 #include "../shared/strappy_prompt.h"
 #include "../shared/strappy_quality_policy.h"
 #include "../shared/strappy_responses.h"
@@ -1512,6 +1513,67 @@ static int harness_content_length(const char *headers,
   return 0;
 }
 
+static int harness_has_expected_user_agent(const char *headers,
+                                           size_t headers_length)
+{
+  static const char field_name[] = "User-Agent:";
+  const char *cursor;
+  const char *headers_end;
+  char *error;
+  char *expected;
+  size_t expected_length;
+  int found;
+
+  if (headers == NULL) {
+    return 0;
+  }
+  error = NULL;
+  expected = strappy_identity_copy_user_agent(&error);
+  if (expected == NULL) {
+    fprintf(stderr,
+            "Could not build expected user agent: %s\n",
+            (error != NULL) ? error : "Unknown identity error.");
+    free(error);
+    return 0;
+  }
+  free(error);
+  expected_length = strlen(expected);
+  cursor = headers;
+  headers_end = headers + headers_length;
+  found = 0;
+  while (cursor < headers_end) {
+    const char *line_end;
+    const char *value;
+    size_t line_length;
+    size_t value_length;
+
+    line_end = strstr(cursor, "\r\n");
+    if ((line_end == NULL) || (line_end > headers_end)) {
+      line_end = headers_end;
+    }
+    line_length = (size_t)(line_end - cursor);
+    if ((line_length >= (sizeof(field_name) - 1U)) &&
+        (strncasecmp(cursor,
+                     field_name,
+                     sizeof(field_name) - 1U) == 0)) {
+      value = cursor + sizeof(field_name) - 1U;
+      while ((value < line_end) && ((*value == ' ') || (*value == '\t'))) {
+        value++;
+      }
+      value_length = (size_t)(line_end - value);
+      found = (value_length == expected_length) &&
+        (memcmp(value, expected, expected_length) == 0);
+      break;
+    }
+    if (line_end == headers_end) {
+      break;
+    }
+    cursor = line_end + 2;
+  }
+  free(expected);
+  return found;
+}
+
 static char *harness_read_request_body(int socket_fd)
 {
   char *request;
@@ -1548,7 +1610,8 @@ static char *harness_read_request_body(int socket_fd)
         if ((strncmp(request, "POST /responses HTTP/", 21U) != 0) ||
             !harness_content_length(request,
                                     headers_length,
-                                    &body_length)) {
+                                    &body_length) ||
+            !harness_has_expected_user_agent(request, headers_length)) {
           free(request);
           return NULL;
         }

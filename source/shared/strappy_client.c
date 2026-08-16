@@ -1,6 +1,7 @@
 #include "strappy_client.h"
 
 #include "strappy_core.h"
+#include "strappy_identity.h"
 
 #include <curl/curl.h>
 #include <cJSON.h>
@@ -337,6 +338,7 @@ int strappy_client_fetch_openrouter_user_models_json(
   struct curl_slist *headers;
   strappy_http_buffer response_buffer;
   char *auth_header;
+  char *user_agent;
   char *url;
   long http_status;
   int ok;
@@ -389,8 +391,16 @@ int strappy_client_fetch_openrouter_user_models_json(
     return 0;
   }
 
+  user_agent = strappy_identity_copy_user_agent(error_out);
+  if (user_agent == NULL) {
+    curl_slist_free_all(headers);
+    free(url);
+    return 0;
+  }
+
   curl = curl_easy_init();
   if (curl == NULL) {
+    free(user_agent);
     curl_slist_free_all(headers);
     free(url);
     strappy_set_error(error_out, "Could not create curl handle.");
@@ -403,7 +413,7 @@ int strappy_client_fetch_openrouter_user_models_json(
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, strappy_client_write_callback);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response_buffer);
-  curl_easy_setopt(curl, CURLOPT_USERAGENT, "Strappy/0.1");
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, user_agent);
   curl_easy_setopt(curl,
                    CURLOPT_TIMEOUT,
                    STRAPPY_CLIENT_MODEL_TIMEOUT_SECONDS);
@@ -417,6 +427,7 @@ int strappy_client_fetch_openrouter_user_models_json(
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_status);
   }
   curl_easy_cleanup(curl);
+  free(user_agent);
   curl_slist_free_all(headers);
   free(url);
   if (http_status_out != NULL) {
@@ -741,6 +752,7 @@ int strappy_client_send_responses_json(
   strappy_responses_transfer_context transfer_context;
   char curl_error[CURL_ERROR_SIZE];
   char *auth_header;
+  char *user_agent;
   char *url;
   size_t request_length;
   int ok;
@@ -802,8 +814,16 @@ int strappy_client_send_responses_json(
     return 0;
   }
 
+  user_agent = strappy_identity_copy_user_agent(error_out);
+  if (user_agent == NULL) {
+    curl_slist_free_all(headers);
+    free(url);
+    return 0;
+  }
+
   curl = curl_easy_init();
   if (curl == NULL) {
+    free(user_agent);
     curl_slist_free_all(headers);
     free(url);
     strappy_set_error(error_out, "Could not create Responses curl handle.");
@@ -844,7 +864,7 @@ int strappy_client_send_responses_json(
                    strappy_responses_transfer_progress_callback);
   curl_easy_setopt(curl, CURLOPT_PROGRESSDATA, (void *)&transfer_context);
 #endif
-  curl_easy_setopt(curl, CURLOPT_USERAGENT, "Strappy/0.1");
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, user_agent);
   curl_easy_setopt(curl,
                    CURLOPT_TIMEOUT,
                    STRAPPY_CLIENT_RESPONSES_TIMEOUT_SECONDS);
@@ -875,6 +895,7 @@ int strappy_client_send_responses_json(
                                                CURLINFO_CONTENT_TYPE,
                                                &result->content_type);
   curl_easy_cleanup(curl);
+  free(user_agent);
   curl_slist_free_all(headers);
   free(url);
 

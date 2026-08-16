@@ -18,6 +18,7 @@ typedef enum strappy_cocoa_timestamp_unit {
 
 char *strappy_cocoa_copy_localized_string(const char *key,
                                            char **error_out);
+char *strappy_cocoa_copy_app_version(char **error_out);
 int strappy_cocoa_copy_bundle_info(const char *bundle_path,
                                    char **name_out,
                                    char **bundle_identifier_out,
