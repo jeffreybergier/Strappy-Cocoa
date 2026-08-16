@@ -19,7 +19,9 @@ services:
     environment:
       ALTIVEC_SDK_ARCHIVE_DIR: /altivec-sdk
     volumes:
-      - ${ALTIVEC_SDK_HOST_DIR:-./.altivec-sdk}:/altivec-sdk
+      - ${ALTIVEC_SDK_HOST_DIR:-./.altivec-sdk}:/altivec-sdk:ro
+      - altivec-sdk-legacy:/osxcross/legacy/target/SDK
+      - altivec-sdk-modern:/osxcross/modern/SDK
     entrypoint: altivec-sdk
 
   altivec-intelligence:

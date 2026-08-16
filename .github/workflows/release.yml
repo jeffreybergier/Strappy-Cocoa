@@ -75,16 +75,54 @@ jobs:
           cat release.env >> "$GITHUB_ENV"
           cat release.env
 
-      - name: Fetch verified SDK archives
+      - name: Fetch and preflight secret SDK inputs
+        env:
+          ALTIVEC_SDK_MACOS_105_URL: ${{ secrets.ALTIVEC_SDK_MACOS_105_URL }}
+          ALTIVEC_SDK_MACOS_113_URL: ${{ secrets.ALTIVEC_SDK_MACOS_113_URL }}
+          ALTIVEC_SDK_IPHONEOS_84_URL: ${{ secrets.ALTIVEC_SDK_IPHONEOS_84_URL }}
         run: |
           set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/.altivec-sdk"
+          archive_dir="${RUNNER_TEMP}/.altivec-sdk"
+          mkdir -p "$archive_dir"
+          chmod 0700 "$archive_dir"
+
+          for archive_input in \
+              'ALTIVEC_SDK_MACOS_105_URL|MacOSX10.5.sdk.tar.xz' \
+              'ALTIVEC_SDK_MACOS_113_URL|MacOSX11.3.sdk.tar.xz' \
+              'ALTIVEC_SDK_IPHONEOS_84_URL|iPhoneOS8.4.sdk.tar.gz'; do
+            IFS='|' read -r secret_name filename <<< "$archive_input"
+            archive_url="${!secret_name:-}"
+            if [[ ! "$archive_url" =~ ^https://[^[:space:]]+$ ]]; then
+              echo "${secret_name} must be configured as an HTTPS repository secret." >&2
+              exit 1
+            fi
+            temporary="${archive_dir}/${filename}.part"
+            if ! curl \
+                --fail \
+                --location \
+                --silent \
+                --show-error \
+                --proto '=https' \
+                --proto-redir '=https' \
+                --retry 5 \
+                --retry-delay 2 \
+                --retry-all-errors \
+                --connect-timeout 30 \
+                --output "$temporary" \
+                "$archive_url"; then
+              rm -f -- "$temporary"
+              echo "Failed to fetch ${filename}." >&2
+              exit 1
+            fi
+            mv "$temporary" "${archive_dir}/${filename}"
+          done
+
           docker run --rm \
             --entrypoint altivec-sdk \
             -e ALTIVEC_SDK_ARCHIVE_DIR=/altivec-sdk \
-            -v "${RUNNER_TEMP}/.altivec-sdk:/altivec-sdk" \
+            -v "${archive_dir}:/altivec-sdk:ro" \
             "$BUILD_IMAGE" \
-            fetch
+            preflight
 
       - name: Build configured targets and stage assets
         run: |
@@ -100,7 +138,7 @@ jobs:
             -v "${{ github.workspace }}:/repo/user" \
             -w /repo/user \
             "$BUILD_IMAGE" \
-            -lc 'altivec-sdk ensure && altivec-release build && altivec-release stage "$RELEASE_VERSION"'
+            -lc 'altivec-sdk install && altivec-release build && altivec-release stage "$RELEASE_VERSION"'
           ls -lh dist
 
       - name: Validate staged release assets

@@ -227,9 +227,20 @@ The project uses the my Docker-based retro development environment called
 git clone https://github.com/jeffreybergier/Strappy-Cocoa.git
 cd Strappy-Cocoa
 docker compose pull
-docker compose run --rm altivec-sdk fetch
+mkdir -p .altivec-sdk
+# Place these exact files in ./.altivec-sdk:
+#   MacOSX10.5.sdk.tar.xz
+#   MacOSX11.3.sdk.tar.xz
+#   iPhoneOS8.4.sdk.tar.gz
+docker compose run --rm altivec-sdk preflight
+docker compose run --rm altivec-sdk install
 docker compose run --rm make clean release
 ```
+
+Tagged GitHub releases obtain those archives from the repository secrets
+`ALTIVEC_SDK_MACOS_105_URL`, `ALTIVEC_SDK_MACOS_113_URL`, and
+`ALTIVEC_SDK_IPHONEOS_84_URL`; the release workflow verifies their pinned
+hashes before building.
 
 Outputs:
 
