@@ -1,9 +1,7 @@
 > [!NOTE]
-> **AI Disclosure:** Strappy has been lovingly crafted by me. Also the writing
-> in this README and in the blog post is 100% written by me. That said, the code
-> is 100% AI generated. I would not recommend reading it; Its like 40,000+ lines
-> of boilerplate JSON parsing and database storage and retrieval code written in
-> C99.
+> **AI Disclosure:** Strappy has been lovingly crafted for retro Apple devices
+> by me. Also the writing in this README and associated blog post is 100%
+> written by me. That said, the code is 100% AI generated.
 
 # Strappy AI
 
@@ -33,7 +31,7 @@ Podcasts, Music, iMessages, and LINE Messages. This gives Strappy plenty of
 | Personal Assistant | Coding Assistant |
 |:---:|:---:|
 | <a href="https://jeffburg.com/assets/images/unenshittification/strappy/03-vacation-gemini.mp4"><img src="https://raw.githubusercontent.com/jeffreybergier/jeffreybergier.github.io/main/source/assets/images/unenshittification/strappy/03-vacation-gemini-poster.png" alt="Strappy finding vacation details from personal databases" width="320"></a> | <a href="https://jeffburg.com/assets/images/unenshittification/strappy/05-pokedex-luna.mp4"><img src="https://raw.githubusercontent.com/jeffreybergier/jeffreybergier.github.io/main/source/assets/images/unenshittification/strappy/05-pokedex-luna-poster.png" alt="Strappy building a Pokédex app on an iPhone" width="320"></a> |
-| Personal Assistant Mode answering a prompt about my upcoming family vacation to Las Vegas on my iPhone 5 | Coding Assistant Mode "one-shotting" a Pokedex App and then launching it on my iPhone 5 |
+| Personal Assistant mode answering a question about where and when my upcoming family vacation is on my iPhone 5 | Coding Assistant mode "one-shotting" a Pokedex App and then launching it on my iPhone 5 |
 
 For the more demo videos, see 
 [my blog post](https://jeffburg.com/unenshittification/2026/08/10/Strappy.html).
@@ -97,11 +95,12 @@ flowchart TB
 
 ### Rules
 
-- [`strappy_cocoa.c`](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/source/shared/strappy_cocoa.c): To keep the C code portable, this is the only file that
-   can use Apple-specific C libraries like CoreFoundation
-- [`StrappySession.m`](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/source/shared/StrappySession.m), [`FileScanner.m`](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/source/shared/FileScanner.m): To keep C code out of the Objective-C
-   code, these files are the only Objective-C files that can import the C 
-   "backend"
+- [`strappy_cocoa.h/c`](source/shared/strappy_cocoa.h): To keep the C code 
+   portable, this is the only file that can use Apple-specific C libraries 
+   like CoreFoundation
+- [`StrappySession.h/m`](source/shared/StrappySession.h), [`FileScanner.h/m`](source/shared/FileScanner.m): 
+   To keep C code out of the Objective-C code, these files are the only
+   Objective-C files that can import the C "backend"
 - Linux test suite runs in the docker container and tests the C "backend"
 
 ### Warning Flags
@@ -157,7 +156,7 @@ line development environment. For the iPhone, install Clang and related tools
 through a package manager or use the
 [Altivec toolchain](https://github.com/jeffreybergier/AltivecIntelligence/releases).
 
-> **Warning:** Bash is not sandboxed, so use it with caution.
+> **Warning:** The coding assistant is not sandboxed in any way. Please be careful.
 
 ## Compatibility
 
@@ -272,19 +271,19 @@ If you want to contribute, these are the next items I plan to add myself:
 
 - OpenAI OAUTH Support: I want to use my ChatGPT monthly plan in Strappy. This
   is sort of a gray area I think? So not sure how well this will work out.
-- Remote Access: I want to be able to access Strappy on my iPhone from Strappy
-  on my computer.
+- Remote Access: I want to be able to access Strappy on my iPhone from my computer.
     - This could be done via some sort of CLI on the iPhone that I
       can SSH into.
     - Or, this could be done by hosting a 
       [little web server](https://github.com/jeremycw/httpserver.h) 
       inside of Strappy 
 - Context Management: Currently there are checkboxes on each round to allow
-  full manual control of context. But I want to add a simple feature where
-  previous prompts have all of their context ignored except the original prompt
-  and the final answer. This should help shrink the context a lot.
+  full manual control of context. But I want to add an option where previous
+  prompts have all of their context ignored except the original prompt and the
+  final answer. This should help shrink the context a lot.
 
 ## Status and license
 
 Strappy is experimental personal software, not a hardened product. It is
-[MIT licensed](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/LICENSE), 100% AI coded and 100% compiled.
+[MIT licensed](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/LICENSE), 
+100% AI coded and 100% compiled.
