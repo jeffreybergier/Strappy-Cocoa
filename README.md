@@ -74,8 +74,8 @@ available in each mode so that smaller models do not get confused.
 | `skill_read` | Yes | Yes | Yes |
 | `session_rename` | Yes | Yes | Yes |
 
-Sources: [`GuidanceTools.json`](source/shared/Resources/GuidanceTools.json) and
-[`AssistantSets.json`](source/shared/Resources/AssistantSets.json).
+Sources: [`GuidanceTools.json`](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/source/shared/Resources/GuidanceTools.json) and
+[`AssistantSets.json`](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/source/shared/Resources/AssistantSets.json).
 
 ## Architecture
 
@@ -97,9 +97,9 @@ flowchart TB
 
 ### Rules
 
-- `strappy_cocoa.c`: To keep the C code portable, this is the only file that 
+- [`strappy_cocoa.c`](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/source/shared/strappy_cocoa.c): To keep the C code portable, this is the only file that
    can use Apple-specific C libraries like CoreFoundation
-- `StrappySession.m`, `FileScanner.m`: To keep C code out of the Objective-C 
+- [`StrappySession.m`](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/source/shared/StrappySession.m), [`FileScanner.m`](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/source/shared/FileScanner.m): To keep C code out of the Objective-C
    code, these files are the only Objective-C files that can import the C 
    "backend"
 - Linux test suite runs in the docker container and tests the C "backend"
@@ -247,21 +247,44 @@ docker compose run --rm make clean test
 
 | Path | Purpose |
 |---|---|
-| `source/shared` | C core, tools, storage, prompts |
-| `source/iOS` | UIKit app and `.deb` packaging |
-| `source/macOS` | AppKit app and quad-fat packaging |
-| `source/linux` | Linux test harnesses |
+| [`source/shared`](https://github.com/jeffreybergier/Strappy-Cocoa/tree/main/source/shared) | C core, tools, storage, prompts |
+| [`source/iOS`](https://github.com/jeffreybergier/Strappy-Cocoa/tree/main/source/iOS) | UIKit app and `.deb` packaging |
+| [`source/macOS`](https://github.com/jeffreybergier/Strappy-Cocoa/tree/main/source/macOS) | AppKit app and quad-fat packaging |
+| [`source/linux`](https://github.com/jeffreybergier/Strappy-Cocoa/tree/main/source/linux) | Linux test harnesses |
 
 Good starting points:
 
-- [`strappy_responses.c`](source/shared/strappy_responses.c): harness loop
-- [`strappy_tools.c`](source/shared/strappy_tools.c): harness tools
-- [`strappy_db.c`](source/shared/strappy_db.c): database storage and retrieval
-- [`AssistantSets.json`](source/shared/Resources/AssistantSets.json): tool definitions
-- [`SystemPrompt.json`](source/shared/Resources/SystemPrompt.json): system prompt definitions
-- [`GuidanceTools.json`](source/shared/Resources/GuidanceTools.json): system prompt definitions
+- [`strappy_responses.c`](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/source/shared/strappy_responses.c): harness loop
+- [`strappy_tools.c`](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/source/shared/strappy_tools.c): harness tools
+- [`strappy_db.c`](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/source/shared/strappy_db.c): database storage and retrieval
+- [`AssistantSets.json`](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/source/shared/Resources/AssistantSets.json): tool definitions
+- [`SystemPrompt.json`](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/source/shared/Resources/SystemPrompt.json): system prompt definitions
+- [`GuidanceTools.json`](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/source/shared/Resources/GuidanceTools.json): system prompt definitions
+
+## Contributing
+
+Sure, I will take contributions as long as you have tested on a real iPhone or
+Mac with a screenshot. Please follow the [code of conduct](CODE_OF_CONDUCT.md).
+
+### Wish List
+
+If you want to contribute, these are the next items I plan to add myself:
+
+- OpenAI OAUTH Support: I want to use my ChatGPT monthly plan in Strappy. This
+  is sort of a gray area I think? So not sure how well this will work out.
+- Remote Access: I want to be able to access Strappy on my iPhone from Strappy
+  on my computer.
+    - This could be done via some sort of CLI on the iPhone that I
+      can SSH into.
+    - Or, this could be done by hosting a 
+      [little web server](https://github.com/jeremycw/httpserver.h) 
+      inside of Strappy 
+- Context Management: Currently there are checkboxes on each round to allow
+  full manual control of context. But I want to add a simple feature where
+  previous prompts have all of their context ignored except the original prompt
+  and the final answer. This should help shrink the context a lot.
 
 ## Status and license
 
 Strappy is experimental personal software, not a hardened product. It is
-[MIT licensed](LICENSE), 100% AI coded and 100% compiled.
+[MIT licensed](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/LICENSE), 100% AI coded and 100% compiled.
