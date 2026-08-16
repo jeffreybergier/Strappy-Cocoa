@@ -282,6 +282,10 @@ If you want to contribute, these are the next items I plan to add myself:
 
 - OpenAI OAUTH Support: I want to use my ChatGPT monthly plan in Strappy. This
   is sort of a gray area I think? So not sure how well this will work out.
+- Improve macOS Coding Agent skill and toolchain: The mac already has a development
+  toolchain in Xcode, but it changes over time. Also I need to be able to 
+  provide AltivecCore and AltivecCocoa to macs (right now the toolchain only supports iPhone)
+- Add arm64 support to the iPhone development toolchain.
 - Remote Access: I want to be able to access Strappy on my iPhone from my computer.
     - This could be done via some sort of CLI on the iPhone that I
       can SSH into.
