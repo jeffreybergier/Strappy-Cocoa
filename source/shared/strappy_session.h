@@ -21,6 +21,25 @@ int strappy_session_configure_process(const char *ca_cert_path,
 int strappy_session_initialize_store(const char *db_path,
                                      char **error_out);
 
+int strappy_session_list_models_matching(
+  const char *db_path,
+  const char *search_text,
+  strappy_model_record_list *list,
+  char **error_out);
+int strappy_session_list_allowed_models(const char *db_path,
+                                        strappy_model_record_list *list,
+                                        char **error_out);
+int strappy_session_get_default_model(const char *db_path,
+                                      char **model_id_out,
+                                      char **error_out);
+int strappy_session_set_default_model(const char *db_path,
+                                      const char *model_id,
+                                      char **error_out);
+int strappy_session_set_model_allowed(const char *db_path,
+                                      const char *model_id,
+                                      int allowed,
+                                      char **error_out);
+
 int strappy_session_list_openrouter_models_matching(
   const char *db_path,
   const char *search_text,

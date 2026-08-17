@@ -388,7 +388,7 @@ static BOOL StrappyContextRoundActionValues(
 {
   NSArray *models;
 
-  models = [StrappySession allowedOpenRouterModelCatalogWithError:nil];
+  models = [StrappySession allowedModelCatalogWithError:nil];
   return (models != nil) ? models : [NSArray array];
 }
 

@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "catalog_revision": 1,
+  "catalog_source": "bundled",
+  "models": [
+    {
+      "provider_id": "openai_chatgpt",
+      "provider_account_id": "openai_chatgpt",
+      "model_id": "openai_chatgpt:gpt-5.3-codex-spark",
+      "wire_model_id": "gpt-5.3-codex-spark",
+      "display_name": "GPT-5.3 Codex Spark",
+      "catalog_active": true,
+      "billing_kind": "chatgpt_plan",
+      "input_modalities": [
+        "text"
+      ],
+      "context_window_tokens": 128000,
+      "max_output_tokens": 128000,
+      "capabilities": {
+        "reasoning": true,
+        "local_functions": true,
+        "hosted_tools": []
+      },
+      "reasoning_levels": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "reasoning_level_overrides": {
+        "minimal": "low"
+      }
+    },
+    {
+      "provider_id": "openai_chatgpt",
+      "provider_account_id": "openai_chatgpt",
+      "model_id": "openai_chatgpt:gpt-5.4",
+      "wire_model_id": "gpt-5.4",
+      "display_name": "GPT-5.4",
+      "catalog_active": true,
+      "billing_kind": "chatgpt_plan",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "context_window_tokens": 272000,
+      "max_output_tokens": 128000,
+      "capabilities": {
+        "reasoning": true,
+        "local_functions": true,
+        "hosted_tools": []
+      },
+      "reasoning_levels": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "reasoning_level_overrides": {
+        "minimal": "low"
+      }
+    },
+    {
+      "provider_id": "openai_chatgpt",
+      "provider_account_id": "openai_chatgpt",
+      "model_id": "openai_chatgpt:gpt-5.4-mini",
+      "wire_model_id": "gpt-5.4-mini",
+      "display_name": "GPT-5.4 mini",
+      "catalog_active": true,
+      "billing_kind": "chatgpt_plan",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "context_window_tokens": 272000,
+      "max_output_tokens": 128000,
+      "capabilities": {
+        "reasoning": true,
+        "local_functions": true,
+        "hosted_tools": []
+      },
+      "reasoning_levels": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "reasoning_level_overrides": {
+        "minimal": "low"
+      }
+    },
+    {
+      "provider_id": "openai_chatgpt",
+      "provider_account_id": "openai_chatgpt",
+      "model_id": "openai_chatgpt:gpt-5.5",
+      "wire_model_id": "gpt-5.5",
+      "display_name": "GPT-5.5",
+      "catalog_active": true,
+      "billing_kind": "chatgpt_plan",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "context_window_tokens": 272000,
+      "max_output_tokens": 128000,
+      "capabilities": {
+        "reasoning": true,
+        "local_functions": true,
+        "hosted_tools": []
+      },
+      "reasoning_levels": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "reasoning_level_overrides": {
+        "minimal": "low"
+      }
+    },
+    {
+      "provider_id": "openai_chatgpt",
+      "provider_account_id": "openai_chatgpt",
+      "model_id": "openai_chatgpt:gpt-5.6-luna",
+      "wire_model_id": "gpt-5.6-luna",
+      "display_name": "GPT-5.6 Luna",
+      "catalog_active": true,
+      "billing_kind": "chatgpt_plan",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "context_window_tokens": 272000,
+      "max_output_tokens": 128000,
+      "capabilities": {
+        "reasoning": true,
+        "local_functions": true,
+        "hosted_tools": []
+      },
+      "reasoning_levels": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "reasoning_level_overrides": {
+        "minimal": "low"
+      }
+    },
+    {
+      "provider_id": "openai_chatgpt",
+      "provider_account_id": "openai_chatgpt",
+      "model_id": "openai_chatgpt:gpt-5.6-sol",
+      "wire_model_id": "gpt-5.6-sol",
+      "display_name": "GPT-5.6 Sol",
+      "catalog_active": true,
+      "billing_kind": "chatgpt_plan",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "context_window_tokens": 272000,
+      "max_output_tokens": 128000,
+      "capabilities": {
+        "reasoning": true,
+        "local_functions": true,
+        "hosted_tools": []
+      },
+      "reasoning_levels": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "reasoning_level_overrides": {
+        "minimal": "low"
+      }
+    },
+    {
+      "provider_id": "openai_chatgpt",
+      "provider_account_id": "openai_chatgpt",
+      "model_id": "openai_chatgpt:gpt-5.6-terra",
+      "wire_model_id": "gpt-5.6-terra",
+      "display_name": "GPT-5.6 Terra",
+      "catalog_active": true,
+      "billing_kind": "chatgpt_plan",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "context_window_tokens": 272000,
+      "max_output_tokens": 128000,
+      "capabilities": {
+        "reasoning": true,
+        "local_functions": true,
+        "hosted_tools": []
+      },
+      "reasoning_levels": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "reasoning_level_overrides": {
+        "minimal": "low"
+      }
+    }
+  ]
+}

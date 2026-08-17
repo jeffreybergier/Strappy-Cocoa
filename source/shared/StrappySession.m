@@ -122,10 +122,9 @@ static NSString *StrappySessionStringFromCString(char *value)
 + (StrappySession *)inFlightSessionForIdentifier:(NSNumber *)identifier;
 + (NSArray *)messagesForSessionIdentifier:(NSNumber *)sessionIdentifier
                                     error:(NSError **)error;
-+ (NSArray *)openRouterModelCatalogFromList:
-    (const strappy_openrouter_model_record_list *)list;
-+ (NSDictionary *)dictionaryFromOpenRouterModelRecord:
-    (const strappy_openrouter_model_record *)record;
++ (NSArray *)modelCatalogFromList:(const strappy_model_record_list *)list;
++ (NSDictionary *)dictionaryFromModelRecord:
+    (const strappy_model_record *)record;
 + (NSDictionary *)dictionaryFromAssistantSetRecord:
     (const strappy_assistant_set_record *)record;
 + (NSDictionary *)dictionaryFromDatabaseStudyStatusRecord:
@@ -1450,10 +1449,13 @@ static BOOL StrappySessionRecordFromOptions(
     nil];
 }
 
-+ (NSDictionary *)dictionaryFromOpenRouterModelRecord:
-    (const strappy_openrouter_model_record *)record
++ (NSDictionary *)dictionaryFromModelRecord:(const strappy_model_record *)record
 {
   NSString *modelId;
+  NSString *providerAccountId;
+  NSString *providerId;
+  NSString *providerAccountName;
+  NSString *wireModelId;
   NSString *canonicalSlug;
   NSString *huggingFaceId;
   NSString *name;
@@ -1486,6 +1488,13 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   modelId = [StrappySession stringFromCStringOrEmpty:record->model_id];
+  providerAccountId =
+    [StrappySession stringFromCStringOrEmpty:record->provider_account_id];
+  providerId = [StrappySession stringFromCStringOrEmpty:record->provider_id];
+  providerAccountName =
+    [StrappySession stringFromCStringOrEmpty:record->provider_account_name];
+  wireModelId =
+    [StrappySession stringFromCStringOrEmpty:record->wire_model_id];
   canonicalSlug =
     [StrappySession stringFromCStringOrEmpty:record->canonical_slug];
   huggingFaceId =
@@ -1536,6 +1545,10 @@ static BOOL StrappySessionRecordFromOptions(
 
   return [NSDictionary dictionaryWithObjectsAndKeys:
     modelId, @"id",
+    providerAccountId, @"provider_account_id",
+    providerId, @"provider_id",
+    providerAccountName, @"provider_account_name",
+    wireModelId, @"wire_model_id",
     canonicalSlug, @"canonical_slug",
     huggingFaceId, @"hugging_face_id",
     name, @"name",
@@ -1771,8 +1784,7 @@ static BOOL StrappySessionRecordFromOptions(
   return YES;
 }
 
-+ (NSArray *)openRouterModelCatalogFromList:
-    (const strappy_openrouter_model_record_list *)list
++ (NSArray *)modelCatalogFromList:(const strappy_model_record_list *)list
 {
   NSMutableArray *models;
   size_t index;
@@ -1784,7 +1796,7 @@ static BOOL StrappySessionRecordFromOptions(
   models = [NSMutableArray arrayWithCapacity:list->count];
   for (index = 0U; index < list->count; index++) {
     NSDictionary *model =
-      [StrappySession dictionaryFromOpenRouterModelRecord:&list->records[index]];
+      [StrappySession dictionaryFromModelRecord:&list->records[index]];
     if (model != nil) {
       [models addObject:model];
     }
@@ -1792,11 +1804,11 @@ static BOOL StrappySessionRecordFromOptions(
   return models;
 }
 
-+ (NSArray *)openRouterModelCatalogMatchingSearchText:(NSString *)searchText
-                                                error:(NSError **)error
++ (NSArray *)modelCatalogMatchingSearchText:(NSString *)searchText
+                                       error:(NSError **)error
 {
   NSString *databasePath;
-  strappy_openrouter_model_record_list list;
+  strappy_model_record_list list;
   NSArray *models;
   char *strappyError;
   const char *searchCString;
@@ -1807,37 +1819,36 @@ static BOOL StrappySessionRecordFromOptions(
     return nil;
   }
 
-  strappy_openrouter_model_record_list_init(&list);
+  strappy_model_record_list_init(&list);
   strappyError = NULL;
   searchCString = ((searchText != nil) && ([searchText length] > 0U)) ?
     [searchText UTF8String] : NULL;
-  if (!strappy_session_list_openrouter_models_matching([databasePath UTF8String],
-                                                  searchCString,
-                                                  &list,
-                                                  &strappyError)) {
+  if (!strappy_session_list_models_matching([databasePath UTF8String],
+                                            searchCString,
+                                            &list,
+                                            &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
     strappy_session_free_string(strappyError);
-    strappy_openrouter_model_record_list_destroy(&list);
+    strappy_model_record_list_destroy(&list);
     return nil;
   }
 
-  models = [StrappySession openRouterModelCatalogFromList:&list];
-  strappy_openrouter_model_record_list_destroy(&list);
+  models = [StrappySession modelCatalogFromList:&list];
+  strappy_model_record_list_destroy(&list);
   return models;
 }
 
-+ (NSArray *)openRouterModelCatalogWithError:(NSError **)error
++ (NSArray *)modelCatalogWithError:(NSError **)error
 {
-  return [StrappySession openRouterModelCatalogMatchingSearchText:nil
-                                                            error:error];
+  return [StrappySession modelCatalogMatchingSearchText:nil error:error];
 }
 
-+ (NSArray *)allowedOpenRouterModelCatalogWithError:(NSError **)error
++ (NSArray *)allowedModelCatalogWithError:(NSError **)error
 {
   NSString *databasePath;
-  strappy_openrouter_model_record_list list;
+  strappy_model_record_list list;
   NSArray *models;
   char *strappyError;
 
@@ -1847,22 +1858,38 @@ static BOOL StrappySessionRecordFromOptions(
     return nil;
   }
 
-  strappy_openrouter_model_record_list_init(&list);
+  strappy_model_record_list_init(&list);
   strappyError = NULL;
-  if (!strappy_session_list_allowed_openrouter_models([databasePath UTF8String],
-                                                 &list,
-                                                 &strappyError)) {
+  if (!strappy_session_list_allowed_models([databasePath UTF8String],
+                                           &list,
+                                           &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
     strappy_session_free_string(strappyError);
-    strappy_openrouter_model_record_list_destroy(&list);
+    strappy_model_record_list_destroy(&list);
     return nil;
   }
 
-  models = [StrappySession openRouterModelCatalogFromList:&list];
-  strappy_openrouter_model_record_list_destroy(&list);
+  models = [StrappySession modelCatalogFromList:&list];
+  strappy_model_record_list_destroy(&list);
   return models;
+}
+
++ (NSArray *)openRouterModelCatalogMatchingSearchText:(NSString *)searchText
+                                                error:(NSError **)error
+{
+  return [StrappySession modelCatalogMatchingSearchText:searchText error:error];
+}
+
++ (NSArray *)openRouterModelCatalogWithError:(NSError **)error
+{
+  return [StrappySession modelCatalogWithError:error];
+}
+
++ (NSArray *)allowedOpenRouterModelCatalogWithError:(NSError **)error
+{
+  return [StrappySession allowedModelCatalogWithError:error];
 }
 
 + (NSArray *)assistantSetCatalog
@@ -1965,7 +1992,7 @@ static BOOL StrappySessionRecordFromOptions(
   return sets;
 }
 
-+ (NSString *)defaultOpenRouterModelIdentifierWithError:(NSError **)error
++ (NSString *)defaultModelIdentifierWithError:(NSError **)error
 {
   NSString *databasePath;
   char *modelId;
@@ -1980,9 +2007,9 @@ static BOOL StrappySessionRecordFromOptions(
 
   modelId = NULL;
   strappyError = NULL;
-  if (!strappy_session_get_default_openrouter_model([databasePath UTF8String],
-                                               &modelId,
-                                               &strappyError)) {
+  if (!strappy_session_get_default_model([databasePath UTF8String],
+                                         &modelId,
+                                         &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
@@ -1998,8 +2025,8 @@ static BOOL StrappySessionRecordFromOptions(
   return result;
 }
 
-+ (BOOL)setDefaultOpenRouterModelIdentifier:(NSString *)modelIdentifier
-                                      error:(NSError **)error
++ (BOOL)setDefaultModelIdentifier:(NSString *)modelIdentifier
+                             error:(NSError **)error
 {
   NSString *databasePath;
   char *strappyError;
@@ -2025,9 +2052,9 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   strappyError = NULL;
-  ok = strappy_session_set_default_openrouter_model([databasePath UTF8String],
-                                               [modelIdentifier UTF8String],
-                                               &strappyError);
+  ok = strappy_session_set_default_model([databasePath UTF8String],
+                                         [modelIdentifier UTF8String],
+                                         &strappyError);
   if (!ok) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
@@ -2044,6 +2071,17 @@ static BOOL StrappySessionRecordFromOptions(
                   modelIdentifier, @"selected_model_id",
                   nil]];
   return YES;
+}
+
++ (NSString *)defaultOpenRouterModelIdentifierWithError:(NSError **)error
+{
+  return [StrappySession defaultModelIdentifierWithError:error];
+}
+
++ (BOOL)setDefaultOpenRouterModelIdentifier:(NSString *)modelIdentifier
+                                      error:(NSError **)error
+{
+  return [StrappySession setDefaultModelIdentifier:modelIdentifier error:error];
 }
 
 + (StrappySessionOptions *)defaultSessionOptionsWithError:(NSError **)error
@@ -2207,9 +2245,9 @@ static BOOL StrappySessionRecordFromOptions(
   return YES;
 }
 
-+ (BOOL)setOpenRouterModelAllowed:(BOOL)allowed
-                forModelIdentifier:(NSString *)modelIdentifier
-                             error:(NSError **)error
++ (BOOL)setModelAllowed:(BOOL)allowed
+     forModelIdentifier:(NSString *)modelIdentifier
+                  error:(NSError **)error
 {
   NSString *databasePath;
   char *strappyError;
@@ -2235,10 +2273,10 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   strappyError = NULL;
-  ok = strappy_session_set_openrouter_model_allowed([databasePath UTF8String],
-                                               [modelIdentifier UTF8String],
-                                               allowed ? 1 : 0,
-                                               &strappyError);
+  ok = strappy_session_set_model_allowed([databasePath UTF8String],
+                                         [modelIdentifier UTF8String],
+                                         allowed ? 1 : 0,
+                                         &strappyError);
   if (!ok) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
@@ -2255,6 +2293,15 @@ static BOOL StrappySessionRecordFromOptions(
                   [NSNumber numberWithBool:(allowed ? YES : NO)], @"allowed",
                   nil]];
   return YES;
+}
+
++ (BOOL)setOpenRouterModelAllowed:(BOOL)allowed
+                forModelIdentifier:(NSString *)modelIdentifier
+                             error:(NSError **)error
+{
+  return [StrappySession setModelAllowed:allowed
+                      forModelIdentifier:modelIdentifier
+                                   error:error];
 }
 
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error
@@ -2330,7 +2377,7 @@ static BOOL StrappySessionRecordFromOptions(
   } else {
     NSArray *models;
 
-    models = [StrappySession openRouterModelCatalogWithError:nil];
+    models = [StrappySession modelCatalogWithError:nil];
     if (models != nil) {
       [result setObject:[NSNumber XP_numberWithUnsignedInteger:[models count]]
                  forKey:@"model_count"];
@@ -2595,7 +2642,7 @@ static BOOL StrappySessionRecordFromOptions(
   }
   strappy_study_database_id_list_destroy(&pending);
 
-  defaultModel = [StrappySession defaultOpenRouterModelIdentifierWithError:error];
+  defaultModel = [StrappySession defaultModelIdentifierWithError:error];
   if (defaultModel == nil) {
     return nil;
   }

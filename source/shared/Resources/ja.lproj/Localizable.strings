@@ -90,6 +90,7 @@
 "https://openrouter.ai/api/v1/responses" = "https://openrouter.ai/api/v1/responses";
 "Paste API token" = "API トークンを貼り付け";
 "Model" = "モデル";
+"Account" = "アカウント";
 "Fetch Models" = "モデルを取得";
 "Refresh the OpenRouter model list." = "OpenRouter のモデル一覧を更新します。";
 "Use" = "使用";

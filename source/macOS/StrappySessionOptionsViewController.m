@@ -869,7 +869,7 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   NSUInteger index;
   NSUInteger validCount;
 
-  models = [StrappySession allowedOpenRouterModelCatalogWithError:nil];
+  models = [StrappySession allowedModelCatalogWithError:nil];
   if (![models isKindOfClass:[NSArray class]]) {
     models = [NSArray array];
   }

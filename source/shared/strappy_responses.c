@@ -1533,6 +1533,9 @@ static char *strappy_responses_build_request_json(
 
 typedef struct strappy_responses_runtime {
   strappy_config config;
+  char *model_id;
+  char *provider_account_id;
+  char *provider_id;
   strappy_assistant_set_profile assistant_set;
   char *system_prompt;
   char *tools_json;
@@ -1550,6 +1553,9 @@ static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
     return;
   }
   strappy_config_init(&runtime->config);
+  runtime->model_id = NULL;
+  runtime->provider_account_id = NULL;
+  runtime->provider_id = NULL;
   strappy_assistant_set_profile_init(&runtime->assistant_set);
   runtime->system_prompt = NULL;
   runtime->tools_json = NULL;
@@ -1568,6 +1574,9 @@ static void strappy_responses_runtime_destroy(
     return;
   }
   strappy_config_destroy(&runtime->config);
+  free(runtime->model_id);
+  free(runtime->provider_account_id);
+  free(runtime->provider_id);
   strappy_assistant_set_profile_destroy(&runtime->assistant_set);
   free(runtime->system_prompt);
   free(runtime->tools_json);
@@ -1758,7 +1767,9 @@ static int strappy_responses_prepare_runtime(
   char **error_out)
 {
   strappy_session_record session;
-  char *model;
+  strappy_model_route_record route;
+  strappy_provider_kind provider;
+  char *provider_endpoint;
   char *assistant_set_id;
   int bash_enabled;
   int ok;
@@ -1772,7 +1783,9 @@ static int strappy_responses_prepare_runtime(
   }
   strappy_responses_runtime_init(runtime);
   strappy_session_record_init(&session);
-  model = NULL;
+  strappy_model_route_record_init(&route);
+  provider = STRAPPY_PROVIDER_KIND_UNKNOWN;
+  provider_endpoint = NULL;
   assistant_set_id = NULL;
 
   ok = strappy_config_load_with_fallback_credentials(
@@ -1809,17 +1822,59 @@ static int strappy_responses_prepare_runtime(
     return 0;
   }
 
-  if (!strappy_db_get_session_model(session_db_path,
-                                    session_id,
-                                    &model,
-                                    error_out) ||
-      !strappy_config_set_api_model(&runtime->config, model, error_out)) {
-    free(model);
+  if (!strappy_db_get_session_model_route(session_db_path,
+                                          session_id,
+                                          &route,
+                                          error_out) ||
+      !strappy_provider_parse(route.provider_id, &provider) ||
+      !strappy_config_set_api_model(&runtime->config,
+                                    route.wire_model_id,
+                                    error_out)) {
+    if ((error_out != NULL) && (*error_out == NULL)) {
+      strappy_set_error(error_out, "Session model provider is not supported.");
+    }
+    strappy_model_route_record_destroy(&route);
     free(assistant_set_id);
     strappy_responses_runtime_destroy(runtime);
     return 0;
   }
-  free(model);
+  runtime->model_id = route.model_id;
+  runtime->provider_account_id = route.provider_account_id;
+  runtime->provider_id = route.provider_id;
+  route.model_id = NULL;
+  route.provider_account_id = NULL;
+  route.provider_id = NULL;
+  strappy_model_route_record_destroy(&route);
+
+  provider_endpoint = strappy_provider_responses_endpoint(
+    provider,
+    runtime->config.api_endpoint,
+    error_out);
+  if (provider_endpoint == NULL) {
+    free(assistant_set_id);
+    strappy_responses_runtime_destroy(runtime);
+    return 0;
+  }
+  free(runtime->config.api_endpoint);
+  runtime->config.api_endpoint = provider_endpoint;
+  provider_endpoint = NULL;
+  runtime->request_url =
+    strappy_client_build_responses_url(runtime->config.api_endpoint);
+  if (runtime->request_url == NULL) {
+    free(assistant_set_id);
+    strappy_set_error(error_out,
+                      "Could not allocate Responses request URL.");
+    strappy_responses_runtime_destroy(runtime);
+    return 0;
+  }
+  if (provider != STRAPPY_PROVIDER_KIND_OPENROUTER) {
+    free(assistant_set_id);
+    strappy_set_error(
+      error_out,
+      "The selected model account does not yet have a request adapter.");
+    strappy_responses_runtime_destroy(runtime);
+    return 0;
+  }
 
   if (!strappy_config_set_guidance_resource_dir(&runtime->config,
                                                 guidance_resource_dir,
@@ -1877,14 +1932,6 @@ static int strappy_responses_prepare_runtime(
       runtime->config.web_provider,
       error_out);
   if (runtime->tools_json == NULL) {
-    strappy_responses_runtime_destroy(runtime);
-    return 0;
-  }
-  runtime->request_url =
-    strappy_client_build_responses_url(runtime->config.api_endpoint);
-  if (runtime->request_url == NULL) {
-    strappy_set_error(error_out,
-                      "Could not allocate Responses request URL.");
     strappy_responses_runtime_destroy(runtime);
     return 0;
   }
@@ -2615,6 +2662,8 @@ static int strappy_responses_send_round(
     begin.session_id = session_id;
     begin.previous_call_id = (previous_call_id_io != NULL) ?
       *previous_call_id_io : 0LL;
+    begin.provider_account_id = runtime->provider_account_id;
+    begin.model_id = runtime->model_id;
     begin.prompt_group_key = prompt_group_key;
     begin.request_kind = (attempt_index == 0L) ? request_kind : "retry";
     begin.round_index = round_index;
@@ -2941,7 +2990,7 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
     return NULL;
   }
   prompt_group_key = strappy_responses_prompt_group_key(session_id);
-  last_model = strappy_string_duplicate(runtime.config.api_model);
+  last_model = strappy_string_duplicate(runtime.model_id);
   if ((prompt_group_key == NULL) || (last_model == NULL) ||
       !strappy_responses_append_initial_items(
         &new_items,
@@ -3063,15 +3112,6 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
     }
 
     last_http_status = http.http_status;
-    if ((analysis.model != NULL) &&
-        !strappy_responses_replace_string(&last_model,
-                                          analysis.model,
-                                          error_out)) {
-      strappy_responses_analysis_destroy(&analysis);
-      strappy_responses_http_result_destroy(&http);
-      break;
-    }
-
     if (analysis.tool_call_count > 0U) {
       strappy_responses_emit_processing_status(callback,
                                                callback_data,

@@ -12,7 +12,7 @@
 /* Session lifecycle, listing, and per-session option persistence. */
 
 #define STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL \
-  "COALESCE(s.model_id, " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL ")"
+  "COALESCE(s.model_id, " STRAPPY_DB_DEFAULT_MODEL_SQL ")"
 #define STRAPPY_DB_SESSION_ASSISTANT_SET_SQL \
   "COALESCE((SELECT a.assistant_set_id FROM session_assistant_sets a " \
   "WHERE a.session_id = s.id), '" STRAPPY_ASSISTANT_SET_DEFAULT "')"
@@ -1246,7 +1246,7 @@ static int strappy_db_copy_default_session_options(
   char **error_out)
 {
   static const char *sql =
-    "SELECT " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL ", "
+    "SELECT " STRAPPY_DB_DEFAULT_MODEL_SQL ", "
     "assistant_set_id, web_provider, web_search_enabled, bash_enabled, "
     "limit_to_one_tool, round_limit, working_directory, "
     "answer_quality_enabled "
@@ -1947,6 +1947,10 @@ int strappy_db_update_session_options(
   if ((actual_changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) {
     allowed = 0;
     if (!strappy_db_model_exists(db, merged.model_id, error_out) ||
+        !strappy_db_model_matches_session_account(db,
+                                                  session_id,
+                                                  merged.model_id,
+                                                  error_out) ||
         !strappy_db_model_is_effectively_allowed(db,
                                                  merged.model_id,
                                                  &allowed,
@@ -1954,7 +1958,7 @@ int strappy_db_update_session_options(
       goto rollback;
     }
     if (!allowed) {
-      strappy_set_error(error_out, "OpenRouter model is not allowed.");
+      strappy_set_error(error_out, "Model is not allowed.");
       goto rollback;
     }
   }
@@ -2212,15 +2216,15 @@ int strappy_db_update_default_session_options(
   if ((actual_changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) {
     ok = strappy_db_upsert_app_setting(
       db,
-      STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_KEY,
+      STRAPPY_DB_DEFAULT_MODEL_KEY,
       merged.model_id,
       "default model",
       error_out);
     if (ok) {
-      ok = strappy_db_set_openrouter_model_allowed_in_db(db,
-                                                        merged.model_id,
-                                                        1,
-                                                        error_out);
+      ok = strappy_db_set_model_allowed_in_db(db,
+                                              merged.model_id,
+                                              1,
+                                              error_out);
     }
   }
   if (ok && ((actual_changed_fields & stored_fields) != 0U)) {

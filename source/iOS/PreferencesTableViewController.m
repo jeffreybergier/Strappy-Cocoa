@@ -480,7 +480,7 @@ enum {
   NSArray *models;
 
   error = nil;
-  models = [StrappySession allowedOpenRouterModelCatalogWithError:&error];
+  models = [StrappySession allowedModelCatalogWithError:&error];
   if (![models isKindOfClass:[NSArray class]]) {
     [self showError:error
               title:NSLocalizedString(@"Could not load models", nil)];

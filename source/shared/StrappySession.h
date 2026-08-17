@@ -121,6 +121,10 @@ enum {
     (NSNumber *)sessionIdentifier error:(NSError **)error;
 + (NSDictionary *)sessionSummaryForSessionIdentifier:(NSNumber *)sessionIdentifier
                                                error:(NSError **)error;
++ (NSArray *)modelCatalogMatchingSearchText:(NSString *)searchText
+                                       error:(NSError **)error;
++ (NSArray *)modelCatalogWithError:(NSError **)error;
++ (NSArray *)allowedModelCatalogWithError:(NSError **)error;
 + (NSArray *)openRouterModelCatalogMatchingSearchText:(NSString *)searchText
                                                 error:(NSError **)error;
 + (NSArray *)openRouterModelCatalogWithError:(NSError **)error;
@@ -130,6 +134,9 @@ enum {
                                   webSearchEnabled:(BOOL)webSearchEnabled
                                              error:(NSError **)error;
 + (NSString *)defaultOpenRouterModelIdentifierWithError:(NSError **)error;
++ (NSString *)defaultModelIdentifierWithError:(NSError **)error;
++ (BOOL)setDefaultModelIdentifier:(NSString *)modelIdentifier
+                             error:(NSError **)error;
 + (BOOL)setDefaultOpenRouterModelIdentifier:(NSString *)modelIdentifier
                                       error:(NSError **)error;
 + (StrappySessionOptions *)defaultSessionOptionsWithError:(NSError **)error;
@@ -139,6 +146,9 @@ enum {
 + (BOOL)setOpenRouterModelAllowed:(BOOL)allowed
                 forModelIdentifier:(NSString *)modelIdentifier
                              error:(NSError **)error;
++ (BOOL)setModelAllowed:(BOOL)allowed
+     forModelIdentifier:(NSString *)modelIdentifier
+                  error:(NSError **)error;
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error;
 + (NSArray *)databaseStudyRowsWithError:(NSError **)error;
 + (BOOL)deleteDatabaseStudyValuesForDatabaseIdentifier:

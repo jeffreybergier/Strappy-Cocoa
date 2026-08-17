@@ -1648,28 +1648,41 @@ static int strappy_db_semantic_begin_response_call(
   long long *call_id_out,
   char **error_out)
 {
-  static const char *insert_model_sql =
-    "INSERT OR IGNORE INTO models "
-    "(id, name, catalog_active, last_seen_at_ms) VALUES (?, ?, 1, ?);";
   static const char *insert_request_sql =
     "INSERT INTO model_requests "
     "(turn_id, previous_request_id, round_index, request_kind, model_id, "
+     "provider_account_id, "
      "instruction_revision_id, toolset_revision_id, input_from_sequence, "
      "input_through_sequence, new_input_from_sequence, max_output_tokens, "
      "temperature_millionths, web_provider, stream_enabled, "
      "reasoning_enabled, reasoning_summary, parallel_tool_calls, "
      "tool_calls_enabled, state, created_at_ms) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, "
      "'running', ?);";
   static const char *update_request_sql =
     "UPDATE model_requests SET input_from_sequence = ?, "
     "input_through_sequence = ?, new_input_from_sequence = ? WHERE id = ?;";
   static const char *insert_attempt_sql =
     "INSERT INTO http_attempts "
-    "(request_id, previous_attempt_id, attempt_index, state, method, endpoint, "
-     "started_at_ms) VALUES (?, ?, ?, 'running', ?, ?, ?);";
+    "(request_id, provider_account_id, previous_attempt_id, attempt_index, "
+     "state, method, endpoint, started_at_ms) "
+    "VALUES (?, ?, ?, ?, 'running', ?, ?, ?);";
+  static const char *bind_session_account_sql =
+    "UPDATE sessions SET "
+      "model_id = CASE WHEN provider_account_id IS NULL "
+        "THEN ?2 ELSE model_id END, "
+      "provider_account_id = COALESCE(provider_account_id, ?1) "
+    "WHERE id = ?3 AND (provider_account_id IS NULL OR "
+      "(provider_account_id = ?1 AND model_id = ?2));";
   static const char *update_session_sql =
     "UPDATE sessions SET updated_at_ms = ? WHERE id = ?;";
+  static const char *model_route_sql =
+    "SELECT m.wire_model_id FROM models m "
+    "WHERE m.id = ? AND m.provider_account_id = ? "
+      "AND m.catalog_active = 1 AND "
+      "(m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL " OR "
+      "EXISTS (SELECT 1 FROM model_preferences mp "
+        "WHERE mp.model_id = m.id AND mp.allowed = 1));";
   sqlite3 *db;
   sqlite3_stmt *stmt;
   cJSON *root;
@@ -1683,7 +1696,7 @@ static int strappy_db_semantic_begin_response_call(
   cJSON *reasoning;
   cJSON *reasoning_summary;
   cJSON *parallel_tool_calls;
-  const char *model_id;
+  const char *wire_model_id;
   const char *summary_text;
   const char *web_provider_name;
   long long now_ms;
@@ -1705,6 +1718,9 @@ static int strappy_db_semantic_begin_response_call(
     *call_id_out = 0LL;
   }
   if ((input == NULL) || (input->session_id <= 0LL) ||
+      (input->provider_account_id == NULL) ||
+      (input->provider_account_id[0] == '\0') ||
+      (input->model_id == NULL) || (input->model_id[0] == '\0') ||
       (input->prompt_group_key == NULL) ||
       (input->prompt_group_key[0] == '\0') ||
       (input->request_kind == NULL) ||
@@ -1746,6 +1762,48 @@ static int strappy_db_semantic_begin_response_call(
   previous_request_id = 0LL;
   instruction_revision_id = 0LL;
   toolset_revision_id = 0LL;
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, bind_session_account_sql, -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt,
+                           1,
+                           input->provider_account_id,
+                           -1,
+                           SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt,
+                           2,
+                           input->model_id,
+                           -1,
+                           SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt,
+                            3,
+                            (sqlite3_int64)input->session_id);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  if ((rc != SQLITE_DONE) || (sqlite3_changes(db) != 1)) {
+    if (rc == SQLITE_DONE) {
+      strappy_set_error(
+        error_out,
+        "This conversation is already bound to a different model account "
+        "or model selection.");
+    } else {
+      strappy_set_formatted_error(error_out,
+                                  "Could not bind session model account: %s",
+                                  sqlite3_errmsg(db));
+    }
+    sqlite3_finalize(stmt);
+    strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
+    strappy_db_release(db);
+    cJSON_Delete(root);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
   if (input->attempt_index > 0L) {
     if ((input->previous_call_id <= 0LL) ||
         !strappy_db_semantic_response_request_id(db,
@@ -1771,8 +1829,8 @@ static int strappy_db_semantic_begin_response_call(
       cJSON_GetObjectItem(reasoning, "summary") : NULL;
     parallel_tool_calls =
       cJSON_GetObjectItem(root, "parallel_tool_calls");
-    model_id = (cJSON_IsString(model) && (model->valuestring != NULL) &&
-                (model->valuestring[0] != '\0')) ?
+    wire_model_id = (cJSON_IsString(model) && (model->valuestring != NULL) &&
+                     (model->valuestring[0] != '\0')) ?
       model->valuestring : STRAPPY_CONFIG_DEFAULT_API_MODEL;
     summary_text = ((reasoning_summary != NULL) &&
                     cJSON_IsString(reasoning_summary) &&
@@ -1825,15 +1883,20 @@ static int strappy_db_semantic_begin_response_call(
       return 0;
     }
     stmt = NULL;
-    rc = sqlite3_prepare_v2(db, insert_model_sql, -1, &stmt, NULL);
+    rc = sqlite3_prepare_v2(db, model_route_sql, -1, &stmt, NULL);
     if ((rc != SQLITE_OK) ||
-        (sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT) != SQLITE_OK) ||
-        (sqlite3_bind_text(stmt, 2, model_id, -1, SQLITE_TRANSIENT) != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)now_ms) != SQLITE_OK) ||
-        (sqlite3_step(stmt) != SQLITE_DONE)) {
-      strappy_set_formatted_error(error_out,
-                                  "Could not retain Responses model: %s",
-                                  sqlite3_errmsg(db));
+        (sqlite3_bind_text(stmt, 1, input->model_id, -1,
+                           SQLITE_TRANSIENT) != SQLITE_OK) ||
+        (sqlite3_bind_text(stmt, 2, input->provider_account_id, -1,
+                           SQLITE_TRANSIENT) != SQLITE_OK) ||
+        (sqlite3_step(stmt) != SQLITE_ROW) ||
+        (sqlite3_column_text(stmt, 0) == NULL) ||
+        (strcmp((const char *)sqlite3_column_text(stmt, 0),
+                wire_model_id) != 0)) {
+      strappy_set_error(
+        error_out,
+        "Responses model is not active and allowed for the selected model "
+        "account.");
       sqlite3_finalize(stmt);
       strappy_db_exec(db, "ROLLBACK;", "Could not roll back Responses call", NULL);
       strappy_db_release(db);
@@ -1854,42 +1917,45 @@ static int strappy_db_semantic_begin_response_call(
                              (sqlite3_int64)input->round_index) == SQLITE_OK) &&
          (sqlite3_bind_text(stmt, 4, input->request_kind, -1,
                             SQLITE_TRANSIENT) == SQLITE_OK) &&
-         (sqlite3_bind_text(stmt, 5, model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+         (sqlite3_bind_text(stmt, 5, input->model_id, -1,
+                            SQLITE_TRANSIENT) == SQLITE_OK) &&
+         (sqlite3_bind_text(stmt, 6, input->provider_account_id, -1,
+                            SQLITE_TRANSIENT) == SQLITE_OK) &&
          ((instruction_revision_id > 0LL) ?
-            (sqlite3_bind_int64(stmt, 6,
-                                (sqlite3_int64)instruction_revision_id) == SQLITE_OK) :
-            (sqlite3_bind_null(stmt, 6) == SQLITE_OK)) &&
-         ((toolset_revision_id > 0LL) ?
             (sqlite3_bind_int64(stmt, 7,
-                                (sqlite3_int64)toolset_revision_id) == SQLITE_OK) :
+                                (sqlite3_int64)instruction_revision_id) == SQLITE_OK) :
             (sqlite3_bind_null(stmt, 7) == SQLITE_OK)) &&
-         (sqlite3_bind_int64(stmt, 8, 1) == SQLITE_OK) &&
-         (sqlite3_bind_int64(stmt, 9, 0) == SQLITE_OK) &&
+         ((toolset_revision_id > 0LL) ?
+            (sqlite3_bind_int64(stmt, 8,
+                                (sqlite3_int64)toolset_revision_id) == SQLITE_OK) :
+            (sqlite3_bind_null(stmt, 8) == SQLITE_OK)) &&
+         (sqlite3_bind_int64(stmt, 9, 1) == SQLITE_OK) &&
+         (sqlite3_bind_int64(stmt, 10, 0) == SQLITE_OK) &&
          (cJSON_IsNumber(max_output_tokens) ?
-            (sqlite3_bind_int64(stmt, 10,
-                                (sqlite3_int64)max_output_tokens->valuedouble) == SQLITE_OK) :
-            (sqlite3_bind_null(stmt, 10) == SQLITE_OK)) &&
-         (cJSON_IsNumber(temperature) ?
             (sqlite3_bind_int64(stmt, 11,
+                                (sqlite3_int64)max_output_tokens->valuedouble) == SQLITE_OK) :
+            (sqlite3_bind_null(stmt, 11) == SQLITE_OK)) &&
+         (cJSON_IsNumber(temperature) ?
+            (sqlite3_bind_int64(stmt, 12,
                                 (sqlite3_int64)(temperature->valuedouble *
                                                 1000000.0)) == SQLITE_OK) :
-            (sqlite3_bind_null(stmt, 11) == SQLITE_OK)) &&
+            (sqlite3_bind_null(stmt, 12) == SQLITE_OK)) &&
          (sqlite3_bind_text(stmt,
-                            12,
+                            13,
                             web_provider_name,
                             -1,
                             SQLITE_TRANSIENT) == SQLITE_OK) &&
-         (sqlite3_bind_int(stmt, 13,
-                           cJSON_IsTrue(stream) ? 1 : 0) == SQLITE_OK) &&
          (sqlite3_bind_int(stmt, 14,
+                           cJSON_IsTrue(stream) ? 1 : 0) == SQLITE_OK) &&
+         (sqlite3_bind_int(stmt, 15,
                            (reasoning == NULL || cJSON_IsNull(reasoning)) ? 0 : 1) == SQLITE_OK) &&
-         strappy_db_bind_nullable_text_value(stmt, 15, summary_text) &&
-         (sqlite3_bind_int(stmt, 16,
-                           cJSON_IsFalse(parallel_tool_calls) ? 0 : 1) == SQLITE_OK) &&
+         strappy_db_bind_nullable_text_value(stmt, 16, summary_text) &&
          (sqlite3_bind_int(stmt, 17,
+                           cJSON_IsFalse(parallel_tool_calls) ? 0 : 1) == SQLITE_OK) &&
+         (sqlite3_bind_int(stmt, 18,
                            cJSON_IsArray(tools) &&
                            (cJSON_GetArraySize(tools) > 0) ? 1 : 0) == SQLITE_OK) &&
-         (sqlite3_bind_int64(stmt, 18, (sqlite3_int64)now_ms) == SQLITE_OK);
+         (sqlite3_bind_int64(stmt, 19, (sqlite3_int64)now_ms) == SQLITE_OK);
     if (!ok || (sqlite3_step(stmt) != SQLITE_DONE)) {
       strappy_set_formatted_error(error_out,
                                   "Could not save semantic Responses request: %s",
@@ -2021,17 +2087,19 @@ static int strappy_db_semantic_begin_response_call(
   rc = sqlite3_prepare_v2(db, insert_attempt_sql, -1, &stmt, NULL);
   ok = (rc == SQLITE_OK) &&
        (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)request_id) == SQLITE_OK) &&
+       (sqlite3_bind_text(stmt, 2, input->provider_account_id, -1,
+                          SQLITE_TRANSIENT) == SQLITE_OK) &&
        ((input->previous_call_id > 0LL) ?
-          (sqlite3_bind_int64(stmt, 2,
+          (sqlite3_bind_int64(stmt, 3,
                               (sqlite3_int64)input->previous_call_id) == SQLITE_OK) :
-          (sqlite3_bind_null(stmt, 2) == SQLITE_OK)) &&
-       (sqlite3_bind_int64(stmt, 3,
+          (sqlite3_bind_null(stmt, 3) == SQLITE_OK)) &&
+       (sqlite3_bind_int64(stmt, 4,
                            (sqlite3_int64)input->attempt_index) == SQLITE_OK) &&
-       (sqlite3_bind_text(stmt, 4, input->request_method, -1,
+       (sqlite3_bind_text(stmt, 5, input->request_method, -1,
                           SQLITE_TRANSIENT) == SQLITE_OK) &&
-       (sqlite3_bind_text(stmt, 5, input->request_url, -1,
+       (sqlite3_bind_text(stmt, 6, input->request_url, -1,
                           SQLITE_TRANSIENT) == SQLITE_OK) &&
-       (sqlite3_bind_int64(stmt, 6, (sqlite3_int64)now_ms) == SQLITE_OK);
+       (sqlite3_bind_int64(stmt, 7, (sqlite3_int64)now_ms) == SQLITE_OK);
   if (!ok || (sqlite3_step(stmt) != SQLITE_DONE)) {
     strappy_set_formatted_error(error_out,
                                 "Could not save Responses HTTP attempt: %s",
@@ -4176,23 +4244,11 @@ int strappy_db_update_response_session_summary(
   }
   now_ms = strappy_db_now_ms();
   if ((model != NULL) && (model[0] != '\0')) {
-    stmt = NULL;
-    rc = sqlite3_prepare_v2(
-      db,
-      "INSERT OR IGNORE INTO models "
-      "(id, name, catalog_active, last_seen_at_ms) VALUES (?, ?, 1, ?);",
-      -1,
-      &stmt,
-      NULL);
-    if ((rc != SQLITE_OK) ||
-        (sqlite3_bind_text(stmt, 1, model, -1, SQLITE_TRANSIENT) != SQLITE_OK) ||
-        (sqlite3_bind_text(stmt, 2, model, -1, SQLITE_TRANSIENT) != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)now_ms) != SQLITE_OK) ||
-        (sqlite3_step(stmt) != SQLITE_DONE)) {
-      strappy_set_formatted_error(error_out,
-                                  "Could not retain session model: %s",
-                                  sqlite3_errmsg(db));
-      sqlite3_finalize(stmt);
+    if (!strappy_db_model_exists(db, model, error_out) ||
+        !strappy_db_model_matches_session_account(db,
+                                                  session_id,
+                                                  model,
+                                                  error_out)) {
       strappy_db_exec(db,
                       "ROLLBACK;",
                       "Could not roll back Responses session finalization",
@@ -4200,7 +4256,6 @@ int strappy_db_update_response_session_summary(
       strappy_db_release(db);
       return 0;
     }
-    sqlite3_finalize(stmt);
   }
   stmt = NULL;
   rc = sqlite3_prepare_v2(

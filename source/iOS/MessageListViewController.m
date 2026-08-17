@@ -824,7 +824,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 {
   NSArray *models;
 
-  models = [StrappySession allowedOpenRouterModelCatalogWithError:nil];
+  models = [StrappySession allowedModelCatalogWithError:nil];
   return [models isKindOfClass:[NSArray class]] ? models : [NSArray array];
 }
 

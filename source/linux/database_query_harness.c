@@ -489,7 +489,8 @@ static int harness_run_fresh_catalog_schema_tests(
          harness_expect_catalog_journal_mode(context->catalog_path, "wal") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
-           "SELECT id, name, model_id, created_at_ms, updated_at_ms "
+           "SELECT id, name, model_id, provider_account_id, "
+           "created_at_ms, updated_at_ms "
            "FROM sessions LIMIT 0;",
            "sessions columns") &&
          harness_expect_catalog_sql_ok(
@@ -570,7 +571,8 @@ static int harness_run_fresh_catalog_schema_tests(
          harness_expect_catalog_sql_ok(
            context->catalog_path,
            "SELECT id, turn_id, previous_request_id, round_index, "
-           "request_kind, model_id, instruction_revision_id, "
+           "request_kind, model_id, provider_account_id, "
+           "instruction_revision_id, "
            "toolset_revision_id, input_from_sequence, "
            "input_through_sequence, new_input_from_sequence, "
            "parallel_tool_calls, state, wall_duration_ms "
@@ -592,7 +594,8 @@ static int harness_run_fresh_catalog_schema_tests(
          harness_expect_catalog_sql_ok(
            context->catalog_path,
            "SELECT id, request_id, previous_attempt_id, attempt_index, "
-           "state, method, endpoint, started_at_ms, completed_at_ms, "
+           "provider_account_id, state, method, endpoint, started_at_ms, "
+           "completed_at_ms, "
            "http_status, request_bytes, response_bytes, total_us "
            "FROM http_attempts LIMIT 0;",
            "http_attempts columns") &&
@@ -656,11 +659,24 @@ static int harness_run_fresh_catalog_schema_tests(
            "database catalog columns") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
-           "SELECT id, canonical_slug, hugging_face_id, name, description, "
+           "SELECT id, provider_account_id, wire_model_id, canonical_slug, "
+           "hugging_face_id, name, description, "
            "context_length, created_at_s, architecture_modality, "
            "architecture_tokenizer, architecture_instruct_type, "
            "catalog_active, last_seen_at_ms FROM models LIMIT 0;",
            "models columns") &&
+         harness_expect_catalog_sql_ok(
+           context->catalog_path,
+           "SELECT id, provider_id, display_name, created_at_ms, updated_at_ms "
+           "FROM provider_accounts LIMIT 0;",
+           "provider account columns") &&
+         harness_expect_catalog_integer(
+           context->catalog_path,
+           "SELECT COUNT(*) FROM provider_accounts WHERE "
+             "(id = 'openrouter' AND provider_id = 'openrouter') OR "
+             "(id = 'openai_chatgpt' AND provider_id = 'openai_chatgpt');",
+           2LL,
+           "built-in provider account count") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
            "SELECT id, assistant_set_id, kind, subject, predicate, value, "
@@ -697,7 +713,65 @@ static int harness_run_fresh_catalog_schema_tests(
              "'openrouter_models','helper_user_info',"
              "'helper_database_info');",
            0LL,
-           "legacy table count");
+         "legacy table count");
+}
+
+static int harness_run_provider_account_reset_test(
+  const harness_context *context)
+{
+  char path[1200];
+  sqlite3 *db;
+  char *error;
+  int initialized;
+  int ok;
+
+  if ((context == NULL) ||
+      !harness_join_path(path,
+                         sizeof(path),
+                         context->temp_dir,
+                         "legacy-provider-schema.sqlite")) {
+    return 0;
+  }
+  harness_unlink_sqlite_files(path);
+  db = NULL;
+  if (sqlite3_open(path, &db) != SQLITE_OK) {
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    return 0;
+  }
+  ok = harness_exec_sql(
+    db,
+    "CREATE TABLE schema_metadata ("
+      "id INTEGER PRIMARY KEY, schema_name TEXT NOT NULL, "
+      "created_at_ms INTEGER NOT NULL);"
+    "INSERT INTO schema_metadata VALUES (1, 'semantic-v1', 1);"
+    "CREATE TABLE models (id TEXT PRIMARY KEY, name TEXT NOT NULL);"
+    "PRAGMA user_version = 1;");
+  sqlite3_close(db);
+  if (!ok) {
+    harness_unlink_sqlite_files(path);
+    return 0;
+  }
+
+  error = NULL;
+  initialized = strappy_db_initialize(path, &error);
+  ok = !initialized && (error != NULL) &&
+    (strstr(error, "no migration is performed") != NULL) &&
+    harness_expect_catalog_integer(
+      path,
+      "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' "
+      "AND name = 'provider_accounts';",
+      0LL,
+      "provider-account reset leaves legacy schema unconverted");
+  if (!ok) {
+    fprintf(stderr,
+            "Legacy provider schema was not rejected cleanly: %s\n",
+            (error != NULL) ? error : "unexpected initialization result");
+  }
+  strappy_free_string(error);
+  harness_unlink_sqlite_files(path);
+  return ok;
 }
 
 static int harness_create_user_database(const char *database_path)
@@ -7849,6 +7923,7 @@ static int harness_study_append_round(
 {
   strappy_response_call_begin_input begin;
   strappy_response_call_finish_input finish;
+  strappy_model_route_record route;
   cJSON *request;
   cJSON *response;
   cJSON *request_items_copy;
@@ -7865,13 +7940,24 @@ static int harness_study_append_round(
     return 0;
   }
 
+  strappy_model_route_record_init(&route);
+  if (!strappy_db_get_session_model_route(catalog_path,
+                                          session_id,
+                                          &route,
+                                          error_out)) {
+    strappy_model_route_record_destroy(&route);
+    return 0;
+  }
+
   request = cJSON_CreateObject();
   response = cJSON_CreateObject();
   request_items_copy = cJSON_Duplicate(request_items, 1);
   response_items_copy = cJSON_Duplicate(response_items, 1);
   if ((request == NULL) || (response == NULL) ||
       (request_items_copy == NULL) || (response_items_copy == NULL) ||
-      (cJSON_AddStringToObject(request, "model", "test/model") == NULL) ||
+      (cJSON_AddStringToObject(request,
+                               "model",
+                               route.wire_model_id) == NULL) ||
       (cJSON_AddFalseToObject(request, "stream") == NULL) ||
       (cJSON_AddFalseToObject(request, "store") == NULL) ||
       !cJSON_AddItemToObject(request, "input", request_items_copy)) {
@@ -7879,6 +7965,7 @@ static int harness_study_append_round(
     cJSON_Delete(response_items_copy);
     cJSON_Delete(request);
     cJSON_Delete(response);
+    strappy_model_route_record_destroy(&route);
     return 0;
   }
   request_items_copy = NULL;
@@ -7891,6 +7978,7 @@ static int harness_study_append_round(
     cJSON_Delete(response_items_copy);
     cJSON_Delete(request);
     cJSON_Delete(response);
+    strappy_model_route_record_destroy(&route);
     return 0;
   }
   response_items_copy = NULL;
@@ -7901,12 +7989,15 @@ static int harness_study_append_round(
   if ((request_json == NULL) || (response_json == NULL)) {
     free(request_json);
     free(response_json);
+    strappy_model_route_record_destroy(&route);
     return 0;
   }
 
   memset(&begin, 0, sizeof(begin));
   begin.session_id = session_id;
   begin.previous_call_id = previous_call_id;
+  begin.provider_account_id = route.provider_account_id;
+  begin.model_id = route.model_id;
   begin.prompt_group_key = prompt_group_key;
   begin.request_kind = request_kind;
   begin.round_index = round_index;
@@ -7941,6 +8032,7 @@ static int harness_study_append_round(
   }
   free(request_json);
   free(response_json);
+  strappy_model_route_record_destroy(&route);
   if (ok && (call_id_out != NULL)) {
     *call_id_out = call_id;
   }
@@ -9524,6 +9616,10 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
 static int harness_run_openrouter_model_catalog_tests(
   const harness_context *context)
 {
+  static const char *gemma_model_id =
+    STRAPPY_PROVIDER_ACCOUNT_OPENROUTER ":google/gemma-4-31b-it";
+  static const char *openai_model_id =
+    STRAPPY_PROVIDER_ACCOUNT_OPENROUTER ":openai/gpt-4.1-mini";
   static const char *models_json =
     "{"
     "\"data\":["
@@ -9579,7 +9675,7 @@ static int harness_run_openrouter_model_catalog_tests(
     "}"
     "]"
     "}";
-  strappy_openrouter_model_record_list list;
+  strappy_model_record_list list;
   strappy_session_record session_list_record;
   strappy_session_options default_options;
   strappy_session_options saved_default_options;
@@ -9611,13 +9707,13 @@ static int harness_run_openrouter_model_catalog_tests(
     return 0;
   }
 
-  strappy_openrouter_model_record_list_init(&list);
-  if (!strappy_db_list_openrouter_models(context->catalog_path, &list, &error)) {
+  strappy_model_record_list_init(&list);
+  if (!strappy_db_list_models(context->catalog_path, &list, &error)) {
     fprintf(stderr,
             "Could not list OpenRouter models: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
-    strappy_openrouter_model_record_list_destroy(&list);
+    strappy_model_record_list_destroy(&list);
     return 0;
   }
 
@@ -9625,15 +9721,23 @@ static int harness_run_openrouter_model_catalog_tests(
   found_gemma = 0;
   found_openai = 0;
   for (index = 0U; index < list.count; index++) {
-    strappy_openrouter_model_record *record;
+    strappy_model_record *record;
 
     record = &list.records[index];
     if ((record->model_id != NULL) &&
-        (strcmp(record->model_id, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0)) {
-      found_builtin_default = record->selected && record->allowed;
+        (strcmp(record->model_id,
+                STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER) == 0)) {
+      found_builtin_default = record->selected && record->allowed &&
+        (record->wire_model_id != NULL) &&
+        (strcmp(record->wire_model_id, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0) &&
+        (record->provider_account_id != NULL) &&
+        (strcmp(record->provider_account_id,
+                STRAPPY_PROVIDER_ACCOUNT_OPENROUTER) == 0) &&
+        (record->provider_id != NULL) &&
+        (strcmp(record->provider_id, STRAPPY_PROVIDER_OPENROUTER) == 0);
     }
     if ((record->model_id != NULL) &&
-        (strcmp(record->model_id, "google/gemma-4-31b-it") == 0)) {
+        (strcmp(record->model_id, gemma_model_id) == 0)) {
       found_gemma =
         (record->name != NULL) &&
         (strcmp(record->name, "Gemma 4 31B IT") == 0) &&
@@ -9652,12 +9756,13 @@ static int harness_run_openrouter_model_catalog_tests(
         (record->raw_json == NULL);
     }
     if ((record->model_id != NULL) &&
-        (strcmp(record->model_id, "openai/gpt-4.1-mini") == 0)) {
-      found_openai = 1;
+        (strcmp(record->model_id, openai_model_id) == 0)) {
+      found_openai = (record->wire_model_id != NULL) &&
+        (strcmp(record->wire_model_id, "openai/gpt-4.1-mini") == 0);
     }
   }
   ok = (list.count == 3U) && found_builtin_default && found_gemma && found_openai;
-  strappy_openrouter_model_record_list_destroy(&list);
+  strappy_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "OpenRouter model rows did not match expected values.\n");
     return 0;
@@ -9665,9 +9770,9 @@ static int harness_run_openrouter_model_catalog_tests(
 
   default_model = NULL;
   error = NULL;
-  if (!strappy_db_get_default_openrouter_model(context->catalog_path,
-                                               &default_model,
-                                               &error)) {
+  if (!strappy_db_get_default_model(context->catalog_path,
+                                    &default_model,
+                                    &error)) {
     fprintf(stderr,
             "Could not get default OpenRouter model: %s\n",
             (error != NULL) ? error : "unknown");
@@ -9675,7 +9780,7 @@ static int harness_run_openrouter_model_catalog_tests(
     return 0;
   }
   ok = (default_model != NULL) &&
-       (strcmp(default_model, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0);
+       (strcmp(default_model, STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER) == 0);
   strappy_free_string(default_model);
   if (!ok) {
     fprintf(stderr, "Built-in OpenRouter default model did not persist.\n");
@@ -9683,108 +9788,107 @@ static int harness_run_openrouter_model_catalog_tests(
   }
 
   error = NULL;
-  strappy_openrouter_model_record_list_init(&list);
-  if (!strappy_db_list_allowed_openrouter_models(context->catalog_path,
-                                                 &list,
-                                                 &error)) {
+  strappy_model_record_list_init(&list);
+  if (!strappy_db_list_allowed_models(context->catalog_path, &list, &error)) {
     fprintf(stderr,
             "Could not list allowed OpenRouter models: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
-    strappy_openrouter_model_record_list_destroy(&list);
+    strappy_model_record_list_destroy(&list);
     return 0;
   }
   ok = (list.count == 1U) &&
        (list.records[0].model_id != NULL) &&
-       (strcmp(list.records[0].model_id, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0) &&
+       (strcmp(list.records[0].model_id,
+               STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER) == 0) &&
        list.records[0].allowed;
-  strappy_openrouter_model_record_list_destroy(&list);
+  strappy_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "Built-in OpenRouter default was not the only allowed model.\n");
     return 0;
   }
 
   error = NULL;
-  strappy_openrouter_model_record_list_init(&list);
-  if (!strappy_db_list_openrouter_models_matching(context->catalog_path,
-                                                  "alloy",
-                                                  &list,
-                                                  &error)) {
+  strappy_model_record_list_init(&list);
+  if (!strappy_db_list_models_matching(context->catalog_path,
+                                       "alloy",
+                                       &list,
+                                       &error)) {
     fprintf(stderr,
             "Could not filter OpenRouter models: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
-    strappy_openrouter_model_record_list_destroy(&list);
+    strappy_model_record_list_destroy(&list);
     return 0;
   }
   ok = (list.count == 1U) &&
        (list.records[0].model_id != NULL) &&
-       (strcmp(list.records[0].model_id, "google/gemma-4-31b-it") == 0);
-  strappy_openrouter_model_record_list_destroy(&list);
+       (strcmp(list.records[0].model_id, gemma_model_id) == 0);
+  strappy_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "OpenRouter model filtered list did not match expected values.\n");
     return 0;
   }
 
   error = NULL;
-  strappy_openrouter_model_record_list_init(&list);
-  if (!strappy_db_list_openrouter_models_matching(context->catalog_path,
-                                                  "GPT 4.1 Mini",
-                                                  &list,
-                                                  &error)) {
+  strappy_model_record_list_init(&list);
+  if (!strappy_db_list_models_matching(context->catalog_path,
+                                       "GPT 4.1 Mini",
+                                       &list,
+                                       &error)) {
     fprintf(stderr,
             "Could not filter OpenRouter models by name: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
-    strappy_openrouter_model_record_list_destroy(&list);
+    strappy_model_record_list_destroy(&list);
     return 0;
   }
   ok = (list.count == 1U) &&
        (list.records[0].model_id != NULL) &&
-       (strcmp(list.records[0].model_id, "openai/gpt-4.1-mini") == 0);
-  strappy_openrouter_model_record_list_destroy(&list);
+       (strcmp(list.records[0].model_id, openai_model_id) == 0);
+  strappy_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "OpenRouter model name filter did not match expected values.\n");
     return 0;
   }
 
   error = NULL;
-  strappy_openrouter_model_record_list_init(&list);
-  if (!strappy_db_list_openrouter_models_matching(context->catalog_path,
-                                                  "openai/gpt-4.1-mini",
-                                                  &list,
-                                                  &error)) {
+  strappy_model_record_list_init(&list);
+  if (!strappy_db_list_models_matching(context->catalog_path,
+                                       "openai/gpt-4.1-mini",
+                                       &list,
+                                       &error)) {
     fprintf(stderr,
             "Could not filter OpenRouter models by id: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
-    strappy_openrouter_model_record_list_destroy(&list);
+    strappy_model_record_list_destroy(&list);
     return 0;
   }
   ok = (list.count == 1U) &&
        (list.records[0].model_id != NULL) &&
-       (strcmp(list.records[0].model_id, "openai/gpt-4.1-mini") == 0);
-  strappy_openrouter_model_record_list_destroy(&list);
+       (strcmp(list.records[0].model_id, openai_model_id) == 0);
+  strappy_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "OpenRouter model id filter did not match expected values.\n");
     return 0;
   }
 
   error = NULL;
-  strappy_openrouter_model_record_list_init(&list);
-  if (!strappy_db_list_openrouter_models_matching(context->catalog_path,
-                                                  "not-a-model",
-                                                  &list,
-                                                  &error)) {
+  strappy_model_record_list_init(&list);
+  if (!strappy_db_list_models_matching(context->catalog_path,
+                                       "not-a-model",
+                                       &list,
+                                       &error)) {
     fprintf(stderr,
             "Could not filter OpenRouter models with no matches: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
-    strappy_openrouter_model_record_list_destroy(&list);
+    strappy_model_record_list_destroy(&list);
     return 0;
   }
   ok = (list.count == 0U);
-  strappy_openrouter_model_record_list_destroy(&list);
+  strappy_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "OpenRouter model filtered list should have been empty.\n");
     return 0;
@@ -9793,21 +9897,21 @@ static int harness_run_openrouter_model_catalog_tests(
   if (!harness_expect_catalog_integer(
         context->catalog_path,
         "SELECT COUNT(*) FROM model_features "
-        "WHERE model_id = 'openai/gpt-4.1-mini' "
+        "WHERE model_id = 'openrouter:openai/gpt-4.1-mini' "
         "AND feature_kind = 'input_modality' AND feature_value = 'image';",
         1LL,
         "OpenRouter input modality count") ||
       !harness_expect_catalog_integer(
         context->catalog_path,
         "SELECT COUNT(*) FROM model_features "
-        "WHERE model_id = 'google/gemma-4-31b-it' "
+        "WHERE model_id = 'openrouter:google/gemma-4-31b-it' "
         "AND feature_kind = 'parameter' AND feature_value = 'tools';",
         1LL,
         "OpenRouter supported parameter count") ||
       !harness_expect_catalog_integer(
         context->catalog_path,
         "SELECT COUNT(*) FROM model_features "
-        "WHERE model_id = 'google/gemma-4-31b-it' "
+        "WHERE model_id = 'openrouter:google/gemma-4-31b-it' "
         "AND feature_kind = 'voice' AND feature_value = 'alloy';",
         1LL,
         "OpenRouter supported voice count")) {
@@ -9833,7 +9937,7 @@ static int harness_run_openrouter_model_catalog_tests(
     return 0;
   }
   free(default_options.model_id);
-  default_options.model_id = strdup("openai/gpt-4.1-mini");
+  default_options.model_id = strdup(openai_model_id);
   actual_changed_fields = 0U;
   if ((default_options.model_id == NULL) ||
       !strappy_db_update_default_session_options(
@@ -9846,7 +9950,7 @@ static int harness_run_openrouter_model_catalog_tests(
         &error) ||
       (actual_changed_fields != STRAPPY_SESSION_OPTION_MODEL) ||
       (saved_default_options.model_id == NULL) ||
-      (strcmp(saved_default_options.model_id, "openai/gpt-4.1-mini") != 0)) {
+      (strcmp(saved_default_options.model_id, openai_model_id) != 0)) {
     fprintf(stderr,
             "Could not set the model through default session options: %s\n",
             (error != NULL) ? error : "snapshot mismatch");
@@ -9859,9 +9963,9 @@ static int harness_run_openrouter_model_catalog_tests(
   strappy_session_options_destroy(&default_options);
 
   default_model = NULL;
-  if (!strappy_db_get_default_openrouter_model(context->catalog_path,
-                                               &default_model,
-                                               &error)) {
+  if (!strappy_db_get_default_model(context->catalog_path,
+                                    &default_model,
+                                    &error)) {
     fprintf(stderr,
             "Could not get default OpenRouter model after update: %s\n",
             (error != NULL) ? error : "unknown");
@@ -9870,7 +9974,7 @@ static int harness_run_openrouter_model_catalog_tests(
   }
 
   ok = (default_model != NULL) &&
-       (strcmp(default_model, "openai/gpt-4.1-mini") == 0);
+       (strcmp(default_model, openai_model_id) == 0);
   strappy_free_string(default_model);
   if (!ok) {
     fprintf(stderr, "Default OpenRouter model did not persist.\n");
@@ -9878,63 +9982,61 @@ static int harness_run_openrouter_model_catalog_tests(
   }
 
   error = NULL;
-  if (strappy_db_set_openrouter_model_allowed(context->catalog_path,
-                                              "openai/gpt-4.1-mini",
-                                              0,
-                                              &error)) {
+  if (strappy_db_set_model_allowed(context->catalog_path,
+                                   openai_model_id,
+                                   0,
+                                   &error)) {
     fprintf(stderr, "Default OpenRouter model should not be removable.\n");
     return 0;
   }
   strappy_free_string(error);
   error = NULL;
 
-  strappy_openrouter_model_record_list_init(&list);
-  if (!strappy_db_list_openrouter_models(context->catalog_path, &list, &error)) {
+  strappy_model_record_list_init(&list);
+  if (!strappy_db_list_models(context->catalog_path, &list, &error)) {
     fprintf(stderr,
             "Could not list selected OpenRouter models: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
-    strappy_openrouter_model_record_list_destroy(&list);
+    strappy_model_record_list_destroy(&list);
     return 0;
   }
 
   ok = (list.count == 3U) &&
        (list.records[0].model_id != NULL) &&
-       (strcmp(list.records[0].model_id, "openai/gpt-4.1-mini") == 0) &&
+       (strcmp(list.records[0].model_id, openai_model_id) == 0) &&
        list.records[0].selected &&
        list.records[0].allowed;
-  strappy_openrouter_model_record_list_destroy(&list);
+  strappy_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "Default OpenRouter model was not listed first.\n");
     return 0;
   }
 
   error = NULL;
-  strappy_openrouter_model_record_list_init(&list);
-  if (!strappy_db_list_allowed_openrouter_models(context->catalog_path,
-                                                 &list,
-                                                 &error)) {
+  strappy_model_record_list_init(&list);
+  if (!strappy_db_list_allowed_models(context->catalog_path, &list, &error)) {
     fprintf(stderr,
             "Could not list updated allowed OpenRouter models: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
-    strappy_openrouter_model_record_list_destroy(&list);
+    strappy_model_record_list_destroy(&list);
     return 0;
   }
   ok = (list.count == 1U) &&
        (list.records[0].model_id != NULL) &&
-       (strcmp(list.records[0].model_id, "openai/gpt-4.1-mini") == 0);
-  strappy_openrouter_model_record_list_destroy(&list);
+       (strcmp(list.records[0].model_id, openai_model_id) == 0);
+  strappy_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "Default OpenRouter model was not the only allowed model.\n");
     return 0;
   }
 
   error = NULL;
-  if (!strappy_db_set_openrouter_model_allowed(context->catalog_path,
-                                               "google/gemma-4-31b-it",
-                                               1,
-                                               &error)) {
+  if (!strappy_db_set_model_allowed(context->catalog_path,
+                                    gemma_model_id,
+                                    1,
+                                    &error)) {
     fprintf(stderr,
             "Could not allow OpenRouter model: %s\n",
             (error != NULL) ? error : "unknown");
@@ -9943,31 +10045,29 @@ static int harness_run_openrouter_model_catalog_tests(
   }
 
   error = NULL;
-  strappy_openrouter_model_record_list_init(&list);
-  if (!strappy_db_list_allowed_openrouter_models(context->catalog_path,
-                                                 &list,
-                                                 &error)) {
+  strappy_model_record_list_init(&list);
+  if (!strappy_db_list_allowed_models(context->catalog_path, &list, &error)) {
     fprintf(stderr,
             "Could not list allowed OpenRouter models after allow: %s\n",
             (error != NULL) ? error : "unknown");
     strappy_free_string(error);
-    strappy_openrouter_model_record_list_destroy(&list);
+    strappy_model_record_list_destroy(&list);
     return 0;
   }
   found_gemma = 0;
   found_openai = 0;
   for (index = 0U; index < list.count; index++) {
     if ((list.records[index].model_id != NULL) &&
-        (strcmp(list.records[index].model_id, "google/gemma-4-31b-it") == 0)) {
+        (strcmp(list.records[index].model_id, gemma_model_id) == 0)) {
       found_gemma = 1;
     }
     if ((list.records[index].model_id != NULL) &&
-        (strcmp(list.records[index].model_id, "openai/gpt-4.1-mini") == 0)) {
+        (strcmp(list.records[index].model_id, openai_model_id) == 0)) {
       found_openai = 1;
     }
   }
   ok = (list.count == 2U) && found_gemma && found_openai;
-  strappy_openrouter_model_record_list_destroy(&list);
+  strappy_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "Allowed OpenRouter models did not match expected values.\n");
     return 0;
@@ -9995,7 +10095,7 @@ static int harness_run_openrouter_model_catalog_tests(
     return 0;
   }
   ok = (session_model != NULL) &&
-       (strcmp(session_model, "openai/gpt-4.1-mini") == 0);
+       (strcmp(session_model, openai_model_id) == 0);
   strappy_free_string(session_model);
   if (!ok) {
     fprintf(stderr, "New session did not copy default OpenRouter model.\n");
@@ -10021,7 +10121,7 @@ static int harness_run_openrouter_model_catalog_tests(
        (session_list_record.response != NULL) &&
        (strcmp(session_list_record.response, "") == 0) &&
        (session_list_record.model != NULL) &&
-       (strcmp(session_list_record.model, "openai/gpt-4.1-mini") == 0) &&
+       (strcmp(session_list_record.model, openai_model_id) == 0) &&
        (session_list_record.model_name != NULL) &&
        (strcmp(session_list_record.model_name, "GPT 4.1 Mini") == 0) &&
        (session_list_record.last_activity_at != NULL) &&
@@ -10036,7 +10136,7 @@ static int harness_run_openrouter_model_catalog_tests(
   error = NULL;
   if (!strappy_db_update_session_model(context->catalog_path,
                                        session_id,
-                                       "google/gemma-4-31b-it",
+                                       gemma_model_id,
                                        &error)) {
     fprintf(stderr,
             "Could not update session OpenRouter model: %s\n",
@@ -10057,7 +10157,7 @@ static int harness_run_openrouter_model_catalog_tests(
     return 0;
   }
   ok = (session_model != NULL) &&
-       (strcmp(session_model, "google/gemma-4-31b-it") == 0);
+       (strcmp(session_model, gemma_model_id) == 0);
   strappy_free_string(session_model);
   if (!ok) {
     fprintf(stderr, "Session OpenRouter model did not persist.\n");
@@ -10078,7 +10178,7 @@ static int harness_run_openrouter_model_catalog_tests(
     return 0;
   }
   ok = (session_list_record.model != NULL) &&
-       (strcmp(session_list_record.model, "google/gemma-4-31b-it") == 0) &&
+       (strcmp(session_list_record.model, gemma_model_id) == 0) &&
        (session_list_record.model_name != NULL) &&
        (strcmp(session_list_record.model_name, "Gemma 4 31B IT") == 0) &&
        (session_list_record.last_activity_at_ms == initial_activity_at_ms);
@@ -10090,6 +10190,362 @@ static int harness_run_openrouter_model_catalog_tests(
   }
 
   return 1;
+}
+
+static int harness_run_provider_account_routing_tests(
+  const harness_context *context)
+{
+  static const char *chatgpt_model_id =
+    STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT ":openai/gpt-4.1-mini";
+  static const char *openrouter_model_id =
+    STRAPPY_PROVIDER_ACCOUNT_OPENROUTER ":openai/gpt-4.1-mini";
+  static const char *wire_model_id = "openai/gpt-4.1-mini";
+  static const char *openrouter_refresh_json =
+    "{\"data\":["
+      "{\"id\":\"google/gemma-4-31b-it\","
+       "\"name\":\"Gemma 4 31B IT\"},"
+      "{\"id\":\"openai/gpt-4.1-mini\","
+       "\"name\":\"GPT 4.1 Mini\"}"
+    "]}";
+  static const char *request_json =
+    "{\"model\":\"openai/gpt-4.1-mini\",\"stream\":true,"
+    "\"store\":false,\"input\":[]}";
+  strappy_model_record_list list;
+  strappy_model_route_record route;
+  strappy_response_call_begin_input begin;
+  strappy_response_call_finish_input finish;
+  sqlite3 *db;
+  char *error;
+  char *qualified_model_id;
+  char *openrouter_endpoint;
+  char *chatgpt_endpoint;
+  char sql[1024];
+  long long session_id;
+  long long call_id;
+  size_t index;
+  int found_chatgpt;
+  int found_openrouter;
+  int ok;
+
+  if (context == NULL) {
+    return 0;
+  }
+
+  db = NULL;
+  if (sqlite3_open(context->catalog_path, &db) != SQLITE_OK) {
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+    return 0;
+  }
+  ok = harness_exec_sql(
+    db,
+    "PRAGMA foreign_keys = ON;"
+    "INSERT INTO models "
+      "(id, provider_account_id, wire_model_id, name, catalog_active, "
+       "last_seen_at_ms) VALUES "
+      "('openai_chatgpt:openai/gpt-4.1-mini', 'openai_chatgpt', "
+       "'openai/gpt-4.1-mini', 'GPT 4.1 Mini (ChatGPT)', 1, 1);");
+  sqlite3_close(db);
+  if (!ok) {
+    return 0;
+  }
+
+  error = NULL;
+  if (!strappy_db_set_model_allowed(context->catalog_path,
+                                    chatgpt_model_id,
+                                    1,
+                                    &error) ||
+      !strappy_db_save_openrouter_models_json(context->catalog_path,
+                                              openrouter_refresh_json,
+                                              &error)) {
+    fprintf(stderr,
+            "Could not prepare provider-account catalog rows: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  if (!harness_expect_catalog_integer(
+        context->catalog_path,
+        "SELECT COUNT(*) FROM models WHERE "
+        "id = 'openai_chatgpt:openai/gpt-4.1-mini' "
+        "AND provider_account_id = 'openai_chatgpt' "
+        "AND catalog_active = 1;",
+        1LL,
+        "ChatGPT model after OpenRouter refresh")) {
+    return 0;
+  }
+
+  strappy_model_record_list_init(&list);
+  error = NULL;
+  if (!strappy_db_list_models_matching(context->catalog_path,
+                                       wire_model_id,
+                                       &list,
+                                       &error)) {
+    fprintf(stderr,
+            "Could not list duplicate cross-account wire models: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_model_record_list_destroy(&list);
+    return 0;
+  }
+  found_chatgpt = 0;
+  found_openrouter = 0;
+  for (index = 0U; index < list.count; index++) {
+    const strappy_model_record *record;
+
+    record = &list.records[index];
+    if ((record->wire_model_id == NULL) ||
+        (strcmp(record->wire_model_id, wire_model_id) != 0)) {
+      continue;
+    }
+    if ((record->model_id != NULL) &&
+        (strcmp(record->model_id, chatgpt_model_id) == 0) &&
+        (record->provider_account_id != NULL) &&
+        (strcmp(record->provider_account_id,
+                STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT) == 0) &&
+        (record->provider_id != NULL) &&
+        (strcmp(record->provider_id,
+                STRAPPY_PROVIDER_OPENAI_CHATGPT) == 0) &&
+        record->allowed) {
+      found_chatgpt = 1;
+    }
+    if ((record->model_id != NULL) &&
+        (strcmp(record->model_id, openrouter_model_id) == 0) &&
+        (record->provider_account_id != NULL) &&
+        (strcmp(record->provider_account_id,
+                STRAPPY_PROVIDER_ACCOUNT_OPENROUTER) == 0)) {
+      found_openrouter = 1;
+    }
+  }
+  ok = (list.count == 2U) && found_chatgpt && found_openrouter;
+  strappy_model_record_list_destroy(&list);
+  if (!ok) {
+    fprintf(stderr,
+            "Identical wire model IDs were not isolated by account.\n");
+    return 0;
+  }
+
+  strappy_model_record_list_init(&list);
+  if (!strappy_db_list_openrouter_models_matching(context->catalog_path,
+                                                  wire_model_id,
+                                                  &list,
+                                                  &error)) {
+    fprintf(stderr,
+            "Could not list compatibility OpenRouter models: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_model_record_list_destroy(&list);
+    return 0;
+  }
+  ok = (list.count == 1U) &&
+    (list.records[0].model_id != NULL) &&
+    (strcmp(list.records[0].model_id, openrouter_model_id) == 0);
+  strappy_model_record_list_destroy(&list);
+  if (!ok) {
+    fprintf(stderr,
+            "OpenRouter compatibility catalog crossed account boundaries.\n");
+    return 0;
+  }
+
+  error = NULL;
+  qualified_model_id = strappy_provider_model_identifier(
+    STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT,
+    wire_model_id,
+    &error);
+  openrouter_endpoint = strappy_provider_responses_endpoint(
+    STRAPPY_PROVIDER_KIND_OPENROUTER,
+    "https://router.example/v1/responses",
+    &error);
+  chatgpt_endpoint = strappy_provider_responses_endpoint(
+    STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT,
+    "https://must-not-be-used.example/responses",
+    &error);
+  ok = (qualified_model_id != NULL) &&
+    (strcmp(qualified_model_id, chatgpt_model_id) == 0) &&
+    (openrouter_endpoint != NULL) &&
+    (strcmp(openrouter_endpoint,
+            "https://router.example/v1/responses") == 0) &&
+    (chatgpt_endpoint != NULL) &&
+    (strcmp(chatgpt_endpoint,
+            STRAPPY_PROVIDER_OPENAI_CHATGPT_RESPONSES_ENDPOINT) == 0);
+  free(qualified_model_id);
+  free(openrouter_endpoint);
+  free(chatgpt_endpoint);
+  if (!ok) {
+    fprintf(stderr,
+            "Provider-account endpoint policy did not match: %s\n",
+            (error != NULL) ? error : "unexpected endpoint");
+    strappy_free_string(error);
+    return 0;
+  }
+  strappy_free_string(error);
+
+  session_id = 0LL;
+  error = NULL;
+  if (!strappy_db_create_session(context->catalog_path, &session_id, &error) ||
+      !strappy_db_update_session_model(context->catalog_path,
+                                       session_id,
+                                       chatgpt_model_id,
+                                       &error)) {
+    fprintf(stderr,
+            "Could not select a ChatGPT-account model: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  strappy_model_route_record_init(&route);
+  if (!strappy_db_get_session_model_route(context->catalog_path,
+                                          session_id,
+                                          &route,
+                                          &error)) {
+    fprintf(stderr,
+            "Could not resolve the session model route: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_model_route_record_destroy(&route);
+    return 0;
+  }
+  ok = (route.model_id != NULL) &&
+    (strcmp(route.model_id, chatgpt_model_id) == 0) &&
+    (route.provider_account_id != NULL) &&
+    (strcmp(route.provider_account_id,
+            STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT) == 0) &&
+    (route.provider_id != NULL) &&
+    (strcmp(route.provider_id, STRAPPY_PROVIDER_OPENAI_CHATGPT) == 0) &&
+    (route.wire_model_id != NULL) &&
+    (strcmp(route.wire_model_id, wire_model_id) == 0);
+  strappy_model_route_record_destroy(&route);
+  if (!ok) {
+    fprintf(stderr, "Session route did not retain its model account.\n");
+    return 0;
+  }
+
+  memset(&begin, 0, sizeof(begin));
+  begin.session_id = session_id;
+  begin.provider_account_id = STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT;
+  begin.model_id = chatgpt_model_id;
+  begin.prompt_group_key = "provider-account-lock";
+  begin.request_kind = "user";
+  begin.round_index = 0L;
+  begin.attempt_index = 0L;
+  begin.new_input_start_index = 0L;
+  begin.request_method = "POST";
+  begin.request_url = STRAPPY_PROVIDER_OPENAI_CHATGPT_RESPONSES_ENDPOINT;
+  begin.request_headers_json = "{}";
+  begin.request_json = request_json;
+  call_id = 0LL;
+  if (!strappy_db_begin_response_call(context->catalog_path,
+                                      &begin,
+                                      &call_id,
+                                      &error)) {
+    fprintf(stderr,
+            "Could not bind a response call to its model account: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  memset(&finish, 0, sizeof(finish));
+  finish.call_id = call_id;
+  finish.state = "cancelled";
+  finish.started_at_ms = 2000000000000LL;
+  finish.completed_at_ms = 2000000000100LL;
+  finish.request_bytes = (long long)strlen(request_json);
+  finish.effective_url = begin.request_url;
+  finish.response_json = "";
+  if (!strappy_db_finish_response_call(context->catalog_path,
+                                       &finish,
+                                       &error)) {
+    fprintf(stderr,
+            "Could not finish the account-routing response fixture: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  if (snprintf(sql,
+               sizeof(sql),
+               "SELECT COUNT(*) FROM sessions s JOIN turns t "
+               "ON t.session_id = s.id JOIN model_requests r "
+               "ON r.turn_id = t.id JOIN http_attempts a "
+               "ON a.request_id = r.id WHERE s.id = %lld "
+               "AND s.provider_account_id = 'openai_chatgpt' "
+               "AND r.model_id = 'openai_chatgpt:openai/gpt-4.1-mini' "
+               "AND r.provider_account_id = 'openai_chatgpt' "
+               "AND a.provider_account_id = 'openai_chatgpt';",
+               session_id) <= 0 ||
+      !harness_expect_catalog_integer(context->catalog_path,
+                                      sql,
+                                      1LL,
+                                      "session/request/attempt account route")) {
+    return 0;
+  }
+
+  error = NULL;
+  if (strappy_db_update_session_model(context->catalog_path,
+                                      session_id,
+                                      openrouter_model_id,
+                                      &error) ||
+      (error == NULL) ||
+      (strstr(error, "different model account") == NULL)) {
+    fprintf(stderr,
+            "Established session accepted a cross-account model: %s\n",
+            (error != NULL) ? error : "no error");
+    strappy_free_string(error);
+    return 0;
+  }
+  strappy_free_string(error);
+  error = NULL;
+
+  if (!strappy_db_set_model_allowed(context->catalog_path,
+                                    chatgpt_model_id,
+                                    0,
+                                    &error)) {
+    fprintf(stderr,
+            "Could not disable the pinned ChatGPT model fixture: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  strappy_model_route_record_init(&route);
+  if (strappy_db_get_session_model_route(context->catalog_path,
+                                         session_id,
+                                         &route,
+                                         &error) ||
+      (error == NULL) ||
+      (strstr(error, "not active and allowed") == NULL)) {
+    fprintf(stderr,
+            "Disabled pinned model did not fail closed: %s\n",
+            (error != NULL) ? error : "route unexpectedly resolved");
+    strappy_free_string(error);
+    strappy_model_route_record_destroy(&route);
+    return 0;
+  }
+  strappy_free_string(error);
+  strappy_model_route_record_destroy(&route);
+  if (snprintf(sql,
+               sizeof(sql),
+               "SELECT COUNT(*) FROM sessions WHERE id = %lld "
+               "AND model_id = "
+               "'openai_chatgpt:openai/gpt-4.1-mini' "
+               "AND provider_account_id = 'openai_chatgpt';",
+               session_id) <= 0 ||
+      !harness_expect_catalog_integer(
+        context->catalog_path,
+        sql,
+        1LL,
+        "disabled pinned model retains its account without fallback")) {
+    return 0;
+  }
+
+  return harness_expect_catalog_integer(context->catalog_path,
+                                        "SELECT COUNT(*) FROM "
+                                        "pragma_foreign_key_check;",
+                                        0LL,
+                                        "provider-account foreign key check");
 }
 
 static int harness_write_file_bytes(const char *path,
@@ -10909,6 +11365,7 @@ int main(void)
        harness_run_helper_fontawesome_tests() &&
        harness_make_temp_dir(&context) &&
        harness_run_fresh_catalog_schema_tests(&context) &&
+       harness_run_provider_account_reset_test(&context) &&
        harness_run_discovered_database_replacement_tests(&context) &&
        harness_run_catalog_reclassification_tests(&context) &&
        harness_run_file_scanner_filename_filter_tests(&context) &&
@@ -10928,6 +11385,7 @@ int main(void)
        harness_run_session_options_tests(&context) &&
        harness_run_empty_session_storage_tests(&context) &&
        harness_run_openrouter_model_catalog_tests(&context) &&
+       harness_run_provider_account_routing_tests(&context) &&
        harness_run_sms_context_tests(&context) &&
        harness_run_mail_context_tests(&context) &&
        harness_run_database_study_same_batch_guard_tests(&context) &&

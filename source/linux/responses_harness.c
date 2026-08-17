@@ -7269,7 +7269,8 @@ static int harness_verify_call_columns(sqlite3 *db,
     sqlite3_finalize(stmt);
     return 0;
   }
-  ok = strcmp((const char *)sqlite3_column_text(stmt, 0), "test/model") == 0 &&
+  ok = strcmp((const char *)sqlite3_column_text(stmt, 0),
+              STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER) == 0 &&
     sqlite3_column_int(stmt, 1) == 0 &&
     strcmp((const char *)sqlite3_column_text(stmt, 2), "System") == 0 &&
     strcmp((const char *)sqlite3_column_text(stmt, 3), "resp-test") == 0 &&
@@ -7459,7 +7460,8 @@ static int harness_append_usage_metrics_call(
   char **error_out)
 {
   static const char *request_json =
-    "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
+    "{\"model\":\"" STRAPPY_CONFIG_DEFAULT_API_MODEL
+    "\",\"stream\":false,\"store\":false,"
     "\"instructions\":\"System\",\"input\":[]}";
   strappy_response_call_begin_input begin;
   strappy_response_call_finish_input finish;
@@ -7468,6 +7470,8 @@ static int harness_append_usage_metrics_call(
   memset(&begin, 0, sizeof(begin));
   begin.session_id = session_id;
   begin.previous_call_id = previous_call_id;
+  begin.provider_account_id = STRAPPY_PROVIDER_ACCOUNT_OPENROUTER;
+  begin.model_id = STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER;
   begin.prompt_group_key = prompt_group_key;
   begin.request_kind = request_kind;
   begin.round_index = round_index;
@@ -7535,7 +7539,8 @@ static int harness_test_cumulative_session_metrics(void)
     "\"model\":\"test/model\",\"output\":[],"
     "\"usage\":{\"cost\":0.0005}}";
   static const char *pending_request =
-    "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
+    "{\"model\":\"" STRAPPY_CONFIG_DEFAULT_API_MODEL
+    "\",\"stream\":false,\"store\":false,"
     "\"instructions\":\"System\",\"input\":[{\"type\":\"message\","
     "\"role\":\"user\",\"content\":[{\"type\":\"input_text\","
     "\"text\":\"Pending metrics\"}]}]}";
@@ -7647,6 +7652,8 @@ static int harness_test_cumulative_session_metrics(void)
     memset(&pending_begin, 0, sizeof(pending_begin));
     pending_begin.session_id = session_id;
     pending_begin.previous_call_id = previous_call_id;
+    pending_begin.provider_account_id = STRAPPY_PROVIDER_ACCOUNT_OPENROUTER;
+    pending_begin.model_id = STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER;
     pending_begin.prompt_group_key = "group-three";
     pending_begin.request_kind = "user";
     pending_begin.round_index = 0L;
@@ -7784,7 +7791,8 @@ static int harness_verify_invalid_structured_text_webview_recovery(
   char **error_out)
 {
   static const char *continuation_request_json =
-    "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
+    "{\"model\":\"" STRAPPY_CONFIG_DEFAULT_API_MODEL
+    "\",\"stream\":false,\"store\":false,"
     "\"instructions\":\"System\",\"input\":[{"
     "\"type\":\"function_call_output\",\"call_id\":\"call-test\","
     "\"output\":{\"value\":\"safe\"}}],\"max_output_tokens\":100,"
@@ -7867,6 +7875,8 @@ static int harness_verify_invalid_structured_text_webview_recovery(
 
   memset(&continuation, 0, sizeof(continuation));
   continuation.session_id = session_id;
+  continuation.provider_account_id = STRAPPY_PROVIDER_ACCOUNT_OPENROUTER;
+  continuation.model_id = STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER;
   continuation.prompt_group_key = "group-test";
   continuation.request_kind = "tool_continuation";
   continuation.round_index = 1L;
@@ -7959,7 +7969,8 @@ cleanup:
 static int harness_test_ledger(void)
 {
   static const char *request_json =
-    "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
+    "{\"model\":\"" STRAPPY_CONFIG_DEFAULT_API_MODEL
+    "\",\"stream\":false,\"store\":false,"
     "\"instructions\":\"System\",\"input\":[{\"type\":\"message\","
     "\"role\":\"user\",\"content\":[{\"type\":\"input_text\","
     "\"text\":\"Hello\"}]}],\"max_output_tokens\":100,"
@@ -8043,6 +8054,8 @@ static int harness_test_ledger(void)
 
   memset(&begin, 0, sizeof(begin));
   begin.session_id = session_id;
+  begin.provider_account_id = STRAPPY_PROVIDER_ACCOUNT_OPENROUTER;
+  begin.model_id = STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER;
   begin.prompt_group_key = "group-test";
   begin.request_kind = "user";
   begin.round_index = 0L;
@@ -8200,7 +8213,8 @@ static int harness_test_ledger(void)
             "\"id\":\"resp-test\"") != NULL) &&
     (strstr(timeline.records[1].metadata_json, "\"usage\"") != NULL) &&
     (strstr(timeline.records[1].metadata_json, "http_status") == NULL) &&
-    (strstr(timeline.records[1].content, "Model: test/model") != NULL) &&
+    (strstr(timeline.records[1].content,
+            "Model: " STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER) != NULL) &&
     (strstr(timeline.records[1].content,
             "Request: POST https://openrouter.ai/api/v1/responses") != NULL) &&
     (strstr(timeline.records[1].content, "HTTP 200") == NULL) &&
@@ -8513,7 +8527,8 @@ static int harness_test_session_webview_rendering(void)
     "Second stored WebView message from "
     "strappy_session_webview_Contacts &amp; Notes.sqlite; keep db_2 raw";
   static const char *request_json =
-    "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
+    "{\"model\":\"" STRAPPY_CONFIG_DEFAULT_API_MODEL
+    "\",\"stream\":false,\"store\":false,"
     "\"input\":[{\"type\":\"message\",\"role\":\"user\","
     "\"content\":[{\"type\":\"input_text\","
     "\"text\":\"First stored WebView message\"}]}]}";
@@ -8674,6 +8689,8 @@ static int harness_test_session_webview_rendering(void)
 
   memset(&begin, 0, sizeof(begin));
   begin.session_id = session_id;
+  begin.provider_account_id = STRAPPY_PROVIDER_ACCOUNT_OPENROUTER;
+  begin.model_id = STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER;
   begin.prompt_group_key = "webview-group";
   begin.request_kind = "user";
   begin.round_index = 0L;

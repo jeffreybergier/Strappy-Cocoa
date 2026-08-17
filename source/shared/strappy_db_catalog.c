@@ -126,13 +126,17 @@ void strappy_database_display_name_record_list_destroy(
   strappy_database_display_name_record_list_init(list);
 }
 
-void strappy_openrouter_model_record_init(strappy_openrouter_model_record *record)
+void strappy_model_record_init(strappy_model_record *record)
 {
   if (record == NULL) {
     return;
   }
 
   record->model_id = NULL;
+  record->provider_account_id = NULL;
+  record->provider_id = NULL;
+  record->provider_account_name = NULL;
+  record->wire_model_id = NULL;
   record->canonical_slug = NULL;
   record->hugging_face_id = NULL;
   record->name = NULL;
@@ -168,13 +172,17 @@ void strappy_openrouter_model_record_init(strappy_openrouter_model_record *recor
   record->allowed = 0;
 }
 
-void strappy_openrouter_model_record_destroy(strappy_openrouter_model_record *record)
+void strappy_model_record_destroy(strappy_model_record *record)
 {
   if (record == NULL) {
     return;
   }
 
   free(record->model_id);
+  free(record->provider_account_id);
+  free(record->provider_id);
+  free(record->provider_account_name);
+  free(record->wire_model_id);
   free(record->canonical_slug);
   free(record->hugging_face_id);
   free(record->name);
@@ -201,11 +209,10 @@ void strappy_openrouter_model_record_destroy(strappy_openrouter_model_record *re
   free(record->per_request_limits_json);
   free(record->raw_json);
   free(record->fetched_at);
-  strappy_openrouter_model_record_init(record);
+  strappy_model_record_init(record);
 }
 
-void strappy_openrouter_model_record_list_init(
-  strappy_openrouter_model_record_list *list)
+void strappy_model_record_list_init(strappy_model_record_list *list)
 {
   if (list == NULL) {
     return;
@@ -215,8 +222,7 @@ void strappy_openrouter_model_record_list_init(
   list->count = 0U;
 }
 
-void strappy_openrouter_model_record_list_destroy(
-  strappy_openrouter_model_record_list *list)
+void strappy_model_record_list_destroy(strappy_model_record_list *list)
 {
   size_t index;
 
@@ -225,10 +231,55 @@ void strappy_openrouter_model_record_list_destroy(
   }
 
   for (index = 0U; index < list->count; index++) {
-    strappy_openrouter_model_record_destroy(&list->records[index]);
+    strappy_model_record_destroy(&list->records[index]);
   }
   free(list->records);
-  strappy_openrouter_model_record_list_init(list);
+  strappy_model_record_list_init(list);
+}
+
+void strappy_openrouter_model_record_init(strappy_openrouter_model_record *record)
+{
+  strappy_model_record_init(record);
+}
+
+void strappy_openrouter_model_record_destroy(strappy_openrouter_model_record *record)
+{
+  strappy_model_record_destroy(record);
+}
+
+void strappy_openrouter_model_record_list_init(
+  strappy_openrouter_model_record_list *list)
+{
+  strappy_model_record_list_init(list);
+}
+
+void strappy_openrouter_model_record_list_destroy(
+  strappy_openrouter_model_record_list *list)
+{
+  strappy_model_record_list_destroy(list);
+}
+
+void strappy_model_route_record_init(strappy_model_route_record *record)
+{
+  if (record == NULL) {
+    return;
+  }
+  record->model_id = NULL;
+  record->provider_account_id = NULL;
+  record->provider_id = NULL;
+  record->wire_model_id = NULL;
+}
+
+void strappy_model_route_record_destroy(strappy_model_route_record *record)
+{
+  if (record == NULL) {
+    return;
+  }
+  free(record->model_id);
+  free(record->provider_account_id);
+  free(record->provider_id);
+  free(record->wire_model_id);
+  strappy_model_route_record_init(record);
 }
 
 static char *strappy_db_like_pattern_for_search(const char *search_text,
@@ -253,7 +304,7 @@ static char *strappy_db_like_pattern_for_search(const char *search_text,
                         (search_text[index] == '_') ||
                         (search_text[index] == '\\')) ? 2U : 1U;
     if (pattern_length > (((size_t)-1) - character_length - 1U)) {
-      strappy_set_error(error_out, "OpenRouter model search text is too large.");
+      strappy_set_error(error_out, "Model search text is too large.");
       return NULL;
     }
     pattern_length += character_length;
@@ -261,7 +312,7 @@ static char *strappy_db_like_pattern_for_search(const char *search_text,
 
   pattern = (char *)malloc(pattern_length + 1U);
   if (pattern == NULL) {
-    strappy_set_error(error_out, "Could not allocate OpenRouter model search.");
+    strappy_set_error(error_out, "Could not allocate model search.");
     return NULL;
   }
 
@@ -583,13 +634,13 @@ static int strappy_db_bind_text_or_null(sqlite3 *db,
                                        error_out);
 }
 
-static int strappy_db_assign_openrouter_model_from_statement(
+static int strappy_db_assign_model_from_statement(
   strappy_openrouter_model_record *record,
   sqlite3_stmt *stmt,
   char **error_out)
 {
   if ((record == NULL) || (stmt == NULL)) {
-    strappy_set_error(error_out, "OpenRouter model row request is incomplete.");
+    strappy_set_error(error_out, "Model row request is incomplete.");
     return 0;
   }
 
@@ -630,10 +681,18 @@ static int strappy_db_assign_openrouter_model_from_statement(
   record->per_request_limits_json = strappy_db_column_string(stmt, 29);
   record->raw_json = strappy_db_column_string(stmt, 30);
   record->fetched_at = strappy_db_column_string(stmt, 31);
+  record->provider_account_id = strappy_db_column_string(stmt, 34);
+  record->provider_id = strappy_db_column_string(stmt, 35);
+  record->provider_account_name = strappy_db_column_string(stmt, 36);
+  record->wire_model_id = strappy_db_column_string(stmt, 37);
 
-  if ((record->model_id == NULL) || (record->fetched_at == NULL)) {
+  if ((record->model_id == NULL) || (record->fetched_at == NULL) ||
+      (record->provider_account_id == NULL) ||
+      (record->provider_id == NULL) ||
+      (record->provider_account_name == NULL) ||
+      (record->wire_model_id == NULL)) {
     strappy_openrouter_model_record_destroy(record);
-    strappy_set_error(error_out, "Could not allocate OpenRouter model row.");
+    strappy_set_error(error_out, "Could not allocate model row.");
     return 0;
   }
 
@@ -2194,7 +2253,8 @@ static int strappy_db_semantic_insert_model(sqlite3 *db,
 {
   static const char *insert_sql =
     "INSERT OR IGNORE INTO models "
-    "(id, name, catalog_active, last_seen_at_ms) VALUES (?, ?, 1, ?);";
+    "(id, provider_account_id, wire_model_id, name, catalog_active, "
+    "last_seen_at_ms) VALUES (?, ?, ?, ?, 1, ?);";
   static const char *update_sql =
     "UPDATE models SET canonical_slug = ?, hugging_face_id = ?, name = ?, "
     "description = ?, context_length = ?, created_at_s = ?, "
@@ -2202,7 +2262,8 @@ static int strappy_db_semantic_insert_model(sqlite3 *db,
     "architecture_instruct_type = ?, provider_context_length = ?, "
     "provider_max_completion_tokens = ?, provider_is_moderated = ?, "
     "knowledge_cutoff = ?, expiration_date = ?, details_url = ?, "
-    "catalog_active = 1, last_seen_at_ms = ? WHERE id = ?;";
+    "catalog_active = 1, last_seen_at_ms = ? "
+    "WHERE id = ? AND provider_account_id = ? AND wire_model_id = ?;";
   static const char *clear_prices_sql =
     "DELETE FROM model_prices WHERE model_id = ?;";
   static const char *clear_features_sql =
@@ -2218,10 +2279,18 @@ static int strappy_db_semantic_insert_model(sqlite3 *db,
     return 0;
   }
   strappy_openrouter_model_record_init(&record);
-  record.model_id = strappy_db_json_copy_object_text(model, "id");
-  if ((record.model_id == NULL) || (record.model_id[0] == '\0')) {
+  record.wire_model_id = strappy_db_json_copy_object_text(model, "id");
+  if ((record.wire_model_id == NULL) || (record.wire_model_id[0] == '\0')) {
     strappy_openrouter_model_record_destroy(&record);
     strappy_set_error(error_out, "OpenRouter model entry is missing id.");
+    return 0;
+  }
+  record.model_id = strappy_provider_model_identifier(
+    STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+    record.wire_model_id,
+    error_out);
+  if (record.model_id == NULL) {
+    strappy_openrouter_model_record_destroy(&record);
     return 0;
   }
   record.canonical_slug =
@@ -2230,7 +2299,7 @@ static int strappy_db_semantic_insert_model(sqlite3 *db,
     strappy_db_json_copy_object_text(model, "hugging_face_id");
   record.name = strappy_db_json_copy_object_text(model, "name");
   if (record.name == NULL) {
-    record.name = strappy_string_duplicate(record.model_id);
+    record.name = strappy_string_duplicate(record.wire_model_id);
   }
   record.description = strappy_db_json_copy_object_text(model, "description");
   record.context_length = strappy_db_json_object_integer(model, "context_length");
@@ -2283,8 +2352,14 @@ static int strappy_db_semantic_insert_model(sqlite3 *db,
   rc = sqlite3_prepare_v2(db, insert_sql, -1, &stmt, NULL);
   if ((rc != SQLITE_OK) ||
       (sqlite3_bind_text(stmt, 1, record.model_id, -1, SQLITE_TRANSIENT) != SQLITE_OK) ||
-      (sqlite3_bind_text(stmt, 2, record.name, -1, SQLITE_TRANSIENT) != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)now_ms) != SQLITE_OK) ||
+      (sqlite3_bind_text(stmt, 2,
+                         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+                         -1,
+                         SQLITE_STATIC) != SQLITE_OK) ||
+      (sqlite3_bind_text(stmt, 3, record.wire_model_id, -1,
+                         SQLITE_TRANSIENT) != SQLITE_OK) ||
+      (sqlite3_bind_text(stmt, 4, record.name, -1, SQLITE_TRANSIENT) != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 5, (sqlite3_int64)now_ms) != SQLITE_OK) ||
       (sqlite3_step(stmt) != SQLITE_DONE)) {
     strappy_set_formatted_error(error_out,
                                 "Could not insert OpenRouter model: %s",
@@ -2332,12 +2407,27 @@ static int strappy_db_semantic_insert_model(sqlite3 *db,
        strappy_db_bind_text_or_null(db, stmt, 15, record.links_details,
                                     "Could not bind model update", error_out) &&
        (sqlite3_bind_int64(stmt, 16, (sqlite3_int64)now_ms) == SQLITE_OK) &&
-       (sqlite3_bind_text(stmt, 17, record.model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK);
-  if (!ok || (sqlite3_step(stmt) != SQLITE_DONE)) {
+       (sqlite3_bind_text(stmt, 17, record.model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+       (sqlite3_bind_text(stmt, 18,
+                          STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+                          -1,
+                          SQLITE_STATIC) == SQLITE_OK) &&
+       (sqlite3_bind_text(stmt, 19, record.wire_model_id, -1,
+                          SQLITE_TRANSIENT) == SQLITE_OK);
+  if (ok) {
+    rc = sqlite3_step(stmt);
+  }
+  if (!ok || (rc != SQLITE_DONE) || (sqlite3_changes(db) != 1)) {
     if (ok) {
-      strappy_set_formatted_error(error_out,
-                                  "Could not update OpenRouter model: %s",
-                                  sqlite3_errmsg(db));
+      if (rc == SQLITE_DONE) {
+        strappy_set_error(
+          error_out,
+          "OpenRouter model account identity did not match its catalog row.");
+      } else {
+        strappy_set_formatted_error(error_out,
+                                    "Could not update OpenRouter model: %s",
+                                    sqlite3_errmsg(db));
+      }
     }
     sqlite3_finalize(stmt);
     strappy_openrouter_model_record_destroy(&record);
@@ -2457,7 +2547,9 @@ static int strappy_db_semantic_save_models(const char *db_path,
     return 0;
   }
   ok = strappy_db_exec(db,
-                       "UPDATE models SET catalog_active = 0;",
+                       "UPDATE models SET catalog_active = 0 "
+                       "WHERE provider_account_id = '"
+                         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER "';",
                        "Could not mark model catalog stale",
                        error_out);
   now_ms = strappy_db_now_ms();
@@ -2479,7 +2571,7 @@ static int strappy_db_semantic_save_models(const char *db_path,
       db,
       "UPDATE models SET catalog_active = 1, "
       "last_seen_at_ms = CAST(strftime('%s','now') AS INTEGER) * 1000 "
-      "WHERE id = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "';",
+      "WHERE id = '" STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER "';",
       "Could not retain built-in default model",
       error_out);
   }
@@ -2502,6 +2594,39 @@ int strappy_db_save_openrouter_models_json(const char *db_path,
   return strappy_db_semantic_save_models(db_path, json, error_out);
 }
 
+static void strappy_db_filter_model_list(strappy_model_record_list *list,
+                                         const char *provider_account_id,
+                                         int allowed_only)
+{
+  size_t read_index;
+  size_t write_index;
+
+  if (list == NULL) {
+    return;
+  }
+  write_index = 0U;
+  for (read_index = 0U; read_index < list->count; read_index++) {
+    int keep;
+
+    keep = (!allowed_only || list->records[read_index].allowed) &&
+      ((provider_account_id == NULL) ||
+       ((list->records[read_index].provider_account_id != NULL) &&
+        (strcmp(list->records[read_index].provider_account_id,
+                provider_account_id) == 0)));
+    if (keep) {
+      if (write_index != read_index) {
+        strappy_model_record_destroy(&list->records[write_index]);
+        list->records[write_index] = list->records[read_index];
+        strappy_model_record_init(&list->records[read_index]);
+      }
+      write_index++;
+    } else {
+      strappy_model_record_destroy(&list->records[read_index]);
+    }
+  }
+  list->count = write_index;
+}
+
 int strappy_db_list_openrouter_models(
   const char *db_path,
   strappy_openrouter_model_record_list *list,
@@ -2518,27 +2643,10 @@ int strappy_db_list_allowed_openrouter_models(
   strappy_openrouter_model_record_list *list,
   char **error_out)
 {
-  size_t read_index;
-  size_t write_index;
-
   if (!strappy_db_list_openrouter_models(db_path, list, error_out)) {
     return 0;
   }
-
-  write_index = 0U;
-  for (read_index = 0U; read_index < list->count; read_index++) {
-    if (list->records[read_index].allowed) {
-      if (write_index != read_index) {
-        strappy_openrouter_model_record_destroy(&list->records[write_index]);
-        list->records[write_index] = list->records[read_index];
-        strappy_openrouter_model_record_init(&list->records[read_index]);
-      }
-      write_index++;
-    } else {
-      strappy_openrouter_model_record_destroy(&list->records[read_index]);
-    }
-  }
-  list->count = write_index;
+  strappy_db_filter_model_list(list, NULL, 1);
   return 1;
 }
 
@@ -2575,18 +2683,25 @@ static int strappy_db_semantic_list_models(
     "m.provider_is_moderated, m.knowledge_cutoff, m.expiration_date, "
     "m.details_url, NULL, NULL, NULL, NULL, NULL, NULL, "
     "strftime('%Y-%m-%dT%H:%M:%fZ', m.last_seen_at_ms / 1000.0, 'unixepoch'), "
-    "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL
+    "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL
       " THEN 1 ELSE 0 END, "
-    "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL
+    "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL
       " OR COALESCE(mp.allowed, 0) = 1 THEN 1 ELSE 0 END "
-    "FROM models m LEFT JOIN model_preferences mp ON mp.model_id = m.id ";
+    ", a.id, a.provider_id, a.display_name, m.wire_model_id "
+    "FROM models m JOIN provider_accounts a "
+      "ON a.id = m.provider_account_id "
+    "LEFT JOIN model_preferences mp ON mp.model_id = m.id ";
   static const char *unfiltered_suffix =
     "WHERE m.catalog_active = 1 "
-    "ORDER BY CASE WHEN m.id = " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL
+    "ORDER BY LOWER(a.display_name), "
+      "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL
       " THEN 0 ELSE 1 END, LOWER(m.name), m.id;";
   static const char *filtered_suffix =
     "WHERE m.catalog_active = 1 AND ("
     "m.id LIKE ?1 ESCAPE '\\' OR COALESCE(m.canonical_slug, '') LIKE ?1 ESCAPE '\\' "
+    "OR m.wire_model_id LIKE ?1 ESCAPE '\\' "
+    "OR a.id LIKE ?1 ESCAPE '\\' OR a.provider_id LIKE ?1 ESCAPE '\\' "
+    "OR a.display_name LIKE ?1 ESCAPE '\\' "
     "OR COALESCE(m.hugging_face_id, '') LIKE ?1 ESCAPE '\\' "
     "OR m.name LIKE ?1 ESCAPE '\\' OR COALESCE(m.description, '') LIKE ?1 ESCAPE '\\' "
     "OR COALESCE(m.architecture_modality, '') LIKE ?1 ESCAPE '\\' "
@@ -2596,7 +2711,8 @@ static int strappy_db_semantic_list_models(
       "AND f.feature_value LIKE ?1 ESCAPE '\\') "
     "OR EXISTS (SELECT 1 FROM model_prices p WHERE p.model_id = m.id "
       "AND p.price_decimal LIKE ?1 ESCAPE '\\')) "
-    "ORDER BY CASE WHEN m.id = " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL
+    "ORDER BY LOWER(a.display_name), "
+      "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL
       " THEN 0 ELSE 1 END, LOWER(m.name), m.id;";
   strappy_db_sql_buffer query;
   sqlite3 *db;
@@ -2606,7 +2722,7 @@ static int strappy_db_semantic_list_models(
   int rc;
 
   if (list == NULL) {
-    strappy_set_error(error_out, "OpenRouter model list output is missing.");
+    strappy_set_error(error_out, "Model list output is missing.");
     return 0;
   }
   strappy_openrouter_model_record_list_init(list);
@@ -2665,7 +2781,7 @@ static int strappy_db_semantic_list_models(
 
     if (list->count >= (((size_t)-1) /
                         sizeof(strappy_openrouter_model_record))) {
-      strappy_set_error(error_out, "OpenRouter model list is too large.");
+      strappy_set_error(error_out, "Model list is too large.");
       sqlite3_finalize(stmt);
       strappy_db_release(db);
       strappy_openrouter_model_record_list_destroy(list);
@@ -2683,7 +2799,7 @@ static int strappy_db_semantic_list_models(
     }
     list->records = records;
     strappy_openrouter_model_record_init(&list->records[list->count]);
-    if (!strappy_db_assign_openrouter_model_from_statement(
+    if (!strappy_db_assign_model_from_statement(
           &list->records[list->count], stmt, error_out)) {
       sqlite3_finalize(stmt);
       strappy_db_release(db);
@@ -2712,10 +2828,45 @@ int strappy_db_list_openrouter_models_matching(
   strappy_openrouter_model_record_list *list,
   char **error_out)
 {
+  if (!strappy_db_semantic_list_models(db_path,
+                                       search_text,
+                                       list,
+                                       error_out)) {
+    return 0;
+  }
+  strappy_db_filter_model_list(list,
+                               STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+                               0);
+  return 1;
+}
+
+int strappy_db_list_models_matching(const char *db_path,
+                                    const char *search_text,
+                                    strappy_model_record_list *list,
+                                    char **error_out)
+{
   return strappy_db_semantic_list_models(db_path,
                                          search_text,
                                          list,
                                          error_out);
+}
+
+int strappy_db_list_models(const char *db_path,
+                           strappy_model_record_list *list,
+                           char **error_out)
+{
+  return strappy_db_list_models_matching(db_path, NULL, list, error_out);
+}
+
+int strappy_db_list_allowed_models(const char *db_path,
+                                   strappy_model_record_list *list,
+                                   char **error_out)
+{
+  if (!strappy_db_list_models(db_path, list, error_out)) {
+    return 0;
+  }
+  strappy_db_filter_model_list(list, NULL, 1);
+  return 1;
 }
 
 int strappy_db_model_exists(sqlite3 *db,
@@ -2728,7 +2879,7 @@ int strappy_db_model_exists(sqlite3 *db,
   int rc;
 
   if ((model_id == NULL) || (model_id[0] == '\0')) {
-    strappy_set_error(error_out, "OpenRouter model id is empty.");
+    strappy_set_error(error_out, "Model id is empty.");
     return 0;
   }
 
@@ -2736,14 +2887,14 @@ int strappy_db_model_exists(sqlite3 *db,
   rc = sqlite3_prepare_v2(db, exists_sql, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
-                                "Could not prepare OpenRouter model lookup: %s",
+                                "Could not prepare model lookup: %s",
                                 sqlite3_errmsg(db));
     return 0;
   }
   rc = sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT);
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
-                                "Could not bind OpenRouter model lookup: %s",
+                                "Could not bind model lookup: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     return 0;
@@ -2751,13 +2902,66 @@ int strappy_db_model_exists(sqlite3 *db,
   rc = sqlite3_step(stmt);
   sqlite3_finalize(stmt);
   if (rc == SQLITE_DONE) {
-    strappy_set_error(error_out, "OpenRouter model was not found.");
+    strappy_set_error(error_out, "Model was not found.");
     return 0;
   }
   if (rc != SQLITE_ROW) {
     strappy_set_formatted_error(error_out,
-                                "Could not read OpenRouter model lookup: %s",
+                                "Could not read model lookup: %s",
                                 sqlite3_errmsg(db));
+    return 0;
+  }
+  return 1;
+}
+
+int strappy_db_model_matches_session_account(sqlite3 *db,
+                                             long long session_id,
+                                             const char *model_id,
+                                             char **error_out)
+{
+  static const char *sql =
+    "SELECT CASE WHEN s.provider_account_id IS NULL "
+      "OR s.provider_account_id = m.provider_account_id THEN 1 ELSE 0 END "
+    "FROM sessions s JOIN models m ON m.id = ? WHERE s.id = ?;";
+  sqlite3_stmt *stmt;
+  int rc;
+  int matches;
+
+  if ((db == NULL) || (session_id <= 0LL) ||
+      (model_id == NULL) || (model_id[0] == '\0')) {
+    strappy_set_error(error_out,
+                      "Session model account validation is incomplete.");
+    return 0;
+  }
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc != SQLITE_ROW) {
+    if (rc == SQLITE_DONE) {
+      strappy_set_error(error_out, "Session model account was not found.");
+    } else {
+      strappy_set_formatted_error(error_out,
+                                  "Could not validate session model account: %s",
+                                  sqlite3_errmsg(db));
+    }
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  matches = sqlite3_column_int(stmt, 0) ? 1 : 0;
+  sqlite3_finalize(stmt);
+  if (!matches) {
+    strappy_set_error(
+      error_out,
+      "This conversation is already bound to a different model account. "
+      "Create a new session to change accounts.");
     return 0;
   }
   return 1;
@@ -2799,17 +3003,17 @@ int strappy_db_upsert_app_setting(sqlite3 *db,
   return 1;
 }
 
-static int strappy_db_copy_default_openrouter_model(sqlite3 *db,
-                                                    char **model_id_out,
-                                                    char **error_out)
+static int strappy_db_copy_default_model(sqlite3 *db,
+                                         char **model_id_out,
+                                         char **error_out)
 {
   static const char *sql =
-    "SELECT " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL ";";
+    "SELECT " STRAPPY_DB_DEFAULT_MODEL_SQL ";";
   sqlite3_stmt *stmt;
   int rc;
 
   if (model_id_out == NULL) {
-    strappy_set_error(error_out, "Default OpenRouter model output is missing.");
+    strappy_set_error(error_out, "Default model output is missing.");
     return 0;
   }
   *model_id_out = NULL;
@@ -2829,7 +3033,8 @@ static int strappy_db_copy_default_openrouter_model(sqlite3 *db,
     if ((*model_id_out == NULL) || ((*model_id_out)[0] == '\0')) {
       sqlite3_finalize(stmt);
       free(*model_id_out);
-      *model_id_out = strappy_string_duplicate(STRAPPY_CONFIG_DEFAULT_API_MODEL);
+      *model_id_out =
+        strappy_string_duplicate(STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER);
       if (*model_id_out == NULL) {
         strappy_set_error(error_out, "Could not allocate default model id.");
         return 0;
@@ -2837,7 +3042,8 @@ static int strappy_db_copy_default_openrouter_model(sqlite3 *db,
       return 1;
     }
   } else if (rc == SQLITE_DONE) {
-    *model_id_out = strappy_string_duplicate(STRAPPY_CONFIG_DEFAULT_API_MODEL);
+    *model_id_out =
+      strappy_string_duplicate(STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER);
     if (*model_id_out == NULL) {
       sqlite3_finalize(stmt);
       strappy_set_error(error_out, "Could not allocate default model id.");
@@ -2861,7 +3067,7 @@ int strappy_db_model_is_effectively_allowed(sqlite3 *db,
                                                    char **error_out)
 {
   static const char *sql =
-    "SELECT CASE WHEN ? = " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL
+    "SELECT CASE WHEN ? = " STRAPPY_DB_DEFAULT_MODEL_SQL
     " OR EXISTS (SELECT 1 FROM model_preferences "
     "WHERE model_id = ? AND allowed = 1) THEN 1 ELSE 0 END;";
   sqlite3_stmt *stmt;
@@ -2873,7 +3079,7 @@ int strappy_db_model_is_effectively_allowed(sqlite3 *db,
   }
   *allowed_out = 0;
   if ((model_id == NULL) || (model_id[0] == '\0')) {
-    strappy_set_error(error_out, "OpenRouter model id is empty.");
+    strappy_set_error(error_out, "Model id is empty.");
     return 0;
   }
 
@@ -2914,10 +3120,10 @@ int strappy_db_model_is_effectively_allowed(sqlite3 *db,
   return 0;
 }
 
-int strappy_db_set_openrouter_model_allowed_in_db(sqlite3 *db,
-                                                         const char *model_id,
-                                                         int allowed,
-                                                         char **error_out)
+int strappy_db_set_model_allowed_in_db(sqlite3 *db,
+                                       const char *model_id,
+                                       int allowed,
+                                       char **error_out)
 {
   static const char *sql =
     "INSERT OR REPLACE INTO model_preferences "
@@ -2927,12 +3133,12 @@ int strappy_db_set_openrouter_model_allowed_in_db(sqlite3 *db,
   int rc;
 
   if ((model_id == NULL) || (model_id[0] == '\0')) {
-    strappy_set_error(error_out, "OpenRouter model id is empty.");
+    strappy_set_error(error_out, "Model id is empty.");
     return 0;
   }
 
   default_model_id = NULL;
-  if (!strappy_db_copy_default_openrouter_model(db, &default_model_id, error_out)) {
+  if (!strappy_db_copy_default_model(db, &default_model_id, error_out)) {
     return 0;
   }
   if (!allowed && (default_model_id != NULL) &&
@@ -2951,7 +3157,7 @@ int strappy_db_set_openrouter_model_allowed_in_db(sqlite3 *db,
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
-                                "Could not prepare OpenRouter model setting: %s",
+                                "Could not prepare model setting: %s",
                                 sqlite3_errmsg(db));
     return 0;
   }
@@ -2964,7 +3170,7 @@ int strappy_db_set_openrouter_model_allowed_in_db(sqlite3 *db,
   }
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
-                                "Could not bind OpenRouter model setting: %s",
+                                "Could not bind model setting: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     return 0;
@@ -2972,7 +3178,7 @@ int strappy_db_set_openrouter_model_allowed_in_db(sqlite3 *db,
   rc = sqlite3_step(stmt);
   if (rc != SQLITE_DONE) {
     strappy_set_formatted_error(error_out,
-                                "Could not save OpenRouter model setting: %s",
+                                "Could not save model setting: %s",
                                 sqlite3_errmsg(db));
     sqlite3_finalize(stmt);
     return 0;
@@ -2982,10 +3188,10 @@ int strappy_db_set_openrouter_model_allowed_in_db(sqlite3 *db,
   return 1;
 }
 
-int strappy_db_set_openrouter_model_allowed(const char *db_path,
-                                            const char *model_id,
-                                            int allowed,
-                                            char **error_out)
+int strappy_db_set_model_allowed(const char *db_path,
+                                 const char *model_id,
+                                 int allowed,
+                                 char **error_out)
 {
   sqlite3 *db;
   int ok;
@@ -2998,17 +3204,17 @@ int strappy_db_set_openrouter_model_allowed(const char *db_path,
     return 0;
   }
 
-  ok = strappy_db_set_openrouter_model_allowed_in_db(db,
-                                                     model_id,
-                                                     allowed,
-                                                     error_out);
+  ok = strappy_db_set_model_allowed_in_db(db,
+                                          model_id,
+                                          allowed,
+                                          error_out);
   strappy_db_release(db);
   return ok;
 }
 
-int strappy_db_set_default_openrouter_model(const char *db_path,
-                                            const char *model_id,
-                                            char **error_out)
+int strappy_db_set_default_model(const char *db_path,
+                                 const char *model_id,
+                                 char **error_out)
 {
   sqlite3 *db;
   int ok;
@@ -3026,24 +3232,24 @@ int strappy_db_set_default_openrouter_model(const char *db_path,
   }
 
   ok = strappy_db_upsert_app_setting(db,
-                                     STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_KEY,
+                                     STRAPPY_DB_DEFAULT_MODEL_KEY,
                                      model_id,
                                      "default model",
                                      error_out);
   if (ok) {
-    ok = strappy_db_set_openrouter_model_allowed_in_db(db,
-                                                       model_id,
-                                                       1,
-                                                       error_out);
+    ok = strappy_db_set_model_allowed_in_db(db,
+                                            model_id,
+                                            1,
+                                            error_out);
   }
 
   strappy_db_release(db);
   return ok;
 }
 
-int strappy_db_get_default_openrouter_model(const char *db_path,
-                                            char **model_id_out,
-                                            char **error_out)
+int strappy_db_get_default_model(const char *db_path,
+                                 char **model_id_out,
+                                 char **error_out)
 {
   sqlite3 *db;
   int ok;
@@ -3056,9 +3262,34 @@ int strappy_db_get_default_openrouter_model(const char *db_path,
     return 0;
   }
 
-  ok = strappy_db_copy_default_openrouter_model(db, model_id_out, error_out);
+  ok = strappy_db_copy_default_model(db, model_id_out, error_out);
   strappy_db_release(db);
   return ok;
+}
+
+int strappy_db_set_openrouter_model_allowed(const char *db_path,
+                                            const char *model_id,
+                                            int allowed,
+                                            char **error_out)
+{
+  return strappy_db_set_model_allowed(db_path,
+                                      model_id,
+                                      allowed,
+                                      error_out);
+}
+
+int strappy_db_set_default_openrouter_model(const char *db_path,
+                                            const char *model_id,
+                                            char **error_out)
+{
+  return strappy_db_set_default_model(db_path, model_id, error_out);
+}
+
+int strappy_db_get_default_openrouter_model(const char *db_path,
+                                            char **model_id_out,
+                                            char **error_out)
+{
+  return strappy_db_get_default_model(db_path, model_id_out, error_out);
 }
 
 int strappy_db_update_session_model(const char *db_path,
@@ -3085,12 +3316,9 @@ int strappy_db_get_session_model(const char *db_path,
                                  char **error_out)
 {
   static const char *sql =
-    "SELECT CASE WHEN NULLIF(s.model_id, '') IS NOT NULL AND "
-    "(s.model_id = " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL
-    " OR EXISTS (SELECT 1 FROM model_preferences mp "
-    "WHERE mp.model_id = s.model_id AND mp.allowed = 1)) "
-    "THEN s.model_id ELSE " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL
-    " END FROM sessions s WHERE s.id = ?;";
+    "SELECT COALESCE(NULLIF(s.model_id, ''), "
+      STRAPPY_DB_DEFAULT_MODEL_SQL ") "
+    "FROM sessions s WHERE s.id = ?;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;
@@ -3137,7 +3365,8 @@ int strappy_db_get_session_model(const char *db_path,
     *model_id_out = strappy_db_column_string(stmt, 0);
     if ((*model_id_out == NULL) || ((*model_id_out)[0] == '\0')) {
       free(*model_id_out);
-      *model_id_out = strappy_string_duplicate(STRAPPY_CONFIG_DEFAULT_API_MODEL);
+      *model_id_out =
+        strappy_string_duplicate(STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER);
     }
     if (*model_id_out == NULL) {
       sqlite3_finalize(stmt);
@@ -3161,5 +3390,85 @@ int strappy_db_get_session_model(const char *db_path,
 
   sqlite3_finalize(stmt);
   strappy_db_release(db);
+  return 1;
+}
+
+int strappy_db_get_session_model_route(
+  const char *db_path,
+  long long session_id,
+  strappy_model_route_record *route,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT m.id, a.id, a.provider_id, m.wire_model_id "
+    "FROM sessions s JOIN models m ON m.id = "
+      "COALESCE(NULLIF(s.model_id, ''), "
+        STRAPPY_DB_DEFAULT_MODEL_SQL ") "
+    "JOIN provider_accounts a ON a.id = m.provider_account_id "
+    "WHERE s.id = ? AND m.catalog_active = 1 AND "
+      "(m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL " OR "
+      "EXISTS (SELECT 1 FROM model_preferences mp "
+        "WHERE mp.model_id = m.id AND mp.allowed = 1));";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if (route == NULL) {
+    strappy_set_error(error_out, "Session model route output is missing.");
+    return 0;
+  }
+  strappy_model_route_record_init(route);
+  if (session_id <= 0LL) {
+    strappy_set_error(error_out, "Session id is not valid.");
+    return 0;
+  }
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  if (!strappy_db_session_exists(db, session_id, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc != SQLITE_ROW) {
+    if (rc == SQLITE_DONE) {
+      strappy_set_error(
+        error_out,
+        "The selected session model is not active and allowed. Choose an "
+        "allowed model without changing the conversation's account.");
+    } else {
+      strappy_set_formatted_error(error_out,
+                                  "Could not read session model route: %s",
+                                  sqlite3_errmsg(db));
+    }
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  route->model_id = strappy_db_column_string(stmt, 0);
+  route->provider_account_id = strappy_db_column_string(stmt, 1);
+  route->provider_id = strappy_db_column_string(stmt, 2);
+  route->wire_model_id = strappy_db_column_string(stmt, 3);
+  sqlite3_finalize(stmt);
+  strappy_db_release(db);
+  if ((route->model_id == NULL) ||
+      (route->provider_account_id == NULL) ||
+      (route->provider_id == NULL) ||
+      (route->wire_model_id == NULL)) {
+    strappy_model_route_record_destroy(route);
+    strappy_set_error(error_out, "Could not allocate session model route.");
+    return 0;
+  }
   return 1;
 }

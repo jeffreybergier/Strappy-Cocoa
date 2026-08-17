@@ -243,7 +243,7 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
   if ([name length] > 0U) {
     return name;
   }
-  return StrappyStringForModelRow(row, @"id");
+  return StrappyStringForModelRow(row, @"wire_model_id");
 }
 
 static NSString *StrappyModelNumberString(NSDictionary *row, NSString *key)
@@ -299,6 +299,10 @@ static NSArray *StrappyModelSearchKeys(void)
   if (keys == nil) {
     keys = [[NSArray alloc] initWithObjects:
       @"id",
+      @"wire_model_id",
+      @"provider_account_id",
+      @"provider_id",
+      @"provider_account_name",
       @"canonical_slug",
       @"hugging_face_id",
       @"name",
@@ -1555,7 +1559,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   NSArray *rows;
 
   error = nil;
-  rows = [StrappySession openRouterModelCatalogWithError:&error];
+  rows = [StrappySession modelCatalogWithError:&error];
   if (rows != nil) {
     [allModelRows_ release];
     allModelRows_ = [StrappyPreparedModelRowsForRows(rows) copy];
@@ -2237,9 +2241,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     modelId = StrappyStringForModelRow(model, @"id");
     error = nil;
     if (([modelId length] == 0U) ||
-        ![StrappySession setOpenRouterModelAllowed:shouldAllow
-                                forModelIdentifier:modelId
-                                             error:&error]) {
+        ![StrappySession setModelAllowed:shouldAllow
+                      forModelIdentifier:modelId
+                                   error:&error]) {
       [self loadOpenRouterModels];
       [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
         error,
@@ -2385,8 +2389,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     if ([identifier isEqualToString:@"model_name"]) {
       return StrappyModelDisplayNameForRow(model);
     }
+    if ([identifier isEqualToString:@"model_account"]) {
+      return StrappyStringForModelRow(model, @"provider_account_name");
+    }
     if ([identifier isEqualToString:@"model_id"]) {
-      return StrappyStringForModelRow(model, @"id");
+      return StrappyStringForModelRow(model, @"wire_model_id");
     }
     if ([identifier isEqualToString:@"model_context"]) {
       return StrappyModelNumberString(model, @"context_length");
@@ -2496,10 +2503,13 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
       if ([description length] > 0U) {
         return description;
       }
-      return StrappyStringForModelRow(model, @"id");
+      return StrappyStringForModelRow(model, @"wire_model_id");
+    }
+    if ([identifier isEqualToString:@"model_account"]) {
+      return StrappyStringForModelRow(model, @"provider_account_id");
     }
     if ([identifier isEqualToString:@"model_id"]) {
-      return StrappyStringForModelRow(model, @"id");
+      return StrappyStringForModelRow(model, @"wire_model_id");
     }
     return @"";
   }
@@ -2648,9 +2658,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     modelId = StrappyStringForModelRow(model, @"id");
     error = nil;
     if (([modelId length] == 0U) ||
-        ![StrappySession setOpenRouterModelAllowed:checked
-                                forModelIdentifier:modelId
-                                             error:&error]) {
+        ![StrappySession setModelAllowed:checked
+                      forModelIdentifier:modelId
+                                   error:&error]) {
       [modelTableView_ reloadData];
       [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
         error,

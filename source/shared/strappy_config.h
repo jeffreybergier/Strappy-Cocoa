@@ -1,6 +1,8 @@
 #ifndef STRAPPY_CONFIG_H
 #define STRAPPY_CONFIG_H
 
+#include "strappy_provider.h"
+
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -11,6 +13,8 @@ extern "C" {
 #define STRAPPY_CONFIG_DEFAULT_API_ENDPOINT \
   "https://openrouter.ai/api/v1/responses"
 #define STRAPPY_CONFIG_DEFAULT_API_MODEL "z-ai/glm-5.2"
+#define STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER \
+  STRAPPY_PROVIDER_ACCOUNT_OPENROUTER ":" STRAPPY_CONFIG_DEFAULT_API_MODEL
 
 typedef enum strappy_web_provider {
   STRAPPY_WEB_PROVIDER_NONE = 0,

@@ -47,7 +47,7 @@ static NSString *StrappyModelWhitelistDisplayNameForRow(NSDictionary *row)
   if ([name length] > 0U) {
     return name;
   }
-  return StrappyModelWhitelistStringForRow(row, @"id");
+  return StrappyModelWhitelistStringForRow(row, @"wire_model_id");
 }
 
 static NSComparisonResult StrappyWhitelistCompareStrings(NSString *left,
@@ -141,6 +141,7 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
 {
   NSTableColumn *allowedColumn;
   NSTableColumn *defaultColumn;
+  NSTableColumn *accountColumn;
   NSTableColumn *nameColumn;
   NSTableColumn *idColumn;
   NSTableColumn *contextColumn;
@@ -181,6 +182,20 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
   [defaultCell setImageScaling:NSImageScaleProportionallyDown];
   [defaultColumn setDataCell:defaultCell];
   [tableView addTableColumn:defaultColumn];
+
+  accountColumn =
+    [[[NSTableColumn alloc] initWithIdentifier:@"model_account"] autorelease];
+  [[accountColumn headerCell] setStringValue:NSLocalizedString(@"Account", nil)];
+  [accountColumn setWidth:112.0];
+  [accountColumn setMinWidth:90.0];
+  [accountColumn setEditable:NO];
+  [accountColumn setSortDescriptorPrototype:
+    [[[NSSortDescriptor alloc] initWithKey:@"model_account"
+                                 ascending:YES] autorelease]];
+  textCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
+  [textCell setLineBreakMode:NSLineBreakByTruncatingTail];
+  [accountColumn setDataCell:textCell];
+  [tableView addTableColumn:accountColumn];
 
   nameColumn = [[[NSTableColumn alloc] initWithIdentifier:@"model_name"] autorelease];
   [[nameColumn headerCell] setStringValue:NSLocalizedString(@"Model", nil)];
@@ -255,26 +270,30 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
   [tableView addTableColumn:completionColumn];
 
   [tableView setSortDescriptors:[NSArray arrayWithObjects:
-    [[[NSSortDescriptor alloc] initWithKey:@"model_id"
+    [[[NSSortDescriptor alloc] initWithKey:@"model_account"
                                  ascending:YES] autorelease],
+    [[[NSSortDescriptor alloc] initWithKey:@"model_allowed"
+                                 ascending:NO] autorelease],
     nil]];
 }
 
 - (NSSortDescriptor *)requiredSortDescriptor
 {
-  return [[[NSSortDescriptor alloc] initWithKey:@"model_allowed"
-                                      ascending:NO] autorelease];
+  return [[[NSSortDescriptor alloc] initWithKey:@"model_account"
+                                      ascending:YES] autorelease];
 }
 
 - (NSSortDescriptor *)defaultPrimarySortDescriptor
 {
-  return [[[NSSortDescriptor alloc] initWithKey:@"model_id"
-                                      ascending:YES] autorelease];
+  return [[[NSSortDescriptor alloc] initWithKey:@"model_allowed"
+                                      ascending:NO] autorelease];
 }
 
 - (NSArray *)fallbackSortDescriptors
 {
   return [NSArray arrayWithObjects:
+    [[[NSSortDescriptor alloc] initWithKey:@"model_id"
+                                 ascending:YES] autorelease],
     [[[NSSortDescriptor alloc] initWithKey:@"model_completion_price"
                                  ascending:YES] autorelease],
     [[[NSSortDescriptor alloc] initWithKey:@"model_prompt_price"
@@ -290,6 +309,7 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
 - (BOOL)sortKeyIsKnown:(NSString *)key
 {
   return ([key isEqualToString:@"model_allowed"] ||
+          [key isEqualToString:@"model_account"] ||
           [key isEqualToString:@"model_name"] ||
           [key isEqualToString:@"model_id"] ||
           [key isEqualToString:@"model_context"] ||
@@ -306,6 +326,11 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
       StrappyModelWhitelistRowIsAllowed(left) ? 1LL : 0LL,
       StrappyModelWhitelistRowIsAllowed(right) ? 1LL : 0LL);
   }
+  if ([key isEqualToString:@"model_account"]) {
+    return StrappyWhitelistCompareStrings(
+      StrappyModelWhitelistStringForRow(left, @"provider_account_name"),
+      StrappyModelWhitelistStringForRow(right, @"provider_account_name"));
+  }
   if ([key isEqualToString:@"model_name"]) {
     return StrappyWhitelistCompareStrings(
       StrappyModelWhitelistDisplayNameForRow(left),
@@ -313,8 +338,8 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
   }
   if ([key isEqualToString:@"model_id"]) {
     return StrappyWhitelistCompareStrings(
-      StrappyModelWhitelistStringForRow(left, @"id"),
-      StrappyModelWhitelistStringForRow(right, @"id"));
+      StrappyModelWhitelistStringForRow(left, @"wire_model_id"),
+      StrappyModelWhitelistStringForRow(right, @"wire_model_id"));
   }
   if ([key isEqualToString:@"model_context"]) {
     NSNumber *leftValue;

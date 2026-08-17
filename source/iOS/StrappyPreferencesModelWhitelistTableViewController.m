@@ -38,7 +38,8 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
   NSString *name;
 
   name = StrappyStringForModelRow(row, @"name");
-  return ([name length] > 0U) ? name : StrappyStringForModelRow(row, @"id");
+  return ([name length] > 0U) ? name :
+    StrappyStringForModelRow(row, @"wire_model_id");
 }
 
 static NSArray *StrappyModelSearchKeys(void)
@@ -48,6 +49,10 @@ static NSArray *StrappyModelSearchKeys(void)
   if (keys == nil) {
     keys = [[NSArray alloc] initWithObjects:
       @"id",
+      @"wire_model_id",
+      @"provider_account_id",
+      @"provider_id",
+      @"provider_account_name",
       @"canonical_slug",
       @"hugging_face_id",
       @"name",
@@ -205,13 +210,20 @@ static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
   (void)context;
   leftRow = [left isKindOfClass:[NSDictionary class]] ? left : nil;
   rightRow = [right isKindOfClass:[NSDictionary class]] ? right : nil;
+  result = StrappyCompareStrings(
+    StrappyStringForModelRow(leftRow, @"provider_account_name"),
+    StrappyStringForModelRow(rightRow, @"provider_account_name"));
+  if (result != NSOrderedSame) {
+    return result;
+  }
   result = StrappyCompareBooleans(StrappyModelRowIsAllowed(leftRow),
                                   StrappyModelRowIsAllowed(rightRow));
   if (result != NSOrderedSame) {
     return result;
   }
-  result = StrappyCompareStrings(StrappyStringForModelRow(leftRow, @"id"),
-                                 StrappyStringForModelRow(rightRow, @"id"));
+  result = StrappyCompareStrings(
+    StrappyStringForModelRow(leftRow, @"wire_model_id"),
+    StrappyStringForModelRow(rightRow, @"wire_model_id"));
   if (result != NSOrderedSame) {
     return result;
   }
@@ -224,6 +236,45 @@ static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
   return StrappyCompareDouble(
     [StrappyStringForModelRow(leftRow, @"pricing_prompt") doubleValue],
     [StrappyStringForModelRow(rightRow, @"pricing_prompt") doubleValue]);
+}
+
+static NSArray *StrappyModelAccountIdentifiersForRows(NSArray *rows)
+{
+  NSMutableArray *identifiers;
+  NSUInteger index;
+
+  identifiers = [NSMutableArray array];
+  for (index = 0U; index < [rows count]; index++) {
+    NSDictionary *row;
+    NSString *identifier;
+
+    row = [rows objectAtIndex:index];
+    identifier = StrappyStringForModelRow(row, @"provider_account_id");
+    if (([identifier length] > 0U) &&
+        ![identifiers containsObject:identifier]) {
+      [identifiers addObject:identifier];
+    }
+  }
+  return identifiers;
+}
+
+static NSArray *StrappyModelRowsForAccount(NSArray *rows,
+                                           NSString *accountIdentifier)
+{
+  NSMutableArray *accountRows;
+  NSUInteger index;
+
+  accountRows = [NSMutableArray array];
+  for (index = 0U; index < [rows count]; index++) {
+    NSDictionary *row;
+
+    row = [rows objectAtIndex:index];
+    if ([StrappyStringForModelRow(row, @"provider_account_id")
+          isEqualToString:accountIdentifier]) {
+      [accountRows addObject:row];
+    }
+  }
+  return accountRows;
 }
 
 @interface StrappyPreferencesModelWhitelistTableViewController ()
@@ -276,7 +327,7 @@ static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
 
 - (NSArray *)loadAllRowsWithError:(NSError **)error
 {
-  return [StrappySession openRouterModelCatalogWithError:error];
+  return [StrappySession modelCatalogWithError:error];
 }
 
 - (NSArray *)preparedRowsForRows:(NSArray *)rows
@@ -304,6 +355,36 @@ static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
   }
   return ([rowSearchText rangeOfString:[searchText lowercaseString]].location !=
           NSNotFound);
+}
+
+- (NSArray *)modelAccountIdentifiers
+{
+  return StrappyModelAccountIdentifiersForRows([self rows]);
+}
+
+- (NSArray *)modelRowsInSection:(NSInteger)section
+{
+  NSArray *accounts;
+
+  accounts = [self modelAccountIdentifiers];
+  if ((section < 0) || ((NSUInteger)section >= [accounts count])) {
+    return [NSArray array];
+  }
+  return StrappyModelRowsForAccount(
+    [self rows],
+    [accounts objectAtIndex:(NSUInteger)section]);
+}
+
+- (NSDictionary *)modelRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  NSArray *sectionRows;
+
+  sectionRows = [self modelRowsInSection:[indexPath section]];
+  if (([indexPath row] < 0) ||
+      ((NSUInteger)[indexPath row] >= [sectionRows count])) {
+    return nil;
+  }
+  return [sectionRows objectAtIndex:(NSUInteger)[indexPath row]];
 }
 
 - (BOOL)modelRowIsDefault:(NSDictionary *)row
@@ -426,14 +507,88 @@ static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
 
   error = nil;
   allow = [self allowedValueForModelRow:row] ? NO : YES;
-  if (![StrappySession setOpenRouterModelAllowed:allow
-                              forModelIdentifier:modelIdentifier
-                                           error:&error]) {
+  if (![StrappySession setModelAllowed:allow
+                    forModelIdentifier:modelIdentifier
+                                 error:&error]) {
     [self showError:error
               title:NSLocalizedString(@"Failed to Save Changes", nil)];
     return;
   }
   [self reloadRows];
+}
+
+#pragma mark - Account-grouped table
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
+{
+  NSUInteger count;
+
+  (void)tableView;
+  count = [[self modelAccountIdentifiers] count];
+  return (NSInteger)((count > 0U) ? count : 1U);
+}
+
+- (NSInteger)tableView:(UITableView *)tableView
+ numberOfRowsInSection:(NSInteger)section
+{
+  (void)tableView;
+  return (NSInteger)[[self modelRowsInSection:section] count];
+}
+
+- (NSString *)tableView:(UITableView *)tableView
+ titleForHeaderInSection:(NSInteger)section
+{
+  NSArray *sectionRows;
+  NSString *name;
+
+  (void)tableView;
+  sectionRows = [self modelRowsInSection:section];
+  if ([sectionRows count] == 0U) {
+    return nil;
+  }
+  name = StrappyStringForModelRow([sectionRows objectAtIndex:0U],
+                                  @"provider_account_name");
+  return ([name length] > 0U) ? name : NSLocalizedString(@"Account", nil);
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView
+         cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  UITableViewCell *cell;
+  NSDictionary *row;
+
+  cell = [tableView dequeueReusableCellWithIdentifier:@"CatalogCell"];
+  if (cell == nil) {
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
+                                  reuseIdentifier:@"CatalogCell"];
+    [[cell textLabel] setNumberOfLines:1];
+    [[cell detailTextLabel] setNumberOfLines:1];
+  }
+  row = [self modelRowAtIndexPath:indexPath];
+  [[cell textLabel] setTextColor:[UIColor blackColor]];
+  [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+  [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
+  [self configureCell:cell withRow:row];
+  return cell;
+}
+
+- (NSIndexPath *)tableView:(UITableView *)tableView
+  willSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  (void)tableView;
+  return ([self modelRowAtIndexPath:indexPath] != nil) ? indexPath : nil;
+}
+
+- (void)tableView:(UITableView *)tableView
+didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  NSDictionary *row;
+
+  [tableView deselectRowAtIndexPath:indexPath animated:YES];
+  row = [self modelRowAtIndexPath:indexPath];
+  if (row != nil) {
+    [self useRow:row atIndexPath:indexPath];
+  }
 }
 
 - (void)dealloc

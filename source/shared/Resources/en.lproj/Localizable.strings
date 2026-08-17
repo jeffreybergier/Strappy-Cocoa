@@ -90,6 +90,7 @@
 "https://openrouter.ai/api/v1/responses" = "https://openrouter.ai/api/v1/responses";
 "Paste API token" = "Paste API token";
 "Model" = "Model";
+"Account" = "Account";
 "Fetch Models" = "Fetch Models";
 "Refresh the OpenRouter model list." = "Refresh the OpenRouter model list.";
 "Use" = "Use";
