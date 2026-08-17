@@ -272,7 +272,7 @@
 "Prompt request is already running." = "Prompt request is already running.";
 "Prompts" = "Prompts";
 "Refresh" = "Refresh";
-"Metadata" = "Metadata";
+"Metadata:" = "Metadata:";
 "No HTTP response" = "No HTTP response";
 "Retry" = "Retry";
 "[fa:gears] Grinding" = "[fa:gears] Grinding";

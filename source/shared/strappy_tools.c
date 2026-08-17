@@ -75,6 +75,7 @@ typedef struct strappy_tool_definition {
 typedef struct strappy_server_tool_definition {
   const char *type;
   const char *feature;
+  const char *response_item_type;
 } strappy_server_tool_definition;
 
 typedef struct strappy_tools_text_buffer {
@@ -173,9 +174,14 @@ static const size_t strappy_tool_definition_count =
 
 static const strappy_server_tool_definition strappy_server_tool_definitions[] = {
   { STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
-    STRAPPY_TOOL_SERVER_FEATURE_WEB_SEARCH },
+    STRAPPY_TOOL_SERVER_FEATURE_WEB_SEARCH,
+    NULL },
   { STRAPPY_TOOL_OPENROUTER_WEB_FETCH,
-    STRAPPY_TOOL_SERVER_FEATURE_WEB_SEARCH }
+    STRAPPY_TOOL_SERVER_FEATURE_WEB_SEARCH,
+    NULL },
+  { STRAPPY_TOOL_WEB_SEARCH,
+    STRAPPY_TOOL_SERVER_FEATURE_WEB_SEARCH,
+    STRAPPY_RESPONSE_ITEM_WEB_SEARCH_CALL }
 };
 
 static const size_t strappy_server_tool_definition_count =
@@ -1240,6 +1246,7 @@ static int strappy_tools_server_schema_is_enabled(
   cJSON *server_tool,
   const char * const *allowed_names,
   size_t allowed_name_count,
+  strappy_provider_kind provider,
   strappy_web_provider web_provider)
 {
   const char *type;
@@ -1249,10 +1256,20 @@ static int strappy_tools_server_schema_is_enabled(
   if (type == NULL) {
     return 0;
   }
+  if (provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) {
+    if (strcmp(type, STRAPPY_TOOL_WEB_SEARCH) != 0) {
+      return 0;
+    }
+  } else if (strcmp(type, STRAPPY_TOOL_WEB_SEARCH) == 0) {
+    return 0;
+  }
   if ((allowed_names != NULL) && (allowed_name_count > 0U) &&
-      !strappy_tools_name_is_allowed(type,
-                                     allowed_names,
-                                     allowed_name_count)) {
+      !strappy_tools_name_is_allowed(type, allowed_names, allowed_name_count) &&
+      !((provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) &&
+        (strcmp(type, STRAPPY_TOOL_WEB_SEARCH) == 0) &&
+        strappy_tools_name_is_allowed(STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
+                                      allowed_names,
+                                      allowed_name_count))) {
     return 0;
   }
   feature = cJSON_GetObjectItemCaseSensitive(
@@ -1393,22 +1410,54 @@ char *strappy_tools_display_registry_json(const char *resource_dir,
 
   for (tool = server_tools->child; tool != NULL; tool = tool->next) {
     const char *type;
+    const strappy_server_tool_definition *definition;
     cJSON *display;
+    cJSON *response_copy;
     cJSON *copy;
 
     type = strappy_tools_server_schema_type(tool);
+    definition = strappy_tools_find_server_definition(type);
     display = cJSON_GetObjectItemCaseSensitive(
       tool,
       STRAPPY_TOOL_DISPLAY_METADATA_KEY);
     copy = cJSON_Duplicate(display, 1);
+    response_copy = NULL;
+    if ((definition != NULL) && (definition->response_item_type != NULL)) {
+      response_copy = cJSON_Duplicate(display, 1);
+    }
     if ((copy == NULL) ||
-        (cJSON_AddBoolToObject(copy, "response_item", 1) == NULL) ||
-        !cJSON_AddItemToObject(registry, type, copy)) {
+        ((definition != NULL) &&
+         (definition->response_item_type != NULL) &&
+         (response_copy == NULL)) ||
+        (cJSON_AddBoolToObject(copy, "response_item", 1) == NULL)) {
       cJSON_Delete(copy);
+      cJSON_Delete(response_copy);
       cJSON_Delete(registry);
       cJSON_Delete(root);
       strappy_set_error(error_out,
                         "Could not build server tool display registry.");
+      return NULL;
+    }
+    if (!cJSON_AddItemToObject(registry, type, copy)) {
+      cJSON_Delete(copy);
+      cJSON_Delete(response_copy);
+      cJSON_Delete(registry);
+      cJSON_Delete(root);
+      strappy_set_error(error_out,
+                        "Could not build server tool display registry.");
+      return NULL;
+    }
+    copy = NULL;
+    if ((response_copy != NULL) &&
+        ((cJSON_AddBoolToObject(response_copy, "response_item", 1) == NULL) ||
+         !cJSON_AddItemToObject(registry,
+                               definition->response_item_type,
+                               response_copy))) {
+      cJSON_Delete(response_copy);
+      cJSON_Delete(registry);
+      cJSON_Delete(root);
+      strappy_set_error(error_out,
+                        "Could not build server tool response display registry.");
       return NULL;
     }
   }
@@ -1459,6 +1508,7 @@ static int strappy_tools_responses_append_server_tools(
   const char *resource_dir,
   const char * const *allowed_names,
   size_t allowed_name_count,
+  strappy_provider_kind provider,
   strappy_web_provider web_provider,
   char **error_out)
 {
@@ -1490,6 +1540,7 @@ static int strappy_tools_responses_append_server_tools(
     if (!strappy_tools_server_schema_is_enabled(server_tool,
                                                 allowed_names,
                                                 allowed_name_count,
+                                                provider,
                                                 web_provider)) {
       continue;
     }
@@ -1540,6 +1591,7 @@ static char *strappy_tools_responses_json_from_chat_json(
   const char *resource_dir,
   const char * const *allowed_names,
   size_t allowed_name_count,
+  strappy_provider_kind provider,
   strappy_web_provider web_provider,
   char **error_out)
 {
@@ -1647,6 +1699,7 @@ static char *strappy_tools_responses_json_from_chat_json(
                                                    resource_dir,
                                                    allowed_names,
                                                    allowed_name_count,
+                                                   provider,
                                                    web_provider,
                                                    error_out)) {
     cJSON_Delete(responses_tools);
@@ -1667,6 +1720,23 @@ char *strappy_tools_responses_request_json_filtered(
   const char *resource_dir,
   const char * const *allowed_names,
   size_t allowed_name_count,
+  strappy_web_provider web_provider,
+  char **error_out)
+{
+  return strappy_tools_responses_request_json_filtered_for_provider(
+    resource_dir,
+    allowed_names,
+    allowed_name_count,
+    STRAPPY_PROVIDER_KIND_OPENROUTER,
+    web_provider,
+    error_out);
+}
+
+char *strappy_tools_responses_request_json_filtered_for_provider(
+  const char *resource_dir,
+  const char * const *allowed_names,
+  size_t allowed_name_count,
+  strappy_provider_kind provider,
   strappy_web_provider web_provider,
   char **error_out)
 {
@@ -1692,6 +1762,7 @@ char *strappy_tools_responses_request_json_filtered(
                                                 resource_dir,
                                                 allowed_names,
                                                 allowed_name_count,
+                                                provider,
                                                 web_provider,
                                                 error_out);
   free(chat_tools_json);
@@ -1763,6 +1834,23 @@ char *strappy_tools_prompt_markdown_filtered(
   strappy_web_provider web_provider,
   char **error_out)
 {
+  return strappy_tools_prompt_markdown_filtered_for_provider(
+    resource_dir,
+    allowed_names,
+    allowed_name_count,
+    STRAPPY_PROVIDER_KIND_OPENROUTER,
+    web_provider,
+    error_out);
+}
+
+char *strappy_tools_prompt_markdown_filtered_for_provider(
+  const char *resource_dir,
+  const char * const *allowed_names,
+  size_t allowed_name_count,
+  strappy_provider_kind provider,
+  strappy_web_provider web_provider,
+  char **error_out)
+{
   cJSON *root;
   cJSON *tools;
   cJSON *server_tools;
@@ -1831,6 +1919,7 @@ char *strappy_tools_prompt_markdown_filtered(
     if (!strappy_tools_server_schema_is_enabled(tool,
                                                 allowed_names,
                                                 allowed_name_count,
+                                                provider,
                                                 web_provider)) {
       continue;
     }

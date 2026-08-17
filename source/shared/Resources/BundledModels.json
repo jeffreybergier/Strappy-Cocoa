@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_revision": 1,
+  "catalog_revision": 2,
   "catalog_source": "bundled",
   "models": [
     {
@@ -19,7 +19,9 @@
       "capabilities": {
         "reasoning": true,
         "local_functions": true,
-        "hosted_tools": []
+        "hosted_tools": [
+          "web_search"
+        ]
       },
       "reasoning_levels": [
         "off",
@@ -50,7 +52,9 @@
       "capabilities": {
         "reasoning": true,
         "local_functions": true,
-        "hosted_tools": []
+        "hosted_tools": [
+          "web_search"
+        ]
       },
       "reasoning_levels": [
         "off",
@@ -81,7 +85,9 @@
       "capabilities": {
         "reasoning": true,
         "local_functions": true,
-        "hosted_tools": []
+        "hosted_tools": [
+          "web_search"
+        ]
       },
       "reasoning_levels": [
         "off",
@@ -112,7 +118,9 @@
       "capabilities": {
         "reasoning": true,
         "local_functions": true,
-        "hosted_tools": []
+        "hosted_tools": [
+          "web_search"
+        ]
       },
       "reasoning_levels": [
         "off",
@@ -143,7 +151,9 @@
       "capabilities": {
         "reasoning": true,
         "local_functions": true,
-        "hosted_tools": []
+        "hosted_tools": [
+          "web_search"
+        ]
       },
       "reasoning_levels": [
         "off",
@@ -175,7 +185,9 @@
       "capabilities": {
         "reasoning": true,
         "local_functions": true,
-        "hosted_tools": []
+        "hosted_tools": [
+          "web_search"
+        ]
       },
       "reasoning_levels": [
         "off",
@@ -207,7 +219,9 @@
       "capabilities": {
         "reasoning": true,
         "local_functions": true,
-        "hosted_tools": []
+        "hosted_tools": [
+          "web_search"
+        ]
       },
       "reasoning_levels": [
         "off",

@@ -190,42 +190,45 @@ endif
 
 .PHONY: test scanner-test prompts review-prompts manual-openai-oauth \
 	manual-chatgpt-compatibility chatgpt-credential-cache-test \
-	openai-oauth-test \
+	openai-web-search-live-test openai-oauth-test \
 	openai-oauth-poc-self-test clean
 
 test: $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS) $(OPENAI_OAUTH_HARNESS) $(CHATGPT_ADAPTER_HARNESS) $(CHATGPT_COMPATIBILITY_PROBE) | $(TEST_DIR)
 	@echo "--- Running Linux shared-core test suite ---"
-	@echo " [1/10] RUN  scanner_profile_harness"
+	@echo " [1/11] RUN  scanner_profile_harness"
 	./$(SCANNER_PROFILE_HARNESS)
-	@echo " [1/10] PASS scanner_profile_harness"
-	@echo " [2/10] RUN  database_query_harness"
+	@echo " [1/11] PASS scanner_profile_harness"
+	@echo " [2/11] RUN  database_query_harness"
 	./$(DATABASE_QUERY_HARNESS)
-	@echo " [2/10] PASS database_query_harness"
-	@echo " [3/10] RUN  bash_harness"
+	@echo " [2/11] PASS database_query_harness"
+	@echo " [3/11] RUN  bash_harness"
 	./$(BASH_HARNESS)
-	@echo " [3/10] PASS bash_harness"
-	@echo " [4/10] RUN  webview_harness"
+	@echo " [3/11] PASS bash_harness"
+	@echo " [4/11] RUN  webview_harness"
 	STRAPPY_WEBVIEW_PAGE_OUTPUT=$(WEBVIEW_PAGE_FIXTURE) ./$(WEBVIEW_HARNESS)
-	@echo " [4/10] PASS webview_harness"
-	@echo " [5/10] RUN  webview_behavior_harness.js"
+	@echo " [4/11] PASS webview_harness"
+	@echo " [5/11] RUN  webview_behavior_harness.js"
 	$(NODE) webview_behavior_harness.js $(WEBVIEW_PAGE_FIXTURE)
-	@echo " [5/10] PASS webview_behavior_harness.js"
-	@echo " [6/10] RUN  responses_harness"
+	@echo " [5/11] PASS webview_behavior_harness.js"
+	@echo " [6/11] RUN  responses_harness"
 	./$(RESPONSES_HARNESS)
-	@echo " [6/10] PASS responses_harness"
-	@echo " [7/10] RUN  prompt_generator_harness"
+	@echo " [6/11] PASS responses_harness"
+	@echo " [7/11] RUN  prompt_generator_harness"
 	./$(PROMPT_GENERATOR_HARNESS) $(SHARED_DIR)/Resources --check
-	@echo " [7/10] PASS prompt_generator_harness"
-	@echo " [8/10] RUN  openai_oauth_harness"
+	@echo " [7/11] PASS prompt_generator_harness"
+	@echo " [8/11] RUN  openai_oauth_harness"
 	./$(OPENAI_OAUTH_HARNESS)
-	@echo " [8/10] PASS openai_oauth_harness"
-	@echo " [9/10] RUN  chatgpt_adapter_harness"
+	@echo " [8/11] PASS openai_oauth_harness"
+	@echo " [9/11] RUN  chatgpt_adapter_harness"
 	./$(CHATGPT_ADAPTER_HARNESS)
-	@echo " [9/10] PASS chatgpt_adapter_harness"
-	@echo " [10/10] RUN  chatgpt credential-cache self-test"
+	@echo " [9/11] PASS chatgpt_adapter_harness"
+	@echo " [10/11] RUN  chatgpt credential-cache self-test"
 	./$(CHATGPT_COMPATIBILITY_PROBE) --credential-cache-self-test
-	@echo " [10/10] PASS chatgpt credential-cache self-test"
-	@echo "--- PASS: all 10 Linux shared-core checks completed ---"
+	@echo " [10/11] PASS chatgpt credential-cache self-test"
+	@echo " [11/11] RUN  optional LUNA native web-search live check"
+	STRAPPY_CHATGPT_PROBE_CREDENTIAL_PATH="$(STRAPPY_CHATGPT_PROBE_CREDENTIAL_PATH)" ./$(CHATGPT_COMPATIBILITY_PROBE) --web-search-live-if-configured
+	@echo " [11/11] PASS optional LUNA native web-search live check"
+	@echo "--- PASS: all 11 Linux shared-core checks completed ---"
 
 scanner-test: $(SCANNER_PROFILE_HARNESS) | $(TEST_DIR)
 	./$(SCANNER_PROFILE_HARNESS)
@@ -241,6 +244,9 @@ manual-chatgpt-compatibility: $(CHATGPT_COMPATIBILITY_PROBE)
 
 chatgpt-credential-cache-test: $(CHATGPT_COMPATIBILITY_PROBE)
 	./$(CHATGPT_COMPATIBILITY_PROBE) --credential-cache-self-test
+
+openai-web-search-live-test: $(CHATGPT_COMPATIBILITY_PROBE)
+	STRAPPY_CHATGPT_PROBE_CREDENTIAL_PATH="$(STRAPPY_CHATGPT_PROBE_CREDENTIAL_PATH)" ./$(CHATGPT_COMPATIBILITY_PROBE) --web-search-live-if-configured
 
 openai-oauth-poc-self-test: $(OPENAI_OAUTH_POC)
 	./$(OPENAI_OAUTH_POC) --self-test

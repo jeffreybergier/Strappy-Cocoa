@@ -86,6 +86,30 @@
   "}]" \
   "}"
 
+#define PROBE_WEB_SEARCH_REQUEST_TEMPLATE \
+  "{" \
+  "\"model\":\"gpt-5.6-luna\"," \
+  "\"store\":false," \
+  "\"stream\":true," \
+  "\"prompt_cache_key\":\"strappy-web-search-live-probe\"," \
+  "\"instructions\":\"You are a concise news assistant. You must use " \
+    "web search and cite the sources used in the answer.\"," \
+  "\"input\":[{" \
+    "\"type\":\"message\",\"role\":\"user\",\"content\":[{" \
+      "\"type\":\"input_text\"," \
+      "\"text\":\"What's the top news today in Tokyo? Please search the " \
+        "web in Japanese to find authentic articles.\"" \
+    "}]" \
+  "}]," \
+  "\"text\":{\"verbosity\":\"low\"}," \
+  "\"include\":[\"reasoning.encrypted_content\"," \
+    "\"web_search_call.action.sources\"]," \
+  "\"tool_choice\":\"auto\"," \
+  "\"parallel_tool_calls\":true," \
+  "\"reasoning\":{\"effort\":\"low\",\"summary\":\"auto\"}," \
+  "\"tools\":[{\"type\":\"web_search\"}]" \
+  "}"
+
 static volatile sig_atomic_t probe_cancelled = 0;
 
 typedef enum probe_credential_cache_status {
@@ -1032,6 +1056,156 @@ static char *probe_copy_output_text(const char *response_json)
   return text;
 }
 
+static int probe_http_url_is_valid(const char *url)
+{
+  return (url != NULL) &&
+    ((strncmp(url, "https://", 8U) == 0) ||
+     (strncmp(url, "http://", 7U) == 0));
+}
+
+static int probe_web_search_action_has_query(cJSON *action)
+{
+  cJSON *query;
+  cJSON *queries;
+  cJSON *value;
+
+  query = cJSON_GetObjectItemCaseSensitive(action, "query");
+  if (cJSON_IsString(query) && (query->valuestring != NULL) &&
+      (query->valuestring[0] != '\0')) {
+    return 1;
+  }
+  queries = cJSON_GetObjectItemCaseSensitive(action, "queries");
+  if (!cJSON_IsArray(queries)) {
+    return 0;
+  }
+  cJSON_ArrayForEach(value, queries) {
+    if (cJSON_IsString(value) && (value->valuestring != NULL) &&
+        (value->valuestring[0] != '\0')) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int probe_web_search_response_is_expected(const char *response_json)
+{
+  cJSON *root;
+  cJSON *output;
+  cJSON *item;
+  size_t search_count;
+  size_t source_count;
+  size_t citation_count;
+  int has_output_text;
+  int ok;
+
+  root = cJSON_Parse(response_json);
+  output = cJSON_GetObjectItemCaseSensitive(root, "output");
+  search_count = 0U;
+  source_count = 0U;
+  citation_count = 0U;
+  has_output_text = 0;
+  ok = cJSON_IsObject(root) && cJSON_IsArray(output);
+  for (item = ok ? output->child : NULL;
+       (item != NULL) && ok;
+       item = item->next) {
+    cJSON *type;
+
+    type = cJSON_GetObjectItemCaseSensitive(item, "type");
+    if (!cJSON_IsString(type) || (type->valuestring == NULL)) {
+      continue;
+    }
+    if (strcmp(type->valuestring, "web_search_call") == 0) {
+      cJSON *status;
+      cJSON *action;
+      cJSON *action_type;
+      cJSON *sources;
+      cJSON *source;
+
+      status = cJSON_GetObjectItemCaseSensitive(item, "status");
+      action = cJSON_GetObjectItemCaseSensitive(item, "action");
+      action_type = cJSON_GetObjectItemCaseSensitive(action, "type");
+      if (!cJSON_IsString(status) || (status->valuestring == NULL) ||
+          (strcmp(status->valuestring, "completed") != 0) ||
+          !cJSON_IsObject(action) || !cJSON_IsString(action_type) ||
+          (action_type->valuestring == NULL)) {
+        ok = 0;
+        continue;
+      }
+      if (strcmp(action_type->valuestring, "search") != 0) {
+        continue;
+      }
+      if (!probe_web_search_action_has_query(action)) {
+        ok = 0;
+        continue;
+      }
+      search_count++;
+      sources = cJSON_GetObjectItemCaseSensitive(action, "sources");
+      cJSON_ArrayForEach(source, sources) {
+        cJSON *url;
+
+        url = cJSON_IsObject(source) ?
+          cJSON_GetObjectItemCaseSensitive(source, "url") : NULL;
+        if (cJSON_IsString(url) &&
+            probe_http_url_is_valid(url->valuestring)) {
+          source_count++;
+        }
+      }
+    } else if (strcmp(type->valuestring, "message") == 0) {
+      cJSON *content;
+      cJSON *part;
+
+      content = cJSON_GetObjectItemCaseSensitive(item, "content");
+      cJSON_ArrayForEach(part, content) {
+        cJSON *part_type;
+        cJSON *text;
+        cJSON *annotations;
+        cJSON *annotation;
+
+        part_type = cJSON_IsObject(part) ?
+          cJSON_GetObjectItemCaseSensitive(part, "type") : NULL;
+        text = cJSON_IsObject(part) ?
+          cJSON_GetObjectItemCaseSensitive(part, "text") : NULL;
+        if (cJSON_IsString(part_type) &&
+            (part_type->valuestring != NULL) &&
+            (strcmp(part_type->valuestring, "output_text") == 0) &&
+            cJSON_IsString(text) && (text->valuestring != NULL) &&
+            (text->valuestring[0] != '\0')) {
+          has_output_text = 1;
+        }
+        annotations = cJSON_IsObject(part) ?
+          cJSON_GetObjectItemCaseSensitive(part, "annotations") : NULL;
+        cJSON_ArrayForEach(annotation, annotations) {
+          cJSON *annotation_type;
+          cJSON *url;
+
+          annotation_type = cJSON_IsObject(annotation) ?
+            cJSON_GetObjectItemCaseSensitive(annotation, "type") : NULL;
+          url = cJSON_IsObject(annotation) ?
+            cJSON_GetObjectItemCaseSensitive(annotation, "url") : NULL;
+          if (cJSON_IsString(annotation_type) &&
+              (annotation_type->valuestring != NULL) &&
+              (strcmp(annotation_type->valuestring, "url_citation") == 0) &&
+              cJSON_IsString(url) &&
+              probe_http_url_is_valid(url->valuestring)) {
+            citation_count++;
+          }
+        }
+      }
+    }
+  }
+  cJSON_Delete(root);
+  ok = ok && (search_count > 0U) && (source_count > 0U) &&
+    (citation_count > 0U) && has_output_text;
+  if (ok) {
+    printf("PASS: live web search returned %lu search action(s), %lu "
+           "consulted source(s), and %lu citation(s).\n",
+           (unsigned long)search_count,
+           (unsigned long)source_count,
+           (unsigned long)citation_count);
+  }
+  return ok;
+}
+
 static int probe_text_matches_fixture(const char *text, const char *expected)
 {
   const char *start;
@@ -1263,11 +1437,45 @@ static int probe_run_tool_round(
   return ok;
 }
 
+static int probe_run_web_search_round(
+  strappy_config *config,
+  const strappy_openai_oauth_credentials *credentials)
+{
+  char *request_json;
+  char *response_json;
+  int ok;
+
+  request_json = probe_request_from_template(
+    PROBE_WEB_SEARCH_REQUEST_TEMPLATE,
+    PROBE_DEFAULT_MODEL,
+    1);
+  response_json = NULL;
+  ok = (request_json != NULL) &&
+    probe_send_request(config,
+                       credentials,
+                       request_json,
+                       STRAPPY_RESPONSES_RESPONSE_TRANSPORT_SSE,
+                       "Live native web-search response",
+                       &response_json);
+  if (ok) {
+    ok = probe_web_search_response_is_expected(response_json);
+  }
+  if (!ok && (response_json != NULL)) {
+    fprintf(stderr,
+            "Live native web search completed with an unexpected response "
+            "shape.\n");
+  }
+  free(response_json);
+  free(request_json);
+  return ok;
+}
+
 static int probe_obtain_credentials(
   const strappy_openai_oauth_configuration *oauth_configuration,
   strappy_openai_oauth_device *device,
   const char *credential_path,
   int reauthorize,
+  int allow_device_authorization,
   strappy_openai_oauth_credentials *credentials)
 {
   strappy_openai_oauth_credentials refreshed;
@@ -1343,6 +1551,13 @@ static int probe_obtain_credentials(
     return 1;
   }
 
+  if (!allow_device_authorization) {
+    fprintf(stderr,
+            "The live web-search credential cache disappeared before it "
+            "could be loaded.\n");
+    return 0;
+  }
+
   ok = strappy_openai_oauth_start_device_authorization(
     oauth_configuration,
     device,
@@ -1401,20 +1616,25 @@ int main(int argc, char **argv)
   char *error;
   int reauthorize;
   int nonstreaming_ok;
+  int web_search_live;
   int ok;
 
   if ((argc == 2) &&
       (strcmp(argv[1], "--credential-cache-self-test") == 0)) {
     return probe_credential_cache_self_test() ? EXIT_SUCCESS : EXIT_FAILURE;
   }
-  if (argc != 1) {
+  web_search_live = (argc == 2) &&
+    (strcmp(argv[1], "--web-search-live-if-configured") == 0);
+  if ((argc != 1) && !web_search_live) {
     fprintf(stderr,
-            "Usage: %s [--credential-cache-self-test]\n",
+            "Usage: %s [--credential-cache-self-test|"
+            "--web-search-live-if-configured]\n",
             argv[0]);
     return EXIT_FAILURE;
   }
 
-  model = getenv("STRAPPY_CHATGPT_PROBE_MODEL");
+  model = web_search_live ? PROBE_DEFAULT_MODEL :
+    getenv("STRAPPY_CHATGPT_PROBE_MODEL");
   if ((model == NULL) || (model[0] == '\0')) {
     model = PROBE_DEFAULT_MODEL;
   }
@@ -1436,6 +1656,22 @@ int main(int argc, char **argv)
   }
   reauthorize = (reauthorize_value != NULL) &&
     (strcmp(reauthorize_value, "1") == 0);
+  if (web_search_live && reauthorize) {
+    fprintf(stderr,
+            "The automated live web-search check cannot reauthorize.\n");
+    return EXIT_FAILURE;
+  }
+  if (web_search_live && (access(credential_path, F_OK) != 0)) {
+    if (errno == ENOENT) {
+      printf("SKIP: live OpenAI Account web search (%s is absent).\n",
+             credential_path);
+      return EXIT_SUCCESS;
+    }
+    fprintf(stderr,
+            "Could not inspect the live web-search credential cache: %s.\n",
+            strerror(errno));
+    return EXIT_FAILURE;
+  }
 
   (void)signal(SIGINT, probe_signal_handler);
   (void)signal(SIGTERM, probe_signal_handler);
@@ -1446,18 +1682,27 @@ int main(int argc, char **argv)
   error = NULL;
   nonstreaming_ok = 0;
 
-  printf("Strappy ChatGPT compatibility probe (%s)\n", model);
+  printf("Strappy ChatGPT %s (%s)\n",
+         web_search_live ? "live web-search probe" :
+           "compatibility probe",
+         model);
   printf("Responses stay in memory; OAuth credentials use an ignored, "
          "owner-only JSON cache.\n");
   printf("Valid cached tokens avoid OAuth calls; refresh occurs only near "
          "expiry.\n");
-  printf("It exercises non-streaming JSON, SSE termination, and a local "
-         "function round.\n\n");
+  if (web_search_live) {
+    printf("It exercises LUNA at low reasoning effort with native web "
+           "search, consulted sources, and citations.\n\n");
+  } else {
+    printf("It exercises non-streaming JSON, SSE termination, and a local "
+           "function round.\n\n");
+  }
   ok = probe_obtain_credentials(
     &oauth_configuration,
     &device,
     credential_path,
     reauthorize,
+    web_search_live ? 0 : 1,
     &credentials);
 
   endpoint = ok ? strappy_provider_responses_endpoint(
@@ -1474,7 +1719,10 @@ int main(int argc, char **argv)
   strappy_free_string(error);
   error = NULL;
 
-  if (ok) {
+  if (ok && web_search_live) {
+    ok = probe_run_web_search_round(&config, &credentials);
+  }
+  if (ok && !web_search_live) {
     nonstreaming_ok = probe_run_text_round(&config,
                                             &credentials,
                                             model,
@@ -1483,25 +1731,25 @@ int main(int argc, char **argv)
       printf("PASS: non-streaming JSON response.\n");
     }
   }
-  if (ok) {
+  if (ok && !web_search_live) {
     ok = probe_run_text_round(&config, &credentials, model, 1);
     if (ok) {
       printf("PASS: streaming text request and terminal SSE response.\n");
     }
   }
-  if (ok) {
+  if (ok && !web_search_live) {
     ok = probe_run_tool_round(&config, &credentials, model);
     if (ok) {
       printf("PASS: local function call/output continuation.\n");
     }
   }
-  if (ok && !nonstreaming_ok) {
+  if (ok && !web_search_live && !nonstreaming_ok) {
     fprintf(stderr,
             "FAIL: the ChatGPT backend did not complete the non-streaming "
             "JSON compatibility check.\n");
     ok = 0;
   }
-  if (ok) {
+  if (ok && !web_search_live) {
     printf("PASS: all live compatibility checks completed.\n");
     printf("Record only PASS/FAIL, date, plan category, and model in the "
            "compatibility report; never record identifiers or payloads.\n");

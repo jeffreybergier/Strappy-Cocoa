@@ -2514,6 +2514,20 @@ static int harness_run_tool_registry_tests(void)
           "url",
           NULL,
           "url") &&
+        harness_server_tool_display_matches(
+          registry,
+          STRAPPY_TOOL_WEB_SEARCH,
+          "Web Search",
+          "action",
+          "query",
+          NULL) &&
+        harness_server_tool_display_matches(
+          registry,
+          STRAPPY_RESPONSE_ITEM_WEB_SEARCH_CALL,
+          "Web Search",
+          "action",
+          "query",
+          NULL) &&
         (cJSON_GetObjectItem(registry,
                              STRAPPY_TOOL_DATABASE_LIST) == NULL) &&
         (cJSON_GetObjectItem(
@@ -9617,10 +9631,10 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
 static int harness_run_bundled_model_catalog_tests(
   const harness_context *context)
 {
-  static const char *revision_two_json =
+  static const char *revision_three_json =
     "{"
       "\"schema_version\":1,"
-      "\"catalog_revision\":2,"
+      "\"catalog_revision\":3,"
       "\"catalog_source\":\"bundled\","
       "\"models\":[{"
         "\"provider_id\":\"openai_chatgpt\","
@@ -9645,7 +9659,7 @@ static int harness_run_bundled_model_catalog_tests(
   static const char *invalid_revision_json =
     "{"
       "\"schema_version\":1,"
-      "\"catalog_revision\":3,"
+      "\"catalog_revision\":4,"
       "\"catalog_source\":\"bundled\","
       "\"unexpected\":true,"
       "\"models\":[]"
@@ -9691,12 +9705,12 @@ static int harness_run_bundled_model_catalog_tests(
          database_path,
          "SELECT catalog_revision FROM bundled_model_catalogs WHERE "
            "provider_account_id = 'openai_chatgpt';",
-         1LL,
+         2LL,
          "initial bundled catalog revision") &&
        harness_expect_catalog_integer(
          database_path,
          "SELECT COUNT(*) FROM model_capabilities WHERE "
-           "billing_kind = 'chatgpt_plan' AND hosted_tools_enabled = 0;",
+           "billing_kind = 'chatgpt_plan' AND hosted_tools_enabled = 1;",
          7LL,
          "bundled plan capability count") &&
        harness_expect_catalog_integer(
@@ -9716,7 +9730,7 @@ static int harness_run_bundled_model_catalog_tests(
                                     1,
                                     &error) ||
       !strappy_db_import_bundled_models_json(database_path,
-                                             revision_two_json,
+                                             revision_three_json,
                                              &error)) {
     fprintf(stderr,
             "Could not update bundled model catalog: %s\n",
@@ -9741,7 +9755,7 @@ static int harness_run_bundled_model_catalog_tests(
          database_path,
          "SELECT catalog_revision FROM bundled_model_catalogs WHERE "
            "provider_account_id = 'openai_chatgpt';",
-         2LL,
+         3LL,
          "updated bundled catalog revision");
   if (!ok) {
     harness_unlink_sqlite_files(database_path);

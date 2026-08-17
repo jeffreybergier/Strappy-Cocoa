@@ -867,6 +867,33 @@ static int harness_test_request_surfaces(void)
   if (!ok) {
     return harness_fail("Disabled web tools leaked into a Responses request.");
   }
+
+  error = NULL;
+  tools_json = strappy_tools_responses_request_json_filtered_for_provider(
+    "../shared/Resources",
+    NULL,
+    0U,
+    STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT,
+    STRAPPY_WEB_PROVIDER_AUTO,
+    &error);
+  if (tools_json == NULL) {
+    fprintf(stderr,
+            "Could not build ChatGPT Responses tools: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    return 0;
+  }
+  tools = cJSON_Parse(tools_json);
+  free(tools_json);
+  ok = cJSON_IsArray(tools) &&
+    harness_has_tool_type(tools, STRAPPY_TOOL_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH);
+  cJSON_Delete(tools);
+  free(error);
+  if (!ok) {
+    return harness_fail("ChatGPT web-search schema was not provider-native.");
+  }
   return 1;
 }
 
@@ -1443,7 +1470,8 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_PREFLIGHT_FIRST_PROMPT_ONLY = 15,
   HARNESS_RESPONSES_SERVER_ISOLATED_PROMPTS = 16,
   HARNESS_RESPONSES_SERVER_ROUND_LIMIT = 17,
-  HARNESS_RESPONSES_SERVER_ANSWER_QUALITY_DISABLED = 18
+  HARNESS_RESPONSES_SERVER_ANSWER_QUALITY_DISABLED = 18,
+  HARNESS_RESPONSES_SERVER_NATIVE_WEB_SEARCH = 19
 } harness_responses_server_scenario;
 
 static int harness_send_all(int socket_fd,
@@ -3689,6 +3717,53 @@ static int harness_run_valid_web_reference_server(int listener_fd)
   return ok;
 }
 
+static int harness_run_native_web_search_server(int listener_fd)
+{
+  static const char *first_response =
+    "{\"id\":\"resp-native-web-search\",\"object\":\"response\","
+    "\"created_at\":1700000005,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{"
+    "\"type\":\"web_search_call\",\"id\":\"ws-native\","
+    "\"status\":\"completed\",\"action\":{\"type\":\"search\","
+    "\"queries\":[\"current test\"],\"sources\":[{\"type\":\"url\","
+    "\"url\":\"https://example.com/article\"}]}},{"
+    "\"type\":\"message\",\"id\":\"msg-native-web-search\","
+    "\"role\":\"assistant\",\"status\":\"completed\","
+    "\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Citation-backed answer.\",\"annotations\":[{"
+    "\"type\":\"url_citation\",\"start_index\":0,\"end_index\":6,"
+    "\"title\":\"Example [Source]\","
+    "\"url\":\"https://example.com/article\"}]}]}],"
+    "\"usage\":{\"input_tokens\":4,\"output_tokens\":5,"
+    "\"total_tokens\":9}}";
+  char *body;
+  char *session_key;
+  char *prompt_group;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  session_key = NULL;
+  prompt_group = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_request_base_is_valid(root,
+                                  "Use native web search",
+                                  &session_key,
+                                  &prompt_group) &&
+    harness_send_json_response(client_fd, 200L, first_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  free(session_key);
+  free(prompt_group);
+  return ok;
+}
+
 static int harness_run_function_tool_server(int listener_fd)
 {
   static const char *tool_response =
@@ -4354,6 +4429,8 @@ static int harness_start_server(harness_responses_server_scenario scenario,
     } else if (scenario ==
                HARNESS_RESPONSES_SERVER_WEB_REFERENCE_VALID) {
       ok = harness_run_valid_web_reference_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_NATIVE_WEB_SEARCH) {
+      ok = harness_run_native_web_search_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_FUNCTION_TOOL) {
       ok = harness_run_function_tool_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_ROUND_LIMIT) {
@@ -6047,6 +6124,144 @@ static int harness_test_valid_web_reference_passes_content_check(void)
   if (!ok) {
     fprintf(stderr,
             "Valid web-reference quality check failed: %s\n",
+            (error != NULL) ? error : "request or ledger mismatch");
+  }
+  free(error);
+  unlink(path);
+  return ok;
+}
+
+static int harness_test_native_web_search_persists_citations(void)
+{
+  char path[] = "/tmp/strappy-responses-native-web-search-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *result;
+  sqlite3 *db;
+  strappy_response_item_raw_record_list context;
+  strappy_session_message_record_list timeline;
+  long long session_id;
+  long long value;
+  size_t index;
+  pid_t server_pid;
+  int context_has_search;
+  int timeline_has_search;
+  int timeline_has_citation;
+  int fd;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create native web-search harness database.");
+  }
+  close(fd);
+  error = NULL;
+  session_id = 0LL;
+  if (!harness_create_session_database(path, &session_id, &error) ||
+      !strappy_db_update_session_web_provider(path,
+                                              session_id,
+                                              STRAPPY_WEB_PROVIDER_AUTO,
+                                              &error) ||
+      !harness_start_server(HARNESS_RESPONSES_SERVER_NATIVE_WEB_SEARCH,
+                            endpoint,
+                            sizeof(endpoint),
+                            &server_pid)) {
+    fprintf(stderr,
+            "Could not prepare native web-search integration test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  result = strappy_responses_send_prompt_for_session_and_store(
+    "Use native web search",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources",
+    path,
+    session_id,
+    &error);
+  server_ok = harness_wait_for_server(server_pid, result == NULL);
+  ok = (result != NULL) &&
+    (strcmp(result, "Citation-backed answer.") == 0) && server_ok;
+  free(result);
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM conversation_items WHERE "
+                           "kind='openrouter:web_search' AND "
+                           "include_in_context=1;",
+                           &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM item_citations WHERE "
+                        "citation_type='url_citation' AND "
+                        "url='https://example.com/article';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_checks WHERE "
+                        "check_key='web_reference' AND status='passed';",
+                        &value) && (value == 1LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+
+  strappy_response_item_raw_record_list_init(&context);
+  strappy_session_message_record_list_init(&timeline);
+  context_has_search = 0;
+  timeline_has_search = 0;
+  timeline_has_citation = 0;
+  if (ok) {
+    ok = strappy_db_list_canonical_response_items(path,
+                                                  session_id,
+                                                  &context,
+                                                  &error) &&
+      strappy_db_list_response_timeline(path,
+                                        session_id,
+                                        &timeline,
+                                        &error);
+  }
+  for (index = 0U; ok && (index < context.count); index++) {
+    if ((context.records[index].raw_json != NULL) &&
+        (strstr(context.records[index].raw_json,
+                "\"type\":\"web_search_call\"") != NULL) &&
+        (strstr(context.records[index].raw_json,
+                "\"queries\":[\"current test\"]") != NULL)) {
+      context_has_search = 1;
+    }
+  }
+  for (index = 0U; ok && (index < timeline.count); index++) {
+    if ((timeline.records[index].role != NULL) &&
+        (strcmp(timeline.records[index].role, "api_item") == 0) &&
+        (timeline.records[index].kind != NULL) &&
+        (strcmp(timeline.records[index].kind,
+                STRAPPY_RESPONSE_ITEM_WEB_SEARCH_CALL) == 0) &&
+        (timeline.records[index].response_item_action_json != NULL) &&
+        (strstr(timeline.records[index].response_item_action_json,
+                "\"queries\":[\"current test\"]") != NULL) &&
+        (strstr(timeline.records[index].response_item_action_json,
+                "https://example.com/article") != NULL)) {
+      timeline_has_search = 1;
+    }
+    if ((timeline.records[index].role != NULL) &&
+        (strcmp(timeline.records[index].role, "assistant") == 0) &&
+        (timeline.records[index].content != NULL) &&
+        (strstr(timeline.records[index].content, "Sources:") != NULL) &&
+        (strstr(timeline.records[index].content,
+                "[Example \\[Source\\]](<https://example.com/article>)") !=
+         NULL)) {
+      timeline_has_citation = 1;
+    }
+  }
+  ok = ok && context_has_search && timeline_has_search &&
+    timeline_has_citation;
+  strappy_response_item_raw_record_list_destroy(&context);
+  strappy_session_message_record_list_destroy(&timeline);
+  if (!ok) {
+    fprintf(stderr,
+            "Native web-search persistence check failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
   free(error);
@@ -9003,6 +9218,7 @@ int main(void)
       harness_test_empty_answer_after_tools_quality_report() &&
       harness_test_web_search_requires_markdown_reference() &&
       harness_test_valid_web_reference_passes_content_check() &&
+      harness_test_native_web_search_persists_citations() &&
       harness_test_function_tool_continuation() &&
       harness_test_round_limit() &&
       harness_test_file_mutation_continuation() &&

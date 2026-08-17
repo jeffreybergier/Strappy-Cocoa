@@ -83,6 +83,7 @@ typedef struct strappy_responses_analysis {
   char *error_type;
   long long plan_resets_at_seconds;
   int has_plan_resets_at;
+  int has_url_citation;
   char **tool_activity_names;
   size_t tool_activity_count;
   strappy_responses_tool_call *tool_calls;
@@ -98,6 +99,7 @@ typedef struct strappy_responses_audit {
   strappy_responses_audit_rule rules[STRAPPY_RESPONSES_MAX_AUDIT_RULES];
   size_t rule_count;
   int web_reference_required;
+  int web_reference_present;
 } strappy_responses_audit;
 
 static int strappy_responses_text_has_non_whitespace(const char *text);
@@ -212,7 +214,8 @@ static void strappy_responses_audit_record_activity(
     return;
   }
   if ((strcmp(tool_name, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) ||
-      (strcmp(tool_name, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0)) {
+      (strcmp(tool_name, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0) ||
+      (strcmp(tool_name, "web_search_call") == 0)) {
     audit->web_reference_required = 1;
   }
 }
@@ -367,7 +370,8 @@ static int strappy_responses_audit_evaluate(
       if (!audit->web_reference_required) {
         check->status = "not_applicable";
         check->detail = "No web search or web fetch was used.";
-      } else if (strappy_responses_text_has_http_markdown_link(response_text)) {
+      } else if (audit->web_reference_present ||
+                 strappy_responses_text_has_http_markdown_link(response_text)) {
         check->status = "passed";
       } else {
         check->status = "failed";
@@ -847,6 +851,49 @@ static int strappy_responses_collect_message_text(
   return 1;
 }
 
+static int strappy_responses_message_has_url_citation(cJSON *message)
+{
+  cJSON *content;
+  cJSON *part;
+
+  content = cJSON_IsObject(message) ?
+    cJSON_GetObjectItem(message, "content") : NULL;
+  if ((content == NULL) || !cJSON_IsArray(content)) {
+    return 0;
+  }
+  for (part = content->child; part != NULL; part = part->next) {
+    cJSON *annotations;
+    cJSON *annotation;
+
+    annotations = cJSON_IsObject(part) ?
+      cJSON_GetObjectItem(part, "annotations") : NULL;
+    if ((annotations == NULL) || !cJSON_IsArray(annotations)) {
+      continue;
+    }
+    for (annotation = annotations->child;
+         annotation != NULL;
+         annotation = annotation->next) {
+      cJSON *type;
+      cJSON *url;
+
+      type = cJSON_IsObject(annotation) ?
+        cJSON_GetObjectItem(annotation, "type") : NULL;
+      url = cJSON_IsObject(annotation) ?
+        cJSON_GetObjectItem(annotation, "url") : NULL;
+      if ((type != NULL) && cJSON_IsString(type) &&
+          (type->valuestring != NULL) &&
+          (strcmp(type->valuestring, "url_citation") == 0) &&
+          (url != NULL) && cJSON_IsString(url) &&
+          (url->valuestring != NULL) &&
+          ((strncmp(url->valuestring, "https://", 8U) == 0) ||
+           (strncmp(url->valuestring, "http://", 7U) == 0))) {
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
 static int strappy_responses_analysis_append_tool_call(
   strappy_responses_analysis *analysis,
   cJSON *item,
@@ -1031,13 +1078,17 @@ static int strappy_responses_analyze_json(
         }
       } else if ((type != NULL) && cJSON_IsString(type) &&
                  (type->valuestring != NULL) &&
-                 (strcmp(type->valuestring, "message") == 0) &&
-                 !strappy_responses_collect_message_text(&text, item)) {
-        strappy_responses_buffer_destroy(&text);
-        cJSON_Delete(root);
-        strappy_set_error(error_out,
-                          "Could not allocate Responses output text.");
-        return 0;
+                 (strcmp(type->valuestring, "message") == 0)) {
+        if (strappy_responses_message_has_url_citation(item)) {
+          analysis->has_url_citation = 1;
+        }
+        if (!strappy_responses_collect_message_text(&text, item)) {
+          strappy_responses_buffer_destroy(&text);
+          cJSON_Delete(root);
+          strappy_set_error(error_out,
+                            "Could not allocate Responses output text.");
+          return 0;
+        }
       }
       output_index++;
     }
@@ -1568,7 +1619,11 @@ static char *strappy_responses_build_request_json(
 
   ok = ok && strappy_responses_buffer_append_string(
     &buffer,
-    "],\"include\":[\"reasoning.encrypted_content\"],") &&
+    (provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) &&
+      strappy_web_provider_is_enabled(config->web_provider) ?
+      "],\"include\":[\"reasoning.encrypted_content\","
+        "\"web_search_call.action.sources\"]," :
+      "],\"include\":[\"reasoning.encrypted_content\"],") &&
     ((provider != STRAPPY_PROVIDER_KIND_OPENROUTER) || !reasoning_enabled ||
      strappy_responses_buffer_append_string(
        &buffer,
@@ -1969,8 +2024,8 @@ static int strappy_responses_prepare_runtime(
       strappy_responses_runtime_destroy(runtime);
       return 0;
     }
-    /* Hosted OpenRouter tools are provider extensions. Local function tools
-     * remain available when the catalog explicitly permits them. */
+  }
+  if (!runtime->hosted_tools_enabled) {
     runtime->config.web_provider = STRAPPY_WEB_PROVIDER_NONE;
   }
 
@@ -2046,9 +2101,10 @@ static int strappy_responses_prepare_runtime(
   runtime->config.tool_allowlist =
     (const char * const *)runtime->assistant_set.tool_names;
   runtime->config.tool_allowlist_count = runtime->assistant_set.tool_name_count;
-  runtime->system_prompt = strappy_prompt_build_with_answer_quality(
+  runtime->system_prompt = strappy_prompt_build_with_answer_quality_for_provider(
     runtime->config.guidance_resource_dir,
     &runtime->assistant_set,
+    runtime->provider,
     runtime->config.web_provider,
     runtime->answer_quality_enabled,
     error_out);
@@ -2057,10 +2113,11 @@ static int strappy_responses_prepare_runtime(
     return 0;
   }
   runtime->tools_json =
-    strappy_tools_responses_request_json_filtered(
+    strappy_tools_responses_request_json_filtered_for_provider(
       runtime->config.guidance_resource_dir,
       runtime->config.tool_allowlist,
       runtime->config.tool_allowlist_count,
+      runtime->provider,
       runtime->config.web_provider,
       error_out);
   if (runtime->tools_json == NULL) {
@@ -2983,6 +3040,9 @@ static int strappy_responses_send_round(
         strappy_responses_audit_record_activity(
           &runtime->audit,
           analysis.tool_activity_names[activity_index]);
+      }
+      if (analysis.has_url_citation) {
+        runtime->audit.web_reference_present = 1;
       }
       if (analysis.tool_call_count == 0U) {
         if (!strappy_responses_audit_evaluate(&runtime->audit,

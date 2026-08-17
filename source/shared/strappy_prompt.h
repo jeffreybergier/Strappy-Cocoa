@@ -22,6 +22,13 @@ char *strappy_prompt_build_with_answer_quality(
   strappy_web_provider web_provider,
   int answer_quality_enabled,
   char **error_out);
+char *strappy_prompt_build_with_answer_quality_for_provider(
+  const char *resource_dir,
+  const strappy_assistant_set_profile *profile,
+  strappy_provider_kind provider,
+  strappy_web_provider web_provider,
+  int answer_quality_enabled,
+  char **error_out);
 char *strappy_prompt_render_resource(const char *resource_dir,
                                      const char *resource_name,
                                      char **error_out);

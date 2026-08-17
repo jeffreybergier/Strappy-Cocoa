@@ -272,7 +272,7 @@
 "Prompt request is already running." = "プロンプトリクエストはすでに実行中です。";
 "Prompts" = "プロンプト";
 "Refresh" = "更新";
-"Metadata" = "メタデータ";
+"Metadata:" = "メタデータ:";
 "No HTTP response" = "HTTP レスポンスなし";
 "Retry" = "再試行";
 "[fa:gears] Grinding" = "[fa:gears] すり合わせ中…";

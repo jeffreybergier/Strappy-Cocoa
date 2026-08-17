@@ -1,4 +1,5 @@
 #include "strappy_webview.h"
+#include "strappy_tools.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,6 +11,10 @@ static const char harness_tool_display_registry_json[] =
   "\"fontawesome_confirm\":{"
   "\"promoted_argument\":\"shortcodes\","
   "\"transform\":\"comma_separated\"},"
+  "\"web_search\":{\"label\":\"Web Search\","
+  "\"promoted_path\":[\"action\",\"query\"],\"response_item\":true},"
+  "\"web_search_call\":{\"label\":\"Web Search\","
+  "\"promoted_path\":[\"action\",\"query\"],\"response_item\":true},"
   "\"openrouter:web_search\":{\"label\":\"Web Search\","
   "\"promoted_path\":[\"action\",\"query\"],\"response_item\":true},"
   "\"openrouter:web_fetch\":{\"label\":\"Web Fetch\","
@@ -112,7 +117,7 @@ static int harness_check_localized_labels(void)
                             "Autoscroll on") &&
        harness_expect_equal(labels->processing_autoscroll_off,
                             "Autoscroll off") &&
-       harness_expect_equal(labels->response_metadata, "Metadata") &&
+       harness_expect_equal(labels->response_metadata, "Metadata:") &&
        harness_expect_equal(labels->no_http_response,
                             "No HTTP response") &&
        harness_expect_equal(labels->tool, "Tool") &&
@@ -2649,7 +2654,8 @@ static int harness_check_api_exchange_status_states(void)
   message.kind = "response_api_call";
   message.text = "Model: example/success\nStarted: 2026-07-16";
   message.metadata_json =
-    "{\"id\":\"resp-success\",\"status\":\"completed\","
+    "{\"id\":\"resp-success\",\"model\":\"example/success\","
+    "\"status\":\"completed\","
     "\"http_status\":200}";
   success_html = strappy_webview_message_html(&message, NULL, NULL, NULL);
 
@@ -2734,7 +2740,7 @@ static int harness_check_api_exchange_status_states(void)
                                "fa-angle-right") &&
        harness_expect_contains(success_html,
                                "</span></a><span class=\"response-metadata-"
-                               "error-slot\"></span>Metadata: OpenRouter"
+                               "error-slot\"></span>Metadata: example/success"
                                "</div>") &&
        harness_expect_contains(success_html,
                                "class=\"response-metadata-body\"></div>") &&
@@ -2844,6 +2850,8 @@ static int harness_check_responses_items(void)
   char *error_output_html;
   char *ok_false_output_html;
   char *search_html;
+  char *native_search_html;
+  char *native_open_html;
   char *fetch_html;
   char *developer_html;
   char *quality_html;
@@ -3105,6 +3113,43 @@ static int harness_check_responses_items(void)
   search_html = strappy_webview_message_html(&message, &labels, NULL, NULL);
 
   memset(&message, 0, sizeof(message));
+  message.element_id = "response-native-web-search-1";
+  message.round_id = 4LL;
+  message.api_call_id = 2LL;
+  message.direction = "response";
+  message.role = "api_item";
+  message.kind = STRAPPY_RESPONSE_ITEM_WEB_SEARCH_CALL;
+  message.tool_display_registry_json = harness_tool_display_registry_json;
+  message.can_include_in_context = 1;
+  message.include_in_context = 1;
+  message.response_item_action_json =
+    "{\"type\":\"search\",\"queries\":[\"Tokyo daily news\","
+    "\"site:nhk.or.jp Tokyo news\"],\"sources\":[{\"type\":\"url\","
+    "\"url\":\"https://example.com/tokyo\"}]}";
+  message.response_item_status = "completed";
+  message.text = STRAPPY_RESPONSE_ITEM_WEB_SEARCH_CALL;
+  native_search_html =
+    strappy_webview_message_html(&message, &labels, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
+  message.element_id = "response-native-web-open-1";
+  message.round_id = 4LL;
+  message.api_call_id = 2LL;
+  message.direction = "response";
+  message.role = "api_item";
+  message.kind = STRAPPY_RESPONSE_ITEM_WEB_SEARCH_CALL;
+  message.tool_display_registry_json = harness_tool_display_registry_json;
+  message.can_include_in_context = 1;
+  message.include_in_context = 1;
+  message.response_item_action_json =
+    "{\"type\":\"open_page\","
+    "\"url\":\"https://example.com/tokyo-article\"}";
+  message.response_item_status = "completed";
+  message.text = STRAPPY_RESPONSE_ITEM_WEB_SEARCH_CALL;
+  native_open_html =
+    strappy_webview_message_html(&message, &labels, NULL, NULL);
+
+  memset(&message, 0, sizeof(message));
   message.element_id = "response-web-fetch-1";
   message.round_id = 4LL;
   message.api_call_id = 2LL;
@@ -3158,6 +3203,7 @@ static int harness_check_responses_items(void)
        (secondary_reasoning_html != NULL) &&
        (request_reasoning_html != NULL) &&
        (function_html != NULL) && (confirm_function_html != NULL) &&
+       (native_search_html != NULL) && (native_open_html != NULL) &&
        (bash_function_html != NULL) &&
        (output_html != NULL) && (bash_output_html != NULL) &&
        (truncated_bash_output_html != NULL) &&
@@ -3460,6 +3506,28 @@ static int harness_check_responses_items(void)
          "&quot;search&quot;,&quot;query&quot;:&quot;Strappy Cocoa&quot;") &&
        harness_expect_contains(search_html,
                                "data-response-item-status=\"completed\"") &&
+       harness_expect_contains(native_search_html,
+                               "class=\"row api_item\"") &&
+       harness_expect_contains(native_search_html,
+                               "data-kind=\"web_search_call\"") &&
+       harness_expect_contains(native_search_html,
+                               "data-tool-display-title=\"Web Search · "
+                               "Tokyo daily news\"") &&
+       harness_expect_contains(native_search_html,
+                               "data-tool-response-item=\"1\"") &&
+       harness_expect_contains(
+         native_search_html,
+         "data-response-item-action-json=\"{&quot;type&quot;:"
+         "&quot;search&quot;,&quot;queries&quot;:[&quot;Tokyo daily "
+         "news&quot;") &&
+       harness_expect_contains(native_open_html,
+                               "data-kind=\"web_search_call\"") &&
+       harness_expect_contains(
+         native_open_html,
+         "data-tool-display-title=\"Web Search · "
+         "https://example.com/tokyo-article\"") &&
+       harness_expect_contains(native_open_html,
+                               "data-tool-response-item=\"1\"") &&
        harness_expect_contains(fetch_html,
                                "class=\"row api_item\"") &&
        harness_expect_contains(fetch_html,
@@ -3562,6 +3630,8 @@ static int harness_check_responses_items(void)
   strappy_webview_free(quality_html);
   strappy_webview_free(developer_html);
   strappy_webview_free(fetch_html);
+  strappy_webview_free(native_open_html);
+  strappy_webview_free(native_search_html);
   strappy_webview_free(search_html);
   strappy_webview_free(ok_false_output_html);
   strappy_webview_free(error_output_html);

@@ -4,6 +4,7 @@
 #include "strappy_tools.h"
 
 #include <cJSON.h>
+#include <ctype.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -336,6 +337,107 @@ static int strappy_db_response_display_append_member(
   return strappy_db_response_display_append_json_value(buffer, member);
 }
 
+static int strappy_db_response_citation_url_is_safe(const char *url)
+{
+  const unsigned char *cursor;
+
+  if ((url == NULL) ||
+      ((strncmp(url, "https://", 8U) != 0) &&
+       (strncmp(url, "http://", 7U) != 0))) {
+    return 0;
+  }
+  for (cursor = (const unsigned char *)url; *cursor != '\0'; cursor++) {
+    if (isspace((int)*cursor) || iscntrl((int)*cursor) ||
+        (*cursor == '<') || (*cursor == '>')) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int strappy_db_response_append_markdown_label(
+  strappy_db_sql_buffer *buffer,
+  const char *label)
+{
+  const unsigned char *cursor;
+  char character[2];
+
+  character[1] = '\0';
+  for (cursor = (const unsigned char *)label; *cursor != '\0'; cursor++) {
+    if (((*cursor == '[') || (*cursor == ']') || (*cursor == '\\')) &&
+        !strappy_db_sql_buffer_append(buffer, "\\")) {
+      return 0;
+    }
+    character[0] = (char)*cursor;
+    if (!strappy_db_sql_buffer_append(buffer, character)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int strappy_db_response_append_citation_sources(
+  strappy_db_sql_buffer *buffer,
+  cJSON *item)
+{
+  cJSON *content;
+  cJSON *part;
+  size_t source_count;
+
+  source_count = 0U;
+  content = cJSON_IsObject(item) ? cJSON_GetObjectItem(item, "content") : NULL;
+  if ((content == NULL) || !cJSON_IsArray(content)) {
+    return 1;
+  }
+  for (part = content->child; part != NULL; part = part->next) {
+    cJSON *annotations;
+    cJSON *annotation;
+
+    annotations = cJSON_IsObject(part) ?
+      cJSON_GetObjectItem(part, "annotations") : NULL;
+    if ((annotations == NULL) || !cJSON_IsArray(annotations)) {
+      continue;
+    }
+    for (annotation = annotations->child;
+         annotation != NULL;
+         annotation = annotation->next) {
+      cJSON *type;
+      cJSON *title;
+      cJSON *url;
+      const char *label;
+
+      type = cJSON_IsObject(annotation) ?
+        cJSON_GetObjectItem(annotation, "type") : NULL;
+      title = cJSON_IsObject(annotation) ?
+        cJSON_GetObjectItem(annotation, "title") : NULL;
+      url = cJSON_IsObject(annotation) ?
+        cJSON_GetObjectItem(annotation, "url") : NULL;
+      if ((type == NULL) || !cJSON_IsString(type) ||
+          (type->valuestring == NULL) ||
+          (strcmp(type->valuestring, "url_citation") != 0) ||
+          (url == NULL) || !cJSON_IsString(url) ||
+          !strappy_db_response_citation_url_is_safe(url->valuestring)) {
+        continue;
+      }
+      label = ((title != NULL) && cJSON_IsString(title) &&
+               (title->valuestring != NULL) &&
+               (title->valuestring[0] != '\0')) ?
+        title->valuestring : url->valuestring;
+      if (((source_count == 0U) &&
+           !strappy_db_sql_buffer_append(buffer, "\n\nSources:\n")) ||
+          !strappy_db_sql_buffer_append(buffer, "- [") ||
+          !strappy_db_response_append_markdown_label(buffer, label) ||
+          !strappy_db_sql_buffer_append(buffer, "](<") ||
+          !strappy_db_sql_buffer_append(buffer, url->valuestring) ||
+          !strappy_db_sql_buffer_append(buffer, ">)\n")) {
+        return 0;
+      }
+      source_count++;
+    }
+  }
+  return 1;
+}
+
 static char *strappy_db_response_item_display_text(cJSON *item)
 {
   strappy_db_sql_buffer buffer;
@@ -365,7 +467,8 @@ static char *strappy_db_response_item_display_text(cJSON *item)
   if (strcmp(type_text, "message") == 0) {
     if (!strappy_db_response_display_append_member(&buffer,
                                                    item,
-                                                   "content")) {
+                                                   "content") ||
+        !strappy_db_response_append_citation_sources(&buffer, item)) {
       strappy_db_sql_buffer_destroy(&buffer);
       return NULL;
     }
@@ -1131,6 +1234,7 @@ static int strappy_db_semantic_insert_item(sqlite3 *db,
   cJSON *provider_id;
   cJSON *status;
   const char *type_text;
+  const char *storage_type_text;
   const char *provider_id_text;
   const char *status_text;
   long long item_id;
@@ -1157,12 +1261,15 @@ static int strappy_db_semantic_insert_item(sqlite3 *db,
        (strcmp(type_text, "function_call") != 0) &&
        (strcmp(type_text, "function_call_output") != 0) &&
        (strcmp(type_text, "openrouter:web_search") != 0) &&
-       (strcmp(type_text, "openrouter:web_fetch") != 0))) {
+       (strcmp(type_text, "openrouter:web_fetch") != 0) &&
+       (strcmp(type_text, "web_search_call") != 0))) {
     strappy_set_formatted_error(error_out,
                                 "Unsupported context-bearing Responses item type: %s",
                                 (type_text != NULL) ? type_text : "missing");
     return 0;
   }
+  storage_type_text = (strcmp(type_text, "web_search_call") == 0) ?
+    "openrouter:web_search" : type_text;
 
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, item_sql, -1, &stmt, NULL);
@@ -1174,7 +1281,8 @@ static int strappy_db_semantic_insert_item(sqlite3 *db,
   }
   ok = (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) == SQLITE_OK) &&
        (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)turn_id) == SQLITE_OK) &&
-       (sqlite3_bind_text(stmt, 3, type_text, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+       (sqlite3_bind_text(stmt, 3, storage_type_text, -1,
+                          SQLITE_TRANSIENT) == SQLITE_OK) &&
        ((introduced_request_id > 0LL) ?
           (sqlite3_bind_int64(stmt, 4,
                               (sqlite3_int64)introduced_request_id) == SQLITE_OK) :
@@ -1408,7 +1516,8 @@ static int strappy_db_semantic_insert_item(sqlite3 *db,
         return 0;
       }
     }
-  } else if (strcmp(type_text, "openrouter:web_search") == 0) {
+  } else if ((strcmp(type_text, "openrouter:web_search") == 0) ||
+             (strcmp(type_text, "web_search_call") == 0)) {
     cJSON *action;
     cJSON *action_type;
     cJSON *query;
@@ -1418,6 +1527,10 @@ static int strappy_db_semantic_insert_item(sqlite3 *db,
     long source_ordinal;
 
     action = cJSON_GetObjectItem(item, "action");
+    if (!cJSON_IsObject(action)) {
+      strappy_set_error(error_out, "Web-search action is missing.");
+      return 0;
+    }
     action_type = cJSON_IsObject(action) ?
       cJSON_GetObjectItem(action, "type") : NULL;
     query = cJSON_IsObject(action) ? cJSON_GetObjectItem(action, "query") : NULL;
@@ -1482,6 +1595,14 @@ static int strappy_db_semantic_insert_item(sqlite3 *db,
       }
       sqlite3_finalize(stmt);
       source_ordinal++;
+    }
+    if ((strcmp(type_text, "web_search_call") == 0) &&
+        !strappy_db_semantic_insert_document(db,
+                                             item_id,
+                                             "arguments",
+                                             action,
+                                             error_out)) {
+      return 0;
     }
   } else {
     cJSON *url;
@@ -1611,7 +1732,12 @@ static int strappy_db_semantic_request_web_provider(
       continue;
     }
     if ((strcmp(type_text, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) != 0) &&
-        (strcmp(type_text, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) != 0)) {
+        (strcmp(type_text, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) != 0) &&
+        (strcmp(type_text, STRAPPY_TOOL_WEB_SEARCH) != 0)) {
+      continue;
+    }
+    if (strcmp(type_text, STRAPPY_TOOL_WEB_SEARCH) == 0) {
+      selected_provider = STRAPPY_WEB_PROVIDER_NATIVE;
       continue;
     }
     parameters = cJSON_GetObjectItemCaseSensitive(tool, "parameters");
@@ -3736,9 +3862,73 @@ static cJSON *strappy_db_semantic_load_item(sqlite3 *db,
     }
     cJSON_AddStringToObject(item, "output", output_text);
     free(output_text);
-  } else if (strcmp(kind, "openrouter:web_search") == 0) {
+  } else if ((strcmp(kind, "openrouter:web_search") == 0) ||
+             (strcmp(kind, "web_search_call") == 0)) {
     cJSON *action;
     cJSON *sources;
+
+    stmt = NULL;
+    rc = sqlite3_prepare_v2(
+      db,
+      "SELECT 1 FROM structured_documents "
+      "WHERE owner_item_id = ? AND purpose = 'arguments';",
+      -1,
+      &stmt,
+      NULL);
+    if ((rc != SQLITE_OK) ||
+        (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)item_id) != SQLITE_OK)) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not inspect web-search action: %s",
+                                  sqlite3_errmsg(db));
+      sqlite3_finalize(stmt);
+      cJSON_Delete(item);
+      free(kind);
+      free(provider_item_id);
+      free(provider_status);
+      return NULL;
+    }
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc == SQLITE_ROW) {
+      cJSON *native_type;
+
+      action = strappy_db_semantic_load_document(db,
+                                                 item_id,
+                                                 "arguments",
+                                                 error_out);
+      native_type = cJSON_CreateString("web_search_call");
+      if ((action == NULL) || (native_type == NULL) ||
+          !cJSON_ReplaceItemInObjectCaseSensitive(item,
+                                                  "type",
+                                                  native_type)) {
+        cJSON_Delete(action);
+        cJSON_Delete(native_type);
+        cJSON_Delete(item);
+        free(kind);
+        free(provider_item_id);
+        free(provider_status);
+        if ((error_out != NULL) && (*error_out == NULL)) {
+          strappy_set_error(error_out,
+                            "Could not reconstruct native web-search action.");
+        }
+        return NULL;
+      }
+      cJSON_AddItemToObject(item, "action", action);
+      free(kind);
+      free(provider_item_id);
+      free(provider_status);
+      return item;
+    }
+    if (rc != SQLITE_DONE) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not inspect web-search action: %s",
+                                  sqlite3_errmsg(db));
+      cJSON_Delete(item);
+      free(kind);
+      free(provider_item_id);
+      free(provider_status);
+      return NULL;
+    }
 
     stmt = NULL;
     rc = sqlite3_prepare_v2(

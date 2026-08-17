@@ -20,6 +20,11 @@ Altivec iOS/macOS clean builds. The current harness targets are
 `database_query_harness`, `scanner_profile_harness`, `bash_harness`,
 `webview_harness`, `responses_harness` and `prompt_generator_harness`, run through
 `make -C source/linux clean test`.
+When the ignored, owner-only `.env.chatgpt.json` OAuth credential cache exists at
+the repository root, that test suite also sends a short daily-news prompt to
+LUNA at low reasoning effort and requires native web-search actions, consulted
+sources, answer text, and URL citations. It skips the live check when the file
+is absent and must not print or persist response payloads or credential values.
 Use `make -C source/linux prompts` to write all assistant-set prompts with web
 search set to none, auto, native, Exa, and Parallel under
 `source/linux/build-linux/system-prompts`, or use
