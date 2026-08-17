@@ -7,6 +7,20 @@
 extern "C" {
 #endif
 
+typedef int (*strappy_chatgpt_credentials_callback)(
+  int force_refresh,
+  char **access_token_out,
+  char **account_id_out,
+  void *user_data,
+  char **error_out);
+
+/* Cocoa installs a process-lifetime Keychain bridge at startup. Portable
+ * harnesses may install a deterministic callback; no credential is persisted
+ * by the shared Responses core. */
+void strappy_responses_set_chatgpt_credentials_callback(
+  strappy_chatgpt_credentials_callback callback,
+  void *user_data);
+
 char *strappy_responses_send_prompt_for_session_and_store(
   const char *prompt,
   const char *env_path,

@@ -2,8 +2,86 @@
 
 #include "strappy_core.h"
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+
+static int strappy_provider_ascii_contains_case_insensitive(
+  const char *value,
+  const char *needle)
+{
+  size_t value_length;
+  size_t needle_length;
+  size_t start;
+
+  if ((value == NULL) || (needle == NULL) || (needle[0] == '\0')) {
+    return 0;
+  }
+  value_length = strlen(value);
+  needle_length = strlen(needle);
+  if (needle_length > value_length) {
+    return 0;
+  }
+  for (start = 0U; start <= (value_length - needle_length); start++) {
+    size_t index;
+
+    for (index = 0U; index < needle_length; index++) {
+      if (tolower((unsigned char)value[start + index]) !=
+          tolower((unsigned char)needle[index])) {
+        break;
+      }
+    }
+    if (index == needle_length) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+int strappy_provider_chatgpt_is_enabled(void)
+{
+#if STRAPPY_ENABLE_EXPERIMENTAL_CHATGPT
+  const char *disabled;
+
+  disabled = getenv("STRAPPY_DISABLE_EXPERIMENTAL_CHATGPT");
+  return ((disabled == NULL) ||
+          ((strcmp(disabled, "1") != 0) &&
+           (strcmp(disabled, "true") != 0) &&
+           (strcmp(disabled, "TRUE") != 0))) ? 1 : 0;
+#else
+  return 0;
+#endif
+}
+
+int strappy_provider_response_is_plan_limit(strappy_provider_kind provider,
+                                            long http_status,
+                                            const char *error_type,
+                                            const char *error_message)
+{
+  if (provider != STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) {
+    return 0;
+  }
+  if (http_status == 429L) {
+    return 1;
+  }
+  if ((error_type != NULL) &&
+      ((strcmp(error_type, "usage_limit_reached") == 0) ||
+       (strcmp(error_type, "usage_not_included") == 0) ||
+       (strcmp(error_type, "rate_limit_exceeded") == 0) ||
+       (strcmp(error_type, "insufficient_quota") == 0) ||
+       (strcmp(error_type, "quota_exceeded") == 0) ||
+       (strcmp(error_type, "plan_limit_reached") == 0))) {
+    return 1;
+  }
+  return strappy_provider_ascii_contains_case_insensitive(error_message,
+                                                           "usage limit") ||
+    strappy_provider_ascii_contains_case_insensitive(error_message,
+                                                      "not included") ||
+    strappy_provider_ascii_contains_case_insensitive(error_message,
+                                                      "insufficient quota") ||
+    strappy_provider_ascii_contains_case_insensitive(error_message,
+                                                      "out of budget");
+}
 
 const char *strappy_provider_name(strappy_provider_kind provider)
 {

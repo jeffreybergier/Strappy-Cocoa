@@ -2225,13 +2225,17 @@ static int strappy_db_semantic_attempt_context(sqlite3 *db,
                                                long long *request_id_out,
                                                long long *turn_id_out,
                                                long long *session_id_out,
+                                               int *is_chatgpt_plan_out,
                                                char **error_out)
 {
   static const char *sql =
-    "SELECT a.request_id, r.turn_id, t.session_id "
+    "SELECT a.request_id, r.turn_id, t.session_id, "
+    "p.provider_id = '" STRAPPY_PROVIDER_OPENAI_CHATGPT "' "
     "FROM http_attempts a "
     "JOIN model_requests r ON r.id = a.request_id "
-    "JOIN turns t ON t.id = r.turn_id WHERE a.id = ?;";
+    "JOIN turns t ON t.id = r.turn_id "
+    "JOIN provider_accounts p ON p.id = a.provider_account_id "
+    "WHERE a.id = ?;";
   sqlite3_stmt *stmt;
   int rc;
 
@@ -2243,6 +2247,9 @@ static int strappy_db_semantic_attempt_context(sqlite3 *db,
   *request_id_out = 0LL;
   *turn_id_out = 0LL;
   *session_id_out = 0LL;
+  if (is_chatgpt_plan_out != NULL) {
+    *is_chatgpt_plan_out = 0;
+  }
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   if ((rc != SQLITE_OK) ||
@@ -2268,6 +2275,9 @@ static int strappy_db_semantic_attempt_context(sqlite3 *db,
   *request_id_out = (long long)sqlite3_column_int64(stmt, 0);
   *turn_id_out = (long long)sqlite3_column_int64(stmt, 1);
   *session_id_out = (long long)sqlite3_column_int64(stmt, 2);
+  if (is_chatgpt_plan_out != NULL) {
+    *is_chatgpt_plan_out = sqlite3_column_int(stmt, 3) ? 1 : 0;
+  }
   sqlite3_finalize(stmt);
   return 1;
 }
@@ -2435,6 +2445,7 @@ static int strappy_db_semantic_finish_response_call(
   int has_upstream_cost;
   int has_upstream_input_cost;
   int has_upstream_output_cost;
+  int is_chatgpt_plan;
   int parameter;
   int rc;
   int ok;
@@ -2463,6 +2474,7 @@ static int strappy_db_semantic_finish_response_call(
                                            &request_id,
                                            &turn_id,
                                            &session_id,
+                                           &is_chatgpt_plan,
                                            error_out) ||
       !strappy_db_exec(db,
                        "BEGIN IMMEDIATE;",
@@ -2610,6 +2622,15 @@ static int strappy_db_semantic_finish_response_call(
       root,
       "usage.cost_details.upstream_inference_output_cost",
       &upstream_output_cost);
+    /* Subscription usage keeps token counts but has no per-request monetary
+     * price. Provider cost-shaped fields must not turn a ChatGPT-plan request
+     * into a fabricated $0 (or API-style charge) in Strappy's ledger. */
+    if (is_chatgpt_plan) {
+      has_cost = 0;
+      has_upstream_cost = 0;
+      has_upstream_input_cost = 0;
+      has_upstream_output_cost = 0;
+    }
     stmt = NULL;
     rc = sqlite3_prepare_v2(db, insert_usage_sql, -1, &stmt, NULL);
     ok = (rc == SQLITE_OK) &&
@@ -2841,6 +2862,7 @@ int strappy_db_mark_response_call_round_limit(
                                            &request_id,
                                            &turn_id,
                                            &session_id,
+                                           NULL,
                                            error_out) ||
       !strappy_db_exec(db,
                        "BEGIN IMMEDIATE;",

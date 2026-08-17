@@ -2,6 +2,7 @@
 
 #include "strappy_core.h"
 #include "strappy_identity.h"
+#include "strappy_sse.h"
 
 #include <curl/curl.h>
 #include <cJSON.h>
@@ -15,6 +16,7 @@
 
 #define STRAPPY_CLIENT_MODEL_TIMEOUT_SECONDS 60L
 #define STRAPPY_CLIENT_RESPONSES_TIMEOUT_SECONDS 900L
+#define STRAPPY_CLIENT_MAX_RESPONSE_BYTES (64U * 1024U * 1024U)
 
 typedef struct strappy_http_buffer {
   char *data;
@@ -32,8 +34,48 @@ typedef struct strappy_responses_transfer_context {
   int cancelled;
 } strappy_responses_transfer_context;
 
+typedef struct strappy_responses_sse_write_context {
+  strappy_sse_parser parser;
+  strappy_http_buffer raw_response;
+  char *parse_error;
+} strappy_responses_sse_write_context;
+
 static int strappy_curl_initialized = 0;
 static char *strappy_cainfo_path = NULL;
+
+static void strappy_client_secure_wipe(void *memory, size_t length)
+{
+  volatile unsigned char *bytes;
+
+  bytes = (volatile unsigned char *)memory;
+  while ((bytes != NULL) && (length > 0U)) {
+    *bytes++ = 0U;
+    length--;
+  }
+}
+
+static void strappy_client_secure_free(char *value)
+{
+  if (value != NULL) {
+    strappy_client_secure_wipe(value, strlen(value));
+    free(value);
+  }
+}
+
+static void strappy_client_destroy_headers(struct curl_slist *headers)
+{
+  struct curl_slist *item;
+
+  for (item = headers; item != NULL; item = item->next) {
+    if ((item->data != NULL) &&
+        (strncasecmp(item->data,
+                     "Authorization:",
+                     strlen("Authorization:")) == 0)) {
+      strappy_client_secure_wipe(item->data, strlen(item->data));
+    }
+  }
+  curl_slist_free_all(headers);
+}
 
 static void strappy_http_buffer_init(strappy_http_buffer *buffer)
 {
@@ -60,7 +102,8 @@ static int strappy_http_buffer_append(strappy_http_buffer *buffer,
   char *next_data;
 
   if ((buffer == NULL) || ((data == NULL) && (length > 0U)) ||
-      (buffer->length > (((size_t)-1) - length - 1U))) {
+      (buffer->length > (((size_t)-1) - length - 1U)) ||
+      ((buffer->length + length) > STRAPPY_CLIENT_MAX_RESPONSE_BYTES)) {
     return 0;
   }
 
@@ -76,6 +119,35 @@ static int strappy_http_buffer_append(strappy_http_buffer *buffer,
   buffer->length += length;
   buffer->data[buffer->length] = '\0';
   return 1;
+}
+
+static size_t strappy_client_sse_write_callback(void *contents,
+                                                size_t size,
+                                                size_t nmemb,
+                                                void *userp)
+{
+  strappy_responses_sse_write_context *context;
+  size_t real_size;
+
+  if ((contents == NULL) || (userp == NULL) ||
+      ((size != 0U) && (nmemb > (((size_t)-1) / size)))) {
+    return 0U;
+  }
+  real_size = size * nmemb;
+  context = (strappy_responses_sse_write_context *)userp;
+  if (!strappy_http_buffer_append(&context->raw_response,
+                                  (const char *)contents,
+                                  real_size) ||
+      !strappy_sse_parser_feed(&context->parser,
+                               (const char *)contents,
+                               real_size,
+                               &context->parse_error)) {
+    return 0U;
+  }
+  /* libcurl has no successful early-stop callback. Returning zero closes a
+   * server that keeps the SSE connection open after its terminal event; the
+   * caller recognizes this exact parser state as success. */
+  return strappy_sse_parser_is_terminal(&context->parser) ? 0U : real_size;
 }
 
 static size_t strappy_client_write_callback(void *contents,
@@ -143,7 +215,7 @@ static int strappy_client_add_header(struct curl_slist **headers,
   next_headers = curl_slist_append(*headers, header);
   if (next_headers == NULL) {
     strappy_set_error(error_out,
-                      "Could not allocate OpenRouter HTTP headers.");
+                      "Could not allocate provider HTTP headers.");
     return 0;
   }
   *headers = next_headers;
@@ -384,16 +456,16 @@ int strappy_client_fetch_openrouter_user_models_json(
                                  "X-OpenRouter-Title: Strappy",
                                  error_out) &&
        strappy_client_add_header(&headers, auth_header, error_out);
-  free(auth_header);
+  strappy_client_secure_free(auth_header);
   if (!ok) {
-    curl_slist_free_all(headers);
+    strappy_client_destroy_headers(headers);
     free(url);
     return 0;
   }
 
   user_agent = strappy_identity_copy_user_agent(error_out);
   if (user_agent == NULL) {
-    curl_slist_free_all(headers);
+    strappy_client_destroy_headers(headers);
     free(url);
     return 0;
   }
@@ -401,7 +473,7 @@ int strappy_client_fetch_openrouter_user_models_json(
   curl = curl_easy_init();
   if (curl == NULL) {
     free(user_agent);
-    curl_slist_free_all(headers);
+    strappy_client_destroy_headers(headers);
     free(url);
     strappy_set_error(error_out, "Could not create curl handle.");
     return 0;
@@ -428,7 +500,7 @@ int strappy_client_fetch_openrouter_user_models_json(
   }
   curl_easy_cleanup(curl);
   free(user_agent);
-  curl_slist_free_all(headers);
+  strappy_client_destroy_headers(headers);
   free(url);
   if (http_status_out != NULL) {
     *http_status_out = http_status;
@@ -736,8 +808,35 @@ static int strappy_responses_copy_curl_info_string(CURL *curl,
   return (*target != NULL) ? 1 : 0;
 }
 
-int strappy_client_send_responses_json(
+static int strappy_client_header_value_is_safe(const char *value,
+                                                size_t maximum_length)
+{
+  size_t index;
+  size_t length;
+
+  if ((value == NULL) || (value[0] == '\0')) {
+    return 0;
+  }
+  length = strlen(value);
+  if (length > maximum_length) {
+    return 0;
+  }
+  for (index = 0U; index < length; index++) {
+    if (((unsigned char)value[index] < 0x20U) ||
+        ((unsigned char)value[index] == 0x7fU)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+int strappy_client_send_provider_responses_json_with_transport(
   const strappy_config *config,
+  strappy_provider_kind provider,
+  strappy_responses_response_transport response_transport,
+  const char *bearer_token,
+  const char *chatgpt_account_id,
+  const char *session_request_id,
   const char *request_json,
   strappy_responses_http_result *result,
   strappy_responses_event_callback callback,
@@ -750,11 +849,19 @@ int strappy_client_send_responses_json(
   strappy_http_buffer response_buffer;
   strappy_responses_header_context header_context;
   strappy_responses_transfer_context transfer_context;
+  strappy_responses_sse_write_context sse_context;
   char curl_error[CURL_ERROR_SIZE];
   char *auth_header;
+  char *account_header;
+  char *session_header;
+  char *client_request_header;
   char *user_agent;
   char *url;
+  const char *token;
   size_t request_length;
+  int is_chatgpt;
+  int uses_sse;
+  int sse_ended_early;
   int ok;
 
   if (result == NULL) {
@@ -763,10 +870,22 @@ int strappy_client_send_responses_json(
     return 0;
   }
   strappy_responses_http_result_init(result);
+  is_chatgpt = (provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) ? 1 : 0;
+  uses_sse =
+    (response_transport == STRAPPY_RESPONSES_RESPONSE_TRANSPORT_SSE) ? 1 : 0;
+  token = (bearer_token != NULL) ? bearer_token :
+    ((config != NULL) ? config->api_token : NULL);
   if ((config == NULL) || (request_json == NULL) ||
       (request_json[0] == '\0') || (config->api_endpoint == NULL) ||
-      (config->api_endpoint[0] == '\0') || (config->api_token == NULL) ||
-      (config->api_token[0] == '\0')) {
+      (config->api_endpoint[0] == '\0') ||
+      ((provider != STRAPPY_PROVIDER_KIND_OPENROUTER) && !is_chatgpt) ||
+      ((response_transport != STRAPPY_RESPONSES_RESPONSE_TRANSPORT_JSON) &&
+       (response_transport != STRAPPY_RESPONSES_RESPONSE_TRANSPORT_SSE)) ||
+      !strappy_client_header_value_is_safe(token, 2U * 1024U * 1024U) ||
+      (is_chatgpt &&
+       !strappy_client_header_value_is_safe(chatgpt_account_id, 512U)) ||
+      ((session_request_id != NULL) &&
+       !strappy_client_header_value_is_safe(session_request_id, 512U))) {
     strappy_set_error(error_out, "Responses request is not configured.");
     return 0;
   }
@@ -785,7 +904,7 @@ int strappy_client_send_responses_json(
     return 0;
   }
   auth_header = strappy_join_strings("Authorization: Bearer ",
-                                     config->api_token);
+                                     token);
   if (auth_header == NULL) {
     free(url);
     strappy_set_error(error_out,
@@ -793,30 +912,71 @@ int strappy_client_send_responses_json(
     return 0;
   }
 
+  account_header = is_chatgpt ?
+    strappy_join_strings("chatgpt-account-id: ", chatgpt_account_id) : NULL;
+  session_header = (is_chatgpt && (session_request_id != NULL)) ?
+    strappy_join_strings("session-id: ", session_request_id) : NULL;
+  client_request_header =
+    (is_chatgpt && (session_request_id != NULL)) ?
+      strappy_join_strings("x-client-request-id: ", session_request_id) : NULL;
+  if (is_chatgpt &&
+      ((account_header == NULL) ||
+       ((session_request_id != NULL) &&
+        ((session_header == NULL) || (client_request_header == NULL))))) {
+    strappy_client_secure_free(auth_header);
+    free(account_header);
+    free(session_header);
+    free(client_request_header);
+    free(url);
+    strappy_set_error(error_out,
+                      "Could not allocate ChatGPT request headers.");
+    return 0;
+  }
+
   headers = NULL;
   ok = strappy_client_add_header(&headers,
                                  "Content-Type: application/json",
                                  error_out) &&
-       strappy_client_add_header(&headers,
-                                 "Accept: application/json",
-                                 error_out) &&
-       strappy_client_add_header(&headers,
-                                 "X-OpenRouter-Title: Strappy",
-                                 error_out) &&
-       strappy_client_add_header(&headers,
-                                 "X-OpenRouter-Metadata: enabled",
-                                 error_out) &&
+       strappy_client_add_header(
+         &headers,
+         uses_sse ? "Accept: text/event-stream" : "Accept: application/json",
+         error_out) &&
+       (!is_chatgpt ||
+        strappy_client_add_header(&headers,
+                                  "OpenAI-Beta: responses=experimental",
+                                  error_out)) &&
+       (!is_chatgpt ||
+        strappy_client_add_header(&headers,
+                                  "originator: strappy",
+                                  error_out)) &&
+       (!is_chatgpt ||
+        strappy_client_add_header(&headers, account_header, error_out)) &&
+       (!is_chatgpt || (session_header == NULL) ||
+        strappy_client_add_header(&headers, session_header, error_out)) &&
+       (!is_chatgpt || (client_request_header == NULL) ||
+        strappy_client_add_header(&headers, client_request_header, error_out)) &&
+       (is_chatgpt ||
+        strappy_client_add_header(&headers,
+                                  "X-OpenRouter-Title: Strappy",
+                                  error_out)) &&
+       (is_chatgpt ||
+        strappy_client_add_header(&headers,
+                                  "X-OpenRouter-Metadata: enabled",
+                                  error_out)) &&
        strappy_client_add_header(&headers, auth_header, error_out);
-  free(auth_header);
+  strappy_client_secure_free(auth_header);
+  free(account_header);
+  free(session_header);
+  free(client_request_header);
   if (!ok) {
-    curl_slist_free_all(headers);
+    strappy_client_destroy_headers(headers);
     free(url);
     return 0;
   }
 
   user_agent = strappy_identity_copy_user_agent(error_out);
   if (user_agent == NULL) {
-    curl_slist_free_all(headers);
+    strappy_client_destroy_headers(headers);
     free(url);
     return 0;
   }
@@ -824,13 +984,16 @@ int strappy_client_send_responses_json(
   curl = curl_easy_init();
   if (curl == NULL) {
     free(user_agent);
-    curl_slist_free_all(headers);
+    strappy_client_destroy_headers(headers);
     free(url);
     strappy_set_error(error_out, "Could not create Responses curl handle.");
     return 0;
   }
 
   strappy_http_buffer_init(&response_buffer);
+  strappy_sse_parser_init(&sse_context.parser);
+  strappy_http_buffer_init(&sse_context.raw_response);
+  sse_context.parse_error = NULL;
   header_context.result = result;
   strappy_http_buffer_init(&header_context.raw_headers);
   memset(&transfer_context, 0, sizeof(transfer_context));
@@ -849,8 +1012,13 @@ int strappy_client_send_responses_json(
                    CURLOPT_HEADERFUNCTION,
                    strappy_responses_header_callback);
   curl_easy_setopt(curl, CURLOPT_HEADERDATA, (void *)&header_context);
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, strappy_client_write_callback);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response_buffer);
+  curl_easy_setopt(curl,
+                   CURLOPT_WRITEFUNCTION,
+                   uses_sse ? strappy_client_sse_write_callback :
+                     strappy_client_write_callback);
+  curl_easy_setopt(curl,
+                   CURLOPT_WRITEDATA,
+                   uses_sse ? (void *)&sse_context : (void *)&response_buffer);
   curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, curl_error);
   curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
 #if LIBCURL_VERSION_NUM >= 0x072000
@@ -875,9 +1043,17 @@ int strappy_client_send_responses_json(
 
   code = strappy_responses_transfer_poll_cancelled(&transfer_context) ?
     CURLE_ABORTED_BY_CALLBACK : curl_easy_perform(curl);
+  sse_ended_early = uses_sse &&
+    strappy_sse_parser_is_terminal(&sse_context.parser) &&
+    (code == CURLE_WRITE_ERROR);
+  if (sse_ended_early) {
+    code = CURLE_OK;
+  }
   result->completed_at_ms = strappy_client_now_ms();
   result->curl_code = (long)code;
   result->cancelled = transfer_context.cancelled;
+  result->response_event_received = uses_sse ?
+    strappy_sse_parser_has_events(&sse_context.parser) : 0;
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result->http_status);
   curl_easy_getinfo(curl,
                     CURLINFO_NAMELOOKUP_TIME,
@@ -896,17 +1072,53 @@ int strappy_client_send_responses_json(
                                                &result->content_type);
   curl_easy_cleanup(curl);
   free(user_agent);
-  curl_slist_free_all(headers);
+  strappy_client_destroy_headers(headers);
   free(url);
 
-  result->response_json = strappy_string_duplicate(
-    (response_buffer.data != NULL) ? response_buffer.data : "");
+  if (uses_sse && (result->http_status >= 200L) &&
+      (result->http_status < 300L)) {
+    char *sse_error;
+
+    sse_error = NULL;
+    if ((sse_context.parse_error == NULL) &&
+        strappy_sse_parser_finish(&sse_context.parser, &sse_error)) {
+      result->response_json =
+        strappy_sse_parser_take_terminal_json(&sse_context.parser);
+    } else {
+      const char *message;
+
+      message = (sse_context.parse_error != NULL) ?
+        sse_context.parse_error :
+        ((sse_error != NULL) ? sse_error :
+          "ChatGPT SSE response could not be parsed.");
+      result->transport_error = strappy_string_duplicate(message);
+      result->response_json = strappy_string_duplicate(
+        (sse_context.raw_response.data != NULL) ?
+          sse_context.raw_response.data : "");
+    }
+    free(sse_error);
+  } else {
+    result->response_json = strappy_string_duplicate(
+      uses_sse ?
+        ((sse_context.raw_response.data != NULL) ?
+          sse_context.raw_response.data : "") :
+        ((response_buffer.data != NULL) ? response_buffer.data : ""));
+  }
   result->response_headers = strappy_string_duplicate(
     (header_context.raw_headers.data != NULL) ?
       header_context.raw_headers.data : "");
-  result->response_bytes = (response_buffer.length <= (size_t)LLONG_MAX) ?
-    (long long)response_buffer.length : LLONG_MAX;
+  if (uses_sse) {
+    result->response_bytes =
+      (sse_context.parser.stream_bytes <= (size_t)LLONG_MAX) ?
+        (long long)sse_context.parser.stream_bytes : LLONG_MAX;
+  } else {
+    result->response_bytes = (response_buffer.length <= (size_t)LLONG_MAX) ?
+      (long long)response_buffer.length : LLONG_MAX;
+  }
   strappy_http_buffer_destroy(&response_buffer);
+  strappy_sse_parser_destroy(&sse_context.parser);
+  strappy_http_buffer_destroy(&sse_context.raw_response);
+  free(sse_context.parse_error);
   strappy_http_buffer_destroy(&header_context.raw_headers);
   if (!ok || (result->response_json == NULL) ||
       (result->response_headers == NULL)) {
@@ -915,7 +1127,7 @@ int strappy_client_send_responses_json(
     return 0;
   }
 
-  if (code != CURLE_OK) {
+  if ((code != CURLE_OK) && (result->transport_error == NULL)) {
     const char *message;
 
     message = result->cancelled ? "Responses request was cancelled." :
@@ -928,4 +1140,57 @@ int strappy_client_send_responses_json(
     }
   }
   return 1;
+}
+
+int strappy_client_send_provider_responses_json(
+  const strappy_config *config,
+  strappy_provider_kind provider,
+  const char *bearer_token,
+  const char *chatgpt_account_id,
+  const char *session_request_id,
+  const char *request_json,
+  strappy_responses_http_result *result,
+  strappy_responses_event_callback callback,
+  void *callback_data,
+  char **error_out)
+{
+  strappy_responses_response_transport response_transport;
+
+  response_transport =
+    (provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) ?
+      STRAPPY_RESPONSES_RESPONSE_TRANSPORT_SSE :
+      STRAPPY_RESPONSES_RESPONSE_TRANSPORT_JSON;
+  return strappy_client_send_provider_responses_json_with_transport(
+    config,
+    provider,
+    response_transport,
+    bearer_token,
+    chatgpt_account_id,
+    session_request_id,
+    request_json,
+    result,
+    callback,
+    callback_data,
+    error_out);
+}
+
+int strappy_client_send_responses_json(
+  const strappy_config *config,
+  const char *request_json,
+  strappy_responses_http_result *result,
+  strappy_responses_event_callback callback,
+  void *callback_data,
+  char **error_out)
+{
+  return strappy_client_send_provider_responses_json(
+    config,
+    STRAPPY_PROVIDER_KIND_OPENROUTER,
+    (config != NULL) ? config->api_token : NULL,
+    NULL,
+    NULL,
+    request_json,
+    result,
+    callback,
+    callback_data,
+    error_out);
 }

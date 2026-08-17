@@ -5,6 +5,7 @@
 #include "strappy_config.h"
 #include "strappy_db.h"
 #include "strappy_file_scanner.h"
+#include "strappy_model_catalog.h"
 #include "strappy_skills.h"
 #include "strappy_study.h"
 #include "strappy_tools.h"
@@ -9613,6 +9614,223 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
 
   return 1;
 }
+static int harness_run_bundled_model_catalog_tests(
+  const harness_context *context)
+{
+  static const char *revision_two_json =
+    "{"
+      "\"schema_version\":1,"
+      "\"catalog_revision\":2,"
+      "\"catalog_source\":\"bundled\","
+      "\"models\":[{"
+        "\"provider_id\":\"openai_chatgpt\","
+        "\"provider_account_id\":\"openai_chatgpt\","
+        "\"model_id\":\"openai_chatgpt:gpt-5.4\","
+        "\"wire_model_id\":\"gpt-5.4\","
+        "\"display_name\":\"GPT-5.4 Updated\","
+        "\"catalog_active\":true,"
+        "\"billing_kind\":\"chatgpt_plan\","
+        "\"input_modalities\":[\"text\",\"image\"],"
+        "\"context_window_tokens\":272000,"
+        "\"max_output_tokens\":128000,"
+        "\"capabilities\":{"
+          "\"reasoning\":true,"
+          "\"local_functions\":true,"
+          "\"hosted_tools\":[]"
+        "},"
+        "\"reasoning_levels\":[\"off\",\"low\",\"high\"],"
+        "\"reasoning_level_overrides\":{\"minimal\":\"low\"}"
+      "}]"
+    "}";
+  static const char *invalid_revision_json =
+    "{"
+      "\"schema_version\":1,"
+      "\"catalog_revision\":3,"
+      "\"catalog_source\":\"bundled\","
+      "\"unexpected\":true,"
+      "\"models\":[]"
+    "}";
+  static const char *selected_model_id = "openai_chatgpt:gpt-5.4";
+  char database_path[1400];
+  strappy_model_record_list list;
+  strappy_model_route_record route;
+  char *error;
+  long long session_id;
+  size_t index;
+  int found_model;
+  int ok;
+
+  if ((context == NULL) ||
+      !harness_join_path(database_path,
+                         sizeof(database_path),
+                         context->temp_dir,
+                         "bundled-models.sqlite")) {
+    return 0;
+  }
+  harness_unlink_sqlite_files(database_path);
+  error = NULL;
+  ok = strappy_db_initialize(database_path, &error) &&
+    strappy_model_catalog_import_bundled_models(HARNESS_RESOURCE_DIR,
+                                                 database_path,
+                                                 &error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not import bundled model catalog: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    harness_unlink_sqlite_files(database_path);
+    return 0;
+  }
+  ok = harness_expect_catalog_integer(
+         database_path,
+         "SELECT COUNT(*) FROM models WHERE provider_account_id = "
+           "'openai_chatgpt' AND catalog_active = 1;",
+         7LL,
+         "initial bundled ChatGPT model count") &&
+       harness_expect_catalog_integer(
+         database_path,
+         "SELECT catalog_revision FROM bundled_model_catalogs WHERE "
+           "provider_account_id = 'openai_chatgpt';",
+         1LL,
+         "initial bundled catalog revision") &&
+       harness_expect_catalog_integer(
+         database_path,
+         "SELECT COUNT(*) FROM model_capabilities WHERE "
+           "billing_kind = 'chatgpt_plan' AND hosted_tools_enabled = 0;",
+         7LL,
+         "bundled plan capability count") &&
+       harness_expect_catalog_integer(
+         database_path,
+         "SELECT COUNT(*) FROM model_features WHERE "
+           "model_id = 'openai_chatgpt:gpt-5.4' AND "
+           "feature_kind = 'input_modality' AND feature_value = 'image';",
+         1LL,
+         "bundled image capability");
+  if (!ok) {
+    harness_unlink_sqlite_files(database_path);
+    return 0;
+  }
+
+  if (!strappy_db_set_model_allowed(database_path,
+                                    selected_model_id,
+                                    1,
+                                    &error) ||
+      !strappy_db_import_bundled_models_json(database_path,
+                                             revision_two_json,
+                                             &error)) {
+    fprintf(stderr,
+            "Could not update bundled model catalog: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    harness_unlink_sqlite_files(database_path);
+    return 0;
+  }
+  ok = harness_expect_catalog_integer(
+         database_path,
+         "SELECT COUNT(*) FROM models WHERE provider_account_id = "
+           "'openai_chatgpt' AND catalog_active = 1;",
+         1LL,
+         "revision-scoped bundled model count") &&
+       harness_expect_catalog_integer(
+         database_path,
+         "SELECT COUNT(*) FROM model_preferences WHERE "
+           "model_id = 'openai_chatgpt:gpt-5.4' AND allowed = 1;",
+         1LL,
+         "preserved bundled model preference") &&
+       harness_expect_catalog_integer(
+         database_path,
+         "SELECT catalog_revision FROM bundled_model_catalogs WHERE "
+           "provider_account_id = 'openai_chatgpt';",
+         2LL,
+         "updated bundled catalog revision");
+  if (!ok) {
+    harness_unlink_sqlite_files(database_path);
+    return 0;
+  }
+
+  strappy_free_string(error);
+  error = NULL;
+  if (strappy_db_import_bundled_models_json(database_path,
+                                            invalid_revision_json,
+                                            &error) ||
+      (error == NULL) || (strstr(error, "unsupported field") == NULL)) {
+    fprintf(stderr, "Invalid bundled model catalog was accepted.\n");
+    strappy_free_string(error);
+    harness_unlink_sqlite_files(database_path);
+    return 0;
+  }
+  strappy_free_string(error);
+  error = NULL;
+  if (!strappy_model_catalog_import_bundled_models(HARNESS_RESOURCE_DIR,
+                                                   database_path,
+                                                   &error)) {
+    fprintf(stderr,
+            "Bundled catalog downgrade guard failed: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    harness_unlink_sqlite_files(database_path);
+    return 0;
+  }
+
+  strappy_model_record_list_init(&list);
+  if (!strappy_db_list_models(database_path, &list, &error)) {
+    fprintf(stderr,
+            "Could not list bundled models: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    strappy_model_record_list_destroy(&list);
+    harness_unlink_sqlite_files(database_path);
+    return 0;
+  }
+  found_model = 0;
+  for (index = 0U; index < list.count; index++) {
+    const strappy_model_record *record;
+
+    record = &list.records[index];
+    if ((record->model_id != NULL) &&
+        (strcmp(record->model_id, selected_model_id) == 0)) {
+      found_model = (record->billing_kind != NULL) &&
+        (strcmp(record->billing_kind, "chatgpt_plan") == 0) &&
+        record->reasoning_enabled && record->local_functions_enabled &&
+        !record->hosted_tools_enabled && record->allowed &&
+        (record->name != NULL) &&
+        (strcmp(record->name, "GPT-5.4 Updated") == 0);
+    }
+  }
+  ok = found_model;
+  strappy_model_record_list_destroy(&list);
+  if (!ok) {
+    fprintf(stderr, "Bundled model capability row did not match.\n");
+    harness_unlink_sqlite_files(database_path);
+    return 0;
+  }
+
+  session_id = 0LL;
+  strappy_model_route_record_init(&route);
+  ok = strappy_db_create_session(database_path, &session_id, &error) &&
+    strappy_db_update_session_model(database_path,
+                                    session_id,
+                                    selected_model_id,
+                                    &error) &&
+    strappy_db_get_session_model_route(database_path,
+                                       session_id,
+                                       &route,
+                                       &error) &&
+    (route.billing_kind != NULL) &&
+    (strcmp(route.billing_kind, "chatgpt_plan") == 0) &&
+    route.reasoning_enabled && route.local_functions_enabled &&
+    !route.hosted_tools_enabled;
+  strappy_model_route_record_destroy(&route);
+  if (!ok) {
+    fprintf(stderr,
+            "Bundled model route did not retain capabilities: %s\n",
+            (error != NULL) ? error : "unknown");
+  }
+  strappy_free_string(error);
+  harness_unlink_sqlite_files(database_path);
+  return ok;
+}
+
 static int harness_run_openrouter_model_catalog_tests(
   const harness_context *context)
 {
@@ -10210,6 +10428,13 @@ static int harness_run_provider_account_routing_tests(
   static const char *request_json =
     "{\"model\":\"openai/gpt-4.1-mini\",\"stream\":true,"
     "\"store\":false,\"input\":[]}";
+  static const char *chatgpt_response_json =
+    "{\"id\":\"resp-plan\",\"status\":\"completed\",\"output\":[],"
+    "\"usage\":{\"input_tokens\":10,\"output_tokens\":4,"
+    "\"total_tokens\":14,\"cost\":0,\"cost_details\":{"
+    "\"upstream_inference_cost\":0,"
+    "\"upstream_inference_input_cost\":0,"
+    "\"upstream_inference_output_cost\":0}}}";
   strappy_model_record_list list;
   strappy_model_route_record route;
   strappy_response_call_begin_input begin;
@@ -10450,12 +10675,13 @@ static int harness_run_provider_account_routing_tests(
 
   memset(&finish, 0, sizeof(finish));
   finish.call_id = call_id;
-  finish.state = "cancelled";
+  finish.state = "completed";
+  finish.http_status = 200L;
   finish.started_at_ms = 2000000000000LL;
   finish.completed_at_ms = 2000000000100LL;
   finish.request_bytes = (long long)strlen(request_json);
   finish.effective_url = begin.request_url;
-  finish.response_json = "";
+  finish.response_json = chatgpt_response_json;
   if (!strappy_db_finish_response_call(context->catalog_path,
                                        &finish,
                                        &error)) {
@@ -10481,6 +10707,22 @@ static int harness_run_provider_account_routing_tests(
                                       sql,
                                       1LL,
                                       "session/request/attempt account route")) {
+    return 0;
+  }
+  if (snprintf(sql,
+               sizeof(sql),
+               "SELECT COUNT(*) FROM api_usage WHERE attempt_id = %lld "
+               "AND input_tokens = 10 AND output_tokens = 4 "
+               "AND total_tokens = 14 AND cost_nano_usd IS NULL "
+               "AND upstream_cost_nano_usd IS NULL "
+               "AND upstream_input_cost_nano_usd IS NULL "
+               "AND upstream_output_cost_nano_usd IS NULL;",
+               call_id) <= 0 ||
+      !harness_expect_catalog_integer(
+        context->catalog_path,
+        sql,
+        1LL,
+        "ChatGPT-plan tokens without fabricated monetary cost")) {
     return 0;
   }
 
@@ -11384,6 +11626,7 @@ int main(void)
        harness_run_database_context_limit_tests(&context) &&
        harness_run_session_options_tests(&context) &&
        harness_run_empty_session_storage_tests(&context) &&
+       harness_run_bundled_model_catalog_tests(&context) &&
        harness_run_openrouter_model_catalog_tests(&context) &&
        harness_run_provider_account_routing_tests(&context) &&
        harness_run_sms_context_tests(&context) &&

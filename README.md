@@ -88,6 +88,7 @@ and AppKit, except for the primary harness/chat/prompt view which is a webview.
 ```mermaid
 flowchart TB
     OpenRouter["OpenRouter<br/>Responses API"] <--> Core["Portable C backend<br/>HTTP · agent/tool loop · sessions"]
+    ChatGPT["ChatGPT Codex backend<br/>experimental subscription path"] <--> Core
     Core <--> DB[("SQLite<br/>strappy.sqlite")]
     Core <--> Bridge["Objective-C bridge<br/>StrappySession.m"]
     Bridge <--> UI["UIKit / AppKit UI<br/>session list · WebView timeline"]
@@ -144,9 +145,11 @@ Strappy only opens whitelisted databases and always in read-only mode:
   blocking writes, PRAGMA, ATTACH, and transactions
 - 100-row result limit
 
-Query results are sent through OpenRouter to the selected model provider. Use
+Query results are sent to the provider selected for the session. For
+OpenRouter sessions, use
 [OpenRouter Guardrails](https://openrouter.ai/docs/guides/features/guardrails)
-to control which providers may receive your data.
+to control which upstream providers may receive your data. Experimental
+ChatGPT sessions send them to the ChatGPT Codex backend instead.
 
 ## Coding Assistant
 
@@ -171,7 +174,32 @@ Personal Assistant may therefore find less useful data on a Mac.
 
 ## Install
 
-Requires an [OpenRouter](https://openrouter.ai/) API token.
+Requires either an [OpenRouter](https://openrouter.ai/) API token or an
+eligible ChatGPT account using the experimental flow below.
+
+### Experimental ChatGPT subscription provider
+
+Preferences can sign in with ChatGPT using a device code. The access token,
+rotating refresh token, expiry, and account routing identifier are stored as one
+device-local Keychain credential; they are never treated as an OpenAI Platform
+API key. ChatGPT models are billed against eligible plan limits, so Strappy
+shows token usage without inventing a per-request dollar cost. OpenRouter
+credentials and conversations remain independent.
+
+This path uses an undocumented direct backend contract and is not approved for
+production distribution. OpenAI's documented embedding surface is
+[Codex App Server](https://learn.chatgpt.com/docs/app-server), whose
+documentation currently describes it as experimental and not supported for
+production workloads. [Device-code login](https://learn.chatgpt.com/docs/auth)
+may also need to be enabled by the user or workspace administrator. See
+[`PLAN.md`](PLAN.md) and the
+[secret-free compatibility report](docs/ChatGPTCompatibilityReport.md) before
+testing or distributing this feature.
+
+Set `STRAPPY_DISABLE_EXPERIMENTAL_CHATGPT=1` before launch to disable all new
+ChatGPT requests and sign-in/refresh activity without changing OpenRouter or
+deleting stored ChatGPT credentials. A build can also define
+`STRAPPY_ENABLE_EXPERIMENTAL_CHATGPT=0`.
 
 ### iOS
 
@@ -213,7 +241,8 @@ ssh \
 
 In Preferences:
 
-1. Save your OpenRouter token in keychain.
+1. Save your OpenRouter token, sign in to experimental ChatGPT, or configure
+   both.
 2. Select the models you want to whitelist
 3. Scan for databases and then whitelist the ones you want
 4. (Optional) Study databases to save tokens in future prompts
@@ -280,8 +309,9 @@ Mac with a screenshot. Please follow the [code of conduct](CODE_OF_CONDUCT.md).
 
 If you want to contribute, these are the next items I plan to add myself:
 
-- OpenAI OAUTH Support: I want to use my ChatGPT monthly plan in Strappy. This
-  is sort of a gray area I think? So not sure how well this will work out.
+- Obtain a production-supported and explicitly permitted ChatGPT integration
+  path; the experimental implementation is complete enough for compatibility
+  testing but remains release-gated.
 - Improve macOS Coding Agent skill and toolchain: The mac already has a development
   toolchain in Xcode, but it changes over time. Also I need to be able to 
   provide AltivecCore and AltivecCocoa to macs (right now the toolchain only supports iPhone)

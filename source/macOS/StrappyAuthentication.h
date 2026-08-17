@@ -24,9 +24,7 @@ typedef enum StrappyAuthenticationState {
 }
 
 + (StrappyAuthentication *)sharedAuthentication;
-+ (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath;
 + (BOOL)isChatGPTProviderEnabled;
-
 - (StrappyAuthenticationState)state;
 - (NSString *)verificationURL;
 - (NSString *)userCode;
@@ -34,7 +32,6 @@ typedef enum StrappyAuthenticationState {
 - (NSString *)errorMessage;
 - (BOOL)isOperationInFlight;
 - (BOOL)hasStoredCredentials;
-
 - (BOOL)startChatGPTDeviceLogin;
 - (void)cancelChatGPTDeviceLogin;
 - (BOOL)refreshChatGPTCredentialsIfNeeded;

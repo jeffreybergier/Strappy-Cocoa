@@ -465,37 +465,35 @@ static const char *strappy_openai_oauth_error_code(cJSON *root)
   return NULL;
 }
 
-static const char *strappy_openai_oauth_error_detail(cJSON *root)
+static int strappy_openai_oauth_error_code_is_reportable(const char *code)
 {
-  cJSON *error;
-  cJSON *detail;
+  static const char * const reportable_codes[] = {
+    "access_denied",
+    "authorization_pending",
+    "device_login_disabled",
+    "deviceauth_authorization_pending",
+    "expired_token",
+    "invalid_grant",
+    "invalid_request",
+    "server_error",
+    "slow_down",
+    "temporarily_unavailable",
+    "unauthorized_client",
+    "unsupported_grant_type"
+  };
+  size_t index;
 
-  if (!cJSON_IsObject(root)) {
-    return NULL;
+  if (code == NULL) {
+    return 0;
   }
-  error = cJSON_GetObjectItem(root, "error");
-  if (cJSON_IsString(error) && (error->valuestring != NULL)) {
-    return error->valuestring;
-  }
-  if (cJSON_IsObject(error)) {
-    detail = cJSON_GetObjectItem(error, "message");
-    if (cJSON_IsString(detail) && (detail->valuestring != NULL)) {
-      return detail->valuestring;
-    }
-    detail = cJSON_GetObjectItem(error, "code");
-    if (cJSON_IsString(detail) && (detail->valuestring != NULL)) {
-      return detail->valuestring;
+  for (index = 0U;
+       index < (sizeof(reportable_codes) / sizeof(reportable_codes[0]));
+       index++) {
+    if (strcmp(code, reportable_codes[index]) == 0) {
+      return 1;
     }
   }
-  detail = cJSON_GetObjectItem(root, "error_description");
-  if (cJSON_IsString(detail) && (detail->valuestring != NULL)) {
-    return detail->valuestring;
-  }
-  detail = cJSON_GetObjectItem(root, "message");
-  if (cJSON_IsString(detail) && (detail->valuestring != NULL)) {
-    return detail->valuestring;
-  }
-  return NULL;
+  return 0;
 }
 
 static void strappy_openai_oauth_set_http_error(
@@ -504,29 +502,24 @@ static void strappy_openai_oauth_set_http_error(
   const strappy_openai_oauth_http_response *response,
   cJSON *root)
 {
-  const char *detail;
-  char *safe_detail;
+  const char *code;
 
-  detail = strappy_openai_oauth_error_detail(root);
-  safe_detail = NULL;
-  if (detail != NULL) {
-    safe_detail = strappy_string_duplicate_length(detail,
-                                                   strlen(detail) > 500U ?
-                                                     500U : strlen(detail));
-  }
-  if ((safe_detail != NULL) && (safe_detail[0] != '\0')) {
+  /* Provider prose is deliberately excluded: an upstream diagnostic can echo
+   * request material. Only a fixed allowlist of protocol error codes is safe
+   * to surface to UI, logs, and the manual compatibility probe. */
+  code = strappy_openai_oauth_error_code(root);
+  if (strappy_openai_oauth_error_code_is_reportable(code)) {
     strappy_set_formatted_error(error_out,
                                 "%s failed with HTTP %ld: %s",
                                 operation,
                                 (response != NULL) ? response->status : 0L,
-                                safe_detail);
+                                code);
   } else {
     strappy_set_formatted_error(error_out,
                                 "%s failed with HTTP %ld.",
                                 operation,
                                 (response != NULL) ? response->status : 0L);
   }
-  free(safe_detail);
 }
 
 static void strappy_openai_oauth_wipe_json_strings(cJSON *value)
@@ -605,15 +598,18 @@ static int strappy_openai_oauth_parse_poll_interval(
 static int strappy_openai_oauth_now_milliseconds(long long *value_out)
 {
   struct timeval now;
+  unsigned long long seconds;
 
   if ((value_out == NULL) || (gettimeofday(&now, NULL) != 0) ||
-      (now.tv_sec < 0)) {
+      (now.tv_sec < 0) || (now.tv_usec < 0) ||
+      (now.tv_usec >= 1000000)) {
     return 0;
   }
-  if ((long long)now.tv_sec > (LLONG_MAX / 1000LL)) {
+  seconds = (unsigned long long)now.tv_sec;
+  if (seconds > ((unsigned long long)LLONG_MAX / 1000ULL)) {
     return 0;
   }
-  *value_out = ((long long)now.tv_sec * 1000LL) +
+  *value_out = ((long long)(seconds * 1000ULL)) +
     ((long long)now.tv_usec / 1000LL);
   return 1;
 }

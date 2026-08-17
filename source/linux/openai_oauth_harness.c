@@ -266,6 +266,22 @@ static int oauth_harness_run_server(int listener_fd)
       "Content-Type: application/json",
       "{\"device_auth_id\":\"device-test\","
       "\"user_code\":\"ABCD-EFGH\"}",
+      400L,
+      "{\"error\":\"deviceauth_authorization_pending\"}") &&
+    oauth_harness_serve_one(
+      listener_fd,
+      "/poll",
+      "Content-Type: application/json",
+      "{\"device_auth_id\":\"device-test\","
+      "\"user_code\":\"ABCD-EFGH\"}",
+      400L,
+      "{\"error\":\"slow_down\"}") &&
+    oauth_harness_serve_one(
+      listener_fd,
+      "/poll",
+      "Content-Type: application/json",
+      "{\"device_auth_id\":\"device-test\","
+      "\"user_code\":\"ABCD-EFGH\"}",
       200L,
       "{\"authorization_code\":\"auth-code\","
       "\"code_verifier\":\"verifier\"}") &&
@@ -351,6 +367,375 @@ static void oauth_harness_stop_server(pid_t pid)
   (void)kill(pid, SIGTERM);
   while ((waitpid(pid, &status, 0) < 0) && (errno == EINTR)) {
   }
+}
+
+static int oauth_harness_wait_server(pid_t pid)
+{
+  int status;
+  pid_t waited;
+
+  status = 0;
+  do {
+    waited = waitpid(pid, &status, 0);
+  } while ((waited < 0) && (errno == EINTR));
+  if (waited != pid) {
+    return 0;
+  }
+  return WIFEXITED(status) && (WEXITSTATUS(status) == 0);
+}
+
+static int oauth_harness_configure_loopback(
+  unsigned short port,
+  strappy_openai_oauth_configuration *configuration,
+  char *start_url,
+  size_t start_url_size,
+  char *poll_url,
+  size_t poll_url_size,
+  char *token_url,
+  size_t token_url_size)
+{
+  int start_length;
+  int poll_length;
+  int token_length;
+
+  start_length = snprintf(start_url,
+                          start_url_size,
+                          "http://127.0.0.1:%u/start",
+                          (unsigned int)port);
+  poll_length = snprintf(poll_url,
+                         poll_url_size,
+                         "http://127.0.0.1:%u/poll",
+                         (unsigned int)port);
+  token_length = snprintf(token_url,
+                          token_url_size,
+                          "http://127.0.0.1:%u/token",
+                          (unsigned int)port);
+  if ((start_length < 0) || ((size_t)start_length >= start_url_size) ||
+      (poll_length < 0) || ((size_t)poll_length >= poll_url_size) ||
+      (token_length < 0) || ((size_t)token_length >= token_url_size)) {
+    return 0;
+  }
+  configuration->client_id = "test-client";
+  configuration->device_start_url = start_url;
+  configuration->device_poll_url = poll_url;
+  configuration->token_url = token_url;
+  configuration->verification_url = "http://127.0.0.1/verify";
+  configuration->device_redirect_uri = "http://127.0.0.1/redirect";
+  return 1;
+}
+
+static int oauth_harness_run_start_error_case(long response_status,
+                                               const char *response_json,
+                                               const char *expected_error)
+{
+  unsigned short port;
+  int listener_fd;
+  pid_t server_pid;
+  strappy_openai_oauth_configuration configuration;
+  strappy_openai_oauth_device device;
+  char start_url[256];
+  char poll_url[256];
+  char token_url[256];
+  char *error;
+  int server_ok;
+  int ok;
+
+  listener_fd = oauth_harness_open_listener(&port);
+  if (listener_fd < 0) {
+    return 0;
+  }
+  server_pid = fork();
+  if (server_pid < 0) {
+    close(listener_fd);
+    return 0;
+  }
+  if (server_pid == 0) {
+    int server_ok;
+
+    (void)alarm(10U);
+    server_ok = oauth_harness_serve_one(listener_fd,
+                                        "/start",
+                                        "Content-Type: application/json",
+                                        "{\"client_id\":\"test-client\"}",
+                                        response_status,
+                                        response_json);
+    close(listener_fd);
+    _exit(server_ok ? 0 : 1);
+  }
+  close(listener_fd);
+
+  if (!oauth_harness_configure_loopback(port,
+                                        &configuration,
+                                        start_url,
+                                        sizeof(start_url),
+                                        poll_url,
+                                        sizeof(poll_url),
+                                        token_url,
+                                        sizeof(token_url))) {
+    oauth_harness_stop_server(server_pid);
+    return 0;
+  }
+  strappy_openai_oauth_device_init(&device);
+  error = NULL;
+  ok = !strappy_openai_oauth_start_device_authorization(&configuration,
+                                                         &device,
+                                                         NULL,
+                                                         NULL,
+                                                         &error) &&
+    (error != NULL) && (strstr(error, expected_error) != NULL);
+  server_ok = oauth_harness_wait_server(server_pid);
+  ok = ok && server_ok;
+  if (!ok) {
+    fprintf(stderr,
+            "OAuth start error case '%s' failed: %s\n",
+            expected_error,
+            (error != NULL) ? error : "no diagnostic");
+  }
+  strappy_free_string(error);
+  strappy_openai_oauth_device_destroy(&device);
+  return ok;
+}
+
+static int oauth_harness_run_poll_error_case(const char *response_json,
+                                              const char *expected_error)
+{
+  unsigned short port;
+  int listener_fd;
+  pid_t server_pid;
+  strappy_openai_oauth_configuration configuration;
+  strappy_openai_oauth_device device;
+  strappy_openai_oauth_credentials credentials;
+  char start_url[256];
+  char poll_url[256];
+  char token_url[256];
+  char *error;
+  int server_ok;
+  int ok;
+
+  listener_fd = oauth_harness_open_listener(&port);
+  if (listener_fd < 0) {
+    return 0;
+  }
+  server_pid = fork();
+  if (server_pid < 0) {
+    close(listener_fd);
+    return 0;
+  }
+  if (server_pid == 0) {
+    int server_ok;
+
+    (void)alarm(10U);
+    server_ok = oauth_harness_serve_one(
+      listener_fd,
+      "/start",
+      "Content-Type: application/json",
+      "{\"client_id\":\"test-client\"}",
+      200L,
+      "{\"device_auth_id\":\"device-error\","
+      "\"user_code\":\"ERROR-CODE\",\"interval\":1}") &&
+      oauth_harness_serve_one(
+        listener_fd,
+        "/poll",
+        "Content-Type: application/json",
+        "{\"device_auth_id\":\"device-error\","
+        "\"user_code\":\"ERROR-CODE\"}",
+        400L,
+        response_json);
+    close(listener_fd);
+    _exit(server_ok ? 0 : 1);
+  }
+  close(listener_fd);
+
+  if (!oauth_harness_configure_loopback(port,
+                                        &configuration,
+                                        start_url,
+                                        sizeof(start_url),
+                                        poll_url,
+                                        sizeof(poll_url),
+                                        token_url,
+                                        sizeof(token_url))) {
+    oauth_harness_stop_server(server_pid);
+    return 0;
+  }
+  strappy_openai_oauth_device_init(&device);
+  strappy_openai_oauth_credentials_init(&credentials);
+  error = NULL;
+  ok = strappy_openai_oauth_start_device_authorization(&configuration,
+                                                        &device,
+                                                        NULL,
+                                                        NULL,
+                                                        &error);
+  if (ok) {
+    ok = !strappy_openai_oauth_complete_device_authorization(
+      &configuration,
+      &device,
+      &credentials,
+      NULL,
+      NULL,
+      &error) && (error != NULL) &&
+      (strstr(error, expected_error) != NULL);
+  }
+  server_ok = oauth_harness_wait_server(server_pid);
+  ok = ok && server_ok;
+  if (!ok) {
+    fprintf(stderr,
+            "OAuth poll error case '%s' failed: %s\n",
+            expected_error,
+            (error != NULL) ? error : "no diagnostic");
+  }
+  strappy_free_string(error);
+  strappy_openai_oauth_credentials_destroy(&credentials);
+  strappy_openai_oauth_device_destroy(&device);
+  return ok;
+}
+
+static int oauth_harness_run_refresh_error_case(void)
+{
+  static const char refresh_secret[] = "refresh-secret-value";
+  unsigned short port;
+  int listener_fd;
+  pid_t server_pid;
+  strappy_openai_oauth_configuration configuration;
+  strappy_openai_oauth_credentials credentials;
+  char start_url[256];
+  char poll_url[256];
+  char token_url[256];
+  char *error;
+  int server_ok;
+  int ok;
+
+  listener_fd = oauth_harness_open_listener(&port);
+  if (listener_fd < 0) {
+    return 0;
+  }
+  server_pid = fork();
+  if (server_pid < 0) {
+    close(listener_fd);
+    return 0;
+  }
+  if (server_pid == 0) {
+    int server_ok;
+
+    (void)alarm(10U);
+    server_ok = oauth_harness_serve_one(
+      listener_fd,
+      "/token",
+      "Content-Type: application/x-www-form-urlencoded",
+      "grant_type=refresh_token&refresh_token=refresh-secret-value&"
+      "client_id=test-client",
+      400L,
+      "{\"error\":\"invalid_grant\","
+      "\"error_description\":\"refresh-secret-value\"}");
+    close(listener_fd);
+    _exit(server_ok ? 0 : 1);
+  }
+  close(listener_fd);
+
+  if (!oauth_harness_configure_loopback(port,
+                                        &configuration,
+                                        start_url,
+                                        sizeof(start_url),
+                                        poll_url,
+                                        sizeof(poll_url),
+                                        token_url,
+                                        sizeof(token_url))) {
+    oauth_harness_stop_server(server_pid);
+    return 0;
+  }
+  strappy_openai_oauth_credentials_init(&credentials);
+  error = NULL;
+  ok = !strappy_openai_oauth_refresh_credentials(&configuration,
+                                                  refresh_secret,
+                                                  &credentials,
+                                                  NULL,
+                                                  NULL,
+                                                  &error) &&
+    (error != NULL) && (strstr(error, "invalid_grant") != NULL) &&
+    (strstr(error, refresh_secret) == NULL);
+  server_ok = oauth_harness_wait_server(server_pid);
+  ok = ok && server_ok;
+  if (!ok) {
+    fprintf(stderr,
+            "OAuth invalid_grant case failed: %s\n",
+            (error != NULL) ? error : "no diagnostic");
+  }
+  strappy_free_string(error);
+  strappy_openai_oauth_credentials_destroy(&credentials);
+  return ok;
+}
+
+static int oauth_harness_run_network_loss_case(void)
+{
+  unsigned short port;
+  int listener_fd;
+  strappy_openai_oauth_configuration configuration;
+  strappy_openai_oauth_device device;
+  char start_url[256];
+  char poll_url[256];
+  char token_url[256];
+  char *error;
+  int ok;
+
+  listener_fd = oauth_harness_open_listener(&port);
+  if (listener_fd < 0) {
+    return 0;
+  }
+  close(listener_fd);
+  if (!oauth_harness_configure_loopback(port,
+                                        &configuration,
+                                        start_url,
+                                        sizeof(start_url),
+                                        poll_url,
+                                        sizeof(poll_url),
+                                        token_url,
+                                        sizeof(token_url))) {
+    return 0;
+  }
+  strappy_openai_oauth_device_init(&device);
+  error = NULL;
+  ok = !strappy_openai_oauth_start_device_authorization(&configuration,
+                                                         &device,
+                                                         NULL,
+                                                         NULL,
+                                                         &error) &&
+    (error != NULL) && (strstr(error, "network request failed") != NULL);
+  if (!ok) {
+    fprintf(stderr,
+            "OAuth network-loss case failed: %s\n",
+            (error != NULL) ? error : "no diagnostic");
+  }
+  strappy_free_string(error);
+  strappy_openai_oauth_device_destroy(&device);
+  return ok;
+}
+
+static int oauth_harness_run_oversized_field_case(void)
+{
+  static const char prefix[] = "{\"device_auth_id\":\"";
+  static const char suffix[] =
+    "\",\"user_code\":\"ABCD-EFGH\",\"interval\":1}";
+  size_t field_length;
+  size_t response_length;
+  char *response;
+  int ok;
+
+  field_length = 4097U;
+  response_length = (sizeof(prefix) - 1U) + field_length +
+    (sizeof(suffix) - 1U);
+  response = (char *)malloc(response_length + 1U);
+  if (response == NULL) {
+    return 0;
+  }
+  memcpy(response, prefix, sizeof(prefix) - 1U);
+  memset(response + sizeof(prefix) - 1U, 'x', field_length);
+  memcpy(response + sizeof(prefix) - 1U + field_length,
+         suffix,
+         sizeof(suffix));
+  ok = oauth_harness_run_start_error_case(200L,
+                                            response,
+                                            "missing fields");
+  free(response);
+  return ok;
 }
 
 int main(void)
@@ -502,6 +887,31 @@ int main(void)
   }
 
   strappy_free_string(error);
+  error = NULL;
+  ok = oauth_harness_run_start_error_case(
+         404L,
+         "{\"error\":\"device_login_disabled\"}",
+         "disabled") &&
+    oauth_harness_run_start_error_case(200L, "{", "invalid JSON") &&
+    oauth_harness_run_start_error_case(
+      200L,
+      "{\"device_auth_id\":7,\"user_code\":false,\"interval\":\"x\"}",
+      "missing fields") &&
+    oauth_harness_run_oversized_field_case() &&
+    oauth_harness_run_poll_error_case(
+      "{\"error\":{\"code\":\"access_denied\","
+      "\"message\":\"authorization denied\"}}",
+      "access_denied") &&
+    oauth_harness_run_poll_error_case(
+      "{\"error\":{\"code\":\"expired_token\","
+      "\"message\":\"device code expired\"}}",
+      "expired_token") &&
+    oauth_harness_run_refresh_error_case() &&
+    oauth_harness_run_network_loss_case();
+  if (!ok) {
+    goto cleanup_failure;
+  }
+
   strappy_openai_oauth_credentials_destroy(&refreshed);
   strappy_openai_oauth_credentials_destroy(&credentials);
   strappy_openai_oauth_device_destroy(&device);

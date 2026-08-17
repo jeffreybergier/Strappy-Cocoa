@@ -1705,6 +1705,20 @@ static const char *harness_message_text(cJSON *item)
     text->valuestring : NULL;
 }
 
+static int harness_message_part_type_is(cJSON *item,
+                                        const char *expected_type)
+{
+  cJSON *content;
+  cJSON *part;
+  cJSON *type;
+
+  content = cJSON_GetObjectItem(item, "content");
+  part = cJSON_GetArrayItem(content, 0);
+  type = cJSON_GetObjectItem(part, "type");
+  return cJSON_IsString(type) && (type->valuestring != NULL) &&
+    (strcmp(type->valuestring, expected_type) == 0);
+}
+
 static const char *harness_object_string(cJSON *parent, const char *key)
 {
   cJSON *value;
@@ -2075,6 +2089,8 @@ static int harness_preflight_input_is_valid(cJSON *input,
   skills_call = cJSON_GetArrayItem(input, 3);
   database_call = cJSON_GetArrayItem(input, 4);
   return harness_message_role_is(cJSON_GetArrayItem(input, 1), "assistant") &&
+    harness_message_part_type_is(cJSON_GetArrayItem(input, 0), "input_text") &&
+    harness_message_part_type_is(cJSON_GetArrayItem(input, 1), "output_text") &&
     (assistant_text != NULL) &&
     (strcmp(assistant_text, HARNESS_PERSONAL_PREFLIGHT_ASSISTANT_TEXT) == 0) &&
     harness_preflight_call_is_valid(memory_call,
@@ -5285,7 +5301,7 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
                         "SELECT COUNT(*) FROM conversation_items i "
                         "JOIN message_items m ON m.item_id=i.id "
                         "JOIN item_text_parts p ON p.item_id=i.id WHERE "
-                        "m.role='assistant' AND p.part_type='input_text' AND "
+                        "m.role='assistant' AND p.part_type='output_text' AND "
                         "p.text='" HARNESS_WORLD_PREFLIGHT_ASSISTANT_TEXT "' "
                         "AND i.introduced_request_id IS NOT NULL AND "
                         "i.source_attempt_id IS NULL;",

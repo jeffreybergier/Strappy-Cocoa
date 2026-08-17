@@ -306,6 +306,10 @@ typedef struct strappy_model_record {
   char *provider_id;
   char *provider_account_name;
   char *wire_model_id;
+  char *billing_kind;
+  int reasoning_enabled;
+  int local_functions_enabled;
+  int hosted_tools_enabled;
   char *canonical_slug;
   char *hugging_face_id;
   char *name;
@@ -355,6 +359,10 @@ typedef struct strappy_model_route_record {
   char *provider_account_id;
   char *provider_id;
   char *wire_model_id;
+  char *billing_kind;
+  int reasoning_enabled;
+  int local_functions_enabled;
+  int hosted_tools_enabled;
 } strappy_model_route_record;
 
 void strappy_session_record_init(strappy_session_record *record);
@@ -629,6 +637,9 @@ int strappy_db_exclude_prompt_group_from_context(
 int strappy_db_save_openrouter_models_json(const char *db_path,
                                            const char *json,
                                            char **error_out);
+int strappy_db_import_bundled_models_json(const char *db_path,
+                                          const char *json,
+                                          char **error_out);
 int strappy_db_list_models_matching(
   const char *db_path,
   const char *search_text,

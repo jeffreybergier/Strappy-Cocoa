@@ -451,6 +451,40 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "feature_value TEXT NOT NULL,"
     "PRIMARY KEY(model_id, feature_kind, feature_value),"
     "FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE"
+    ");";
+
+  static const char schema_model_capabilities_sql[] =
+    "CREATE TABLE IF NOT EXISTS bundled_model_catalogs ("
+    "provider_account_id TEXT PRIMARY KEY,"
+    "schema_version INTEGER NOT NULL CHECK(schema_version = 1),"
+    "catalog_revision INTEGER NOT NULL CHECK(catalog_revision > 0),"
+    "catalog_source TEXT NOT NULL CHECK(length(catalog_source) > 0),"
+    "imported_at_ms INTEGER NOT NULL,"
+    "FOREIGN KEY(provider_account_id) REFERENCES provider_accounts(id)"
+    ");"
+    "CREATE TABLE IF NOT EXISTS model_capabilities ("
+    "model_id TEXT PRIMARY KEY,"
+    "billing_kind TEXT NOT NULL CHECK(billing_kind IN "
+      "('metered_api','chatgpt_plan')),"
+    "reasoning_enabled INTEGER NOT NULL CHECK(reasoning_enabled IN (0,1)),"
+    "local_functions_enabled INTEGER NOT NULL "
+      "CHECK(local_functions_enabled IN (0,1)),"
+    "hosted_tools_enabled INTEGER NOT NULL "
+      "CHECK(hosted_tools_enabled IN (0,1)),"
+    "FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE"
+    ");"
+    "CREATE TABLE IF NOT EXISTS model_hosted_tools ("
+    "model_id TEXT NOT NULL,"
+    "tool_id TEXT NOT NULL CHECK(length(tool_id) > 0),"
+    "PRIMARY KEY(model_id, tool_id),"
+    "FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE"
+    ");"
+    "CREATE TABLE IF NOT EXISTS model_reasoning_overrides ("
+    "model_id TEXT NOT NULL,"
+    "requested_level TEXT NOT NULL CHECK(length(requested_level) > 0),"
+    "wire_level TEXT NOT NULL CHECK(length(wire_level) > 0),"
+    "PRIMARY KEY(model_id, requested_level),"
+    "FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE"
     ");"
     "CREATE TABLE IF NOT EXISTS model_preferences ("
     "model_id TEXT PRIMARY KEY,"
@@ -1013,6 +1047,7 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "PRAGMA user_version = 1;";
   static const char *const schema_sql[] = {
     schema_models_sql,
+    schema_model_capabilities_sql,
     schema_sessions_sql,
     schema_requests_sql,
     schema_attempts_sql,

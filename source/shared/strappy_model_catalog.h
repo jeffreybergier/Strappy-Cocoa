@@ -11,6 +11,10 @@ int strappy_model_catalog_refresh_openrouter_user_models(
   const char *fallback_api_token,
   const char *db_path,
   char **error_out);
+int strappy_model_catalog_import_bundled_models(
+  const char *resource_dir,
+  const char *db_path,
+  char **error_out);
 
 #ifdef __cplusplus
 }

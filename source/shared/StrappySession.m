@@ -2,12 +2,17 @@
 
 #import "StrappyKeychain.h"
 #import "strappy_core.h"
+#import "strappy_model_catalog.h"
+#import "strappy_openai_oauth.h"
 #import "strappy_prompt.h"
+#import "strappy_responses.h"
 #import "strappy_session.h"
 #import "strappy_study.h"
 #import "XPFoundation.h"
 
+#include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 NSString * const StrappySessionDidUpdateNotification =
   @"StrappySessionDidUpdateNotification";
@@ -41,6 +46,144 @@ const NSUInteger StrappySessionMaximumLimit =
 
 static NSMutableDictionary *StrappySessionInFlightSessions = nil;
 static BOOL StrappySessionModelCatalogRefreshInFlight = NO;
+
+static void StrappySessionSecureFreeCString(char *value)
+{
+  volatile unsigned char *bytes;
+  size_t length;
+
+  if (value == NULL) {
+    return;
+  }
+  bytes = (volatile unsigned char *)value;
+  length = strlen(value);
+  while (length > 0U) {
+    *bytes++ = 0U;
+    length--;
+  }
+  free(value);
+}
+
+static long long StrappySessionNowMilliseconds(void)
+{
+  struct timeval now;
+
+  if ((gettimeofday(&now, NULL) != 0) || (now.tv_sec < 0)) {
+    return 0LL;
+  }
+  return ((long long)now.tv_sec * 1000LL) +
+    ((long long)now.tv_usec / 1000LL);
+}
+
+static int StrappySessionCopyChatGPTCredentials(
+  int forceRefresh,
+  char **accessTokenOut,
+  char **accountIdentifierOut,
+  void *userData,
+  char **errorOut)
+{
+  static const long long refreshLeewayMilliseconds = 5LL * 60LL * 1000LL;
+  StrappyKeychain *keychain;
+  NSString *accessToken;
+  NSString *refreshToken;
+  NSString *accountIdentifier;
+  long long expiresAtMilliseconds;
+  long long nowMilliseconds;
+  BOOL credentialReady;
+  int ok;
+
+  (void)userData;
+  if ((accessTokenOut == NULL) || (accountIdentifierOut == NULL)) {
+    strappy_set_error(errorOut, "ChatGPT credential outputs are missing.");
+    return 0;
+  }
+  *accessTokenOut = NULL;
+  *accountIdentifierOut = NULL;
+  keychain = [StrappyKeychain sharedKeychain];
+  accessToken = nil;
+  refreshToken = nil;
+  accountIdentifier = nil;
+  expiresAtMilliseconds = 0LL;
+  ok = 0;
+
+  @synchronized(keychain) {
+    if (![keychain loadChatGPTAccessToken:&accessToken
+                              refreshToken:&refreshToken
+                         accountIdentifier:&accountIdentifier
+                      expiresAtMilliseconds:&expiresAtMilliseconds]) {
+      strappy_set_error(errorOut, "Sign in to ChatGPT before sending a prompt.");
+    } else {
+      credentialReady = YES;
+      nowMilliseconds = StrappySessionNowMilliseconds();
+      if (forceRefresh || (nowMilliseconds <= 0LL) ||
+          ((expiresAtMilliseconds - nowMilliseconds) <=
+           refreshLeewayMilliseconds)) {
+        strappy_openai_oauth_configuration configuration;
+        strappy_openai_oauth_credentials credentials;
+        NSString *nextAccessToken;
+        NSString *nextRefreshToken;
+        NSString *nextAccountIdentifier;
+
+        strappy_openai_oauth_default_configuration(&configuration);
+        strappy_openai_oauth_credentials_init(&credentials);
+        credentialReady = NO;
+        if (strappy_openai_oauth_refresh_credentials(
+              &configuration,
+              [refreshToken UTF8String],
+              &credentials,
+              NULL,
+              NULL,
+              errorOut)) {
+          nextAccessToken = [NSString stringWithUTF8String:
+            credentials.access_token];
+          nextRefreshToken = [NSString stringWithUTF8String:
+            credentials.refresh_token];
+          nextAccountIdentifier = [NSString stringWithUTF8String:
+            credentials.account_id];
+          if ((nextAccessToken == nil) || (nextRefreshToken == nil) ||
+              (nextAccountIdentifier == nil) ||
+              ![nextAccountIdentifier isEqualToString:accountIdentifier]) {
+            strappy_set_error(
+              errorOut,
+              "Refreshed ChatGPT credentials changed account identity.");
+          } else if (![keychain
+                       saveChatGPTAccessToken:nextAccessToken
+                       refreshToken:nextRefreshToken
+                       accountIdentifier:nextAccountIdentifier
+                       expiresAtMilliseconds:
+                         credentials.expires_at_milliseconds]) {
+            strappy_set_error(
+              errorOut,
+              "The Keychain refused the refreshed ChatGPT credential.");
+          } else {
+            accessToken = nextAccessToken;
+            refreshToken = nextRefreshToken;
+            accountIdentifier = nextAccountIdentifier;
+            expiresAtMilliseconds = credentials.expires_at_milliseconds;
+            credentialReady = YES;
+          }
+        }
+        strappy_openai_oauth_credentials_destroy(&credentials);
+      }
+      if (credentialReady && ((errorOut == NULL) || (*errorOut == NULL))) {
+        *accessTokenOut = strappy_string_duplicate([accessToken UTF8String]);
+        *accountIdentifierOut =
+          strappy_string_duplicate([accountIdentifier UTF8String]);
+        if ((*accessTokenOut == NULL) || (*accountIdentifierOut == NULL)) {
+          StrappySessionSecureFreeCString(*accessTokenOut);
+          StrappySessionSecureFreeCString(*accountIdentifierOut);
+          *accessTokenOut = NULL;
+          *accountIdentifierOut = NULL;
+          strappy_set_error(errorOut,
+                            "Could not allocate ChatGPT credential snapshot.");
+        } else {
+          ok = 1;
+        }
+      }
+    }
+  }
+  return ok;
+}
 
 typedef struct StrappySessionResponsesContext {
   StrappySession *session;
@@ -1145,6 +1288,11 @@ static BOOL StrappySessionRecordFromOptions(
   ok = strappy_session_configure_process([caCertPath fileSystemRepresentation],
                                          [fontsPath fileSystemRepresentation],
                                          &strappyError);
+  if (ok) {
+    ok = strappy_openai_oauth_set_cainfo(
+      [caCertPath fileSystemRepresentation],
+      &strappyError);
+  }
   if (!ok) {
     NSString *message = nil;
     if (strappyError != NULL) {
@@ -1154,6 +1302,9 @@ static BOOL StrappySessionRecordFromOptions(
     [NSException raise:NSInvalidArgumentException
                 format:@"%@", (message ? message : @"Could not bootstrap Strappy.")];
   }
+  strappy_responses_set_chatgpt_credentials_callback(
+    StrappySessionCopyChatGPTCredentials,
+    NULL);
   (void)[StrappySession assistantSetCatalog];
 }
 
@@ -1456,6 +1607,7 @@ static BOOL StrappySessionRecordFromOptions(
   NSString *providerId;
   NSString *providerAccountName;
   NSString *wireModelId;
+  NSString *billingKind;
   NSString *canonicalSlug;
   NSString *huggingFaceId;
   NSString *name;
@@ -1495,6 +1647,8 @@ static BOOL StrappySessionRecordFromOptions(
     [StrappySession stringFromCStringOrEmpty:record->provider_account_name];
   wireModelId =
     [StrappySession stringFromCStringOrEmpty:record->wire_model_id];
+  billingKind =
+    [StrappySession stringFromCStringOrEmpty:record->billing_kind];
   canonicalSlug =
     [StrappySession stringFromCStringOrEmpty:record->canonical_slug];
   huggingFaceId =
@@ -1549,6 +1703,13 @@ static BOOL StrappySessionRecordFromOptions(
     providerId, @"provider_id",
     providerAccountName, @"provider_account_name",
     wireModelId, @"wire_model_id",
+    billingKind, @"billing_kind",
+    [NSNumber numberWithBool:(record->reasoning_enabled ? YES : NO)],
+      @"reasoning_enabled",
+    [NSNumber numberWithBool:(record->local_functions_enabled ? YES : NO)],
+      @"local_functions_enabled",
+    [NSNumber numberWithBool:(record->hosted_tools_enabled ? YES : NO)],
+      @"hosted_tools_enabled",
     canonicalSlug, @"canonical_slug",
     huggingFaceId, @"hugging_face_id",
     name, @"name",
@@ -1773,6 +1934,21 @@ static BOOL StrappySessionRecordFromOptions(
   strappyError = NULL;
   ok = strappy_session_initialize_store([databasePath UTF8String],
                                         &strappyError);
+  if (ok) {
+    NSString *resourcePath;
+
+    resourcePath = [[NSBundle mainBundle] resourcePath];
+    ok = [resourcePath isKindOfClass:[NSString class]] &&
+      ([resourcePath length] > 0U) &&
+      strappy_model_catalog_import_bundled_models(
+        [resourcePath fileSystemRepresentation],
+        [databasePath fileSystemRepresentation],
+        &strappyError);
+    if (!ok && (strappyError == NULL)) {
+      strappy_set_error(&strappyError,
+                        "Bundled model catalog resource is missing.");
+    }
+  }
   if (!ok) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];

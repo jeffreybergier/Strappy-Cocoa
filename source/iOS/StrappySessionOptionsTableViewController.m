@@ -1,6 +1,7 @@
 #import "StrappySessionOptionsTableViewController.h"
 
 #import "StrappyAppearance.h"
+#import "StrappyAuthentication.h"
 #import "StrappyModelCellFormatter.h"
 #import "XPUIKit.h"
 
@@ -62,6 +63,45 @@ static NSString *StrappyMessageModelDisplayNameForRow(NSDictionary *row)
   return ([modelIdentifier length] > 0U)
     ? modelIdentifier
     : NSLocalizedString(@"Model", nil);
+}
+
+static NSDictionary *StrappyPromptSelectedModel(NSArray *models,
+                                                StrappySessionOptions *options)
+{
+  NSString *selectedIdentifier;
+  NSDictionary *model;
+
+  selectedIdentifier = [options modelIdentifier];
+  for (model in models) {
+    if ([StrappyMessageModelStringForRow(model, @"id")
+          isEqualToString:selectedIdentifier]) {
+      return model;
+    }
+  }
+  return nil;
+}
+
+static BOOL StrappyPromptModelBoolean(NSDictionary *model,
+                                      NSString *key,
+                                      BOOL fallback)
+{
+  NSNumber *value;
+
+  value = [model objectForKey:key];
+  return [value isKindOfClass:[NSNumber class]] ? [value boolValue] : fallback;
+}
+
+static BOOL StrappyPromptModelIsUsable(NSDictionary *model)
+{
+  NSString *providerIdentifier;
+
+  providerIdentifier =
+    StrappyMessageModelStringForRow(model, @"provider_id");
+  if (![providerIdentifier isEqualToString:@"openai_chatgpt"]) {
+    return YES;
+  }
+  return [StrappyAuthentication isChatGPTProviderEnabled] &&
+    [[StrappyAuthentication sharedAuthentication] hasStoredCredentials];
 }
 
 @class StrappySessionOptionsTableViewController;
@@ -249,12 +289,27 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
 
 - (void)reloadOptionsFromDelegate
 {
+  NSDictionary *selectedModel;
+  BOOL hostedToolsEnabled;
+  BOOL localFunctionsEnabled;
+
   [self reloadOptionsSnapshot];
+  selectedModel = StrappyPromptSelectedModel([self models],
+                                              [self sessionOptions]);
+  hostedToolsEnabled = StrappyPromptModelBoolean(selectedModel,
+                                                  @"hosted_tools_enabled",
+                                                  YES);
+  localFunctionsEnabled = StrappyPromptModelBoolean(selectedModel,
+                                                     @"local_functions_enabled",
+                                                     YES);
   [[self webSearchSwitch]
-    setOn:[[self sessionOptions] webSearchEnabled]
+    setOn:hostedToolsEnabled && [[self sessionOptions] webSearchEnabled]
   animated:NO];
-  [[self bashSwitch] setOn:[[self sessionOptions] bashEnabled] animated:NO];
-  [[self bashSwitch] setEnabled:YES];
+  [[self webSearchSwitch] setEnabled:hostedToolsEnabled];
+  [[self bashSwitch]
+    setOn:localFunctionsEnabled && [[self sessionOptions] bashEnabled]
+  animated:NO];
+  [[self bashSwitch] setEnabled:localFunctionsEnabled];
   [[self limitToOneToolSwitch]
     setOn:[[self sessionOptions] limitToOneTool]
   animated:NO];
@@ -288,6 +343,13 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
   StrappySessionOptions *options;
 
   optionsDelegate = [self optionsDelegate];
+  if (!StrappyPromptModelBoolean(
+        StrappyPromptSelectedModel([self models], [self sessionOptions]),
+        @"hosted_tools_enabled",
+        YES)) {
+    [sender setOn:NO animated:YES];
+    return;
+  }
   if (optionsDelegate != nil) {
     options = [[optionsDelegate sessionOptions] copy];
     [options setWebSearchEnabled:[sender isOn]];
@@ -314,7 +376,10 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
     [self setSessionOptions:[optionsDelegate sessionOptions]];
   }
   [sender setOn:[[self sessionOptions] bashEnabled] animated:YES];
-  [sender setEnabled:YES];
+  [sender setEnabled:StrappyPromptModelBoolean(
+    StrappyPromptSelectedModel([self models], [self sessionOptions]),
+    @"local_functions_enabled",
+    YES)];
 }
 
 - (void)limitToOneToolSwitchChanged:(UISwitch *)sender
@@ -487,7 +552,15 @@ titleForHeaderInSection:(NSInteger)section
   }
 
   if ([indexPath section] == kStrappyPromptOptionsSectionAvailableTools) {
+    NSDictionary *selectedModel;
+    BOOL capabilityEnabled;
+
+    selectedModel = StrappyPromptSelectedModel([self models],
+                                                [self sessionOptions]);
     if ([indexPath row] == 0) {
+      capabilityEnabled = StrappyPromptModelBoolean(selectedModel,
+                                                     @"hosted_tools_enabled",
+                                                     YES);
       cell = [tableView dequeueReusableCellWithIdentifier:@"WebSearchCell"];
       if (cell == nil) {
         cell = [[UITableViewCell alloc]
@@ -497,10 +570,12 @@ titleForHeaderInSection:(NSInteger)section
         [[cell textLabel] setNumberOfLines:1];
       }
       [[cell textLabel] setText:NSLocalizedString(@"Enable Web Search", nil)];
-      [[cell textLabel] setTextColor:[UIColor blackColor]];
+      [[cell textLabel] setTextColor:capabilityEnabled ?
+        [UIColor blackColor] : [UIColor grayColor]];
       [[self webSearchSwitch]
-        setOn:[[self sessionOptions] webSearchEnabled]
+        setOn:capabilityEnabled && [[self sessionOptions] webSearchEnabled]
       animated:NO];
+      [[self webSearchSwitch] setEnabled:capabilityEnabled];
       [cell setAccessoryView:[self webSearchSwitch]];
       return cell;
     }
@@ -514,9 +589,15 @@ titleForHeaderInSection:(NSInteger)section
       [[cell textLabel] setNumberOfLines:1];
     }
     [[cell textLabel] setText:NSLocalizedString(@"Enable Bash", nil)];
-    [[cell textLabel] setTextColor:[UIColor blackColor]];
-    [[self bashSwitch] setOn:[[self sessionOptions] bashEnabled] animated:NO];
-    [[self bashSwitch] setEnabled:YES];
+    capabilityEnabled = StrappyPromptModelBoolean(selectedModel,
+                                                   @"local_functions_enabled",
+                                                   YES);
+    [[cell textLabel] setTextColor:capabilityEnabled ?
+      [UIColor blackColor] : [UIColor grayColor]];
+    [[self bashSwitch]
+      setOn:capabilityEnabled && [[self sessionOptions] bashEnabled]
+    animated:NO];
+    [[self bashSwitch] setEnabled:capabilityEnabled];
     [cell setAccessoryView:[self bashSwitch]];
     return cell;
   }
@@ -624,9 +705,11 @@ titleForHeaderInSection:(NSInteger)section
     identifier = StrappyMessageModelStringForRow(model, @"id");
     [[cell textLabel] setText:StrappyMessageModelDisplayNameForRow(model)];
     [[cell detailTextLabel] setText:StrappyModelCellDetailText(model)];
-    [[cell textLabel] setTextColor:[UIColor blackColor]];
+    [[cell textLabel] setTextColor:StrappyPromptModelIsUsable(model) ?
+      [UIColor blackColor] : [UIColor grayColor]];
     [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
-    [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
+    [cell setSelectionStyle:StrappyPromptModelIsUsable(model) ?
+      UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone];
     [cell setAccessoryView:nil];
     [cell setAccessoryType:
       [identifier isEqualToString:[[self sessionOptions] modelIdentifier]]
@@ -655,6 +738,12 @@ titleForHeaderInSection:(NSInteger)section
   }
   if ([indexPath section] ==
       kStrappyPromptOptionsSectionSearchProvider) {
+    if (!StrappyPromptModelBoolean(
+          StrappyPromptSelectedModel([self models], [self sessionOptions]),
+          @"hosted_tools_enabled",
+          YES)) {
+      return nil;
+    }
     return ((NSUInteger)[indexPath row] <
       [StrappyPromptSearchProviders() count]) ? indexPath : nil;
   }
@@ -665,7 +754,12 @@ titleForHeaderInSection:(NSInteger)section
   if ([indexPath section] != kStrappyPromptOptionsSectionModels) {
     return nil;
   }
-  return ([[self models] count] > 0U) ? indexPath : nil;
+  if ((NSUInteger)[indexPath row] >= [[self models] count]) {
+    return nil;
+  }
+  return StrappyPromptModelIsUsable(
+    [[self models] objectAtIndex:(NSUInteger)[indexPath row]]) ?
+      indexPath : nil;
 }
 
 - (void)tableView:(UITableView *)tableView

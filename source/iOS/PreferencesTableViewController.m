@@ -291,23 +291,21 @@ enum {
   state = [authentication state];
   if (row == 0) {
     NSString *status;
-    NSString *accountIdentifier;
 
     cell = [[UITableViewCell alloc]
       initWithStyle:UITableViewCellStyleSubtitle
       reuseIdentifier:nil];
     [[cell textLabel] setText:NSLocalizedString(@"Status", nil)];
     [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-    accountIdentifier = [authentication accountIdentifier];
-    if (state == StrappyAuthenticationStateRequestingCode) {
+    if (![StrappyAuthentication isChatGPTProviderEnabled]) {
+      status = NSLocalizedString(
+        @"Disabled by the experimental provider kill switch", nil);
+    } else if (state == StrappyAuthenticationStateRequestingCode) {
       status = NSLocalizedString(@"Requesting a device code…", nil);
     } else if (state == StrappyAuthenticationStateAwaitingUser) {
       status = NSLocalizedString(@"Waiting for browser approval", nil);
     } else if (state == StrappyAuthenticationStateSignedIn) {
-      status = ([accountIdentifier length] > 0U)
-        ? [NSString stringWithFormat:NSLocalizedString(@"Signed in as %@", nil),
-            accountIdentifier]
-        : NSLocalizedString(@"Signed in", nil);
+      status = NSLocalizedString(@"Signed in", nil);
     } else if (state == StrappyAuthenticationStateRefreshing) {
       status = NSLocalizedString(@"Refreshing credentials…", nil);
     } else if (state == StrappyAuthenticationStateError) {
@@ -360,6 +358,10 @@ enum {
   } else {
     [[cell textLabel] setText:NSLocalizedString(@"Sign In with ChatGPT", nil)];
   }
+  if (![StrappyAuthentication isChatGPTProviderEnabled]) {
+    [[cell textLabel] setTextColor:[UIColor grayColor]];
+    [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+  }
   return cell;
 }
 
@@ -369,6 +371,9 @@ enum {
   StrappyAuthenticationState state;
 
   if (row == 0) {
+    return;
+  }
+  if (![StrappyAuthentication isChatGPTProviderEnabled]) {
     return;
   }
   authentication = [StrappyAuthentication sharedAuthentication];
@@ -607,7 +612,7 @@ titleForFooterInSection:(NSInteger)section
   (void)tableView;
   if (section == kStrappyPreferencesSectionChatGPT) {
     return NSLocalizedString(
-      @"Uses the Pi-compatible device flow. Access and refresh tokens are "
+      @"Uses the experimental Codex device flow. Access and refresh tokens are "
        "stored together in the Keychain and refreshed automatically. "
        "Device-code login must be enabled for your ChatGPT account or "
        "workspace.", nil);

@@ -4,6 +4,7 @@
 
 #include "strappy_core.h"
 #include "strappy_openai_oauth.h"
+#include "strappy_provider.h"
 
 #include <string.h>
 #include <sys/time.h>
@@ -101,17 +102,27 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
   strappy_free_string(error);
 }
 
++ (BOOL)isChatGPTProviderEnabled
+{
+  return strappy_provider_chatgpt_is_enabled() ? YES : NO;
+}
+
 - (id)init
 {
   NSString *accountIdentifier;
+  StrappyKeychain *keychain;
+  BOOL loaded;
 
   if ((self = [super init])) {
     accountIdentifier = nil;
-    if ([[StrappyKeychain sharedKeychain]
-          loadChatGPTAccessToken:NULL
-                    refreshToken:NULL
-               accountIdentifier:&accountIdentifier
-            expiresAtMilliseconds:NULL]) {
+    keychain = [StrappyKeychain sharedKeychain];
+    @synchronized(keychain) {
+      loaded = [keychain loadChatGPTAccessToken:NULL
+                                      refreshToken:NULL
+                                 accountIdentifier:&accountIdentifier
+                              expiresAtMilliseconds:NULL];
+    }
+    if (loaded) {
       state_ = StrappyAuthenticationStateSignedIn;
       accountIdentifier_ = [accountIdentifier copy];
     } else {
@@ -183,7 +194,14 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
 
 - (BOOL)hasStoredCredentials
 {
-  return [[StrappyKeychain sharedKeychain] hasChatGPTCredentials];
+  StrappyKeychain *keychain;
+  BOOL stored;
+
+  keychain = [StrappyKeychain sharedKeychain];
+  @synchronized(keychain) {
+    stored = [keychain hasChatGPTCredentials];
+  }
+  return stored;
 }
 
 - (void)postDidChangeNotification
@@ -219,6 +237,9 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
 {
   NSUInteger generation;
 
+  if (![[self class] isChatGPTProviderEnabled]) {
+    return NO;
+  }
   @synchronized(self) {
     if ((state_ == StrappyAuthenticationStateRequestingCode) ||
         (state_ == StrappyAuthenticationStateAwaitingUser) ||
@@ -274,6 +295,8 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
     char *error;
     BOOL started;
     BOOL completed;
+    BOOL credentialSaved;
+    NSString *savedAccountIdentifier;
     BOOL stateChanged;
 
     generation = [generationNumber unsignedIntegerValue];
@@ -325,33 +348,46 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
         &error) ? YES : NO;
     }
 
-    stateChanged = NO;
-    @synchronized(self) {
-      if ((generation == operationGeneration_) &&
-          !cancellationRequested_) {
-        if (completed) {
-          NSString *accessToken;
-          NSString *refreshToken;
-          NSString *accountIdentifier;
-          BOOL saved;
+    credentialSaved = NO;
+    savedAccountIdentifier = nil;
+    if (completed) {
+      NSString *accessToken;
+      NSString *refreshToken;
+      NSString *accountIdentifier;
+      StrappyKeychain *keychain;
 
-          accessToken = [NSString stringWithUTF8String:
-            credentials.access_token];
-          refreshToken = [NSString stringWithUTF8String:
-            credentials.refresh_token];
-          accountIdentifier = [NSString stringWithUTF8String:
-            credentials.account_id];
-          saved = (accessToken != nil) && (refreshToken != nil) &&
-            (accountIdentifier != nil) &&
-            [[StrappyKeychain sharedKeychain]
+      accessToken = [NSString stringWithUTF8String:credentials.access_token];
+      refreshToken = [NSString stringWithUTF8String:
+        credentials.refresh_token];
+      accountIdentifier = [NSString stringWithUTF8String:
+        credentials.account_id];
+      keychain = [StrappyKeychain sharedKeychain];
+      if ((accessToken != nil) && (refreshToken != nil) &&
+          (accountIdentifier != nil)) {
+        @synchronized(keychain) {
+          if (![self shouldCancelOperationWithGeneration:generation]) {
+            credentialSaved = [keychain
               saveChatGPTAccessToken:accessToken
                           refreshToken:refreshToken
                      accountIdentifier:accountIdentifier
                   expiresAtMilliseconds:
                     credentials.expires_at_milliseconds];
-          if (saved) {
+          }
+        }
+        if (credentialSaved) {
+          savedAccountIdentifier = accountIdentifier;
+        }
+      }
+    }
+
+    stateChanged = NO;
+    @synchronized(self) {
+      if ((generation == operationGeneration_) &&
+        !cancellationRequested_) {
+        if (completed) {
+          if (credentialSaved) {
             state_ = StrappyAuthenticationStateSignedIn;
-            accountIdentifier_ = [accountIdentifier copy];
+            accountIdentifier_ = [savedAccountIdentifier copy];
             errorMessage_ = nil;
           } else {
             state_ = StrappyAuthenticationStateError;
@@ -382,21 +418,27 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
 
 - (BOOL)refreshChatGPTCredentialsIfNeeded
 {
-  NSString *refreshToken;
   NSString *accountIdentifier;
+  StrappyKeychain *keychain;
   long long expiresAtMilliseconds;
   long long nowMilliseconds;
   NSUInteger generation;
   BOOL stateChanged;
+  BOOL loaded;
 
-  refreshToken = nil;
+  if (![[self class] isChatGPTProviderEnabled]) {
+    return NO;
+  }
   accountIdentifier = nil;
   expiresAtMilliseconds = 0LL;
-  if (![[StrappyKeychain sharedKeychain]
-        loadChatGPTAccessToken:NULL
-                    refreshToken:&refreshToken
-               accountIdentifier:&accountIdentifier
-            expiresAtMilliseconds:&expiresAtMilliseconds]) {
+  keychain = [StrappyKeychain sharedKeychain];
+  @synchronized(keychain) {
+    loaded = [keychain loadChatGPTAccessToken:NULL
+                                    refreshToken:NULL
+                               accountIdentifier:&accountIdentifier
+                            expiresAtMilliseconds:&expiresAtMilliseconds];
+  }
+  if (!loaded) {
     stateChanged = NO;
     @synchronized(self) {
       if ((state_ != StrappyAuthenticationStateRequestingCode) &&
@@ -455,7 +497,7 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
                          withObject:[NSDictionary dictionaryWithObjectsAndKeys:
                            [NSNumber numberWithUnsignedInteger:generation],
                              @"generation",
-                           [refreshToken copy], @"refresh_token",
+                           [accountIdentifier copy], @"account_identifier",
                            nil]];
   return YES;
 }
@@ -464,69 +506,103 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
 {
   @autoreleasepool {
     NSUInteger generation;
-    NSString *refreshToken;
+    NSString *previousAccountIdentifier;
     StrappyAuthenticationCancellationContext cancellationContext;
     strappy_openai_oauth_configuration configuration;
     strappy_openai_oauth_credentials credentials;
+    StrappyKeychain *keychain;
+    NSString *accessToken;
+    NSString *nextRefreshToken;
+    NSString *accountIdentifier;
     char *error;
     BOOL refreshed;
+    BOOL saved;
+    BOOL accountChanged;
     BOOL stateChanged;
 
     generation = [[operation objectForKey:@"generation"]
       unsignedIntegerValue];
-    refreshToken = [operation objectForKey:@"refresh_token"];
+    previousAccountIdentifier = [operation
+      objectForKey:@"account_identifier"];
     cancellationContext.authentication = self;
     cancellationContext.generation = generation;
     strappy_openai_oauth_default_configuration(&configuration);
     strappy_openai_oauth_credentials_init(&credentials);
+    keychain = [StrappyKeychain sharedKeychain];
+    accessToken = nil;
+    nextRefreshToken = nil;
+    accountIdentifier = nil;
     error = NULL;
-    refreshed = strappy_openai_oauth_refresh_credentials(
-      &configuration,
-      [refreshToken UTF8String],
-      &credentials,
-      StrappyAuthenticationShouldCancel,
-      &cancellationContext,
-      &error) ? YES : NO;
+    refreshed = NO;
+    saved = NO;
+    accountChanged = NO;
+    @synchronized(keychain) {
+      NSString *currentRefreshToken;
+      NSString *currentAccountIdentifier;
 
-    stateChanged = NO;
-    @synchronized(self) {
-      if ((generation == operationGeneration_) &&
-          !cancellationRequested_) {
+      currentRefreshToken = nil;
+      currentAccountIdentifier = nil;
+      if (![keychain loadChatGPTAccessToken:NULL
+                                  refreshToken:&currentRefreshToken
+                             accountIdentifier:&currentAccountIdentifier
+                          expiresAtMilliseconds:NULL]) {
+        strappy_set_error(&error,
+                          "Stored ChatGPT credentials are unavailable.");
+      } else if (![currentAccountIdentifier
+                   isEqualToString:previousAccountIdentifier]) {
+        accountChanged = YES;
+      } else {
+        refreshed = strappy_openai_oauth_refresh_credentials(
+          &configuration,
+          [currentRefreshToken UTF8String],
+          &credentials,
+          StrappyAuthenticationShouldCancel,
+          &cancellationContext,
+          &error) ? YES : NO;
         if (refreshed) {
-          NSString *accessToken;
-          NSString *nextRefreshToken;
-          NSString *accountIdentifier;
-          BOOL saved;
-
           accessToken = [NSString stringWithUTF8String:
             credentials.access_token];
           nextRefreshToken = [NSString stringWithUTF8String:
             credentials.refresh_token];
           accountIdentifier = [NSString stringWithUTF8String:
             credentials.account_id];
-          saved = (accessToken != nil) && (nextRefreshToken != nil) &&
-            (accountIdentifier != nil) &&
-            [[StrappyKeychain sharedKeychain]
+          accountChanged = (accountIdentifier == nil) ||
+            ![accountIdentifier isEqualToString:previousAccountIdentifier];
+          if (!accountChanged && (accessToken != nil) &&
+              (nextRefreshToken != nil) &&
+              ![self shouldCancelOperationWithGeneration:generation]) {
+            saved = [keychain
               saveChatGPTAccessToken:accessToken
                           refreshToken:nextRefreshToken
                      accountIdentifier:accountIdentifier
                   expiresAtMilliseconds:
                     credentials.expires_at_milliseconds];
-          if (saved) {
-            state_ = StrappyAuthenticationStateSignedIn;
-            accountIdentifier_ = [accountIdentifier copy];
-            errorMessage_ = nil;
-          } else {
-            state_ = StrappyAuthenticationStateError;
-            errorMessage_ = NSLocalizedString(
-              @"The Keychain refused the refreshed ChatGPT credential.",
-              nil);
           }
+        }
+      }
+    }
+
+    stateChanged = NO;
+    @synchronized(self) {
+      if ((generation == operationGeneration_) &&
+          !cancellationRequested_) {
+        if (refreshed && saved) {
+          state_ = StrappyAuthenticationStateSignedIn;
+          accountIdentifier_ = [accountIdentifier copy];
+          errorMessage_ = nil;
         } else {
           state_ = StrappyAuthenticationStateError;
-          errorMessage_ = StrappyAuthenticationErrorMessage(
-            error,
-            NSLocalizedString(@"ChatGPT credential refresh failed.", nil));
+          errorMessage_ = accountChanged ?
+            NSLocalizedString(
+              @"The refreshed ChatGPT credential changed accounts.", nil) :
+            (refreshed ?
+              NSLocalizedString(
+                @"The Keychain refused the refreshed ChatGPT credential.",
+                nil) :
+              StrappyAuthenticationErrorMessage(
+                error,
+                NSLocalizedString(
+                  @"ChatGPT credential refresh failed.", nil)));
         }
         verificationURL_ = nil;
         userCode_ = nil;
@@ -548,10 +624,14 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
   @synchronized(self) {
     cancellationRequested_ = YES;
     operationGeneration_++;
-    deleted = [[StrappyKeychain sharedKeychain]
-      deleteChatGPTCredentials];
     verificationURL_ = nil;
     userCode_ = nil;
+  }
+  @synchronized([StrappyKeychain sharedKeychain]) {
+    deleted = [[StrappyKeychain sharedKeychain]
+      deleteChatGPTCredentials];
+  }
+  @synchronized(self) {
     accountIdentifier_ = nil;
     if (deleted) {
       state_ = StrappyAuthenticationStateSignedOut;

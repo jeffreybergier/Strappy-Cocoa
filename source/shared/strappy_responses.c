@@ -21,6 +21,35 @@
 #include <syslog.h>
 #include <sys/time.h>
 
+static strappy_chatgpt_credentials_callback
+  strappy_responses_chatgpt_credentials_callback = NULL;
+static void *strappy_responses_chatgpt_credentials_callback_data = NULL;
+
+static void strappy_responses_secure_free(char *value)
+{
+  volatile unsigned char *bytes;
+  size_t length;
+
+  if (value == NULL) {
+    return;
+  }
+  bytes = (volatile unsigned char *)value;
+  length = strlen(value);
+  while (length > 0U) {
+    *bytes++ = 0U;
+    length--;
+  }
+  free(value);
+}
+
+void strappy_responses_set_chatgpt_credentials_callback(
+  strappy_chatgpt_credentials_callback callback,
+  void *user_data)
+{
+  strappy_responses_chatgpt_credentials_callback = callback;
+  strappy_responses_chatgpt_credentials_callback_data = user_data;
+}
+
 #define STRAPPY_RESPONSES_MAX_ATTEMPTS 3L
 #define STRAPPY_RESPONSES_INITIAL_RETRY_DELAY_MS 500L
 #define STRAPPY_RESPONSES_MAX_RETRY_DELAY_MS 60000L
@@ -52,6 +81,8 @@ typedef struct strappy_responses_analysis {
   char *response_text;
   char *error_message;
   char *error_type;
+  long long plan_resets_at_seconds;
+  int has_plan_resets_at;
   char **tool_activity_names;
   size_t tool_activity_count;
   strappy_responses_tool_call *tool_calls;
@@ -929,11 +960,14 @@ static int strappy_responses_analyze_json(
   if ((value != NULL) && !cJSON_IsNull(value)) {
     cJSON *message;
     cJSON *code;
+    cJSON *resets_at;
 
     analysis->has_api_error = 1;
     message = cJSON_IsObject(value) ?
       cJSON_GetObjectItem(value, "message") : NULL;
     code = cJSON_IsObject(value) ? cJSON_GetObjectItem(value, "code") : NULL;
+    resets_at = cJSON_IsObject(value) ?
+      cJSON_GetObjectItem(value, "resets_at") : NULL;
     analysis->error_message = ((message != NULL) &&
                                cJSON_IsString(message) &&
                                (message->valuestring != NULL)) ?
@@ -953,6 +987,15 @@ static int strappy_responses_analyze_json(
                           "Could not allocate Responses error code.");
         return 0;
       }
+    }
+    if ((resets_at != NULL) && cJSON_IsNumber(resets_at) &&
+        (resets_at->valuedouble > 0.0) &&
+        (resets_at->valuedouble <= (double)LLONG_MAX)) {
+      analysis->plan_resets_at_seconds =
+        (long long)resets_at->valuedouble;
+      analysis->has_plan_resets_at =
+        ((double)analysis->plan_resets_at_seconds ==
+         resets_at->valuedouble) ? 1 : 0;
     }
   }
 
@@ -1048,15 +1091,18 @@ static char *strappy_responses_message_item_json(const char *role,
   cJSON *item;
   cJSON *content;
   cJSON *part;
+  const char *part_type;
   char *json;
 
+  part_type = ((role != NULL) && (strcmp(role, "assistant") == 0)) ?
+    "output_text" : "input_text";
   item = cJSON_CreateObject();
   content = cJSON_CreateArray();
   part = cJSON_CreateObject();
   if ((item == NULL) || (content == NULL) || (part == NULL) ||
       (cJSON_AddStringToObject(item, "type", "message") == NULL) ||
       (cJSON_AddStringToObject(item, "role", role) == NULL) ||
-      (cJSON_AddStringToObject(part, "type", "input_text") == NULL) ||
+      (cJSON_AddStringToObject(part, "type", part_type) == NULL) ||
       (cJSON_AddStringToObject(part,
                                "text",
                                (text != NULL) ? text : "") == NULL)) {
@@ -1403,12 +1449,14 @@ static char *strappy_responses_session_key(long long session_id)
 
 static char *strappy_responses_build_request_json(
   const strappy_config *config,
+  strappy_provider_kind provider,
   const char *instructions,
   long long session_id,
   const char *prompt_group_key,
   long round_index,
   const char *tools_json,
   int parallel_tool_calls,
+  int reasoning_enabled,
   const strappy_response_item_raw_record_list *history,
   const strappy_responses_owned_items *new_items,
   long *new_input_start_index_out,
@@ -1427,6 +1475,8 @@ static char *strappy_responses_build_request_json(
   int ok;
 
   if ((config == NULL) || (config->api_model == NULL) ||
+      ((provider != STRAPPY_PROVIDER_KIND_OPENROUTER) &&
+       (provider != STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT)) ||
       (instructions == NULL) || (prompt_group_key == NULL) ||
       (tools_json == NULL) || (history == NULL) || (new_items == NULL)) {
     strappy_set_error(error_out, "Responses request builder is incomplete.");
@@ -1463,22 +1513,31 @@ static char *strappy_responses_build_request_json(
 
   memset(&buffer, 0, sizeof(buffer));
   ok = strappy_responses_buffer_append_string(&buffer, "{\"model\":") &&
-       strappy_responses_buffer_append_string(&buffer, model_json) &&
-       strappy_responses_buffer_append_string(
-         &buffer,
-         ",\"stream\":false,\"store\":false,\"session_id\":") &&
-       strappy_responses_buffer_append_string(&buffer, session_key_json) &&
-       strappy_responses_buffer_append_string(
-         &buffer,
-         ",\"metadata\":{\"strappy_session_id\":") &&
-       strappy_responses_buffer_append_string(&buffer, session_key_json) &&
-       strappy_responses_buffer_append_string(
-         &buffer,
-         ",\"strappy_prompt_group_key\":") &&
-       strappy_responses_buffer_append_string(&buffer, prompt_group_json) &&
-       strappy_responses_buffer_append_string(&buffer, ",\"strappy_round\":") &&
-       strappy_responses_buffer_append_string(&buffer, round_json) &&
-       strappy_responses_buffer_append_string(&buffer, "},\"instructions\":") &&
+       strappy_responses_buffer_append_string(&buffer, model_json);
+  if (ok && (provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT)) {
+    ok = strappy_responses_buffer_append_string(
+           &buffer,
+           ",\"stream\":true,\"store\":false,\"prompt_cache_key\":") &&
+         strappy_responses_buffer_append_string(&buffer, session_key_json) &&
+         strappy_responses_buffer_append_string(&buffer, ",\"instructions\":");
+  } else if (ok) {
+    ok = strappy_responses_buffer_append_string(
+           &buffer,
+           ",\"stream\":false,\"store\":false,\"session_id\":") &&
+         strappy_responses_buffer_append_string(&buffer, session_key_json) &&
+         strappy_responses_buffer_append_string(
+           &buffer,
+           ",\"metadata\":{\"strappy_session_id\":") &&
+         strappy_responses_buffer_append_string(&buffer, session_key_json) &&
+         strappy_responses_buffer_append_string(
+           &buffer,
+           ",\"strappy_prompt_group_key\":") &&
+         strappy_responses_buffer_append_string(&buffer, prompt_group_json) &&
+         strappy_responses_buffer_append_string(&buffer, ",\"strappy_round\":") &&
+         strappy_responses_buffer_append_string(&buffer, round_json) &&
+         strappy_responses_buffer_append_string(&buffer, "},\"instructions\":");
+  }
+  ok = ok &&
        strappy_responses_buffer_append_string(&buffer, instructions_json) &&
        strappy_responses_buffer_append_string(&buffer, ",\"input\":[");
   free(model_json);
@@ -1509,9 +1568,16 @@ static char *strappy_responses_build_request_json(
 
   ok = ok && strappy_responses_buffer_append_string(
     &buffer,
-    "],\"include\":[\"reasoning.encrypted_content\"],"
-    "\"reasoning\":{\"enabled\":true,\"summary\":\"auto\"},"
-    "\"parallel_tool_calls\":") &&
+    "],\"include\":[\"reasoning.encrypted_content\"],") &&
+    ((provider != STRAPPY_PROVIDER_KIND_OPENROUTER) || !reasoning_enabled ||
+     strappy_responses_buffer_append_string(
+       &buffer,
+       "\"reasoning\":{\"enabled\":true,\"summary\":\"auto\"},")) &&
+    ((provider != STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) ||
+     strappy_responses_buffer_append_string(
+       &buffer,
+       "\"text\":{\"verbosity\":\"low\"},")) &&
+    strappy_responses_buffer_append_string(&buffer, "\"parallel_tool_calls\":") &&
     strappy_responses_buffer_append_string(
       &buffer,
       parallel_tool_calls ? "true" : "false") &&
@@ -1533,17 +1599,25 @@ static char *strappy_responses_build_request_json(
 
 typedef struct strappy_responses_runtime {
   strappy_config config;
+  strappy_provider_kind provider;
   char *model_id;
   char *provider_account_id;
   char *provider_id;
+  char *billing_kind;
+  char *chatgpt_access_token;
+  char *chatgpt_account_id;
   strappy_assistant_set_profile assistant_set;
   char *system_prompt;
   char *tools_json;
   strappy_responses_audit audit;
   char *request_url;
+  char *request_session_id;
   int is_first_user_prompt;
   int parallel_tool_calls;
   int answer_quality_enabled;
+  int reasoning_enabled;
+  int local_functions_enabled;
+  int hosted_tools_enabled;
   long round_limit;
 } strappy_responses_runtime;
 
@@ -1553,17 +1627,25 @@ static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
     return;
   }
   strappy_config_init(&runtime->config);
+  runtime->provider = STRAPPY_PROVIDER_KIND_UNKNOWN;
   runtime->model_id = NULL;
   runtime->provider_account_id = NULL;
   runtime->provider_id = NULL;
+  runtime->billing_kind = NULL;
+  runtime->chatgpt_access_token = NULL;
+  runtime->chatgpt_account_id = NULL;
   strappy_assistant_set_profile_init(&runtime->assistant_set);
   runtime->system_prompt = NULL;
   runtime->tools_json = NULL;
   strappy_responses_audit_reset(&runtime->audit);
   runtime->request_url = NULL;
+  runtime->request_session_id = NULL;
   runtime->is_first_user_prompt = 0;
   runtime->parallel_tool_calls = 1;
   runtime->answer_quality_enabled = 0;
+  runtime->reasoning_enabled = 1;
+  runtime->local_functions_enabled = 1;
+  runtime->hosted_tools_enabled = 1;
   runtime->round_limit = STRAPPY_SESSION_DEFAULT_ROUND_LIMIT;
 }
 
@@ -1577,10 +1659,14 @@ static void strappy_responses_runtime_destroy(
   free(runtime->model_id);
   free(runtime->provider_account_id);
   free(runtime->provider_id);
+  free(runtime->billing_kind);
+  strappy_responses_secure_free(runtime->chatgpt_access_token);
+  strappy_responses_secure_free(runtime->chatgpt_account_id);
   strappy_assistant_set_profile_destroy(&runtime->assistant_set);
   free(runtime->system_prompt);
   free(runtime->tools_json);
   free(runtime->request_url);
+  free(runtime->request_session_id);
   strappy_responses_runtime_init(runtime);
 }
 
@@ -1841,10 +1927,52 @@ static int strappy_responses_prepare_runtime(
   runtime->model_id = route.model_id;
   runtime->provider_account_id = route.provider_account_id;
   runtime->provider_id = route.provider_id;
+  runtime->billing_kind = route.billing_kind;
+  runtime->provider = provider;
+  runtime->reasoning_enabled = route.reasoning_enabled;
+  runtime->local_functions_enabled = route.local_functions_enabled;
+  runtime->hosted_tools_enabled = route.hosted_tools_enabled;
   route.model_id = NULL;
   route.provider_account_id = NULL;
   route.provider_id = NULL;
+  route.billing_kind = NULL;
   strappy_model_route_record_destroy(&route);
+
+  if ((provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) &&
+      (!strappy_provider_chatgpt_is_enabled() ||
+       (runtime->billing_kind == NULL) ||
+       (strcmp(runtime->billing_kind, "chatgpt_plan") != 0))) {
+    free(assistant_set_id);
+    strappy_set_error(
+      error_out,
+      !strappy_provider_chatgpt_is_enabled() ?
+        "ChatGPT (Codex) is disabled by the experimental provider kill switch." :
+        "ChatGPT model billing metadata is invalid.");
+    strappy_responses_runtime_destroy(runtime);
+    return 0;
+  }
+  if (provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) {
+    if ((strappy_responses_chatgpt_credentials_callback == NULL) ||
+        !strappy_responses_chatgpt_credentials_callback(
+          0,
+          &runtime->chatgpt_access_token,
+          &runtime->chatgpt_account_id,
+          strappy_responses_chatgpt_credentials_callback_data,
+          error_out) ||
+        (runtime->chatgpt_access_token == NULL) ||
+        (runtime->chatgpt_account_id == NULL)) {
+      if ((error_out != NULL) && (*error_out == NULL)) {
+        strappy_set_error(error_out,
+                          "ChatGPT sign-in credentials are unavailable.");
+      }
+      free(assistant_set_id);
+      strappy_responses_runtime_destroy(runtime);
+      return 0;
+    }
+    /* Hosted OpenRouter tools are provider extensions. Local function tools
+     * remain available when the catalog explicitly permits them. */
+    runtime->config.web_provider = STRAPPY_WEB_PROVIDER_NONE;
+  }
 
   provider_endpoint = strappy_provider_responses_endpoint(
     provider,
@@ -1860,22 +1988,15 @@ static int strappy_responses_prepare_runtime(
   provider_endpoint = NULL;
   runtime->request_url =
     strappy_client_build_responses_url(runtime->config.api_endpoint);
-  if (runtime->request_url == NULL) {
+  runtime->request_session_id = strappy_responses_session_key(session_id);
+  if ((runtime->request_url == NULL) ||
+      (runtime->request_session_id == NULL)) {
     free(assistant_set_id);
     strappy_set_error(error_out,
                       "Could not allocate Responses request URL.");
     strappy_responses_runtime_destroy(runtime);
     return 0;
   }
-  if (provider != STRAPPY_PROVIDER_KIND_OPENROUTER) {
-    free(assistant_set_id);
-    strappy_set_error(
-      error_out,
-      "The selected model account does not yet have a request adapter.");
-    strappy_responses_runtime_destroy(runtime);
-    return 0;
-  }
-
   if (!strappy_config_set_guidance_resource_dir(&runtime->config,
                                                 guidance_resource_dir,
                                                 error_out)) {
@@ -1894,7 +2015,18 @@ static int strappy_responses_prepare_runtime(
     return 0;
   }
   free(assistant_set_id);
-  if (bash_enabled) {
+  if (!runtime->local_functions_enabled) {
+    while (runtime->assistant_set.tool_name_count > 0U) {
+      const char *tool_name;
+
+      tool_name = runtime->assistant_set.tool_names[0];
+      strappy_responses_profile_remove_preflight_tool(
+        &runtime->assistant_set,
+        tool_name);
+      strappy_responses_profile_remove_tool(&runtime->assistant_set,
+                                            tool_name);
+    }
+  } else if (bash_enabled) {
     if (!strappy_responses_profile_add_tool(&runtime->assistant_set,
                                             STRAPPY_TOOL_BASH,
                                             error_out)) {
@@ -1958,6 +2090,18 @@ static int strappy_responses_error_type_is_retryable(const char *type)
     (strcmp(type, "server_error") == 0);
 }
 
+static int strappy_responses_is_chatgpt_plan_limit(
+  strappy_provider_kind provider,
+  const strappy_responses_http_result *http,
+  const strappy_responses_analysis *analysis)
+{
+  return strappy_provider_response_is_plan_limit(
+    provider,
+    (http != NULL) ? http->http_status : 0L,
+    (analysis != NULL) ? analysis->error_type : NULL,
+    (analysis != NULL) ? analysis->error_message : NULL);
+}
+
 static int strappy_responses_http_is_success(
   const strappy_responses_http_result *http,
   const strappy_responses_analysis *analysis)
@@ -1992,6 +2136,7 @@ static int strappy_responses_output_is_canonical(
 }
 
 static int strappy_responses_should_retry(
+  strappy_provider_kind provider,
   const strappy_responses_http_result *http,
   const strappy_responses_analysis *analysis)
 {
@@ -1999,6 +2144,9 @@ static int strappy_responses_should_retry(
     return 0;
   }
   if (http->cancelled) {
+    return 0;
+  }
+  if (strappy_responses_is_chatgpt_plan_limit(provider, http, analysis)) {
     return 0;
   }
   if (http->transport_error != NULL) {
@@ -2395,13 +2543,35 @@ static void strappy_responses_call_did_reach_round_limit(
 }
 
 static char *strappy_responses_failure_message(
+  strappy_provider_kind provider,
   const strappy_responses_http_result *http,
   const strappy_responses_analysis *analysis)
 {
   char buffer[1024];
   int written;
 
-  if ((http != NULL) && http->cancelled) {
+  if (strappy_responses_is_chatgpt_plan_limit(provider, http, analysis)) {
+    if ((analysis != NULL) && analysis->has_plan_resets_at) {
+      written = snprintf(
+        buffer,
+        sizeof(buffer),
+        "The ChatGPT plan limit was reached or this model is not included. "
+        "The provider reports reset time %lld (Unix seconds).",
+        analysis->plan_resets_at_seconds);
+    } else if ((http != NULL) && (http->retry_after_seconds > 0L)) {
+      written = snprintf(
+        buffer,
+        sizeof(buffer),
+        "The ChatGPT plan limit was reached or this model is not included. "
+        "Try again in about %ld seconds.",
+        http->retry_after_seconds);
+    } else {
+      written = snprintf(
+        buffer,
+        sizeof(buffer),
+        "The ChatGPT plan limit was reached or this model is not included.");
+    }
+  } else if ((http != NULL) && http->cancelled) {
     written = snprintf(buffer,
                        sizeof(buffer),
                        "Responses request was cancelled.");
@@ -2623,14 +2793,23 @@ static int strappy_responses_send_round(
   strappy_responses_deferred_call_event *deferred,
   char **error_out)
 {
-  static const char *request_headers_json =
+  static const char *openrouter_request_headers_json =
     "{\"Content-Type\":\"application/json\","
     "\"Accept\":\"application/json\","
     "\"X-OpenRouter-Title\":\"Strappy\","
     "\"X-OpenRouter-Metadata\":\"enabled\","
     "\"Authorization\":\"Bearer [REDACTED]\"}";
+  static const char *chatgpt_request_headers_json =
+    "{\"Content-Type\":\"application/json\","
+    "\"Accept\":\"text/event-stream\","
+    "\"OpenAI-Beta\":\"responses=experimental\","
+    "\"originator\":\"strappy\","
+    "\"chatgpt-account-id\":\"[REDACTED]\","
+    "\"Authorization\":\"Bearer [REDACTED]\"}";
+  const char *request_headers_json;
   long attempt_index;
   long retry_delay_ms;
+  int forced_refresh_attempted;
 
   strappy_responses_http_result_init(http_out);
   strappy_responses_analysis_init(analysis_out);
@@ -2638,6 +2817,10 @@ static int strappy_responses_send_round(
     *round_call_id_out = 0LL;
   }
   retry_delay_ms = STRAPPY_RESPONSES_INITIAL_RETRY_DELAY_MS;
+  forced_refresh_attempted = 0;
+  request_headers_json =
+    (runtime->provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) ?
+      chatgpt_request_headers_json : openrouter_request_headers_json;
 
   for (attempt_index = 0L;
        attempt_index < STRAPPY_RESPONSES_MAX_ATTEMPTS;
@@ -2652,6 +2835,8 @@ static int strappy_responses_send_round(
     int should_retry;
     int response_ok;
     int output_is_canonical;
+    int refreshed_after_unauthorized;
+    char *credential_refresh_error;
     strappy_answer_quality_audit_input answer_quality;
     const strappy_answer_quality_audit_input *answer_quality_to_store;
 
@@ -2698,8 +2883,14 @@ static int strappy_responses_send_round(
                                      callback,
                                      callback_data,
                                      deferred);
-    client_ok = strappy_client_send_responses_json(
+    client_ok = strappy_client_send_provider_responses_json(
       &runtime->config,
+      runtime->provider,
+      (runtime->provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) ?
+        runtime->chatgpt_access_token : runtime->config.api_token,
+      runtime->chatgpt_account_id,
+      (runtime->provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) ?
+        runtime->request_session_id : NULL,
       request_json,
       &http,
       callback,
@@ -2736,9 +2927,48 @@ static int strappy_responses_send_round(
       return 0;
     }
 
+    refreshed_after_unauthorized = 0;
+    credential_refresh_error = NULL;
+    if (client_ok && (http.http_status == 401L) &&
+        (runtime->provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) &&
+        !http.response_event_received &&
+        !forced_refresh_attempted &&
+        ((attempt_index + 1L) < STRAPPY_RESPONSES_MAX_ATTEMPTS) &&
+        (strappy_responses_chatgpt_credentials_callback != NULL)) {
+      char *next_access_token;
+      char *next_account_id;
+
+      next_access_token = NULL;
+      next_account_id = NULL;
+      forced_refresh_attempted = 1;
+      if (strappy_responses_chatgpt_credentials_callback(
+            1,
+            &next_access_token,
+            &next_account_id,
+            strappy_responses_chatgpt_credentials_callback_data,
+            &credential_refresh_error) &&
+          (next_access_token != NULL) && (next_account_id != NULL)) {
+        strappy_responses_secure_free(runtime->chatgpt_access_token);
+        strappy_responses_secure_free(runtime->chatgpt_account_id);
+        runtime->chatgpt_access_token = next_access_token;
+        runtime->chatgpt_account_id = next_account_id;
+        refreshed_after_unauthorized = 1;
+        strappy_free_string(credential_refresh_error);
+        credential_refresh_error = NULL;
+      } else {
+        strappy_responses_secure_free(next_access_token);
+        strappy_responses_secure_free(next_account_id);
+        if (credential_refresh_error == NULL) {
+          strappy_set_error(
+            &credential_refresh_error,
+            "ChatGPT credentials could not be refreshed after HTTP 401.");
+        }
+      }
+    }
     should_retry = client_ok &&
       ((attempt_index + 1L) < STRAPPY_RESPONSES_MAX_ATTEMPTS) &&
-      strappy_responses_should_retry(&http, &analysis);
+      (refreshed_after_unauthorized ||
+       strappy_responses_should_retry(runtime->provider, &http, &analysis));
     output_is_canonical = !should_retry &&
       strappy_responses_output_is_canonical(&http, &analysis);
     response_ok = client_ok &&
@@ -2759,6 +2989,7 @@ static int strappy_responses_send_round(
                                               analysis.response_text,
                                               &answer_quality,
                                               error_out)) {
+          strappy_free_string(credential_refresh_error);
           *http_out = http;
           *analysis_out = analysis;
           return 0;
@@ -2776,6 +3007,7 @@ static int strappy_responses_send_round(
                                        answer_quality_to_store,
                                        error_out)) {
       strappy_responses_answer_quality_destroy(&answer_quality);
+      strappy_free_string(credential_refresh_error);
       *http_out = http;
       *analysis_out = analysis;
       return 0;
@@ -2798,6 +3030,7 @@ static int strappy_responses_send_round(
     }
 
     if (!client_ok) {
+      strappy_free_string(credential_refresh_error);
       *http_out = http;
       *analysis_out = analysis;
       return 0;
@@ -2827,12 +3060,14 @@ static int strappy_responses_send_round(
         retry_reason);
       if (!strappy_responses_sleep_ms(delay, callback, callback_data)) {
         strappy_set_error(error_out, "Responses request was cancelled.");
+        strappy_free_string(credential_refresh_error);
         *http_out = http;
         *analysis_out = analysis;
         return 0;
       }
       strappy_responses_analysis_destroy(&analysis);
       strappy_responses_http_result_destroy(&http);
+      strappy_free_string(credential_refresh_error);
       strappy_responses_emit_processing_status(
         callback,
         callback_data,
@@ -2851,18 +3086,25 @@ static int strappy_responses_send_round(
     }
 
     if (!response_ok) {
-      failure = strappy_responses_failure_message(&http, &analysis);
-      if (failure != NULL) {
+      failure = (credential_refresh_error == NULL) ?
+        strappy_responses_failure_message(runtime->provider,
+                                          &http,
+                                          &analysis) : NULL;
+      if (credential_refresh_error != NULL) {
+        strappy_set_error(error_out, credential_refresh_error);
+      } else if (failure != NULL) {
         strappy_set_error(error_out, failure);
       } else {
         strappy_set_error(error_out, "Responses API failed.");
       }
       free(failure);
+      strappy_free_string(credential_refresh_error);
       *http_out = http;
       *analysis_out = analysis;
       return 0;
     }
 
+    strappy_free_string(credential_refresh_error);
     *http_out = http;
     *analysis_out = analysis;
     return 1;
@@ -3058,12 +3300,14 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
 
     request_json = strappy_responses_build_request_json(
       &runtime.config,
+      runtime.provider,
       runtime.system_prompt,
       session_id,
       prompt_group_key,
       round_index,
       runtime.tools_json,
       runtime.parallel_tool_calls,
+      runtime.reasoning_enabled,
       &history,
       &new_items,
       &new_input_start_index,

@@ -169,10 +169,12 @@
 "Code Copied" = "コードをコピーしました";
 "The ChatGPT sign-in page could not be opened." = "ChatGPT のサインインページを開けませんでした。";
 "Could Not Open Browser" = "ブラウザを開けませんでした";
-"Uses the Pi-compatible device flow. Access and refresh tokens are stored together in the Keychain and refreshed automatically. Device-code login must be enabled for your ChatGPT account or workspace." = "Pi 互換のデバイスフローを使用します。アクセストークンと更新トークンはまとめてキーチェーンに保存され、自動的に更新されます。ChatGPT アカウントまたはワークスペースでデバイスコードログインを有効にする必要があります。";
+"Uses the experimental Codex device flow. Access and refresh tokens are stored together in the Keychain and refreshed automatically. Device-code login must be enabled for your ChatGPT account or workspace." = "実験的な Codex デバイスフローを使用します。アクセストークンと更新トークンはまとめてキーチェーンに保存され、自動的に更新されます。ChatGPT アカウントまたはワークスペースでデバイスコードログインを有効にする必要があります。";
 "The Keychain refused the ChatGPT credential write." = "キーチェーンが ChatGPT 認証情報の書き込みを拒否しました。";
 "ChatGPT sign-in failed." = "ChatGPT のサインインに失敗しました。";
 "The Keychain refused the refreshed ChatGPT credential." = "キーチェーンが更新後の ChatGPT 認証情報の書き込みを拒否しました。";
+"The refreshed ChatGPT credential changed accounts." = "更新後の ChatGPT 認証情報が別のアカウントに変更されました。";
+"Disabled by the experimental provider kill switch" = "実験的プロバイダーのキルスイッチにより無効です";
 "ChatGPT credential refresh failed." = "ChatGPT 認証情報の更新に失敗しました。";
 "The Keychain refused to remove the ChatGPT credential." = "キーチェーンが ChatGPT 認証情報の削除を拒否しました。";
 

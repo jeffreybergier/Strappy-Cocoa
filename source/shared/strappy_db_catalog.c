@@ -137,6 +137,10 @@ void strappy_model_record_init(strappy_model_record *record)
   record->provider_id = NULL;
   record->provider_account_name = NULL;
   record->wire_model_id = NULL;
+  record->billing_kind = NULL;
+  record->reasoning_enabled = 1;
+  record->local_functions_enabled = 1;
+  record->hosted_tools_enabled = 1;
   record->canonical_slug = NULL;
   record->hugging_face_id = NULL;
   record->name = NULL;
@@ -183,6 +187,7 @@ void strappy_model_record_destroy(strappy_model_record *record)
   free(record->provider_id);
   free(record->provider_account_name);
   free(record->wire_model_id);
+  free(record->billing_kind);
   free(record->canonical_slug);
   free(record->hugging_face_id);
   free(record->name);
@@ -268,6 +273,10 @@ void strappy_model_route_record_init(strappy_model_route_record *record)
   record->provider_account_id = NULL;
   record->provider_id = NULL;
   record->wire_model_id = NULL;
+  record->billing_kind = NULL;
+  record->reasoning_enabled = 1;
+  record->local_functions_enabled = 1;
+  record->hosted_tools_enabled = 1;
 }
 
 void strappy_model_route_record_destroy(strappy_model_route_record *record)
@@ -279,6 +288,7 @@ void strappy_model_route_record_destroy(strappy_model_route_record *record)
   free(record->provider_account_id);
   free(record->provider_id);
   free(record->wire_model_id);
+  free(record->billing_kind);
   strappy_model_route_record_init(record);
 }
 
@@ -685,12 +695,17 @@ static int strappy_db_assign_model_from_statement(
   record->provider_id = strappy_db_column_string(stmt, 35);
   record->provider_account_name = strappy_db_column_string(stmt, 36);
   record->wire_model_id = strappy_db_column_string(stmt, 37);
+  record->billing_kind = strappy_db_column_string(stmt, 38);
+  record->reasoning_enabled = sqlite3_column_int(stmt, 39) ? 1 : 0;
+  record->local_functions_enabled = sqlite3_column_int(stmt, 40) ? 1 : 0;
+  record->hosted_tools_enabled = sqlite3_column_int(stmt, 41) ? 1 : 0;
 
   if ((record->model_id == NULL) || (record->fetched_at == NULL) ||
       (record->provider_account_id == NULL) ||
       (record->provider_id == NULL) ||
       (record->provider_account_name == NULL) ||
-      (record->wire_model_id == NULL)) {
+      (record->wire_model_id == NULL) ||
+      (record->billing_kind == NULL)) {
     strappy_openrouter_model_record_destroy(record);
     strappy_set_error(error_out, "Could not allocate model row.");
     return 0;
@@ -2594,6 +2609,750 @@ int strappy_db_save_openrouter_models_json(const char *db_path,
   return strappy_db_semantic_save_models(db_path, json, error_out);
 }
 
+#define STRAPPY_BUNDLED_CATALOG_MAX_BYTES (512U * 1024U)
+#define STRAPPY_BUNDLED_CATALOG_MAX_MODELS 64
+#define STRAPPY_BUNDLED_CATALOG_MAX_FEATURES 16
+#define STRAPPY_BUNDLED_CATALOG_MAX_IDENTIFIER 128U
+#define STRAPPY_BUNDLED_CATALOG_MAX_NAME 160U
+#define STRAPPY_BUNDLED_CATALOG_MAX_TOKEN_LIMIT 2000000LL
+
+static int strappy_db_bundled_key_allowed(
+  const char *key,
+  const char * const *allowed,
+  size_t allowed_count)
+{
+  size_t index;
+
+  if (key == NULL) {
+    return 0;
+  }
+  for (index = 0U; index < allowed_count; index++) {
+    if (strcmp(key, allowed[index]) == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int strappy_db_bundled_validate_object_keys(
+  cJSON *object,
+  const char * const *allowed,
+  size_t allowed_count,
+  const char *label,
+  char **error_out)
+{
+  cJSON *child;
+  cJSON *other;
+
+  if (!cJSON_IsObject(object)) {
+    strappy_set_formatted_error(error_out, "%s is not an object.", label);
+    return 0;
+  }
+  for (child = object->child; child != NULL; child = child->next) {
+    if (!strappy_db_bundled_key_allowed(child->string,
+                                        allowed,
+                                        allowed_count)) {
+      strappy_set_formatted_error(error_out,
+                                  "%s contains unsupported field '%s'.",
+                                  label,
+                                  (child->string != NULL) ? child->string : "");
+      return 0;
+    }
+    for (other = object->child; other != child; other = other->next) {
+      if ((other->string != NULL) && (child->string != NULL) &&
+          (strcmp(other->string, child->string) == 0)) {
+        strappy_set_formatted_error(error_out,
+                                    "%s repeats field '%s'.",
+                                    label,
+                                    child->string);
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
+static int strappy_db_bundled_required_string(cJSON *object,
+                                               const char *key,
+                                               size_t maximum_length,
+                                               const char **value_out,
+                                               char **error_out)
+{
+  cJSON *value;
+  size_t length;
+
+  value = cJSON_GetObjectItemCaseSensitive(object, key);
+  if (!cJSON_IsString(value) || (value->valuestring == NULL) ||
+      (value->valuestring[0] == '\0')) {
+    strappy_set_formatted_error(error_out,
+                                "Bundled model field '%s' must be a string.",
+                                key);
+    return 0;
+  }
+  length = strlen(value->valuestring);
+  if (length > maximum_length) {
+    strappy_set_formatted_error(error_out,
+                                "Bundled model field '%s' is too long.",
+                                key);
+    return 0;
+  }
+  if (value_out != NULL) {
+    *value_out = value->valuestring;
+  }
+  return 1;
+}
+
+static int strappy_db_bundled_positive_integer(cJSON *object,
+                                                const char *key,
+                                                long long maximum,
+                                                long long *value_out,
+                                                char **error_out)
+{
+  cJSON *value;
+  long long integer;
+
+  value = cJSON_GetObjectItemCaseSensitive(object, key);
+  if (!cJSON_IsNumber(value) || (value->valuedouble < 1.0) ||
+      (value->valuedouble > (double)maximum)) {
+    strappy_set_formatted_error(error_out,
+                                "Bundled model field '%s' is invalid.",
+                                key);
+    return 0;
+  }
+  integer = (long long)value->valuedouble;
+  if ((double)integer != value->valuedouble) {
+    strappy_set_formatted_error(error_out,
+                                "Bundled model field '%s' is not an integer.",
+                                key);
+    return 0;
+  }
+  if (value_out != NULL) {
+    *value_out = integer;
+  }
+  return 1;
+}
+
+static int strappy_db_bundled_string_array(cJSON *array,
+                                            const char *label,
+                                            int allow_empty,
+                                            char **error_out)
+{
+  cJSON *value;
+  cJSON *other;
+  int count;
+  int index;
+  int other_index;
+
+  if (!cJSON_IsArray(array)) {
+    strappy_set_formatted_error(error_out, "%s must be an array.", label);
+    return 0;
+  }
+  count = cJSON_GetArraySize(array);
+  if ((!allow_empty && (count == 0)) ||
+      (count > STRAPPY_BUNDLED_CATALOG_MAX_FEATURES)) {
+    strappy_set_formatted_error(error_out, "%s has an invalid size.", label);
+    return 0;
+  }
+  for (index = 0; index < count; index++) {
+    value = cJSON_GetArrayItem(array, index);
+    if (!cJSON_IsString(value) || (value->valuestring == NULL) ||
+        (value->valuestring[0] == '\0') ||
+        (strlen(value->valuestring) > STRAPPY_BUNDLED_CATALOG_MAX_IDENTIFIER)) {
+      strappy_set_formatted_error(error_out,
+                                  "%s contains an invalid value.",
+                                  label);
+      return 0;
+    }
+    for (other_index = 0; other_index < index; other_index++) {
+      other = cJSON_GetArrayItem(array, other_index);
+      if (strcmp(other->valuestring, value->valuestring) == 0) {
+        strappy_set_formatted_error(error_out,
+                                    "%s contains duplicate value '%s'.",
+                                    label,
+                                    value->valuestring);
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
+static int strappy_db_bundled_validate_model(cJSON *model,
+                                              char **error_out)
+{
+  static const char * const model_keys[] = {
+    "provider_id", "provider_account_id", "model_id", "wire_model_id",
+    "display_name", "catalog_active", "billing_kind", "input_modalities",
+    "context_window_tokens", "max_output_tokens", "capabilities",
+    "reasoning_levels", "reasoning_level_overrides"
+  };
+  static const char * const capability_keys[] = {
+    "reasoning", "local_functions", "hosted_tools"
+  };
+  const char *provider_id;
+  const char *account_id;
+  const char *model_id;
+  const char *wire_model_id;
+  const char *billing_kind;
+  char *expected_model_id;
+  cJSON *active;
+  cJSON *capabilities;
+  cJSON *reasoning;
+  cJSON *local_functions;
+  cJSON *overrides;
+  cJSON *override_value;
+  int ok;
+
+  if (!strappy_db_bundled_validate_object_keys(
+        model,
+        model_keys,
+        sizeof(model_keys) / sizeof(model_keys[0]),
+        "Bundled model entry",
+        error_out) ||
+      !strappy_db_bundled_required_string(
+        model, "provider_id", STRAPPY_BUNDLED_CATALOG_MAX_IDENTIFIER,
+        &provider_id, error_out) ||
+      !strappy_db_bundled_required_string(
+        model, "provider_account_id", STRAPPY_BUNDLED_CATALOG_MAX_IDENTIFIER,
+        &account_id, error_out) ||
+      !strappy_db_bundled_required_string(
+        model, "model_id", STRAPPY_BUNDLED_CATALOG_MAX_IDENTIFIER,
+        &model_id, error_out) ||
+      !strappy_db_bundled_required_string(
+        model, "wire_model_id", STRAPPY_BUNDLED_CATALOG_MAX_IDENTIFIER,
+        &wire_model_id, error_out) ||
+      !strappy_db_bundled_required_string(
+        model, "display_name", STRAPPY_BUNDLED_CATALOG_MAX_NAME,
+        NULL, error_out) ||
+      !strappy_db_bundled_required_string(
+        model, "billing_kind", STRAPPY_BUNDLED_CATALOG_MAX_IDENTIFIER,
+        &billing_kind, error_out)) {
+    return 0;
+  }
+  if ((strcmp(provider_id, STRAPPY_PROVIDER_OPENAI_CHATGPT) != 0) ||
+      (strcmp(account_id, STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT) != 0) ||
+      (strcmp(billing_kind, "chatgpt_plan") != 0)) {
+    strappy_set_error(error_out,
+                      "Bundled catalog contains a non-ChatGPT model route.");
+    return 0;
+  }
+  expected_model_id = strappy_provider_model_identifier(account_id,
+                                                         wire_model_id,
+                                                         error_out);
+  if (expected_model_id == NULL) {
+    return 0;
+  }
+  ok = (strcmp(expected_model_id, model_id) == 0);
+  free(expected_model_id);
+  if (!ok) {
+    strappy_set_error(error_out,
+                      "Bundled model id does not match its account and wire id.");
+    return 0;
+  }
+  active = cJSON_GetObjectItemCaseSensitive(model, "catalog_active");
+  capabilities = cJSON_GetObjectItemCaseSensitive(model, "capabilities");
+  reasoning = cJSON_GetObjectItemCaseSensitive(capabilities, "reasoning");
+  local_functions =
+    cJSON_GetObjectItemCaseSensitive(capabilities, "local_functions");
+  if (!cJSON_IsBool(active) ||
+      !strappy_db_bundled_positive_integer(
+        model, "context_window_tokens", STRAPPY_BUNDLED_CATALOG_MAX_TOKEN_LIMIT,
+        NULL, error_out) ||
+      !strappy_db_bundled_positive_integer(
+        model, "max_output_tokens", STRAPPY_BUNDLED_CATALOG_MAX_TOKEN_LIMIT,
+        NULL, error_out) ||
+      !strappy_db_bundled_validate_object_keys(
+        capabilities,
+        capability_keys,
+        sizeof(capability_keys) / sizeof(capability_keys[0]),
+        "Bundled model capabilities",
+        error_out) ||
+      !cJSON_IsBool(reasoning) || !cJSON_IsBool(local_functions) ||
+      !strappy_db_bundled_string_array(
+        cJSON_GetObjectItemCaseSensitive(model, "input_modalities"),
+        "Bundled model input_modalities", 0, error_out) ||
+      !strappy_db_bundled_string_array(
+        cJSON_GetObjectItemCaseSensitive(model, "reasoning_levels"),
+        "Bundled model reasoning_levels", 1, error_out) ||
+      !strappy_db_bundled_string_array(
+        cJSON_GetObjectItemCaseSensitive(capabilities, "hosted_tools"),
+        "Bundled model hosted_tools", 1, error_out)) {
+    if ((error_out != NULL) && (*error_out == NULL)) {
+      strappy_set_error(error_out,
+                        "Bundled model capability flags are invalid.");
+    }
+    return 0;
+  }
+  overrides =
+    cJSON_GetObjectItemCaseSensitive(model, "reasoning_level_overrides");
+  if (!cJSON_IsObject(overrides)) {
+    strappy_set_error(error_out,
+                      "Bundled model reasoning overrides must be an object.");
+    return 0;
+  }
+  for (override_value = overrides->child;
+       override_value != NULL;
+       override_value = override_value->next) {
+    if ((override_value->string == NULL) ||
+        (override_value->string[0] == '\0') ||
+        (strlen(override_value->string) >
+          STRAPPY_BUNDLED_CATALOG_MAX_IDENTIFIER) ||
+        !cJSON_IsString(override_value) ||
+        (override_value->valuestring == NULL) ||
+        (override_value->valuestring[0] == '\0') ||
+        (strlen(override_value->valuestring) >
+          STRAPPY_BUNDLED_CATALOG_MAX_IDENTIFIER)) {
+      strappy_set_error(error_out,
+                        "Bundled model reasoning override is invalid.");
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int strappy_db_bundled_exec_model_statement(sqlite3 *db,
+                                                    const char *sql,
+                                                    const char *model_id,
+                                                    const char *label,
+                                                    char **error_out)
+{
+  sqlite3_stmt *stmt;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if ((rc == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK)) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out, "%s: %s", label, sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+static int strappy_db_bundled_insert_pair(sqlite3 *db,
+                                           const char *sql,
+                                           const char *model_id,
+                                           const char *first,
+                                           const char *second,
+                                           const char *label,
+                                           char **error_out)
+{
+  sqlite3_stmt *stmt;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if ((rc == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 2, first, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+      ((second == NULL) ||
+       (sqlite3_bind_text(stmt, 3, second, -1, SQLITE_TRANSIENT) == SQLITE_OK))) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out, "%s: %s", label, sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+static int strappy_db_bundled_import_model(sqlite3 *db,
+                                            cJSON *model,
+                                            long long now_ms,
+                                            char **error_out)
+{
+  static const char *insert_sql =
+    "INSERT OR IGNORE INTO models "
+    "(id, provider_account_id, wire_model_id, name, context_length, "
+      "provider_context_length, provider_max_completion_tokens, "
+      "catalog_active, last_seen_at_ms) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);";
+  static const char *update_sql =
+    "UPDATE models SET name = ?, context_length = ?, "
+      "provider_context_length = ?, provider_max_completion_tokens = ?, "
+      "catalog_active = ?, last_seen_at_ms = ? "
+    "WHERE id = ? AND provider_account_id = ? AND wire_model_id = ?;";
+  static const char *capabilities_sql =
+    "INSERT INTO model_capabilities "
+    "(model_id, billing_kind, reasoning_enabled, local_functions_enabled, "
+      "hosted_tools_enabled) VALUES (?, ?, ?, ?, ?);";
+  static const char *feature_sql =
+    "INSERT INTO model_features (model_id, feature_kind, feature_value) "
+    "VALUES (?, ?, ?);";
+  static const char *hosted_tool_sql =
+    "INSERT INTO model_hosted_tools (model_id, tool_id) VALUES (?, ?);";
+  static const char *override_sql =
+    "INSERT INTO model_reasoning_overrides "
+    "(model_id, requested_level, wire_level) VALUES (?, ?, ?);";
+  const char *model_id;
+  const char *wire_model_id;
+  const char *display_name;
+  const char *billing_kind;
+  cJSON *capabilities;
+  cJSON *array;
+  cJSON *value;
+  sqlite3_stmt *stmt;
+  long long context_tokens;
+  long long output_tokens;
+  int active;
+  int reasoning_enabled;
+  int local_functions_enabled;
+  int hosted_tools_enabled;
+  int count;
+  int index;
+  int rc;
+
+  context_tokens = 0LL;
+  output_tokens = 0LL;
+  model_id = cJSON_GetObjectItemCaseSensitive(model, "model_id")->valuestring;
+  wire_model_id =
+    cJSON_GetObjectItemCaseSensitive(model, "wire_model_id")->valuestring;
+  display_name =
+    cJSON_GetObjectItemCaseSensitive(model, "display_name")->valuestring;
+  billing_kind =
+    cJSON_GetObjectItemCaseSensitive(model, "billing_kind")->valuestring;
+  (void)strappy_db_bundled_positive_integer(
+    model, "context_window_tokens", STRAPPY_BUNDLED_CATALOG_MAX_TOKEN_LIMIT,
+    &context_tokens, NULL);
+  (void)strappy_db_bundled_positive_integer(
+    model, "max_output_tokens", STRAPPY_BUNDLED_CATALOG_MAX_TOKEN_LIMIT,
+    &output_tokens, NULL);
+  active = cJSON_IsTrue(
+    cJSON_GetObjectItemCaseSensitive(model, "catalog_active")) ? 1 : 0;
+  capabilities = cJSON_GetObjectItemCaseSensitive(model, "capabilities");
+  reasoning_enabled = cJSON_IsTrue(
+    cJSON_GetObjectItemCaseSensitive(capabilities, "reasoning")) ? 1 : 0;
+  local_functions_enabled = cJSON_IsTrue(
+    cJSON_GetObjectItemCaseSensitive(capabilities, "local_functions")) ? 1 : 0;
+  array = cJSON_GetObjectItemCaseSensitive(capabilities, "hosted_tools");
+  hosted_tools_enabled = (cJSON_GetArraySize(array) > 0) ? 1 : 0;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, insert_sql, -1, &stmt, NULL);
+  if ((rc == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 2, STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT,
+                         -1, SQLITE_STATIC) == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 3, wire_model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 4, display_name, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+      (sqlite3_bind_int64(stmt, 5, (sqlite3_int64)context_tokens) == SQLITE_OK) &&
+      (sqlite3_bind_int64(stmt, 6, (sqlite3_int64)context_tokens) == SQLITE_OK) &&
+      (sqlite3_bind_int64(stmt, 7, (sqlite3_int64)output_tokens) == SQLITE_OK) &&
+      (sqlite3_bind_int(stmt, 8, active) == SQLITE_OK) &&
+      (sqlite3_bind_int64(stmt, 9, (sqlite3_int64)now_ms) == SQLITE_OK)) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not insert bundled model: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, update_sql, -1, &stmt, NULL);
+  if ((rc == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 1, display_name, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+      (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)context_tokens) == SQLITE_OK) &&
+      (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)context_tokens) == SQLITE_OK) &&
+      (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)output_tokens) == SQLITE_OK) &&
+      (sqlite3_bind_int(stmt, 5, active) == SQLITE_OK) &&
+      (sqlite3_bind_int64(stmt, 6, (sqlite3_int64)now_ms) == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 7, model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 8, STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT,
+                         -1, SQLITE_STATIC) == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 9, wire_model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK)) {
+    rc = sqlite3_step(stmt);
+  }
+  if ((rc != SQLITE_DONE) || (sqlite3_changes(db) != 1)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not update bundled model identity: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+
+  if (!strappy_db_bundled_exec_model_statement(
+        db, "DELETE FROM model_features WHERE model_id = ?;", model_id,
+        "Could not clear bundled model features", error_out) ||
+      !strappy_db_bundled_exec_model_statement(
+        db, "DELETE FROM model_capabilities WHERE model_id = ?;", model_id,
+        "Could not clear bundled model capabilities", error_out) ||
+      !strappy_db_bundled_exec_model_statement(
+        db, "DELETE FROM model_hosted_tools WHERE model_id = ?;", model_id,
+        "Could not clear bundled hosted tools", error_out) ||
+      !strappy_db_bundled_exec_model_statement(
+        db, "DELETE FROM model_reasoning_overrides WHERE model_id = ?;", model_id,
+        "Could not clear bundled reasoning overrides", error_out)) {
+    return 0;
+  }
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, capabilities_sql, -1, &stmt, NULL);
+  if ((rc == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 2, billing_kind, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+      (sqlite3_bind_int(stmt, 3, reasoning_enabled) == SQLITE_OK) &&
+      (sqlite3_bind_int(stmt, 4, local_functions_enabled) == SQLITE_OK) &&
+      (sqlite3_bind_int(stmt, 5, hosted_tools_enabled) == SQLITE_OK)) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not save bundled model capabilities: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+
+  array = cJSON_GetObjectItemCaseSensitive(model, "input_modalities");
+  count = cJSON_GetArraySize(array);
+  for (index = 0; index < count; index++) {
+    value = cJSON_GetArrayItem(array, index);
+    if (!strappy_db_bundled_insert_pair(db, feature_sql, model_id,
+                                         "input_modality", value->valuestring,
+                                         "Could not save bundled input modality",
+                                         error_out)) {
+      return 0;
+    }
+  }
+  array = cJSON_GetObjectItemCaseSensitive(model, "reasoning_levels");
+  count = cJSON_GetArraySize(array);
+  for (index = 0; index < count; index++) {
+    value = cJSON_GetArrayItem(array, index);
+    if (!strappy_db_bundled_insert_pair(db, feature_sql, model_id,
+                                         "reasoning", value->valuestring,
+                                         "Could not save bundled reasoning level",
+                                         error_out)) {
+      return 0;
+    }
+  }
+  array = cJSON_GetObjectItemCaseSensitive(capabilities, "hosted_tools");
+  count = cJSON_GetArraySize(array);
+  for (index = 0; index < count; index++) {
+    value = cJSON_GetArrayItem(array, index);
+    if (!strappy_db_bundled_insert_pair(db, hosted_tool_sql, model_id,
+                                         value->valuestring, NULL,
+                                         "Could not save bundled hosted tool",
+                                         error_out)) {
+      return 0;
+    }
+  }
+  value = cJSON_GetObjectItemCaseSensitive(model,
+                                            "reasoning_level_overrides")->child;
+  while (value != NULL) {
+    if (!strappy_db_bundled_insert_pair(db, override_sql, model_id,
+                                         value->string, value->valuestring,
+                                         "Could not save reasoning override",
+                                         error_out)) {
+      return 0;
+    }
+    value = value->next;
+  }
+  return 1;
+}
+
+int strappy_db_import_bundled_models_json(const char *db_path,
+                                          const char *json,
+                                          char **error_out)
+{
+  static const char * const root_keys[] = {
+    "schema_version", "catalog_revision", "catalog_source", "models"
+  };
+  static const char *revision_sql =
+    "INSERT OR REPLACE INTO bundled_model_catalogs "
+    "(provider_account_id, schema_version, catalog_revision, catalog_source, "
+      "imported_at_ms) VALUES (?, 1, ?, ?, ?);";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  cJSON *root;
+  cJSON *schema_version;
+  cJSON *revision;
+  cJSON *source;
+  cJSON *models;
+  cJSON *model;
+  cJSON *other;
+  const char *model_id;
+  const char *other_id;
+  long long catalog_revision;
+  long long current_revision;
+  long long now_ms;
+  size_t json_length;
+  int count;
+  int index;
+  int other_index;
+  int rc;
+  int ok;
+
+  if ((json == NULL) || (json[0] == '\0')) {
+    strappy_set_error(error_out, "Bundled model catalog is empty.");
+    return 0;
+  }
+  json_length = strlen(json);
+  if (json_length > STRAPPY_BUNDLED_CATALOG_MAX_BYTES) {
+    strappy_set_error(error_out, "Bundled model catalog is too large.");
+    return 0;
+  }
+  root = cJSON_Parse(json);
+  if ((root == NULL) ||
+      !strappy_db_bundled_validate_object_keys(
+        root, root_keys, sizeof(root_keys) / sizeof(root_keys[0]),
+        "Bundled model catalog", error_out)) {
+    if ((error_out != NULL) && (*error_out == NULL)) {
+      strappy_set_error(error_out, "Bundled model catalog is not valid JSON.");
+    }
+    cJSON_Delete(root);
+    return 0;
+  }
+  schema_version = cJSON_GetObjectItemCaseSensitive(root, "schema_version");
+  revision = cJSON_GetObjectItemCaseSensitive(root, "catalog_revision");
+  source = cJSON_GetObjectItemCaseSensitive(root, "catalog_source");
+  models = cJSON_GetObjectItemCaseSensitive(root, "models");
+  if (!cJSON_IsNumber(schema_version) ||
+      (schema_version->valuedouble != 1.0) ||
+      !cJSON_IsNumber(revision) || (revision->valuedouble < 1.0) ||
+      (revision->valuedouble > (double)INT_MAX) ||
+      ((double)((long long)revision->valuedouble) != revision->valuedouble) ||
+      !cJSON_IsString(source) || (source->valuestring == NULL) ||
+      (strcmp(source->valuestring, "bundled") != 0) ||
+      !cJSON_IsArray(models)) {
+    cJSON_Delete(root);
+    strappy_set_error(error_out,
+                      "Bundled model catalog metadata is invalid.");
+    return 0;
+  }
+  catalog_revision = (long long)revision->valuedouble;
+  count = cJSON_GetArraySize(models);
+  if ((count < 1) || (count > STRAPPY_BUNDLED_CATALOG_MAX_MODELS)) {
+    cJSON_Delete(root);
+    strappy_set_error(error_out,
+                      "Bundled model catalog has an invalid model count.");
+    return 0;
+  }
+  for (index = 0; index < count; index++) {
+    model = cJSON_GetArrayItem(models, index);
+    if (!strappy_db_bundled_validate_model(model, error_out)) {
+      cJSON_Delete(root);
+      return 0;
+    }
+    model_id = cJSON_GetObjectItemCaseSensitive(model, "model_id")->valuestring;
+    for (other_index = 0; other_index < index; other_index++) {
+      other = cJSON_GetArrayItem(models, other_index);
+      other_id =
+        cJSON_GetObjectItemCaseSensitive(other, "model_id")->valuestring;
+      if (strcmp(model_id, other_id) == 0) {
+        cJSON_Delete(root);
+        strappy_set_error(error_out,
+                          "Bundled model catalog contains duplicate model ids.");
+        return 0;
+      }
+    }
+  }
+
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    cJSON_Delete(root);
+    return 0;
+  }
+  if (!strappy_db_ensure_schema(db, error_out)) {
+    strappy_db_release(db);
+    cJSON_Delete(root);
+    return 0;
+  }
+  current_revision = 0LL;
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(
+    db,
+    "SELECT catalog_revision FROM bundled_model_catalogs "
+      "WHERE provider_account_id = ?;",
+    -1,
+    &stmt,
+    NULL);
+  if ((rc == SQLITE_OK) &&
+      (sqlite3_bind_text(stmt, 1, STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT,
+                         -1, SQLITE_STATIC) == SQLITE_OK)) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc == SQLITE_ROW) {
+    current_revision = (long long)sqlite3_column_int64(stmt, 0);
+  } else if (rc != SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read bundled catalog revision: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    cJSON_Delete(root);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+  if (current_revision >= catalog_revision) {
+    strappy_db_release(db);
+    cJSON_Delete(root);
+    return 1;
+  }
+
+  if (!strappy_db_exec(db, "BEGIN IMMEDIATE;",
+                       "Could not begin bundled catalog import", error_out)) {
+    strappy_db_release(db);
+    cJSON_Delete(root);
+    return 0;
+  }
+  ok = strappy_db_exec(
+    db,
+    "UPDATE models SET catalog_active = 0 WHERE provider_account_id = '"
+      STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT "';",
+    "Could not deactivate stale bundled models",
+    error_out);
+  now_ms = strappy_db_now_ms();
+  for (index = 0; ok && (index < count); index++) {
+    ok = strappy_db_bundled_import_model(db,
+                                         cJSON_GetArrayItem(models, index),
+                                         now_ms,
+                                         error_out);
+  }
+  if (ok) {
+    stmt = NULL;
+    rc = sqlite3_prepare_v2(db, revision_sql, -1, &stmt, NULL);
+    if ((rc == SQLITE_OK) &&
+        (sqlite3_bind_text(stmt, 1, STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT,
+                           -1, SQLITE_STATIC) == SQLITE_OK) &&
+        (sqlite3_bind_int64(stmt, 2,
+                            (sqlite3_int64)catalog_revision) == SQLITE_OK) &&
+        (sqlite3_bind_text(stmt, 3, source->valuestring,
+                           -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
+        (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)now_ms) == SQLITE_OK)) {
+      rc = sqlite3_step(stmt);
+    }
+    if (rc != SQLITE_DONE) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not record bundled catalog revision: %s",
+                                  sqlite3_errmsg(db));
+      ok = 0;
+    }
+    sqlite3_finalize(stmt);
+  }
+  if (ok) {
+    ok = strappy_db_exec(db, "COMMIT;",
+                         "Could not commit bundled catalog import", error_out);
+  } else {
+    (void)strappy_db_exec(db, "ROLLBACK;",
+                          "Could not roll back bundled catalog import", NULL);
+  }
+  strappy_db_release(db);
+  cJSON_Delete(root);
+  return ok;
+}
+
 static void strappy_db_filter_model_list(strappy_model_record_list *list,
                                          const char *provider_account_id,
                                          int allowed_only)
@@ -2687,9 +3446,14 @@ static int strappy_db_semantic_list_models(
       " THEN 1 ELSE 0 END, "
     "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL
       " OR COALESCE(mp.allowed, 0) = 1 THEN 1 ELSE 0 END "
-    ", a.id, a.provider_id, a.display_name, m.wire_model_id "
+    ", a.id, a.provider_id, a.display_name, m.wire_model_id, "
+    "COALESCE(mc.billing_kind, 'metered_api'), "
+    "COALESCE(mc.reasoning_enabled, 1), "
+    "COALESCE(mc.local_functions_enabled, 1), "
+    "COALESCE(mc.hosted_tools_enabled, 1) "
     "FROM models m JOIN provider_accounts a "
       "ON a.id = m.provider_account_id "
+    "LEFT JOIN model_capabilities mc ON mc.model_id = m.id "
     "LEFT JOIN model_preferences mp ON mp.model_id = m.id ";
   static const char *unfiltered_suffix =
     "WHERE m.catalog_active = 1 "
@@ -3400,11 +4164,16 @@ int strappy_db_get_session_model_route(
   char **error_out)
 {
   static const char *sql =
-    "SELECT m.id, a.id, a.provider_id, m.wire_model_id "
+    "SELECT m.id, a.id, a.provider_id, m.wire_model_id, "
+      "COALESCE(mc.billing_kind, 'metered_api'), "
+      "COALESCE(mc.reasoning_enabled, 1), "
+      "COALESCE(mc.local_functions_enabled, 1), "
+      "COALESCE(mc.hosted_tools_enabled, 1) "
     "FROM sessions s JOIN models m ON m.id = "
       "COALESCE(NULLIF(s.model_id, ''), "
         STRAPPY_DB_DEFAULT_MODEL_SQL ") "
     "JOIN provider_accounts a ON a.id = m.provider_account_id "
+    "LEFT JOIN model_capabilities mc ON mc.model_id = m.id "
     "WHERE s.id = ? AND m.catalog_active = 1 AND "
       "(m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL " OR "
       "EXISTS (SELECT 1 FROM model_preferences mp "
@@ -3460,12 +4229,17 @@ int strappy_db_get_session_model_route(
   route->provider_account_id = strappy_db_column_string(stmt, 1);
   route->provider_id = strappy_db_column_string(stmt, 2);
   route->wire_model_id = strappy_db_column_string(stmt, 3);
+  route->billing_kind = strappy_db_column_string(stmt, 4);
+  route->reasoning_enabled = sqlite3_column_int(stmt, 5) ? 1 : 0;
+  route->local_functions_enabled = sqlite3_column_int(stmt, 6) ? 1 : 0;
+  route->hosted_tools_enabled = sqlite3_column_int(stmt, 7) ? 1 : 0;
   sqlite3_finalize(stmt);
   strappy_db_release(db);
   if ((route->model_id == NULL) ||
       (route->provider_account_id == NULL) ||
       (route->provider_id == NULL) ||
-      (route->wire_model_id == NULL)) {
+      (route->wire_model_id == NULL) ||
+      (route->billing_kind == NULL)) {
     strappy_model_route_record_destroy(route);
     strappy_set_error(error_out, "Could not allocate session model route.");
     return 0;

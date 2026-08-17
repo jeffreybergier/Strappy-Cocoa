@@ -60,10 +60,21 @@ NSString *StrappyModelCellDetailText(NSDictionary *model)
 {
   NSMutableArray *details;
   NSString *context;
+  NSString *accountName;
+  NSString *billingKind;
   NSString *promptPrice;
   NSString *completionPrice;
 
   details = [NSMutableArray array];
+  accountName = StrappyModelCellStringForRow(model,
+                                              @"provider_account_name");
+  if ([accountName length] > 0U) {
+    [details addObject:accountName];
+  }
+  billingKind = StrappyModelCellStringForRow(model, @"billing_kind");
+  if ([billingKind isEqualToString:@"chatgpt_plan"]) {
+    [details addObject:NSLocalizedString(@"ChatGPT plan", nil)];
+  }
   context = StrappyModelCellNumberString(model, @"context_length");
   if ([context length] > 0U) {
     [details addObject:[NSString stringWithFormat:

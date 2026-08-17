@@ -1,5 +1,6 @@
 #import "StrappySessionOptionsViewController.h"
 
+#import "StrappyAuthentication.h"
 #import "XPAppKit.h"
 #include <math.h>
 
@@ -65,6 +66,45 @@ static NSString *StrappyInspectorModelTitle(NSDictionary *row)
   identifier = StrappyInspectorStringForRow(row, @"id");
   return ([identifier length] > 0U) ? identifier :
     NSLocalizedString(@"Model", nil);
+}
+
+static NSDictionary *StrappyInspectorModelForIdentifier(NSArray *models,
+                                                         NSString *identifier)
+{
+  NSDictionary *model;
+  NSUInteger index;
+
+  if (![identifier isKindOfClass:[NSString class]]) {
+    identifier = @"";
+  }
+  for (index = 0U; index < [models count]; index++) {
+    model = [models objectAtIndex:index];
+    if ([StrappyInspectorStringForRow(model, @"id")
+          isEqualToString:identifier]) {
+      return model;
+    }
+  }
+  return nil;
+}
+
+static BOOL StrappyInspectorModelBoolean(NSDictionary *model,
+                                         NSString *key,
+                                         BOOL fallback)
+{
+  NSNumber *value;
+
+  value = [model objectForKey:key];
+  return [value isKindOfClass:[NSNumber class]] ? [value boolValue] : fallback;
+}
+
+static BOOL StrappyInspectorModelIsSignedIn(NSDictionary *model)
+{
+  if (![StrappyInspectorStringForRow(model, @"provider_id")
+        isEqualToString:@"openai_chatgpt"]) {
+    return YES;
+  }
+  return [StrappyAuthentication isChatGPTProviderEnabled] &&
+    [[StrappyAuthentication sharedAuthentication] hasStoredCredentials];
 }
 
 static NSString *StrappyInspectorAssistantSegmentTitle(NSDictionary *row,
@@ -289,6 +329,10 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
     [notificationCenter addObserver:self
                            selector:@selector(modelCatalogDidChange:)
                                name:StrappySessionModelCatalogDidChangeNotification
+                             object:nil];
+    [notificationCenter addObserver:self
+                           selector:@selector(modelCatalogDidChange:)
+                               name:StrappyAuthenticationDidChangeNotification
                              object:nil];
   }
   return self;
@@ -824,6 +868,25 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
     XPControlStateValueOn : XPControlStateValueOff)];
   [answerQualityButton_ setState:([options answerQualityEnabled] ?
     XPControlStateValueOn : XPControlStateValueOff)];
+  {
+    NSArray *models;
+    NSDictionary *selectedModel;
+
+    models = [StrappySession allowedModelCatalogWithError:nil];
+    selectedModel = StrappyInspectorModelForIdentifier(
+      models,
+      [options modelIdentifier]);
+    if (!StrappyInspectorModelBoolean(selectedModel,
+                                      @"hosted_tools_enabled",
+                                      YES)) {
+      [webSearchButton_ setState:XPControlStateValueOff];
+    }
+    if (!StrappyInspectorModelBoolean(selectedModel,
+                                      @"local_functions_enabled",
+                                      YES)) {
+      [bashButton_ setState:XPControlStateValueOff];
+    }
+  }
   roundLimit = StrappyInspectorSnapSliderRoundLimit((double)((options != nil) ?
     [options roundLimit] : StrappySessionDefaultRoundLimit));
   [roundLimitSlider_ setDoubleValue:(double)roundLimit];
@@ -868,6 +931,9 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   NSMenuItem *selectedItem;
   NSUInteger index;
   NSUInteger validCount;
+  NSString *lastAccountIdentifier;
+  NSString *selectedAccountIdentifier;
+  BOOL sessionAccountLocked;
 
   models = [StrappySession allowedModelCatalogWithError:nil];
   if (![models isKindOfClass:[NSArray class]]) {
@@ -881,9 +947,18 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   [modelPopUpButton_ removeAllItems];
   selectedItem = nil;
   validCount = 0U;
+  lastAccountIdentifier = @"";
+  selectedAccountIdentifier = StrappyInspectorStringForRow(
+    StrappyInspectorModelForIdentifier(models, selectedIdentifier),
+    @"provider_account_id");
+  sessionAccountLocked = !editsSessionDefaults_ &&
+    ([[[session_ cachedSummary] objectForKey:@"prompt"] length] > 0U) &&
+    ([selectedAccountIdentifier length] > 0U);
   for (index = 0U; index < [models count]; index++) {
     NSDictionary *row;
     NSString *identifier;
+    NSString *accountIdentifier;
+    NSString *accountName;
     NSMenuItem *item;
 
     row = [models objectAtIndex:index];
@@ -891,10 +966,30 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
     if ([identifier length] == 0U) {
       continue;
     }
+    accountIdentifier =
+      StrappyInspectorStringForRow(row, @"provider_account_id");
+    accountName =
+      StrappyInspectorStringForRow(row, @"provider_account_name");
+    if (![accountIdentifier isEqualToString:lastAccountIdentifier]) {
+      if ([lastAccountIdentifier length] > 0U) {
+        [[modelPopUpButton_ menu] addItem:[NSMenuItem separatorItem]];
+      }
+      [modelPopUpButton_ addItemWithTitle:([accountName length] > 0U) ?
+        accountName : accountIdentifier];
+      item = [modelPopUpButton_ lastItem];
+      [item setEnabled:NO];
+      lastAccountIdentifier = accountIdentifier;
+    }
     [modelPopUpButton_ addItemWithTitle:StrappyInspectorModelTitle(row)];
     item = [modelPopUpButton_ lastItem];
     [item setRepresentedObject:identifier];
-    validCount++;
+    if (!StrappyInspectorModelIsSignedIn(row) ||
+        (sessionAccountLocked &&
+         ![accountIdentifier isEqualToString:selectedAccountIdentifier])) {
+      [item setEnabled:NO];
+    } else {
+      validCount++;
+    }
     if ([identifier isEqualToString:selectedIdentifier]) {
       selectedItem = item;
     }
@@ -1018,18 +1113,34 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
 {
   BOOL enabled;
   BOOL providerEnabled;
+  BOOL hostedToolsEnabled;
+  BOOL localFunctionsEnabled;
   StrappySessionOptions *options;
+  NSArray *models;
+  NSDictionary *selectedModel;
 
   enabled = [self canEditOptions];
   options = [self currentOptions];
+  models = [StrappySession allowedModelCatalogWithError:nil];
+  selectedModel = StrappyInspectorModelForIdentifier(models,
+                                                      [options modelIdentifier]);
+  hostedToolsEnabled = StrappyInspectorModelBoolean(
+    selectedModel,
+    @"hosted_tools_enabled",
+    YES);
+  localFunctionsEnabled = StrappyInspectorModelBoolean(
+    selectedModel,
+    @"local_functions_enabled",
+    YES);
   providerEnabled = enabled &&
+    hostedToolsEnabled &&
     (!editsSessionDefaults_ || [options webSearchEnabled]);
   [modelPopUpButton_ setEnabled:
     (enabled && StrappyInspectorPopUpHasEnabledChoice(modelPopUpButton_))];
   [assistantSegmentedControl_ setEnabled:
     (enabled && ([assistantSegmentIdentifiers_ count] > 0U))];
-  [webSearchButton_ setEnabled:enabled];
-  [bashButton_ setEnabled:enabled];
+  [webSearchButton_ setEnabled:enabled && hostedToolsEnabled];
+  [bashButton_ setEnabled:enabled && localFunctionsEnabled];
   [limitToOneToolButton_ setEnabled:enabled];
   [answerQualityButton_ setEnabled:enabled];
   [roundLimitSlider_ setEnabled:enabled];
@@ -1128,9 +1239,21 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
 
 - (void)webSearchChanged:(id)sender
 {
+  NSArray *models;
+  NSDictionary *selectedModel;
   StrappySessionOptions *options;
 
   (void)sender;
+  models = [StrappySession allowedModelCatalogWithError:nil];
+  selectedModel = StrappyInspectorModelForIdentifier(
+    models,
+    [[self currentOptions] modelIdentifier]);
+  if (!StrappyInspectorModelBoolean(selectedModel,
+                                    @"hosted_tools_enabled",
+                                    YES)) {
+    [self reloadOptions];
+    return;
+  }
   options = [[self currentOptions] copy];
   [options setWebSearchEnabled:([webSearchButton_ state] ==
     XPControlStateValueOn)];
@@ -1141,9 +1264,21 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
 
 - (void)bashChanged:(id)sender
 {
+  NSArray *models;
+  NSDictionary *selectedModel;
   StrappySessionOptions *options;
 
   (void)sender;
+  models = [StrappySession allowedModelCatalogWithError:nil];
+  selectedModel = StrappyInspectorModelForIdentifier(
+    models,
+    [[self currentOptions] modelIdentifier]);
+  if (!StrappyInspectorModelBoolean(selectedModel,
+                                    @"local_functions_enabled",
+                                    YES)) {
+    [self reloadOptions];
+    return;
+  }
   options = [[self currentOptions] copy];
   [options setBashEnabled:([bashButton_ state] == XPControlStateValueOn)];
   (void)[self saveOptions:options changedFields:StrappySessionOptionBash];

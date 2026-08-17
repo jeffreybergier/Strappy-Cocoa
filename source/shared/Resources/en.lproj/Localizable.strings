@@ -169,10 +169,12 @@
 "Code Copied" = "Code Copied";
 "The ChatGPT sign-in page could not be opened." = "The ChatGPT sign-in page could not be opened.";
 "Could Not Open Browser" = "Could Not Open Browser";
-"Uses the Pi-compatible device flow. Access and refresh tokens are stored together in the Keychain and refreshed automatically. Device-code login must be enabled for your ChatGPT account or workspace." = "Uses the Pi-compatible device flow. Access and refresh tokens are stored together in the Keychain and refreshed automatically. Device-code login must be enabled for your ChatGPT account or workspace.";
+"Uses the experimental Codex device flow. Access and refresh tokens are stored together in the Keychain and refreshed automatically. Device-code login must be enabled for your ChatGPT account or workspace." = "Uses the experimental Codex device flow. Access and refresh tokens are stored together in the Keychain and refreshed automatically. Device-code login must be enabled for your ChatGPT account or workspace.";
 "The Keychain refused the ChatGPT credential write." = "The Keychain refused the ChatGPT credential write.";
 "ChatGPT sign-in failed." = "ChatGPT sign-in failed.";
 "The Keychain refused the refreshed ChatGPT credential." = "The Keychain refused the refreshed ChatGPT credential.";
+"The refreshed ChatGPT credential changed accounts." = "The refreshed ChatGPT credential changed accounts.";
+"Disabled by the experimental provider kill switch" = "Disabled by the experimental provider kill switch";
 "ChatGPT credential refresh failed." = "ChatGPT credential refresh failed.";
 "The Keychain refused to remove the ChatGPT credential." = "The Keychain refused to remove the ChatGPT credential.";
 

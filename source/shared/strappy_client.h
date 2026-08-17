@@ -36,7 +36,14 @@ typedef struct strappy_responses_http_result {
   double start_transfer_seconds;
   double total_seconds;
   int cancelled;
+  /* True once at least one syntactically valid SSE data event arrived. */
+  int response_event_received;
 } strappy_responses_http_result;
+
+typedef enum strappy_responses_response_transport {
+  STRAPPY_RESPONSES_RESPONSE_TRANSPORT_JSON = 0,
+  STRAPPY_RESPONSES_RESPONSE_TRANSPORT_SSE = 1
+} strappy_responses_response_transport;
 
 typedef enum strappy_responses_event_type {
   STRAPPY_RESPONSES_EVENT_CANCELLATION_POLL = 1,
@@ -85,6 +92,29 @@ int strappy_client_fetch_openrouter_user_models_json(
   char **error_out);
 int strappy_client_send_responses_json(
   const strappy_config *config,
+  const char *request_json,
+  strappy_responses_http_result *result,
+  strappy_responses_event_callback callback,
+  void *callback_data,
+  char **error_out);
+int strappy_client_send_provider_responses_json(
+  const strappy_config *config,
+  strappy_provider_kind provider,
+  const char *bearer_token,
+  const char *chatgpt_account_id,
+  const char *session_request_id,
+  const char *request_json,
+  strappy_responses_http_result *result,
+  strappy_responses_event_callback callback,
+  void *callback_data,
+  char **error_out);
+int strappy_client_send_provider_responses_json_with_transport(
+  const strappy_config *config,
+  strappy_provider_kind provider,
+  strappy_responses_response_transport response_transport,
+  const char *bearer_token,
+  const char *chatgpt_account_id,
+  const char *session_request_id,
   const char *request_json,
   strappy_responses_http_result *result,
   strappy_responses_event_callback callback,

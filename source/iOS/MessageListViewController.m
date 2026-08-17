@@ -823,9 +823,52 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (NSArray *)availableModels
 {
   NSArray *models;
+  NSDictionary *summary;
+  StrappySessionOptions *options;
+  NSString *selectedIdentifier;
+  NSString *selectedAccountIdentifier;
+  NSMutableArray *filteredModels;
+  NSUInteger index;
 
   models = [StrappySession allowedModelCatalogWithError:nil];
-  return [models isKindOfClass:[NSArray class]] ? models : [NSArray array];
+  if (![models isKindOfClass:[NSArray class]]) {
+    return [NSArray array];
+  }
+  /* Once a request has bound the conversation, do not offer models from a
+   * different provider account. The database remains the authoritative guard;
+   * this keeps the iOS chooser from presenting a selection it must reject. */
+  summary = [[self session] cachedSummary];
+  if ([StrappyStringForSessionSummary(summary, @"prompt") length] == 0U) {
+    return models;
+  }
+  options = [[self session] optionsWithError:nil];
+  selectedIdentifier = [options modelIdentifier];
+  selectedAccountIdentifier = @"";
+  for (index = 0U; index < [models count]; index++) {
+    NSDictionary *model;
+
+    model = [models objectAtIndex:index];
+    if ([StrappyStringForSessionSummary(model, @"id")
+          isEqualToString:selectedIdentifier]) {
+      selectedAccountIdentifier =
+        StrappyStringForSessionSummary(model, @"provider_account_id");
+      break;
+    }
+  }
+  if ([selectedAccountIdentifier length] == 0U) {
+    return models;
+  }
+  filteredModels = [NSMutableArray array];
+  for (index = 0U; index < [models count]; index++) {
+    NSDictionary *model;
+
+    model = [models objectAtIndex:index];
+    if ([StrappyStringForSessionSummary(model, @"provider_account_id")
+          isEqualToString:selectedAccountIdentifier]) {
+      [filteredModels addObject:model];
+    }
+  }
+  return filteredModels;
 }
 
 - (NSArray *)availableAssistantSets

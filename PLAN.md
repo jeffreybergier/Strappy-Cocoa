@@ -1,7 +1,8 @@
 # ChatGPT Device OAuth and Subscription Backend Plan
 
-Status: in progress — iOS OAuth credential lifecycle live-verified and
-provider-account database/routing foundation implemented, 2026-08-17
+Status: implementation complete for the experimental catalog, OAuth lifecycle,
+provider adapter, tools/session behavior, and matched iOS/macOS UI; live backend
+compatibility and production authorization remain release gates, 2026-08-17
 
 This plan adds a second provider, `openai_chatgpt`, whose product label is
 "ChatGPT (Codex)". It signs in with the device-code flow and sends requests to
@@ -14,11 +15,13 @@ public `api.openai.com/v1` API.
 
 ## Implementation progress — 2026-08-17
 
-The current worktree includes the iOS login-and-credential slice plus the
-provider-account database, model-catalog, session-isolation, and endpoint-policy
-foundation. It does **not** yet send prompts to the ChatGPT backend; the
-ChatGPT request adapter and bundled model catalog remain open, while existing
-chat requests continue to use OpenRouter.
+The current worktree includes the provider-account database, validated bundled
+catalog importer, iOS/macOS credential lifecycle and preferences, provider-
+separated ChatGPT request adapter, bounded SSE extraction, capability-aware
+tools/session UI, subscription billing semantics, kill switches, and
+no-persistence compatibility/report tooling. OpenRouter remains independent and
+unchanged in product behavior. Live backend/tool/plan-limit checks and written
+production authority are deliberately not represented as complete.
 
 ### Completed
 
@@ -52,8 +55,8 @@ chat requests continue to use OpenRouter.
   account column with account-first sorting.
 - [x] Added adapter-owned endpoint policy derived from a model's stored account
   route. OpenRouter retains its configurable endpoint; ChatGPT resolves to the
-  fixed Codex Responses endpoint and is rejected before transport until its
-  separate request adapter is implemented.
+  fixed Codex Responses endpoint and runs only through its provider-separated
+  request adapter.
 - [x] Added nullable session account binding, locked it on the first recorded
   request, snapshotted the account on model requests and HTTP attempts, and
   prevented cross-account model changes or fallback for an established
@@ -61,6 +64,19 @@ chat requests continue to use OpenRouter.
 - [x] Applied the approved development-reset strategy in schema version 1:
   there is no migration, and an older schema is rejected with an explicit
   delete-and-relaunch message instead of being converted or deleted by Strappy.
+- [x] Added a strict, transactional importer for the versioned bundled ChatGPT
+  catalog. Revision upgrades preserve allowed/default preferences and deactivate
+  removed models only inside the ChatGPT account.
+- [x] Added the ChatGPT Responses adapter with fixed endpoint/header policy,
+  provider-specific request bodies, bounded SSE terminal extraction, one safe
+  pre-event 401 refresh/retry, and no cross-provider fallback.
+- [x] Kept local function tools capability-gated, omitted OpenRouter hosted
+  tools on ChatGPT, locked established sessions to one provider account, and
+  represented ChatGPT usage as plan usage with no fabricated monetary cost.
+- [x] Added matched macOS authentication/preferences, provider-aware model and
+  session options on both platforms, and account-stable atomic refresh handling.
+- [x] Added compile/runtime ChatGPT kill switches, user documentation, a
+  no-persistence live compatibility probe, and a secret-free evidence report.
 
 ### Verified
 
@@ -70,13 +86,13 @@ chat requests continue to use OpenRouter.
 - [x] Clean macOS analyzer and release build: 0 warnings/errors and a
   ppc/i386/x86_64/arm64 app, verifying the shared Keychain changes against all
   supported targets.
-- [x] All eight Linux shared-core harnesses, the existing OAuth PoC parser
-  self-test, and an AddressSanitizer/UndefinedBehaviorSanitizer OAuth harness
-  run passed.
-- [x] Re-ran the required clean Linux, iOS, and macOS gates after the
-  provider-account work on 2026-08-17. All eight Linux checks passed; both
-  Apple analyzers reported 0 warnings and 0 errors; and the universal iOS and
-  quad-architecture macOS release packages built successfully.
+- [x] All nine Linux shared-core harnesses and the existing OAuth PoC parser
+  self-test passed. AddressSanitizer/UndefinedBehaviorSanitizer runs also pass
+  for the database/catalog, OAuth, and ChatGPT adapter/SSE harnesses.
+- [x] Re-ran the required clean Linux, iOS, and macOS gates on the completed
+  experimental implementation on 2026-08-17. All nine Linux checks passed;
+  both Apple analyzers reported 0 warnings and 0 errors; and the universal iOS
+  and quad-architecture macOS release packages built successfully.
 - [x] Added regression coverage for identical wire IDs under two accounts,
   account-scoped OpenRouter refresh, fixed-versus-configurable endpoint policy,
   session/request/attempt account snapshots, cross-account session rejection,
@@ -85,30 +101,35 @@ chat requests continue to use OpenRouter.
 - [x] Installed package version 1.0.2 over 1.0.0 on `gomadango` (iPhone5,2),
   verified the transferred package checksum, and received user confirmation
   that the live device login completed successfully.
+- [x] Added deterministic catalog fixtures plus a loopback ChatGPT transport
+  harness covering exact header separation, arbitrary SSE chunking, terminal
+  variants, early close, malformed/truncated streams, and subscription cost
+  suppression.
+- [x] Expanded the OAuth mock matrix for status/structured pending,
+  `slow_down`, disabled/denied/expired login, malformed/wrong-type/oversized
+  fields, network loss, `invalid_grant` redaction, rotation, and cancellation.
 
 ### Still open
 
-- [ ] Complete Phase 0 backend/SSE/plan-limit compatibility checks beyond the
-  now-verified live login.
-- [ ] Add the validated bundled ChatGPT model catalog and complete the ChatGPT
-  request adapter, OAuth credential handoff, SSE extraction, tool capability
-  gating, and subscription billing semantics.
-- [ ] Add the matching macOS ChatGPT authentication UI. The macOS build above
-  validates shared-source compatibility only.
-- [ ] Expand deterministic and manual coverage for disabled/denied/expired
-  login, `slow_down`, network loss, malformed/oversized fields, failed
-  Keychain replacement, `invalid_grant`, concurrent refresh callers, restart,
-  live refresh, and sign-out.
-- [ ] Add the production kill switch and user documentation, complete the
-  remaining security/rollout review, and remove the temporary Pi submodule
-  before the intended implementation commit.
+- [ ] Run the checked-in live probe for text, refresh, local functions, every
+  enabled bundled model, and a real plan-limit/not-included response. Only the
+  live iOS device-login step has been confirmed so far.
+- [ ] Manually exercise failed Keychain replacement, concurrent request refresh,
+  process restart, background/resume, live expiry, and sign-out on both Apple
+  platforms; deterministic portable coverage does not substitute for Keychain
+  and lifecycle testing.
+- [ ] Obtain a production-permitted integration and dedicated Strappy identity
+  from OpenAI (or adopt a supported App Server path) before distribution.
+- [ ] Complete the remaining rollout review and remove the temporary Pi
+  submodule before the intended implementation commit.
 
 ## Feasibility conclusion
 
 The feature is technically feasible at the prototype level.
 
-OpenAI documents device-code login as a beta login method for Codex on
-headless systems. OpenAI also documents that "Sign in with ChatGPT" uses a
+OpenAI [documents device-code login](https://learn.chatgpt.com/docs/auth) as a
+beta login method for Codex on headless systems. OpenAI also documents that
+"Sign in with ChatGPT" uses a
 ChatGPT subscription, while API-key login uses separately billed API usage.
 Device-code login may have to be enabled in the user's ChatGPT security
 settings or by a workspace administrator.
@@ -419,7 +440,11 @@ model requests, and HTTP attempts snapshot the account boundary.
 
 ## Implementation phases
 
-### Phase 0 — Compatibility probe (in progress)
+### Phase 0 — Compatibility probe (live run pending)
+
+The secret-free manual probe and report are checked in. Device login has been
+live-verified; refresh, text, local-function, candidate-model, and plan-limit
+rows must still be filled from real eligible accounts before release.
 
 Build a non-shipping, manually invoked Linux probe using the existing curl/cJSON
 stack. It must not read or print API keys, persist OAuth credentials, or run in
@@ -438,7 +463,7 @@ Exit criterion: a short checked-in compatibility fixture/report containing no
 secrets and recording the tested protocol date and behavior rather than real
 identifiers or payloads.
 
-### Phase 1 — Provider domain and database (in progress)
+### Phase 1 — Provider domain and database (implemented)
 
 - [x] Add provider IDs/accounts, provider-qualified model keys, and exact wire
   model IDs to shared C types.
@@ -448,7 +473,7 @@ identifiers or payloads.
   queries account-safe.
 - [x] Add the bounded, versioned `source/shared/Resources/BundledModels.json`
   schema and seed it with the Pi-matched ChatGPT candidate set above.
-- Add a shared validator/importer that transactionally upserts the bundled
+- [x] Add a shared validator/importer that transactionally upserts the bundled
   catalog, scopes deactivation to `openai_chatgpt`, records the imported
   revision, and preserves database-owned user preferences.
 - [x] Bundle the resource on both platforms. Rename the misleading
@@ -459,7 +484,7 @@ identifiers or payloads.
 - [x] Replace OpenRouter-named public model-record APIs with generic APIs while
   retaining short-lived compatibility wrappers.
 - [x] Resolve the endpoint through the selected model's account and a
-  code-owned provider policy; keep the unimplemented ChatGPT transport closed.
+  code-owned provider policy; keep endpoints adapter-owned.
 
 Exit criterion: both providers may contain the same wire model ID without
 collision; importing the same bundled revision is idempotent; a catalog upgrade
@@ -469,56 +494,55 @@ and all DB harness tests and foreign-key checks pass.
 
 ### Phase 2 — OAuth protocol and secure credential lifecycle
 
-Status: iOS login/storage/refresh/sign-out implemented; request snapshots and
-the full exit-criterion test matrix remain pending.
+Status: implemented on iOS and macOS. The expanded portable protocol matrix
+passes; Apple Keychain failure injection and lifecycle/manual cases remain.
 
-- Implement bounded device-start, polling, exchange, refresh, JWT claim parsing,
+- [x] Implement bounded device-start, polling, exchange, refresh, JWT claim parsing,
   timeout, and cancellation in portable C.
-- Add the Cocoa authentication coordinator and an observable state machine:
+- [x] Add the Cocoa authentication coordinator and an observable state machine:
   signed out, requesting code, awaiting user, exchanging, signed in, refreshing,
   needs sign-in, and error/cancelled.
-- Add atomic Keychain credential replacement and provider-specific delete.
-- Coalesce concurrent refreshes and return immutable access/account snapshots to
+- [x] Add atomic Keychain credential replacement and provider-specific delete.
+- [x] Serialize concurrent refreshes and return immutable access/account snapshots to
   requests.
-- Implement local sign-out. Do not claim remote revocation unless a supported
+- [x] Implement local sign-out. Do not claim remote revocation unless a supported
   revocation endpoint is later documented.
 
 Exit criterion: deterministic mock-server tests cover every state and no secret
 appears in diagnostics, SQLite, or fixtures.
 
-### Phase 3 — Provider request adapters and SSE (not started)
+### Phase 3 — Provider request adapters and SSE (implemented)
 
-- Separate generic curl transport from OpenRouter header/body policy.
-- Preserve OpenRouter byte-for-byte behavior with request snapshot tests.
-- Add ChatGPT URL/header/body construction using only fields proven in Phase 0.
-- Add the bounded SSE terminal-response extractor and structured error mapping.
-- Add refresh-before-send and the narrowly safe one-time 401 retry.
-- Feed the terminal response through the existing parser and database round.
+- [x] Separate generic curl transport from OpenRouter header/body policy.
+- [x] Preserve OpenRouter behavior with existing response-loop regression tests.
+- [x] Add ChatGPT URL/header/body construction isolated behind provider policy.
+- [x] Add the bounded SSE terminal-response extractor and structured error mapping.
+- [x] Add refresh-before-send and the narrowly safe one-time 401 retry.
+- [x] Feed the terminal response through the existing parser and database round.
 
 Exit criterion: scripted local servers prove success, incomplete, quota error,
 malformed stream, timeout, cancellation, early terminal close, and header
 separation. Existing response-loop tests remain green.
 
-### Phase 4 — Models, tools, and session behavior (not started)
+### Phase 4 — Models, tools, and session behavior (implemented; live model matrix pending)
 
-- Establish the release-time review, compatibility-test, and revision-bump
+- [x] Establish the release-time review, compatibility-test, and revision-bump
   procedure for `BundledModels.json`; there is no ChatGPT runtime catalog fetch.
-- Generate request reasoning fields from model capabilities rather than the
+- [x] Generate request reasoning fields from model capabilities rather than the
   current OpenRouter assumptions.
-- Keep local functions available when verified; gate hosted tools by provider.
-- Disable provider changes on non-empty sessions and provide a new-session path.
-- Make missing credentials, unsupported models, and plan limits actionable in
+- [x] Keep local functions available when verified; gate hosted tools by provider.
+- [x] Disable provider changes on non-empty sessions and require a new session.
+- [x] Make missing credentials, unsupported models, and plan limits actionable in
   the UI without automatic fallback.
-- Preserve token usage while reporting subscription billing semantics honestly.
+- [x] Preserve token usage while reporting subscription billing semantics honestly.
 
 Exit criterion: request fixtures for every shipped ChatGPT model/capability and
 cross-provider history tests pass.
 
 ### Phase 5 — iOS and macOS preferences
 
-Status: the iOS OAuth section is implemented and live-verified; macOS
-authentication UI and provider-aware session presentation remain pending. The
-shared model APIs and account-grouped whitelist presentation are implemented.
+Status: implemented on iOS and macOS; matched lifecycle behavior still requires
+the manual Apple-platform matrix.
 
 Replace the single implicit OpenRouter credentials form with two provider
 sections:
@@ -547,18 +571,18 @@ stored credential, refresh, and sign-out.
 
 ### Phase 6 — Hardening, documentation, and rollout (in progress)
 
-- Add a runtime/compile-time kill switch for the ChatGPT provider while the
+- [x] Add a runtime/compile-time kill switch for the ChatGPT provider while the
   protocol remains undocumented/beta.
-- Document subscription eligibility, workspace controls, plan limits, privacy,
+- [x] Document subscription eligibility, workspace controls, plan limits, privacy,
   troubleshooting, and the distinction from API-key billing.
-- Review every log/error path for bearer tokens, refresh tokens, JWTs, device
+- [x] Review every log/error path for bearer tokens, refresh tokens, JWTs, device
   IDs, codes, and verifier leakage.
-- Verify old SDK/architecture compatibility and update all explicit iOS, macOS,
+- [x] Verify old SDK/architecture compatibility and update all explicit iOS, macOS,
   and Linux Makefile source lists.
-- Remove the temporary Pi submodule before the implementation is committed.
-- If substantial Pi code is adapted rather than independently implemented,
-  retain its MIT copyright/license notice in the appropriate third-party file
-  and source comments.
+- [ ] Remove the temporary Pi submodule before the implementation is committed.
+- [x] Keep the implementation independent; Pi remains a pinned behavioral
+  reference only. If that changes, retain its MIT copyright/license notice in
+  the appropriate third-party file and source comments.
 
 Exit criterion: all automated and manual gates below pass, the feature can be
 disabled without affecting OpenRouter.
