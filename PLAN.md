@@ -341,15 +341,15 @@ fixtures remain byte-for-byte compatible where protocol behavior is unchanged.
 
 ### Phase 2 — Multi-account database
 
-- [ ] Replace the two seeded singleton accounts with opaque account instances.
-- [ ] Make the existing required account names arbitrary and editable, then add
+- [x] Replace the two seeded singleton accounts with opaque account instances.
+- [x] Make the existing required account names arbitrary and editable, then add
   lifecycle/configuration and CRUD/archive APIs.
-- [ ] Make defaults, model lookup, catalog state, and catalog refresh explicitly
+- [x] Make defaults, model lookup, catalog state, and catalog refresh explicitly
   account-scoped.
-- [ ] Convert the bundled ChatGPT catalog to provider-level static data and
+- [x] Convert the bundled ChatGPT catalog to provider-level static data and
   materialize it per ChatGPT account.
-- [ ] Update schema identity/reset detection and all database harness fixtures.
-- [ ] Add manual account-model APIs and fixtures for `other`.
+- [x] Update schema identity/reset detection and all database harness fixtures.
+- [x] Add manual account-model APIs and fixtures for `other`.
 
 Exit criterion: two accounts for the same provider can share a display name and
 contain the same wire model ID without collision; renaming, model mutations,

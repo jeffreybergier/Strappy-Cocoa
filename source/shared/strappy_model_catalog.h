@@ -16,6 +16,14 @@ int strappy_model_catalog_update_for_provider(
   const char *resource_dir,
   const char *db_path,
   char **error_out);
+int strappy_model_catalog_update_for_account(
+  const char *provider_account_id,
+  const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
+  const char *resource_dir,
+  const char *db_path,
+  char **error_out);
 
 int strappy_model_catalog_refresh_openrouter_user_models(
   const char *env_path,

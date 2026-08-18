@@ -255,13 +255,13 @@ static void strappy_db_set_reset_required_error(char **error_out)
 {
   strappy_set_error(
     error_out,
-    "This development database predates provider accounts. Delete "
+    "This development database predates multi-account providers. Delete "
     "strappy.sqlite and relaunch; no migration is performed.");
 }
 
 static int strappy_db_validate_schema_identity(sqlite3 *db, char **error_out)
 {
-  static const char expected[] = "semantic-v1-provider-accounts";
+  static const char expected[] = "semantic-v1-multi-account-providers";
   sqlite3_stmt *stmt;
   const unsigned char *actual;
   int rc;
@@ -381,30 +381,44 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     ");"
     "INSERT OR IGNORE INTO schema_metadata "
     "(id, schema_name, created_at_ms) VALUES "
-    "(1, 'semantic-v1-provider-accounts', "
+    "(1, 'semantic-v1-multi-account-providers', "
       "CAST(strftime('%s','now') AS INTEGER) * 1000);"
 
     "CREATE TABLE IF NOT EXISTS provider_accounts ("
     "id TEXT PRIMARY KEY CHECK(length(id) > 0),"
     "provider_id TEXT NOT NULL CHECK(provider_id IN ('"
       STRAPPY_PROVIDER_OPENROUTER "','"
-      STRAPPY_PROVIDER_OPENAI_CHATGPT "')),"
-    "display_name TEXT NOT NULL CHECK(length(display_name) > 0),"
-    "created_at_ms INTEGER NOT NULL,"
-    "updated_at_ms INTEGER NOT NULL"
-    ");"
-    "INSERT OR IGNORE INTO provider_accounts "
-    "(id, provider_id, display_name, created_at_ms, updated_at_ms) VALUES "
-    "('" STRAPPY_PROVIDER_ACCOUNT_OPENROUTER "','"
-      STRAPPY_PROVIDER_OPENROUTER "','"
-      STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME "',"
-      "CAST(strftime('%s','now') AS INTEGER) * 1000,"
-      "CAST(strftime('%s','now') AS INTEGER) * 1000),"
-    "('" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT "','"
       STRAPPY_PROVIDER_OPENAI_CHATGPT "','"
-      STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT_NAME "',"
+      STRAPPY_PROVIDER_OTHER "')) ,"
+    "display_name TEXT NOT NULL CHECK(length(display_name) > 0),"
+    "lifecycle_state TEXT NOT NULL DEFAULT 'active' "
+      "CHECK(lifecycle_state IN ('active','archived')) ,"
+    "responses_endpoint TEXT "
+      "CHECK(responses_endpoint IS NULL OR length(responses_endpoint) > 0),"
+    "created_at_ms INTEGER NOT NULL,"
+    "updated_at_ms INTEGER NOT NULL,"
+    "last_used_at_ms INTEGER"
+    ");"
+    "CREATE INDEX IF NOT EXISTS provider_accounts_provider_lifecycle_idx "
+      "ON provider_accounts(provider_id, lifecycle_state);"
+    "INSERT INTO provider_accounts "
+    "(id, provider_id, display_name, lifecycle_state, created_at_ms, "
+      "updated_at_ms) "
+    "SELECT '" STRAPPY_PROVIDER_ACCOUNT_OPENROUTER "', '"
+      STRAPPY_PROVIDER_OPENROUTER "', 'OpenRouter', 'active', "
       "CAST(strftime('%s','now') AS INTEGER) * 1000,"
-      "CAST(strftime('%s','now') AS INTEGER) * 1000);"
+      "CAST(strftime('%s','now') AS INTEGER) * 1000 "
+      "WHERE NOT EXISTS (SELECT 1 FROM provider_accounts WHERE provider_id='"
+        STRAPPY_PROVIDER_OPENROUTER "');"
+    "INSERT INTO provider_accounts "
+    "(id, provider_id, display_name, lifecycle_state, created_at_ms, "
+      "updated_at_ms) "
+    "SELECT '" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT "', '"
+      STRAPPY_PROVIDER_OPENAI_CHATGPT "', 'ChatGPT (Codex)', 'active', "
+      "CAST(strftime('%s','now') AS INTEGER) * 1000,"
+      "CAST(strftime('%s','now') AS INTEGER) * 1000 "
+      "WHERE NOT EXISTS (SELECT 1 FROM provider_accounts WHERE provider_id='"
+        STRAPPY_PROVIDER_OPENAI_CHATGPT "');"
 
     "CREATE TABLE IF NOT EXISTS models ("
     "id TEXT PRIMARY KEY,"
@@ -455,17 +469,25 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
 
   static const char schema_model_capabilities_sql[] =
     "CREATE TABLE IF NOT EXISTS bundled_model_catalogs ("
-    "provider_account_id TEXT PRIMARY KEY,"
+    "provider_id TEXT PRIMARY KEY,"
     "schema_version INTEGER NOT NULL CHECK(schema_version = 1),"
     "catalog_revision INTEGER NOT NULL CHECK(catalog_revision > 0),"
     "catalog_source TEXT NOT NULL CHECK(length(catalog_source) > 0),"
     "imported_at_ms INTEGER NOT NULL,"
+    "CHECK(provider_id = '" STRAPPY_PROVIDER_OPENAI_CHATGPT "')"
+    ");"
+    "CREATE TABLE IF NOT EXISTS bundled_catalog_applications ("
+    "provider_id TEXT NOT NULL,"
+    "provider_account_id TEXT NOT NULL,"
+    "catalog_revision INTEGER NOT NULL CHECK(catalog_revision > 0),"
+    "applied_at_ms INTEGER NOT NULL,"
+    "PRIMARY KEY(provider_id, provider_account_id),"
     "FOREIGN KEY(provider_account_id) REFERENCES provider_accounts(id)"
     ");"
     "CREATE TABLE IF NOT EXISTS model_capabilities ("
     "model_id TEXT PRIMARY KEY,"
     "billing_kind TEXT NOT NULL CHECK(billing_kind IN "
-      "('metered_api','chatgpt_plan')),"
+      "('metered_api','chatgpt_plan','unknown')) ,"
     "reasoning_enabled INTEGER NOT NULL CHECK(reasoning_enabled IN (0,1)),"
     "local_functions_enabled INTEGER NOT NULL "
       "CHECK(local_functions_enabled IN (0,1)),"
@@ -495,8 +517,12 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "CREATE TABLE IF NOT EXISTS app_preferences ("
     "id INTEGER PRIMARY KEY CHECK(id = 1),"
     "default_model_id TEXT,"
+    "default_provider_account_id TEXT,"
     "updated_at_ms INTEGER NOT NULL,"
-    "FOREIGN KEY(default_model_id) REFERENCES models(id)"
+    "FOREIGN KEY(default_model_id) REFERENCES models(id),"
+    "FOREIGN KEY(default_provider_account_id) REFERENCES provider_accounts(id),"
+    "FOREIGN KEY(default_model_id, default_provider_account_id) "
+      "REFERENCES models(id, provider_account_id)"
     ");"
     "INSERT OR IGNORE INTO app_preferences (id, updated_at_ms) VALUES "
       "(1, CAST(strftime('%s','now') AS INTEGER) * 1000);";
@@ -1080,6 +1106,17 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
                        STRAPPY_DB_INSERT_BUILTIN_DEFAULT_MODEL_SQL,
                        "Could not create built-in default model",
                        error_out)) {
+    return 0;
+  }
+  if (!strappy_db_exec(
+        db,
+        "UPDATE app_preferences SET "
+        "default_model_id=COALESCE(default_model_id," STRAPPY_DB_DEFAULT_MODEL_SQL "),"
+        "default_provider_account_id=COALESCE(default_provider_account_id,"
+          "(SELECT provider_account_id FROM models WHERE id="
+            STRAPPY_DB_DEFAULT_MODEL_SQL ")) WHERE id=1;",
+        "Could not initialize account-scoped model defaults",
+        error_out)) {
     return 0;
   }
   return strappy_db_exec(db,

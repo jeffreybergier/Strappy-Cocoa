@@ -5,8 +5,6 @@
   "models": [
     {
       "provider_id": "openai_chatgpt",
-      "provider_account_id": "openai_chatgpt",
-      "model_id": "openai_chatgpt:gpt-5.3-codex-spark",
       "wire_model_id": "gpt-5.3-codex-spark",
       "display_name": "GPT-5.3 Codex Spark",
       "catalog_active": true,
@@ -37,8 +35,6 @@
     },
     {
       "provider_id": "openai_chatgpt",
-      "provider_account_id": "openai_chatgpt",
-      "model_id": "openai_chatgpt:gpt-5.4",
       "wire_model_id": "gpt-5.4",
       "display_name": "GPT-5.4",
       "catalog_active": true,
@@ -70,8 +66,6 @@
     },
     {
       "provider_id": "openai_chatgpt",
-      "provider_account_id": "openai_chatgpt",
-      "model_id": "openai_chatgpt:gpt-5.4-mini",
       "wire_model_id": "gpt-5.4-mini",
       "display_name": "GPT-5.4 mini",
       "catalog_active": true,
@@ -103,8 +97,6 @@
     },
     {
       "provider_id": "openai_chatgpt",
-      "provider_account_id": "openai_chatgpt",
-      "model_id": "openai_chatgpt:gpt-5.5",
       "wire_model_id": "gpt-5.5",
       "display_name": "GPT-5.5",
       "catalog_active": true,
@@ -136,8 +128,6 @@
     },
     {
       "provider_id": "openai_chatgpt",
-      "provider_account_id": "openai_chatgpt",
-      "model_id": "openai_chatgpt:gpt-5.6-luna",
       "wire_model_id": "gpt-5.6-luna",
       "display_name": "GPT-5.6 Luna",
       "catalog_active": true,
@@ -170,8 +160,6 @@
     },
     {
       "provider_id": "openai_chatgpt",
-      "provider_account_id": "openai_chatgpt",
-      "model_id": "openai_chatgpt:gpt-5.6-sol",
       "wire_model_id": "gpt-5.6-sol",
       "display_name": "GPT-5.6 Sol",
       "catalog_active": true,
@@ -204,8 +192,6 @@
     },
     {
       "provider_id": "openai_chatgpt",
-      "provider_account_id": "openai_chatgpt",
-      "model_id": "openai_chatgpt:gpt-5.6-terra",
       "wire_model_id": "gpt-5.6-terra",
       "display_name": "GPT-5.6 Terra",
       "catalog_active": true,

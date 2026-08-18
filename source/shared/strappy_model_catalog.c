@@ -13,6 +13,7 @@
 #define STRAPPY_BUNDLED_MODELS_MAX_BYTES (512U * 1024U)
 
 static int strappy_model_catalog_refresh_remote_account(
+  const char *provider_account_id,
   const char *env_path,
   const char *fallback_api_endpoint,
   const char *fallback_api_token,
@@ -46,7 +47,8 @@ static int strappy_model_catalog_refresh_remote_account(
                                                         &http_status,
                                                         error_out);
   if (ok) {
-    ok = strappy_db_save_openrouter_models_json(db_path, json, error_out);
+    ok = strappy_db_save_account_models_json(db_path, provider_account_id,
+                                             json, error_out);
   }
 
   free(json);
@@ -55,6 +57,7 @@ static int strappy_model_catalog_refresh_remote_account(
 }
 
 static int strappy_model_catalog_import_bundled(
+  const char *provider_account_id,
   const char *resource_dir,
   const char *db_path,
   char **error_out)
@@ -128,7 +131,12 @@ static int strappy_model_catalog_import_bundled(
     return 0;
   }
   json[read_length] = '\0';
-  ok = strappy_db_import_bundled_models_json(db_path, json, error_out);
+  if (provider_account_id != NULL) {
+    ok = strappy_db_import_bundled_models_json_for_account(
+      db_path, provider_account_id, json, error_out);
+  } else {
+    ok = strappy_db_import_bundled_models_json(db_path, json, error_out);
+  }
   free(json);
   return ok;
 }
@@ -142,9 +150,43 @@ int strappy_model_catalog_update_for_provider(
   const char *db_path,
   char **error_out)
 {
-  const strappy_provider_definition *definition;
+  char *account_id;
+  int ok;
 
-  definition = strappy_provider_find(provider_id);
+  account_id = NULL;
+  if (!strappy_db_get_designated_provider_account(db_path, provider_id,
+                                                  &account_id, error_out)) {
+    return 0;
+  }
+  ok = strappy_model_catalog_update_for_account(
+    account_id, env_path, fallback_api_endpoint, fallback_api_token,
+    resource_dir, db_path, error_out);
+  free(account_id);
+  return ok;
+}
+
+int strappy_model_catalog_update_for_account(
+  const char *provider_account_id,
+  const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
+  const char *resource_dir,
+  const char *db_path,
+  char **error_out)
+{
+  const strappy_provider_definition *definition;
+  strappy_provider_account_record account;
+
+  if (!strappy_db_get_provider_account(db_path, provider_account_id,
+                                       &account, error_out)) return 0;
+  if (strcmp(account.lifecycle_state, STRAPPY_PROVIDER_ACCOUNT_ACTIVE) != 0) {
+    strappy_provider_account_record_destroy(&account);
+    strappy_set_error(error_out, "Archived accounts cannot update models.");
+    return 0;
+  }
+
+  definition = strappy_provider_find(account.provider_id);
+  strappy_provider_account_record_destroy(&account);
   if (definition == NULL) {
     strappy_set_error(error_out, "Model catalog provider is not registered.");
     return 0;
@@ -156,6 +198,7 @@ int strappy_model_catalog_update_for_provider(
   }
   if (definition->catalog_kind == STRAPPY_PROVIDER_CATALOG_REMOTE_ACCOUNT) {
     return strappy_model_catalog_refresh_remote_account(
+      provider_account_id,
       env_path,
       fallback_api_endpoint,
       fallback_api_token,
@@ -163,7 +206,8 @@ int strappy_model_catalog_update_for_provider(
       error_out);
   }
   if (definition->catalog_kind == STRAPPY_PROVIDER_CATALOG_BUNDLED) {
-    return strappy_model_catalog_import_bundled(resource_dir,
+    return strappy_model_catalog_import_bundled(provider_account_id,
+                                                resource_dir,
                                                 db_path,
                                                 error_out);
   }
@@ -194,12 +238,6 @@ int strappy_model_catalog_import_bundled_models(
   const char *db_path,
   char **error_out)
 {
-  return strappy_model_catalog_update_for_provider(
-    STRAPPY_PROVIDER_OPENAI_CHATGPT,
-    NULL,
-    NULL,
-    NULL,
-    resource_dir,
-    db_path,
-    error_out);
+  return strappy_model_catalog_import_bundled(NULL, resource_dir, db_path,
+                                              error_out);
 }

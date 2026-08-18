@@ -11,11 +11,13 @@ extern "C" {
 #define STRAPPY_PROVIDER_OPENAI_CHATGPT "openai_chatgpt"
 #define STRAPPY_PROVIDER_OTHER "other"
 
-/* Development-schema compatibility only. Provider behavior must never infer
- * a provider from one of these account ids. Phase 2 replaces these seeded
- * account ids with opaque account instances. */
-#define STRAPPY_PROVIDER_ACCOUNT_OPENROUTER "openrouter"
-#define STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT "openai_chatgpt"
+/* Designated-account compatibility only. These opaque ids preserve the
+ * current UI while generic database APIs accept any account instance.
+ * Provider behavior must never infer a provider from either id. */
+#define STRAPPY_PROVIDER_ACCOUNT_OPENROUTER \
+  "acct_4f70656e526f75746572000000000001"
+#define STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT \
+  "acct_43686174475054000000000000000001"
 
 #define STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME "OpenRouter"
 #define STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT_NAME "ChatGPT (Codex)"
