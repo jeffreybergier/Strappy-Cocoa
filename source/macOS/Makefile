@@ -20,7 +20,7 @@ SYSTEM_PROMPT_RESOURCE = $(SHARED_DIR)/Resources/SystemPrompt.json
 ASSISTANT_SET_RESOURCE = $(SHARED_DIR)/Resources/AssistantSets.json
 BUNDLED_MODELS_RESOURCE = $(SHARED_DIR)/Resources/BundledModels.json
 FONTAWESOME_GENERATOR = $(SHARED_DIR)/tools/generate_fontawesome_webview_map.py
-FONTAWESOME_FONT_DIR ?= /altivec/libs/cocoa/build-mac/Resources/Fonts
+FONTAWESOME_FONT_DIR ?= $(ALTIVECCOCOA_DIR)/Resources/Fonts
 FONTAWESOME_ICONS_RESOURCE = $(SHARED_DIR)/Resources/FontAwesomeIcons.json
 FONTAWESOME_WEBVIEW_MAP = $(SHARED_DIR)/strappy_fontawesome_icons.inc
 FONTAWESOME_GENERATED = $(FONTAWESOME_WEBVIEW_MAP)
@@ -48,11 +48,11 @@ BUNDLE_FONT_DIRS = $(ALTIVECCOCOA_DIR)/Resources/Fonts
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
 EXTRA_BUNDLE_STEPS = @set -e; $(MAKE) -f Makefile $(FONTAWESOME_GENERATED); echo "  > copying shared resources"; for resource in $(SHARED_RESOURCES); do cp "$$resource" "$@/Contents/Resources/"; done
 
-$(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
-	python3 $(FONTAWESOME_GENERATOR) --font-dir "$(FONTAWESOME_FONT_DIR)" --webview-map "$(FONTAWESOME_WEBVIEW_MAP)"
-
 # Import common Mac build engine.
 include /altivec/altivec_common_mac.mk
+
+$(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
+	python3 $(FONTAWESOME_GENERATOR) --font-dir "$(FONTAWESOME_FONT_DIR)" --webview-map "$(FONTAWESOME_WEBVIEW_MAP)"
 
 MAC_FLAGS += $(EXTRA_FLAGS)
 MAC_LIBS += -framework Security
