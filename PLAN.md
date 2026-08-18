@@ -1,825 +1,463 @@
-# ChatGPT Device OAuth and Subscription Backend Plan
+# Provider and Multi-Account Plan
 
-Status: implementation complete for the experimental catalog, OAuth lifecycle,
-provider adapter, tools/session behavior, and matched iOS/macOS UI; live backend
-compatibility and production authorization remain release gates, 2026-08-17
+Status: ChatGPT OAuth, ChatGPT Responses, native web search, provider-aware
+models, and provider-locked sessions work. The next architectural step is to
+support named accounts for OpenRouter, OpenAI, and a minimal custom Responses
+provider without changing the current iOS or macOS user interface.
 
-This plan adds a second provider, `openai_chatgpt`, whose product label is
-"ChatGPT (Codex)". It signs in with the device-code flow and sends requests to
-the ChatGPT Codex backend so usage is charged against the user's eligible
-ChatGPT plan limits rather than an OpenAI Platform API key.
+This plan replaces the temporary assumption that a provider ID is also its one
+account ID. It keeps the working OAuth implementation and makes the provider,
+account, credential, model, and session boundaries explicit.
 
-The plan intentionally keeps OpenRouter working. It does not turn a ChatGPT
-OAuth access token into an API key, and it does not send that token to the
-public `api.openai.com/v1` API.
+## Current problem
 
-## Implementation progress — 2026-08-17
+The database has a `provider_accounts` table, but startup creates exactly two
+fixed rows whose IDs are also the provider IDs: `openrouter` and
+`openai_chatgpt`. The rest of the implementation still relies on that one-to-one
+relationship:
 
-The current worktree includes the provider-account database, validated bundled
-catalog importer, iOS/macOS credential lifecycle and preferences, provider-
-separated ChatGPT request adapter, bounded SSE extraction, capability-aware
-tools/session UI, subscription billing semantics, kill switches, and
-no-persistence compatibility/report tooling. OpenRouter remains independent and
-unchanged in product behavior. Live backend/tool/plan-limit checks and written
-production authority are deliberately not represented as complete.
+- OpenRouter has one global endpoint/token Keychain record.
+- ChatGPT has one global OAuth credential and one global authentication state
+  machine.
+- The ChatGPT bundled catalog contains a fixed provider-account ID.
+- OpenRouter catalog refresh writes only to the fixed OpenRouter account.
+- The request credential callback does not receive an account ID.
+- Provider endpoints, catalog behavior, request differences, hosted tools, and
+  error/billing rules are selected in several different modules.
 
-### Completed
+The existing session and request tables already snapshot a
+`provider_account_id`. That is the right boundary, but it must refer to a real
+account instance rather than a provider singleton.
 
-- [x] Added `strappy_openai_oauth.[ch]` with the Pi-compatible device start,
-  immediate polling, pending/`slow_down` handling, 15-minute timeout,
-  cancellation, authorization-code exchange, refresh-token rotation, bounded
-  JSON/base64url/JWT parsing, and ChatGPT account-ID extraction.
-- [x] Added the iOS `StrappyAuthentication` coordinator with a process-lifetime
-  observable state machine, main-thread notifications, serialized login and
-  refresh operations, race-safe cancellation/sign-out, and proactive refresh
-  within five minutes of expiry when the app becomes active.
-- [x] Extended `XPKeychain` and `StrappyKeychain` to store one provider-specific,
-  versioned binary-plist credential containing the access token, rotating
-  refresh token, absolute expiry, account ID, and format version. iOS uses
-  `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, and rotation updates the
-  existing Keychain item in place rather than deleting the last credential.
-- [x] Added the iOS **ChatGPT (Experimental)** preferences section with status,
-  device code, Copy Code, Open Browser, Cancel, Retry Refresh, and Sign Out,
-  plus English and Japanese localization.
-- [x] Added a deterministic Linux mock-server harness covering device start,
-  pending polling, successful authorization, token exchange, JWT account
-  extraction, refresh rotation, and pre-network cancellation.
-- [x] Kept the OpenRouter credential and request path unchanged and made no
-  `PRAGMA user_version` change.
-- [x] Added internal provider accounts for OpenRouter and ChatGPT, stored each
-  model with its account plus an exact wire model ID, and changed database model
-  keys to stable account-qualified identifiers such as
-  `openrouter:z-ai/glm-5.2`.
-- [x] Made OpenRouter catalog deactivation account-scoped, added generic model
-  APIs, and grouped the iOS whitelist by account; the macOS whitelist has an
-  account column with account-first sorting.
-- [x] Added adapter-owned endpoint policy derived from a model's stored account
-  route. OpenRouter retains its configurable endpoint; ChatGPT resolves to the
-  fixed Codex Responses endpoint and runs only through its provider-separated
-  request adapter.
-- [x] Added nullable session account binding, locked it on the first recorded
-  request, snapshotted the account on model requests and HTTP attempts, and
-  prevented cross-account model changes or fallback for an established
-  conversation.
-- [x] Applied the approved development-reset strategy in schema version 1:
-  there is no migration, and an older schema is rejected with an explicit
-  delete-and-relaunch message instead of being converted or deleted by Strappy.
-- [x] Added a strict, transactional importer for the versioned bundled ChatGPT
-  catalog. Revision upgrades preserve allowed/default preferences and deactivate
-  removed models only inside the ChatGPT account.
-- [x] Added the ChatGPT Responses adapter with fixed endpoint/header policy,
-  provider-specific request bodies, bounded SSE terminal extraction, one safe
-  pre-event 401 refresh/retry, and no cross-provider fallback.
-- [x] Kept local function tools capability-gated, omitted OpenRouter hosted
-  tools on ChatGPT, locked established sessions to one provider account, and
-  represented ChatGPT usage as plan usage with no fabricated monetary cost.
-- [x] Added matched macOS authentication/preferences, provider-aware model and
-  session options on both platforms, and account-stable atomic refresh handling.
-- [x] Added compile/runtime ChatGPT kill switches, user documentation, a
-  no-persistence live compatibility probe, and a secret-free evidence report.
+## Goals
 
-### Verified
+- Allow any number of OpenRouter accounts and ChatGPT accounts.
+- Give every account a required, arbitrary, user-editable display name.
+- Give every account an opaque, stable Strappy account ID independent of the
+  provider ID and any upstream account identifier.
+- Support a minimal `other` provider for manually configured Responses API
+  endpoints without model discovery or hosted web tools.
+- Centralize each provider's static behavior in shared portable C code.
+- Store secrets only in account-keyed Keychain entries, never in SQLite.
+- Scope models, preferences, catalog refreshes, OAuth refreshes, requests,
+  retries, usage, and sign-out to one exact account.
+- Preserve the rule that a conversation cannot change accounts after its first
+  request.
+- Keep OpenRouter and the working ChatGPT OAuth path behaviorally unchanged
+  while the architecture is refactored.
+- Keep the current iOS and macOS layouts, controls, and user-visible workflows
+  unchanged in this phase.
+- Make `SessionOptions` select an exact provider account; resolve the provider
+  type from that account instead of storing duplicate provider state.
 
-- [x] iOS Clang analyzer: 0 warnings and 0 errors.
-- [x] Clean iOS release build and package inspection: universal armv7/arm64
-  app in `Strappy.deb`.
-- [x] Clean macOS analyzer and release build: 0 warnings/errors and a
-  ppc/i386/x86_64/arm64 app, verifying the shared Keychain changes against all
-  supported targets.
-- [x] All nine Linux shared-core harnesses and the existing OAuth PoC parser
-  self-test passed. AddressSanitizer/UndefinedBehaviorSanitizer runs also pass
-  for the database/catalog, OAuth, and ChatGPT adapter/SSE harnesses.
-- [x] Re-ran the required clean Linux, iOS, and macOS gates on the completed
-  experimental implementation on 2026-08-17. All nine Linux checks passed;
-  both Apple analyzers reported 0 warnings and 0 errors; and the universal iOS
-  and quad-architecture macOS release packages built successfully.
-- [x] Added regression coverage for identical wire IDs under two accounts,
-  account-scoped OpenRouter refresh, fixed-versus-configurable endpoint policy,
-  session/request/attempt account snapshots, cross-account session rejection,
-  pinned-session no-fallback behavior, foreign keys, and explicit legacy-schema
-  reset rejection.
-- [x] Installed package version 1.0.2 over 1.0.0 on `gomadango` (iPhone5,2),
-  verified the transferred package checksum, and received user confirmation
-  that the live device login completed successfully.
-- [x] Added deterministic catalog fixtures plus a loopback ChatGPT transport
-  harness covering exact header separation, arbitrary SSE chunking, terminal
-  variants, early close, malformed/truncated streams, and subscription cost
-  suppression.
-- [x] Expanded the OAuth mock matrix for status/structured pending,
-  `slow_down`, disabled/denied/expired login, malformed/wrong-type/oversized
-  fields, network loss, `invalid_grant` redaction, rotation, and cancellation.
+## Non-goals for this phase
 
-### Still open
+- Designing account-list, add-account, rename-account, or account-switching UI.
+- Switching an established conversation to another account.
+- Falling back to another account or provider after an authentication,
+  transport, model, tool, or plan-limit failure.
+- Storing bearer tokens, refresh tokens, API keys, OAuth claims, request bodies,
+  response bodies, or HTTP headers in SQLite.
+- Treating a ChatGPT OAuth token as an OpenAI Platform API key.
+- Adding an `openai_api` provider. It may be added later as a distinct provider
+  with API-key billing and behavior.
+- Assuming every Responses-compatible endpoint implements OpenRouter or
+  ChatGPT extensions.
 
-- [ ] Run the checked-in live probe for text, refresh, local functions, every
-  enabled bundled model, and a real plan-limit/not-included response. Only the
-  live iOS device-login step has been confirmed so far.
-- [ ] Manually exercise failed Keychain replacement, concurrent request refresh,
-  process restart, background/resume, live expiry, and sign-out on both Apple
-  platforms; deterministic portable coverage does not substitute for Keychain
-  and lifecycle testing.
-- [ ] Obtain a production-permitted integration and dedicated Strappy identity
-  from OpenAI (or adopt a supported App Server path) before distribution.
-- [ ] Complete the remaining rollout review and remove the temporary Pi
-  submodule before the intended implementation commit.
+## Core design
 
-## Feasibility conclusion
+### Provider definitions are code-owned
 
-The feature is technically feasible at the prototype level.
+Create one provider registry in `strappy_provider.[ch]`. A provider definition
+is immutable application behavior, not a database row and not user input. Each
+definition owns or dispatches:
 
-OpenAI [documents device-code login](https://learn.chatgpt.com/docs/auth) as a
-beta login method for Codex on headless systems. OpenAI also documents that
-"Sign in with ChatGPT" uses a
-ChatGPT subscription, while API-key login uses separately billed API usage.
-Device-code login may have to be enabled in the user's ChatGPT security
-settings or by a workspace administrator.
+- stable provider ID and display name;
+- credential kind (`api_token` or `oauth_device`);
+- default Responses endpoint and any other fixed service endpoints;
+- validation of permitted per-account endpoint overrides;
+- model catalog source and refresh/import operation;
+- request URL, headers, body extensions, and response transport;
+- hosted-tool names and provider-specific request encoding;
+- provider error classification, rate/plan-limit semantics, and billing kind;
+- compile-time and runtime availability checks; and
+- credential snapshot, refresh, and sign-out operations.
 
-## Scope
+Callers resolve a provider definition by `provider_id` and invoke a narrow
+provider operation. They must not infer provider behavior from an endpoint,
+credential shape, account ID, model ID prefix, or scattered provider `if`
+statements.
 
-### In scope
+The initial registry contains:
 
-- Device-code login only: show a URL and short code, open the browser on
-  request, poll in the app, and finish remotely.
-- Secure access-token and refresh-token persistence in Keychain.
-- Automatic, serialized token refresh.
-- The ChatGPT Codex Responses-like backend and its SSE response transport.
-- Explicit provider identity throughout models, sessions, requests, tools,
-  billing metadata, and preferences.
-- OpenRouter as an optional, independently configured provider.
-- iOS and macOS UI, with shared portable C protocol code where practical.
-- Deterministic Linux harness coverage and clean/analyze/release Apple builds.
+| Provider ID | Credentials | Responses endpoint | Models | Hosted web tool |
+| --- | --- | --- | --- | --- |
+| `openrouter` | API token | provider default with the existing validated account override | account-authenticated remote catalog | OpenRouter search/fetch extensions |
+| `openai_chatgpt` | device OAuth | fixed Codex Responses endpoint | bundled provider catalog, materialized per account | native `web_search` |
+| `other` | optional bearer API token | required validated account endpoint | manually registered only | none |
 
-### Out of scope for the first release
+OAuth protocol details may remain in `strappy_openai_oauth.[ch]`, generic HTTP
+transport may remain shared, and provider-specific parsing/building may remain
+in focused modules. The registry is the single public dispatch point; it does
+not require one very large source file.
 
-- Browser redirect or localhost-callback login.
-- OpenAI Platform API-key login.
-- Importing credentials from Codex CLI or another application.
-- WebSocket transport or live token-by-token rendering.
-- Translating OpenRouter's hosted web tools to an assumed OpenAI equivalent.
-- Switching an established conversation between providers.
-- Organization/workspace administration inside Strappy.
+### Accounts are runtime instances
 
-## Product assumptions to confirm
+`provider_accounts.id` becomes an opaque Strappy-generated identifier. It must
+not equal the provider ID and must not be derived from an API key, token, email,
+or upstream OAuth account ID.
 
-The implementation can start with these conservative defaults unless they are
-changed before that phase:
+Each account stores only non-secret application state:
 
-- OpenRouter remains the default for existing installations. ChatGPT is opt-in.
-- Pre-release databases are disposable for this phase. Strappy performs no
-  conversion; an older schema is rejected and the user deletes it before
-  relaunching.
-- A session's provider account becomes fixed when its first request is
-  submitted. A new session is required to change accounts.
-- ChatGPT sessions support Strappy's local function tools in the first release,
-  but not the OpenRouter-hosted web search/fetch tools.
-- The ChatGPT path buffers SSE internally and commits the final response through
-  Strappy's existing round transaction. Streaming UI is a later feature.
-- A protocol failure never falls back to OpenRouter or an API key. Such a
-  fallback could unexpectedly change billing, privacy, model behavior, and the
-  party receiving the prompt.
+- `id`;
+- `provider_id`;
+- required user-visible display name;
+- lifecycle state such as active or archived;
+- optional validated non-secret configuration, such as an OpenRouter endpoint
+  override;
+- creation, update, and last-used timestamps.
 
-Database strategy was approved on 2026-08-17: replace the development schema in
-place while retaining `PRAGMA user_version = 1`, perform no migration, and let
-the user delete old databases. Strappy detects and rejects the former schema;
-it does not delete a database itself.
+Account names are labels, not identities. They do not need to be unique and
+changing one cannot change routing, credentials, models, or history. OpenRouter
+uses an arbitrary name supplied by the user. ChatGPT OAuth may provide a useful
+name or email claim; when present and safe to display, it may be used as the
+initial suggested name. The implementation must not require that claim because
+the working OAuth flow currently guarantees only the upstream account ID. Use a
+stable fallback such as `ChatGPT Account`, allow the label to be edited, and do
+not use an email or name for credential lookup or duplicate detection.
 
-## What must change
+The upstream ChatGPT account ID remains inside the account's Keychain
+credential. SQLite uses only the opaque Strappy account ID. The credential
+layer may compare the upstream ID during refresh or duplicate-account checks,
+but it must not expose it as the database primary key. A display name may itself
+be personal information, including an email chosen or accepted by the user, so
+it must not be emitted in network diagnostics or secret-free test reports.
 
-Today a single endpoint/token pair implicitly means OpenRouter. Model refresh
-deactivates the entire catalog, model IDs have no provider namespace, request
-headers are OpenRouter-specific, hosted tools use `openrouter:*` types, and
-usage records assume metered API pricing. Those assumptions cannot be selected
-by testing the endpoint string; provider identity must be first-class.
+Accounts with conversation history are archived instead of deleted. Sign-out
+removes only that account's credential and prevents new requests; it does not
+delete the account row, models, sessions, history, or another account's
+credential.
 
-| Concern | OpenRouter | ChatGPT (Codex) |
-| --- | --- | --- |
-| Credential | User API token | OAuth access + rotating refresh token |
-| Billing | Metered/API-provider rules | Eligible ChatGPT plan limits |
-| Endpoint | User-configurable Responses URL | Fixed, adapter-owned Codex backend URL |
-| Catalog | `/api/v1/models/user` | Bundled, versioned `BundledModels.json`; no runtime discovery unless a supported catalog API is documented |
-| Response transport | One final JSON response | SSE, terminating on a completed/done/incomplete response event |
-| Extra headers | `X-OpenRouter-*` | Account ID, beta/stream headers, and an approved Strappy originator |
-| Request extensions | OpenRouter `session_id` and tool types | Codex-compatible request fields only |
-| Hosted web tools | `openrouter:web_search` / `openrouter:web_fetch` | Disabled initially; no equivalence assumed |
-| Cost record | Provider-reported/token price | Tokens and plan-limit state; monetary cost is not `0` unless known |
+### Credentials are keyed by account
 
-## Target architecture
+Replace the provider-wide Keychain APIs with account-aware operations:
 
 ```text
-iOS/macOS Preferences
-        |
-        v
-StrappyAuthentication  --->  Keychain (one versioned OAuth credential)
-        |                          access, refresh, expiry, account ID
-        v
-portable device/refresh protocol adapter
-
-Session + provider-qualified model
-        |
-        v
-provider registry ---> OpenRouter adapter ----> generic libcurl transport
-        |                                      |
-        +-----------> ChatGPT adapter ---------+
-                                                    |
-                          final JSON <--- SSE terminal response extractor
-                                                    |
-                                           existing response parser/DB round
+load(provider_id, provider_account_id)
+save(provider_id, provider_account_id, credential)
+delete(provider_id, provider_account_id)
+snapshot(provider_id, provider_account_id, refresh_policy)
 ```
 
-### Provider identity and models
+- OpenRouter stores one API token per account. Its endpoint override is
+  non-secret account configuration; the provider definition supplies the
+  default endpoint.
+- ChatGPT stores one versioned OAuth credential per account: access token,
+  rotating refresh token, expiry, and upstream account ID.
+- Other may store one bearer API token per account when its endpoint requires
+  authentication. Its required endpoint is non-secret account configuration;
+  an endpoint that requires no authentication has no Keychain credential.
+- Keychain service names separate providers and Keychain account names use the
+  opaque Strappy account ID.
+- OAuth refresh is serialized per account, not globally. Requests for different
+  accounts may refresh independently.
+- Atomic replacement preserves the previous usable credential if a rotated
+  credential cannot be saved.
+- Environment OpenRouter credentials map to one deterministic ephemeral/default
+  account and do not silently override every stored OpenRouter account.
 
-Introduce stable provider IDs distinct from marketing labels:
+The Responses credential callback must accept `provider_account_id`. Every
+request obtains an immutable credential/account snapshot for its selected
+account, and a 401 retry refreshes only that same account.
 
-- `openrouter`
-- `openai_chatgpt`
-- reserve `openai_api` for a possible future, separately billed API-key provider
+### Models remain account-qualified
 
-Each model needs:
+Models remain routed through an account because catalog availability, pricing,
+eligibility, and credentials can differ between two accounts using the same
+provider. A model identity is therefore:
 
-- an internal, provider-qualified key such as
-  `openai_chatgpt:gpt-…`;
-- `provider_account_id`, whose account row supplies `provider_id`;
-- the exact `wire_model_id` sent to the provider;
-- capability fields for reasoning, local functions, hosted tools, input types,
-  context/output limits, and supported reasoning settings;
-- catalog source/revision and catalog-active state; and
-- billing kind (`metered_api` or `chatgpt_plan`) independent of token counts.
+```text
+provider_account_id + wire_model_id
+```
 
-Add `source/shared/Resources/BundledModels.json` beside the existing shared JSON
-resources. Despite its location, it is application catalog data rather than
-prompt guidance. Its top level contains a bounded `schema_version`, a
-`catalog_revision`, and a `models` array. Each entry contains the provider ID,
-provider-qualified internal key, exact wire model ID, display name,
-capabilities, supported reasoning levels, input modalities, context/output
-limits, and billing kind. It must not contain credentials, per-user
-allowed/default choices, or monetary prices for `chatgpt_plan` models.
+The internal `model_id` may continue to be generated from those values, but no
+code may assume a provider ID is the prefix. Identical wire model IDs under two
+accounts must produce separate model rows and separate preference state.
 
-The initial candidate set, matching the pinned Pi catalog at
-`94373d815d2b4a3a48864d5341afc824b8db45e3`, is
-`gpt-5.3-codex-spark`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.5`,
-`gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra`. Presence in Pi is not by
-itself a Strappy compatibility guarantee: omit or mark unavailable any entry
-that has not passed Strappy's request/capability fixtures before release.
+Change `BundledModels.json` from an account catalog into a provider catalog:
 
-A shared catalog loader validates and transactionally imports this resource
-into SQLite during database initialization and whenever its revision changes.
-The import upserts only the bundled provider rows, marks removed entries
-inactive only within `openai_chatgpt`, records the imported revision, and
-preserves database-owned allowed/default preferences. Cocoa model screens query
-the unified database API and never parse the JSON resource directly.
+- keep `provider_id`, `wire_model_id`, display data, capabilities, reasoning
+  mappings, limits, hosted tools, and billing kind;
+- remove fixed `provider_account_id` and account-qualified `model_id` values;
+  and
+- materialize the bundled models for every active ChatGPT account during
+  account creation and catalog revision import.
 
-Catalog refresh and deactivation must be provider-scoped. Refreshing
-OpenRouter must no longer mark ChatGPT models inactive. ChatGPT login controls
-whether those bundled models are usable, not whether they exist in the local
-catalog. Pi likewise supplies its OpenAI Codex provider a release-generated
-static catalog and does not register a runtime model fetch. Do not call the
-public OpenAI `/v1/models` endpoint with a ChatGPT access token, probe an
-undocumented private model route, or make production depend on files in the
-temporary Pi submodule.
+OpenRouter refresh receives the target account ID, endpoint configuration, and
+that account's credential. It deactivates and upserts models only for that
+account. Refreshing one account must never alter another account's models,
+allowed choices, or default selection.
 
-### Session isolation
+### The `other` provider is intentionally minimal
 
-Provider-specific reasoning payloads and hosted-tool records should not cross
-provider boundaries. For the first release:
+It makes sense to add `other` as one provider type whose accounts point at
+user-supplied Responses-compatible endpoints. This avoids creating a new
+provider definition for every compatible server while keeping its behavior
+strict and predictable:
 
-- a new session is unbound until its first request;
-- the first request records and locks `sessions.provider_account_id`;
-- later model choices must have the same provider account; and
-- the UI offers "New Session with …" instead of changing provider in place.
+- require an absolute, validated Responses endpoint on each account;
+- use the account's bearer token when present and the common Responses
+  request/response shape;
+- require model wire IDs to be registered manually for that account;
+- provide no model-fetch operation, bundled catalog, hosted web search/fetch,
+  provider-specific headers, plan-limit interpretation, or price claims;
+- permit Strappy local function tools only when the manually registered model
+  explicitly enables them;
+- record monetary cost and provider quotas as unknown unless returned in a
+  supported common Responses field; and
+- fail clearly when an endpoint uses incompatible extensions rather than
+  guessing another provider or falling back.
 
-This prevents encrypted reasoning generated by one provider from being replayed
-to another and makes request history and billing auditable. A future explicit
-"fork portable transcript" feature could copy only user/assistant text and
-standard function-call records to a new provider.
+`other` is still a normal provider registry entry and supports multiple named
+accounts. Its configurable endpoint is account data, while its lack of extras
+and its generic request policy are static provider behavior.
 
-### OAuth state and credential ownership
+### Session options select the account
 
-Add a shared Objective-C coordinator, tentatively `StrappyAuthentication`, at
-the same Cocoa boundary currently used by `StrappySession` and
-`StrappyKeychain`. It owns login state, marshals UI notifications to the main
-thread, loads/saves Keychain data, and performs a single-flight refresh when
-multiple requests arrive near expiry.
+Add `provider_account_id` to both the portable `strappy_session_options` struct
+and the Objective-C `StrappySessionOptions` object. Add a corresponding option
+mask bit, initializer/accessor/copy support, database loading/saving, summary
+mapping, and validation.
 
-The portable C OAuth module owns HTTP request construction, bounded JSON/JWT
-parsing, polling rules, timeout/cancellation, and token response validation. It
-does not own Apple Keychain APIs or UI.
+Resolution has one direction:
 
-Persist one versioned Keychain credential containing:
+```text
+SessionOptions.provider_account_id
+        -> provider_accounts.provider_id
+        -> provider registry definition
+```
 
-- access token;
-- refresh token;
-- absolute expiry;
-- ChatGPT account ID; and
-- credential format version.
+Do not add `provider_id` to `SessionOptions`; duplicating it would allow the
+selected account and provider type to disagree. `model_id` remains a separate
+option, and the database must verify that it belongs to the selected account.
+Changing the account on an empty session clears or replaces an incompatible
+model with that account's allowed default. Once the first request binds the
+session, neither account nor provider may change.
 
-No OAuth secret, device authorization ID, code verifier, or raw JWT belongs in
-SQLite, `.env`, logs, notifications, crash messages, or request ledgers. The
-short user code is displayed in memory only and disappears on completion,
-cancellation, timeout, or process exit.
+Default session options must persist an exact account ID as well as a model ID.
+Existing UI controllers may derive the account when a model row is selected and
+populate the new field internally, so this change does not require a new
+visible control in the current phase.
 
-The existing Keychain implementation deletes and re-adds an item. OAuth token
-rotation needs an update-in-place/replace operation that does not destroy the
-last usable refresh token if the new write fails. The coordinator publishes new
-credentials only after the complete rotated credential has been stored.
+### Sessions and requests stay pinned
 
-Refresh should begin before expiry with a small clock-skew allowance. An HTTP
-401 may trigger exactly one refresh and retry only if no response event was
-received; once an SSE response has begun, automatic replay could duplicate a
-request. `invalid_grant`, a missing rotated refresh token, or a second 401 marks
-the account as requiring sign-in without silently using another provider.
+- A new session's options select an account. A legacy or not-yet-configured
+  session may temporarily have no account, but it cannot send a request.
+- The first request atomically binds both `model_id` and
+  `provider_account_id`.
+- Later rounds must use models belonging to that same account.
+- Model requests and HTTP attempts continue to snapshot the account ID.
+- Credential refresh, retry, hosted tools, billing, and rate-limit state are
+  resolved from the snapshotted account and its provider definition.
+- Missing credentials or an archived account produces an actionable error
+  before network I/O.
+- There is no automatic cross-account or cross-provider fallback.
 
-### Device login state machine
+## Database work
 
-The Pi reference currently demonstrates this sequence:
+The database has not shipped. Preserve the existing development-reset policy:
+keep `PRAGMA user_version = 1`, change the schema identity, reject the previous
+development schema with an explicit delete-and-relaunch message, and do not add
+a migration unless separately approved.
 
-1. `POST https://auth.openai.com/api/accounts/deviceauth/usercode` to begin
-   device authorization.
-2. Validate `device_auth_id`, `user_code`, and polling interval.
-3. Display `https://auth.openai.com/codex/device` and the code; offer Copy,
-   Open Browser, and Cancel.
-4. Poll `/api/accounts/deviceauth/token` on a worker, respecting the server
-   interval, pending responses, `slow_down`, cancellation, and a bounded
-   timeout.
-5. Exchange the returned authorization code and PKCE verifier at
-   `/oauth/token`, using the device callback URI.
-6. Validate access token, refresh token, and expiry. Decode the bounded JWT
-   payload to obtain the ChatGPT account ID required by the backend, then store
-   the complete credential.
+Required schema changes:
 
-All endpoint paths, field names, and claim paths are undocumented protocol
-details and must live in one narrow adapter. The UI and database must never
-depend on them. Parsing must reject missing fields, overlong values, invalid
-base64url, invalid JSON, arithmetic overflow, and unexpected status
-transitions. JWT claim extraction supplies a routing header; it is not a local
-authorization decision.
+- Stop inserting provider IDs as permanent account IDs.
+- Keep the existing required non-empty `display_name`, define it as editable
+  account metadata, and add account lifecycle state plus validated non-secret
+  account configuration.
+- Add an index on `(provider_id, lifecycle_state)` and preserve uniqueness of
+  `(provider_account_id, wire_model_id)`.
+- Make bundled catalog revision state provider-scoped, then track application
+  of that revision to each applicable account.
+- Keep model preferences account-specific through their account-qualified
+  model IDs.
+- Make default and per-session options persist an exact account and model;
+  validate their composite relationship on every write.
+- Preserve composite foreign keys that prevent a session, model request, or
+  HTTP attempt from mixing a model with the wrong account.
+- Add account create/list/update/archive APIs and generic account-scoped catalog
+  APIs; remove fixed-account constants from public call sites.
+- Add manual model create/update/archive APIs for `other` accounts without
+  exposing a fake catalog refresh operation.
 
-### ChatGPT request adapter
+SQLite remains metadata and history storage. A database account row may exist
+without a usable credential. Request readiness requires an active row and, when
+the resolved provider definition requires authentication, a valid account-keyed
+Keychain credential.
 
-The first implementation should use libcurl SSE rather than add WebSockets.
-Based on the pinned Pi reference, the compatibility spike should verify:
+## UI compatibility boundary
 
-- `https://chatgpt.com/backend-api/codex/responses`;
-- OAuth bearer authorization and the ChatGPT account header;
-- `originator: strappy`, an honest Strappy user agent, and required beta/SSE
-  headers;
-- `store: false` and `stream: true`;
-- the exact supported shapes for instructions, input, reasoning effort/summary,
-  encrypted reasoning, local function tools, and tool choice; and
-- terminal events named `response.completed`, `response.done`, or
-  `response.incomplete`, plus structured error events.
+No new account-management interface is part of this phase.
 
-Do not send OpenRouter headers, the OpenRouter `session_id` body extension,
-OpenRouter hosted-tool types, or OpenRouter pricing metadata on this path. Do
-not import Pi's coding system prompt; Strappy should keep its own assistant-set
-instructions unless the spike proves a documented backend requirement.
+The current screens continue through compatibility methods that resolve one
+designated account per provider:
 
-The SSE reader must handle arbitrary chunk boundaries, CRLF/LF, comments,
-multiple `data:` lines, unknown events, error events, size limits, cancellation,
-and a server that leaves the connection open after the terminal event. It can
-extract the terminal `response` object and pass that object to Strappy's
-existing final-response parser, preserving the current atomic database round
-and non-streaming UI.
+- the existing OpenRouter endpoint/token form edits the designated OpenRouter
+  account;
+- the existing ChatGPT Sign In, status, refresh, and Sign Out controls operate
+  on the designated ChatGPT account;
+- the new account field in `SessionOptions` is populated from the designated
+  account or selected model without adding a visible account control;
+- existing model pickers and whitelist views receive the same dictionary shape
+  and preserve their current layout and behavior; and
+- existing notifications remain available while their backing implementation
+  becomes account-aware.
 
-Plan-limit errors such as usage exhausted/not included and rate limiting should
-be surfaced as ChatGPT-plan errors, including a safe reset time when supplied.
-They are not ordinary transient transport errors and must not be represented as
-per-token charges.
-
-### Provider-aware tools
-
-Keep standard local function tools provider-neutral. Move hosted-tool encoding
-behind provider capabilities:
-
-- OpenRouter continues to emit `openrouter:web_search` and
-  `openrouter:web_fetch`.
-- ChatGPT initially omits those tools and disables the corresponding preference
-  for ChatGPT sessions with a short explanation.
-- Add an OpenAI-native hosted search tool only after a live compatibility test
-  confirms that the **subscription backend**, not merely the public Responses
-  API, supports it for the target plans.
-
-The database should store semantic tool activity plus provider identity, not
-raw provider JSON. Unknown response item types should be ignored or recorded as
-unsupported without corrupting the conversation round.
-
-### Audit and billing semantics
-
-Add provider, authentication method, transport, and provider-qualified model to
-model requests and HTTP attempts. Keep the current policy of recording a
-redacted header manifest rather than raw credentials or bodies.
-
-For ChatGPT requests, retain token counts when returned, but distinguish
-"subscription plan usage; monetary cost not supplied" from a real zero-dollar
-API call. Store semantic plan-limit/reset information from structured errors.
-Never infer remaining quota from token counts.
-
-## Database design decision
-
-The clean design changes `models.id` into a globally unique internal model key
-and adds `provider_account_id` plus `wire_model_id`, with a uniqueness
-constraint on `(provider_account_id, wire_model_id)`. Each account maps to a
-stable provider ID. Foreign keys retain their existing `model_id` column names
-but point at the internal key. The following also need provider-aware changes:
-
-- default/allowed model preferences;
-- sessions and model requests;
-- provider-scoped catalog activation;
-- HTTP attempts and usage/billing records; and
-- any response/tool record that can contain provider-specific opaque data.
-
-Decision, 2026-08-17: use the development reset. The provider-aware schema
-replaces the former version-1 layout while `PRAGMA user_version` remains `1`.
-There is intentionally no conversion path. Strappy detects the former schema,
-returns an explicit reset-required error, and leaves deletion to the user.
-
-The implemented model key is globally unique and account-qualified. Models
-store `provider_account_id` and `wire_model_id`; the account row maps to a
-code-owned provider adapter. This supports multiple accounts for one provider
-without letting a model row supply an arbitrary endpoint. Sessions,
-model requests, and HTTP attempts snapshot the account boundary.
+The core/database/Keychain APIs must support multiple accounts even though this
+phase exposes only the designated account in the UI. A later UI plan can add
+account creation and switching without another database or request-routing
+redesign.
 
 ## Implementation phases
 
-### Phase 0 — Compatibility probe (live run pending)
+### Phase 1 — Provider registry
 
-The secret-free manual probe and report are checked in. Device login has been
-live-verified; refresh, text, local-function, candidate-model, and plan-limit
-rows must still be filled from real eligible accounts before release.
+- [ ] Define the immutable provider descriptor and operations interface.
+- [ ] Move endpoint, catalog, hosted-tool, request, error, billing, and feature
+  policy behind provider dispatch.
+- [ ] Add the minimal `other` provider and prove its operation table advertises
+  no catalog or hosted-tool capabilities.
+- [ ] Retain focused OAuth, transport, SSE, and provider adapter modules.
+- [ ] Remove fixed provider-account constants from provider behavior.
+- [ ] Add registry tests for unknown providers and complete definitions.
 
-Build a non-shipping, manually invoked Linux probe using the existing curl/cJSON
-stack. It must not read or print API keys, persist OAuth credentials, or run in
-CI. Use it with a test ChatGPT account to verify:
+Exit criterion: request/catalog/tool code selects behavior only through a
+resolved provider definition, while existing OpenRouter and ChatGPT request
+fixtures remain byte-for-byte compatible where protocol behavior is unchanged.
 
-- device login enabled and disabled behavior;
-- an honest Strappy originator and user agent;
-- token refresh and account-ID extraction;
-- one simple text response and one local function-call round;
-- SSE terminal/error shapes and cancellation;
-- plan-limit behavior where practical; and
-- that usage appears on the ChatGPT/Codex plan rather than OpenAI Platform API
-  billing.
+### Phase 2 — Multi-account database
 
-Exit criterion: a short checked-in compatibility fixture/report containing no
-secrets and recording the tested protocol date and behavior rather than real
-identifiers or payloads.
+- [ ] Replace the two seeded singleton accounts with opaque account instances.
+- [ ] Make the existing required account names arbitrary and editable, then add
+  lifecycle/configuration and CRUD/archive APIs.
+- [ ] Make defaults, model lookup, catalog state, and catalog refresh explicitly
+  account-scoped.
+- [ ] Convert the bundled ChatGPT catalog to provider-level static data and
+  materialize it per ChatGPT account.
+- [ ] Update schema identity/reset detection and all database harness fixtures.
+- [ ] Add manual account-model APIs and fixtures for `other`.
 
-### Phase 1 — Provider domain and database (implemented)
+Exit criterion: two accounts for the same provider can share a display name and
+contain the same wire model ID without collision; renaming, model mutations,
+and catalog refreshes for either account leave the other unchanged; all
+foreign-key checks pass.
 
-- [x] Add provider IDs/accounts, provider-qualified model keys, and exact wire
-  model IDs to shared C types.
-- [x] Apply the explicitly approved development-reset strategy without a
-  migration or `user_version` change.
-- [x] Make OpenRouter catalog activation, whitelist/default lookup, and model
-  queries account-safe.
-- [x] Add the bounded, versioned `source/shared/Resources/BundledModels.json`
-  schema and seed it with the Pi-matched ChatGPT candidate set above.
-- [x] Add a shared validator/importer that transactionally upserts the bundled
-  catalog, scopes deactivation to `openai_chatgpt`, records the imported
-  revision, and preserves database-owned user preferences.
-- [x] Bundle the resource on both platforms. Rename the misleading
-  `GUIDANCE_RESOURCES` Makefile variable to a general shared-resource name when
-  adding the catalog.
-- [x] Reject historical schema data rather than convert it, and enforce session
-  account locking on the first request.
-- [x] Replace OpenRouter-named public model-record APIs with generic APIs while
-  retaining short-lived compatibility wrappers.
-- [x] Resolve the endpoint through the selected model's account and a
-  code-owned provider policy; keep endpoints adapter-owned.
+### Phase 3 — Account-keyed credentials and OAuth
 
-Exit criterion: both providers may contain the same wire model ID without
-collision; importing the same bundled revision is idempotent; a catalog upgrade
-preserves allowed/default choices; refreshing one provider cannot change the
-other; malformed resources roll back without damaging the last-known catalog;
-and all DB harness tests and foreign-key checks pass.
+- [ ] Add generic account-keyed Keychain operations and versioned credential
+  codecs per credential kind.
+- [ ] Convert the existing OpenRouter record into the designated account without
+  losing the user's saved token/endpoint during the application refactor.
+- [ ] Convert ChatGPT authentication from one global credential/state machine to
+  account-keyed authentication contexts.
+- [ ] Make device login create or attach one account only after the upstream
+  identity is known and the credential is safely stored.
+- [ ] Serialize refresh, cancellation, rotation, and sign-out per account.
+- [ ] Change request credential snapshots and safe 401 retry to require the
+  selected account ID.
+- [ ] Store independent optional bearer credentials for multiple `other`
+  accounts.
 
-### Phase 2 — OAuth protocol and secure credential lifecycle
+Exit criterion: two OpenRouter tokens and two ChatGPT OAuth credentials can
+coexist; refreshing or signing out one account cannot read, replace, delete, or
+stall the other.
 
-Status: implemented on iOS and macOS. The expanded portable protocol matrix
-passes; Apple Keychain failure injection and lifecycle/manual cases remain.
+### Phase 4 — Account-pinned runtime
 
-- [x] Implement bounded device-start, polling, exchange, refresh, JWT claim parsing,
-  timeout, and cancellation in portable C.
-- [x] Add the Cocoa authentication coordinator and an observable state machine:
-  signed out, requesting code, awaiting user, exchanging, signed in, refreshing,
-  needs sign-in, and error/cancelled.
-- [x] Add atomic Keychain credential replacement and provider-specific delete.
-- [x] Serialize concurrent refreshes and return immutable access/account snapshots to
-  requests.
-- [x] Implement local sign-out. Do not claim remote revocation unless a supported
-  revocation endpoint is later documented.
+- [ ] Add `provider_account_id` to the C and Objective-C session option types,
+  copy/merge/change masks, defaults, summaries, and persistence.
+- [ ] Resolve provider type only by loading the selected account; validate the
+  selected model belongs to it.
+- [ ] Pass the account ID through model resolution, provider dispatch, request
+  construction, tools, transport attempts, and error/usage recording.
+- [ ] Reject missing, archived, mismatched, or credential-less accounts before
+  network I/O.
+- [ ] Keep every retry and multi-round tool loop on the original account.
+- [ ] Verify native ChatGPT web search and OpenRouter hosted tools are chosen by
+  provider capabilities, never by account naming or endpoint inspection.
+- [ ] Preserve subscription versus metered billing semantics per provider.
+- [ ] Verify `other` sends generic Responses requests with no model fetch,
+  hosted tools, provider-specific extensions, or fabricated billing data.
 
-Exit criterion: deterministic mock-server tests cover every state and no secret
-appears in diagnostics, SQLite, or fixtures.
+Exit criterion: concurrent sessions using different accounts cannot cross
+credentials, endpoints, models, tools, rate-limit state, retries, or history.
 
-### Phase 3 — Provider request adapters and SSE (implemented)
+### Phase 5 — Preserve the existing UI
 
-- [x] Separate generic curl transport from OpenRouter header/body policy.
-- [x] Preserve OpenRouter behavior with existing response-loop regression tests.
-- [x] Add ChatGPT URL/header/body construction isolated behind provider policy.
-- [x] Add the bounded SSE terminal-response extractor and structured error mapping.
-- [x] Add refresh-before-send and the narrowly safe one-time 401 retry.
-- [x] Feed the terminal response through the existing parser and database round.
+- [ ] Add designated-account compatibility facades to `StrappyKeychain`,
+  `StrappyAuthentication`, and `StrappySession`.
+- [ ] Keep current iOS/macOS controls, strings, notifications, model-row shapes,
+  and preference behavior unchanged.
+- [ ] Confirm UI state is still loaded from SQLite/Keychain rather than cached as
+  an independent source of truth.
+- [ ] Document that adding/switching additional accounts is a separate UI phase.
 
-Exit criterion: scripted local servers prove success, incomplete, quota error,
-malformed stream, timeout, cancellation, early terminal close, and header
-separation. Existing response-loop tests remain green.
+Exit criterion: screenshots and manual workflows match the current build while
+portable tests prove the underlying core supports multiple accounts.
 
-### Phase 4 — Models, tools, and session behavior (implemented; live model matrix pending)
+### Phase 6 — Hardening and release validation
 
-- [x] Establish the release-time review, compatibility-test, and revision-bump
-  procedure for `BundledModels.json`; there is no ChatGPT runtime catalog fetch.
-- [x] Generate request reasoning fields from model capabilities rather than the
-  current OpenRouter assumptions.
-- [x] Keep local functions available when verified; gate hosted tools by provider.
-- [x] Disable provider changes on non-empty sessions and require a new session.
-- [x] Make missing credentials, unsupported models, and plan limits actionable in
-  the UI without automatic fallback.
-- [x] Preserve token usage while reporting subscription billing semantics honestly.
+- [ ] Add deterministic tests for duplicate upstream login, per-account refresh
+  races, failed Keychain replacement, archive/sign-out, restart, and missing
+  credential recovery.
+- [ ] Add two-account fixtures for both providers, including identical wire
+  model IDs and simultaneous requests.
+- [ ] Add account-name tests for arbitrary UTF-8 labels, duplicate names,
+  renaming, empty/oversized rejection, and safe display/log handling.
+- [ ] Add `SessionOptions` tests for account/model mismatch, provider inference,
+  default-account selection, empty-session account changes, and established
+  session locking.
+- [ ] Add `other` fixtures for two endpoints, manual models, local functions,
+  authenticated and unauthenticated requests, invalid endpoints, and rejection
+  of unsupported extras.
+- [ ] Assert secrets and upstream account identifiers never enter SQLite, logs,
+  fixtures, notifications, or user-facing errors.
+- [ ] Run the complete Linux shared-core suite and clean analyzer/release builds
+  for iOS and macOS.
+- [ ] Manually verify restart, background/resume, expiry, refresh, and sign-out
+  on both Apple platforms.
+- [ ] Re-run the live ChatGPT compatibility probe for text, local functions,
+  native web search, every enabled bundled model, and a real plan-limit case.
 
-Exit criterion: request fixtures for every shipped ChatGPT model/capability and
-cross-provider history tests pass.
+## Production release gate
 
-### Phase 5 — iOS and macOS preferences
+The working ChatGPT login establishes technical compatibility, not permission
+to distribute another application's OAuth identity or rely on an undocumented
+backend contract. Before release, Strappy still needs either a supported,
+redistributable Codex integration that covers its legacy targets or its own
+approved OAuth client identity and explicit backend authorization from OpenAI.
 
-Status: implemented on iOS and macOS; matched lifecycle behavior still requires
-the manual Apple-platform matrix.
-
-Replace the single implicit OpenRouter credentials form with two provider
-sections:
-
-- **OpenRouter:** endpoint, API token, save, and current validation behavior.
-- **ChatGPT (Codex):** Sign In; verification URL; large selectable code; Copy
-  Code; Open Browser; Cancel; signed-in/refresh-needed state; and Sign Out.
-
-The flow must stay responsive, survive preference-view recreation while the app
-process remains alive, and marshal all control changes to the main thread. App
-termination may cancel the ephemeral device flow; the user simply starts again.
-No callback URL scheme is required.
-
-Model whitelisting is now grouped by account and reads the unified database
-catalog. Still group model selection by account and explain why ChatGPT hosted
-web tools are unavailable in the initial release. OpenRouter retains its
-network-backed **Update** action; once the bundled catalog lands, ChatGPT must
-show its catalog revision and have no refresh action. Bundled ChatGPT models
-remain visible while signed out but are marked unavailable until authentication
-succeeds. Add accessibility labels and keyboard navigation for the code and
-actions.
-
-Exit criterion: matched behavior and error messages on iOS and macOS, including
-disabled device login, cancellation, timeout, background/resume, restart with a
-stored credential, refresh, and sign-out.
-
-### Phase 6 — Hardening, documentation, and rollout (in progress)
-
-- [x] Add a runtime/compile-time kill switch for the ChatGPT provider while the
-  protocol remains undocumented/beta.
-- [x] Document subscription eligibility, workspace controls, plan limits, privacy,
-  troubleshooting, and the distinction from API-key billing.
-- [x] Review every log/error path for bearer tokens, refresh tokens, JWTs, device
-  IDs, codes, and verifier leakage.
-- [x] Verify old SDK/architecture compatibility and update all explicit iOS, macOS,
-  and Linux Makefile source lists.
-- [ ] Remove the temporary Pi submodule before the implementation is committed.
-- [x] Keep the implementation independent; Pi remains a pinned behavioral
-  reference only. If that changes, retain its MIT copyright/license notice in
-  the appropriate third-party file and source comments.
-
-Exit criterion: all automated and manual gates below pass, the feature can be
-disabled without affecting OpenRouter.
-
-## Expected file-level work
-
-Names are tentative, but boundaries should remain narrow.
-
-| Area | Expected files |
-| --- | --- |
-| Provider types/capabilities | new `source/shared/strappy_provider.[ch]` |
-| Device OAuth | new `source/shared/strappy_openai_oauth.[ch]` |
-| SSE parsing | new `source/shared/strappy_sse.[ch]` or a private ChatGPT adapter module |
-| Credential coordination | iOS `source/iOS/StrappyAuthentication.[hm]`; extended shared `StrappyKeychain` and `XPKeychain` |
-| HTTP/request adapters | refactor `strappy_client.[ch]` and `strappy_responses.[ch]` |
-| Configuration | clarify legacy OpenRouter fields in `strappy_config.[ch]`; do not add OAuth-token environment variables |
-| Persistence/catalog | `strappy_db*.c`, `strappy_db*.h`, `strappy_model_catalog.[ch]`, and new `source/shared/Resources/BundledModels.json` |
-| Hosted tools | provider-gate `Resources/GuidanceTools.json` and request building |
-| Cocoa boundary | `StrappySession.[hm]` plus focused authentication calls |
-| iOS UI | `PreferencesTableViewController.m` and model/session option views |
-| macOS UI | `StrappyPreferencesAuthenticationView.m` and model/session option views/controllers |
-| Builds/tests | all three Makefiles, `responses_harness.c`, `database_query_harness.c`, and focused new harness files if needed |
-| Documentation/licensing | README/auth help and third-party notices if Pi-derived code is retained |
-
-## Automated test gates
-
-### OAuth and secrets
-
-- Valid begin/pending/authorized/exchange flow.
-- Pending as both HTTP status and structured error.
-- `slow_down`, server interval, bounded timeout, cancellation before/during I/O,
-  and no busy polling.
-- Missing, wrong-type, oversized, and malformed response fields.
-- JWT base64url padding, missing claim, malformed payload, and size limits.
-- Refresh-token rotation, near-expiry refresh, failed Keychain replacement,
-  invalid grant, and concurrent single-flight refresh.
-- Assertions that secret values never occur in logs, ledger fields, SQLite, or
-  fixture failure messages.
-
-### Providers and requests
-
-- OpenRouter request snapshots retain their endpoint, headers, body, and hosted
-  tools.
-- ChatGPT request snapshots contain required fields and no OpenRouter headers,
-  extensions, hosted tools, or API key.
-- Provider/model mismatch fails before network I/O.
-- No automatic cross-provider fallback.
-- A 401 retries at most once before any stream event and never after one.
-
-### SSE and responses
-
-- Arbitrary byte splits, CRLF/LF, comments, multiple data lines, and unknown
-  events.
-- Completed, done, incomplete, failed, and top-level error events.
-- Terminal event followed by an open connection.
-- Malformed/oversized events, HTTP errors, timeout, and cancellation.
-- Text, reasoning/encrypted content, local function call/output, usage, and
-  existing multi-round transaction behavior.
-
-### Database and catalogs
-
-- Strict bundled-manifest validation: supported schema/revision, bounded field
-  sizes and counts, unique provider-qualified keys, valid wire IDs, known
-  capabilities, and no monetary prices on `chatgpt_plan` entries.
-- First import, repeated same-revision import, revision upgrade, removed-model
-  deactivation, missing resource, malformed resource, and transactional
-  rollback while retaining the last-known good catalog.
-- Identical wire IDs under two providers.
-- Provider-scoped refresh/deactivation and whitelist/default behavior.
-- Existing-data conversion or explicit reset behavior, foreign-key checks, and
-  rollback on migration failure if migration is chosen.
-- Provider lock on non-empty sessions and safe handling of historical
-  OpenRouter-specific reasoning/tool records.
-- Subscription usage represented as unknown monetary cost, not fabricated zero.
-
-## Required build and manual gates
-
-Run from the repository root after each implementation phase that changes code:
-
-```sh
-make -C source/linux clean test
-make -C source/iOS clean analyze release
-make -C source/macOS clean analyze release
-```
-
-Before release, manually test at least:
-
-- one eligible personal ChatGPT plan;
-- one managed workspace if managed workspaces are in the supported scope;
-- device login enabled, disabled, cancelled, expired, and denied;
-- app restart, proactive refresh, expired refresh token, and local sign-out;
-- successful text and local function-tool rounds;
-- an unavailable model and a plan/rate-limit response;
-- network loss during polling, exchange, refresh, and SSE; and
-- the complete existing OpenRouter login, catalog, model selection, tools, and
-  response loop on both iOS and macOS.
-
-Live credentials must never be added to CI or captured in test artifacts.
-
-## Security and privacy checklist
-
-- TLS verification and the repository CA policy stay enabled for every OAuth and
-  backend request.
-- URLs are adapter constants; no redirect or endpoint supplied by a response is
-  followed without validation.
-- OAuth responses, JWTs, SSE events, and error bodies have explicit byte/depth
-  limits before parsing or display.
-- Device polling uses cancellation and monotonic deadlines where supported.
-- Secrets are short-lived in memory, copied minimally, and cleared when buffers
-  are released where the platform/compiler permits.
-- Keychain entries are provider-specific and local to each app/device.
-- UI and logs show a safe account state, not access tokens or the full account
-  claim.
-- Sign-out removes only ChatGPT credentials and never deletes conversations or
-  OpenRouter credentials.
-- The selected provider is visible before a prompt is sent so users understand
-  which service receives prompts, tool schemas, and database-derived results.
-- Workspace controls and data handling are described without claiming that
-  ChatGPT subscription traffic has the same policy as OpenAI Platform API
-  traffic.
-
-## Rollback strategy
-
-OpenRouter remains a complete independent path. The ChatGPT provider should be
-feature-gated at registration/UI level, so a backend protocol change can hide
-new sign-in and reject new ChatGPT requests with a clear compatibility message
-without changing existing OpenRouter configuration or data. Stored ChatGPT
-credentials remain in Keychain until explicit sign-out; disabling the feature
-must not print, migrate, or expose them.
+Do not ship the ChatGPT provider until that production path is confirmed. Keep
+the ChatGPT kill switch independent of OpenRouter and remove the temporary Pi
+reference submodule before the implementation commit, retaining attribution
+only if code was materially copied.
 
 ## Completion criteria
 
-This project is complete only when:
+The multi-account foundation is complete when:
 
-- the approved development-reset database strategy remains enforced;
-- device login, secure refresh, and sign-out work on iOS and macOS;
-- a ChatGPT-backed session completes text and local function-tool rounds using
-  no API key;
-- ChatGPT usage is shown with plan-limit semantics and no fabricated price;
-- OpenRouter remains fully functional and independently optional;
-- provider-specific data cannot cross session, request, catalog, or tool
-  boundaries accidentally;
-- all automated, analyze, release, manual, security, and regression gates pass;
-  and
-- the Pi submodule is absent from the intended commit, with attribution retained
-  only if its implementation was materially copied.
-
-## References
-
-- OpenAI, [Codex pricing](https://developers.openai.com/codex/pricing/): plan
-  inclusion and the distinction from API-key pricing.
-- Temporary local Pi reference at commit
-  `94373d815d2b4a3a48864d5341afc824b8db45e3`:
-  `packages/ai/src/auth/oauth/openai-codex.ts`,
-  `packages/ai/src/auth/oauth/device-code.ts`,
-  `packages/ai/src/providers/openai-codex.ts`,
-  `packages/ai/src/api/openai-codex-responses.ts`, and their focused tests.
-
-## Want to do
-
-### Confirm the supported production integration and Strappy identity
-
-Status: **Want to do**
-
-All OAuth/backend release-authority and client-identity work is tracked here.
-The current experimental development build uses the client identity
-demonstrated by the pinned Pi reference at the user's explicit direction. The
-successful live login establishes development compatibility only; it is not
-production authorization. Strappy must never ship while identifying itself as
-Pi, Codex, or another client merely to pass an OAuth or backend check.
-
-Official OpenAI documentation reviewed on 2026-08-17 adds a potentially
-supported alternative to Strappy's direct private-protocol approach:
-
-- OpenAI now documents Codex App Server as the interface for embedding Codex
-  into another product, including authentication, conversation history,
-  approvals, and streamed agent events.
-- App Server's JSON-RPC account surface supports managed ChatGPT browser and
-  device-code login, automatic token persistence and refresh, cancellation,
-  logout, plan identification, rate-limit state, and token-usage summaries.
-- The documented device-code method lets the client own the sign-in ceremony
-  and return the verification URL and one-time code to its UI.
-- The App Server command and WebSocket transport are currently described as
-  experimental and unsupported for production workloads. The default stdio
-  transport is JSONL, but the documentation does not establish support for
-  Strappy's old iOS/macOS runtimes and armv7, PPC, x86, x64, and arm64 target
-  matrix, nor does it grant an explicit redistribution or porting right for a
-  production Strappy build.
-- The reviewed official documentation does not publish a self-service
-  third-party OAuth client-registration form. It also does not document the raw
-  device OAuth endpoints or the
-  `chatgpt.com/backend-api/codex/responses` contract as a general third-party
-  production API.
-
-Wanted work:
-
-1. Determine whether Codex App Server can be built, bundled, or otherwise used
-   on every required Strappy target without weakening the legacy-platform
-   promise or moving user prompts through an unintended intermediary.
-2. Ask OpenAI whether App Server is the required and permitted integration for
-   a distributed third-party Strappy client and whether its production and
-   redistribution status covers these targets.
-3. If App Server is not a viable supported route, request a dedicated public
-   Strappy OAuth client ID plus explicit authorization to use the ChatGPT Codex
-   subscription backend directly.
-4. Ask OpenAI to confirm eligible plans, workspace controls, permitted end-user
-   distribution, billing semantics, supported models/tools, and the production
-   compatibility policy.
-5. Record the response, date, and approved integration boundaries without
-   recording credentials, account identifiers, or private payloads. Do not
-   release the direct backend path until written authorization is obtained.
-
-Completion gate: do not release the ChatGPT provider until OpenAI confirms a
-production-permitted integration path and Strappy either uses that supported
-path or has its own explicitly approved client identity and backend access.
-
-Proposed request:
-
-> We are developing Strappy, a native iOS and macOS client that lets users
-> authenticate with their own eligible ChatGPT account and use Codex under
-> their ChatGPT plan. We will not ship another application's OAuth identity or
-> treat ChatGPT OAuth tokens as OpenAI Platform API keys. Is Codex App Server
-> the required and production-supported integration for this distributed
-> third-party use case, including our legacy Apple targets? If App Server
-> cannot support those targets, can OpenAI issue Strappy a dedicated public
-> OAuth client ID and explicitly authorize direct use of the ChatGPT Codex
-> subscription backend? Please also confirm permitted distribution, eligible
-> plans and workspace controls, billing semantics, supported capabilities, and
-> the applicable production compatibility policy.
-
-Official sources:
-
-- OpenAI, [Codex App Server](https://learn.chatgpt.com/docs/app-server): product
-  embedding, JSON-RPC transports, managed ChatGPT authentication, device-code
-  UI ownership, refresh/logout, and plan-limit/usage surfaces.
-- OpenAI, [Codex authentication](https://learn.chatgpt.com/docs/auth): ChatGPT
-  subscription versus API-key authentication, token refresh, device-code beta
-  status, and personal/workspace enablement.
-- OpenAI, [Codex CLI reference](https://developers.openai.com/codex/cli/reference/):
-  the `codex login --device-auth` user flow.
+- providers are immutable code-owned definitions and accounts are independent
+  runtime/database instances;
+- at least two named accounts for each provider coexist in database and Keychain
+  harnesses;
+- `SessionOptions` carries an account ID, provider type is inferred from that
+  account, and mismatched account/model pairs cannot be saved or sent;
+- `other` performs only generic Responses requests against explicit endpoints
+  and never advertises catalog or hosted-tool support;
+- every model, session, request, attempt, credential operation, catalog update,
+  tool choice, and retry is scoped to an exact account;
+- account archive/sign-out is isolated and preserves historical sessions;
+- the existing iOS and macOS interfaces behave as they do today; and
+- all Linux, Apple build/analyzer, manual lifecycle, secret-safety, and live
+  compatibility gates pass.
