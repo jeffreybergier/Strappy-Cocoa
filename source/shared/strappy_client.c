@@ -858,8 +858,11 @@ int strappy_client_send_provider_responses_json_with_transport(
   char *user_agent;
   char *url;
   const char *token;
+  const strappy_provider_definition *definition;
   size_t request_length;
-  int is_chatgpt;
+  int uses_chatgpt_headers;
+  int uses_openrouter_headers;
+  int token_is_present;
   int uses_sse;
   int sse_ended_early;
   int ok;
@@ -870,19 +873,28 @@ int strappy_client_send_provider_responses_json_with_transport(
     return 0;
   }
   strappy_responses_http_result_init(result);
-  is_chatgpt = (provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) ? 1 : 0;
+  definition = strappy_provider_for_kind(provider);
+  uses_chatgpt_headers = (definition != NULL) &&
+    (definition->request_profile == STRAPPY_PROVIDER_REQUEST_CHATGPT_CODEX);
+  uses_openrouter_headers = (definition != NULL) &&
+    (definition->request_profile == STRAPPY_PROVIDER_REQUEST_OPENROUTER);
   uses_sse =
     (response_transport == STRAPPY_RESPONSES_RESPONSE_TRANSPORT_SSE) ? 1 : 0;
   token = (bearer_token != NULL) ? bearer_token :
     ((config != NULL) ? config->api_token : NULL);
+  token_is_present = (token != NULL) && (token[0] != '\0');
   if ((config == NULL) || (request_json == NULL) ||
       (request_json[0] == '\0') || (config->api_endpoint == NULL) ||
       (config->api_endpoint[0] == '\0') ||
-      ((provider != STRAPPY_PROVIDER_KIND_OPENROUTER) && !is_chatgpt) ||
+      (definition == NULL) || !strappy_provider_is_available(definition) ||
       ((response_transport != STRAPPY_RESPONSES_RESPONSE_TRANSPORT_JSON) &&
        (response_transport != STRAPPY_RESPONSES_RESPONSE_TRANSPORT_SSE)) ||
-      !strappy_client_header_value_is_safe(token, 2U * 1024U * 1024U) ||
-      (is_chatgpt &&
+      ((!token_is_present &&
+        (definition->credential_kind !=
+         STRAPPY_PROVIDER_CREDENTIAL_OPTIONAL_BEARER)) ||
+       (token_is_present &&
+        !strappy_client_header_value_is_safe(token, 2U * 1024U * 1024U))) ||
+      (uses_chatgpt_headers &&
        !strappy_client_header_value_is_safe(chatgpt_account_id, 512U)) ||
       ((session_request_id != NULL) &&
        !strappy_client_header_value_is_safe(session_request_id, 512U))) {
@@ -903,23 +915,23 @@ int strappy_client_send_provider_responses_json_with_transport(
     strappy_set_error(error_out, "Could not allocate Responses API URL.");
     return 0;
   }
-  auth_header = strappy_join_strings("Authorization: Bearer ",
-                                     token);
-  if (auth_header == NULL) {
+  auth_header = token_is_present ?
+    strappy_join_strings("Authorization: Bearer ", token) : NULL;
+  if (token_is_present && (auth_header == NULL)) {
     free(url);
     strappy_set_error(error_out,
                       "Could not allocate Responses auth header.");
     return 0;
   }
 
-  account_header = is_chatgpt ?
+  account_header = uses_chatgpt_headers ?
     strappy_join_strings("chatgpt-account-id: ", chatgpt_account_id) : NULL;
-  session_header = (is_chatgpt && (session_request_id != NULL)) ?
+  session_header = (uses_chatgpt_headers && (session_request_id != NULL)) ?
     strappy_join_strings("session-id: ", session_request_id) : NULL;
   client_request_header =
-    (is_chatgpt && (session_request_id != NULL)) ?
+    (uses_chatgpt_headers && (session_request_id != NULL)) ?
       strappy_join_strings("x-client-request-id: ", session_request_id) : NULL;
-  if (is_chatgpt &&
+  if (uses_chatgpt_headers &&
       ((account_header == NULL) ||
        ((session_request_id != NULL) &&
         ((session_header == NULL) || (client_request_header == NULL))))) {
@@ -941,29 +953,30 @@ int strappy_client_send_provider_responses_json_with_transport(
          &headers,
          uses_sse ? "Accept: text/event-stream" : "Accept: application/json",
          error_out) &&
-       (!is_chatgpt ||
+       (!uses_chatgpt_headers ||
         strappy_client_add_header(&headers,
                                   "OpenAI-Beta: responses=experimental",
                                   error_out)) &&
-       (!is_chatgpt ||
+       (!uses_chatgpt_headers ||
         strappy_client_add_header(&headers,
                                   "originator: strappy",
                                   error_out)) &&
-       (!is_chatgpt ||
+       (!uses_chatgpt_headers ||
         strappy_client_add_header(&headers, account_header, error_out)) &&
-       (!is_chatgpt || (session_header == NULL) ||
+       (!uses_chatgpt_headers || (session_header == NULL) ||
         strappy_client_add_header(&headers, session_header, error_out)) &&
-       (!is_chatgpt || (client_request_header == NULL) ||
+       (!uses_chatgpt_headers || (client_request_header == NULL) ||
         strappy_client_add_header(&headers, client_request_header, error_out)) &&
-       (is_chatgpt ||
+       (!uses_openrouter_headers ||
         strappy_client_add_header(&headers,
                                   "X-OpenRouter-Title: Strappy",
                                   error_out)) &&
-       (is_chatgpt ||
+       (!uses_openrouter_headers ||
         strappy_client_add_header(&headers,
                                   "X-OpenRouter-Metadata: enabled",
                                   error_out)) &&
-       strappy_client_add_header(&headers, auth_header, error_out);
+       ((auth_header == NULL) ||
+        strappy_client_add_header(&headers, auth_header, error_out));
   strappy_client_secure_free(auth_header);
   free(account_header);
   free(session_header);
@@ -1154,10 +1167,16 @@ int strappy_client_send_provider_responses_json(
   void *callback_data,
   char **error_out)
 {
+  const strappy_provider_definition *definition;
   strappy_responses_response_transport response_transport;
 
+  definition = strappy_provider_for_kind(provider);
+  if (definition == NULL) {
+    strappy_set_error(error_out, "Responses provider is not registered.");
+    return 0;
+  }
   response_transport =
-    (provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) ?
+    (definition->response_transport == STRAPPY_PROVIDER_TRANSPORT_SSE) ?
       STRAPPY_RESPONSES_RESPONSE_TRANSPORT_SSE :
       STRAPPY_RESPONSES_RESPONSE_TRANSPORT_JSON;
   return strappy_client_send_provider_responses_json_with_transport(

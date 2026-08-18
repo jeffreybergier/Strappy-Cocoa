@@ -265,10 +265,10 @@ visible control in the current phase.
 
 ## Database work
 
-The database has not shipped. Preserve the existing development-reset policy:
-keep `PRAGMA user_version = 1`, change the schema identity, reject the previous
-development schema with an explicit delete-and-relaunch message, and do not add
-a migration unless separately approved.
+The database has not shipped, and production databases may be deleted. Do not
+add database migration code. Preserve the existing development-reset policy:
+keep `PRAGMA user_version = 1`, change the schema identity, and reject the
+previous development schema with an explicit delete-and-relaunch message.
 
 Required schema changes:
 
@@ -323,14 +323,17 @@ redesign.
 
 ### Phase 1 — Provider registry
 
-- [ ] Define the immutable provider descriptor and operations interface.
-- [ ] Move endpoint, catalog, hosted-tool, request, error, billing, and feature
+Phase 1 intentionally makes no database schema changes and adds no database
+migration code.
+
+- [x] Define the immutable provider descriptor and operations interface.
+- [x] Move endpoint, catalog, hosted-tool, request, error, billing, and feature
   policy behind provider dispatch.
-- [ ] Add the minimal `other` provider and prove its operation table advertises
+- [x] Add the minimal `other` provider and prove its operation table advertises
   no catalog or hosted-tool capabilities.
-- [ ] Retain focused OAuth, transport, SSE, and provider adapter modules.
-- [ ] Remove fixed provider-account constants from provider behavior.
-- [ ] Add registry tests for unknown providers and complete definitions.
+- [x] Retain focused OAuth, transport, SSE, and provider adapter modules.
+- [x] Remove fixed provider-account constants from provider behavior.
+- [x] Add registry tests for unknown providers and complete definitions.
 
 Exit criterion: request/catalog/tool code selects behavior only through a
 resolved provider definition, while existing OpenRouter and ChatGPT request

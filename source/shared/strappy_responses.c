@@ -1513,6 +1513,7 @@ static char *strappy_responses_build_request_json(
   long *new_input_start_index_out,
   char **error_out)
 {
+  const strappy_provider_definition *definition;
   strappy_responses_buffer buffer;
   char round_text[64];
   char *model_json;
@@ -1525,9 +1526,9 @@ static char *strappy_responses_build_request_json(
   int written;
   int ok;
 
+  definition = strappy_provider_for_kind(provider);
   if ((config == NULL) || (config->api_model == NULL) ||
-      ((provider != STRAPPY_PROVIDER_KIND_OPENROUTER) &&
-       (provider != STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT)) ||
+      (definition == NULL) ||
       (instructions == NULL) || (prompt_group_key == NULL) ||
       (tools_json == NULL) || (history == NULL) || (new_items == NULL)) {
     strappy_set_error(error_out, "Responses request builder is incomplete.");
@@ -1565,13 +1566,15 @@ static char *strappy_responses_build_request_json(
   memset(&buffer, 0, sizeof(buffer));
   ok = strappy_responses_buffer_append_string(&buffer, "{\"model\":") &&
        strappy_responses_buffer_append_string(&buffer, model_json);
-  if (ok && (provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT)) {
+  if (ok && (definition->request_profile ==
+             STRAPPY_PROVIDER_REQUEST_CHATGPT_CODEX)) {
     ok = strappy_responses_buffer_append_string(
            &buffer,
            ",\"stream\":true,\"store\":false,\"prompt_cache_key\":") &&
          strappy_responses_buffer_append_string(&buffer, session_key_json) &&
          strappy_responses_buffer_append_string(&buffer, ",\"instructions\":");
-  } else if (ok) {
+  } else if (ok && (definition->request_profile ==
+                    STRAPPY_PROVIDER_REQUEST_OPENROUTER)) {
     ok = strappy_responses_buffer_append_string(
            &buffer,
            ",\"stream\":false,\"store\":false,\"session_id\":") &&
@@ -1587,6 +1590,10 @@ static char *strappy_responses_build_request_json(
          strappy_responses_buffer_append_string(&buffer, ",\"strappy_round\":") &&
          strappy_responses_buffer_append_string(&buffer, round_json) &&
          strappy_responses_buffer_append_string(&buffer, "},\"instructions\":");
+  } else if (ok) {
+    ok = strappy_responses_buffer_append_string(
+           &buffer,
+           ",\"stream\":false,\"store\":false,\"instructions\":");
   }
   ok = ok &&
        strappy_responses_buffer_append_string(&buffer, instructions_json) &&
@@ -1619,16 +1626,21 @@ static char *strappy_responses_build_request_json(
 
   ok = ok && strappy_responses_buffer_append_string(
     &buffer,
-    (provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) &&
+    (definition->request_profile ==
+       STRAPPY_PROVIDER_REQUEST_CHATGPT_CODEX) &&
       strappy_web_provider_is_enabled(config->web_provider) ?
       "],\"include\":[\"reasoning.encrypted_content\","
         "\"web_search_call.action.sources\"]," :
-      "],\"include\":[\"reasoning.encrypted_content\"],") &&
-    ((provider != STRAPPY_PROVIDER_KIND_OPENROUTER) || !reasoning_enabled ||
+      ((definition->request_profile ==
+        STRAPPY_PROVIDER_REQUEST_GENERIC_RESPONSES) ? "]," :
+       "],\"include\":[\"reasoning.encrypted_content\"],")) &&
+    ((definition->request_profile != STRAPPY_PROVIDER_REQUEST_OPENROUTER) ||
+     !reasoning_enabled ||
      strappy_responses_buffer_append_string(
        &buffer,
        "\"reasoning\":{\"enabled\":true,\"summary\":\"auto\"},")) &&
-    ((provider != STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) ||
+    ((definition->request_profile !=
+       STRAPPY_PROVIDER_REQUEST_CHATGPT_CODEX) ||
      strappy_responses_buffer_append_string(
        &buffer,
        "\"text\":{\"verbosity\":\"low\"},")) &&
@@ -1655,6 +1667,7 @@ static char *strappy_responses_build_request_json(
 typedef struct strappy_responses_runtime {
   strappy_config config;
   strappy_provider_kind provider;
+  const strappy_provider_definition *provider_definition;
   char *model_id;
   char *provider_account_id;
   char *provider_id;
@@ -1683,6 +1696,7 @@ static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
   }
   strappy_config_init(&runtime->config);
   runtime->provider = STRAPPY_PROVIDER_KIND_UNKNOWN;
+  runtime->provider_definition = NULL;
   runtime->model_id = NULL;
   runtime->provider_account_id = NULL;
   runtime->provider_id = NULL;
@@ -1984,6 +1998,7 @@ static int strappy_responses_prepare_runtime(
   runtime->provider_id = route.provider_id;
   runtime->billing_kind = route.billing_kind;
   runtime->provider = provider;
+  runtime->provider_definition = strappy_provider_for_kind(provider);
   runtime->reasoning_enabled = route.reasoning_enabled;
   runtime->local_functions_enabled = route.local_functions_enabled;
   runtime->hosted_tools_enabled = route.hosted_tools_enabled;
@@ -1993,20 +2008,32 @@ static int strappy_responses_prepare_runtime(
   route.billing_kind = NULL;
   strappy_model_route_record_destroy(&route);
 
-  if ((provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) &&
-      (!strappy_provider_chatgpt_is_enabled() ||
-       (runtime->billing_kind == NULL) ||
+  if ((runtime->provider_definition == NULL) ||
+      !strappy_provider_is_available(runtime->provider_definition)) {
+    free(assistant_set_id);
+    strappy_set_error(
+      error_out,
+      ((runtime->provider_definition != NULL) &&
+       (runtime->provider_definition->request_profile ==
+        STRAPPY_PROVIDER_REQUEST_CHATGPT_CODEX)) ?
+        "ChatGPT (Codex) is disabled by the experimental provider kill switch." :
+        "Session model provider is unavailable.");
+    strappy_responses_runtime_destroy(runtime);
+    return 0;
+  }
+  if ((runtime->provider_definition->billing_kind ==
+      STRAPPY_PROVIDER_BILLING_CHATGPT_PLAN) &&
+      ((runtime->billing_kind == NULL) ||
        (strcmp(runtime->billing_kind, "chatgpt_plan") != 0))) {
     free(assistant_set_id);
     strappy_set_error(
       error_out,
-      !strappy_provider_chatgpt_is_enabled() ?
-        "ChatGPT (Codex) is disabled by the experimental provider kill switch." :
-        "ChatGPT model billing metadata is invalid.");
+      "ChatGPT model billing metadata is invalid.");
     strappy_responses_runtime_destroy(runtime);
     return 0;
   }
-  if (provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) {
+  if (runtime->provider_definition->credential_kind ==
+      STRAPPY_PROVIDER_CREDENTIAL_OAUTH_DEVICE) {
     if ((strappy_responses_chatgpt_credentials_callback == NULL) ||
         !strappy_responses_chatgpt_credentials_callback(
           0,
@@ -2029,9 +2056,10 @@ static int strappy_responses_prepare_runtime(
     runtime->config.web_provider = STRAPPY_WEB_PROVIDER_NONE;
   }
 
-  provider_endpoint = strappy_provider_responses_endpoint(
-    provider,
-    runtime->config.api_endpoint,
+  provider_endpoint = strappy_provider_definition_responses_endpoint(
+    runtime->provider_definition,
+    runtime->provider_definition->allows_endpoint_override ?
+      runtime->config.api_endpoint : NULL,
     error_out);
   if (provider_endpoint == NULL) {
     free(assistant_set_id);
@@ -2863,6 +2891,10 @@ static int strappy_responses_send_round(
     "\"originator\":\"strappy\","
     "\"chatgpt-account-id\":\"[REDACTED]\","
     "\"Authorization\":\"Bearer [REDACTED]\"}";
+  static const char *generic_request_headers_json =
+    "{\"Content-Type\":\"application/json\","
+    "\"Accept\":\"application/json\","
+    "\"Authorization\":\"Bearer [REDACTED]\"}";
   const char *request_headers_json;
   long attempt_index;
   long retry_delay_ms;
@@ -2875,9 +2907,15 @@ static int strappy_responses_send_round(
   }
   retry_delay_ms = STRAPPY_RESPONSES_INITIAL_RETRY_DELAY_MS;
   forced_refresh_attempted = 0;
-  request_headers_json =
-    (runtime->provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) ?
-      chatgpt_request_headers_json : openrouter_request_headers_json;
+  if (runtime->provider_definition->request_profile ==
+      STRAPPY_PROVIDER_REQUEST_CHATGPT_CODEX) {
+    request_headers_json = chatgpt_request_headers_json;
+  } else if (runtime->provider_definition->request_profile ==
+             STRAPPY_PROVIDER_REQUEST_OPENROUTER) {
+    request_headers_json = openrouter_request_headers_json;
+  } else {
+    request_headers_json = generic_request_headers_json;
+  }
 
   for (attempt_index = 0L;
        attempt_index < STRAPPY_RESPONSES_MAX_ATTEMPTS;
@@ -2943,10 +2981,12 @@ static int strappy_responses_send_round(
     client_ok = strappy_client_send_provider_responses_json(
       &runtime->config,
       runtime->provider,
-      (runtime->provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) ?
+      (runtime->provider_definition->credential_kind ==
+       STRAPPY_PROVIDER_CREDENTIAL_OAUTH_DEVICE) ?
         runtime->chatgpt_access_token : runtime->config.api_token,
       runtime->chatgpt_account_id,
-      (runtime->provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) ?
+      (runtime->provider_definition->request_profile ==
+       STRAPPY_PROVIDER_REQUEST_CHATGPT_CODEX) ?
         runtime->request_session_id : NULL,
       request_json,
       &http,
@@ -2987,7 +3027,8 @@ static int strappy_responses_send_round(
     refreshed_after_unauthorized = 0;
     credential_refresh_error = NULL;
     if (client_ok && (http.http_status == 401L) &&
-        (runtime->provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) &&
+        (runtime->provider_definition->credential_kind ==
+         STRAPPY_PROVIDER_CREDENTIAL_OAUTH_DEVICE) &&
         !http.response_event_received &&
         !forced_refresh_attempted &&
         ((attempt_index + 1L) < STRAPPY_RESPONSES_MAX_ATTEMPTS) &&

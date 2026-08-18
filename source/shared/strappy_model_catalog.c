@@ -12,7 +12,7 @@
 #define STRAPPY_BUNDLED_MODELS_FILENAME "BundledModels.json"
 #define STRAPPY_BUNDLED_MODELS_MAX_BYTES (512U * 1024U)
 
-int strappy_model_catalog_refresh_openrouter_user_models(
+static int strappy_model_catalog_refresh_remote_account(
   const char *env_path,
   const char *fallback_api_endpoint,
   const char *fallback_api_token,
@@ -54,7 +54,7 @@ int strappy_model_catalog_refresh_openrouter_user_models(
   return ok;
 }
 
-int strappy_model_catalog_import_bundled_models(
+static int strappy_model_catalog_import_bundled(
   const char *resource_dir,
   const char *db_path,
   char **error_out)
@@ -131,4 +131,75 @@ int strappy_model_catalog_import_bundled_models(
   ok = strappy_db_import_bundled_models_json(db_path, json, error_out);
   free(json);
   return ok;
+}
+
+int strappy_model_catalog_update_for_provider(
+  const char *provider_id,
+  const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
+  const char *resource_dir,
+  const char *db_path,
+  char **error_out)
+{
+  const strappy_provider_definition *definition;
+
+  definition = strappy_provider_find(provider_id);
+  if (definition == NULL) {
+    strappy_set_error(error_out, "Model catalog provider is not registered.");
+    return 0;
+  }
+  if (!strappy_provider_has_catalog_operation(definition)) {
+    strappy_set_error(error_out,
+                      "The selected provider has no model catalog operation.");
+    return 0;
+  }
+  if (definition->catalog_kind == STRAPPY_PROVIDER_CATALOG_REMOTE_ACCOUNT) {
+    return strappy_model_catalog_refresh_remote_account(
+      env_path,
+      fallback_api_endpoint,
+      fallback_api_token,
+      db_path,
+      error_out);
+  }
+  if (definition->catalog_kind == STRAPPY_PROVIDER_CATALOG_BUNDLED) {
+    return strappy_model_catalog_import_bundled(resource_dir,
+                                                db_path,
+                                                error_out);
+  }
+  strappy_set_error(error_out,
+                    "The selected provider catalog policy is unsupported.");
+  return 0;
+}
+
+int strappy_model_catalog_refresh_openrouter_user_models(
+  const char *env_path,
+  const char *fallback_api_endpoint,
+  const char *fallback_api_token,
+  const char *db_path,
+  char **error_out)
+{
+  return strappy_model_catalog_update_for_provider(
+    STRAPPY_PROVIDER_OPENROUTER,
+    env_path,
+    fallback_api_endpoint,
+    fallback_api_token,
+    NULL,
+    db_path,
+    error_out);
+}
+
+int strappy_model_catalog_import_bundled_models(
+  const char *resource_dir,
+  const char *db_path,
+  char **error_out)
+{
+  return strappy_model_catalog_update_for_provider(
+    STRAPPY_PROVIDER_OPENAI_CHATGPT,
+    NULL,
+    NULL,
+    NULL,
+    resource_dir,
+    db_path,
+    error_out);
 }

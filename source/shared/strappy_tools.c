@@ -1249,23 +1249,20 @@ static int strappy_tools_server_schema_is_enabled(
   strappy_provider_kind provider,
   strappy_web_provider web_provider)
 {
+  const strappy_provider_definition *definition;
   const char *type;
   cJSON *feature;
 
   type = strappy_tools_server_schema_type(server_tool);
-  if (type == NULL) {
-    return 0;
-  }
-  if (provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) {
-    if (strcmp(type, STRAPPY_TOOL_WEB_SEARCH) != 0) {
-      return 0;
-    }
-  } else if (strcmp(type, STRAPPY_TOOL_WEB_SEARCH) == 0) {
+  definition = strappy_provider_for_kind(provider);
+  if ((type == NULL) || (definition == NULL) ||
+      !strappy_provider_supports_hosted_tool(definition, type)) {
     return 0;
   }
   if ((allowed_names != NULL) && (allowed_name_count > 0U) &&
       !strappy_tools_name_is_allowed(type, allowed_names, allowed_name_count) &&
-      !((provider == STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT) &&
+      !((definition->request_profile ==
+           STRAPPY_PROVIDER_REQUEST_CHATGPT_CODEX) &&
         (strcmp(type, STRAPPY_TOOL_WEB_SEARCH) == 0) &&
         strappy_tools_name_is_allowed(STRAPPY_TOOL_OPENROUTER_WEB_SEARCH,
                                       allowed_names,
@@ -1743,6 +1740,10 @@ char *strappy_tools_responses_request_json_filtered_for_provider(
   char *chat_tools_json;
   char *responses_tools_json;
 
+  if (strappy_provider_for_kind(provider) == NULL) {
+    strappy_set_error(error_out, "Responses tool provider is not registered.");
+    return NULL;
+  }
   if (strappy_web_provider_name(web_provider) == NULL) {
     strappy_set_error(error_out, "Web provider is invalid.");
     return NULL;
@@ -1860,6 +1861,10 @@ char *strappy_tools_prompt_markdown_filtered_for_provider(
 
   buffer.data = NULL;
   buffer.length = 0U;
+  if (strappy_provider_for_kind(provider) == NULL) {
+    strappy_set_error(error_out, "Prompt tool provider is not registered.");
+    return NULL;
+  }
   if (strappy_web_provider_name(web_provider) == NULL) {
     strappy_set_error(error_out, "Web provider is invalid.");
     return NULL;
