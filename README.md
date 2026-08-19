@@ -12,8 +12,8 @@ questions about your text messages, calendars, notes, music, and even third-
 party apps.
 
 > Strappy is my personal strap-on AI harness. Strappy has a big, sassy, and very
-> gay personality… I mean, Strappy's physical embodiment is a 12" strap-on
-> rainbow eggplant. And like most gays, Strappy is insanely diligent,
+> gay personality… I mean, Strappy's physical embodiment is a rainbow-colored
+> strap-on AI harness. And like most gays, Strappy is insanely diligent,
 > detail-oriented, and strict… like dominatrix-strict. But why? Well, to
 > be honest, I am kind of getting bored of the monotone and direct answers we
 > are getting from the models by default.

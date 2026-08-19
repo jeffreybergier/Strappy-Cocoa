@@ -111,23 +111,13 @@ typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_DEVELOPER,
   STRAPPY_WEBVIEW_LABEL_THINKING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_TOOLS,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_SERVING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_HYDRATING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_BEDAZZLING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_STRUTTING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_TOUCHING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_SPOONING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_SHEDDING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_JUDGING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_STROKING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_EDGING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_RIDING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_DRILLING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_PULSING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_BINDING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_PADDLING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_PEGGING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_DOMINATING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_CLIMAXING,
-  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_REGRETTING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_CHILLING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_ENCHANTING,
+  STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_REIGNING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_AUTOSCROLL_ON,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_AUTOSCROLL_OFF,
   STRAPPY_WEBVIEW_LABEL_RESPONSE_METADATA,
@@ -172,23 +162,13 @@ static const char * const g_strappy_webview_label_keys[
   "Harness",
   "Thinking",
   "[fa:gears] Grinding",
+  "[fa:bell-concierge] Serving",
   "[fa:martini-glass] Hydrating",
+  "[fa:gem] Bedazzling",
   "[fa:shoe-prints] Strutting",
-  "[fa:hands-holding-circle] Touching",
-  "[fa:spoon] Spooning",
-  "[fa:socks] Shedding",
-  "[fa:hand-lizard] Judging",
-  "[fa:hand-holding-droplet] Stroking",
-  "[fa:ring] Edging",
-  "[fa:horse] Riding",
-  "[fa:bore-hole] Drilling",
-  "[fa:bed-pulse] Pulsing",
-  "[fa:hands-bound] Binding",
-  "[fa:table-tennis-paddle-ball] Paddling",
-  "[fa:thumbtack] Pegging",
-  "[fa:hand-back-fist] Dominating",
-  "[fa:droplet] Climaxing",
-  "[fa:shower] Regretting",
+  "[fa:snowflake] Chilling",
+  "[fa:wand-sparkles] Enchanting",
+  "[fa:crown] Reigning",
   "Autoscroll on",
   "Autoscroll off",
   "Metadata",
@@ -249,7 +229,7 @@ static void strappy_webview_assign_localized_labels(
        index < STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT;
        index++) {
     labels->processing_waiting[index] =
-      values[(size_t)STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_HYDRATING +
+      values[(size_t)STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_SERVING +
              index];
   }
   labels->processing_autoscroll_on =
@@ -1012,7 +992,7 @@ static const char *strappy_webview_processing_waiting_label(
     return labels->processing_waiting[index];
   }
   return g_strappy_webview_label_keys[
-    (size_t)STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_HYDRATING + index];
+    (size_t)STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_SERVING + index];
 }
 
 static const char *strappy_webview_processing_tools_label(
@@ -2855,11 +2835,11 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "b&&b.getAttribute?b.getAttribute('data-processing-waiting-count'):0);",
     "var index,label;if(count<1){strappyProcessingWaitingIndex=-1;",
     "strappyProcessingWaitingLabel=",
-    "'[fa:martini-glass] Hydrating';return strappyProcessingWaitingLabel;}",
+    "'[fa:bell-concierge] Serving';return strappyProcessingWaitingLabel;}",
     "index=strappyProcessingWaitingIndex+1;if(index<0||index>=count)index=0;",
     "strappyProcessingWaitingIndex=index;",
     "label=processingLabel('waiting-'+index,'');",
-    "strappyProcessingWaitingLabel=label||'[fa:martini-glass] Hydrating';",
+    "strappyProcessingWaitingLabel=label||'[fa:bell-concierge] Serving';",
     "return strappyProcessingWaitingLabel;}",
     "function processingWaitingLabel(){return strappyProcessingWaitingLabel||",
     "advanceProcessingWaitingLabel();}",

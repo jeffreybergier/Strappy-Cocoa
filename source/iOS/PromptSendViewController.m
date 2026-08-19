@@ -452,7 +452,7 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
   [self setTextViewShadow:textViewShadow];
 
   send = [[StrappyPromptSendButton alloc] initWithFrame:CGRectZero];
-  [send setImage:[self iconImageForIcon:AIFAMarsStroke
+  [send setImage:[self iconImageForIcon:AIFAPaperPlane
                                   style:AIFontAwesomeStyleSolid
                               pointSize:18.0f
                                   color:[UIColor whiteColor]]
@@ -639,13 +639,13 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
   [[self sendButton] setEnabled:sendEnabled];
 
   if ([self sending]) {
-    sendImage = [self iconImageForIcon:AIFAHandMiddleFinger
+    sendImage = [self iconImageForIcon:AIFAStop
                                  style:AIFontAwesomeStyleSolid
                              pointSize:16.0f
                                  color:[UIColor whiteColor]];
     [[self sendButton] setAccessibilityLabel:NSLocalizedString(@"Cancel Prompt", nil)];
   } else {
-    sendImage = [self iconImageForIcon:AIFAMarsStroke
+    sendImage = [self iconImageForIcon:AIFAPaperPlane
                                  style:AIFontAwesomeStyleSolid
                              pointSize:18.0f
                                  color:[UIColor whiteColor]];

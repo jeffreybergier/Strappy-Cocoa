@@ -123,7 +123,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 
   [self setAddButton:
     [[UIBarButtonItem alloc]
-      initWithImage:[self whiteBarIconForIcon:AIFAMarsStroke]
+      initWithImage:[self whiteBarIconForIcon:AIFAStd12]
               style:UIBarButtonItemStyleBordered
              target:self
              action:@selector(addSession:)]];
