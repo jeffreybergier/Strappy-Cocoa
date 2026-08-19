@@ -10120,6 +10120,57 @@ static int harness_run_openrouter_model_catalog_tests(
     return 0;
   }
 
+  error = NULL;
+  if (!strappy_db_update_response_session_summary(
+        context->catalog_path,
+        session_id,
+        "Harness prompt",
+        "Harness response",
+        "google/gemma-provider-revision",
+        200L,
+        &error) ||
+      !strappy_db_update_response_session_summary(
+        context->catalog_path,
+        session_id,
+        "Harness error prompt",
+        "Harness provider error",
+        "openai/gpt-4.1-mini",
+        503L,
+        &error)) {
+    fprintf(stderr,
+            "Could not finalize model-selection Responses turns: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  session_model = NULL;
+  if (!strappy_db_get_session_model(context->catalog_path,
+                                    session_id,
+                                    &session_model,
+                                    &error)) {
+    fprintf(stderr,
+            "Could not read session model after Responses finalization: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  ok = (session_model != NULL) &&
+       (strcmp(session_model, "google/gemma-4-31b-it") == 0);
+  strappy_free_string(session_model);
+  if (!ok ||
+      !harness_expect_catalog_integer(
+        context->catalog_path,
+        "SELECT COUNT(*) FROM sessions WHERE id = "
+        "(SELECT MAX(id) FROM sessions) AND "
+        "model_id = 'google/gemma-4-31b-it';",
+        1LL,
+        "session model after Responses finalization")) {
+    fprintf(stderr,
+            "Responses finalization replaced the selected session model.\n");
+    return 0;
+  }
+
   strappy_session_record_init(&session_list_record);
   error = NULL;
   if (!strappy_db_load_session_list_record(context->catalog_path,

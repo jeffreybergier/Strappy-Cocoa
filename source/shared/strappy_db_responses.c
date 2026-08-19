@@ -4158,6 +4158,9 @@ int strappy_db_update_response_session_summary(
 
   (void)prompt;
   (void)response;
+  /* Provider model metadata belongs to the response ledger. The session model
+     is a user-selected option and must not be changed during finalization. */
+  (void)model;
   (void)http_status;
 
   if (!strappy_db_open(db_path, &db, error_out)) {
@@ -4175,47 +4178,16 @@ int strappy_db_update_response_session_summary(
     return 0;
   }
   now_ms = strappy_db_now_ms();
-  if ((model != NULL) && (model[0] != '\0')) {
-    stmt = NULL;
-    rc = sqlite3_prepare_v2(
-      db,
-      "INSERT OR IGNORE INTO models "
-      "(id, name, catalog_active, last_seen_at_ms) VALUES (?, ?, 1, ?);",
-      -1,
-      &stmt,
-      NULL);
-    if ((rc != SQLITE_OK) ||
-        (sqlite3_bind_text(stmt, 1, model, -1, SQLITE_TRANSIENT) != SQLITE_OK) ||
-        (sqlite3_bind_text(stmt, 2, model, -1, SQLITE_TRANSIENT) != SQLITE_OK) ||
-        (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)now_ms) != SQLITE_OK) ||
-        (sqlite3_step(stmt) != SQLITE_DONE)) {
-      strappy_set_formatted_error(error_out,
-                                  "Could not retain session model: %s",
-                                  sqlite3_errmsg(db));
-      sqlite3_finalize(stmt);
-      strappy_db_exec(db,
-                      "ROLLBACK;",
-                      "Could not roll back Responses session finalization",
-                      NULL);
-      strappy_db_release(db);
-      return 0;
-    }
-    sqlite3_finalize(stmt);
-  }
   stmt = NULL;
   rc = sqlite3_prepare_v2(
     db,
-    "UPDATE sessions SET model_id = CASE WHEN ? IS NULL OR ? = '' "
-      "THEN model_id ELSE ? END, updated_at_ms = ? WHERE id = ?;",
+    "UPDATE sessions SET updated_at_ms = ? WHERE id = ?;",
     -1,
     &stmt,
     NULL);
   ok = (rc == SQLITE_OK) &&
-       strappy_db_bind_nullable_text_value(stmt, 1, model) &&
-       strappy_db_bind_nullable_text_value(stmt, 2, model) &&
-       strappy_db_bind_nullable_text_value(stmt, 3, model) &&
-       (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)now_ms) == SQLITE_OK) &&
-       (sqlite3_bind_int64(stmt, 5, (sqlite3_int64)session_id) == SQLITE_OK);
+       (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)now_ms) == SQLITE_OK) &&
+       (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) == SQLITE_OK);
   if (!ok || (sqlite3_step(stmt) != SQLITE_DONE) ||
       (sqlite3_changes(db) != 1)) {
     strappy_set_formatted_error(error_out,
