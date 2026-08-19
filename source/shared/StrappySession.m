@@ -666,7 +666,9 @@ static BOOL StrappySessionRecordFromOptions(
   streamEvent = (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) ?
     @"processing_status" :
     ((event->type == STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED) ?
-      @"ledger_updated" : @"ledger_changed");
+      @"ledger_updated" :
+      (event->coalesce_with_next_ledger_change ?
+        @"ledger_changed_coalescible" : @"ledger_changed"));
   updateJavaScript = nil;
   eventRenderFailed = NO;
   if (contextDictionary != nil) {

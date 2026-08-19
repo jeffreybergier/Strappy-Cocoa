@@ -894,6 +894,9 @@ typedef struct harness_ledger_event_recorder {
   long long started_count;
   long long completion_event_count;
   long long coalesced_transition_count;
+  long long coalescible_completion_count;
+  long long tool_outputs_event_count;
+  long long pending_presented_request_id;
   long long last_started_request_id;
   long long processing_count;
   long long processing_started_ms;
@@ -1082,6 +1085,7 @@ static int harness_record_ledger_event(
   long long session_id;
   int event_ok;
   int coalesced_transition;
+  int presented_transition;
   int opened;
   int running;
 
@@ -1231,6 +1235,31 @@ static int harness_record_ledger_event(
     return 1;
   }
 
+  if ((event->type == STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED) &&
+      (event->kind != NULL) &&
+      (strcmp(event->kind, "response_tool_outputs") == 0)) {
+    call_id = 0LL;
+    extra = '\0';
+    event_ok = (event->message_key != NULL) &&
+      (sscanf(event->message_key,
+              "response-call-%lld%c",
+              &call_id,
+              &extra) == 1) &&
+      (call_id > 0LL) &&
+      (event->actor != NULL) &&
+      (strcmp(event->actor, "harness") == 0) &&
+      (event->status_kind != NULL) &&
+      (strcmp(event->status_kind, "tool_outputs") == 0) &&
+      strappy_session_webview_event_requires_message_update(event);
+    if (event_ok) {
+      recorder->tool_outputs_event_count++;
+      recorder->message_update_required_count++;
+    } else {
+      recorder->valid = 0;
+    }
+    return 1;
+  }
+
   call_id = 0LL;
   extra = '\0';
   running = (event->status_kind != NULL) &&
@@ -1311,6 +1340,9 @@ static int harness_record_ledger_event(
                       &answer_quality_count);
   coalesced_transition = event_ok && running &&
     (recorder->started_count == (recorder->count + 1LL));
+  presented_transition = event_ok && running &&
+    (recorder->pending_presented_request_id > 0LL) &&
+    (recorder->started_count == recorder->count);
   if (event_ok && running) {
     event_ok = ((recorder->started_count == recorder->count) ||
                 (coalesced_transition &&
@@ -1330,7 +1362,12 @@ static int harness_record_ledger_event(
     if (event_ok) {
       if (coalesced_transition) {
         recorder->count++;
+      }
+      if (coalesced_transition || presented_transition) {
         recorder->coalesced_transition_count++;
+      }
+      if (presented_transition) {
+        recorder->pending_presented_request_id = 0LL;
       }
       recorder->started_count++;
       recorder->last_started_request_id = request_id;
@@ -1350,6 +1387,37 @@ static int harness_record_ledger_event(
     if (event_ok) {
       recorder->count++;
       recorder->completion_event_count++;
+      if (event->coalesce_with_next_ledger_change) {
+        sqlite3_stmt *tool_stmt;
+        long long tool_execution_count;
+        int tool_rc;
+
+        tool_stmt = NULL;
+        tool_execution_count = -1LL;
+        tool_rc = sqlite3_prepare_v2(
+          db,
+          "SELECT COUNT(*) FROM tool_executions "
+          "WHERE response_attempt_id=?;",
+          -1,
+          &tool_stmt,
+          NULL);
+        if ((tool_rc != SQLITE_OK) ||
+            (sqlite3_bind_int64(tool_stmt,
+                                1,
+                                (sqlite3_int64)call_id) != SQLITE_OK) ||
+            (sqlite3_step(tool_stmt) != SQLITE_ROW)) {
+          event_ok = 0;
+        } else {
+          tool_execution_count =
+            (long long)sqlite3_column_int64(tool_stmt, 0);
+          event_ok = tool_execution_count == 0LL;
+        }
+        sqlite3_finalize(tool_stmt);
+        if (event_ok) {
+          recorder->coalescible_completion_count++;
+          recorder->pending_presented_request_id = request_id;
+        }
+      }
     }
   }
   if (!event_ok) {
@@ -6051,11 +6119,13 @@ static int harness_test_function_tool_continuation(void)
   ok = (result != NULL) &&
     (strcmp(result, "Function tool final answer.") == 0) &&
     server_ok && events.valid && (events.count == 2LL) &&
-    (events.completion_event_count == 1LL) &&
+    (events.completion_event_count == 2LL) &&
     (events.coalesced_transition_count == 1LL) &&
+    (events.coalescible_completion_count == 1LL) &&
+    (events.tool_outputs_event_count == 1LL) &&
     (events.wall_duration_update_count == 1LL) &&
     (events.message_update_skipped_count == 2LL) &&
-    (events.message_update_required_count == 2LL) &&
+    (events.message_update_required_count == 4LL) &&
     (events.answer_quality_count == 1LL) && events.saw_thinking &&
     events.saw_tools && (events.clear_count == 1L);
   free(result);
@@ -6797,6 +6867,8 @@ static int harness_test_bash_tool_cancellation(void)
     (events.count == 1LL) &&
     (events.completion_event_count == 1LL) &&
     (events.coalesced_transition_count == 0LL) &&
+    (events.coalescible_completion_count == 1LL) &&
+    (events.tool_outputs_event_count == 1LL) &&
     (events.wall_duration_update_count == 0LL) &&
     (events.clear_count == 1L) &&
     (error != NULL) && (strstr(error, "cancelled") != NULL) &&
@@ -6918,8 +6990,10 @@ static int harness_test_retry_attempt_ledger(void)
   ok = (result != NULL) &&
     (strcmp(result, "Retry final answer.") == 0) &&
     server_ok && events.valid && (events.count == 3LL) &&
-    (events.completion_event_count == 2LL) &&
+    (events.completion_event_count == 3LL) &&
     (events.coalesced_transition_count == 1LL) &&
+    (events.coalescible_completion_count == 1LL) &&
+    (events.tool_outputs_event_count == 1LL) &&
     (events.wall_duration_update_count == 1LL) &&
     (events.answer_quality_count == 1LL) && events.saw_thinking &&
     events.saw_tools && events.saw_retry_wait && events.saw_retrying &&

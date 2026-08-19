@@ -67,6 +67,9 @@ typedef struct strappy_responses_event {
   unsigned int retry_after_seconds;
   unsigned int retry_attempt;
   unsigned int retry_max_attempts;
+  /* The committed ledger range may be held briefly so a fast continuation
+   * can share one WebView mutation without hiding a long-running tool call. */
+  int coalesce_with_next_ledger_change;
   /* A completed, tool-free response that ends the prompt loop. */
   int is_terminal;
 } strappy_responses_event;

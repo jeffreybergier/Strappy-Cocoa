@@ -722,8 +722,18 @@ static BOOL StrappyContextRoundActionValues(
     return;
   }
   streamEvent = [event objectForKey:@"stream_event"];
+  if ([streamEvent isEqualToString:@"ledger_changed_coalescible"]) {
+    [self queueJavaScriptForStreamEvent:event];
+    return;
+  }
   if ([streamEvent isEqualToString:@"ledger_changed"] ||
       [streamEvent isEqualToString:@"terminal_delta"]) {
+    if ([streamEvent isEqualToString:@"ledger_changed"] &&
+        ([pendingStreamJavaScript_ length] > 0U)) {
+      [self queueJavaScriptForStreamEvent:event];
+      [self flushPendingStreamEvents];
+      return;
+    }
     [self flushPendingStreamEvents];
     js = [self javaScriptForStreamEvent:event];
     if ([js length] > 0U) {

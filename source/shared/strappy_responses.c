@@ -2093,6 +2093,7 @@ static void strappy_responses_emit_call_ledger_changed(
   const char *prompt_group_key,
   const char *state,
   const char *render_role,
+  int coalesce_with_next_ledger_change,
   int is_terminal,
   long long status_started_ms,
   long long status_updated_ms,
@@ -2117,6 +2118,8 @@ static void strappy_responses_emit_call_ledger_changed(
   event.message_key = message_key;
   event.render_role = (render_role != NULL) ? render_role : "api_call";
   event.status_kind = state;
+  event.coalesce_with_next_ledger_change =
+    coalesce_with_next_ledger_change ? 1 : 0;
   event.status_started_ms = status_started_ms;
   event.status_updated_ms = status_updated_ms;
   event.is_terminal = is_terminal ? 1 : 0;
@@ -2126,22 +2129,33 @@ static void strappy_responses_emit_call_ledger_changed(
 static void strappy_responses_flush_deferred_call_event(
   strappy_responses_deferred_call_event *deferred,
   const char *prompt_group_key,
+  int coalesce_with_next_ledger_change,
   strappy_responses_event_callback callback,
   void *callback_data)
 {
+  strappy_responses_event event;
+  char message_key[64];
+
   if ((deferred == NULL) || (deferred->call_id <= 0LL)) {
     return;
   }
-  strappy_responses_emit_call_ledger_changed(
-    deferred->call_id,
-    prompt_group_key,
-    "completed",
-    "api_call",
-    0,
-    deferred->status_started_ms,
-    deferred->status_updated_ms,
-    callback,
-    callback_data);
+  snprintf(message_key,
+           sizeof(message_key),
+           "response-call-%lld",
+           deferred->call_id);
+  memset(&event, 0, sizeof(event));
+  event.type = STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED;
+  event.prompt_group_key = prompt_group_key;
+  event.actor = "harness";
+  event.kind = "response_tool_outputs";
+  event.message_key = message_key;
+  event.render_role = "harness";
+  event.status_kind = "tool_outputs";
+  event.coalesce_with_next_ledger_change =
+    coalesce_with_next_ledger_change ? 1 : 0;
+  if (callback != NULL) {
+    (void)callback(&event, callback_data);
+  }
   strappy_responses_deferred_call_event_init(deferred);
 }
 
@@ -2173,19 +2187,24 @@ static void strappy_responses_call_did_begin(
 {
   long long now_ms;
 
+  /* The continuation request is durable now. Append it with the preceding
+   * tool outputs and refresh the completed round in the same UI batch. */
+  strappy_responses_flush_deferred_call_event(deferred,
+                                               prompt_group_key,
+                                               0,
+                                               callback,
+                                               callback_data);
   now_ms = strappy_responses_now_ms();
   strappy_responses_emit_call_ledger_changed(call_id,
                                              prompt_group_key,
                                              "running",
                                              "api_call",
                                              0,
+                                             0,
                                              now_ms,
                                              now_ms,
                                              callback,
                                              callback_data);
-  /* The new request notification exposes every committed timeline row since
-   * the consumer's cursor, including a deferred response and wall duration. */
-  strappy_responses_deferred_call_event_init(deferred);
 }
 
 static void strappy_responses_call_did_finish(
@@ -2235,6 +2254,17 @@ static void strappy_responses_call_did_finish(
     deferred->call_id = call_id;
     deferred->status_started_ms = status_started_ms;
     deferred->status_updated_ms = status_updated_ms;
+    strappy_responses_emit_call_ledger_changed(
+      call_id,
+      prompt_group_key,
+      state,
+      "api_call",
+      1,
+      0,
+      status_started_ms,
+      status_updated_ms,
+      callback,
+      callback_data);
     return;
   }
 
@@ -2243,6 +2273,7 @@ static void strappy_responses_call_did_finish(
     prompt_group_key,
     state,
     (strcmp(state, "completed") == 0) ? "api_call" : "api_error",
+    0,
     is_terminal,
     status_started_ms,
     status_updated_ms,
@@ -3282,6 +3313,7 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
 
   strappy_responses_flush_deferred_call_event(&deferred_call_event,
                                                prompt_group_key,
+                                               0,
                                                callback,
                                                callback_data);
   free(final_text);
