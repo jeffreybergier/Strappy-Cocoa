@@ -2484,6 +2484,26 @@ static int strappy_db_semantic_save_models(const char *db_path,
       error_out);
   }
   if (ok) {
+    ok = strappy_db_exec(
+      db,
+      "INSERT OR IGNORE INTO model_preferences "
+      "(model_id, allowed, updated_at_ms) SELECT "
+      STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL ", 1, "
+      "CAST(strftime('%s','now') AS INTEGER) * 1000;",
+      "Could not whitelist default model",
+      error_out);
+  }
+  if (ok) {
+    ok = strappy_db_exec(
+      db,
+      "UPDATE model_preferences SET allowed = 1, "
+      "updated_at_ms = CAST(strftime('%s','now') AS INTEGER) * 1000 "
+      "WHERE model_id = " STRAPPY_DB_DEFAULT_OPENROUTER_MODEL_SQL
+      " AND allowed <> 1;",
+      "Could not restore default model whitelist",
+      error_out);
+  }
+  if (ok) {
     ok = strappy_db_exec(db, "COMMIT;", "Could not commit model refresh",
                          error_out);
   } else {

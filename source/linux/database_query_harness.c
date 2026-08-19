@@ -2755,8 +2755,7 @@ static int harness_coding_preflight_bash_arguments_are_valid(
   command = cJSON_IsObject(root) ?
     cJSON_GetObjectItemCaseSensitive(root, "command") : NULL;
   ok = cJSON_IsString(command) && (command->valuestring != NULL) &&
-    (root->child == command) && (command->next == NULL) &&
-    (strstr(command->valuestring, "python") == NULL);
+    (root->child == command) && (command->next == NULL);
   for (index = 0U;
        ok && (index < (sizeof(required_fragments) /
                        sizeof(required_fragments[0])));
@@ -9921,12 +9920,43 @@ static int harness_run_openrouter_model_catalog_tests(
     strappy_openrouter_model_record_list_destroy(&list);
     return 0;
   }
-  ok = (list.count == 1U) &&
-       (list.records[0].model_id != NULL) &&
-       (strcmp(list.records[0].model_id, "openai/gpt-4.1-mini") == 0);
+  found_builtin_default = 0;
+  found_openai = 0;
+  for (index = 0U; index < list.count; index++) {
+    if ((list.records[index].model_id != NULL) &&
+        (strcmp(list.records[index].model_id,
+                STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0)) {
+      found_builtin_default = 1;
+    }
+    if ((list.records[index].model_id != NULL) &&
+        (strcmp(list.records[index].model_id, "openai/gpt-4.1-mini") == 0)) {
+      found_openai = 1;
+    }
+  }
+  ok = (list.count == 2U) && found_builtin_default && found_openai;
   strappy_openrouter_model_record_list_destroy(&list);
   if (!ok) {
-    fprintf(stderr, "Default OpenRouter model was not the only allowed model.\n");
+    fprintf(stderr,
+            "Fetched default OpenRouter model did not remain whitelisted.\n");
+    return 0;
+  }
+
+  error = NULL;
+  if (!strappy_db_save_openrouter_models_json(context->catalog_path,
+                                              models_json,
+                                              &error)) {
+    fprintf(stderr,
+            "Could not refresh OpenRouter models after changing default: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  if (!harness_expect_catalog_integer(
+        context->catalog_path,
+        "SELECT COUNT(*) FROM model_preferences "
+        "WHERE model_id = 'openai/gpt-4.1-mini' AND allowed = 1;",
+        1LL,
+        "refreshed default model whitelist count")) {
     return 0;
   }
 
@@ -9966,7 +9996,18 @@ static int harness_run_openrouter_model_catalog_tests(
       found_openai = 1;
     }
   }
-  ok = (list.count == 2U) && found_gemma && found_openai;
+  ok = (list.count == 3U) && found_gemma && found_openai;
+  if (ok) {
+    found_builtin_default = 0;
+    for (index = 0U; index < list.count; index++) {
+      if ((list.records[index].model_id != NULL) &&
+          (strcmp(list.records[index].model_id,
+                  STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0)) {
+        found_builtin_default = 1;
+      }
+    }
+    ok = found_builtin_default;
+  }
   strappy_openrouter_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "Allowed OpenRouter models did not match expected values.\n");

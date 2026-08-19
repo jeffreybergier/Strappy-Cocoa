@@ -10,7 +10,7 @@ extern "C" {
 #define STRAPPY_CONFIG_DEFAULT_ENV_PATH ".env"
 #define STRAPPY_CONFIG_DEFAULT_API_ENDPOINT \
   "https://openrouter.ai/api/v1/responses"
-#define STRAPPY_CONFIG_DEFAULT_API_MODEL "z-ai/glm-5.2"
+#define STRAPPY_CONFIG_DEFAULT_API_MODEL "~deepseek/deepseek-v4-flash-latest"
 
 typedef enum strappy_web_provider {
   STRAPPY_WEB_PROVIDER_NONE = 0,
