@@ -1,30 +1,11 @@
 #import "StrappyPreferencesModelWhitelistTableViewController.h"
 
-#import "AIFontAwesome.h"
 #import "StrappyAppearance.h"
 #import "StrappyModelCellFormatter.h"
 #import "StrappySession.h"
 
 static NSString * const kStrappyModelSearchTextKey =
   @"_strappy_model_search_text";
-static const CGFloat kStrappyModelDefaultIconCanvasSize = 24.0f;
-static const CGFloat kStrappyModelDefaultIconSize = 20.0f;
-
-static UIImage *StrappyModelDefaultIconImage(void)
-{
-  static UIImage *image = nil;
-
-  if (image == nil) {
-    image = [AIFontAwesome imageForIcon:AIFACircleCheck
-                               style:AIFontAwesomeStyleSolid
-                            iconSize:kStrappyModelDefaultIconSize
-                          canvasSize:kStrappyModelDefaultIconCanvasSize
-                                  color:[UIColor blackColor]
-                                  scale:0.0f];
-  }
-  return image;
-}
-
 static NSString *StrappyStringForModelRow(NSDictionary *row, NSString *key)
 {
   NSString *value;
@@ -341,14 +322,9 @@ static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
 
 - (void)configureCell:(UITableViewCell *)cell withRow:(NSDictionary *)row
 {
-  BOOL defaultModel;
-
-  defaultModel = [self modelRowIsDefault:row];
-
   [[cell textLabel] setText:StrappyModelDisplayNameForRow(row)];
   [[cell detailTextLabel] setText:StrappyModelCellDetailText(row)];
-  [[cell imageView] setContentMode:UIViewContentModeCenter];
-  [[cell imageView] setImage:defaultModel ? StrappyModelDefaultIconImage() : nil];
+  [[cell imageView] setImage:nil];
   [cell setAccessoryType:[self allowedValueForModelRow:row]
     ? UITableViewCellAccessoryCheckmark
     : UITableViewCellAccessoryNone];

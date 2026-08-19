@@ -50,15 +50,6 @@ static NSString *StrappyPreferencesErrorMessage(NSError *error,
     NSLocalizedString(@"The request failed.", nil);
 }
 
-static NSImage *StrappyDefaultModelIndicatorImage(CGFloat scale)
-{
-  return [AIFontAwesome imageForIcon:AIFACircleCheck
-                               style:AIFontAwesomeStyleSolid
-                            iconSize:12.0
-                          canvasSize:16.0
-                               scale:scale];
-}
-
 static NSString *StrappyByteCountString(NSNumber *sizeNumber)
 {
   unsigned long long size;
@@ -2377,11 +2368,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     if ([identifier isEqualToString:@"model_allowed"]) {
       return [self allowedValueForModelRow:model];
     }
-    if ([identifier isEqualToString:@"model_default"]) {
-      return [self modelRowIsDefault:model] ?
-        StrappyDefaultModelIndicatorImage(
-          [[self window] XP_backingScaleFactor]) : nil;
-    }
     if ([identifier isEqualToString:@"model_name"]) {
       return StrappyModelDisplayNameForRow(model);
     }
@@ -2484,10 +2470,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
         return NSLocalizedString(@"Default model is always allowed.", nil);
       }
       return @"";
-    }
-    if ([identifier isEqualToString:@"model_default"]) {
-      return [self modelRowIsDefault:model] ?
-        NSLocalizedString(@"Used for new chats and Database Study.", nil) : @"";
     }
     if ([identifier isEqualToString:@"model_name"]) {
       NSString *description;
