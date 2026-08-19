@@ -1,6 +1,7 @@
 #import "StrappyAuthentication.h"
 
 #import "StrappyKeychain.h"
+#import "StrappySession.h"
 
 #include "strappy_core.h"
 #include "strappy_openai_oauth.h"
@@ -21,6 +22,8 @@ typedef struct StrappyAuthenticationCancellationContext {
 } StrappyAuthenticationCancellationContext;
 
 @interface StrappyAuthentication ()
+- (id)initWithProviderAccountIdentifier:(NSString *)providerAccountIdentifier;
+- (NSString *)designatedProviderAccountIdentifier;
 - (BOOL)shouldCancelOperationWithGeneration:(NSUInteger)generation;
 - (void)runDeviceLogin:(NSNumber *)generationNumber;
 - (void)runCredentialRefresh:(NSDictionary *)operation;
@@ -78,16 +81,49 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
 
 @implementation StrappyAuthentication
 
+- (NSString *)designatedProviderAccountIdentifier
+{
+  return ([providerAccountIdentifier_ length] > 0U) ?
+    providerAccountIdentifier_ : [StrappySession
+    designatedProviderAccountIdentifierForProviderIdentifier:
+      @"openai_chatgpt"
+    error:NULL];
+}
+
 + (StrappyAuthentication *)sharedAuthentication
 {
-  static StrappyAuthentication *instance = nil;
+  NSString *providerAccountIdentifier;
 
+  providerAccountIdentifier = [StrappySession
+    designatedProviderAccountIdentifierForProviderIdentifier:
+      @"openai_chatgpt"
+    error:NULL];
+  return [self authenticationForProviderAccountIdentifier:
+    providerAccountIdentifier];
+}
+
++ (StrappyAuthentication *)authenticationForProviderAccountIdentifier:
+  (NSString *)providerAccountIdentifier
+{
+  static NSMutableDictionary *contexts = nil;
+  StrappyAuthentication *context;
+
+  if ([providerAccountIdentifier length] == 0U) {
+    return nil;
+  }
   @synchronized(self) {
-    if (instance == nil) {
-      instance = [[StrappyAuthentication alloc] init];
+    if (contexts == nil) {
+      contexts = [[NSMutableDictionary alloc] init];
+    }
+    context = [contexts objectForKey:providerAccountIdentifier];
+    if (context == nil) {
+      context = [[[StrappyAuthentication alloc]
+        initWithProviderAccountIdentifier:providerAccountIdentifier]
+        autorelease];
+      [contexts setObject:context forKey:providerAccountIdentifier];
     }
   }
-  return instance;
+  return context;
 }
 
 + (BOOL)isChatGPTProviderEnabled
@@ -97,18 +133,29 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
 
 - (id)init
 {
+  return [self initWithProviderAccountIdentifier:[StrappySession
+    designatedProviderAccountIdentifierForProviderIdentifier:
+      @"openai_chatgpt"
+    error:NULL]];
+}
+
+- (id)initWithProviderAccountIdentifier:(NSString *)providerAccountIdentifier
+{
   NSString *accountIdentifier;
   StrappyKeychain *keychain;
   BOOL loaded;
 
   if ((self = [super init])) {
+    providerAccountIdentifier_ = [providerAccountIdentifier copy];
     accountIdentifier = nil;
     keychain = [StrappyKeychain sharedKeychain];
     @synchronized(keychain) {
       loaded = [keychain loadChatGPTAccessToken:NULL
                                       refreshToken:NULL
                                  accountIdentifier:&accountIdentifier
-                              expiresAtMilliseconds:NULL];
+                              expiresAtMilliseconds:NULL
+                         providerAccountIdentifier:
+                           providerAccountIdentifier];
     }
     if (loaded) {
       state_ = StrappyAuthenticationStateSignedIn;
@@ -187,8 +234,19 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
   BOOL stored;
 
   keychain = [StrappyKeychain sharedKeychain];
-  @synchronized(keychain) {
-    stored = [keychain hasChatGPTCredentials];
+  {
+    NSString *providerAccountIdentifier;
+    NSObject *credentialLock;
+
+    providerAccountIdentifier = [self designatedProviderAccountIdentifier];
+    credentialLock = [keychain
+      credentialLockForProviderIdentifier:@"openai_chatgpt"
+      providerAccountIdentifier:providerAccountIdentifier];
+  @synchronized(credentialLock) {
+    stored = [keychain
+      hasChatGPTCredentialsForProviderAccountIdentifier:
+        providerAccountIdentifier];
+  }
   }
   return stored;
 }
@@ -285,9 +343,11 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
   BOOL credentialSaved;
   NSString *savedAccountIdentifier;
   BOOL stateChanged;
+  NSString *providerAccountIdentifier;
 
   pool = [[NSAutoreleasePool alloc] init];
   generation = [generationNumber unsignedIntegerValue];
+  providerAccountIdentifier = [self designatedProviderAccountIdentifier];
   cancellationContext.authentication = self;
   cancellationContext.generation = generation;
   strappy_openai_oauth_default_configuration(&configuration);
@@ -348,13 +408,16 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
     keychain = [StrappyKeychain sharedKeychain];
     if ((accessToken != nil) && (refreshToken != nil) &&
         (accountIdentifier != nil)) {
-      @synchronized(keychain) {
+      @synchronized([keychain
+        credentialLockForProviderIdentifier:@"openai_chatgpt"
+        providerAccountIdentifier:providerAccountIdentifier]) {
         if (![self shouldCancelOperationWithGeneration:generation]) {
           credentialSaved = [keychain
             saveChatGPTAccessToken:accessToken
                         refreshToken:refreshToken
                    accountIdentifier:accountIdentifier
-                expiresAtMilliseconds:credentials.expires_at_milliseconds];
+                expiresAtMilliseconds:credentials.expires_at_milliseconds
+           providerAccountIdentifier:providerAccountIdentifier];
         }
       }
       if (credentialSaved) {
@@ -409,6 +472,7 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
   long long nowMilliseconds;
   NSUInteger generation;
   BOOL loaded;
+  NSString *providerAccountIdentifier;
 
   if (![[self class] isChatGPTProviderEnabled]) {
     return NO;
@@ -416,11 +480,15 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
   accountIdentifier = nil;
   expiresAtMilliseconds = 0LL;
   keychain = [StrappyKeychain sharedKeychain];
-  @synchronized(keychain) {
+  providerAccountIdentifier = [self designatedProviderAccountIdentifier];
+  @synchronized([keychain
+    credentialLockForProviderIdentifier:@"openai_chatgpt"
+    providerAccountIdentifier:providerAccountIdentifier]) {
     loaded = [keychain loadChatGPTAccessToken:NULL
                                     refreshToken:NULL
                                accountIdentifier:&accountIdentifier
-                            expiresAtMilliseconds:&expiresAtMilliseconds];
+                            expiresAtMilliseconds:&expiresAtMilliseconds
+                       providerAccountIdentifier:providerAccountIdentifier];
   }
   if (!loaded) {
     @synchronized(self) {
@@ -466,6 +534,8 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
                            [NSNumber numberWithUnsignedInteger:generation],
                              @"generation",
                            accountIdentifier, @"account_identifier",
+                           providerAccountIdentifier,
+                             @"provider_account_identifier",
                            nil]];
   return YES;
 }
@@ -475,6 +545,7 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
   NSAutoreleasePool *pool;
   NSUInteger generation;
   NSString *previousAccountIdentifier;
+  NSString *providerAccountIdentifier;
   StrappyAuthenticationCancellationContext cancellationContext;
   strappy_openai_oauth_configuration configuration;
   strappy_openai_oauth_credentials credentials;
@@ -491,6 +562,8 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
   pool = [[NSAutoreleasePool alloc] init];
   generation = [[operation objectForKey:@"generation"] unsignedIntegerValue];
   previousAccountIdentifier = [operation objectForKey:@"account_identifier"];
+  providerAccountIdentifier = [operation
+    objectForKey:@"provider_account_identifier"];
   cancellationContext.authentication = self;
   cancellationContext.generation = generation;
   strappy_openai_oauth_default_configuration(&configuration);
@@ -506,7 +579,9 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
   /* This is the same lock used by the prompt credential callback. It makes
    * refresh-token rotation single-flight across lifecycle refreshes, proactive
    * prompt refreshes, and the one-time 401 path. */
-  @synchronized(keychain) {
+  @synchronized([keychain
+    credentialLockForProviderIdentifier:@"openai_chatgpt"
+    providerAccountIdentifier:providerAccountIdentifier]) {
     NSString *currentRefreshToken;
     NSString *currentAccountIdentifier;
 
@@ -515,7 +590,8 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
     if (![keychain loadChatGPTAccessToken:NULL
                                 refreshToken:&currentRefreshToken
                            accountIdentifier:&currentAccountIdentifier
-                        expiresAtMilliseconds:NULL]) {
+                        expiresAtMilliseconds:NULL
+                   providerAccountIdentifier:providerAccountIdentifier]) {
       strappy_set_error(&error,
                         "Stored ChatGPT credentials are unavailable.");
     } else if (![currentAccountIdentifier
@@ -544,7 +620,8 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
             saveChatGPTAccessToken:accessToken
                         refreshToken:nextRefreshToken
                    accountIdentifier:accountIdentifier
-                expiresAtMilliseconds:credentials.expires_at_milliseconds];
+                expiresAtMilliseconds:credentials.expires_at_milliseconds
+           providerAccountIdentifier:providerAccountIdentifier];
         }
       }
     }
@@ -587,6 +664,7 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
 - (BOOL)signOutChatGPT
 {
   BOOL deleted;
+  NSString *providerAccountIdentifier;
 
   @synchronized(self) {
     cancellationRequested_ = YES;
@@ -594,8 +672,13 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
     StrappyAuthenticationReplaceString(&verificationURL_, nil);
     StrappyAuthenticationReplaceString(&userCode_, nil);
   }
-  @synchronized([StrappyKeychain sharedKeychain]) {
-    deleted = [[StrappyKeychain sharedKeychain] deleteChatGPTCredentials];
+  providerAccountIdentifier = [self designatedProviderAccountIdentifier];
+  @synchronized([[StrappyKeychain sharedKeychain]
+    credentialLockForProviderIdentifier:@"openai_chatgpt"
+    providerAccountIdentifier:providerAccountIdentifier]) {
+    deleted = [[StrappyKeychain sharedKeychain]
+      deleteChatGPTCredentialsForProviderAccountIdentifier:
+        providerAccountIdentifier];
   }
   @synchronized(self) {
     StrappyAuthenticationReplaceString(&accountIdentifier_, nil);
@@ -619,6 +702,7 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
   [verificationURL_ release];
   [userCode_ release];
   [accountIdentifier_ release];
+  [providerAccountIdentifier_ release];
   [errorMessage_ release];
   [super dealloc];
 }

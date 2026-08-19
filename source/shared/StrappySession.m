@@ -5,6 +5,7 @@
 #import "strappy_model_catalog.h"
 #import "strappy_openai_oauth.h"
 #import "strappy_prompt.h"
+#import "strappy_provider.h"
 #import "strappy_responses.h"
 #import "strappy_session.h"
 #import "strappy_study.h"
@@ -76,6 +77,8 @@ static long long StrappySessionNowMilliseconds(void)
 }
 
 static int StrappySessionCopyChatGPTCredentials(
+  const char *providerID,
+  const char *providerAccountID,
   int forceRefresh,
   char **accessTokenOut,
   char **accountIdentifierOut,
@@ -93,8 +96,10 @@ static int StrappySessionCopyChatGPTCredentials(
   int ok;
 
   (void)userData;
-  if ((accessTokenOut == NULL) || (accountIdentifierOut == NULL)) {
-    strappy_set_error(errorOut, "ChatGPT credential outputs are missing.");
+  if ((providerID == NULL) || (providerID[0] == '\0') ||
+      (providerAccountID == NULL) || (providerAccountID[0] == '\0') ||
+      (accessTokenOut == NULL) || (accountIdentifierOut == NULL)) {
+    strappy_set_error(errorOut, "Account credential inputs are missing.");
     return 0;
   }
   *accessTokenOut = NULL;
@@ -106,11 +111,48 @@ static int StrappySessionCopyChatGPTCredentials(
   expiresAtMilliseconds = 0LL;
   ok = 0;
 
-  @synchronized(keychain) {
+  if (strcmp(providerID, STRAPPY_PROVIDER_OPENAI_CHATGPT) != 0) {
+    NSString *providerIdentifier;
+    NSString *providerAccountIdentifier;
+    NSString *bearerToken;
+    NSObject *credentialLock;
+
+    providerIdentifier = [NSString stringWithUTF8String:providerID];
+    providerAccountIdentifier = [NSString stringWithUTF8String:
+      providerAccountID];
+    bearerToken = nil;
+    credentialLock = [keychain
+      credentialLockForProviderIdentifier:providerIdentifier
+      providerAccountIdentifier:providerAccountIdentifier];
+    @synchronized(credentialLock) {
+      if ([keychain loadBearerToken:&bearerToken
+              forProviderIdentifier:providerIdentifier
+          providerAccountIdentifier:providerAccountIdentifier]) {
+        *accessTokenOut = strappy_string_duplicate([bearerToken UTF8String]);
+        if (*accessTokenOut != NULL) {
+          return 1;
+        }
+      }
+    }
+    strappy_set_error(errorOut, "The selected account has no bearer credential.");
+    return 0;
+  }
+
+  {
+    NSString *providerAccountIdentifier;
+    NSObject *credentialLock;
+
+    providerAccountIdentifier = [NSString stringWithUTF8String:
+      providerAccountID];
+    credentialLock = [keychain
+      credentialLockForProviderIdentifier:@"openai_chatgpt"
+      providerAccountIdentifier:providerAccountIdentifier];
+  @synchronized(credentialLock) {
     if (![keychain loadChatGPTAccessToken:&accessToken
                               refreshToken:&refreshToken
                          accountIdentifier:&accountIdentifier
-                      expiresAtMilliseconds:&expiresAtMilliseconds]) {
+                      expiresAtMilliseconds:&expiresAtMilliseconds
+                 providerAccountIdentifier:providerAccountIdentifier]) {
       strappy_set_error(errorOut, "Sign in to ChatGPT before sending a prompt.");
     } else {
       credentialReady = YES;
@@ -151,7 +193,8 @@ static int StrappySessionCopyChatGPTCredentials(
                        refreshToken:nextRefreshToken
                        accountIdentifier:nextAccountIdentifier
                        expiresAtMilliseconds:
-                         credentials.expires_at_milliseconds]) {
+                         credentials.expires_at_milliseconds
+                  providerAccountIdentifier:providerAccountIdentifier]) {
             strappy_set_error(
               errorOut,
               "The Keychain refused the refreshed ChatGPT credential.");
@@ -181,6 +224,7 @@ static int StrappySessionCopyChatGPTCredentials(
         }
       }
     }
+  }
   }
   return ok;
 }
@@ -1302,7 +1346,7 @@ static BOOL StrappySessionRecordFromOptions(
     [NSException raise:NSInvalidArgumentException
                 format:@"%@", (message ? message : @"Could not bootstrap Strappy.")];
   }
-  strappy_responses_set_chatgpt_credentials_callback(
+  strappy_responses_set_provider_credentials_callback(
     StrappySessionCopyChatGPTCredentials,
     NULL);
   (void)[StrappySession assistantSetCatalog];
@@ -1949,6 +1993,75 @@ static BOOL StrappySessionRecordFromOptions(
                         "Bundled model catalog resource is missing.");
     }
   }
+  if (ok) {
+    static const char *providerIDs[] = {
+      STRAPPY_PROVIDER_OPENROUTER,
+      STRAPPY_PROVIDER_OPENAI_CHATGPT
+    };
+    size_t providerIndex;
+
+    for (providerIndex = 0U;
+         ok && (providerIndex < (sizeof(providerIDs) / sizeof(providerIDs[0])));
+         providerIndex++) {
+      char *providerAccountID;
+      NSString *providerAccountIdentifier;
+      StrappyKeychain *keychain;
+      NSObject *credentialLock;
+
+      providerAccountID = NULL;
+      if (!strappy_db_get_designated_provider_account(
+            [databasePath fileSystemRepresentation],
+            providerIDs[providerIndex],
+            &providerAccountID,
+            &strappyError)) {
+        ok = 0;
+        break;
+      }
+      providerAccountIdentifier = [NSString stringWithUTF8String:
+        providerAccountID];
+      keychain = [StrappyKeychain sharedKeychain];
+      credentialLock = [keychain
+        credentialLockForProviderIdentifier:[NSString stringWithUTF8String:
+          providerIDs[providerIndex]]
+        providerAccountIdentifier:providerAccountIdentifier];
+      @synchronized(credentialLock) {
+        if (strcmp(providerIDs[providerIndex], STRAPPY_PROVIDER_OPENROUTER) == 0) {
+          NSString *legacyEndpoint;
+          strappy_provider_account_record account;
+
+          legacyEndpoint = nil;
+          ok = [keychain
+            migrateLegacyOpenRouterCredentialToProviderAccountIdentifier:
+              providerAccountIdentifier
+            endpoint:&legacyEndpoint] ? 1 : 0;
+          if (ok && ([legacyEndpoint length] > 0U)) {
+            strappy_provider_account_record_init(&account);
+            ok = strappy_db_get_provider_account(
+              [databasePath fileSystemRepresentation],
+              providerAccountID,
+              &account,
+              &strappyError) &&
+              strappy_db_update_provider_account(
+                [databasePath fileSystemRepresentation],
+                providerAccountID,
+                account.display_name,
+                [legacyEndpoint UTF8String],
+                &strappyError);
+            strappy_provider_account_record_destroy(&account);
+          }
+        } else {
+          ok = [keychain
+            migrateLegacyChatGPTCredentialToProviderAccountIdentifier:
+              providerAccountIdentifier] ? 1 : 0;
+        }
+      }
+      free(providerAccountID);
+      if (!ok && (strappyError == NULL)) {
+        strappy_set_error(&strappyError,
+                          "Could not convert the saved account credential.");
+      }
+    }
+  }
   if (!ok) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
@@ -1958,6 +2071,44 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   return YES;
+}
+
++ (NSString *)designatedProviderAccountIdentifierForProviderIdentifier:
+                (NSString *)providerIdentifier
+                                                               error:
+                (NSError **)error
+{
+  NSString *databasePath;
+  char *accountID;
+  char *strappyError;
+  NSString *result;
+
+  if (![providerIdentifier isKindOfClass:[NSString class]] ||
+      ([providerIdentifier length] == 0U)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:
+        "Provider identifier is missing."];
+    }
+    return nil;
+  }
+  databasePath = [StrappySession sessionsDatabasePath];
+  accountID = NULL;
+  strappyError = NULL;
+  if (!strappy_db_get_designated_provider_account(
+        [databasePath fileSystemRepresentation],
+        [providerIdentifier UTF8String],
+        &accountID,
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return nil;
+  }
+  result = [NSString stringWithUTF8String:accountID];
+  free(accountID);
+  strappy_free_string(strappyError);
+  return result;
 }
 
 + (NSArray *)modelCatalogFromList:(const strappy_model_record_list *)list
@@ -2523,6 +2674,7 @@ static BOOL StrappySessionRecordFromOptions(
   NSString *databasePath;
   NSString *apiEndpoint;
   NSString *apiToken;
+  NSString *providerAccountIdentifier;
   NSMutableDictionary *result;
   char *strappyError;
   int ok;
@@ -2530,12 +2682,43 @@ static BOOL StrappySessionRecordFromOptions(
   (void)ignored;
   pool = [[NSAutoreleasePool alloc] init];
   databasePath = [StrappySession sessionsDatabasePath];
-  apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
-  apiToken = [[StrappyKeychain sharedKeychain] apiToken];
+  providerAccountIdentifier = [StrappySession
+    designatedProviderAccountIdentifierForProviderIdentifier:@"openrouter"
+    error:nil];
+  apiEndpoint = nil;
+  apiToken = nil;
+  if ([providerAccountIdentifier length] > 0U) {
+    strappy_provider_account_record account;
+
+    strappy_provider_account_record_init(&account);
+    if (strappy_db_get_provider_account([databasePath fileSystemRepresentation],
+                                        [providerAccountIdentifier UTF8String],
+                                        &account,
+                                        NULL)) {
+      apiEndpoint = (account.responses_endpoint != NULL) ?
+        [NSString stringWithUTF8String:account.responses_endpoint] : nil;
+    }
+    strappy_provider_account_record_destroy(&account);
+    @synchronized([[StrappyKeychain sharedKeychain]
+      credentialLockForProviderIdentifier:@"openrouter"
+      providerAccountIdentifier:providerAccountIdentifier]) {
+      [[StrappyKeychain sharedKeychain]
+        loadBearerToken:&apiToken
+        forProviderIdentifier:@"openrouter"
+        providerAccountIdentifier:providerAccountIdentifier];
+    }
+  }
+  if ([apiEndpoint length] == 0U) {
+    apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
+  }
+  if ([apiToken length] == 0U) {
+    apiToken = [[StrappyKeychain sharedKeychain] apiToken];
+  }
   result = [[NSMutableDictionary alloc] init];
 
   strappyError = NULL;
-  ok = strappy_session_refresh_openrouter_user_models(
+  ok = strappy_model_catalog_refresh_openrouter_user_models(
+    StrappySessionOptionalCString(providerAccountIdentifier),
     StrappySessionOptionalCString(apiEndpoint),
     StrappySessionOptionalCString(apiToken),
     [databasePath UTF8String],

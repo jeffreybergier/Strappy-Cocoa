@@ -358,18 +358,18 @@ foreign-key checks pass.
 
 ### Phase 3 — Account-keyed credentials and OAuth
 
-- [ ] Add generic account-keyed Keychain operations and versioned credential
+- [x] Add generic account-keyed Keychain operations and versioned credential
   codecs per credential kind.
-- [ ] Convert the existing OpenRouter record into the designated account without
+- [x] Convert the existing OpenRouter record into the designated account without
   losing the user's saved token/endpoint during the application refactor.
-- [ ] Convert ChatGPT authentication from one global credential/state machine to
+- [x] Convert ChatGPT authentication from one global credential/state machine to
   account-keyed authentication contexts.
-- [ ] Make device login create or attach one account only after the upstream
+- [x] Make device login create or attach one account only after the upstream
   identity is known and the credential is safely stored.
-- [ ] Serialize refresh, cancellation, rotation, and sign-out per account.
-- [ ] Change request credential snapshots and safe 401 retry to require the
+- [x] Serialize refresh, cancellation, rotation, and sign-out per account.
+- [x] Change request credential snapshots and safe 401 retry to require the
   selected account ID.
-- [ ] Store independent optional bearer credentials for multiple `other`
+- [x] Store independent optional bearer credentials for multiple `other`
   accounts.
 
 Exit criterion: two OpenRouter tokens and two ChatGPT OAuth credentials can

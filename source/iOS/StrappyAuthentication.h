@@ -18,12 +18,15 @@ typedef enum StrappyAuthenticationState {
   NSString *verificationURL_;
   NSString *userCode_;
   NSString *accountIdentifier_;
+  NSString *providerAccountIdentifier_;
   NSString *errorMessage_;
   NSUInteger operationGeneration_;
   BOOL cancellationRequested_;
 }
 
 + (StrappyAuthentication *)sharedAuthentication;
++ (StrappyAuthentication *)authenticationForProviderAccountIdentifier:
+  (NSString *)providerAccountIdentifier;
 + (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath;
 + (BOOL)isChatGPTProviderEnabled;
 

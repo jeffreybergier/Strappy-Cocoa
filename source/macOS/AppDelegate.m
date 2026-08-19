@@ -66,6 +66,7 @@ static NSString *StrappyPromptCompletionNotificationBody(
     NSParameterAssert(cacert);
     [StrappySession bootstrapProcessWithCACertPath:cacert];
   }
+  (void)[StrappySession initializeSessionStoreWithError:NULL];
   [[StrappyAuthentication sharedAuthentication]
     refreshChatGPTCredentialsIfNeeded];
   [[NSNotificationCenter defaultCenter]

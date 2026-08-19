@@ -106,6 +106,10 @@ enum {
 + (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath;
 + (NSString *)sessionsDatabasePath;
 + (BOOL)initializeSessionStoreWithError:(NSError **)error;
++ (NSString *)designatedProviderAccountIdentifierForProviderIdentifier:
+                (NSString *)providerIdentifier
+                                                               error:
+                (NSError **)error;
 + (StrappySession *)createSessionWithError:(NSError **)error;
 + (NSArray *)codingWorkingDirectoryPaths;
 + (BOOL)deleteSessionWithIdentifier:(NSNumber *)sessionIdentifier

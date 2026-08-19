@@ -21,9 +21,9 @@
 #include <syslog.h>
 #include <sys/time.h>
 
-static strappy_chatgpt_credentials_callback
-  strappy_responses_chatgpt_credentials_callback = NULL;
-static void *strappy_responses_chatgpt_credentials_callback_data = NULL;
+static strappy_provider_credentials_callback
+  strappy_responses_provider_credentials_callback = NULL;
+static void *strappy_responses_provider_credentials_callback_data = NULL;
 
 static void strappy_responses_secure_free(char *value)
 {
@@ -46,8 +46,15 @@ void strappy_responses_set_chatgpt_credentials_callback(
   strappy_chatgpt_credentials_callback callback,
   void *user_data)
 {
-  strappy_responses_chatgpt_credentials_callback = callback;
-  strappy_responses_chatgpt_credentials_callback_data = user_data;
+  strappy_responses_set_provider_credentials_callback(callback, user_data);
+}
+
+void strappy_responses_set_provider_credentials_callback(
+  strappy_provider_credentials_callback callback,
+  void *user_data)
+{
+  strappy_responses_provider_credentials_callback = callback;
+  strappy_responses_provider_credentials_callback_data = user_data;
 }
 
 #define STRAPPY_RESPONSES_MAX_ATTEMPTS 3L
@@ -2034,12 +2041,14 @@ static int strappy_responses_prepare_runtime(
   }
   if (runtime->provider_definition->credential_kind ==
       STRAPPY_PROVIDER_CREDENTIAL_OAUTH_DEVICE) {
-    if ((strappy_responses_chatgpt_credentials_callback == NULL) ||
-        !strappy_responses_chatgpt_credentials_callback(
+    if ((strappy_responses_provider_credentials_callback == NULL) ||
+        !strappy_responses_provider_credentials_callback(
+          runtime->provider_id,
+          runtime->provider_account_id,
           0,
           &runtime->chatgpt_access_token,
           &runtime->chatgpt_account_id,
-          strappy_responses_chatgpt_credentials_callback_data,
+          strappy_responses_provider_credentials_callback_data,
           error_out) ||
         (runtime->chatgpt_access_token == NULL) ||
         (runtime->chatgpt_account_id == NULL)) {
@@ -2051,6 +2060,46 @@ static int strappy_responses_prepare_runtime(
       strappy_responses_runtime_destroy(runtime);
       return 0;
     }
+  } else if (strappy_responses_provider_credentials_callback != NULL) {
+    char *account_bearer_token;
+    char *unused_upstream_account_id;
+    char *credential_error;
+
+    account_bearer_token = NULL;
+    unused_upstream_account_id = NULL;
+    credential_error = NULL;
+    if (strappy_responses_provider_credentials_callback(
+          runtime->provider_id,
+          runtime->provider_account_id,
+          0,
+          &account_bearer_token,
+          &unused_upstream_account_id,
+          strappy_responses_provider_credentials_callback_data,
+          &credential_error) &&
+        (account_bearer_token != NULL)) {
+      strappy_responses_secure_free(runtime->config.api_token);
+      runtime->config.api_token = account_bearer_token;
+      account_bearer_token = NULL;
+    } else if ((runtime->provider_definition->credential_kind ==
+                STRAPPY_PROVIDER_CREDENTIAL_API_TOKEN) &&
+               ((runtime->config.api_token == NULL) ||
+                (runtime->config.api_token[0] == '\0'))) {
+      if (credential_error != NULL) {
+        strappy_set_error(error_out, credential_error);
+      } else {
+        strappy_set_error(error_out,
+                          "The selected account has no API credential.");
+      }
+      strappy_responses_secure_free(account_bearer_token);
+      strappy_responses_secure_free(unused_upstream_account_id);
+      strappy_free_string(credential_error);
+      free(assistant_set_id);
+      strappy_responses_runtime_destroy(runtime);
+      return 0;
+    }
+    strappy_responses_secure_free(account_bearer_token);
+    strappy_responses_secure_free(unused_upstream_account_id);
+    strappy_free_string(credential_error);
   }
   if (!runtime->hosted_tools_enabled) {
     runtime->config.web_provider = STRAPPY_WEB_PROVIDER_NONE;
@@ -3032,18 +3081,20 @@ static int strappy_responses_send_round(
         !http.response_event_received &&
         !forced_refresh_attempted &&
         ((attempt_index + 1L) < STRAPPY_RESPONSES_MAX_ATTEMPTS) &&
-        (strappy_responses_chatgpt_credentials_callback != NULL)) {
+        (strappy_responses_provider_credentials_callback != NULL)) {
       char *next_access_token;
       char *next_account_id;
 
       next_access_token = NULL;
       next_account_id = NULL;
       forced_refresh_attempted = 1;
-      if (strappy_responses_chatgpt_credentials_callback(
+      if (strappy_responses_provider_credentials_callback(
+            runtime->provider_id,
+            runtime->provider_account_id,
             1,
             &next_access_token,
             &next_account_id,
-            strappy_responses_chatgpt_credentials_callback_data,
+            strappy_responses_provider_credentials_callback_data,
             &credential_refresh_error) &&
           (next_access_token != NULL) && (next_account_id != NULL)) {
         strappy_responses_secure_free(runtime->chatgpt_access_token);
