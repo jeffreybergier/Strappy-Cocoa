@@ -2693,24 +2693,39 @@ static int harness_coding_preflight_bash_arguments_are_valid(
   const char *arguments_json)
 {
   static const char *required_fragments[] = {
-    "uname -a",
+    "command -v sw_vers",
+    "sw_vers -productName",
+    "sw_vers -productVersion",
+    "uname -s",
+    "uname -m",
+    "OS=%s",
+    "OS_VERSION=%s",
+    "MACHINE=%s",
     "command -v id",
     "UID=%s",
     "PWD=%s",
     "PATH=%s",
-    "=== Relevant commands ===",
-    ("for command_name in clang make git altivec-app altivec-sdk "
-     "altivec-lib ldid zip xcrun xcodebuild"),
+    "=== Core tools ===",
+    ("for command_name in clang make git ruby perl python python3 node jq "
+     "curl magick ldid zip xcrun xcodebuild"),
+    "=== Altivec ===",
+    "for command_name in altivec-sdk altivec-lib altivec-app",
     "command -v \"$command_name\"",
     "/var/altivec/share/altivec/make/ios-app.mk",
-    "command -v altivec-sdk",
-    "altivec-sdk list",
-    "altivec-sdk list exited",
     "command -v altivec-lib",
     "altivec-lib list",
     "altivec-lib list exited"
   };
   static const char *forbidden_fragments[] = {
+    "uname -a",
+    "uname -r",
+    "uname -v",
+    "uname -n",
+    "uname -i",
+    "uname -p",
+    "sw_vers -buildVersion",
+    "=== altivec-sdk list ===",
+    "altivec-sdk list exited",
     "SystemVersion.plist",
     "dpkg --print-architecture",
     "HOME=$HOME",
