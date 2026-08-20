@@ -19,6 +19,7 @@
   NSView       *bezelView_;
   NSScrollView *scrollView_;
   NSTextView   *textView_;
+  NSSegmentedControl *sidebarSegmented_;
   NSSegmentedControl *actionSegmented_;
   id<PromptSendViewControllerDelegate> delegate_;
   BOOL          enabled_;
@@ -26,6 +27,8 @@
   BOOL          expanded_;
   BOOL          sending_;
   BOOL          cancellationRequested_;
+  BOOL          sidebarStateKnown_;
+  BOOL          sidebarCollapsed_;
 }
 
 - (void)setDelegate:(id<PromptSendViewControllerDelegate>)delegate;

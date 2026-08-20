@@ -147,6 +147,8 @@ enum {
 + (BOOL)resetDatabaseStudyWithError:(NSError **)error;
 + (StrappySession *)beginDatabaseStudyWithError:(NSError **)error;
 + (NSString *)webViewBatchedJavaScriptForJavaScript:(NSString *)javaScript;
++ (NSString *)webViewEmptyMessagesPageHTMLWithPalette:
+    (StrappyWebViewPalette)palette;
 
 - (id)initWithSessionIdentifier:(NSNumber *)sessionIdentifier
                         summary:(NSDictionary *)summary;

@@ -207,7 +207,10 @@ ssh \
 
 1. Download `Strappy-X.Y.Z-macOS.zip` from
 [Releases](https://github.com/jeffreybergier/Strappy-Cocoa/releases)
-1. Unzip it and launch it (as God intended)
+1. Unzip it
+1. Optional: If your Mac has Gatekeeper and you don't want to fight with it,
+   run `xattr -d com.apple.quarantine ~/Downloads/Strappy-X.Y.Z-macOS.zip`
+1. Launch it (as God intended)
 
 ### First launch
 

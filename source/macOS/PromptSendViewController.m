@@ -7,6 +7,7 @@ static const CGFloat kPromptSendHeightExpanded = 108.0;
 static const CGFloat kPromptSendPad = 4.0;
 static const CGFloat kPromptActionButtonHeight = 24.0;
 static const CGFloat kPromptActionGlyphSize = 14.0;
+static const CGFloat kPromptActionSmallGlyphSize = 13.0;
 static const CGFloat kPromptActionGlyphCanvasSize = 20.0;
 
 enum {
@@ -56,8 +57,11 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 - (void)updateActionControls;
 - (void)updateSendButtonAppearance;
 - (void)rebuildActionSegmentIcons;
+- (void)updateSidebarButtonAppearance;
 - (void)barDidMoveToWindow:(id)sender;
 - (void)barViewFrameDidChange:(NSNotification *)notification;
+- (void)sidebarSplitViewDidResize:(NSNotification *)notification;
+- (void)sidebarSegmentClicked:(id)sender;
 - (void)actionSegmentClicked:(id)sender;
 - (void)sendButtonClicked:(id)sender;
 @end
@@ -138,6 +142,17 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   [textView_ setDelegate:self];
   [scrollView_ setDocumentView:textView_];
 
+  sidebarSegmented_ = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
+  [sidebarSegmented_ setSegmentCount:1];
+  [[sidebarSegmented_ cell]
+    setTrackingMode:NSSegmentSwitchTrackingMomentary];
+  [sidebarSegmented_ XP_setToolbarSegmentStyle];
+  [sidebarSegmented_ setTarget:self];
+  [sidebarSegmented_ setAction:@selector(sidebarSegmentClicked:)];
+  [sidebarSegmented_
+    setAutoresizingMask:NSViewMaxXMargin | NSViewMaxYMargin];
+  [barView_ addSubview:sidebarSegmented_];
+
   /* Match ENIL's compact composer action control: icon-only Close and
    * Inspector segments followed by an icon-and-label Send segment. Momentary
    * tracking makes all three segments act like ordinary push buttons. The
@@ -161,9 +176,15 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
          selector:@selector(barViewFrameDidChange:)
              name:NSViewFrameDidChangeNotification
            object:barView_];
+  [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(sidebarSplitViewDidResize:)
+             name:NSSplitViewDidResizeSubviewsNotification
+           object:nil];
 
   [self setEnabled:enabled_];
   [self updateActionControls];
+  [self updateSidebarButtonAppearance];
 }
 
 - (void)viewDidLayout
@@ -178,7 +199,9 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   NSSize actionSize;
   CGFloat actionWidth;
   CGFloat actionHeight;
+  CGFloat sidebarWidth;
   CGFloat inputWidth;
+  CGFloat inputX;
   CGFloat actionX;
 
   bounds = [barView_ bounds];
@@ -188,17 +211,24 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   if (actionHeight <= 0.0) {
     actionHeight = kPromptActionButtonHeight;
   }
-  inputWidth = bounds.size.width - actionWidth - (kPromptSendPad * 3.0);
+  sidebarWidth = actionHeight;
+  inputWidth = bounds.size.width - sidebarWidth - actionWidth -
+    (kPromptSendPad * 5.0);
   if (inputWidth < 0.0) {
     inputWidth = 0.0;
   }
 
+  [sidebarSegmented_ setFrame:NSMakeRect(kPromptSendPad,
+                                         kPromptSendPad,
+                                         sidebarWidth,
+                                         actionHeight)];
+  inputX = kPromptSendPad + sidebarWidth + kPromptSendPad;
   actionX = NSMaxX(bounds) - kPromptSendPad - actionWidth;
   [actionSegmented_ setFrame:NSMakeRect(actionX,
                                         kPromptSendPad,
                                         actionWidth,
                                         actionHeight)];
-  [bezelView_ setFrame:NSMakeRect(kPromptSendPad,
+  [bezelView_ setFrame:NSMakeRect(inputX,
                                   kPromptSendPad,
                                   inputWidth,
                                   bounds.size.height - (kPromptSendPad * 2.0))];
@@ -235,6 +265,7 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 - (void)rebuildActionSegmentIcons
 {
   CGFloat scale;
+  CGFloat sendIconSize;
   AIFontAwesomeIcon sendIcon;
   AIFontAwesomeStyle sendStyle;
 
@@ -257,18 +288,20 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   [actionSegmented_
     setImage:[AIFontAwesome imageForIcon:AIFAGear
                                    style:AIFontAwesomeStyleSolid
-                                iconSize:kPromptActionGlyphSize
+                                iconSize:kPromptActionSmallGlyphSize
                               canvasSize:kPromptActionGlyphCanvasSize
                                    scale:scale]
   forSegment:kPromptActionSegmentInspector];
 
   sendIcon = sending_ ? AIFAStop : AIFAPaperPlane;
+  sendIconSize = sending_ ?
+    kPromptActionGlyphSize : kPromptActionSmallGlyphSize;
   sendStyle = sending_ ?
     AIFontAwesomeStyleSolid : AIFontAwesomeStyleRegular;
   [actionSegmented_
     setImage:[AIFontAwesome imageForIcon:sendIcon
                                    style:sendStyle
-                                iconSize:kPromptActionGlyphSize
+                                iconSize:sendIconSize
                               canvasSize:kPromptActionGlyphCanvasSize
                                    scale:scale]
   forSegment:kPromptActionSegmentSend];
@@ -288,7 +321,62 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
 - (void)barDidMoveToWindow:(id)sender
 {
   (void)sender;
+  sidebarStateKnown_ = NO;
+  [self updateSidebarButtonAppearance];
   [self rebuildActionSegmentIcons];
+}
+
+- (void)updateSidebarButtonAppearance
+{
+  AICookieCutterWindowController *windowController;
+  AIFontAwesomeIcon icon;
+  CGFloat scale;
+  BOOL collapsed;
+
+  if (sidebarSegmented_ == nil) {
+    return;
+  }
+
+  windowController = (AICookieCutterWindowController *)
+    [[barView_ window] windowController];
+  collapsed = (windowController != nil) ?
+    [windowController isSidebarCollapsed] : NO;
+  if (sidebarStateKnown_ && (sidebarCollapsed_ == collapsed)) {
+    return;
+  }
+  sidebarStateKnown_ = YES;
+  sidebarCollapsed_ = collapsed;
+
+  scale = [[barView_ window] XP_backingScaleFactor];
+  if (scale < 1.0) {
+    scale = 1.0;
+  }
+
+  /* These directional glyphs are the crisp raster equivalents of rotating
+   * chevron-down 90 degrees while open and 270 degrees while collapsed. */
+  icon = collapsed ? AIFAChevronRight : AIFAChevronLeft;
+  [sidebarSegmented_ setImage:[AIFontAwesome imageForIcon:icon
+                                                   style:AIFontAwesomeStyleSolid
+                                                iconSize:kPromptActionSmallGlyphSize
+                                              canvasSize:kPromptActionGlyphCanvasSize
+                                                   scale:scale]
+                        forSegment:0];
+  [sidebarSegmented_ setLabel:@"" forSegment:0];
+  [sidebarSegmented_ setToolTip:NSLocalizedString(
+    collapsed ? @"Show Sidebar" : @"Hide Sidebar", nil)];
+}
+
+- (void)sidebarSplitViewDidResize:(NSNotification *)notification
+{
+  (void)notification;
+  [self updateSidebarButtonAppearance];
+}
+
+- (void)sidebarSegmentClicked:(id)sender
+{
+  [[self nextResponder] tryToPerform:@selector(toggleSidebar:) with:sender];
+  sidebarStateKnown_ = NO;
+  [self updateSidebarButtonAppearance];
 }
 
 - (void)updateActionControls
@@ -494,6 +582,7 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [scrollView_ release];
   [textView_ release];
+  [sidebarSegmented_ release];
   [actionSegmented_ release];
   [super dealloc];
 }

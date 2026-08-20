@@ -550,18 +550,20 @@ static BOOL StrappyContextRoundActionValues(
   if (!StrappyEnsureDirectory(htmlDirectoryPath_)) {
     return nil;
   }
-  if (session_ == nil) {
-    return nil;
-  }
 
   errorText = ([statusText_ length] > 0U) ? statusText_ : nil;
   timelineCursor = nil;
   renderError = nil;
-  html = [session_ webViewMessagesPageHTMLWithErrorText:errorText
-                                                palette:StrappyWebViewPaletteNeutral
-                                           messageCount:NULL
-                                         timelineCursor:&timelineCursor
-                                                  error:&renderError];
+  if (session_ == nil) {
+    html = [StrappySession webViewEmptyMessagesPageHTMLWithPalette:
+      StrappyWebViewPaletteNeutral];
+  } else {
+    html = [session_ webViewMessagesPageHTMLWithErrorText:errorText
+                                                  palette:StrappyWebViewPaletteNeutral
+                                             messageCount:NULL
+                                           timelineCursor:&timelineCursor
+                                                    error:&renderError];
+  }
   if (![html isKindOfClass:[NSString class]] || ([html length] == 0U)) {
     NSLog(@"StrappyResponses could not render WebView HTML for session %@: %@",
           [[session_ sessionIdentifier] description],
