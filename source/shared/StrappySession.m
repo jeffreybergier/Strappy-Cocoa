@@ -15,6 +15,82 @@
 #include <string.h>
 #include <sys/time.h>
 
+static NSString *StrappyStageWebViewFonts(void)
+{
+  static NSString * const fontNames[] = {
+    @"FA7-Solid-900.otf",
+    @"FA7-Regular-400.otf",
+    @"FA7-Brands-400.otf"
+  };
+  NSFileManager *fileManager;
+  NSString *sourceDirectory;
+  NSString *webViewDirectory;
+  NSString *destinationDirectory;
+  BOOL isDirectory;
+  NSUInteger index;
+
+  fileManager = [NSFileManager defaultManager];
+  sourceDirectory = [[[NSBundle mainBundle] resourcePath]
+    stringByAppendingPathComponent:@"Fonts"];
+  webViewDirectory =
+    [[StrappySession sessionsDatabasePath] stringByDeletingLastPathComponent];
+  destinationDirectory =
+    [webViewDirectory stringByAppendingPathComponent:@"Fonts"];
+  isDirectory = NO;
+
+  if (![fileManager fileExistsAtPath:webViewDirectory
+                         isDirectory:&isDirectory]) {
+    if (![fileManager XP_createDirectoryAtPath:webViewDirectory
+                   withIntermediateDirectories:YES
+                                    attributes:nil
+                                         error:NULL]) {
+      return nil;
+    }
+  } else if (!isDirectory) {
+    return nil;
+  }
+
+  isDirectory = NO;
+  if ([fileManager fileExistsAtPath:destinationDirectory
+                        isDirectory:&isDirectory]) {
+    if (!isDirectory) {
+      return nil;
+    }
+  } else if (![fileManager XP_createDirectoryAtPath:destinationDirectory
+                        withIntermediateDirectories:YES
+                                         attributes:nil
+                                              error:NULL]) {
+    return nil;
+  }
+
+  for (index = 0U;
+       index < (sizeof(fontNames) / sizeof(fontNames[0]));
+       index++) {
+    NSString *sourcePath;
+    NSString *destinationPath;
+    NSData *sourceData;
+    NSData *destinationData;
+
+    sourcePath = [sourceDirectory stringByAppendingPathComponent:fontNames[index]];
+    destinationPath =
+      [destinationDirectory stringByAppendingPathComponent:fontNames[index]];
+    sourceData = [NSData dataWithContentsOfFile:sourcePath];
+    if ((sourceData == nil) || ([sourceData length] == 0U)) {
+      return nil;
+    }
+
+    destinationData = [NSData dataWithContentsOfFile:destinationPath];
+    if ((destinationData != nil) && [destinationData isEqualToData:sourceData]) {
+      continue;
+    }
+    if (![sourceData writeToFile:destinationPath atomically:YES]) {
+      return nil;
+    }
+  }
+
+  return destinationDirectory;
+}
+
 NSString * const StrappySessionDidUpdateNotification =
   @"StrappySessionDidUpdateNotification";
 NSString * const StrappySessionPromptDidStartNotification =
@@ -785,6 +861,25 @@ static BOOL StrappySessionRecordFromOptions(
     strappy_session_webview_batched_js([javaScript UTF8String]));
 }
 
++ (NSString *)webViewEmptyMessagesPageHTMLWithPalette:
+    (StrappyWebViewPalette)palette
+{
+  strappy_webview_palette webViewPalette;
+
+  webViewPalette =
+    (palette == StrappyWebViewPaletteNeutral) ?
+      STRAPPY_WEBVIEW_PALETTE_NEUTRAL :
+      STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED;
+  return StrappySessionStringFromCString(
+    strappy_webview_messages_page_html("",
+                                       "{}",
+                                       NULL,
+                                       0U,
+                                       NULL,
+                                       NULL,
+                                       webViewPalette));
+}
+
 - (int)handleResponsesEvent:(const strappy_responses_event *)event
            responsesContext:(StrappySessionResponsesContext *)responsesContext
 {
@@ -852,7 +947,9 @@ static BOOL StrappySessionRecordFromOptions(
   streamEvent = (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) ?
     @"processing_status" :
     ((event->type == STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED) ?
-      @"ledger_updated" : @"ledger_changed");
+      @"ledger_updated" :
+      (event->coalesce_with_next_ledger_change ?
+        @"ledger_changed_coalescible" : @"ledger_changed"));
   updateJavaScript = nil;
   eventRenderFailed = NO;
   if (contextDictionary != nil) {
@@ -1327,6 +1424,18 @@ static BOOL StrappySessionRecordFromOptions(
 
   fontsPath = [[[NSBundle mainBundle] resourcePath]
     stringByAppendingPathComponent:@"Fonts"];
+  if ([[NSProcessInfo processInfo] XP_platformFamily] ==
+      XPPlatformFamilyMacOS) {
+    /* WKWebView may only read files below AIWebViewController's read-access
+     * URL. Keep the web fonts beside session.html instead of pointing CSS at
+     * the app bundle, which is outside that subtree and may also be mounted
+     * at a transient App Translocation path. */
+    fontsPath = StrappyStageWebViewFonts();
+    if (fontsPath == nil) {
+      [NSException raise:NSInvalidArgumentException
+                  format:@"Could not stage Strappy WebView fonts."];
+    }
+  }
 
   strappyError = NULL;
   ok = strappy_session_configure_process([caCertPath fileSystemRepresentation],

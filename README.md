@@ -12,8 +12,8 @@ questions about your text messages, calendars, notes, music, and even third-
 party apps.
 
 > Strappy is my personal strap-on AI harness. Strappy has a big, sassy, and very
-> gay personality… I mean, Strappy's physical embodiment is a 12" strap-on
-> rainbow eggplant. And like most gays, Strappy is insanely diligent,
+> gay personality… I mean, Strappy's physical embodiment is a rainbow-colored
+> strap-on AI harness. And like most gays, Strappy is insanely diligent,
 > detail-oriented, and strict… like dominatrix-strict. But why? Well, to
 > be honest, I am kind of getting bored of the monotone and direct answers we
 > are getting from the models by default.
@@ -172,7 +172,7 @@ The Mac build is one quad-fat binary. Older Mac apps often don't use SQLite
 databases, and newer macOS versions restrict access to some personal data.
 Personal Assistant may therefore find less useful data on a Mac.
 
-## Install
+## Install from Releases
 
 Requires either an [OpenRouter](https://openrouter.ai/) API token or an
 eligible ChatGPT account using the experimental flow below.
@@ -235,7 +235,10 @@ ssh \
 
 1. Download `Strappy-X.Y.Z-macOS.zip` from
 [Releases](https://github.com/jeffreybergier/Strappy-Cocoa/releases)
-1. Unzip it and launch it (as God intended)
+1. Unzip it
+1. Optional: If your Mac has Gatekeeper and you don't want to fight with it,
+   run `xattr -d com.apple.quarantine ~/Downloads/Strappy-X.Y.Z-macOS.zip`
+1. Launch it (as God intended)
 
 ### First launch
 
@@ -249,27 +252,37 @@ In Preferences:
 
 ## Compile from Source
 
-The project uses the my Docker-based retro development environment called
-[Altivec Intelligence](https://github.com/jeffreybergier/AltivecIntelligence)
+This project uses the Docker-based retro development environment
+[Altivec Intelligence](https://github.com/jeffreybergier/AltivecIntelligence).
+
+### BYOSDK
+
+Altivec Intelligence is BYOSDK (Bring Your Own SDK), so you must supply the
+Apple SDK archives yourself. See
+[Altivec Intelligence](https://github.com/jeffreybergier/AltivecIntelligence#byosdk)
+repo for details before building Strappy.
+
+### Build from Source
+
+**1. Clone repo**
 
 ```sh
 git clone https://github.com/jeffreybergier/Strappy-Cocoa.git
 cd Strappy-Cocoa
-docker compose pull
-mkdir -p .altivec-sdk
-# Place these exact files in ./.altivec-sdk:
-#   MacOSX10.5.sdk.tar.xz
-#   MacOSX11.3.sdk.tar.xz
-#   iPhoneOS8.4.sdk.tar.gz
-docker compose run --rm altivec-sdk preflight
-docker compose run --rm altivec-sdk install
-docker compose run --rm make clean release
 ```
 
-Tagged GitHub releases obtain those archives from the repository secrets
-`ALTIVEC_SDK_MACOS_105_URL`, `ALTIVEC_SDK_MACOS_113_URL`, and
-`ALTIVEC_SDK_IPHONEOS_84_URL`; the release workflow verifies their pinned
-hashes before building.
+**2. Pull the Docker image and install the SDKs**
+
+```sh
+docker compose pull
+docker compose run --rm altivec-sdk install
+```
+
+**3. Build Strappy**
+
+```sh
+docker compose run --rm make clean release
+```
 
 Outputs:
 

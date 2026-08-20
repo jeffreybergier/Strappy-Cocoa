@@ -140,7 +140,6 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
 - (void)addTableColumnsToTableView:(NSTableView *)tableView
 {
   NSTableColumn *allowedColumn;
-  NSTableColumn *defaultColumn;
   NSTableColumn *accountColumn;
   NSTableColumn *nameColumn;
   NSTableColumn *idColumn;
@@ -148,7 +147,6 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
   NSTableColumn *promptColumn;
   NSTableColumn *completionColumn;
   NSButtonCell *allowedCell;
-  NSImageCell *defaultCell;
   NSTextFieldCell *textCell;
   NSTextFieldCell *rightCell;
 
@@ -168,20 +166,6 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
   [allowedCell setAlignment:XPTextAlignmentCenter];
   [allowedColumn setDataCell:allowedCell];
   [tableView addTableColumn:allowedColumn];
-
-  defaultColumn =
-    [[[NSTableColumn alloc] initWithIdentifier:@"model_default"] autorelease];
-  [[defaultColumn headerCell] setStringValue:NSLocalizedString(@"Default", nil)];
-  [[defaultColumn headerCell] setAlignment:XPTextAlignmentCenter];
-  [defaultColumn setWidth:54.0];
-  [defaultColumn setMinWidth:50.0];
-  [defaultColumn setMaxWidth:64.0];
-  [defaultColumn setEditable:NO];
-  defaultCell = [[[NSImageCell alloc] init] autorelease];
-  [defaultCell setAlignment:XPTextAlignmentCenter];
-  [defaultCell setImageScaling:NSImageScaleProportionallyDown];
-  [defaultColumn setDataCell:defaultCell];
-  [tableView addTableColumn:defaultColumn];
 
   accountColumn =
     [[[NSTableColumn alloc] initWithIdentifier:@"model_account"] autorelease];

@@ -33,23 +33,13 @@ static const strappy_webview_database_display_name
 
 static const char * const harness_processing_waiting_labels[
   STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT] = {
+  "[fa:bell-concierge] Serving",
   "[fa:martini-glass] Hydrating",
+  "[fa:gem] Bedazzling",
   "[fa:shoe-prints] Strutting",
-  "[fa:hands-holding-circle] Touching",
-  "[fa:spoon] Spooning",
-  "[fa:socks] Shedding",
-  "[fa:hand-lizard] Judging",
-  "[fa:hand-holding-droplet] Stroking",
-  "[fa:ring] Edging",
-  "[fa:horse] Riding",
-  "[fa:bore-hole] Drilling",
-  "[fa:bed-pulse] Pulsing",
-  "[fa:hands-bound] Binding",
-  "[fa:table-tennis-paddle-ball] Paddling",
-  "[fa:thumbtack] Pegging",
-  "[fa:hand-back-fist] Dominating",
-  "[fa:droplet] Climaxing",
-  "[fa:shower] Regretting"
+  "[fa:snowflake] Chilling",
+  "[fa:wand-sparkles] Enchanting",
+  "[fa:crown] Reigning"
 };
 
 static int harness_expect_contains(const char *text, const char *needle)
@@ -1584,25 +1574,17 @@ static int harness_check_page_scripts(void)
                                "data-processing-tools-label="
                                "\"[fa:gears] Grinding\"") &&
        harness_expect_contains(page_html,
-                               "data-processing-waiting-count=\"17\"") &&
+                               "data-processing-waiting-count=\"7\"") &&
        harness_expect_contains(
          page_html,
          "data-processing-waiting-0-label="
-         "\"[fa:martini-glass] Hydrating\"") &&
+         "\"[fa:bell-concierge] Serving\"") &&
        harness_expect_contains(
          page_html,
          "data-processing-waiting-6-label="
-         "\"[fa:hand-holding-droplet] Stroking\"") &&
-       harness_expect_contains(
-         page_html,
-         "data-processing-waiting-15-label="
-         "\"[fa:droplet] Climaxing\"") &&
-       harness_expect_contains(
-         page_html,
-         "data-processing-waiting-16-label="
-         "\"[fa:shower] Regretting\"") &&
+         "\"[fa:crown] Reigning\"") &&
        harness_expect_not_contains(page_html,
-                                   "data-processing-waiting-17-label") &&
+                                   "data-processing-waiting-7-label") &&
        harness_expect_not_contains(page_html,
                                    "[fa:wind] Blowing") &&
        harness_expect_not_contains(page_html,

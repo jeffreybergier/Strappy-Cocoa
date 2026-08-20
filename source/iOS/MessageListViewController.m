@@ -1201,9 +1201,19 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     return;
   }
   streamEvent = [event objectForKey:@"stream_event"];
+  if ([streamEvent isEqualToString:@"ledger_changed_coalescible"]) {
+    (void)[self queueJavaScriptForStreamEvent:event];
+    return;
+  }
   if ([streamEvent isEqualToString:@"ledger_changed"] ||
       [streamEvent isEqualToString:@"terminal_delta"]) {
     [self logLifecycleEvent:@"sessionLedgerDidChange"];
+    if ([streamEvent isEqualToString:@"ledger_changed"] &&
+        ([[self pendingStreamJavaScript] length] > 0U)) {
+      (void)[self queueJavaScriptForStreamEvent:event];
+      [self flushPendingStreamEvents];
+      return;
+    }
     [self flushPendingStreamEvents];
     javaScript = [self javaScriptForStreamEvent:event];
     if ([javaScript length] > 0U) {

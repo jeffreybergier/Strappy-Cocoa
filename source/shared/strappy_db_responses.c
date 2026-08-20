@@ -4438,6 +4438,9 @@ int strappy_db_update_response_session_summary(
 
   (void)prompt;
   (void)response;
+  /* Provider model metadata belongs to the response ledger. The session model
+     is a user-selected option and must not be changed during finalization. */
+  (void)model;
   (void)http_status;
 
   if (!strappy_db_open(db_path, &db, error_out)) {
@@ -4455,34 +4458,16 @@ int strappy_db_update_response_session_summary(
     return 0;
   }
   now_ms = strappy_db_now_ms();
-  if ((model != NULL) && (model[0] != '\0')) {
-    if (!strappy_db_model_exists(db, model, error_out) ||
-        !strappy_db_model_matches_session_account(db,
-                                                  session_id,
-                                                  model,
-                                                  error_out)) {
-      strappy_db_exec(db,
-                      "ROLLBACK;",
-                      "Could not roll back Responses session finalization",
-                      NULL);
-      strappy_db_release(db);
-      return 0;
-    }
-  }
   stmt = NULL;
   rc = sqlite3_prepare_v2(
     db,
-    "UPDATE sessions SET model_id = CASE WHEN ? IS NULL OR ? = '' "
-      "THEN model_id ELSE ? END, updated_at_ms = ? WHERE id = ?;",
+    "UPDATE sessions SET updated_at_ms = ? WHERE id = ?;",
     -1,
     &stmt,
     NULL);
   ok = (rc == SQLITE_OK) &&
-       strappy_db_bind_nullable_text_value(stmt, 1, model) &&
-       strappy_db_bind_nullable_text_value(stmt, 2, model) &&
-       strappy_db_bind_nullable_text_value(stmt, 3, model) &&
-       (sqlite3_bind_int64(stmt, 4, (sqlite3_int64)now_ms) == SQLITE_OK) &&
-       (sqlite3_bind_int64(stmt, 5, (sqlite3_int64)session_id) == SQLITE_OK);
+       (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)now_ms) == SQLITE_OK) &&
+       (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) == SQLITE_OK);
   if (!ok || (sqlite3_step(stmt) != SQLITE_DONE) ||
       (sqlite3_changes(db) != 1)) {
     strappy_set_formatted_error(error_out,

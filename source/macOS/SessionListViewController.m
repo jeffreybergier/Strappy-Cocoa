@@ -26,9 +26,8 @@ static const AIFontAwesomeIcon kStrappySessionPromptActiveIcon =
   AIFAArrowsRotate;
 
 enum {
-  kStrappySessionToolbarClose = 0,
-  kStrappySessionToolbarDelete = 1,
-  kStrappySessionToolbarNew = 2
+  kStrappySessionToolbarDelete = 0,
+  kStrappySessionToolbarNew = 1
 };
 
 static NSString * const kStrappySessionRowTypeKey = @"row_type";
@@ -468,7 +467,7 @@ static void StrappyDrawTintedImage(NSImage *image,
   [[self view] addSubview:toolbarView_];
 
   toolbarSegmented_ = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
-  [toolbarSegmented_ setSegmentCount:3];
+  [toolbarSegmented_ setSegmentCount:2];
   [[toolbarSegmented_ cell] setTrackingMode:NSSegmentSwitchTrackingMomentary];
   [toolbarSegmented_ XP_setToolbarSegmentStyle];
   [toolbarSegmented_ setTarget:self];
@@ -562,7 +561,6 @@ static void StrappyDrawTintedImage(NSImage *image,
 - (void)rebuildToolbarSegmentIcons
 {
   CGFloat scale;
-  NSImage *closeImage;
   NSImage *deleteImage;
   NSImage *newImage;
 
@@ -578,11 +576,6 @@ static void StrappyDrawTintedImage(NSImage *image,
     scale = 1.0;
   }
 
-  closeImage = [AIFontAwesome imageForIcon:AIFAXmark
-                                     style:AIFontAwesomeStyleSolid
-                                  iconSize:14.0
-                                canvasSize:20.0
-                                     scale:scale];
   newImage = [AIFontAwesome imageForIcon:kStrappySessionToolbarPlusIcon
                                    style:AIFontAwesomeStyleSolid
                                 iconSize:14.0
@@ -593,16 +586,6 @@ static void StrappyDrawTintedImage(NSImage *image,
                                    iconSize:14.0
                                  canvasSize:20.0
                                       scale:scale];
-
-  if (closeImage != nil) {
-    [toolbarSegmented_ setImage:closeImage
-                     forSegment:kStrappySessionToolbarClose];
-    [toolbarSegmented_ setLabel:@""
-                     forSegment:kStrappySessionToolbarClose];
-  } else {
-    [toolbarSegmented_ setLabel:NSLocalizedString(@"Close", nil)
-                     forSegment:kStrappySessionToolbarClose];
-  }
 
   if (newImage != nil) {
     [toolbarSegmented_ setImage:newImage
@@ -624,8 +607,6 @@ static void StrappyDrawTintedImage(NSImage *image,
                      forSegment:kStrappySessionToolbarDelete];
   }
 
-  [toolbarSegmented_ XP_setToolTip:NSLocalizedString(@"Close Chat", nil)
-                         forSegment:kStrappySessionToolbarClose];
   [toolbarSegmented_ XP_setToolTip:NSLocalizedString(@"Delete Chat", nil)
                          forSegment:kStrappySessionToolbarDelete];
   [toolbarSegmented_ XP_setToolTip:NSLocalizedString(@"New Chat", nil)
@@ -635,15 +616,10 @@ static void StrappyDrawTintedImage(NSImage *image,
 
 - (void)updateToolbarSegments
 {
-  BOOL hasOpenSession;
-
   if (toolbarSegmented_ == nil) {
     return;
   }
 
-  hasOpenSession = [self canCloseActiveSession];
-  [toolbarSegmented_ setEnabled:hasOpenSession
-                     forSegment:kStrappySessionToolbarClose];
   [toolbarSegmented_ setEnabled:[self canDeleteActiveSession]
                      forSegment:kStrappySessionToolbarDelete];
   [toolbarSegmented_ setEnabled:(creatingSession_ ? NO : YES)
@@ -907,9 +883,7 @@ static void StrappyDrawTintedImage(NSImage *image,
   NSInteger selectedSegment;
 
   selectedSegment = [(NSSegmentedControl *)sender selectedSegment];
-  if (selectedSegment == kStrappySessionToolbarClose) {
-    [self closeActiveSession:sender];
-  } else if (selectedSegment == kStrappySessionToolbarDelete) {
+  if (selectedSegment == kStrappySessionToolbarDelete) {
     [self deleteActiveSession:sender];
   } else if (selectedSegment == kStrappySessionToolbarNew) {
     [self addSession:sender];

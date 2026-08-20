@@ -3007,6 +3007,69 @@ static int strappy_db_semantic_save_models(const char *db_path,
     ok=retain_rc==SQLITE_DONE; sqlite3_finalize(retain_stmt);
   }
   if (ok) {
+    char *default_model_id = strappy_provider_model_identifier(
+      provider_account_id, STRAPPY_CONFIG_DEFAULT_API_MODEL, error_out);
+    sqlite3_stmt *preference_stmt = NULL;
+    int preference_rc = (default_model_id != NULL) ? sqlite3_prepare_v2(
+      db,
+      "INSERT OR IGNORE INTO model_preferences "
+      "(model_id, allowed, updated_at_ms) VALUES (?, 1, ?);",
+      -1,
+      &preference_stmt,
+      NULL) : SQLITE_ERROR;
+    if ((preference_rc == SQLITE_OK) &&
+        (sqlite3_bind_text(preference_stmt,
+                           1,
+                           default_model_id,
+                           -1,
+                           SQLITE_TRANSIENT) == SQLITE_OK) &&
+        (sqlite3_bind_int64(preference_stmt,
+                            2,
+                            (sqlite3_int64)now_ms) == SQLITE_OK)) {
+      preference_rc = sqlite3_step(preference_stmt);
+    }
+    ok = preference_rc == SQLITE_DONE;
+    if (!ok && ((error_out == NULL) || (*error_out == NULL))) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not whitelist default model: %s",
+                                  sqlite3_errmsg(db));
+    }
+    sqlite3_finalize(preference_stmt);
+    free(default_model_id);
+  }
+  if (ok) {
+    char *default_model_id = strappy_provider_model_identifier(
+      provider_account_id, STRAPPY_CONFIG_DEFAULT_API_MODEL, error_out);
+    sqlite3_stmt *preference_stmt = NULL;
+    int preference_rc = (default_model_id != NULL) ? sqlite3_prepare_v2(
+      db,
+      "UPDATE model_preferences SET allowed = 1, "
+      "updated_at_ms = ? WHERE model_id = ? AND allowed <> 1;",
+      -1,
+      &preference_stmt,
+      NULL) : SQLITE_ERROR;
+    if ((preference_rc == SQLITE_OK) &&
+        (sqlite3_bind_int64(preference_stmt,
+                            1,
+                            (sqlite3_int64)now_ms) == SQLITE_OK) &&
+        (sqlite3_bind_text(preference_stmt,
+                           2,
+                           default_model_id,
+                           -1,
+                           SQLITE_TRANSIENT) == SQLITE_OK)) {
+      preference_rc = sqlite3_step(preference_stmt);
+    }
+    ok = preference_rc == SQLITE_DONE;
+    if (!ok && ((error_out == NULL) || (*error_out == NULL))) {
+      strappy_set_formatted_error(
+        error_out,
+        "Could not restore default model whitelist: %s",
+        sqlite3_errmsg(db));
+    }
+    sqlite3_finalize(preference_stmt);
+    free(default_model_id);
+  }
+  if (ok) {
     ok = strappy_db_exec(db, "COMMIT;", "Could not commit model refresh",
                          error_out);
   } else {

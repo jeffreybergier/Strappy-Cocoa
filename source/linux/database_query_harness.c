@@ -2784,24 +2784,39 @@ static int harness_coding_preflight_bash_arguments_are_valid(
   const char *arguments_json)
 {
   static const char *required_fragments[] = {
-    "uname -a",
+    "command -v sw_vers",
+    "sw_vers -productName",
+    "sw_vers -productVersion",
+    "uname -s",
+    "uname -m",
+    "OS=%s",
+    "OS_VERSION=%s",
+    "MACHINE=%s",
     "command -v id",
     "UID=%s",
     "PWD=%s",
     "PATH=%s",
-    "=== Relevant commands ===",
-    ("for command_name in clang make git altivec-app altivec-sdk "
-     "altivec-lib ldid zip xcrun xcodebuild"),
+    "=== Core tools ===",
+    ("for command_name in clang make git ruby perl python python3 node jq "
+     "curl magick ldid zip xcrun xcodebuild"),
+    "=== Altivec ===",
+    "for command_name in altivec-sdk altivec-lib altivec-app",
     "command -v \"$command_name\"",
     "/var/altivec/share/altivec/make/ios-app.mk",
-    "command -v altivec-sdk",
-    "altivec-sdk list",
-    "altivec-sdk list exited",
     "command -v altivec-lib",
     "altivec-lib list",
     "altivec-lib list exited"
   };
   static const char *forbidden_fragments[] = {
+    "uname -a",
+    "uname -r",
+    "uname -v",
+    "uname -n",
+    "uname -i",
+    "uname -p",
+    "sw_vers -buildVersion",
+    "=== altivec-sdk list ===",
+    "altivec-sdk list exited",
     "SystemVersion.plist",
     "dpkg --print-architecture",
     "HOME=$HOME",
@@ -2846,8 +2861,7 @@ static int harness_coding_preflight_bash_arguments_are_valid(
   command = cJSON_IsObject(root) ?
     cJSON_GetObjectItemCaseSensitive(root, "command") : NULL;
   ok = cJSON_IsString(command) && (command->valuestring != NULL) &&
-    (root->child == command) && (command->next == NULL) &&
-    (strstr(command->valuestring, "python") == NULL);
+    (root->child == command) && (command->next == NULL);
   for (index = 0U;
        ok && (index < (sizeof(required_fragments) /
                        sizeof(required_fragments[0])));
@@ -10263,12 +10277,44 @@ static int harness_run_openrouter_model_catalog_tests(
     strappy_model_record_list_destroy(&list);
     return 0;
   }
-  ok = (list.count == 1U) &&
-       (list.records[0].model_id != NULL) &&
-       (strcmp(list.records[0].model_id, openai_model_id) == 0);
+  found_builtin_default = 0;
+  found_openai = 0;
+  for (index = 0U; index < list.count; index++) {
+    if ((list.records[index].model_id != NULL) &&
+        (strcmp(list.records[index].model_id,
+                STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER) == 0)) {
+      found_builtin_default = 1;
+    }
+    if ((list.records[index].model_id != NULL) &&
+        (strcmp(list.records[index].model_id, openai_model_id) == 0)) {
+      found_openai = 1;
+    }
+  }
+  ok = (list.count == 2U) && found_builtin_default && found_openai;
   strappy_model_record_list_destroy(&list);
   if (!ok) {
-    fprintf(stderr, "Default OpenRouter model was not the only allowed model.\n");
+    fprintf(stderr,
+            "Fetched default OpenRouter model did not remain whitelisted.\n");
+    return 0;
+  }
+
+  error = NULL;
+  if (!strappy_db_save_openrouter_models_json(context->catalog_path,
+                                              models_json,
+                                              &error)) {
+    fprintf(stderr,
+            "Could not refresh OpenRouter models after changing default: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  if (!harness_expect_catalog_integer(
+        context->catalog_path,
+        "SELECT COUNT(*) FROM model_preferences "
+        "WHERE model_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENROUTER
+          ":openai/gpt-4.1-mini' AND allowed = 1;",
+        1LL,
+        "refreshed default model whitelist count")) {
     return 0;
   }
 
@@ -10306,7 +10352,18 @@ static int harness_run_openrouter_model_catalog_tests(
       found_openai = 1;
     }
   }
-  ok = (list.count == 2U) && found_gemma && found_openai;
+  ok = (list.count == 3U) && found_gemma && found_openai;
+  if (ok) {
+    found_builtin_default = 0;
+    for (index = 0U; index < list.count; index++) {
+      if ((list.records[index].model_id != NULL) &&
+          (strcmp(list.records[index].model_id,
+                  STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER) == 0)) {
+        found_builtin_default = 1;
+      }
+    }
+    ok = found_builtin_default;
+  }
   strappy_model_record_list_destroy(&list);
   if (!ok) {
     fprintf(stderr, "Allowed OpenRouter models did not match expected values.\n");
@@ -10401,6 +10458,58 @@ static int harness_run_openrouter_model_catalog_tests(
   strappy_free_string(session_model);
   if (!ok) {
     fprintf(stderr, "Session OpenRouter model did not persist.\n");
+    return 0;
+  }
+
+  error = NULL;
+  if (!strappy_db_update_response_session_summary(
+        context->catalog_path,
+        session_id,
+        "Harness prompt",
+        "Harness response",
+        "google/gemma-provider-revision",
+        200L,
+        &error) ||
+      !strappy_db_update_response_session_summary(
+        context->catalog_path,
+        session_id,
+        "Harness error prompt",
+        "Harness provider error",
+        "openai/gpt-4.1-mini",
+        503L,
+        &error)) {
+    fprintf(stderr,
+            "Could not finalize model-selection Responses turns: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+
+  session_model = NULL;
+  if (!strappy_db_get_session_model(context->catalog_path,
+                                    session_id,
+                                    &session_model,
+                                    &error)) {
+    fprintf(stderr,
+            "Could not read session model after Responses finalization: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    return 0;
+  }
+  ok = (session_model != NULL) &&
+       (strcmp(session_model, gemma_model_id) == 0);
+  strappy_free_string(session_model);
+  if (!ok ||
+      !harness_expect_catalog_integer(
+        context->catalog_path,
+        "SELECT COUNT(*) FROM sessions WHERE id = "
+        "(SELECT MAX(id) FROM sessions) AND "
+        "model_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENROUTER
+          ":google/gemma-4-31b-it';",
+        1LL,
+        "session model after Responses finalization")) {
+    fprintf(stderr,
+            "Responses finalization replaced the selected session model.\n");
     return 0;
   }
 
