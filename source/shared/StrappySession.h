@@ -36,6 +36,7 @@ enum {
   StrappySessionOptionBash = 1U << 4,
   StrappySessionOptionLimitToOneTool = 1U << 5,
   StrappySessionOptionWorkingDirectory = 1U << 6,
+  StrappySessionOptionProviderAccount = 1U << 7,
   StrappySessionOptionRoundLimit = 1U << 8,
   StrappySessionOptionAnswerQuality = 1U << 9,
   StrappySessionOptionAll =
@@ -46,6 +47,7 @@ enum {
     StrappySessionOptionBash |
     StrappySessionOptionLimitToOneTool |
     StrappySessionOptionWorkingDirectory |
+    StrappySessionOptionProviderAccount |
     StrappySessionOptionRoundLimit |
     StrappySessionOptionAnswerQuality
 };
@@ -53,6 +55,7 @@ enum {
 @interface StrappySessionOptions : NSObject <NSCopying> {
  @private
   NSString *modelIdentifier_;
+  NSString *providerAccountIdentifier_;
   NSString *assistantSetIdentifier_;
   NSString *webProvider_;
   NSString *workingDirectory_;
@@ -71,8 +74,19 @@ enum {
                limitToOneTool:(BOOL)limitToOneTool
                    roundLimit:(NSUInteger)roundLimit
              workingDirectory:(NSString *)workingDirectory;
+- (id)initWithModelIdentifier:(NSString *)modelIdentifier
+    providerAccountIdentifier:(NSString *)providerAccountIdentifier
+       assistantSetIdentifier:(NSString *)assistantSetIdentifier
+                  webProvider:(NSString *)webProvider
+             webSearchEnabled:(BOOL)webSearchEnabled
+                  bashEnabled:(BOOL)bashEnabled
+               limitToOneTool:(BOOL)limitToOneTool
+                   roundLimit:(NSUInteger)roundLimit
+             workingDirectory:(NSString *)workingDirectory;
 - (NSString *)modelIdentifier;
 - (void)setModelIdentifier:(NSString *)modelIdentifier;
+- (NSString *)providerAccountIdentifier;
+- (void)setProviderAccountIdentifier:(NSString *)providerAccountIdentifier;
 - (NSString *)assistantSetIdentifier;
 - (void)setAssistantSetIdentifier:(NSString *)assistantSetIdentifier;
 - (NSString *)webProvider;

@@ -1678,6 +1678,7 @@ typedef struct strappy_responses_runtime {
   char *model_id;
   char *provider_account_id;
   char *provider_id;
+  char *account_endpoint;
   char *billing_kind;
   char *chatgpt_access_token;
   char *chatgpt_account_id;
@@ -1707,6 +1708,7 @@ static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
   runtime->model_id = NULL;
   runtime->provider_account_id = NULL;
   runtime->provider_id = NULL;
+  runtime->account_endpoint = NULL;
   runtime->billing_kind = NULL;
   runtime->chatgpt_access_token = NULL;
   runtime->chatgpt_account_id = NULL;
@@ -1735,6 +1737,7 @@ static void strappy_responses_runtime_destroy(
   free(runtime->model_id);
   free(runtime->provider_account_id);
   free(runtime->provider_id);
+  free(runtime->account_endpoint);
   free(runtime->billing_kind);
   strappy_responses_secure_free(runtime->chatgpt_access_token);
   strappy_responses_secure_free(runtime->chatgpt_account_id);
@@ -1934,6 +1937,7 @@ static int strappy_responses_prepare_runtime(
   char *provider_endpoint;
   char *assistant_set_id;
   int bash_enabled;
+  int account_credential_loaded;
   int ok;
 
   if ((runtime == NULL) || (guidance_resource_dir == NULL) ||
@@ -1949,6 +1953,7 @@ static int strappy_responses_prepare_runtime(
   provider = STRAPPY_PROVIDER_KIND_UNKNOWN;
   provider_endpoint = NULL;
   assistant_set_id = NULL;
+  account_credential_loaded = 0;
 
   ok = strappy_config_load_with_fallback_credentials(
     &runtime->config,
@@ -2003,6 +2008,7 @@ static int strappy_responses_prepare_runtime(
   runtime->model_id = route.model_id;
   runtime->provider_account_id = route.provider_account_id;
   runtime->provider_id = route.provider_id;
+  runtime->account_endpoint = route.responses_endpoint;
   runtime->billing_kind = route.billing_kind;
   runtime->provider = provider;
   runtime->provider_definition = strappy_provider_for_kind(provider);
@@ -2012,6 +2018,7 @@ static int strappy_responses_prepare_runtime(
   route.model_id = NULL;
   route.provider_account_id = NULL;
   route.provider_id = NULL;
+  route.responses_endpoint = NULL;
   route.billing_kind = NULL;
   strappy_model_route_record_destroy(&route);
 
@@ -2038,6 +2045,15 @@ static int strappy_responses_prepare_runtime(
       "ChatGPT model billing metadata is invalid.");
     strappy_responses_runtime_destroy(runtime);
     return 0;
+  }
+  if ((runtime->provider_definition->credential_kind !=
+       STRAPPY_PROVIDER_CREDENTIAL_OAUTH_DEVICE) &&
+      !((runtime->provider_definition->credential_kind ==
+         STRAPPY_PROVIDER_CREDENTIAL_API_TOKEN) &&
+        (strcmp(runtime->provider_account_id,
+                STRAPPY_PROVIDER_ACCOUNT_OPENROUTER) == 0))) {
+    strappy_responses_secure_free(runtime->config.api_token);
+    runtime->config.api_token = NULL;
   }
   if (runtime->provider_definition->credential_kind ==
       STRAPPY_PROVIDER_CREDENTIAL_OAUTH_DEVICE) {
@@ -2080,6 +2096,7 @@ static int strappy_responses_prepare_runtime(
       strappy_responses_secure_free(runtime->config.api_token);
       runtime->config.api_token = account_bearer_token;
       account_bearer_token = NULL;
+      account_credential_loaded = 1;
     } else if ((runtime->provider_definition->credential_kind ==
                 STRAPPY_PROVIDER_CREDENTIAL_API_TOKEN) &&
                ((runtime->config.api_token == NULL) ||
@@ -2101,6 +2118,17 @@ static int strappy_responses_prepare_runtime(
     strappy_responses_secure_free(unused_upstream_account_id);
     strappy_free_string(credential_error);
   }
+  if ((runtime->provider_definition->credential_kind ==
+       STRAPPY_PROVIDER_CREDENTIAL_API_TOKEN) &&
+      !account_credential_loaded &&
+      (strcmp(runtime->provider_account_id,
+              STRAPPY_PROVIDER_ACCOUNT_OPENROUTER) != 0)) {
+    free(assistant_set_id);
+    strappy_set_error(error_out,
+                      "The selected account has no API credential.");
+    strappy_responses_runtime_destroy(runtime);
+    return 0;
+  }
   if (!runtime->hosted_tools_enabled) {
     runtime->config.web_provider = STRAPPY_WEB_PROVIDER_NONE;
   }
@@ -2108,7 +2136,12 @@ static int strappy_responses_prepare_runtime(
   provider_endpoint = strappy_provider_definition_responses_endpoint(
     runtime->provider_definition,
     runtime->provider_definition->allows_endpoint_override ?
-      runtime->config.api_endpoint : NULL,
+      (((runtime->account_endpoint != NULL) &&
+        (runtime->account_endpoint[0] != '\0')) ?
+        runtime->account_endpoint :
+        ((strcmp(runtime->provider_account_id,
+                 STRAPPY_PROVIDER_ACCOUNT_OPENROUTER) == 0) ?
+          runtime->config.api_endpoint : NULL)) : NULL,
     error_out);
   if (provider_endpoint == NULL) {
     free(assistant_set_id);

@@ -8886,7 +8886,9 @@ static int harness_run_session_options_tests(const harness_context *context)
             (error != NULL) ? error : "unknown");
     goto cleanup;
   }
-  if ((stale.model_id == NULL) || (stale.assistant_set_id == NULL) ||
+  if ((stale.model_id == NULL) || (stale.provider_account_id == NULL) ||
+      (stale.provider_account_id[0] == '\0') ||
+      (stale.assistant_set_id == NULL) ||
       (stale.working_directory == NULL) ||
       (stale.web_provider != STRAPPY_WEB_PROVIDER_AUTO) ||
       !stale.web_search_enabled || stale.bash_enabled ||
@@ -8908,6 +8910,8 @@ static int harness_run_session_options_tests(const harness_context *context)
                                          &actual_changed_fields,
                                          &error);
   if (!ok || (actual_changed_fields != first_update_fields) ||
+      (saved.provider_account_id == NULL) ||
+      (strcmp(saved.provider_account_id, stale.provider_account_id) != 0) ||
       (saved.web_provider != STRAPPY_WEB_PROVIDER_PARALLEL) ||
       !saved.bash_enabled || !saved.web_search_enabled) {
     fprintf(stderr,
@@ -9093,7 +9097,10 @@ static int harness_run_session_options_tests(const harness_context *context)
   }
   if (!ok || (actual_changed_fields != default_update_fields) ||
       (saved_defaults.model_id == NULL) ||
+      (saved_defaults.provider_account_id == NULL) ||
       (strcmp(saved_defaults.model_id, original_defaults.model_id) != 0) ||
+      (strcmp(saved_defaults.provider_account_id,
+              original_defaults.provider_account_id) != 0) ||
       (saved_defaults.assistant_set_id == NULL) ||
       (strcmp(saved_defaults.assistant_set_id,
               STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE) != 0) ||
@@ -9134,7 +9141,10 @@ static int harness_run_session_options_tests(const harness_context *context)
                                     &future_options,
                                     &error);
   if (!ok || (future_options.model_id == NULL) ||
+      (future_options.provider_account_id == NULL) ||
       (strcmp(future_options.model_id, original_defaults.model_id) != 0) ||
+      (strcmp(future_options.provider_account_id,
+              original_defaults.provider_account_id) != 0) ||
       (future_options.assistant_set_id == NULL) ||
       (strcmp(future_options.assistant_set_id,
               STRAPPY_ASSISTANT_SET_WORLD_KNOWLEDGE) != 0) ||
@@ -11750,6 +11760,11 @@ static int harness_run_multi_account_database_tests(
   char *error;
   strappy_provider_account_record_list accounts;
   strappy_manual_model_input input;
+  strappy_session_options options;
+  strappy_session_options saved_options;
+  strappy_model_route_record route;
+  strappy_session_option_mask changed_fields;
+  long long session_id;
   int ok;
 
   if (!harness_join_path(path,sizeof(path),context->temp_dir,
@@ -11757,6 +11772,10 @@ static int harness_run_multi_account_database_tests(
   harness_unlink_sqlite_files(path);
   chat_one=chat_two=chat_three=router_one=router_two=other_one=other_two=NULL;
   manual_one=manual_two=default_account=default_model=error=NULL;
+  session_id=0LL;
+  strappy_session_options_init(&options);
+  strappy_session_options_init(&saved_options);
+  strappy_model_route_record_init(&route);
   ok = strappy_db_initialize(path,&error) &&
     strappy_db_get_designated_provider_account(path,"openai_chatgpt",&chat_one,&error) &&
     strappy_db_get_designated_provider_account(path,"openrouter",&router_one,&error) &&
@@ -11796,10 +11815,34 @@ static int harness_run_multi_account_database_tests(
   input.display_name="Manual Two";
   if (ok) ok = strappy_db_create_manual_model(path,other_two,&input,&manual_two,&error) &&
     (strcmp(manual_one,manual_two)!=0) &&
+    strappy_db_set_model_allowed(path,manual_one,1,&error) &&
     !strappy_db_set_default_account_model(path,other_one,manual_two,NULL) &&
     strappy_db_set_default_account_model(path,other_two,manual_two,&error) &&
     strappy_db_get_default_account_model(path,&default_account,&default_model,&error) &&
-    (strcmp(default_account,other_two)==0) && (strcmp(default_model,manual_two)==0);
+    (strcmp(default_account,other_two)==0) && (strcmp(default_model,manual_two)==0) &&
+    strappy_db_create_session(path,&session_id,&error) &&
+    strappy_db_load_session_options(path,session_id,&options,&error) &&
+    (strcmp(options.provider_account_id,other_two)==0) &&
+    (strcmp(options.model_id,manual_two)==0) &&
+    strappy_db_get_session_model_route(path,session_id,&route,&error) &&
+    (route.responses_endpoint != NULL) &&
+    (strcmp(route.responses_endpoint,"https://two.example/v1/responses")==0) &&
+    (strcmp(route.billing_kind,"unknown")==0) &&
+    route.local_functions_enabled && !route.hosted_tools_enabled;
+  strappy_model_route_record_destroy(&route);
+  if (ok) {
+    free(options.provider_account_id);
+    options.provider_account_id=strdup(other_one);
+    changed_fields=0U;
+    ok=(options.provider_account_id != NULL) &&
+      strappy_db_update_session_options(
+        path,session_id,&options,STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT,
+        &saved_options,&changed_fields,&error) &&
+      (changed_fields==(STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT |
+                       STRAPPY_SESSION_OPTION_MODEL)) &&
+      (strcmp(saved_options.provider_account_id,other_one)==0) &&
+      (strcmp(saved_options.model_id,manual_one)==0);
+  }
   input.display_name="Manual One Updated";
   if (ok) ok = strappy_db_update_manual_model(path,other_one,&input,&error) &&
     strappy_db_archive_manual_model(path,other_one,"manual",&error) &&
@@ -11814,6 +11857,9 @@ static int harness_run_multi_account_database_tests(
   free(chat_one); free(chat_two); free(chat_three); free(router_one); free(router_two);
   free(other_one); free(other_two); free(manual_one); free(manual_two);
   free(default_account); free(default_model);
+  strappy_model_route_record_destroy(&route);
+  strappy_session_options_destroy(&saved_options);
+  strappy_session_options_destroy(&options);
   strappy_free_string(error); harness_unlink_sqlite_files(path);
   return ok;
 }

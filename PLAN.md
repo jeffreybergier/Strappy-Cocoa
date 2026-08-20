@@ -1,9 +1,9 @@
 # Provider and Multi-Account Plan
 
-Status: ChatGPT OAuth, ChatGPT Responses, native web search, provider-aware
-models, and provider-locked sessions work. The next architectural step is to
-support named accounts for OpenRouter, OpenAI, and a minimal custom Responses
-provider without changing the current iOS or macOS user interface.
+Status: The provider registry, named multi-account database and credentials,
+account-pinned runtime, and existing-UI compatibility boundary are implemented.
+Automated hardening is partially complete; the remaining work is listed in
+Phase 6 together with the manual lifecycle and external release gates.
 
 This plan replaces the temporary assumption that a provider ID is also its one
 account ID. It keeps the working OAuth implementation and makes the provider,
@@ -378,19 +378,19 @@ stall the other.
 
 ### Phase 4 — Account-pinned runtime
 
-- [ ] Add `provider_account_id` to the C and Objective-C session option types,
+- [x] Add `provider_account_id` to the C and Objective-C session option types,
   copy/merge/change masks, defaults, summaries, and persistence.
-- [ ] Resolve provider type only by loading the selected account; validate the
+- [x] Resolve provider type only by loading the selected account; validate the
   selected model belongs to it.
-- [ ] Pass the account ID through model resolution, provider dispatch, request
+- [x] Pass the account ID through model resolution, provider dispatch, request
   construction, tools, transport attempts, and error/usage recording.
-- [ ] Reject missing, archived, mismatched, or credential-less accounts before
+- [x] Reject missing, archived, mismatched, or credential-less accounts before
   network I/O.
-- [ ] Keep every retry and multi-round tool loop on the original account.
-- [ ] Verify native ChatGPT web search and OpenRouter hosted tools are chosen by
+- [x] Keep every retry and multi-round tool loop on the original account.
+- [x] Verify native ChatGPT web search and OpenRouter hosted tools are chosen by
   provider capabilities, never by account naming or endpoint inspection.
-- [ ] Preserve subscription versus metered billing semantics per provider.
-- [ ] Verify `other` sends generic Responses requests with no model fetch,
+- [x] Preserve subscription versus metered billing semantics per provider.
+- [x] Verify `other` sends generic Responses requests with no model fetch,
   hosted tools, provider-specific extensions, or fabricated billing data.
 
 Exit criterion: concurrent sessions using different accounts cannot cross
@@ -398,13 +398,13 @@ credentials, endpoints, models, tools, rate-limit state, retries, or history.
 
 ### Phase 5 — Preserve the existing UI
 
-- [ ] Add designated-account compatibility facades to `StrappyKeychain`,
+- [x] Add designated-account compatibility facades to `StrappyKeychain`,
   `StrappyAuthentication`, and `StrappySession`.
-- [ ] Keep current iOS/macOS controls, strings, notifications, model-row shapes,
+- [x] Keep current iOS/macOS controls, strings, notifications, model-row shapes,
   and preference behavior unchanged.
-- [ ] Confirm UI state is still loaded from SQLite/Keychain rather than cached as
+- [x] Confirm UI state is still loaded from SQLite/Keychain rather than cached as
   an independent source of truth.
-- [ ] Document that adding/switching additional accounts is a separate UI phase.
+- [x] Document that adding/switching additional accounts is a separate UI phase.
 
 Exit criterion: screenshots and manual workflows match the current build while
 portable tests prove the underlying core supports multiple accounts.
@@ -418,7 +418,7 @@ portable tests prove the underlying core supports multiple accounts.
   model IDs and simultaneous requests.
 - [ ] Add account-name tests for arbitrary UTF-8 labels, duplicate names,
   renaming, empty/oversized rejection, and safe display/log handling.
-- [ ] Add `SessionOptions` tests for account/model mismatch, provider inference,
+- [x] Add `SessionOptions` tests for account/model mismatch, provider inference,
   default-account selection, empty-session account changes, and established
   session locking.
 - [ ] Add `other` fixtures for two endpoints, manual models, local functions,
@@ -426,7 +426,7 @@ portable tests prove the underlying core supports multiple accounts.
   of unsupported extras.
 - [ ] Assert secrets and upstream account identifiers never enter SQLite, logs,
   fixtures, notifications, or user-facing errors.
-- [ ] Run the complete Linux shared-core suite and clean analyzer/release builds
+- [x] Run the complete Linux shared-core suite and clean analyzer/release builds
   for iOS and macOS.
 - [ ] Manually verify restart, background/resume, expiry, refresh, and sign-out
   on both Apple platforms.

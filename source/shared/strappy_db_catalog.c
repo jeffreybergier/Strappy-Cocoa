@@ -272,6 +272,7 @@ void strappy_model_route_record_init(strappy_model_route_record *record)
   record->model_id = NULL;
   record->provider_account_id = NULL;
   record->provider_id = NULL;
+  record->responses_endpoint = NULL;
   record->wire_model_id = NULL;
   record->billing_kind = NULL;
   record->reasoning_enabled = 1;
@@ -287,6 +288,7 @@ void strappy_model_route_record_destroy(strappy_model_route_record *record)
   free(record->model_id);
   free(record->provider_account_id);
   free(record->provider_id);
+  free(record->responses_endpoint);
   free(record->wire_model_id);
   free(record->billing_kind);
   strappy_model_route_record_init(record);
@@ -4900,7 +4902,7 @@ int strappy_db_get_session_model_route(
   char **error_out)
 {
   static const char *sql =
-    "SELECT m.id, a.id, a.provider_id, m.wire_model_id, "
+    "SELECT m.id, a.id, a.provider_id, a.responses_endpoint, m.wire_model_id, "
       "COALESCE(mc.billing_kind, 'metered_api'), "
       "COALESCE(mc.reasoning_enabled, 1), "
       "COALESCE(mc.local_functions_enabled, 1), "
@@ -4910,7 +4912,10 @@ int strappy_db_get_session_model_route(
         STRAPPY_DB_DEFAULT_MODEL_SQL ") "
     "JOIN provider_accounts a ON a.id = m.provider_account_id "
     "LEFT JOIN model_capabilities mc ON mc.model_id = m.id "
-    "WHERE s.id = ? AND m.catalog_active = 1 AND "
+    "WHERE s.id = ? AND a.lifecycle_state = 'active' "
+      "AND (s.provider_account_id IS NULL OR "
+        "s.provider_account_id = m.provider_account_id) "
+      "AND m.catalog_active = 1 AND "
       "(m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL " OR "
       "EXISTS (SELECT 1 FROM model_preferences mp "
         "WHERE mp.model_id = m.id AND mp.allowed = 1));";
@@ -4964,11 +4969,12 @@ int strappy_db_get_session_model_route(
   route->model_id = strappy_db_column_string(stmt, 0);
   route->provider_account_id = strappy_db_column_string(stmt, 1);
   route->provider_id = strappy_db_column_string(stmt, 2);
-  route->wire_model_id = strappy_db_column_string(stmt, 3);
-  route->billing_kind = strappy_db_column_string(stmt, 4);
-  route->reasoning_enabled = sqlite3_column_int(stmt, 5) ? 1 : 0;
-  route->local_functions_enabled = sqlite3_column_int(stmt, 6) ? 1 : 0;
-  route->hosted_tools_enabled = sqlite3_column_int(stmt, 7) ? 1 : 0;
+  route->responses_endpoint = strappy_db_column_string(stmt, 3);
+  route->wire_model_id = strappy_db_column_string(stmt, 4);
+  route->billing_kind = strappy_db_column_string(stmt, 5);
+  route->reasoning_enabled = sqlite3_column_int(stmt, 6) ? 1 : 0;
+  route->local_functions_enabled = sqlite3_column_int(stmt, 7) ? 1 : 0;
+  route->hosted_tools_enabled = sqlite3_column_int(stmt, 8) ? 1 : 0;
   sqlite3_finalize(stmt);
   strappy_db_release(db);
   if ((route->model_id == NULL) ||

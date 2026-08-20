@@ -47,6 +47,7 @@ enum {
   STRAPPY_SESSION_OPTION_BASH = 1U << 4,
   STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL = 1U << 5,
   STRAPPY_SESSION_OPTION_WORKING_DIRECTORY = 1U << 6,
+  STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT = 1U << 7,
   STRAPPY_SESSION_OPTION_ROUND_LIMIT = 1U << 8,
   STRAPPY_SESSION_OPTION_ANSWER_QUALITY = 1U << 9,
   STRAPPY_SESSION_OPTION_ALL =
@@ -57,12 +58,14 @@ enum {
     STRAPPY_SESSION_OPTION_BASH |
     STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
     STRAPPY_SESSION_OPTION_WORKING_DIRECTORY |
+    STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT |
     STRAPPY_SESSION_OPTION_ROUND_LIMIT |
     STRAPPY_SESSION_OPTION_ANSWER_QUALITY
 };
 
 typedef struct strappy_session_options {
   char *model_id;
+  char *provider_account_id;
   char *assistant_set_id;
   char *working_directory;
   strappy_web_provider web_provider;
@@ -358,6 +361,7 @@ typedef struct strappy_model_route_record {
   char *model_id;
   char *provider_account_id;
   char *provider_id;
+  char *responses_endpoint;
   char *wire_model_id;
   char *billing_kind;
   int reasoning_enabled;

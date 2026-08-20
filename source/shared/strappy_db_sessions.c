@@ -13,6 +13,9 @@
 
 #define STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL \
   "COALESCE(s.model_id, " STRAPPY_DB_DEFAULT_MODEL_SQL ")"
+#define STRAPPY_DB_SESSION_EFFECTIVE_ACCOUNT_SQL \
+  "COALESCE(s.provider_account_id, (SELECT m.provider_account_id FROM models m " \
+  "WHERE m.id = " STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL "))"
 #define STRAPPY_DB_SESSION_ASSISTANT_SET_SQL \
   "COALESCE((SELECT a.assistant_set_id FROM session_assistant_sets a " \
   "WHERE a.session_id = s.id), '" STRAPPY_ASSISTANT_SET_DEFAULT "')"
@@ -118,6 +121,7 @@ void strappy_session_options_init(strappy_session_options *options)
     return;
   }
   options->model_id = NULL;
+  options->provider_account_id = NULL;
   options->assistant_set_id = NULL;
   options->working_directory = NULL;
   options->web_provider = STRAPPY_WEB_PROVIDER_AUTO;
@@ -134,6 +138,7 @@ void strappy_session_options_destroy(strappy_session_options *options)
     return;
   }
   free(options->model_id);
+  free(options->provider_account_id);
   free(options->assistant_set_id);
   free(options->working_directory);
   strappy_session_options_init(options);
@@ -324,8 +329,8 @@ int strappy_db_create_session_with_working_directory(
 {
   static const char *sql =
     "INSERT INTO sessions "
-    "(model_id, created_at_ms, updated_at_ms) "
-    "VALUES (?, ?, ?);";
+    "(model_id, provider_account_id, created_at_ms, updated_at_ms) "
+    "VALUES (?, ?, ?, ?);";
   strappy_session_options defaults;
   sqlite3 *db;
   sqlite3_stmt *stmt;
@@ -377,10 +382,14 @@ int strappy_db_create_session_with_working_directory(
 
   rc = sqlite3_bind_text(stmt, 1, defaults.model_id, -1, SQLITE_TRANSIENT);
   if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_int64(stmt, 2, (sqlite3_int64)now_ms);
+    rc = sqlite3_bind_text(stmt, 2, defaults.provider_account_id, -1,
+                           SQLITE_TRANSIENT);
   }
   if (rc == SQLITE_OK) {
     rc = sqlite3_bind_int64(stmt, 3, (sqlite3_int64)now_ms);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 4, (sqlite3_int64)now_ms);
   }
   if (rc != SQLITE_OK) {
     strappy_set_formatted_error(error_out,
@@ -1247,6 +1256,7 @@ static int strappy_db_copy_default_session_options(
 {
   static const char *sql =
     "SELECT " STRAPPY_DB_DEFAULT_MODEL_SQL ", "
+    "(SELECT default_provider_account_id FROM app_preferences WHERE id=1), "
     "assistant_set_id, web_provider, web_search_enabled, bash_enabled, "
     "limit_to_one_tool, round_limit, working_directory, "
     "answer_quality_enabled "
@@ -1284,15 +1294,17 @@ static int strappy_db_copy_default_session_options(
   }
 
   loaded.model_id = strappy_db_column_string(stmt, 0);
-  loaded.assistant_set_id = strappy_db_column_string(stmt, 1);
-  provider_text = sqlite3_column_text(stmt, 2);
-  loaded.web_search_enabled = sqlite3_column_int(stmt, 3) ? 1 : 0;
-  loaded.bash_enabled = sqlite3_column_int(stmt, 4) ? 1 : 0;
-  loaded.limit_to_one_tool = sqlite3_column_int(stmt, 5) ? 1 : 0;
-  loaded.round_limit = (long)sqlite3_column_int64(stmt, 6);
-  working_directory_text = sqlite3_column_text(stmt, 7);
-  loaded.answer_quality_enabled = sqlite3_column_int(stmt, 8) ? 1 : 0;
-  if ((loaded.model_id == NULL) || (loaded.assistant_set_id == NULL) ||
+  loaded.provider_account_id = strappy_db_column_string(stmt, 1);
+  loaded.assistant_set_id = strappy_db_column_string(stmt, 2);
+  provider_text = sqlite3_column_text(stmt, 3);
+  loaded.web_search_enabled = sqlite3_column_int(stmt, 4) ? 1 : 0;
+  loaded.bash_enabled = sqlite3_column_int(stmt, 5) ? 1 : 0;
+  loaded.limit_to_one_tool = sqlite3_column_int(stmt, 6) ? 1 : 0;
+  loaded.round_limit = (long)sqlite3_column_int64(stmt, 7);
+  working_directory_text = sqlite3_column_text(stmt, 8);
+  loaded.answer_quality_enabled = sqlite3_column_int(stmt, 9) ? 1 : 0;
+  if ((loaded.model_id == NULL) || (loaded.provider_account_id == NULL) ||
+      (loaded.assistant_set_id == NULL) ||
       (provider_text == NULL) ||
       (loaded.round_limit < 1L) ||
       (loaded.round_limit > STRAPPY_SESSION_MAX_LIMIT) ||
@@ -1327,6 +1339,7 @@ static int strappy_db_copy_session_options(sqlite3 *db,
 {
   static const char *sql =
     "SELECT " STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL ", "
+    STRAPPY_DB_SESSION_EFFECTIVE_ACCOUNT_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
     STRAPPY_DB_SESSION_WEB_PROVIDER_SQL ", "
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
@@ -1370,14 +1383,16 @@ static int strappy_db_copy_session_options(sqlite3 *db,
   }
 
   loaded.model_id = strappy_db_column_string(stmt, 0);
-  loaded.assistant_set_id = strappy_db_column_string(stmt, 1);
-  provider_text = sqlite3_column_text(stmt, 2);
-  loaded.web_search_enabled = sqlite3_column_int(stmt, 3) ? 1 : 0;
-  loaded.bash_enabled = sqlite3_column_int(stmt, 4) ? 1 : 0;
-  loaded.limit_to_one_tool = sqlite3_column_int(stmt, 5) ? 1 : 0;
-  loaded.round_limit = (long)sqlite3_column_int64(stmt, 6);
-  loaded.answer_quality_enabled = sqlite3_column_int(stmt, 7) ? 1 : 0;
-  if ((loaded.model_id == NULL) || (loaded.assistant_set_id == NULL) ||
+  loaded.provider_account_id = strappy_db_column_string(stmt, 1);
+  loaded.assistant_set_id = strappy_db_column_string(stmt, 2);
+  provider_text = sqlite3_column_text(stmt, 3);
+  loaded.web_search_enabled = sqlite3_column_int(stmt, 4) ? 1 : 0;
+  loaded.bash_enabled = sqlite3_column_int(stmt, 5) ? 1 : 0;
+  loaded.limit_to_one_tool = sqlite3_column_int(stmt, 6) ? 1 : 0;
+  loaded.round_limit = (long)sqlite3_column_int64(stmt, 7);
+  loaded.answer_quality_enabled = sqlite3_column_int(stmt, 8) ? 1 : 0;
+  if ((loaded.model_id == NULL) || (loaded.provider_account_id == NULL) ||
+      (loaded.assistant_set_id == NULL) ||
       (provider_text == NULL) ||
       (loaded.round_limit < 1L) ||
       (loaded.round_limit > STRAPPY_SESSION_MAX_LIMIT) ||
@@ -1456,6 +1471,11 @@ static int strappy_db_copy_options(const strappy_session_options *source,
                                      source->model_id,
                                      "Could not allocate session model option.",
                                      error_out) ||
+      !strappy_db_copy_options_value(
+        &copy.provider_account_id,
+        source->provider_account_id,
+        "Could not allocate session provider-account option.",
+        error_out) ||
       !strappy_db_copy_options_value(
         &copy.assistant_set_id,
         source->assistant_set_id,
@@ -1623,11 +1643,15 @@ static int strappy_db_save_session_options_model(
   sqlite3 *db,
   long long session_id,
   const char *model_id,
+  const char *provider_account_id,
   long long now_ms,
   char **error_out)
 {
   static const char *sql =
-    "UPDATE sessions SET model_id = ?, updated_at_ms = ? WHERE id = ?;";
+    "UPDATE sessions SET model_id = ?, provider_account_id = ?, "
+    "updated_at_ms = ? WHERE id = ? AND (provider_account_id = ? OR "
+    "NOT EXISTS (SELECT 1 FROM model_requests r JOIN turns t "
+    "ON t.id=r.turn_id WHERE t.session_id=sessions.id));";
   sqlite3_stmt *stmt;
   int rc;
 
@@ -1637,19 +1661,106 @@ static int strappy_db_save_session_options_model(
     rc = sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT);
   }
   if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_int64(stmt, 2, (sqlite3_int64)now_ms);
+    rc = sqlite3_bind_text(stmt, 2, provider_account_id, -1,
+                           SQLITE_TRANSIENT);
   }
   if (rc == SQLITE_OK) {
-    rc = sqlite3_bind_int64(stmt, 3, (sqlite3_int64)session_id);
+    rc = sqlite3_bind_int64(stmt, 3, (sqlite3_int64)now_ms);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 4, (sqlite3_int64)session_id);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 5, provider_account_id, -1,
+                           SQLITE_TRANSIENT);
   }
   if (rc == SQLITE_OK) {
     rc = sqlite3_step(stmt);
   }
   sqlite3_finalize(stmt);
   if ((rc != SQLITE_DONE) || (sqlite3_changes(db) != 1)) {
-    strappy_set_formatted_error(error_out,
-                                "Could not save session model option: %s",
-                                sqlite3_errmsg(db));
+    if (rc == SQLITE_DONE) {
+      strappy_set_error(
+        error_out,
+        "This conversation is already bound to a different model account. "
+        "Create a new session to change accounts.");
+    } else {
+      strappy_set_formatted_error(
+        error_out, "Could not save session account/model options: %s",
+        sqlite3_errmsg(db));
+    }
+    return 0;
+  }
+  return 1;
+}
+
+static int strappy_db_copy_model_account(sqlite3 *db,
+                                         const char *model_id,
+                                         char **provider_account_id_out,
+                                         char **error_out)
+{
+  sqlite3_stmt *stmt;
+  int rc;
+
+  *provider_account_id_out = NULL;
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(
+    db,
+    "SELECT m.provider_account_id FROM models m JOIN provider_accounts a "
+    "ON a.id=m.provider_account_id WHERE m.id=? AND m.catalog_active=1 "
+    "AND a.lifecycle_state='active';",
+    -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc == SQLITE_ROW) {
+    *provider_account_id_out = strappy_db_column_string(stmt, 0);
+  }
+  sqlite3_finalize(stmt);
+  if (*provider_account_id_out == NULL) {
+    strappy_set_error(error_out,
+                      "The selected model does not belong to an active account.");
+    return 0;
+  }
+  return 1;
+}
+
+static int strappy_db_copy_account_default_model(sqlite3 *db,
+                                                 const char *account_id,
+                                                 char **model_id_out,
+                                                 char **error_out)
+{
+  sqlite3_stmt *stmt;
+  int rc;
+
+  *model_id_out = NULL;
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(
+    db,
+    "SELECT m.id FROM models m JOIN provider_accounts a "
+    "ON a.id=m.provider_account_id LEFT JOIN model_preferences p "
+    "ON p.model_id=m.id WHERE m.provider_account_id=? "
+    "AND a.lifecycle_state='active' AND m.catalog_active=1 "
+    "AND (p.allowed=1 OR m.id=(SELECT default_model_id FROM app_preferences "
+    "WHERE id=1)) ORDER BY CASE WHEN m.id=(SELECT default_model_id "
+    "FROM app_preferences WHERE id=1) THEN 0 ELSE 1 END, m.name, m.id LIMIT 1;",
+    -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 1, account_id, -1, SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc == SQLITE_ROW) {
+    *model_id_out = strappy_db_column_string(stmt, 0);
+  }
+  sqlite3_finalize(stmt);
+  if (*model_id_out == NULL) {
+    strappy_set_error(error_out,
+                      "The selected account has no active allowed model.");
     return 0;
   }
   return 1;
@@ -1799,6 +1910,8 @@ int strappy_db_update_session_options(
   long long now_ms;
   int allowed;
   int ok;
+  char *selected_account_id;
+  char *selected_model_id;
 
   if (actual_changed_fields_out != NULL) {
     *actual_changed_fields_out = 0U;
@@ -1812,6 +1925,12 @@ int strappy_db_update_session_options(
   if (((changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) &&
       ((options->model_id == NULL) || (options->model_id[0] == '\0'))) {
     strappy_set_error(error_out, "Session model is not selected.");
+    return 0;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT) != 0U) &&
+      ((options->provider_account_id == NULL) ||
+       (options->provider_account_id[0] == '\0'))) {
+    strappy_set_error(error_out, "Session provider account is not selected.");
     return 0;
   }
   if (((changed_fields & STRAPPY_SESSION_OPTION_ASSISTANT_SET) != 0U) &&
@@ -1839,6 +1958,8 @@ int strappy_db_update_session_options(
 
   strappy_session_options_init(&current);
   strappy_session_options_init(&merged);
+  selected_account_id = NULL;
+  selected_model_id = NULL;
   if (!strappy_db_open(db_path, &db, error_out)) {
     return 0;
   }
@@ -1872,6 +1993,44 @@ int strappy_db_update_session_options(
         "Could not allocate session model option.",
         error_out)) {
     goto rollback;
+  }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT) != 0U) {
+    if (!strappy_db_copy_options_value(
+          &merged.provider_account_id, options->provider_account_id,
+          "Could not allocate session provider-account option.", error_out)) {
+      goto rollback;
+    }
+    if (((changed_fields & STRAPPY_SESSION_OPTION_MODEL) == 0U) &&
+        (strcmp(current.provider_account_id,
+                merged.provider_account_id) != 0)) {
+      if (!strappy_db_copy_account_default_model(db,
+                                                 merged.provider_account_id,
+                                                 &selected_model_id,
+                                                 error_out) ||
+          !strappy_db_copy_options_value(
+            &merged.model_id, selected_model_id,
+            "Could not allocate the selected account's default model.",
+            error_out)) {
+        goto rollback;
+      }
+    }
+  }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) {
+    if (!strappy_db_copy_model_account(db, merged.model_id,
+                                       &selected_account_id, error_out)) {
+      goto rollback;
+    }
+    if ((changed_fields & STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT) == 0U) {
+      if (!strappy_db_copy_options_value(
+            &merged.provider_account_id, selected_account_id,
+            "Could not allocate the model's provider account.", error_out)) {
+        goto rollback;
+      }
+    } else if (strcmp(merged.provider_account_id, selected_account_id) != 0) {
+      strappy_set_error(error_out,
+                        "The selected model does not belong to the selected account.");
+      goto rollback;
+    }
   }
   if (((changed_fields & STRAPPY_SESSION_OPTION_ASSISTANT_SET) != 0U) &&
       !strappy_db_copy_options_value(
@@ -1912,6 +2071,13 @@ int strappy_db_update_session_options(
       (strcmp(current.model_id, merged.model_id) != 0)) {
     actual_changed_fields |= STRAPPY_SESSION_OPTION_MODEL;
   }
+  if (strcmp(current.provider_account_id, merged.provider_account_id) != 0) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT;
+  }
+  if (((actual_changed_fields & STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT) != 0U) &&
+      (strcmp(current.model_id, merged.model_id) != 0)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_MODEL;
+  }
   if (((changed_fields & STRAPPY_SESSION_OPTION_ASSISTANT_SET) != 0U) &&
       (strcmp(current.assistant_set_id, merged.assistant_set_id) != 0)) {
     actual_changed_fields |= STRAPPY_SESSION_OPTION_ASSISTANT_SET;
@@ -1944,13 +2110,21 @@ int strappy_db_update_session_options(
       (strcmp(current.working_directory, merged.working_directory) != 0)) {
     actual_changed_fields |= STRAPPY_SESSION_OPTION_WORKING_DIRECTORY;
   }
-  if ((actual_changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) {
+  if ((actual_changed_fields & (STRAPPY_SESSION_OPTION_MODEL |
+                                STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT)) != 0U) {
     allowed = 0;
     if (!strappy_db_model_exists(db, merged.model_id, error_out) ||
-        !strappy_db_model_matches_session_account(db,
-                                                  session_id,
-                                                  merged.model_id,
-                                                  error_out) ||
+        ((selected_account_id == NULL) &&
+         !strappy_db_copy_model_account(db, merged.model_id,
+                                        &selected_account_id, error_out))) {
+      goto rollback;
+    }
+    if (strcmp(selected_account_id, merged.provider_account_id) != 0) {
+      strappy_set_error(error_out,
+                        "The selected model does not belong to the selected account.");
+      goto rollback;
+    }
+    if (
         !strappy_db_model_is_effectively_allowed(db,
                                                  merged.model_id,
                                                  &allowed,
@@ -1973,10 +2147,12 @@ int strappy_db_update_session_options(
                                                   error_out);
   }
   if (ok &&
-      ((actual_changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U)) {
+      ((actual_changed_fields & (STRAPPY_SESSION_OPTION_MODEL |
+                                 STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT)) != 0U)) {
     ok = strappy_db_save_session_options_model(db,
                                                session_id,
                                                merged.model_id,
+                                               merged.provider_account_id,
                                                now_ms,
                                                error_out);
   } else if (ok && (actual_changed_fields != 0U)) {
@@ -2019,6 +2195,8 @@ int strappy_db_update_session_options(
   }
   strappy_db_release(db);
   strappy_session_options_destroy(&merged);
+  free(selected_account_id);
+  free(selected_model_id);
   if (saved_options_out != NULL) {
     strappy_session_options_destroy(saved_options_out);
     *saved_options_out = current;
@@ -2037,6 +2215,8 @@ rollback:
                   NULL);
   strappy_session_options_destroy(&current);
   strappy_session_options_destroy(&merged);
+  free(selected_account_id);
+  free(selected_model_id);
   strappy_db_release(db);
   return 0;
 }
@@ -2065,6 +2245,8 @@ int strappy_db_update_default_session_options(
   sqlite3 *db;
   long long now_ms;
   int ok;
+  char *selected_account_id;
+  char *selected_model_id;
 
   if (actual_changed_fields_out != NULL) {
     *actual_changed_fields_out = 0U;
@@ -2079,6 +2261,13 @@ int strappy_db_update_default_session_options(
   if (((changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) &&
       ((options->model_id == NULL) || (options->model_id[0] == '\0'))) {
     strappy_set_error(error_out, "Default session model is not selected.");
+    return 0;
+  }
+  if (((changed_fields & STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT) != 0U) &&
+      ((options->provider_account_id == NULL) ||
+       (options->provider_account_id[0] == '\0'))) {
+    strappy_set_error(error_out,
+                      "Default session provider account is not selected.");
     return 0;
   }
   if (((changed_fields & STRAPPY_SESSION_OPTION_ASSISTANT_SET) != 0U) &&
@@ -2106,6 +2295,8 @@ int strappy_db_update_default_session_options(
 
   strappy_session_options_init(&current);
   strappy_session_options_init(&merged);
+  selected_account_id = NULL;
+  selected_model_id = NULL;
   if (!strappy_db_open(db_path, &db, error_out)) {
     return 0;
   }
@@ -2132,6 +2323,43 @@ int strappy_db_update_default_session_options(
         "Could not allocate default session model option.",
         error_out)) {
     goto default_rollback;
+  }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT) != 0U) {
+    if (!strappy_db_copy_options_value(
+          &merged.provider_account_id, options->provider_account_id,
+          "Could not allocate default provider-account option.", error_out)) {
+      goto default_rollback;
+    }
+    if (((changed_fields & STRAPPY_SESSION_OPTION_MODEL) == 0U) &&
+        (strcmp(current.provider_account_id,
+                merged.provider_account_id) != 0)) {
+      if (!strappy_db_copy_account_default_model(db,
+                                                 merged.provider_account_id,
+                                                 &selected_model_id,
+                                                 error_out) ||
+          !strappy_db_copy_options_value(
+            &merged.model_id, selected_model_id,
+            "Could not allocate the default account model.", error_out)) {
+        goto default_rollback;
+      }
+    }
+  }
+  if ((changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) {
+    if (!strappy_db_copy_model_account(db, merged.model_id,
+                                       &selected_account_id, error_out)) {
+      goto default_rollback;
+    }
+    if ((changed_fields & STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT) == 0U) {
+      if (!strappy_db_copy_options_value(
+            &merged.provider_account_id, selected_account_id,
+            "Could not allocate the default model account.", error_out)) {
+        goto default_rollback;
+      }
+    } else if (strcmp(merged.provider_account_id, selected_account_id) != 0) {
+      strappy_set_error(error_out,
+                        "The default model does not belong to the selected account.");
+      goto default_rollback;
+    }
   }
   if (((changed_fields & STRAPPY_SESSION_OPTION_ASSISTANT_SET) != 0U) &&
       !strappy_db_copy_options_value(
@@ -2173,6 +2401,13 @@ int strappy_db_update_default_session_options(
       (strcmp(current.model_id, merged.model_id) != 0)) {
     actual_changed_fields |= STRAPPY_SESSION_OPTION_MODEL;
   }
+  if (strcmp(current.provider_account_id, merged.provider_account_id) != 0) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT;
+  }
+  if (((actual_changed_fields & STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT) != 0U) &&
+      (strcmp(current.model_id, merged.model_id) != 0)) {
+    actual_changed_fields |= STRAPPY_SESSION_OPTION_MODEL;
+  }
   if (((changed_fields & STRAPPY_SESSION_OPTION_ASSISTANT_SET) != 0U) &&
       (strcmp(current.assistant_set_id, merged.assistant_set_id) != 0)) {
     actual_changed_fields |= STRAPPY_SESSION_OPTION_ASSISTANT_SET;
@@ -2206,14 +2441,16 @@ int strappy_db_update_default_session_options(
     actual_changed_fields |= STRAPPY_SESSION_OPTION_WORKING_DIRECTORY;
   }
 
-  if (((actual_changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) &&
+  if (((actual_changed_fields & (STRAPPY_SESSION_OPTION_MODEL |
+                                 STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT)) != 0U) &&
       !strappy_db_model_exists(db, merged.model_id, error_out)) {
     goto default_rollback;
   }
 
   now_ms = strappy_db_now_ms();
   ok = 1;
-  if ((actual_changed_fields & STRAPPY_SESSION_OPTION_MODEL) != 0U) {
+  if ((actual_changed_fields & (STRAPPY_SESSION_OPTION_MODEL |
+                                STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT)) != 0U) {
     ok = strappy_db_upsert_app_setting(
       db,
       STRAPPY_DB_DEFAULT_MODEL_KEY,
@@ -2250,6 +2487,8 @@ int strappy_db_update_default_session_options(
   }
   strappy_db_release(db);
   strappy_session_options_destroy(&merged);
+  free(selected_account_id);
+  free(selected_model_id);
   if (saved_options_out != NULL) {
     strappy_session_options_destroy(saved_options_out);
     *saved_options_out = current;
@@ -2268,6 +2507,8 @@ default_rollback:
                   NULL);
   strappy_session_options_destroy(&current);
   strappy_session_options_destroy(&merged);
+  free(selected_account_id);
+  free(selected_model_id);
   strappy_db_release(db);
   return 0;
 }

@@ -582,8 +582,30 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
                    roundLimit:(NSUInteger)roundLimit
              workingDirectory:(NSString *)workingDirectory
 {
+  return [self initWithModelIdentifier:modelIdentifier
+             providerAccountIdentifier:@""
+                assistantSetIdentifier:assistantSetIdentifier
+                           webProvider:webProvider
+                      webSearchEnabled:webSearchEnabled
+                           bashEnabled:bashEnabled
+                        limitToOneTool:limitToOneTool
+                            roundLimit:roundLimit
+                      workingDirectory:workingDirectory];
+}
+
+- (id)initWithModelIdentifier:(NSString *)modelIdentifier
+    providerAccountIdentifier:(NSString *)providerAccountIdentifier
+       assistantSetIdentifier:(NSString *)assistantSetIdentifier
+                  webProvider:(NSString *)webProvider
+             webSearchEnabled:(BOOL)webSearchEnabled
+                  bashEnabled:(BOOL)bashEnabled
+               limitToOneTool:(BOOL)limitToOneTool
+                   roundLimit:(NSUInteger)roundLimit
+             workingDirectory:(NSString *)workingDirectory
+{
   if ((self = [super init])) {
     [self setModelIdentifier:modelIdentifier];
+    [self setProviderAccountIdentifier:providerAccountIdentifier];
     [self setAssistantSetIdentifier:assistantSetIdentifier];
     [self setWebProvider:webProvider];
     [self setWebSearchEnabled:webSearchEnabled];
@@ -609,6 +631,7 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
              limitToOneTool:[self limitToOneTool]
                  roundLimit:[self roundLimit]
            workingDirectory:[self workingDirectory]];
+  [copy setProviderAccountIdentifier:[self providerAccountIdentifier]];
   [copy setAnswerQualityEnabled:[self answerQualityEnabled]];
   return copy;
 }
@@ -627,6 +650,23 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
   if (modelIdentifier_ != value) {
     [modelIdentifier_ release];
     modelIdentifier_ = [value copy];
+  }
+}
+
+- (NSString *)providerAccountIdentifier
+{
+  return providerAccountIdentifier_;
+}
+
+- (void)setProviderAccountIdentifier:(NSString *)providerAccountIdentifier
+{
+  NSString *value;
+
+  value = [providerAccountIdentifier isKindOfClass:[NSString class]] ?
+    providerAccountIdentifier : @"";
+  if (providerAccountIdentifier_ != value) {
+    [providerAccountIdentifier_ release];
+    providerAccountIdentifier_ = [value copy];
   }
 }
 
@@ -733,6 +773,7 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
 - (void)dealloc
 {
   [modelIdentifier_ release];
+  [providerAccountIdentifier_ release];
   [assistantSetIdentifier_ release];
   [webProvider_ release];
   [workingDirectory_ release];
@@ -746,12 +787,17 @@ static StrappySessionOptions *StrappySessionOptionsFromSummary(
   NSString *workingDirectory)
 {
   NSString *modelIdentifier;
+  NSString *providerAccountIdentifier;
   NSString *assistantSetIdentifier;
   StrappySessionOptions *options;
 
   modelIdentifier = [summary objectForKey:@"model"];
   if (![modelIdentifier isKindOfClass:[NSString class]]) {
     modelIdentifier = @"";
+  }
+  providerAccountIdentifier = [summary objectForKey:@"provider_account_id"];
+  if (![providerAccountIdentifier isKindOfClass:[NSString class]]) {
+    providerAccountIdentifier = @"";
   }
   assistantSetIdentifier = [summary objectForKey:@"assistant_set_id"];
   if (![assistantSetIdentifier isKindOfClass:[NSString class]] ||
@@ -771,6 +817,7 @@ static StrappySessionOptions *StrappySessionOptionsFromSummary(
                 StrappySessionDefaultRoundLimit)
            workingDirectory:workingDirectory]
     autorelease];
+  [options setProviderAccountIdentifier:providerAccountIdentifier];
   [options setAnswerQualityEnabled:
     StrappySessionAnswerQualityEnabledFromSummary(summary)];
   return options;
@@ -804,6 +851,9 @@ static StrappySessionOptions *StrappySessionOptionsFromRecord(
                  roundLimit:(NSUInteger)options->round_limit
            workingDirectory:workingDirectory]
     autorelease];
+  [sessionOptions setProviderAccountIdentifier:
+    ((options->provider_account_id != NULL) ?
+      [NSString stringWithUTF8String:options->provider_account_id] : @"")];
   [sessionOptions setAnswerQualityEnabled:
     (options->answer_quality_enabled ? YES : NO)];
   return sessionOptions;
@@ -835,6 +885,8 @@ static BOOL StrappySessionRecordFromOptions(
     return NO;
   }
   record->model_id = (char *)[[options modelIdentifier] UTF8String];
+  record->provider_account_id =
+    (char *)[[options providerAccountIdentifier] UTF8String];
   record->assistant_set_id =
     (char *)[[options assistantSetIdentifier] UTF8String];
   record->working_directory =
