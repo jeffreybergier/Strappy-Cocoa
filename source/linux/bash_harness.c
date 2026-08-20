@@ -2,6 +2,7 @@
 
 #include "strappy_bash.h"
 #include "strappy_db.h"
+#include "strappy_provider.h"
 
 #include <cJSON.h>
 #include <errno.h>
@@ -342,7 +343,14 @@ static int harness_run(void)
     goto cleanup;
   }
 
-  if (!strappy_db_create_session_with_working_directory(catalog_path,
+  if (!strappy_db_restore_provider_account(
+        catalog_path,
+        STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+        STRAPPY_PROVIDER_OPENROUTER,
+        STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
+        NULL,
+        &error) ||
+      !strappy_db_create_session_with_working_directory(catalog_path,
                                                         temp_dir,
                                                         &session_id,
                                                         &error)) {

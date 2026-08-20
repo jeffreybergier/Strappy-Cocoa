@@ -4756,7 +4756,14 @@ static int harness_create_session_database_with_answer_quality(
   int ok;
 
   unlink(path);
-  if (!strappy_db_create_session(path, session_id_out, error_out)) {
+  if (!strappy_db_restore_provider_account(
+        path,
+        STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+        STRAPPY_PROVIDER_OPENROUTER,
+        STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
+        NULL,
+        error_out) ||
+      !strappy_db_create_session(path, session_id_out, error_out)) {
     return 0;
   }
   if (!answer_quality_enabled) {
@@ -8080,7 +8087,14 @@ static int harness_test_cumulative_session_metrics(void)
   strappy_response_timeline_cursor_init(&range_cursor);
   strappy_session_message_record_list_init(&timeline);
   strappy_session_message_record_list_init(&ranged_timeline);
-  ok = strappy_db_create_session(path, &session_id, &error) &&
+  ok = strappy_db_restore_provider_account(
+         path,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+         STRAPPY_PROVIDER_OPENROUTER,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
+         NULL,
+         &error) &&
+    strappy_db_create_session(path, &session_id, &error) &&
     harness_append_usage_metrics_call(path,
                                    session_id,
                                    previous_call_id,
@@ -8547,7 +8561,14 @@ static int harness_test_ledger(void)
   model_request_id = 0LL;
   strappy_response_item_raw_record_list_init(&context);
   strappy_session_message_record_list_init(&timeline);
-  ok = strappy_db_create_session(path, &session_id, &error);
+  ok = strappy_db_restore_provider_account(
+         path,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+         STRAPPY_PROVIDER_OPENROUTER,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
+         NULL,
+         &error) &&
+    strappy_db_create_session(path, &session_id, &error);
   if (!ok) {
     fprintf(stderr, "Could not create harness session: %s\n", error);
     free(error);
@@ -8933,7 +8954,14 @@ static int harness_test_working_directory_selection(void)
   working_directory = NULL;
   error = NULL;
   session_id = 0LL;
-  ok = strappy_session_create_with_working_directory(database_path,
+  ok = strappy_db_restore_provider_account(
+         database_path,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+         STRAPPY_PROVIDER_OPENROUTER,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
+         NULL,
+         &error) &&
+    strappy_session_create_with_working_directory(database_path,
                                                      developer_path,
                                                      &session_id,
                                                      &error) &&
@@ -9118,6 +9146,13 @@ static int harness_test_session_webview_rendering(void)
   strappy_response_timeline_cursor_init(&request_cursor);
   strappy_session_message_record_list_init(&range);
   ok = strappy_webview_configure_localized_labels(&error) &&
+       strappy_db_restore_provider_account(
+         path,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+         STRAPPY_PROVIDER_OPENROUTER,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
+         NULL,
+         &error) &&
        strappy_db_create_session(path, &session_id, &error) &&
        harness_create_approved_preflight_database(path,
                                                   database_path,

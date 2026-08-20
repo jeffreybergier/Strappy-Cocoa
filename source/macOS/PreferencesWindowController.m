@@ -150,6 +150,21 @@ static NSString *StrappyDatabaseAppNameForRow(NSDictionary *row)
   return NSLocalizedString(@"Other", nil);
 }
 
+static NSString *StrappyModelProviderDisplayName(NSString *providerId)
+{
+  if ([providerId isEqualToString:@"openrouter"]) {
+    return @"OpenRouter";
+  }
+  if ([providerId isEqualToString:@"openai_chatgpt"]) {
+    return @"ChatGPT";
+  }
+  if ([providerId isEqualToString:@"other"]) {
+    return NSLocalizedString(@"Other", nil);
+  }
+  return ([providerId length] > 0U) ? providerId :
+    NSLocalizedString(@"Other", nil);
+}
+
 static NSString *StrappyDatabaseBundleIdentifierForRow(NSDictionary *row)
 {
   NSString *bundleIdentifier;
@@ -292,6 +307,7 @@ static NSArray *StrappyModelSearchKeys(void)
       @"wire_model_id",
       @"provider_account_id",
       @"provider_id",
+      @"provider_name",
       @"provider_account_name",
       @"canonical_slug",
       @"hugging_face_id",
@@ -362,6 +378,8 @@ static NSString *StrappyModelSearchTextForRow(NSDictionary *row)
 
 static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 {
+  NSMutableDictionary *rowsByProviderModel;
+  NSMutableArray *providerModels;
   NSMutableArray *preparedRows;
   NSUInteger index;
 
@@ -369,16 +387,68 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return [NSArray array];
   }
 
-  preparedRows = [NSMutableArray arrayWithCapacity:[rows count]];
+  rowsByProviderModel = [NSMutableDictionary dictionary];
+  providerModels = [NSMutableArray array];
   for (index = 0U; index < [rows count]; index++) {
     NSDictionary *row;
-    NSMutableDictionary *preparedRow;
+    NSMutableDictionary *providerModel;
+    NSString *providerId;
+    NSString *wireModelId;
+    NSString *providerModelKey;
 
     row = [rows objectAtIndex:index];
     if (![row isKindOfClass:[NSDictionary class]]) {
       continue;
     }
 
+    providerId = StrappyStringForModelRow(row, @"provider_id");
+    wireModelId = StrappyStringForModelRow(row, @"wire_model_id");
+    if (([providerId length] == 0U) || ([wireModelId length] == 0U)) {
+      continue;
+    }
+    providerModelKey = [NSString stringWithFormat:@"%@\n%@",
+      providerId, wireModelId];
+    providerModel = [rowsByProviderModel objectForKey:providerModelKey];
+    if (providerModel == nil) {
+      providerModel = [NSMutableDictionary dictionaryWithDictionary:row];
+      [providerModel setObject:providerModelKey forKey:@"provider_model_key"];
+      [providerModel setObject:StrappyModelProviderDisplayName(providerId)
+                       forKey:@"provider_name"];
+      [rowsByProviderModel setObject:providerModel forKey:providerModelKey];
+      [providerModels addObject:providerModel];
+    } else {
+      BOOL allowed;
+      BOOL selected;
+
+      allowed = [[providerModel objectForKey:@"allowed"] boolValue] ||
+        [[row objectForKey:@"allowed"] boolValue];
+      selected = [[providerModel objectForKey:@"selected"] boolValue] ||
+        [[row objectForKey:@"selected"] boolValue];
+      if ([[row objectForKey:@"selected"] boolValue]) {
+        NSString *savedKey;
+        NSString *savedProviderName;
+
+        savedKey = [[providerModel objectForKey:@"provider_model_key"] retain];
+        savedProviderName = [[providerModel objectForKey:@"provider_name"] retain];
+        [providerModel setDictionary:row];
+        [providerModel setObject:savedKey forKey:@"provider_model_key"];
+        [providerModel setObject:savedProviderName forKey:@"provider_name"];
+        [savedKey release];
+        [savedProviderName release];
+      }
+      [providerModel setObject:[NSNumber numberWithBool:allowed]
+                       forKey:@"allowed"];
+      [providerModel setObject:[NSNumber numberWithBool:selected]
+                       forKey:@"selected"];
+    }
+  }
+
+  preparedRows = [NSMutableArray arrayWithCapacity:[providerModels count]];
+  for (index = 0U; index < [providerModels count]; index++) {
+    NSDictionary *row;
+    NSMutableDictionary *preparedRow;
+
+    row = [providerModels objectAtIndex:index];
     preparedRow = [NSMutableDictionary dictionaryWithDictionary:row];
     [preparedRow setObject:StrappyModelSearchTextForRow(row)
                     forKey:kStrappyModelSearchTextKey];
@@ -386,6 +456,56 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   return preparedRows;
+}
+
+static NSArray *StrappyModelRowsForAvailableAccounts(NSArray *rows,
+                                                      NSArray *accounts)
+{
+  NSMutableSet *availableProviders;
+  NSMutableArray *availableRows;
+  NSUInteger index;
+
+  availableProviders = [NSMutableSet set];
+  for (index = 0U; index < [accounts count]; index++) {
+    NSDictionary *account;
+    NSString *providerIdentifier;
+
+    account = [accounts objectAtIndex:index];
+    if (![[account objectForKey:@"available"] boolValue]) {
+      continue;
+    }
+    providerIdentifier = [account objectForKey:@"provider_id"];
+    if ([providerIdentifier isKindOfClass:[NSString class]]) {
+      [availableProviders addObject:providerIdentifier];
+    }
+  }
+
+  availableRows = [NSMutableArray array];
+  for (index = 0U; index < [rows count]; index++) {
+    NSDictionary *row;
+
+    row = [rows objectAtIndex:index];
+    if ([availableProviders containsObject:
+          StrappyStringForModelRow(row, @"provider_id")]) {
+      [availableRows addObject:row];
+    }
+  }
+  return availableRows;
+}
+
+static BOOL StrappyAccountsContainAvailableModelAccount(NSArray *accounts)
+{
+  NSUInteger index;
+
+  for (index = 0U; index < [accounts count]; index++) {
+    NSDictionary *account;
+
+    account = [accounts objectAtIndex:index];
+    if ([[account objectForKey:@"available"] boolValue]) {
+      return YES;
+    }
+  }
+  return NO;
 }
 
 @interface PreferencesWindowController ()
@@ -665,8 +785,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 {
   return [NSArray arrayWithObjects:
     kStrappyPreferencesToolbarAuthentication,
-    kStrappyPreferencesToolbarSessionDefaults,
     kStrappyPreferencesToolbarModels,
+    kStrappyPreferencesToolbarSessionDefaults,
     kStrappyPreferencesToolbarDatabases,
     kStrappyPreferencesToolbarStudy,
     kStrappyPreferencesToolbarPrompts,
@@ -706,6 +826,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
                isEqualToString:kStrappyPreferencesToolbarSessionDefaults]) {
     paneView = [sessionDefaultsController_ view];
   } else if ([identifier isEqualToString:kStrappyPreferencesToolbarModels]) {
+    [self loadOpenRouterModels];
     paneView = modelWhitelistView_;
   } else if ([identifier isEqualToString:kStrappyPreferencesToolbarDatabases]) {
     paneView = databaseWhitelistView_;
@@ -1287,7 +1408,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [alert addButtonWithTitle:NSLocalizedString(@"OK", nil)];
   window = [self window];
   if (window == nil) {
-    [alert runModal];
+    NSBeep();
     return;
   }
   [alert XP_beginSheetModalForWindow:window
@@ -1494,8 +1615,13 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
           (unsigned long)count]];
     }
   } else if (count == 0U) {
-    [modelStatusLabel_ setStringValue:
-      NSLocalizedString(@"No models have been fetched yet.", nil)];
+    if (noAvailableModelAccounts_) {
+      [modelStatusLabel_ setStringValue:
+        NSLocalizedString(@"No accounts configured.", nil)];
+    } else {
+      [modelStatusLabel_ setStringValue:
+        NSLocalizedString(@"No models have been fetched yet.", nil)];
+    }
   } else if (count == 1U) {
     [modelStatusLabel_ setStringValue:
       NSLocalizedString(@"1 model available.", nil)];
@@ -1521,13 +1647,24 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)loadOpenRouterModels
 {
   NSError *error;
+  NSArray *accounts;
   NSArray *rows;
 
   error = nil;
   rows = [StrappySession modelCatalogWithError:&error];
   if (rows != nil) {
+    accounts = [StrappySession providerAccountCatalogWithError:&error];
+    if (accounts == nil) {
+      [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
+        error,
+        NSLocalizedString(@"Accounts could not be loaded.", nil))];
+      return;
+    }
+    noAvailableModelAccounts_ =
+      !StrappyAccountsContainAvailableModelAccount(accounts);
     [allModelRows_ release];
-    allModelRows_ = [StrappyPreparedModelRowsForRows(rows) copy];
+    allModelRows_ = [StrappyPreparedModelRowsForRows(
+      StrappyModelRowsForAvailableAccounts(rows, accounts)) copy];
     [self sortAllModelRows];
     [self applyModelRows];
     return;
@@ -1565,7 +1702,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   return StrappyStringForModelRow([modelRows_ objectAtIndex:(NSUInteger)row],
-                                  @"id");
+                                  @"provider_model_key");
 }
 
 - (void)selectModelTableRowWithIdentifier:(NSString *)modelIdentifier
@@ -1586,7 +1723,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     NSDictionary *row;
 
     row = [modelRows_ objectAtIndex:index];
-    if ([StrappyStringForModelRow(row, @"id")
+    if ([StrappyStringForModelRow(row, @"provider_model_key")
           isEqualToString:modelIdentifier]) {
       [modelTableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:index]
                      byExtendingSelection:NO];
@@ -1717,6 +1854,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   NSError *error;
   NSString *message;
   NSAlert *alert;
+  NSWindow *window;
 
   (void)sender;
   if (refreshingModels_) {
@@ -1732,7 +1870,16 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     alert = [[[NSAlert alloc] init] autorelease];
     [alert setMessageText:NSLocalizedString(@"Could not fetch models", nil)];
     [alert setInformativeText:message];
-    [alert runModal];
+    [alert addButtonWithTitle:NSLocalizedString(@"OK", nil)];
+    window = [self window];
+    if (window == nil) {
+      NSBeep();
+      return;
+    }
+    [alert XP_beginSheetModalForWindow:window
+                         modalDelegate:nil
+                        didEndSelector:NULL
+                           contextInfo:NULL];
     return;
   }
 
@@ -2314,8 +2461,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     if ([identifier isEqualToString:@"model_name"]) {
       return StrappyModelDisplayNameForRow(model);
     }
-    if ([identifier isEqualToString:@"model_account"]) {
-      return StrappyStringForModelRow(model, @"provider_account_name");
+    if ([identifier isEqualToString:@"model_provider"]) {
+      return StrappyStringForModelRow(model, @"provider_name");
     }
     if ([identifier isEqualToString:@"model_id"]) {
       return StrappyStringForModelRow(model, @"wire_model_id");
@@ -2426,8 +2573,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
       }
       return StrappyStringForModelRow(model, @"wire_model_id");
     }
-    if ([identifier isEqualToString:@"model_account"]) {
-      return StrappyStringForModelRow(model, @"provider_account_id");
+    if ([identifier isEqualToString:@"model_provider"]) {
+      return StrappyStringForModelRow(model, @"provider_id");
     }
     if ([identifier isEqualToString:@"model_id"]) {
       return StrappyStringForModelRow(model, @"wire_model_id");

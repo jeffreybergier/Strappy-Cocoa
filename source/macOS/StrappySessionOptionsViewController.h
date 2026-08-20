@@ -14,9 +14,11 @@
   NSBox *toolsBox_;
   NSBox *limitsBox_;
   NSBox *searchProviderBox_;
+  NSTextField *accountLabel_;
   NSTextField *modelLabel_;
   NSTextField *assistantLabel_;
   NSTextField *searchProviderLabel_;
+  NSPopUpButton *accountPopUpButton_;
   NSPopUpButton *modelPopUpButton_;
   NSSegmentedControl *assistantSegmentedControl_;
   NSArray *assistantSegmentIdentifiers_;

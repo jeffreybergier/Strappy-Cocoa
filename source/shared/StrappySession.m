@@ -2142,6 +2142,159 @@ static BOOL StrappySessionRecordFromOptions(
   ok = strappy_session_initialize_store([databasePath UTF8String],
                                         &strappyError);
   if (ok) {
+    static const char *providerIDs[] = {
+      STRAPPY_PROVIDER_OPENROUTER,
+      STRAPPY_PROVIDER_OPENAI_CHATGPT
+    };
+    static const char *accountIDs[] = {
+      STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+      STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT
+    };
+    static const char *accountNames[] = {
+      STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
+      STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT_NAME
+    };
+    size_t providerIndex;
+
+    for (providerIndex = 0U;
+         ok && (providerIndex < (sizeof(providerIDs) / sizeof(providerIDs[0])));
+         providerIndex++) {
+      strappy_provider_account_record_list existingAccounts;
+      NSString *providerIdentifier;
+      NSString *providerAccountIdentifier;
+      StrappyKeychain *keychain;
+      NSObject *credentialLock;
+      NSString *legacyEndpoint;
+      NSMutableArray *restoreIdentifiers;
+      NSArray *credentialIdentifiers;
+      NSUInteger credentialIndex;
+
+      strappy_provider_account_record_list_init(&existingAccounts);
+      if (!strappy_db_list_provider_accounts(
+            [databasePath fileSystemRepresentation], providerIDs[providerIndex],
+            0, &existingAccounts, &strappyError)) {
+        ok = 0;
+        break;
+      }
+      providerIdentifier = [NSString stringWithUTF8String:
+        providerIDs[providerIndex]];
+      providerAccountIdentifier = [NSString stringWithUTF8String:
+        (existingAccounts.count > 0U) ?
+          existingAccounts.records[0].account_id : accountIDs[providerIndex]];
+      keychain = [StrappyKeychain sharedKeychain];
+      credentialLock = [keychain
+        credentialLockForProviderIdentifier:providerIdentifier
+        providerAccountIdentifier:providerAccountIdentifier];
+      legacyEndpoint = nil;
+      @synchronized(credentialLock) {
+        if (strcmp(providerIDs[providerIndex], STRAPPY_PROVIDER_OPENROUTER) == 0) {
+          ok = [keychain
+            migrateLegacyOpenRouterCredentialToProviderAccountIdentifier:
+              providerAccountIdentifier
+            endpoint:&legacyEndpoint] ? 1 : 0;
+        } else {
+          ok = [keychain
+            migrateLegacyChatGPTCredentialToProviderAccountIdentifier:
+              providerAccountIdentifier] ? 1 : 0;
+        }
+      }
+      if (ok && (existingAccounts.count == 0U)) {
+        restoreIdentifiers = [NSMutableArray array];
+        credentialIdentifiers = [keychain
+          credentialProviderAccountIdentifiersForProviderIdentifier:
+            providerIdentifier];
+        if ([credentialIdentifiers containsObject:providerAccountIdentifier]) {
+          [restoreIdentifiers addObject:providerAccountIdentifier];
+        }
+        for (credentialIndex = 0U;
+             credentialIndex < [credentialIdentifiers count];
+             credentialIndex++) {
+          NSString *identifier;
+
+          identifier = [credentialIdentifiers objectAtIndex:credentialIndex];
+          if (![restoreIdentifiers containsObject:identifier]) {
+            [restoreIdentifiers addObject:identifier];
+          }
+        }
+        for (credentialIndex = 0U;
+             ok && (credentialIndex < [restoreIdentifiers count]);
+             credentialIndex++) {
+          NSString *identifier;
+          NSString *displayName;
+          NSString *savedDisplayName;
+          const char *endpoint;
+
+          identifier = [restoreIdentifiers objectAtIndex:credentialIndex];
+          savedDisplayName = nil;
+          displayName = [keychain loadDisplayName:&savedDisplayName
+            forProviderIdentifier:providerIdentifier
+            providerAccountIdentifier:identifier] ? savedDisplayName : nil;
+          if ([displayName length] == 0U) {
+            displayName = (credentialIndex == 0U) ?
+              [NSString stringWithUTF8String:accountNames[providerIndex]] :
+              [NSString stringWithFormat:@"%s %lu", accountNames[providerIndex],
+                (unsigned long)(credentialIndex + 1U)];
+          }
+          endpoint = ([identifier isEqualToString:providerAccountIdentifier] &&
+                      ([legacyEndpoint length] > 0U)) ?
+            [legacyEndpoint UTF8String] : NULL;
+          ok = strappy_db_restore_provider_account(
+            [databasePath fileSystemRepresentation], [identifier UTF8String],
+            providerIDs[providerIndex], [displayName UTF8String], endpoint,
+            &strappyError);
+          if (ok) {
+            ok = [keychain saveDisplayName:displayName
+              forProviderIdentifier:providerIdentifier
+              providerAccountIdentifier:identifier] ? 1 : 0;
+          }
+        }
+      } else if (ok &&
+                 ([legacyEndpoint length] > 0U)) {
+        ok = strappy_db_update_provider_account(
+          [databasePath fileSystemRepresentation],
+          existingAccounts.records[0].account_id,
+          existingAccounts.records[0].display_name,
+          [legacyEndpoint UTF8String], &strappyError);
+      }
+      if (ok && (existingAccounts.count > 0U)) {
+        size_t existingIndex;
+
+        for (existingIndex = 0U;
+             ok && (existingIndex < existingAccounts.count);
+             existingIndex++) {
+          NSString *identifier;
+          NSString *displayName;
+          NSString *savedDisplayName;
+          NSObject *nameCredentialLock;
+
+          identifier = [NSString stringWithUTF8String:
+            existingAccounts.records[existingIndex].account_id];
+          displayName = [NSString stringWithUTF8String:
+            existingAccounts.records[existingIndex].display_name];
+          savedDisplayName = nil;
+          nameCredentialLock = [keychain
+            credentialLockForProviderIdentifier:providerIdentifier
+            providerAccountIdentifier:identifier];
+          @synchronized(nameCredentialLock) {
+            if (![keychain loadDisplayName:&savedDisplayName
+                     forProviderIdentifier:providerIdentifier
+                 providerAccountIdentifier:identifier] ||
+                ![savedDisplayName isEqualToString:displayName]) {
+              ok = [keychain saveDisplayName:displayName
+                forProviderIdentifier:providerIdentifier
+                providerAccountIdentifier:identifier] ? 1 : 0;
+            }
+          }
+        }
+      }
+      strappy_provider_account_record_list_destroy(&existingAccounts);
+      if (!ok && (strappyError == NULL)) {
+        strappy_set_error(&strappyError,
+                          "Could not convert the saved account credential.");
+      }
+    }
+  }
+  if (ok) {
     NSString *resourcePath;
 
     resourcePath = [[NSBundle mainBundle] resourcePath];
@@ -2154,75 +2307,6 @@ static BOOL StrappySessionRecordFromOptions(
     if (!ok && (strappyError == NULL)) {
       strappy_set_error(&strappyError,
                         "Bundled model catalog resource is missing.");
-    }
-  }
-  if (ok) {
-    static const char *providerIDs[] = {
-      STRAPPY_PROVIDER_OPENROUTER,
-      STRAPPY_PROVIDER_OPENAI_CHATGPT
-    };
-    size_t providerIndex;
-
-    for (providerIndex = 0U;
-         ok && (providerIndex < (sizeof(providerIDs) / sizeof(providerIDs[0])));
-         providerIndex++) {
-      char *providerAccountID;
-      NSString *providerAccountIdentifier;
-      StrappyKeychain *keychain;
-      NSObject *credentialLock;
-
-      providerAccountID = NULL;
-      if (!strappy_db_get_designated_provider_account(
-            [databasePath fileSystemRepresentation],
-            providerIDs[providerIndex],
-            &providerAccountID,
-            &strappyError)) {
-        ok = 0;
-        break;
-      }
-      providerAccountIdentifier = [NSString stringWithUTF8String:
-        providerAccountID];
-      keychain = [StrappyKeychain sharedKeychain];
-      credentialLock = [keychain
-        credentialLockForProviderIdentifier:[NSString stringWithUTF8String:
-          providerIDs[providerIndex]]
-        providerAccountIdentifier:providerAccountIdentifier];
-      @synchronized(credentialLock) {
-        if (strcmp(providerIDs[providerIndex], STRAPPY_PROVIDER_OPENROUTER) == 0) {
-          NSString *legacyEndpoint;
-          strappy_provider_account_record account;
-
-          legacyEndpoint = nil;
-          ok = [keychain
-            migrateLegacyOpenRouterCredentialToProviderAccountIdentifier:
-              providerAccountIdentifier
-            endpoint:&legacyEndpoint] ? 1 : 0;
-          if (ok && ([legacyEndpoint length] > 0U)) {
-            strappy_provider_account_record_init(&account);
-            ok = strappy_db_get_provider_account(
-              [databasePath fileSystemRepresentation],
-              providerAccountID,
-              &account,
-              &strappyError) &&
-              strappy_db_update_provider_account(
-                [databasePath fileSystemRepresentation],
-                providerAccountID,
-                account.display_name,
-                [legacyEndpoint UTF8String],
-                &strappyError);
-            strappy_provider_account_record_destroy(&account);
-          }
-        } else {
-          ok = [keychain
-            migrateLegacyChatGPTCredentialToProviderAccountIdentifier:
-              providerAccountIdentifier] ? 1 : 0;
-        }
-      }
-      free(providerAccountID);
-      if (!ok && (strappyError == NULL)) {
-        strappy_set_error(&strappyError,
-                          "Could not convert the saved account credential.");
-      }
     }
   }
   if (!ok) {
@@ -2375,11 +2459,47 @@ static BOOL StrappySessionRecordFromOptions(
   accounts = [NSMutableArray arrayWithCapacity:list.count];
   for (index = 0U; index < list.count; index++) {
     NSDictionary *account;
+    NSMutableDictionary *availableAccount;
+    NSString *accountIdentifier;
+    NSString *providerIdentifier;
+    NSString *responsesEndpoint;
+    StrappyKeychain *keychain;
+    NSObject *credentialLock;
+    BOOL available;
 
     account = [StrappySession dictionaryFromProviderAccountRecord:
       &list.records[index]];
     if (account != nil) {
-      [accounts addObject:account];
+      accountIdentifier = [account objectForKey:@"id"];
+      providerIdentifier = [account objectForKey:@"provider_id"];
+      responsesEndpoint = [account objectForKey:@"responses_endpoint"];
+      keychain = [StrappyKeychain sharedKeychain];
+      available = NO;
+      if ([providerIdentifier isEqualToString:@"other"]) {
+        available = [responsesEndpoint length] > 0U;
+      } else if ([providerIdentifier isEqualToString:@"openrouter"]) {
+        credentialLock = [keychain
+          credentialLockForProviderIdentifier:providerIdentifier
+          providerAccountIdentifier:accountIdentifier];
+        @synchronized(credentialLock) {
+          available = [keychain
+            hasBearerTokenForProviderIdentifier:providerIdentifier
+            providerAccountIdentifier:accountIdentifier];
+        }
+      } else if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) {
+        credentialLock = [keychain
+          credentialLockForProviderIdentifier:providerIdentifier
+          providerAccountIdentifier:accountIdentifier];
+        @synchronized(credentialLock) {
+          available = [keychain
+            hasChatGPTCredentialsForProviderAccountIdentifier:
+              accountIdentifier];
+        }
+      }
+      availableAccount = [[account mutableCopy] autorelease];
+      [availableAccount setObject:[NSNumber numberWithBool:available]
+                           forKey:@"available"];
+      [accounts addObject:availableAccount];
     }
   }
   strappy_provider_account_record_list_destroy(&list);
@@ -2484,6 +2604,28 @@ static BOOL StrappySessionRecordFromOptions(
                                       accountID, &record, &strappyError)) {
     account = [StrappySession dictionaryFromProviderAccountRecord:&record];
   }
+  if (account != nil) {
+    NSString *accountIdentifier;
+    StrappyKeychain *keychain;
+    NSObject *credentialLock;
+
+    accountIdentifier = [account objectForKey:@"id"];
+    keychain = [StrappyKeychain sharedKeychain];
+    credentialLock = [keychain
+      credentialLockForProviderIdentifier:providerIdentifier
+      providerAccountIdentifier:accountIdentifier];
+    @synchronized(credentialLock) {
+      if (![keychain saveDisplayName:displayName
+               forProviderIdentifier:providerIdentifier
+           providerAccountIdentifier:accountIdentifier]) {
+        (void)strappy_db_archive_provider_account(
+          [databasePath fileSystemRepresentation], accountID, NULL);
+        account = nil;
+        strappy_set_error(&strappyError,
+                          "Could not save the account name in Keychain.");
+      }
+    }
+  }
   strappy_provider_account_record_destroy(&record);
   free(accountID);
   if (account == nil) {
@@ -2512,6 +2654,11 @@ static BOOL StrappySessionRecordFromOptions(
   NSString *databasePath;
   NSString *trimmedName;
   NSString *trimmedEndpoint;
+  strappy_provider_account_record existingRecord;
+  NSString *providerIdentifier;
+  NSString *previousName;
+  StrappyKeychain *keychain;
+  NSObject *credentialLock;
   char *strappyError;
 
   trimmedName = [displayName stringByTrimmingCharactersInSet:
@@ -2527,17 +2674,56 @@ static BOOL StrappySessionRecordFromOptions(
     return NO;
   }
   databasePath = [StrappySession sessionsDatabasePath];
+  strappy_provider_account_record_init(&existingRecord);
   strappyError = NULL;
+  if (!strappy_db_get_provider_account(
+        [databasePath fileSystemRepresentation],
+        [providerAccountIdentifier UTF8String], &existingRecord,
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_provider_account_record_destroy(&existingRecord);
+    strappy_free_string(strappyError);
+    return NO;
+  }
+  providerIdentifier = [NSString stringWithUTF8String:
+    existingRecord.provider_id];
+  previousName = [NSString stringWithUTF8String:existingRecord.display_name];
+  keychain = [StrappyKeychain sharedKeychain];
+  credentialLock = [keychain
+    credentialLockForProviderIdentifier:providerIdentifier
+    providerAccountIdentifier:providerAccountIdentifier];
+  @synchronized(credentialLock) {
+    if (![keychain saveDisplayName:trimmedName
+             forProviderIdentifier:providerIdentifier
+         providerAccountIdentifier:providerAccountIdentifier]) {
+      if (error != nil) {
+        *error = [StrappySession errorFromCString:
+          "Could not save the account name in Keychain."];
+      }
+      strappy_provider_account_record_destroy(&existingRecord);
+      strappy_free_string(strappyError);
+      return NO;
+    }
+  }
   if (!strappy_db_update_provider_account(
         [databasePath fileSystemRepresentation],
         [providerAccountIdentifier UTF8String], [trimmedName UTF8String],
         StrappySessionOptionalCString(trimmedEndpoint), &strappyError)) {
+    @synchronized(credentialLock) {
+      (void)[keychain saveDisplayName:previousName
+               forProviderIdentifier:providerIdentifier
+           providerAccountIdentifier:providerAccountIdentifier];
+    }
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
+    strappy_provider_account_record_destroy(&existingRecord);
     strappy_free_string(strappyError);
     return NO;
   }
+  strappy_provider_account_record_destroy(&existingRecord);
   strappy_free_string(strappyError);
   [[NSNotificationCenter defaultCenter]
     postNotificationName:StrappyProviderAccountsDidChangeNotification
@@ -3147,7 +3333,12 @@ static BOOL StrappySessionRecordFromOptions(
 
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error
 {
+  NSArray *accounts;
+  NSString *designatedAccountIdentifier;
+  NSString *providerAccountIdentifier;
   NSString *databasePath;
+  NSUInteger index;
+  BOOL hasOpenRouterAccount;
 
   @synchronized(self) {
     if (StrappySessionModelCatalogRefreshInFlight) {
@@ -3158,6 +3349,66 @@ static BOOL StrappySessionRecordFromOptions(
         *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
                                      code:10
                                  userInfo:userInfo];
+      }
+      return NO;
+    }
+  }
+
+  accounts = [StrappySession providerAccountCatalogWithError:error];
+  if (accounts == nil) {
+    return NO;
+  }
+  designatedAccountIdentifier = [StrappySession
+    designatedProviderAccountIdentifierForProviderIdentifier:@"openrouter"
+    error:nil];
+  providerAccountIdentifier = nil;
+  hasOpenRouterAccount = NO;
+  for (index = 0U; index < [accounts count]; index++) {
+    NSDictionary *account;
+    NSString *accountIdentifier;
+
+    account = [accounts objectAtIndex:index];
+    if (![[account objectForKey:@"provider_id"]
+          isEqualToString:@"openrouter"]) {
+      continue;
+    }
+    hasOpenRouterAccount = YES;
+    if (![[account objectForKey:@"available"] boolValue]) {
+      continue;
+    }
+    accountIdentifier = [account objectForKey:@"id"];
+    if (providerAccountIdentifier == nil) {
+      providerAccountIdentifier = accountIdentifier;
+    }
+    if ([accountIdentifier isEqualToString:designatedAccountIdentifier]) {
+      providerAccountIdentifier = accountIdentifier;
+      break;
+    }
+  }
+  if ([providerAccountIdentifier length] == 0U) {
+    NSString *message;
+
+    message = hasOpenRouterAccount ? NSLocalizedString(
+      @"Enter an API key for an OpenRouter account before fetching models.",
+      nil) : NSLocalizedString(
+      @"Add an OpenRouter account before fetching models.", nil);
+    if (error != nil) {
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:11
+                               userInfo:[NSDictionary dictionaryWithObject:message
+                                         forKey:NSLocalizedDescriptionKey]];
+    }
+    return NO;
+  }
+
+  @synchronized(self) {
+    if (StrappySessionModelCatalogRefreshInFlight) {
+      if (error != nil) {
+        *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                     code:10
+                                 userInfo:[NSDictionary dictionaryWithObject:
+                                   NSLocalizedString(@"Model refresh is already running.", nil)
+                                   forKey:NSLocalizedDescriptionKey]];
       }
       return NO;
     }
@@ -3178,7 +3429,7 @@ static BOOL StrappySessionRecordFromOptions(
                   object:self];
   [NSThread detachNewThreadSelector:@selector(refreshOpenRouterModelCatalogInBackground:)
                            toTarget:self
-                         withObject:nil];
+                         withObject:providerAccountIdentifier];
   return YES;
 }
 
@@ -3193,12 +3444,10 @@ static BOOL StrappySessionRecordFromOptions(
   char *strappyError;
   int ok;
 
-  (void)ignored;
   pool = [[NSAutoreleasePool alloc] init];
   databasePath = [StrappySession sessionsDatabasePath];
-  providerAccountIdentifier = [StrappySession
-    designatedProviderAccountIdentifierForProviderIdentifier:@"openrouter"
-    error:nil];
+  providerAccountIdentifier = [ignored isKindOfClass:[NSString class]] ?
+    ignored : nil;
   apiEndpoint = nil;
   apiToken = nil;
   if ([providerAccountIdentifier length] > 0U) {
@@ -3231,10 +3480,12 @@ static BOOL StrappySessionRecordFromOptions(
   result = [[NSMutableDictionary alloc] init];
 
   strappyError = NULL;
-  ok = strappy_model_catalog_refresh_openrouter_user_models(
+  ok = strappy_model_catalog_update_for_account(
     StrappySessionOptionalCString(providerAccountIdentifier),
+    NULL,
     StrappySessionOptionalCString(apiEndpoint),
     StrappySessionOptionalCString(apiToken),
+    NULL,
     [databasePath UTF8String],
     &strappyError);
   if (!ok) {

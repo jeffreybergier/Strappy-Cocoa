@@ -1808,7 +1808,9 @@ static int strappy_db_semantic_begin_response_call(
       "AND m.catalog_active = 1 AND "
       "(m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL " OR "
       "EXISTS (SELECT 1 FROM model_preferences mp "
-        "WHERE mp.model_id = m.id AND mp.allowed = 1));";
+        "WHERE mp.provider_id = (SELECT a.provider_id "
+        "FROM provider_accounts a WHERE a.id = m.provider_account_id) "
+        "AND mp.wire_model_id = m.wire_model_id AND mp.allowed = 1));";
   sqlite3 *db;
   sqlite3_stmt *stmt;
   cJSON *root;

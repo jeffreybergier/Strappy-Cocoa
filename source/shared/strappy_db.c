@@ -261,7 +261,8 @@ static void strappy_db_set_reset_required_error(char **error_out)
 
 static int strappy_db_validate_schema_identity(sqlite3 *db, char **error_out)
 {
-  static const char expected[] = "semantic-v1-multi-account-providers";
+  static const char expected[] =
+    "semantic-v1-provider-model-preferences-no-seeded-accounts";
   sqlite3_stmt *stmt;
   const unsigned char *actual;
   int rc;
@@ -381,7 +382,7 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     ");"
     "INSERT OR IGNORE INTO schema_metadata "
     "(id, schema_name, created_at_ms) VALUES "
-    "(1, 'semantic-v1-multi-account-providers', "
+    "(1, 'semantic-v1-provider-model-preferences-no-seeded-accounts', "
       "CAST(strftime('%s','now') AS INTEGER) * 1000);"
 
     "CREATE TABLE IF NOT EXISTS provider_accounts ("
@@ -401,25 +402,6 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     ");"
     "CREATE INDEX IF NOT EXISTS provider_accounts_provider_lifecycle_idx "
       "ON provider_accounts(provider_id, lifecycle_state);"
-    "INSERT INTO provider_accounts "
-    "(id, provider_id, display_name, lifecycle_state, created_at_ms, "
-      "updated_at_ms) "
-    "SELECT '" STRAPPY_PROVIDER_ACCOUNT_OPENROUTER "', '"
-      STRAPPY_PROVIDER_OPENROUTER "', 'OpenRouter', 'active', "
-      "CAST(strftime('%s','now') AS INTEGER) * 1000,"
-      "CAST(strftime('%s','now') AS INTEGER) * 1000 "
-      "WHERE NOT EXISTS (SELECT 1 FROM provider_accounts WHERE provider_id='"
-        STRAPPY_PROVIDER_OPENROUTER "');"
-    "INSERT INTO provider_accounts "
-    "(id, provider_id, display_name, lifecycle_state, created_at_ms, "
-      "updated_at_ms) "
-    "SELECT '" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT "', '"
-      STRAPPY_PROVIDER_OPENAI_CHATGPT "', 'ChatGPT (Codex)', 'active', "
-      "CAST(strftime('%s','now') AS INTEGER) * 1000,"
-      "CAST(strftime('%s','now') AS INTEGER) * 1000 "
-      "WHERE NOT EXISTS (SELECT 1 FROM provider_accounts WHERE provider_id='"
-        STRAPPY_PROVIDER_OPENAI_CHATGPT "');"
-
     "CREATE TABLE IF NOT EXISTS models ("
     "id TEXT PRIMARY KEY,"
     "provider_account_id TEXT NOT NULL,"
@@ -509,10 +491,11 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE"
     ");"
     "CREATE TABLE IF NOT EXISTS model_preferences ("
-    "model_id TEXT PRIMARY KEY,"
+    "provider_id TEXT NOT NULL,"
+    "wire_model_id TEXT NOT NULL,"
     "allowed INTEGER NOT NULL DEFAULT 0 CHECK(allowed IN (0,1)),"
     "updated_at_ms INTEGER NOT NULL,"
-    "FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE"
+    "PRIMARY KEY(provider_id, wire_model_id)"
     ");"
     "CREATE TABLE IF NOT EXISTS app_preferences ("
     "id INTEGER PRIMARY KEY CHECK(id = 1),"

@@ -83,6 +83,8 @@
 "Session defaults apply to new sessions" = "セッションのデフォルトは新規セッションに適用されます";
 "Tools & Search" = "ツールと検索";
 "Provider" = "プロバイダー";
+"Add an OpenRouter account before fetching models." = "モデルを取得する前にOpenRouterアカウントを追加してください。";
+"Enter an API key for an OpenRouter account before fetching models." = "モデルを取得する前にOpenRouterアカウントのAPIキーを入力してください。";
 "API Token" = "API トークン";
 "OpenRouter" = "OpenRouter";
 "Endpoint" = "エンドポイント";
@@ -91,6 +93,8 @@
 "Paste API token" = "API トークンを貼り付け";
 "Model" = "モデル";
 "Account" = "アカウント";
+"Choose an Account" = "アカウントを選択";
+"No Accounts Available" = "利用可能なアカウントがありません";
 "Fetch Models" = "モデルを取得";
 "Refresh the OpenRouter model list." = "OpenRouter のモデル一覧を更新します。";
 "Use" = "使用";
@@ -367,6 +371,7 @@
 "No databases available." = "利用できるデータベースはありません。";
 "No messages yet" = "メッセージはまだありません";
 "No models have been fetched yet." = "モデルはまだ取得されていません。";
+"No accounts configured." = "アカウントが設定されていません。";
 "Other" = "その他";
 "Out: %@" = "出力: %@";
 "Prompt guidance resources are missing from the app bundle." = "プロンプトガイダンスのリソースがアプリバンドルにありません。";

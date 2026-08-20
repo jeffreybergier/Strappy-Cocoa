@@ -83,6 +83,8 @@
 "Session defaults apply to new sessions" = "Session defaults apply to new sessions";
 "Tools & Search" = "Tools & Search";
 "Provider" = "Provider";
+"Add an OpenRouter account before fetching models." = "Add an OpenRouter account before fetching models.";
+"Enter an API key for an OpenRouter account before fetching models." = "Enter an API key for an OpenRouter account before fetching models.";
 "API Token" = "API Token";
 "OpenRouter" = "OpenRouter";
 "Endpoint" = "Endpoint";
@@ -91,6 +93,8 @@
 "Paste API token" = "Paste API token";
 "Model" = "Model";
 "Account" = "Account";
+"Choose an Account" = "Choose an Account";
+"No Accounts Available" = "No Accounts Available";
 "Fetch Models" = "Fetch Models";
 "Refresh the OpenRouter model list." = "Refresh the OpenRouter model list.";
 "Use" = "Use";
@@ -367,6 +371,7 @@
 "No databases available." = "No databases available.";
 "No messages yet" = "No messages yet";
 "No models have been fetched yet." = "No models have been fetched yet.";
+"No accounts configured." = "No accounts configured.";
 "Other" = "Other";
 "Out: %@" = "Out: %@";
 "Prompt guidance resources are missing from the app bundle." = "Prompt guidance resources are missing from the app bundle.";

@@ -193,6 +193,48 @@ static NSString *xpkc_iosProtoForScheme(NSString *scheme)
   return YES;
 }
 
++ (NSArray *)genericPasswordAccountsForService:(NSString *)service
+{
+  NSDictionary *query;
+  CFTypeRef result;
+  OSStatus status;
+  NSArray *matches;
+  NSMutableArray *accounts;
+  NSUInteger index;
+
+  if ([service length] == 0U) {
+    return [NSArray array];
+  }
+  query = [NSDictionary dictionaryWithObjectsAndKeys:
+    (id)kSecClassGenericPassword, (id)kSecClass,
+    service,                      (id)kSecAttrService,
+    (id)kCFBooleanTrue,           (id)kSecReturnAttributes,
+    (id)kSecMatchLimitAll,        (id)kSecMatchLimit, nil];
+  result = NULL;
+  status = SecItemCopyMatching((CFDictionaryRef)query, &result);
+  if ((status == errSecItemNotFound) || (result == NULL)) {
+    return [NSArray array];
+  }
+  if (status != errSecSuccess) {
+    NSLog(@"XPKeychain.genericPasswordAccounts status=%d service=%@",
+          (int)status, service);
+    return [NSArray array];
+  }
+  matches = (NSArray *)result;
+  accounts = [NSMutableArray array];
+  for (index = 0U; index < [matches count]; index++) {
+    NSString *account;
+
+    account = [[matches objectAtIndex:index] objectForKey:(id)kSecAttrAccount];
+    if ([account isKindOfClass:[NSString class]] &&
+        ![accounts containsObject:account]) {
+      [accounts addObject:account];
+    }
+  }
+  CFRelease(result);
+  return accounts;
+}
+
 + (BOOL)deleteGenericPasswordForService:(NSString *)service
                                 account:(NSString *)account
 {
@@ -612,6 +654,88 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
     CFRelease(item);
   }
   return YES;
+}
+
++ (NSArray *)genericPasswordAccountsForService:(NSString *)service
+{
+  const char *serviceCString;
+  size_t serviceLength;
+  SecKeychainAttribute searchAttribute;
+  SecKeychainAttributeList searchAttributes;
+  SecKeychainSearchRef search;
+  NSMutableArray *accounts;
+  OSStatus status;
+
+  if ([service length] == 0U) {
+    return [NSArray array];
+  }
+  serviceCString = [service UTF8String];
+  serviceLength = strlen(serviceCString);
+  if (serviceLength > (size_t)UINT_MAX) {
+    return [NSArray array];
+  }
+  searchAttribute.tag = kSecServiceItemAttr;
+  searchAttribute.length = (UInt32)serviceLength;
+  searchAttribute.data = (void *)serviceCString;
+  searchAttributes.count = 1U;
+  searchAttributes.attr = &searchAttribute;
+  search = NULL;
+  status = SecKeychainSearchCreateFromAttributes(
+    NULL, kSecGenericPasswordItemClass, &searchAttributes, &search);
+  if ((status != errSecSuccess) || (search == NULL)) {
+    if (status != errSecItemNotFound) {
+      NSLog(@"XPKeychain.genericPasswordAccounts search status=%d service=%@",
+            (int)status, service);
+    }
+    if (search != NULL) {
+      CFRelease(search);
+    }
+    return [NSArray array];
+  }
+
+  accounts = [NSMutableArray array];
+  for (;;) {
+    SecKeychainItemRef item;
+
+    item = NULL;
+    status = SecKeychainSearchCopyNext(search, &item);
+    if (status != errSecSuccess) {
+      break;
+    }
+    if (item != NULL) {
+      UInt32 tag;
+      UInt32 format;
+      SecKeychainAttributeInfo info;
+      SecKeychainAttributeList *attributes;
+
+      tag = kSecAccountItemAttr;
+      format = CSSM_DB_ATTRIBUTE_FORMAT_STRING;
+      info.count = 1U;
+      info.tag = &tag;
+      info.format = &format;
+      attributes = NULL;
+      if ((SecKeychainItemCopyAttributesAndData(
+             item, &info, NULL, &attributes, NULL, NULL) == errSecSuccess) &&
+          (attributes != NULL) && (attributes->count == 1U)) {
+        NSString *account;
+
+        account = xpkc_macAttrString(&attributes->attr[0]);
+        if (([account length] > 0U) && ![accounts containsObject:account]) {
+          [accounts addObject:account];
+        }
+      }
+      if (attributes != NULL) {
+        SecKeychainItemFreeAttributesAndData(attributes, NULL);
+      }
+      CFRelease(item);
+    }
+  }
+  if ((status != errSecItemNotFound) && (status != errSecSuccess)) {
+    NSLog(@"XPKeychain.genericPasswordAccounts next status=%d service=%@",
+          (int)status, service);
+  }
+  CFRelease(search);
+  return accounts;
 }
 
 + (BOOL)deleteGenericPasswordForService:(NSString *)service

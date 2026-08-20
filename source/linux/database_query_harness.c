@@ -677,8 +677,8 @@ static int harness_run_fresh_catalog_schema_tests(
            "SELECT COUNT(*) FROM provider_accounts WHERE lifecycle_state='active' "
              "AND id LIKE 'acct_%' AND id <> provider_id "
              "AND provider_id IN ('openrouter','openai_chatgpt');",
-           2LL,
-           "built-in provider account count") &&
+           0LL,
+           "fresh database provider account count") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
            "SELECT id, assistant_set_id, kind, subject, predicate, value, "
@@ -716,6 +716,78 @@ static int harness_run_fresh_catalog_schema_tests(
              "'helper_database_info');",
            0LL,
          "legacy table count");
+}
+
+static int harness_restore_fixture_provider_accounts_at_path(const char *path)
+{
+  char *error;
+  int ok;
+
+  error = NULL;
+  ok = strappy_db_restore_provider_account(
+         path,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+         STRAPPY_PROVIDER_OPENROUTER,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
+         NULL,
+         &error) &&
+       strappy_db_restore_provider_account(
+         path,
+         STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT,
+         STRAPPY_PROVIDER_OPENAI_CHATGPT,
+         STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT_NAME,
+         NULL,
+         &error);
+  if (!ok) {
+    fprintf(stderr, "Could not restore fixture accounts: %s\n",
+            (error != NULL) ? error : "unknown");
+  }
+  strappy_free_string(error);
+  return ok;
+}
+
+static int harness_run_empty_account_defaults_tests(
+  const harness_context *context)
+{
+  strappy_session_options options;
+  char *error;
+  long long session_id;
+  int ok;
+
+  strappy_session_options_init(&options);
+  error = NULL;
+  session_id = 0LL;
+  ok = strappy_db_load_default_session_options(
+         context->catalog_path, context->temp_dir, &options, &error) &&
+       (options.model_id != NULL) && (options.model_id[0] == '\0') &&
+       (options.provider_account_id != NULL) &&
+       (options.provider_account_id[0] == '\0');
+  if (!ok) {
+    fprintf(stderr, "Fresh account defaults were not empty: %s\n",
+            (error != NULL) ? error : "unexpected values");
+  }
+  strappy_free_string(error);
+  error = NULL;
+  if (ok) {
+    ok = !strappy_db_create_session_with_working_directory(
+           context->catalog_path, context->temp_dir, &session_id, &error) &&
+         (error != NULL) &&
+         (strstr(error, "Add an account before creating a session") != NULL);
+    if (!ok) {
+      fprintf(stderr, "Fresh database allowed a session without an account: %s\n",
+              (error != NULL) ? error : "unexpected success");
+    }
+  }
+  strappy_free_string(error);
+  strappy_session_options_destroy(&options);
+  return ok;
+}
+
+static int harness_restore_fixture_provider_accounts(
+  const harness_context *context)
+{
+  return harness_restore_fixture_provider_accounts_at_path(
+    context->catalog_path);
 }
 
 static int harness_run_provider_account_reset_test(
@@ -3456,6 +3528,7 @@ static int harness_run_skills_tests(const harness_context *context)
 
   if (ok) {
     ok = strappy_db_initialize(catalog_path, &error) &&
+      harness_restore_fixture_provider_accounts_at_path(catalog_path) &&
       strappy_db_create_session(catalog_path, &session_id, &error);
   }
   if (ok) {
@@ -9709,6 +9782,7 @@ static int harness_run_bundled_model_catalog_tests(
   harness_unlink_sqlite_files(database_path);
   error = NULL;
   ok = strappy_db_initialize(database_path, &error) &&
+    harness_restore_fixture_provider_accounts_at_path(database_path) &&
     strappy_model_catalog_import_bundled_models(HARNESS_RESOURCE_DIR,
                                                  database_path,
                                                  &error);
@@ -9776,8 +9850,8 @@ static int harness_run_bundled_model_catalog_tests(
        harness_expect_catalog_integer(
          database_path,
          "SELECT COUNT(*) FROM model_preferences WHERE "
-           "model_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT
-             ":gpt-5.4' AND allowed = 1;",
+           "provider_id = 'openai_chatgpt' AND wire_model_id = 'gpt-5.4' "
+             "AND allowed = 1;",
          1LL,
          "preserved bundled model preference") &&
        harness_expect_catalog_integer(
@@ -10321,8 +10395,8 @@ static int harness_run_openrouter_model_catalog_tests(
   if (!harness_expect_catalog_integer(
         context->catalog_path,
         "SELECT COUNT(*) FROM model_preferences "
-        "WHERE model_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENROUTER
-          ":openai/gpt-4.1-mini' AND allowed = 1;",
+        "WHERE provider_id = 'openrouter' "
+          "AND wire_model_id = 'openai/gpt-4.1-mini' AND allowed = 1;",
         1LL,
         "refreshed default model whitelist count")) {
     return 0;
@@ -11785,6 +11859,7 @@ static int harness_run_multi_account_database_tests(
   memset(oversized_name, 'x', sizeof(oversized_name) - 1U);
   oversized_name[sizeof(oversized_name) - 1U] = '\0';
   ok = strappy_db_initialize(path,&error) &&
+    harness_restore_fixture_provider_accounts_at_path(path) &&
     strappy_db_get_designated_provider_account(path,"openai_chatgpt",&chat_one,&error) &&
     strappy_db_get_designated_provider_account(path,"openrouter",&router_one,&error) &&
     strappy_db_create_provider_account(path,"openai_chatgpt","Same Name",NULL,&chat_two,&error) &&
@@ -11874,6 +11949,17 @@ static int harness_run_multi_account_database_tests(
   if (ok) ok = strappy_db_create_manual_model(path,other_two,&input,&manual_two,&error) &&
     (strcmp(manual_one,manual_two)!=0) &&
     strappy_db_set_model_allowed(path,manual_one,1,&error) &&
+    harness_expect_catalog_integer(path,
+      "SELECT COUNT(*) FROM model_preferences WHERE provider_id='other' "
+      "AND wire_model_id='manual' AND allowed=1;",
+      1LL,"single provider-level manual model preference") &&
+    harness_expect_catalog_integer(path,
+      "SELECT COUNT(*) FROM models m JOIN provider_accounts a "
+      "ON a.id=m.provider_account_id JOIN model_preferences p "
+      "ON p.provider_id=a.provider_id AND p.wire_model_id=m.wire_model_id "
+      "WHERE a.provider_id='other' AND m.wire_model_id='manual' "
+      "AND p.allowed=1;",
+      2LL,"provider preference shared across account models") &&
     !strappy_db_set_default_account_model(path,other_one,manual_two,NULL) &&
     strappy_db_set_default_account_model(path,other_two,manual_two,&error) &&
     strappy_db_get_default_account_model(path,&default_account,&default_model,&error) &&
@@ -11949,6 +12035,8 @@ int main(void)
        harness_run_helper_fontawesome_tests() &&
        harness_make_temp_dir(&context) &&
        harness_run_fresh_catalog_schema_tests(&context) &&
+       harness_run_empty_account_defaults_tests(&context) &&
+       harness_restore_fixture_provider_accounts(&context) &&
        harness_run_provider_account_reset_test(&context) &&
        harness_run_discovered_database_replacement_tests(&context) &&
        harness_run_catalog_reclassification_tests(&context) &&

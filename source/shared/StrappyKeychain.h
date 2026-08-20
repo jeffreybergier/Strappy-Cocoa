@@ -37,6 +37,14 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier;
 - (BOOL)deleteBearerTokenForProviderIdentifier:(NSString *)providerIdentifier
                       providerAccountIdentifier:
                         (NSString *)providerAccountIdentifier;
+- (NSArray *)credentialProviderAccountIdentifiersForProviderIdentifier:
+  (NSString *)providerIdentifier;
+- (BOOL)loadDisplayName:(NSString **)displayName
+  forProviderIdentifier:(NSString *)providerIdentifier
+providerAccountIdentifier:(NSString *)providerAccountIdentifier;
+- (BOOL)saveDisplayName:(NSString *)displayName
+  forProviderIdentifier:(NSString *)providerIdentifier
+providerAccountIdentifier:(NSString *)providerAccountIdentifier;
 
 - (BOOL)hasChatGPTCredentials;
 - (BOOL)loadChatGPTAccessToken:(NSString **)accessToken

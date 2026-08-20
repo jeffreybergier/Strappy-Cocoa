@@ -28,6 +28,7 @@ static NSString * const kStrappyChatGPTAccountIdentifierKey = @"account_id";
 static NSString * const kStrappyChatGPTExpiresAtKey = @"expires_at_ms";
 static NSString * const kStrappyBearerTokenKey = @"bearer_token";
 static NSString * const kStrappyCredentialKindKey = @"credential_kind";
+static NSString * const kStrappyDisplayNameKey = @"display_name";
 
 enum {
   kStrappyChatGPTCredentialFormatVersion =
@@ -101,6 +102,24 @@ static NSDictionary *StrappyKeychainPropertyListFromData(NSData *data)
   [errorDescription release];
   return ([propertyList isKindOfClass:[NSDictionary class]] &&
           (format == NSPropertyListBinaryFormat_v1_0)) ? propertyList : nil;
+}
+
+static NSMutableDictionary *StrappyKeychainMutableCredential(
+  NSString *service,
+  NSString *providerAccountIdentifier)
+{
+  NSData *data;
+  NSDictionary *credential;
+
+  data = nil;
+  if (![XPKeychain findGenericPasswordDataForService:service
+                                              account:providerAccountIdentifier
+                                              outData:&data]) {
+    return [NSMutableDictionary dictionary];
+  }
+  credential = StrappyKeychainPropertyListFromData(data);
+  return [credential isKindOfClass:[NSDictionary class]] ?
+    [[credential mutableCopy] autorelease] : nil;
 }
 
 static NSString *StrappyEnvironmentValueOrNil(NSString *name)
@@ -291,7 +310,7 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
 providerAccountIdentifier:(NSString *)providerAccountIdentifier
 {
   NSString *service;
-  NSDictionary *credential;
+  NSMutableDictionary *credential;
   NSData *data;
 
   service = StrappyKeychainServiceForProvider(providerIdentifier);
@@ -300,13 +319,16 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
       [providerIdentifier isEqualToString:@"openai_chatgpt"]) {
     return NO;
   }
-  credential = [NSDictionary dictionaryWithObjectsAndKeys:
-    [NSNumber XP_numberWithInteger:
-      (XPInteger)kStrappyBearerCredentialFormatVersion],
-      kStrappyChatGPTFormatVersionKey,
-    @"api_token", kStrappyCredentialKindKey,
-    bearerToken, kStrappyBearerTokenKey,
-    nil];
+  credential = StrappyKeychainMutableCredential(
+    service, providerAccountIdentifier);
+  if (credential == nil) {
+    return NO;
+  }
+  [credential setObject:[NSNumber XP_numberWithInteger:
+    (XPInteger)kStrappyBearerCredentialFormatVersion]
+                 forKey:kStrappyChatGPTFormatVersionKey];
+  [credential setObject:@"api_token" forKey:kStrappyCredentialKindKey];
+  [credential setObject:bearerToken forKey:kStrappyBearerTokenKey];
   data = StrappyKeychainPropertyListData(credential);
   if ((data == nil) ||
       ![XPKeychain setGenericPasswordData:data service:service
@@ -329,6 +351,105 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
       [providerIdentifier isEqualToString:@"openai_chatgpt"] ||
       ![XPKeychain deleteGenericPasswordForService:service
                                            account:providerAccountIdentifier]) {
+    return NO;
+  }
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappyKeychainDidChangeNotification object:self];
+  return YES;
+}
+
+- (NSArray *)credentialProviderAccountIdentifiersForProviderIdentifier:
+  (NSString *)providerIdentifier
+{
+  NSString *service;
+  NSArray *candidates;
+  NSMutableArray *identifiers;
+  NSUInteger index;
+
+  service = StrappyKeychainServiceForProvider(providerIdentifier);
+  if (service == nil) {
+    return [NSArray array];
+  }
+  candidates = [XPKeychain genericPasswordAccountsForService:service];
+  identifiers = [NSMutableArray array];
+  for (index = 0U; index < [candidates count]; index++) {
+    NSString *identifier;
+    BOOL valid;
+
+    identifier = [candidates objectAtIndex:index];
+    if (![identifier isKindOfClass:[NSString class]] ||
+        ![identifier hasPrefix:@"acct_"]) {
+      continue;
+    }
+    if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) {
+      valid = [self hasChatGPTCredentialsForProviderAccountIdentifier:
+        identifier];
+    } else {
+      valid = [self hasBearerTokenForProviderIdentifier:providerIdentifier
+                               providerAccountIdentifier:identifier];
+    }
+    if (valid && ![identifiers containsObject:identifier]) {
+      [identifiers addObject:identifier];
+    }
+  }
+  return identifiers;
+}
+
+- (BOOL)loadDisplayName:(NSString **)displayName
+  forProviderIdentifier:(NSString *)providerIdentifier
+providerAccountIdentifier:(NSString *)providerAccountIdentifier
+{
+  NSString *service;
+  NSData *data;
+  NSDictionary *credential;
+  id storedName;
+
+  if (displayName != NULL) {
+    *displayName = nil;
+  }
+  service = StrappyKeychainServiceForProvider(providerIdentifier);
+  data = nil;
+  if ((service == nil) || ([providerAccountIdentifier length] == 0U) ||
+      ![XPKeychain findGenericPasswordDataForService:service
+                                              account:providerAccountIdentifier
+                                              outData:&data]) {
+    return NO;
+  }
+  credential = StrappyKeychainPropertyListFromData(data);
+  storedName = [credential objectForKey:kStrappyDisplayNameKey];
+  if (![storedName isKindOfClass:[NSString class]] ||
+      ([storedName length] == 0U)) {
+    return NO;
+  }
+  if (displayName != NULL) {
+    *displayName = [[storedName copy] autorelease];
+  }
+  return YES;
+}
+
+- (BOOL)saveDisplayName:(NSString *)displayName
+  forProviderIdentifier:(NSString *)providerIdentifier
+providerAccountIdentifier:(NSString *)providerAccountIdentifier
+{
+  NSString *service;
+  NSMutableDictionary *credential;
+  NSData *data;
+
+  service = StrappyKeychainServiceForProvider(providerIdentifier);
+  if ((service == nil) || ([providerAccountIdentifier length] == 0U) ||
+      ([displayName length] == 0U)) {
+    return NO;
+  }
+  credential = StrappyKeychainMutableCredential(
+    service, providerAccountIdentifier);
+  if (credential == nil) {
+    return NO;
+  }
+  [credential setObject:displayName forKey:kStrappyDisplayNameKey];
+  data = StrappyKeychainPropertyListData(credential);
+  if ((data == nil) ||
+      ![XPKeychain setGenericPasswordData:data service:service
+                                  account:providerAccountIdentifier]) {
     return NO;
   }
   [[NSNotificationCenter defaultCenter]
@@ -444,7 +565,7 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
           expiresAtMilliseconds:(long long)expiresAtMilliseconds
      providerAccountIdentifier:(NSString *)providerAccountIdentifier
 {
-  NSDictionary *credential;
+  NSMutableDictionary *credential;
   NSData *data;
 
   if (([accessToken length] == 0U) || ([refreshToken length] == 0U) ||
@@ -454,16 +575,20 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
     return NO;
   }
 
-  credential = [NSDictionary dictionaryWithObjectsAndKeys:
-    [NSNumber XP_numberWithInteger:
-      (XPInteger)kStrappyChatGPTCredentialFormatVersion],
-      kStrappyChatGPTFormatVersionKey,
-    accessToken, kStrappyChatGPTAccessTokenKey,
-    refreshToken, kStrappyChatGPTRefreshTokenKey,
-    accountIdentifier, kStrappyChatGPTAccountIdentifierKey,
-    [NSNumber numberWithLongLong:expiresAtMilliseconds],
-      kStrappyChatGPTExpiresAtKey,
-    nil];
+  credential = StrappyKeychainMutableCredential(
+    kStrappyChatGPTKeychainService, providerAccountIdentifier);
+  if (credential == nil) {
+    return NO;
+  }
+  [credential setObject:[NSNumber XP_numberWithInteger:
+    (XPInteger)kStrappyChatGPTCredentialFormatVersion]
+                 forKey:kStrappyChatGPTFormatVersionKey];
+  [credential setObject:accessToken forKey:kStrappyChatGPTAccessTokenKey];
+  [credential setObject:refreshToken forKey:kStrappyChatGPTRefreshTokenKey];
+  [credential setObject:accountIdentifier
+                 forKey:kStrappyChatGPTAccountIdentifierKey];
+  [credential setObject:[NSNumber numberWithLongLong:expiresAtMilliseconds]
+                 forKey:kStrappyChatGPTExpiresAtKey];
   data = StrappyKeychainPropertyListData(credential);
   if ((data == nil) ||
       ([data length] > (NSUInteger)kStrappyChatGPTCredentialMaximumBytes) ||
@@ -515,6 +640,11 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
   designatedOpenRouterAccountIdentifier_ = [providerAccountIdentifier copy];
   if ([self hasBearerTokenForProviderIdentifier:@"openrouter"
                        providerAccountIdentifier:providerAccountIdentifier]) {
+    if (![XPKeychain deleteInternetPasswordForAccount:
+          kStrappyKeychainAccount]) {
+      return NO;
+    }
+    [self reload];
     return YES;
   }
   legacyEndpoint = nil;
@@ -533,6 +663,11 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
   if (endpoint != NULL) {
     *endpoint = [[legacyEndpoint copy] autorelease];
   }
+  if (![XPKeychain deleteInternetPasswordForAccount:
+        kStrappyKeychainAccount]) {
+    return NO;
+  }
+  [self reload];
   return YES;
 }
 
@@ -549,7 +684,9 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
   }
   if ([self hasChatGPTCredentialsForProviderAccountIdentifier:
         providerAccountIdentifier]) {
-    return YES;
+    return [XPKeychain
+      deleteGenericPasswordForService:kStrappyChatGPTKeychainService
+                               account:kStrappyChatGPTKeychainAccount];
   }
   accessToken = nil;
   refreshToken = nil;

@@ -44,6 +44,7 @@
   NSString            *expandedDatabaseStudyIdentifier_;
   BOOL                 scanning_;
   BOOL                 refreshingModels_;
+  BOOL                 noAvailableModelAccounts_;
 }
 
 - (id)init;

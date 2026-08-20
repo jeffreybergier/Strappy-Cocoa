@@ -307,6 +307,9 @@ static NSButton *StrappyAccountsButton(NSRect frame,
 - (void)showError:(NSError *)error title:(NSString *)title;
 - (void)saveAccount:(id)sender;
 - (void)deleteAccount:(id)sender;
+- (void)deleteAccountAlertDidEnd:(NSAlert *)alert
+                      returnCode:(NSInteger)returnCode
+                     contextInfo:(void *)contextInfo;
 - (void)authenticationDidChange:(NSNotification *)notification;
 - (StrappyAuthentication *)selectedChatGPTAuthentication;
 - (void)reloadChatGPTState;
@@ -911,6 +914,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
 {
   NSAlert *alert;
   NSString *message;
+  NSWindow *window;
 
   message = [error localizedDescription];
   if ([message length] == 0U) {
@@ -919,7 +923,16 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   alert = [[[NSAlert alloc] init] autorelease];
   [alert setMessageText:title];
   [alert setInformativeText:message];
-  [alert runModal];
+  [alert addButtonWithTitle:NSLocalizedString(@"OK", nil)];
+  window = [self window];
+  if (window == nil) {
+    NSBeep();
+    return;
+  }
+  [alert XP_beginSheetModalForWindow:window
+                       modalDelegate:nil
+                      didEndSelector:NULL
+                         contextInfo:NULL];
 }
 
 - (void)saveAccount:(id)sender
@@ -1002,8 +1015,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
 {
   NSDictionary *account;
   NSAlert *alert;
-  NSInteger response;
-  NSError *error;
+  NSWindow *window;
 
   (void)sender;
   account = [self selectedAccount];
@@ -1017,6 +1029,11 @@ static NSButton *StrappyAccountsButton(NSRect frame,
                 nil)];
     return;
   }
+  window = [self window];
+  if (window == nil) {
+    NSBeep();
+    return;
+  }
   alert = [[[NSAlert alloc] init] autorelease];
   [alert setMessageText:NSLocalizedString(@"Delete Account?", nil)];
   [alert setInformativeText:[NSString stringWithFormat:NSLocalizedString(
@@ -1024,18 +1041,35 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     nil), [account objectForKey:@"name"]]];
   [alert addButtonWithTitle:NSLocalizedString(@"Delete Account", nil)];
   [alert addButtonWithTitle:NSLocalizedString(@"Cancel", nil)];
-  response = [alert runModal];
-  if (response != NSAlertFirstButtonReturn) {
+  [alert XP_beginSheetModalForWindow:window
+                       modalDelegate:self
+                      didEndSelector:@selector(deleteAccountAlertDidEnd:returnCode:contextInfo:)
+                         contextInfo:[selectedAccountIdentifier_ retain]];
+}
+
+- (void)deleteAccountAlertDidEnd:(NSAlert *)alert
+                      returnCode:(NSInteger)returnCode
+                     contextInfo:(void *)contextInfo
+{
+  NSString *accountIdentifier;
+  NSError *error;
+
+  (void)alert;
+  accountIdentifier = (NSString *)contextInfo;
+  if (returnCode != NSAlertFirstButtonReturn) {
+    [accountIdentifier release];
     return;
   }
   error = nil;
   if (![StrappySession
-        archiveProviderAccountIdentifier:selectedAccountIdentifier_
+        archiveProviderAccountIdentifier:accountIdentifier
                                     error:&error]) {
     [self showError:error
               title:NSLocalizedString(@"Could Not Delete Account", nil)];
+    [accountIdentifier release];
     return;
   }
+  [accountIdentifier release];
   [selectedAccountIdentifier_ release];
   selectedAccountIdentifier_ = nil;
   [self reloadAccountsPreservingSelection];

@@ -370,6 +370,12 @@ int strappy_db_create_session_with_working_directory(
                                              error_out)) {
     goto rollback;
   }
+  if ((defaults.model_id[0] == '\0') ||
+      (defaults.provider_account_id[0] == '\0')) {
+    strappy_set_error(error_out,
+                      "Add an account before creating a session.");
+    goto rollback;
+  }
 
   now_ms = strappy_db_now_ms();
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -1303,7 +1309,7 @@ static int strappy_db_copy_default_session_options(
   loaded.round_limit = (long)sqlite3_column_int64(stmt, 7);
   working_directory_text = sqlite3_column_text(stmt, 8);
   loaded.answer_quality_enabled = sqlite3_column_int(stmt, 9) ? 1 : 0;
-  if ((loaded.model_id == NULL) || (loaded.provider_account_id == NULL) ||
+  if (((loaded.model_id == NULL) != (loaded.provider_account_id == NULL)) ||
       (loaded.assistant_set_id == NULL) ||
       (provider_text == NULL) ||
       (loaded.round_limit < 1L) ||
@@ -1314,6 +1320,17 @@ static int strappy_db_copy_default_session_options(
     sqlite3_finalize(stmt);
     strappy_session_options_destroy(&loaded);
     return 0;
+  }
+  if (loaded.model_id == NULL) {
+    loaded.model_id = strappy_string_duplicate("");
+    loaded.provider_account_id = strappy_string_duplicate("");
+    if ((loaded.model_id == NULL) || (loaded.provider_account_id == NULL)) {
+      strappy_set_error(error_out,
+                        "Could not allocate empty default account options.");
+      sqlite3_finalize(stmt);
+      strappy_session_options_destroy(&loaded);
+      return 0;
+    }
   }
   loaded.working_directory = strappy_string_duplicate(
     ((working_directory_text != NULL) && (working_directory_text[0] != '\0'))
@@ -1742,7 +1759,8 @@ static int strappy_db_copy_account_default_model(sqlite3 *db,
     db,
     "SELECT m.id FROM models m JOIN provider_accounts a "
     "ON a.id=m.provider_account_id LEFT JOIN model_preferences p "
-    "ON p.model_id=m.id WHERE m.provider_account_id=? "
+    "ON p.provider_id=a.provider_id AND p.wire_model_id=m.wire_model_id "
+    "WHERE m.provider_account_id=? "
     "AND a.lifecycle_state='active' AND m.catalog_active=1 "
     "AND (p.allowed=1 OR m.id=(SELECT default_model_id FROM app_preferences "
     "WHERE id=1)) ORDER BY CASE WHEN m.id=(SELECT default_model_id "

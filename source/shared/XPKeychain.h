@@ -13,6 +13,7 @@
 + (BOOL)findGenericPasswordDataForService:(NSString *)service
                                   account:(NSString *)account
                                   outData:(NSData **)outData;
++ (NSArray *)genericPasswordAccountsForService:(NSString *)service;
 + (BOOL)deleteGenericPasswordForService:(NSString *)service
                                 account:(NSString *)account;
 + (BOOL)setGenericPasswordData:(NSData *)data

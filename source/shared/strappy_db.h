@@ -448,6 +448,12 @@ int strappy_db_create_provider_account(const char *db_path,
                                        const char *responses_endpoint,
                                        char **account_id_out,
                                        char **error_out);
+int strappy_db_restore_provider_account(const char *db_path,
+                                        const char *account_id,
+                                        const char *provider_id,
+                                        const char *display_name,
+                                        const char *responses_endpoint,
+                                        char **error_out);
 int strappy_db_list_provider_accounts(
   const char *db_path,
   const char *provider_id,

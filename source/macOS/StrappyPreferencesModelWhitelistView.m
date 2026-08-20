@@ -140,7 +140,7 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
 - (void)addTableColumnsToTableView:(NSTableView *)tableView
 {
   NSTableColumn *allowedColumn;
-  NSTableColumn *accountColumn;
+  NSTableColumn *providerColumn;
   NSTableColumn *nameColumn;
   NSTableColumn *idColumn;
   NSTableColumn *contextColumn;
@@ -167,19 +167,19 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
   [allowedColumn setDataCell:allowedCell];
   [tableView addTableColumn:allowedColumn];
 
-  accountColumn =
-    [[[NSTableColumn alloc] initWithIdentifier:@"model_account"] autorelease];
-  [[accountColumn headerCell] setStringValue:NSLocalizedString(@"Account", nil)];
-  [accountColumn setWidth:112.0];
-  [accountColumn setMinWidth:90.0];
-  [accountColumn setEditable:NO];
-  [accountColumn setSortDescriptorPrototype:
-    [[[NSSortDescriptor alloc] initWithKey:@"model_account"
+  providerColumn =
+    [[[NSTableColumn alloc] initWithIdentifier:@"model_provider"] autorelease];
+  [[providerColumn headerCell] setStringValue:NSLocalizedString(@"Provider", nil)];
+  [providerColumn setWidth:112.0];
+  [providerColumn setMinWidth:90.0];
+  [providerColumn setEditable:NO];
+  [providerColumn setSortDescriptorPrototype:
+    [[[NSSortDescriptor alloc] initWithKey:@"model_provider"
                                  ascending:YES] autorelease]];
   textCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
   [textCell setLineBreakMode:NSLineBreakByTruncatingTail];
-  [accountColumn setDataCell:textCell];
-  [tableView addTableColumn:accountColumn];
+  [providerColumn setDataCell:textCell];
+  [tableView addTableColumn:providerColumn];
 
   nameColumn = [[[NSTableColumn alloc] initWithIdentifier:@"model_name"] autorelease];
   [[nameColumn headerCell] setStringValue:NSLocalizedString(@"Model", nil)];
@@ -254,7 +254,7 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
   [tableView addTableColumn:completionColumn];
 
   [tableView setSortDescriptors:[NSArray arrayWithObjects:
-    [[[NSSortDescriptor alloc] initWithKey:@"model_account"
+    [[[NSSortDescriptor alloc] initWithKey:@"model_provider"
                                  ascending:YES] autorelease],
     [[[NSSortDescriptor alloc] initWithKey:@"model_allowed"
                                  ascending:NO] autorelease],
@@ -263,7 +263,7 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
 
 - (NSSortDescriptor *)requiredSortDescriptor
 {
-  return [[[NSSortDescriptor alloc] initWithKey:@"model_account"
+  return [[[NSSortDescriptor alloc] initWithKey:@"model_provider"
                                       ascending:YES] autorelease];
 }
 
@@ -293,7 +293,7 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
 - (BOOL)sortKeyIsKnown:(NSString *)key
 {
   return ([key isEqualToString:@"model_allowed"] ||
-          [key isEqualToString:@"model_account"] ||
+          [key isEqualToString:@"model_provider"] ||
           [key isEqualToString:@"model_name"] ||
           [key isEqualToString:@"model_id"] ||
           [key isEqualToString:@"model_context"] ||
@@ -310,10 +310,10 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
       StrappyModelWhitelistRowIsAllowed(left) ? 1LL : 0LL,
       StrappyModelWhitelistRowIsAllowed(right) ? 1LL : 0LL);
   }
-  if ([key isEqualToString:@"model_account"]) {
+  if ([key isEqualToString:@"model_provider"]) {
     return StrappyWhitelistCompareStrings(
-      StrappyModelWhitelistStringForRow(left, @"provider_account_name"),
-      StrappyModelWhitelistStringForRow(right, @"provider_account_name"));
+      StrappyModelWhitelistStringForRow(left, @"provider_name"),
+      StrappyModelWhitelistStringForRow(right, @"provider_name"));
   }
   if ([key isEqualToString:@"model_name"]) {
     return StrappyWhitelistCompareStrings(
