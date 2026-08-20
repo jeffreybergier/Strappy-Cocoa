@@ -1,23 +1,37 @@
 #import <AppKit/AppKit.h>
 
-@interface StrappyPreferencesAuthenticationView : NSView {
+#import "XPAppKit.h"
+
+@interface StrappyPreferencesAuthenticationView : NSView
+    <XPTableViewDataSource, XPTableViewDelegate> {
  @private
-  NSTextField       *apiEndpointField_;
-  NSSecureTextField *apiTokenField_;
-  NSTextField       *statusLabel_;
-  NSTextField       *chatGPTStatusLabel_;
-  NSTextField       *chatGPTCodeLabel_;
-  NSButton          *chatGPTSignInButton_;
-  NSButton          *chatGPTCopyButton_;
-  NSButton          *chatGPTOpenButton_;
-  NSButton          *chatGPTCancelButton_;
-  NSButton          *chatGPTRetryButton_;
-  NSButton          *chatGPTSignOutButton_;
+  NSScrollView *accountScrollView_;
+  NSTableView *accountTableView_;
+  NSView *introductionLabel_;
+  NSView *dividerView_;
+  NSView *rightPaneView_;
+  NSArray *accounts_;
+  NSArray *providers_;
+  NSString *selectedAccountIdentifier_;
+  BOOL suppressSelectionNotification_;
+  BOOL creatingAccount_;
+
+  NSTableView *providerTableView_;
+  NSTextField *accountNameField_;
+  NSTextField *endpointField_;
+  NSSecureTextField *tokenField_;
+  NSTextField *statusLabel_;
+  NSButton *saveButton_;
+  NSButton *deleteButton_;
+
+  NSTextField *chatGPTStatusLabel_;
+  NSTextField *chatGPTURLField_;
+  NSTextField *chatGPTCodeField_;
+  NSButton *chatGPTActionButton_;
+  NSButton *chatGPTCopyButton_;
+  NSButton *chatGPTOpenButton_;
 }
 
 - (id)initWithFrame:(NSRect)frame target:(id)target;
-- (NSTextField *)apiEndpointField;
-- (NSSecureTextField *)apiTokenField;
-- (NSTextField *)statusLabel;
 
 @end

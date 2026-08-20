@@ -9,7 +9,6 @@
 #import "StrappyPreferencesModelWhitelistView.h"
 #import "StrappyPreferencesSystemPromptsView.h"
 #import "StrappySessionOptionsViewController.h"
-#import "StrappyKeychain.h"
 
 static const CGFloat kStrappyPreferencesWidth = 640.0;
 static const CGFloat kStrappyPreferencesHeight = 480.0;
@@ -398,7 +397,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (NSToolbarItem *)makeToolbarItemWithIdentifier:(NSString *)identifier
                                             icon:(AIFontAwesomeIcon)icon
                                            label:(NSString *)label;
-- (void)refreshAPITokenStatusWithSaved:(BOOL)saved;
 - (void)preferencesWindowDidBecomeKey:(NSNotification *)notification;
 - (void)loadSystemPrompt;
 - (void)loadDatabaseStudy;
@@ -581,10 +579,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   authenticationPaneView_ =
     [[StrappyPreferencesAuthenticationView alloc] initWithFrame:paneFrame
                                                          target:self];
-  apiEndpointField_ = [[authenticationPaneView_ apiEndpointField] retain];
-  apiTokenField_ = [[authenticationPaneView_ apiTokenField] retain];
-  apiTokenStatusLabel_ = [[authenticationPaneView_ statusLabel] retain];
-  [self refreshAPITokenStatusWithSaved:NO];
 
   sessionDefaultsController_ =
     [[StrappySessionOptionsViewController alloc] initForSessionDefaults];
@@ -770,8 +764,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
   if ([identifier isEqualToString:kStrappyPreferencesToolbarAuthentication]) {
     return [self makeToolbarItemWithIdentifier:identifier
-                                          icon:AIFAKey
-                                         label:NSLocalizedString(@"Auth", nil)];
+                                          icon:AIFAUsers
+                                         label:NSLocalizedString(@"Accounts", nil)];
   }
   if ([identifier
         isEqualToString:kStrappyPreferencesToolbarSessionDefaults]) {
@@ -1389,26 +1383,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [[self window] close];
 }
 
-#pragma mark - Authentication
-
-- (void)refreshAPITokenStatusWithSaved:(BOOL)saved
-{
-  NSString *message;
-
-  if (apiTokenStatusLabel_ == nil) {
-    return;
-  }
-
-  if (saved) {
-    message = NSLocalizedString(@"API credentials saved to keychain.", nil);
-  } else if ([[StrappyKeychain sharedKeychain] hasAPICredentials]) {
-    message = NSLocalizedString(@"API credentials are available.", nil);
-  } else {
-    message = NSLocalizedString(@"No API credentials are saved in the keychain.", nil);
-  }
-  [apiTokenStatusLabel_ setStringValue:message];
-}
-
 - (void)loadSystemPrompt
 {
   NSString *prompt;
@@ -2001,41 +1975,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
   [databaseStatusLabel_ setStringValue:message];
   [databaseStatusLabel_ setToolTip:message];
-}
-
-- (void)saveAPICredentials:(id)sender
-{
-  NSString *apiEndpoint;
-  NSString *apiToken;
-  NSAlert *alert;
-
-  (void)sender;
-  apiEndpoint = [[apiEndpointField_ stringValue]
-    stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  apiToken = [[apiTokenField_ stringValue]
-    stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if (([apiEndpoint length] == 0U) || ([apiToken length] == 0U)) {
-    alert = [[[NSAlert alloc] init] autorelease];
-    [alert setMessageText:NSLocalizedString(@"API credentials are required", nil)];
-    [alert setInformativeText:NSLocalizedString(
-      @"Enter an API endpoint and token before saving them to the keychain.", nil)];
-    [alert runModal];
-    return;
-  }
-
-  if (![[StrappyKeychain sharedKeychain] saveAPIEndpoint:apiEndpoint
-                                                   token:apiToken]) {
-    alert = [[[NSAlert alloc] init] autorelease];
-    [alert setMessageText:NSLocalizedString(@"Could not save API credentials", nil)];
-    [alert setInformativeText:NSLocalizedString(
-      @"The keychain refused the write.", nil)];
-    [alert runModal];
-    return;
-  }
-
-  [apiEndpointField_ setStringValue:apiEndpoint];
-  [apiTokenField_ setStringValue:apiToken];
-  [self refreshAPITokenStatusWithSaved:YES];
 }
 
 - (void)scanDatabases:(id)sender
@@ -2870,9 +2809,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [contentPaneView_ release];
   [authenticationPaneView_ release];
   [sessionDefaultsController_ release];
-  [apiEndpointField_ release];
-  [apiTokenField_ release];
-  [apiTokenStatusLabel_ release];
   [modelSearchField_ release];
   [modelTableView_ release];
   [modelWhitelistView_ release];

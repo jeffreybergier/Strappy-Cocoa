@@ -1,5 +1,6 @@
 #import "StrappyKeychain.h"
 
+#import "XPFoundation.h"
 #import "XPKeychain.h"
 #include "strappy_config.h"
 #include "strappy_openai_oauth.h"
@@ -273,7 +274,8 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
   kind = [credential objectForKey:kStrappyCredentialKindKey];
   token = [credential objectForKey:kStrappyBearerTokenKey];
   if (![version isKindOfClass:[NSNumber class]] ||
-      ([version integerValue] != kStrappyBearerCredentialFormatVersion) ||
+      ([version XP_integerValue] !=
+        kStrappyBearerCredentialFormatVersion) ||
       ![kind isEqual:@"api_token"] ||
       ![token isKindOfClass:[NSString class]] || ([token length] == 0U)) {
     return NO;
@@ -299,7 +301,8 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
     return NO;
   }
   credential = [NSDictionary dictionaryWithObjectsAndKeys:
-    [NSNumber numberWithInteger:kStrappyBearerCredentialFormatVersion],
+    [NSNumber XP_numberWithInteger:
+      (XPInteger)kStrappyBearerCredentialFormatVersion],
       kStrappyChatGPTFormatVersionKey,
     @"api_token", kStrappyCredentialKindKey,
     bearerToken, kStrappyBearerTokenKey,
@@ -398,7 +401,8 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
   account = [credential objectForKey:kStrappyChatGPTAccountIdentifierKey];
   expiry = [credential objectForKey:kStrappyChatGPTExpiresAtKey];
   valid = [version isKindOfClass:[NSNumber class]] &&
-    ([version integerValue] == kStrappyChatGPTCredentialFormatVersion) &&
+    ([version XP_integerValue] ==
+      kStrappyChatGPTCredentialFormatVersion) &&
     [access isKindOfClass:[NSString class]] && ([access length] > 0U) &&
     [refresh isKindOfClass:[NSString class]] && ([refresh length] > 0U) &&
     [account isKindOfClass:[NSString class]] && ([account length] > 0U) &&
@@ -451,7 +455,8 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
   }
 
   credential = [NSDictionary dictionaryWithObjectsAndKeys:
-    [NSNumber numberWithInteger:kStrappyChatGPTCredentialFormatVersion],
+    [NSNumber XP_numberWithInteger:
+      (XPInteger)kStrappyChatGPTCredentialFormatVersion],
       kStrappyChatGPTFormatVersionKey,
     accessToken, kStrappyChatGPTAccessTokenKey,
     refreshToken, kStrappyChatGPTRefreshTokenKey,

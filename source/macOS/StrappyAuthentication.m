@@ -2,6 +2,7 @@
 
 #import "StrappyKeychain.h"
 #import "StrappySession.h"
+#import "XPFoundation.h"
 
 #include "strappy_core.h"
 #include "strappy_openai_oauth.h"
@@ -260,7 +261,7 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
 
 - (void)notifyDidChange
 {
-  if ([NSThread isMainThread]) {
+  if ([NSThread XP_isMainThread]) {
     [self postDidChangeNotification];
   } else {
     [self performSelectorOnMainThread:@selector(postDidChangeNotification)
@@ -302,8 +303,8 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
   [self notifyDidChange];
   [NSThread detachNewThreadSelector:@selector(runDeviceLogin:)
                            toTarget:self
-                         withObject:[NSNumber numberWithUnsignedInteger:
-                           generation]];
+                         withObject:[NSNumber XP_numberWithUnsignedInteger:
+                           (XPUInteger)generation]];
   return YES;
 }
 
@@ -346,7 +347,7 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
   NSString *providerAccountIdentifier;
 
   pool = [[NSAutoreleasePool alloc] init];
-  generation = [generationNumber unsignedIntegerValue];
+  generation = [generationNumber XP_unsignedIntegerValue];
   providerAccountIdentifier = [self designatedProviderAccountIdentifier];
   cancellationContext.authentication = self;
   cancellationContext.generation = generation;
@@ -531,7 +532,8 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
   [NSThread detachNewThreadSelector:@selector(runCredentialRefresh:)
                            toTarget:self
                          withObject:[NSDictionary dictionaryWithObjectsAndKeys:
-                           [NSNumber numberWithUnsignedInteger:generation],
+                           [NSNumber XP_numberWithUnsignedInteger:
+                             (XPUInteger)generation],
                              @"generation",
                            accountIdentifier, @"account_identifier",
                            providerAccountIdentifier,
@@ -560,7 +562,8 @@ static NSString *StrappyAuthenticationErrorMessage(char *error,
   BOOL stateChanged;
 
   pool = [[NSAutoreleasePool alloc] init];
-  generation = [[operation objectForKey:@"generation"] unsignedIntegerValue];
+  generation = [[operation objectForKey:@"generation"]
+    XP_unsignedIntegerValue];
   previousAccountIdentifier = [operation objectForKey:@"account_identifier"];
   providerAccountIdentifier = [operation
     objectForKey:@"provider_account_identifier"];

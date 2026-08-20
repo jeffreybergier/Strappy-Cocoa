@@ -11753,6 +11753,7 @@ static int harness_run_multi_account_database_tests(
   char *router_two;
   char *other_one;
   char *other_two;
+  char *other_incomplete;
   char *manual_one;
   char *manual_two;
   char *default_account;
@@ -11774,6 +11775,7 @@ static int harness_run_multi_account_database_tests(
                          "multi-account.sqlite")) return 0;
   harness_unlink_sqlite_files(path);
   chat_one=chat_two=chat_three=router_one=router_two=other_one=other_two=NULL;
+  other_incomplete=NULL;
   manual_one=manual_two=default_account=default_model=error=NULL;
   session_id=0LL;
   strappy_session_options_init(&options);
@@ -11846,6 +11848,21 @@ static int harness_run_multi_account_database_tests(
       (strcmp(accounts.records[0].display_name,accounts.records[1].display_name)!=0);
     strappy_provider_account_record_list_destroy(&accounts);
   }
+  if (ok) {
+    ok = strappy_db_create_provider_account(
+      path,"other","Unconfigured",NULL,&other_incomplete,&error) &&
+      strappy_db_get_provider_account(path,other_incomplete,&account,&error) &&
+      (account.responses_endpoint == NULL) &&
+      !strappy_db_update_provider_account(
+        path,other_incomplete,"Unconfigured",NULL,&error) &&
+      (error != NULL) &&
+      (strstr(error,"requires a Responses endpoint") != NULL);
+    strappy_provider_account_record_destroy(&account);
+    strappy_free_string(error);
+    error=NULL;
+    if (ok) ok = strappy_db_archive_provider_account(
+      path,other_incomplete,&error);
+  }
   if (ok) ok = strappy_db_create_provider_account(path,"other","Local","https://one.example/v1/responses",&other_one,&error) &&
     strappy_db_create_provider_account(path,"other","Local","https://two.example/v1/responses",&other_two,&error);
   memset(&input,0,sizeof(input));
@@ -11894,7 +11911,7 @@ static int harness_run_multi_account_database_tests(
     strappy_db_initialize(path,&error) &&
     harness_expect_catalog_integer(path,
       "SELECT COUNT(*) FROM provider_accounts WHERE lifecycle_state='archived' AND provider_id='other';",
-      1LL,"archived account after restart") &&
+      2LL,"archived accounts after restart") &&
     harness_expect_catalog_integer(path,
       "SELECT COUNT(*) FROM models WHERE provider_account_id IN (SELECT id FROM provider_accounts WHERE lifecycle_state='archived');",
       1LL,"archived account model preservation") &&
@@ -11909,7 +11926,8 @@ static int harness_run_multi_account_database_tests(
   if (!ok) fprintf(stderr,"Multi-account database test failed: %s\n",
                    error != NULL ? error : "unknown");
   free(chat_one); free(chat_two); free(chat_three); free(router_one); free(router_two);
-  free(other_one); free(other_two); free(manual_one); free(manual_two);
+  free(other_one); free(other_two); free(other_incomplete);
+  free(manual_one); free(manual_two);
   free(default_account); free(default_model);
   strappy_provider_account_record_destroy(&account);
   strappy_model_route_record_destroy(&route);

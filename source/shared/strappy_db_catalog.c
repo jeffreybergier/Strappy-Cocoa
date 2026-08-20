@@ -343,6 +343,7 @@ static int strappy_db_validate_account_metadata(
   const char *provider_id,
   const char *display_name,
   const char *responses_endpoint,
+  int allow_incomplete_endpoint,
   const strappy_provider_definition **definition_out,
   char **error_out)
 {
@@ -361,6 +362,13 @@ static int strappy_db_validate_account_metadata(
   if (definition == NULL) {
     strappy_set_error(error_out, "Provider account type is not registered.");
     return 0;
+  }
+  if (allow_incomplete_endpoint && definition->requires_endpoint_override &&
+      ((responses_endpoint == NULL) || (responses_endpoint[0] == '\0'))) {
+    if (definition_out != NULL) {
+      *definition_out = definition;
+    }
+    return 1;
   }
   resolved = strappy_provider_definition_responses_endpoint(
     definition, responses_endpoint, error_out);
@@ -477,7 +485,7 @@ int strappy_db_create_provider_account(const char *db_path,
   }
   *account_id_out = NULL;
   if (!strappy_db_validate_account_metadata(provider_id, display_name,
-                                             responses_endpoint, NULL,
+                                             responses_endpoint, 1, NULL,
                                              error_out) ||
       !strappy_db_open(db_path, &db, error_out)) {
     return 0;
@@ -609,7 +617,8 @@ int strappy_db_update_provider_account(const char *db_path, const char *account_
   sqlite3 *db; sqlite3_stmt *stmt; strappy_provider_account_record current; int rc; int changed;
   if (!strappy_db_get_provider_account(db_path, account_id, &current, error_out)) return 0;
   if (!strappy_db_validate_account_metadata(current.provider_id, display_name,
-                                             responses_endpoint, NULL, error_out)) {
+                                             responses_endpoint, 0, NULL,
+                                             error_out)) {
     strappy_provider_account_record_destroy(&current); return 0;
   }
   strappy_provider_account_record_destroy(&current);

@@ -7,6 +7,7 @@ extern NSString * const StrappySessionStreamEventNotification;
 extern NSString * const StrappySessionModelCatalogRefreshDidStartNotification;
 extern NSString * const StrappySessionModelCatalogRefreshDidFinishNotification;
 extern NSString * const StrappySessionModelCatalogDidChangeNotification;
+extern NSString * const StrappyProviderAccountsDidChangeNotification;
 extern NSString * const StrappySessionChangeKindKey;
 extern NSString * const StrappySessionChangeKindActivity;
 extern NSString * const StrappySessionChangeKindName;
@@ -124,6 +125,18 @@ enum {
                 (NSString *)providerIdentifier
                                                                error:
                 (NSError **)error;
++ (NSArray *)providerCatalog;
++ (NSArray *)providerAccountCatalogWithError:(NSError **)error;
++ (NSDictionary *)createProviderAccountForProviderIdentifier:
+                    (NSString *)providerIdentifier
+                                                        error:
+                    (NSError **)error;
++ (BOOL)updateProviderAccountIdentifier:(NSString *)providerAccountIdentifier
+                            displayName:(NSString *)displayName
+                      responsesEndpoint:(NSString *)responsesEndpoint
+                                  error:(NSError **)error;
++ (BOOL)archiveProviderAccountIdentifier:(NSString *)providerAccountIdentifier
+                                    error:(NSError **)error;
 + (StrappySession *)createSessionWithError:(NSError **)error;
 + (NSArray *)codingWorkingDirectoryPaths;
 + (BOOL)deleteSessionWithIdentifier:(NSNumber *)sessionIdentifier

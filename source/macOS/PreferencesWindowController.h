@@ -14,9 +14,6 @@
   NSView              *contentPaneView_;
   StrappyPreferencesAuthenticationView *authenticationPaneView_;
   StrappySessionOptionsViewController *sessionDefaultsController_;
-  NSTextField         *apiEndpointField_;
-  NSSecureTextField   *apiTokenField_;
-  NSTextField         *apiTokenStatusLabel_;
   NSSearchField       *modelSearchField_;
   NSTableView         *modelTableView_;
   StrappyPreferencesModelWhitelistView *modelWhitelistView_;
