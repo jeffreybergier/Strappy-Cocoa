@@ -4,6 +4,7 @@
 #include <cJSON.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sqlite3.h>
 #include <stdio.h>
@@ -894,6 +895,37 @@ static int harness_test_request_surfaces(void)
   if (!ok) {
     return harness_fail("ChatGPT web-search schema was not provider-native.");
   }
+
+  error = NULL;
+  tools_json = strappy_tools_responses_request_json_filtered_for_provider(
+    "../shared/Resources",
+    NULL,
+    0U,
+    STRAPPY_PROVIDER_KIND_OTHER,
+    STRAPPY_WEB_PROVIDER_AUTO,
+    &error);
+  if (tools_json == NULL) {
+    fprintf(stderr,
+            "Could not build generic Responses tools: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    return 0;
+  }
+  tools = cJSON_Parse(tools_json);
+  free(tools_json);
+  ok = cJSON_IsArray(tools) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_DATETIME_TO_ISO8601) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_SESSION_RENAME) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+    harness_tools_hide_local_display_metadata(tools);
+  cJSON_Delete(tools);
+  free(error);
+  if (!ok) {
+    return harness_fail(
+      "Generic Responses tools included unsupported hosted extras.");
+  }
   return 1;
 }
 
@@ -1520,6 +1552,10 @@ static int harness_direct_timeline_cursor_matches(
 
 #define HARNESS_HTTP_MAX_REQUEST_BYTES (4U * 1024U * 1024U)
 
+/* Set immediately before fork so each local fixture server receives its own
+ * immutable expectation. Never set this to a live credential. */
+static const char *harness_expected_authorization = NULL;
+
 typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_ANSWER_QUALITY = 1,
   HARNESS_RESPONSES_SERVER_SERVER_TOOL = 2,
@@ -1539,8 +1575,47 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_ISOLATED_PROMPTS = 16,
   HARNESS_RESPONSES_SERVER_ROUND_LIMIT = 17,
   HARNESS_RESPONSES_SERVER_ANSWER_QUALITY_DISABLED = 18,
-  HARNESS_RESPONSES_SERVER_NATIVE_WEB_SEARCH = 19
+  HARNESS_RESPONSES_SERVER_NATIVE_WEB_SEARCH = 19,
+  HARNESS_RESPONSES_SERVER_OTHER_GENERIC = 20
 } harness_responses_server_scenario;
+
+static int harness_headers_have_exact_authorization(
+  const char *headers,
+  size_t headers_length,
+  const char *expected)
+{
+  const char *cursor;
+  const char *headers_end;
+
+  if (expected == NULL) {
+    return 1;
+  }
+  cursor = headers;
+  headers_end = headers + headers_length;
+  while (cursor < headers_end) {
+    const char *line_end;
+    static const char field[] = "Authorization:";
+
+    line_end = strstr(cursor, "\r\n");
+    if ((line_end == NULL) || (line_end > headers_end)) {
+      line_end = headers_end;
+    }
+    if (((size_t)(line_end - cursor) >= (sizeof(field) - 1U)) &&
+        (strncasecmp(cursor, field, sizeof(field) - 1U) == 0)) {
+      const char *value;
+
+      value = cursor + sizeof(field) - 1U;
+      while ((value < line_end) && ((*value == ' ') || (*value == '\t'))) {
+        value++;
+      }
+      return (expected[0] != '\0') &&
+        ((size_t)(line_end - value) == strlen(expected)) &&
+        (memcmp(value, expected, strlen(expected)) == 0);
+    }
+    cursor = (line_end < headers_end) ? line_end + 2 : headers_end;
+  }
+  return expected[0] == '\0';
+}
 
 static int harness_send_all(int socket_fd,
                             const char *data,
@@ -1707,7 +1782,11 @@ static char *harness_read_request_body(int socket_fd)
             !harness_content_length(request,
                                     headers_length,
                                     &body_length) ||
-            !harness_has_expected_user_agent(request, headers_length)) {
+            !harness_has_expected_user_agent(request, headers_length) ||
+            !harness_headers_have_exact_authorization(
+              request,
+              headers_length,
+              harness_expected_authorization)) {
           free(request);
           return NULL;
         }
@@ -4388,6 +4467,109 @@ static int harness_run_retry_after_server(int listener_fd)
   return ok;
 }
 
+static int harness_run_other_generic_server(int listener_fd)
+{
+  static const char *function_response =
+    "{\"id\":\"resp-other-function\",\"object\":\"response\","
+    "\"created_at\":1700000000,\"model\":\"manual\","
+    "\"status\":\"completed\",\"output\":[{\"type\":\"function_call\","
+    "\"id\":\"fc-other\",\"call_id\":\"call-other-rename\","
+    "\"name\":\"session_rename\","
+    "\"arguments\":\"{\\\"name\\\":\\\"Generic Fixture\\\"}\","
+    "\"status\":\"completed\"}],"
+    "\"usage\":{\"input_tokens\":2,\"output_tokens\":1,"
+    "\"total_tokens\":3}}";
+  static const char *response =
+    "{\"id\":\"resp-other\",\"object\":\"response\","
+    "\"created_at\":1700000000,\"model\":\"manual\","
+    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-other\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Generic response.\",\"annotations\":[]}]}],"
+    "\"usage\":{\"input_tokens\":3,\"output_tokens\":2,"
+    "\"total_tokens\":5}}";
+  char *body;
+  cJSON *root;
+  cJSON *model;
+  cJSON *stream;
+  cJSON *store;
+  cJSON *tools;
+  cJSON *input;
+  cJSON *item;
+  int client_fd;
+  int exercise_local_function;
+  int found_function_output;
+  int ok;
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  model = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "model") : NULL;
+  stream = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "stream") : NULL;
+  store = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "store") : NULL;
+  tools = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "tools") : NULL;
+  exercise_local_function = (harness_expected_authorization != NULL) &&
+    (harness_expected_authorization[0] != '\0');
+  ok = cJSON_IsString(model) && (model->valuestring != NULL) &&
+    (strcmp(model->valuestring, "manual") == 0) &&
+    cJSON_IsFalse(stream) && cJSON_IsFalse(store) &&
+    (cJSON_GetObjectItem(root, "session_id") == NULL) &&
+    (cJSON_GetObjectItem(root, "metadata") == NULL) &&
+    (cJSON_GetObjectItem(root, "include") == NULL) &&
+    (cJSON_GetObjectItem(root, "reasoning") == NULL) &&
+    (cJSON_GetObjectItem(root, "text") == NULL) &&
+    cJSON_IsArray(tools) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_SESSION_RENAME) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+    harness_send_json_response(
+      client_fd,
+      200L,
+      exercise_local_function ? function_response : response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok || !exercise_local_function) {
+    return ok;
+  }
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  input = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "input") : NULL;
+  found_function_output = 0;
+  for (item = cJSON_IsArray(input) ? input->child : NULL;
+       item != NULL;
+       item = item->next) {
+    cJSON *type;
+    cJSON *call_id;
+
+    type = cJSON_IsObject(item) ? cJSON_GetObjectItem(item, "type") : NULL;
+    call_id = cJSON_IsObject(item) ?
+      cJSON_GetObjectItem(item, "call_id") : NULL;
+    if (cJSON_IsString(type) && (type->valuestring != NULL) &&
+        (strcmp(type->valuestring, "function_call_output") == 0) &&
+        cJSON_IsString(call_id) && (call_id->valuestring != NULL) &&
+        (strcmp(call_id->valuestring, "call-other-rename") == 0)) {
+      found_function_output = 1;
+    }
+  }
+  ok = cJSON_IsObject(root) && found_function_output &&
+    (cJSON_GetObjectItem(root, "session_id") == NULL) &&
+    (cJSON_GetObjectItem(root, "metadata") == NULL) &&
+    (cJSON_GetObjectItem(root, "include") == NULL) &&
+    harness_send_json_response(client_fd, 200L, response);
+  cJSON_Delete(root);
+  close(client_fd);
+  return ok;
+}
+
 static int harness_run_slow_server(int listener_fd)
 {
   struct timeval timeout;
@@ -4513,6 +4695,8 @@ static int harness_start_server(harness_responses_server_scenario scenario,
       ok = harness_run_valid_web_reference_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_NATIVE_WEB_SEARCH) {
       ok = harness_run_native_web_search_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_OTHER_GENERIC) {
+      ok = harness_run_other_generic_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_FUNCTION_TOOL) {
       ok = harness_run_function_tool_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_ROUND_LIMIT) {
@@ -9290,6 +9474,329 @@ cleanup:
   return ok;
 }
 
+typedef struct harness_other_credentials {
+  const char *authenticated_account_id;
+  const char *unauthenticated_account_id;
+  pthread_mutex_t mutex;
+  int authenticated_snapshots;
+  int unauthenticated_snapshots;
+  int invalid_snapshots;
+} harness_other_credentials;
+
+typedef struct harness_other_request {
+  const char *db_path;
+  long long session_id;
+  const char *prompt;
+  char *result;
+  char *error;
+} harness_other_request;
+
+static int harness_other_credentials_callback(
+  const char *provider_id,
+  const char *provider_account_id,
+  int force_refresh,
+  char **bearer_token_out,
+  char **upstream_account_id_out,
+  void *user_data,
+  char **error_out)
+{
+  static const char token[] = "phase6-auth-token-not-live";
+  harness_other_credentials *credentials;
+  int valid;
+
+  (void)error_out;
+  credentials = (harness_other_credentials *)user_data;
+  if ((bearer_token_out == NULL) || (upstream_account_id_out == NULL) ||
+      (credentials == NULL)) {
+    return 0;
+  }
+  *bearer_token_out = NULL;
+  *upstream_account_id_out = NULL;
+  valid = (provider_id != NULL) &&
+    (strcmp(provider_id, STRAPPY_PROVIDER_OTHER) == 0) && !force_refresh;
+  pthread_mutex_lock(&credentials->mutex);
+  if (valid && (provider_account_id != NULL) &&
+      (strcmp(provider_account_id,
+              credentials->authenticated_account_id) == 0)) {
+    credentials->authenticated_snapshots++;
+    *bearer_token_out = strdup(token);
+    valid = *bearer_token_out != NULL;
+  } else if (valid && (provider_account_id != NULL) &&
+             (strcmp(provider_account_id,
+                     credentials->unauthenticated_account_id) == 0)) {
+    credentials->unauthenticated_snapshots++;
+  } else {
+    credentials->invalid_snapshots++;
+    valid = 0;
+  }
+  pthread_mutex_unlock(&credentials->mutex);
+  return valid;
+}
+
+static void *harness_run_other_request_thread(void *context)
+{
+  harness_other_request *request;
+
+  request = (harness_other_request *)context;
+  request->result =
+    strappy_responses_send_prompt_for_session_and_store(
+      request->prompt,
+      "/dev/null",
+      NULL,
+      NULL,
+      "../shared/Resources",
+      request->db_path,
+      request->session_id,
+      &request->error);
+  return NULL;
+}
+
+static int harness_file_contains_text(const char *path, const char *needle)
+{
+  FILE *file;
+  char *bytes;
+  long length;
+  size_t index;
+  size_t needle_length;
+  int close_ok;
+  int found;
+
+  file = fopen(path, "rb");
+  if (file == NULL) {
+    return 0;
+  }
+  if ((fseek(file, 0L, SEEK_END) != 0) ||
+      ((length = ftell(file)) < 0L) ||
+      (fseek(file, 0L, SEEK_SET) != 0)) {
+    fclose(file);
+    return 0;
+  }
+  bytes = (char *)malloc((size_t)length + 1U);
+  if (bytes == NULL) {
+    fclose(file);
+    return 0;
+  }
+  found = fread(bytes, 1U, (size_t)length, file) == (size_t)length;
+  close_ok = fclose(file) == 0;
+  needle_length = strlen(needle);
+  found = found && close_ok && (needle_length <= (size_t)length);
+  for (index = 0U;
+       found && (index + needle_length <= (size_t)length);
+       index++) {
+    if (memcmp(bytes + index, needle, needle_length) == 0) {
+      free(bytes);
+      return 1;
+    }
+  }
+  free(bytes);
+  return 0;
+}
+
+static int harness_test_other_provider_accounts(void)
+{
+  static const char token[] = "phase6-auth-token-not-live";
+  char path[] = "/tmp/strappy-responses-other-XXXXXX";
+  char endpoint_one[128];
+  char endpoint_two[128];
+  char wal_path[sizeof(path) + 8U];
+  char *account_one;
+  char *account_two;
+  char *model_one;
+  char *model_two;
+  char *error;
+  strappy_manual_model_input model_input;
+  strappy_model_route_record route;
+  harness_other_credentials credentials;
+  harness_other_request request_one;
+  harness_other_request request_two;
+  pthread_t thread_one;
+  pthread_t thread_two;
+  pid_t server_one;
+  pid_t server_two;
+  long long session_one;
+  long long session_two;
+  int fd;
+  int first_started;
+  int second_started;
+  int first_joined;
+  int second_joined;
+  int server_one_ok;
+  int server_two_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create generic-provider test database.");
+  }
+  close(fd);
+  account_one = NULL;
+  account_two = NULL;
+  model_one = NULL;
+  model_two = NULL;
+  error = NULL;
+  session_one = 0LL;
+  session_two = 0LL;
+  server_one = (pid_t)-1;
+  server_two = (pid_t)-1;
+  first_started = 0;
+  second_started = 0;
+  first_joined = 0;
+  second_joined = 0;
+  server_one_ok = 0;
+  server_two_ok = 0;
+  wal_path[0] = '\0';
+  strappy_model_route_record_init(&route);
+  memset(&credentials, 0, sizeof(credentials));
+  memset(&request_one, 0, sizeof(request_one));
+  memset(&request_two, 0, sizeof(request_two));
+  pthread_mutex_init(&credentials.mutex, NULL);
+
+  harness_expected_authorization = "Bearer phase6-auth-token-not-live";
+  ok = harness_start_server(HARNESS_RESPONSES_SERVER_OTHER_GENERIC,
+                            endpoint_one,
+                            sizeof(endpoint_one),
+                            &server_one);
+  harness_expected_authorization = "";
+  if (ok) {
+    ok = harness_start_server(HARNESS_RESPONSES_SERVER_OTHER_GENERIC,
+                              endpoint_two,
+                              sizeof(endpoint_two),
+                              &server_two);
+  }
+  harness_expected_authorization = NULL;
+  memset(&model_input, 0, sizeof(model_input));
+  model_input.wire_model_id = "manual";
+  model_input.display_name = "Manual";
+  model_input.context_window_tokens = 8192LL;
+  model_input.max_output_tokens = 1024LL;
+  model_input.local_functions_enabled = 1;
+  ok = ok && strappy_db_initialize(path, &error) &&
+    strappy_db_create_provider_account(
+      path,"other","Authenticated",endpoint_one,&account_one,&error) &&
+    strappy_db_create_provider_account(
+      path,"other","Unauthenticated",endpoint_two,&account_two,&error) &&
+    strappy_db_create_manual_model(
+      path,account_one,&model_input,&model_one,&error) &&
+    strappy_db_create_manual_model(
+      path,account_two,&model_input,&model_two,&error) &&
+    strappy_db_set_model_allowed(path,model_one,1,&error) &&
+    strappy_db_set_model_allowed(path,model_two,1,&error) &&
+    strappy_db_set_default_account_model(path,account_one,model_one,&error) &&
+    strappy_db_create_session(path,&session_one,&error) &&
+    strappy_db_set_default_account_model(path,account_two,model_two,&error) &&
+    strappy_db_create_session(path,&session_two,&error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not prepare generic-provider fixtures: %s\n",
+            (error != NULL) ? error : "unknown");
+    goto cleanup;
+  }
+
+  credentials.authenticated_account_id = account_one;
+  credentials.unauthenticated_account_id = account_two;
+  strappy_responses_set_provider_credentials_callback(
+    harness_other_credentials_callback,
+    &credentials);
+  request_one.db_path = path;
+  request_one.session_id = session_one;
+  request_one.prompt = "Authenticated generic request";
+  request_two.db_path = path;
+  request_two.session_id = session_two;
+  request_two.prompt = "Unauthenticated generic request";
+  first_started = pthread_create(
+    &thread_one,NULL,harness_run_other_request_thread,&request_one) == 0;
+  second_started = first_started && (pthread_create(
+    &thread_two,NULL,harness_run_other_request_thread,&request_two) == 0);
+  if (first_started) {
+    first_joined = pthread_join(thread_one, NULL) == 0;
+  }
+  if (second_started) {
+    second_joined = pthread_join(thread_two, NULL) == 0;
+  }
+  strappy_responses_set_provider_credentials_callback(NULL, NULL);
+  server_one_ok = harness_wait_for_server(
+    server_one,
+    request_one.result == NULL);
+  server_one = (pid_t)-1;
+  server_two_ok = harness_wait_for_server(
+    server_two,
+    request_two.result == NULL);
+  server_two = (pid_t)-1;
+  ok = first_started && second_started && first_joined && second_joined &&
+    (request_one.result != NULL) &&
+    (strcmp(request_one.result,"Generic response.") == 0) &&
+    (request_two.result != NULL) &&
+    (strcmp(request_two.result,"Generic response.") == 0) &&
+    (request_one.error == NULL) && (request_two.error == NULL) &&
+    (credentials.authenticated_snapshots == 1) &&
+    (credentials.unauthenticated_snapshots == 1) &&
+    (credentials.invalid_snapshots == 0) &&
+    server_one_ok && server_two_ok;
+  if (!ok) {
+    fprintf(stderr,"Generic-provider simultaneous requests failed.\n");
+    goto cleanup;
+  }
+
+  snprintf(wal_path, sizeof(wal_path), "%s-wal", path);
+  /* Reopening proves account/model/session state survives process-style
+   * teardown; archiving must preserve history while blocking new routing. */
+  ok = !harness_file_contains_text(path, token) &&
+    !harness_file_contains_text(wal_path, token) &&
+    strappy_db_initialize(path,&error) &&
+    strappy_db_archive_provider_account(path,account_one,&error);
+  if (ok) {
+    ok = !strappy_db_get_session_model_route(
+           path,session_one,&route,&error) && (error != NULL) &&
+      (strstr(error,"active") != NULL) &&
+      (strstr(error,"Authenticated") == NULL);
+  }
+  strappy_free_string(error);
+  error = NULL;
+  if (ok) {
+    sqlite3 *db;
+    long long value;
+
+    db = NULL;
+    ok = (sqlite3_open(path,&db) == SQLITE_OK) &&
+      harness_query_int(db,
+        "SELECT COUNT(*) FROM model_requests r JOIN turns t ON t.id=r.turn_id "
+        "JOIN sessions s ON s.id=t.session_id WHERE r.provider_account_id IN "
+        "(SELECT id FROM provider_accounts WHERE provider_id='other');",
+        &value) && (value >= 2LL) &&
+      harness_query_int(db,
+        "SELECT COUNT(*) FROM api_usage WHERE cost_nano_usd IS NOT NULL;",
+        &value) && (value == 0LL);
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+  }
+
+cleanup:
+  strappy_responses_set_provider_credentials_callback(NULL, NULL);
+  if (server_one > 0) {
+    (void)harness_wait_for_server(server_one, 1);
+  }
+  if (server_two > 0) {
+    (void)harness_wait_for_server(server_two, 1);
+  }
+  pthread_mutex_destroy(&credentials.mutex);
+  strappy_model_route_record_destroy(&route);
+  free(request_one.result);
+  free(request_one.error);
+  free(request_two.result);
+  free(request_two.error);
+  free(account_one);
+  free(account_two);
+  free(model_one);
+  free(model_two);
+  free(error);
+  if (wal_path[0] != '\0') {
+    unlink(wal_path);
+  }
+  unlink(path);
+  return ok;
+}
+
 int main(void)
 {
   if (harness_test_unicode_emoji_scan() &&
@@ -9316,6 +9823,7 @@ int main(void)
       harness_test_retry_attempt_ledger() &&
       harness_test_active_request_cancellation() &&
       harness_test_retry_after_clamp_and_cancellation() &&
+      harness_test_other_provider_accounts() &&
       harness_test_session_webview_rendering()) {
     printf("responses_harness passed.\n");
     return 0;

@@ -416,12 +416,12 @@ portable tests prove the underlying core supports multiple accounts.
   credential recovery.
 - [ ] Add two-account fixtures for both providers, including identical wire
   model IDs and simultaneous requests.
-- [ ] Add account-name tests for arbitrary UTF-8 labels, duplicate names,
+- [x] Add account-name tests for arbitrary UTF-8 labels, duplicate names,
   renaming, empty/oversized rejection, and safe display/log handling.
 - [x] Add `SessionOptions` tests for account/model mismatch, provider inference,
   default-account selection, empty-session account changes, and established
   session locking.
-- [ ] Add `other` fixtures for two endpoints, manual models, local functions,
+- [x] Add `other` fixtures for two endpoints, manual models, local functions,
   authenticated and unauthenticated requests, invalid endpoints, and rejection
   of unsupported extras.
 - [ ] Assert secrets and upstream account identifiers never enter SQLite, logs,
@@ -432,6 +432,21 @@ portable tests prove the underlying core supports multiple accounts.
   on both Apple platforms.
 - [ ] Re-run the live ChatGPT compatibility probe for text, local functions,
   native web search, every enabled bundled model, and a real plan-limit case.
+
+On 2026-08-20, the bounded LUNA native-web-search validation passed with one
+Responses request and no OAuth request. The broader multi-model, local-function,
+and real plan-limit work above remains deliberately incomplete to avoid
+unnecessary account activity.
+
+On the same date, the `other` provider passed a separate one-request live smoke
+test using the OpenRouter Responses endpoint, a bearer credential, and the app's
+default DeepSeek V4 Flash model. It used the generic request profile without a
+catalog request or hosted tools.
+
+The native `openrouter` provider then passed its own one-request live smoke test
+with the same endpoint, credential, and model. That request used the app's
+OpenRouter-specific profile. Neither smoke test performed discovery, hosted
+tools, web search, or a retry.
 
 ## Production release gate
 

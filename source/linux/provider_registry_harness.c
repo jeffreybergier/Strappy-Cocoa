@@ -19,6 +19,12 @@ static int harness_definition_is_complete(
 
 int main(void)
 {
+  static const char *invalid_other_endpoints[] = {
+    "relative/responses",
+    "ftp://example.test/responses",
+    "https:///responses",
+    "https://example.test/line\nbreak"
+  };
   const strappy_provider_definition *openrouter;
   const strappy_provider_definition *chatgpt;
   const strappy_provider_definition *other;
@@ -87,12 +93,20 @@ int main(void)
   ok = ok && (endpoint == NULL) && (error != NULL);
   free(error);
   error = NULL;
-  endpoint = strappy_provider_definition_responses_endpoint(
-    other,
-    "relative/responses",
-    &error);
-  ok = ok && (endpoint == NULL) && (error != NULL);
-  free(endpoint);
+  for (index = 0U;
+       ok && (index < (sizeof(invalid_other_endpoints) /
+                       sizeof(invalid_other_endpoints[0])));
+       index++) {
+    endpoint = strappy_provider_definition_responses_endpoint(
+      other,
+      invalid_other_endpoints[index],
+      &error);
+    ok = (endpoint == NULL) && (error != NULL) &&
+      (strstr(error, invalid_other_endpoints[index]) == NULL);
+    free(endpoint);
+    free(error);
+    error = NULL;
+  }
   free(error);
 
   if (!ok) {

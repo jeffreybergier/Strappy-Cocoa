@@ -348,8 +348,12 @@ static int strappy_db_validate_account_metadata(
 {
   const strappy_provider_definition *definition;
   char *resolved;
+  size_t display_name_length;
+
+  display_name_length = (display_name != NULL) ? strlen(display_name) : 0U;
   if ((display_name == NULL) || (display_name[0] == '\0') ||
-      (strlen(display_name) > 160U)) {
+      (display_name_length > 160U) ||
+      !strappy_utf8_validate(display_name, display_name_length)) {
     strappy_set_error(error_out, "Provider account name is invalid.");
     return 0;
   }

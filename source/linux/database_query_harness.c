@@ -11758,11 +11758,14 @@ static int harness_run_multi_account_database_tests(
   char *default_account;
   char *default_model;
   char *error;
+  char oversized_name[162];
+  static const char invalid_utf8_name[] = "Invalid \xF0\x28\x8C\x28";
   strappy_provider_account_record_list accounts;
   strappy_manual_model_input input;
   strappy_session_options options;
   strappy_session_options saved_options;
   strappy_model_route_record route;
+  strappy_provider_account_record account;
   strappy_session_option_mask changed_fields;
   long long session_id;
   int ok;
@@ -11776,11 +11779,19 @@ static int harness_run_multi_account_database_tests(
   strappy_session_options_init(&options);
   strappy_session_options_init(&saved_options);
   strappy_model_route_record_init(&route);
+  strappy_provider_account_record_init(&account);
+  memset(oversized_name, 'x', sizeof(oversized_name) - 1U);
+  oversized_name[sizeof(oversized_name) - 1U] = '\0';
   ok = strappy_db_initialize(path,&error) &&
     strappy_db_get_designated_provider_account(path,"openai_chatgpt",&chat_one,&error) &&
     strappy_db_get_designated_provider_account(path,"openrouter",&router_one,&error) &&
     strappy_db_create_provider_account(path,"openai_chatgpt","Same Name",NULL,&chat_two,&error) &&
     strappy_db_create_provider_account(path,"openrouter","Same Name",NULL,&router_two,&error) &&
+    strappy_db_update_provider_account(
+      path,router_two,"\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E \xF0\x9F\x8C\x88",NULL,&error) &&
+    strappy_db_get_provider_account(path,router_two,&account,&error) &&
+    (strcmp(account.display_name,
+            "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E \xF0\x9F\x8C\x88") == 0) &&
     strappy_model_catalog_import_bundled_models(HARNESS_RESOURCE_DIR,path,&error) &&
     strappy_db_create_provider_account(path,"openai_chatgpt","Later",NULL,&chat_three,&error) &&
     harness_expect_catalog_integer(path,
@@ -11798,6 +11809,36 @@ static int harness_run_multi_account_database_tests(
       "SELECT COUNT(*) FROM models WHERE wire_model_id='shared/model' AND catalog_active=1;",
       2LL,"duplicate wire model ids across accounts") &&
     strappy_db_update_provider_account(path,chat_two,"Renamed",NULL,&error);
+  strappy_provider_account_record_destroy(&account);
+  if (ok) {
+    char *rejected_account;
+
+    rejected_account = NULL;
+    ok = !strappy_db_create_provider_account(
+           path,"openrouter","",NULL,&rejected_account,&error) &&
+      (rejected_account == NULL) && (error != NULL) &&
+      (strstr(error,"Provider account name is invalid.") != NULL);
+    strappy_free_string(error);
+    error = NULL;
+    if (ok) {
+      ok = !strappy_db_create_provider_account(
+             path,"openrouter",oversized_name,NULL,&rejected_account,&error) &&
+        (rejected_account == NULL) && (error != NULL) &&
+        (strstr(error,oversized_name) == NULL);
+    }
+    strappy_free_string(error);
+    error = NULL;
+    if (ok) {
+      ok = !strappy_db_create_provider_account(
+             path,"openrouter",invalid_utf8_name,NULL,
+             &rejected_account,&error) &&
+        (rejected_account == NULL) && (error != NULL) &&
+        (strstr(error,"Invalid") == NULL);
+    }
+    free(rejected_account);
+    strappy_free_string(error);
+    error = NULL;
+  }
   if (ok) {
     strappy_provider_account_record_list_init(&accounts);
     ok = strappy_db_list_provider_accounts(path,"openai_chatgpt",0,&accounts,&error) &&
@@ -11850,6 +11891,19 @@ static int harness_run_multi_account_database_tests(
       "SELECT COUNT(*) FROM models WHERE wire_model_id='manual' AND catalog_active=1;",
       1LL,"isolated manual model archive") &&
     strappy_db_archive_provider_account(path,other_one,&error) &&
+    strappy_db_initialize(path,&error) &&
+    harness_expect_catalog_integer(path,
+      "SELECT COUNT(*) FROM provider_accounts WHERE lifecycle_state='archived' AND provider_id='other';",
+      1LL,"archived account after restart") &&
+    harness_expect_catalog_integer(path,
+      "SELECT COUNT(*) FROM models WHERE provider_account_id IN (SELECT id FROM provider_accounts WHERE lifecycle_state='archived');",
+      1LL,"archived account model preservation") &&
+    harness_expect_catalog_integer(path,
+      "SELECT COUNT(*) FROM sqlite_schema s JOIN pragma_table_info(s.name) p "
+      "WHERE s.type='table' AND lower(p.name) IN "
+      "('access_token','refresh_token','api_key','api_token','bearer_token',"
+      "'upstream_account_id','request_body','response_body','http_headers');",
+      0LL,"secret-bearing schema column count") &&
     harness_expect_catalog_integer(path,"SELECT COUNT(*) FROM pragma_foreign_key_check;",0LL,
                                    "multi-account foreign key check");
   if (!ok) fprintf(stderr,"Multi-account database test failed: %s\n",
@@ -11857,6 +11911,7 @@ static int harness_run_multi_account_database_tests(
   free(chat_one); free(chat_two); free(chat_three); free(router_one); free(router_two);
   free(other_one); free(other_two); free(manual_one); free(manual_two);
   free(default_account); free(default_model);
+  strappy_provider_account_record_destroy(&account);
   strappy_model_route_record_destroy(&route);
   strappy_session_options_destroy(&saved_options);
   strappy_session_options_destroy(&options);
