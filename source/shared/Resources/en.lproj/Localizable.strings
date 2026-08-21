@@ -167,6 +167,7 @@
 "Code" = "Code";
 "Copy Code" = "Copy Code";
 "Open Browser" = "Open Browser";
+"URL" = "URL";
 "Sign Out" = "Sign Out";
 "Retry Refresh" = "Retry Refresh";
 "Sign In with ChatGPT" = "Sign In with ChatGPT";
@@ -421,7 +422,7 @@
 "Delete Account…" = "Delete Account…";
 "Endpoint and optional bearer token" = "Endpoint and optional bearer token";
 "Endpoint is configured." = "Endpoint is configured.";
-"Limit maximum output tokens" = "Limit maximum output tokens";
+"Limit Output Tokens" = "Limit Output Tokens";
 "Maximum Output Tokens Must Be a Positive Integer" = "Maximum Output Tokens Must Be a Positive Integer";
 "Not configured." = "Not configured.";
 "Not signed in to ChatGPT." = "Not signed in to ChatGPT.";

@@ -2,6 +2,7 @@
 
 #import "StrappyAppearance.h"
 #import "StrappyModelCellFormatter.h"
+#import "StrappyModelProvidersTableViewController.h"
 #import "StrappySession.h"
 
 static NSString * const kStrappyModelSearchTextKey =
@@ -33,6 +34,7 @@ static NSArray *StrappyModelSearchKeys(void)
       @"wire_model_id",
       @"provider_account_id",
       @"provider_id",
+      @"provider_name",
       @"provider_account_name",
       @"canonical_slug",
       @"hugging_face_id",
@@ -103,6 +105,8 @@ static NSString *StrappyModelSearchTextForRow(NSDictionary *row)
 
 static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 {
+  NSMutableDictionary *rowsByProviderModel;
+  NSMutableArray *providerModels;
   NSMutableArray *preparedRows;
   NSUInteger index;
 
@@ -110,16 +114,69 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return [NSArray array];
   }
 
-  preparedRows = [NSMutableArray arrayWithCapacity:[rows count]];
+  rowsByProviderModel = [NSMutableDictionary dictionary];
+  providerModels = [NSMutableArray array];
   for (index = 0U; index < [rows count]; index++) {
     NSDictionary *row;
-    NSMutableDictionary *preparedRow;
+    NSMutableDictionary *providerModel;
+    NSString *providerIdentifier;
+    NSString *wireModelIdentifier;
+    NSString *key;
 
     row = [rows objectAtIndex:index];
     if (![row isKindOfClass:[NSDictionary class]]) {
       continue;
     }
 
+    providerIdentifier = StrappyStringForModelRow(row, @"provider_id");
+    wireModelIdentifier = StrappyStringForModelRow(row, @"wire_model_id");
+    if (([providerIdentifier length] == 0U) ||
+        ([wireModelIdentifier length] == 0U)) {
+      continue;
+    }
+    key = [NSString stringWithFormat:@"%@\n%@", providerIdentifier,
+      wireModelIdentifier];
+    providerModel = [rowsByProviderModel objectForKey:key];
+    if (providerModel == nil) {
+      NSString *providerName;
+
+      providerModel = [NSMutableDictionary dictionaryWithDictionary:row];
+      [providerModel setObject:key forKey:@"provider_model_key"];
+      if ([providerIdentifier isEqualToString:@"openrouter"]) providerName = @"OpenRouter";
+      else if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) providerName = @"ChatGPT";
+      else providerName = NSLocalizedString(@"Other", nil);
+      [providerModel setObject:providerName forKey:@"provider_name"];
+      [rowsByProviderModel setObject:providerModel forKey:key];
+      [providerModels addObject:providerModel];
+    } else {
+      BOOL allowed;
+      BOOL selected;
+
+      allowed = [[providerModel objectForKey:@"allowed"] boolValue] ||
+        [[row objectForKey:@"allowed"] boolValue];
+      selected = [[providerModel objectForKey:@"selected"] boolValue] ||
+        [[row objectForKey:@"selected"] boolValue];
+      if ([[row objectForKey:@"selected"] boolValue]) {
+        NSString *savedKey;
+        NSString *savedProviderName;
+
+        savedKey = [providerModel objectForKey:@"provider_model_key"];
+        savedProviderName = [providerModel objectForKey:@"provider_name"];
+        [providerModel setDictionary:row];
+        [providerModel setObject:savedKey forKey:@"provider_model_key"];
+        [providerModel setObject:savedProviderName forKey:@"provider_name"];
+      }
+      [providerModel setObject:[NSNumber numberWithBool:allowed] forKey:@"allowed"];
+      [providerModel setObject:[NSNumber numberWithBool:selected] forKey:@"selected"];
+    }
+  }
+
+  preparedRows = [NSMutableArray arrayWithCapacity:[providerModels count]];
+  for (index = 0U; index < [providerModels count]; index++) {
+    NSDictionary *row;
+    NSMutableDictionary *preparedRow;
+
+    row = [providerModels objectAtIndex:index];
     preparedRow = [NSMutableDictionary dictionaryWithDictionary:row];
     [preparedRow setObject:StrappyModelSearchTextForRow(row)
                     forKey:kStrappyModelSearchTextKey];
@@ -278,12 +335,12 @@ static NSArray *StrappyModelRowsForAccount(NSArray *rows,
   [super viewDidLoad];
 
   updateButton = [[UIBarButtonItem alloc]
-    initWithTitle:NSLocalizedString(@"Update", nil)
+    initWithTitle:NSLocalizedString(@"Edit", nil)
             style:UIBarButtonItemStyleBordered
            target:self
            action:@selector(actionButtonPressed:)];
   [updateButton
-    setAccessibilityLabel:NSLocalizedString(@"Update Models", nil)];
+    setAccessibilityLabel:NSLocalizedString(@"Edit Model Providers", nil)];
   [self setUpdateButton:updateButton];
   [[self navigationItem] setRightBarButtonItem:updateButton];
   [StrappyAppearance applyLegacyTintToBarButtonItem:updateButton];
@@ -414,26 +471,14 @@ static NSArray *StrappyModelRowsForAccount(NSArray *rows,
 
 - (void)actionButtonPressed:(id)sender
 {
-  NSError *error;
-
   (void)sender;
-  if ([self refreshingModels]) {
-    return;
-  }
-
-  error = nil;
-  if (![StrappySession beginOpenRouterModelCatalogRefreshWithError:&error]) {
-    [self showError:error
-              title:NSLocalizedString(@"Could not fetch models", nil)];
-    return;
-  }
-  [self setRefreshingModels:YES];
+  [[self navigationController] pushViewController:
+    [[StrappyModelProvidersTableViewController alloc] init] animated:YES];
 }
 
 - (void)setRefreshingModels:(BOOL)refreshingModels
 {
   _refreshingModels = refreshingModels;
-  [[self updateButton] setEnabled:refreshingModels ? NO : YES];
   [self setWorking:refreshingModels];
   [[self tableView] reloadData];
   [self refreshStatusToolbar];

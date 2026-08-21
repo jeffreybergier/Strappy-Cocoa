@@ -81,6 +81,20 @@ static NSDictionary *StrappyPromptSelectedModel(NSArray *models,
   return nil;
 }
 
+static NSDictionary *StrappyPromptAccountForIdentifier(NSArray *accounts,
+                                                        NSString *identifier)
+{
+  NSDictionary *account;
+
+  for (account in accounts) {
+    if ([StrappyMessageModelStringForRow(account, @"id")
+          isEqualToString:identifier]) {
+      return account;
+    }
+  }
+  return nil;
+}
+
 static BOOL StrappyPromptModelBoolean(NSDictionary *model,
                                       NSString *key,
                                       BOOL fallback)
@@ -104,10 +118,26 @@ static BOOL StrappyPromptModelIsUsable(NSDictionary *model)
     [[StrappyAuthentication sharedAuthentication] hasStoredCredentials];
 }
 
+static NSDictionary *StrappyPromptFirstUsableModelForProvider(
+    NSArray *models, NSString *providerIdentifier)
+{
+  NSDictionary *model;
+
+  for (model in models) {
+    if ([StrappyMessageModelStringForRow(model, @"provider_id")
+          isEqualToString:providerIdentifier] &&
+        StrappyPromptModelIsUsable(model)) {
+      return model;
+    }
+  }
+  return nil;
+}
+
 @class StrappySessionOptionsTableViewController;
 
 enum {
-  kStrappyPromptOptionsSectionModels = 0,
+  kStrappyPromptOptionsSectionAccounts = 0,
+  kStrappyPromptOptionsSectionModels,
   kStrappyPromptOptionsSectionAssistantSet,
   kStrappyPromptOptionsSectionAvailableTools,
   kStrappyPromptOptionsSectionLimits,
@@ -141,6 +171,7 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
 @interface StrappySessionOptionsTableViewController ()
 @property (nonatomic, assign) id<StrappySessionOptionsTableViewControllerDelegate> optionsDelegate;
 @property (nonatomic, copy) NSArray *assistantSets;
+@property (nonatomic, copy) NSArray *accounts;
 @property (nonatomic, copy) NSArray *models;
 @property (nonatomic, copy) StrappySessionOptions *sessionOptions;
 @property (nonatomic, strong) UISwitch *webSearchSwitch;
@@ -156,6 +187,10 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
                        presentedModally:(BOOL)presentedModally;
 - (void)reloadOptionsSnapshot;
 - (void)reloadOptionsFromDelegate;
+- (NSString *)selectedProviderIdentifier;
+- (NSArray *)modelsForSelectedAccount;
+- (BOOL)supportsWebSearch;
+- (BOOL)supportsSearchProvider;
 - (void)updateRoundLimitControlValues;
 - (NSUInteger)updateRoundLimitDisplayForSlider:(UISlider *)slider;
 - (void)persistRoundLimit:(NSUInteger)limit;
@@ -275,6 +310,10 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
   id<StrappySessionOptionsTableViewControllerDelegate> optionsDelegate;
 
   optionsDelegate = [self optionsDelegate];
+  [self setAccounts:
+    (optionsDelegate != nil)
+      ? [optionsDelegate currentProviderAccounts]
+      : [NSArray array]];
   [self setAssistantSets:
     (optionsDelegate != nil)
       ? [optionsDelegate currentAssistantSets]
@@ -303,9 +342,11 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
                                                      @"local_functions_enabled",
                                                      YES);
   [[self webSearchSwitch]
-    setOn:hostedToolsEnabled && [[self sessionOptions] webSearchEnabled]
+    setOn:[self supportsWebSearch] && hostedToolsEnabled &&
+      [[self sessionOptions] webSearchEnabled]
   animated:NO];
-  [[self webSearchSwitch] setEnabled:hostedToolsEnabled];
+  [[self webSearchSwitch]
+    setEnabled:[self supportsWebSearch] && hostedToolsEnabled];
   [[self bashSwitch]
     setOn:localFunctionsEnabled && [[self sessionOptions] bashEnabled]
   animated:NO];
@@ -318,6 +359,47 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
   animated:NO];
   [self updateRoundLimitControlValues];
   [[self tableView] reloadData];
+}
+
+- (NSString *)selectedProviderIdentifier
+{
+  NSDictionary *account;
+
+  account = StrappyPromptAccountForIdentifier(
+    [self accounts], [[self sessionOptions] providerAccountIdentifier]);
+  return StrappyMessageModelStringForRow(account, @"provider_id");
+}
+
+- (NSArray *)modelsForSelectedAccount
+{
+  NSMutableArray *filteredModels;
+  NSString *providerIdentifier;
+  NSDictionary *model;
+
+  providerIdentifier = [self selectedProviderIdentifier];
+  filteredModels = [NSMutableArray array];
+  for (model in [self models]) {
+    if ([StrappyMessageModelStringForRow(model, @"provider_id")
+          isEqualToString:providerIdentifier]) {
+      [filteredModels addObject:model];
+    }
+  }
+  return filteredModels;
+}
+
+- (BOOL)supportsWebSearch
+{
+  NSString *providerIdentifier;
+
+  providerIdentifier = [self selectedProviderIdentifier];
+  return [providerIdentifier isEqualToString:@"openrouter"] ||
+    [providerIdentifier isEqualToString:@"openai_chatgpt"];
+}
+
+- (BOOL)supportsSearchProvider
+{
+  return [[self selectedProviderIdentifier]
+    isEqualToString:@"openrouter"];
 }
 
 - (void)updateRoundLimitControlValues
@@ -343,7 +425,7 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
   StrappySessionOptions *options;
 
   optionsDelegate = [self optionsDelegate];
-  if (!StrappyPromptModelBoolean(
+  if (![self supportsWebSearch] || !StrappyPromptModelBoolean(
         StrappyPromptSelectedModel([self models], [self sessionOptions]),
         @"hosted_tools_enabled",
         YES)) {
@@ -359,6 +441,9 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
     [self setSessionOptions:[optionsDelegate sessionOptions]];
   }
   [sender setOn:[[self sessionOptions] webSearchEnabled] animated:YES];
+  [[self tableView] reloadSections:[NSIndexSet indexSetWithIndex:
+    kStrappyPromptOptionsSectionSearchProvider]
+    withRowAnimation:UITableViewRowAnimationNone];
 }
 
 - (void)bashSwitchChanged:(UISwitch *)sender
@@ -471,20 +556,24 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
  numberOfRowsInSection:(NSInteger)section
 {
   (void)tableView;
+  if (section == kStrappyPromptOptionsSectionAccounts) {
+    return (NSInteger)[[self accounts] count];
+  }
   if (section == kStrappyPromptOptionsSectionAssistantSet) {
     return (NSInteger)[[self assistantSets] count];
   }
   if (section == kStrappyPromptOptionsSectionModels) {
-    return (NSInteger)[[self models] count];
+    return (NSInteger)[[self modelsForSelectedAccount] count];
   }
   if (section == kStrappyPromptOptionsSectionAvailableTools) {
-    return 2;
+    return [self supportsWebSearch] ? 2 : 1;
   }
   if (section == kStrappyPromptOptionsSectionLimits) {
     return kStrappyPromptOptionsLimitRowCount;
   }
   if (section == kStrappyPromptOptionsSectionSearchProvider) {
-    return (NSInteger)[StrappyPromptSearchProviders() count];
+    return [self supportsSearchProvider] ?
+      (NSInteger)[StrappyPromptSearchProviders() count] : 0;
   }
   return 0;
 }
@@ -493,13 +582,18 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
 titleForHeaderInSection:(NSInteger)section
 {
   (void)tableView;
+  if (section == kStrappyPromptOptionsSectionAccounts) {
+    return ([[self accounts] count] > 0U) ?
+      NSLocalizedString(@"Account", nil) : nil;
+  }
   if (section == kStrappyPromptOptionsSectionAssistantSet) {
     return ([[self assistantSets] count] > 0U)
       ? NSLocalizedString(@"Assistant", nil)
       : nil;
   }
   if (section == kStrappyPromptOptionsSectionModels) {
-    return ([[self models] count] > 0U) ? NSLocalizedString(@"Model", nil) : nil;
+    return ([[self modelsForSelectedAccount] count] > 0U) ?
+      NSLocalizedString(@"Model", nil) : nil;
   }
   if (section == kStrappyPromptOptionsSectionAvailableTools) {
     return NSLocalizedString(@"Tools", nil);
@@ -508,7 +602,8 @@ titleForHeaderInSection:(NSInteger)section
     return NSLocalizedString(@"Limits", nil);
   }
   if (section == kStrappyPromptOptionsSectionSearchProvider) {
-    return NSLocalizedString(@"Search Provider", nil);
+    return [self supportsSearchProvider] ?
+      NSLocalizedString(@"Search Provider", nil) : nil;
   }
   return nil;
 }
@@ -517,6 +612,50 @@ titleForHeaderInSection:(NSInteger)section
          cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
   UITableViewCell *cell;
+
+  if ([indexPath section] == kStrappyPromptOptionsSectionAccounts) {
+    NSDictionary *account;
+    NSString *identifier;
+    NSString *name;
+    NSString *providerIdentifier;
+    BOOL enabled;
+
+    cell = [tableView dequeueReusableCellWithIdentifier:@"AccountCell"];
+    if (cell == nil) {
+      cell = [[UITableViewCell alloc]
+        initWithStyle:UITableViewCellStyleSubtitle
+       reuseIdentifier:@"AccountCell"];
+      [[cell textLabel] setNumberOfLines:1];
+      [[cell detailTextLabel] setNumberOfLines:1];
+    }
+    account = [[self accounts] objectAtIndex:(NSUInteger)[indexPath row]];
+    identifier = StrappyMessageModelStringForRow(account, @"id");
+    name = StrappyMessageModelStringForRow(account, @"name");
+    providerIdentifier =
+      StrappyMessageModelStringForRow(account, @"provider_id");
+    enabled = StrappyPromptFirstUsableModelForProvider(
+      [self models], providerIdentifier) != nil;
+    [[cell textLabel] setText:([name length] > 0U) ? name : identifier];
+    if ([providerIdentifier isEqualToString:@"openrouter"]) {
+      [[cell detailTextLabel] setText:@"OpenRouter"];
+    } else if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) {
+      [[cell detailTextLabel] setText:@"ChatGPT"];
+    } else {
+      [[cell detailTextLabel] setText:NSLocalizedString(@"Other", nil)];
+    }
+    [[cell textLabel] setTextColor:enabled ?
+      [UIColor blackColor] : [UIColor grayColor]];
+    [[cell detailTextLabel] setTextColor:[UIColor grayColor]];
+    [cell setSelectionStyle:enabled ?
+      UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone];
+    [cell setAccessoryView:nil];
+    [cell setAccessoryType:
+      [identifier isEqualToString:
+        [[self sessionOptions] providerAccountIdentifier]]
+        ? UITableViewCellAccessoryCheckmark
+        : UITableViewCellAccessoryNone];
+    return cell;
+  }
 
   if ([indexPath section] == kStrappyPromptOptionsSectionAssistantSet) {
     NSDictionary *assistantSet;
@@ -554,10 +693,12 @@ titleForHeaderInSection:(NSInteger)section
   if ([indexPath section] == kStrappyPromptOptionsSectionAvailableTools) {
     NSDictionary *selectedModel;
     BOOL capabilityEnabled;
+    BOOL webSearchRow;
 
     selectedModel = StrappyPromptSelectedModel([self models],
                                                 [self sessionOptions]);
-    if ([indexPath row] == 0) {
+    webSearchRow = [self supportsWebSearch] && ([indexPath row] == 0);
+    if (webSearchRow) {
       capabilityEnabled = StrappyPromptModelBoolean(selectedModel,
                                                      @"hosted_tools_enabled",
                                                      YES);
@@ -679,8 +820,16 @@ titleForHeaderInSection:(NSInteger)section
     webProvider = [StrappyPromptSearchProviders()
       objectAtIndex:(NSUInteger)[indexPath row]];
     [[cell textLabel] setText:StrappyPromptWebProviderTitle(webProvider)];
-    [[cell textLabel] setTextColor:[UIColor blackColor]];
-    [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
+    if ([[self sessionOptions] webSearchEnabled] &&
+        StrappyPromptModelBoolean(
+          StrappyPromptSelectedModel([self models], [self sessionOptions]),
+          @"hosted_tools_enabled", YES)) {
+      [[cell textLabel] setTextColor:[UIColor blackColor]];
+      [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
+    } else {
+      [[cell textLabel] setTextColor:[UIColor grayColor]];
+      [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+    }
     [cell setAccessoryView:nil];
     [cell setAccessoryType:
       [webProvider isEqualToString:[[self sessionOptions] webProvider]]
@@ -698,10 +847,12 @@ titleForHeaderInSection:(NSInteger)section
   }
 
   {
+    NSArray *models;
     NSDictionary *model;
     NSString *identifier;
 
-    model = [[self models] objectAtIndex:(NSUInteger)[indexPath row]];
+    models = [self modelsForSelectedAccount];
+    model = [models objectAtIndex:(NSUInteger)[indexPath row]];
     identifier = StrappyMessageModelStringForRow(model, @"id");
     [[cell textLabel] setText:StrappyMessageModelDisplayNameForRow(model)];
     [[cell detailTextLabel] setText:StrappyModelCellDetailText(model)];
@@ -723,6 +874,19 @@ titleForHeaderInSection:(NSInteger)section
   willSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
   (void)tableView;
+  if ([indexPath section] == kStrappyPromptOptionsSectionAccounts) {
+    NSDictionary *account;
+    NSString *providerIdentifier;
+
+    if ((NSUInteger)[indexPath row] >= [[self accounts] count]) {
+      return nil;
+    }
+    account = [[self accounts] objectAtIndex:(NSUInteger)[indexPath row]];
+    providerIdentifier =
+      StrappyMessageModelStringForRow(account, @"provider_id");
+    return (StrappyPromptFirstUsableModelForProvider(
+      [self models], providerIdentifier) != nil) ? indexPath : nil;
+  }
   if ([indexPath section] == kStrappyPromptOptionsSectionAssistantSet) {
     NSDictionary *assistantSet;
     NSNumber *available;
@@ -738,7 +902,9 @@ titleForHeaderInSection:(NSInteger)section
   }
   if ([indexPath section] ==
       kStrappyPromptOptionsSectionSearchProvider) {
-    if (!StrappyPromptModelBoolean(
+    if (![self supportsSearchProvider] ||
+        ![[self sessionOptions] webSearchEnabled] ||
+        !StrappyPromptModelBoolean(
           StrappyPromptSelectedModel([self models], [self sessionOptions]),
           @"hosted_tools_enabled",
           YES)) {
@@ -754,11 +920,13 @@ titleForHeaderInSection:(NSInteger)section
   if ([indexPath section] != kStrappyPromptOptionsSectionModels) {
     return nil;
   }
-  if ((NSUInteger)[indexPath row] >= [[self models] count]) {
+  if ((NSUInteger)[indexPath row] >=
+      [[self modelsForSelectedAccount] count]) {
     return nil;
   }
   return StrappyPromptModelIsUsable(
-    [[self models] objectAtIndex:(NSUInteger)[indexPath row]]) ?
+    [[self modelsForSelectedAccount]
+      objectAtIndex:(NSUInteger)[indexPath row]]) ?
       indexPath : nil;
 }
 
@@ -769,6 +937,50 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   NSString *modelIdentifier;
 
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
+  if ([indexPath section] == kStrappyPromptOptionsSectionAccounts) {
+    NSDictionary *account;
+    NSDictionary *firstModel;
+    NSString *accountIdentifier;
+    NSString *providerIdentifier;
+    StrappySessionOptionMask changedFields;
+    StrappySessionOptions *options;
+
+    if ((NSUInteger)[indexPath row] >= [[self accounts] count]) {
+      return;
+    }
+    account = [[self accounts] objectAtIndex:(NSUInteger)[indexPath row]];
+    accountIdentifier = StrappyMessageModelStringForRow(account, @"id");
+    providerIdentifier =
+      StrappyMessageModelStringForRow(account, @"provider_id");
+    firstModel = StrappyPromptFirstUsableModelForProvider(
+      [self models], providerIdentifier);
+    if (([accountIdentifier length] == 0U) || (firstModel == nil)) {
+      return;
+    }
+    options = [[[self optionsDelegate] sessionOptions] copy];
+    [options setProviderAccountIdentifier:accountIdentifier];
+    [options setModelIdentifier:
+      StrappyMessageModelStringForRow(firstModel, @"id")];
+    changedFields = StrappySessionOptionProviderAccount |
+      StrappySessionOptionModel;
+    if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) {
+      [options setWebProvider:StrappyWebProviderNative];
+      changedFields |= StrappySessionOptionWebProvider;
+    } else if ([providerIdentifier isEqualToString:@"other"]) {
+      [options setWebSearchEnabled:NO];
+      [options setWebProvider:StrappyWebProviderNone];
+      changedFields |= StrappySessionOptionWebSearch |
+        StrappySessionOptionWebProvider;
+    } else if ([[options webProvider]
+                 isEqualToString:StrappyWebProviderNone]) {
+      [options setWebProvider:StrappyWebProviderAuto];
+      changedFields |= StrappySessionOptionWebProvider;
+    }
+    (void)[[self optionsDelegate] updateSessionOptions:options
+                                         changedFields:changedFields];
+    [self reloadOptionsFromDelegate];
+    return;
+  }
   if ([indexPath section] ==
       kStrappyPromptOptionsSectionSearchProvider) {
     NSString *webProvider;
@@ -820,31 +1032,30 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     return;
   }
   if (([indexPath section] != kStrappyPromptOptionsSectionModels) ||
-      ([[self models] count] == 0U)) {
+      ([[self modelsForSelectedAccount] count] == 0U)) {
     return;
   }
 
-  model = [[self models] objectAtIndex:(NSUInteger)[indexPath row]];
+  model = [[self modelsForSelectedAccount]
+    objectAtIndex:(NSUInteger)[indexPath row]];
   modelIdentifier = StrappyMessageModelStringForRow(model, @"id");
   if ([modelIdentifier length] == 0U) {
     return;
   }
 
   {
+    StrappySessionOptionMask changedFields;
     StrappySessionOptions *options;
 
     options = [[[self optionsDelegate] sessionOptions] copy];
     [options setModelIdentifier:modelIdentifier];
-    if ([[self optionsDelegate]
-          updateSessionOptions:options
-                 changedFields:StrappySessionOptionModel]) {
-      [self setSessionOptions:[[self optionsDelegate] sessionOptions]];
-      [[self tableView] reloadSections:
-        [NSIndexSet indexSetWithIndex:kStrappyPromptOptionsSectionModels]
-                    withRowAnimation:UITableViewRowAnimationNone];
-    } else {
-      [self reloadOptionsFromDelegate];
+    changedFields = StrappySessionOptionModel;
+    if ([[options providerAccountIdentifier] length] > 0U) {
+      changedFields |= StrappySessionOptionProviderAccount;
     }
+    (void)[[self optionsDelegate]
+      updateSessionOptions:options changedFields:changedFields];
+    [self reloadOptionsFromDelegate];
   }
 }
 

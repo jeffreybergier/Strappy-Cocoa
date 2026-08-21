@@ -5,6 +5,7 @@
 @class StrappySessionOptionsTableViewController;
 
 @protocol StrappySessionOptionsTableViewControllerDelegate <NSObject>
+- (NSArray *)currentProviderAccounts;
 - (NSArray *)currentAllowedModels;
 - (NSArray *)currentAssistantSets;
 - (StrappySessionOptions *)sessionOptions;

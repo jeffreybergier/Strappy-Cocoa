@@ -1,9 +1,8 @@
 #import "PreferencesTableViewController.h"
 
 #import "FileScanner.h"
-#import "StrappyAuthentication.h"
+#import "StrappyAccountTableViewController.h"
 #import "StrappyAppearance.h"
-#import "StrappyKeychain.h"
 #import "StrappyActivityAccessoryView.h"
 #import "StrappyPreferencesDatabaseWhitelistTableViewController.h"
 #import "StrappyPreferencesDatabaseStudyViewController.h"
@@ -12,15 +11,6 @@
 #import "StrappySession.h"
 #import "StrappySessionOptionsTableViewController.h"
 #import "XPUIKit.h"
-
-static NSString *StrappyPreferencesTrimmedString(NSString *string)
-{
-  if (![string isKindOfClass:[NSString class]]) {
-    return @"";
-  }
-  return [string stringByTrimmingCharactersInSet:
-    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-}
 
 static NSString *StrappyPreferencesModelStringForRow(NSDictionary *row,
                                                      NSString *key)
@@ -70,21 +60,14 @@ static NSComparisonResult StrappyPreferencesCompareModelNameRows(
 }
 
 enum {
-  kStrappyPreferencesSectionOpenRouter = 0,
-  kStrappyPreferencesSectionChatGPT,
+  kStrappyPreferencesSectionAccounts = 0,
   kStrappyPreferencesSectionPanes,
   kStrappyPreferencesSectionCount
 };
 
 enum {
-  kStrappyAuthRowEndpoint = 0,
-  kStrappyAuthRowToken,
-  kStrappyAuthRowCount
-};
-
-enum {
-  kStrappyPaneRowSessionDefaults = 0,
-  kStrappyPaneRowModels,
+  kStrappyPaneRowModels = 0,
+  kStrappyPaneRowSessionDefaults,
   kStrappyPaneRowDatabases,
   kStrappyPaneRowStudy,
   kStrappyPaneRowPrompts,
@@ -92,24 +75,15 @@ enum {
 };
 
 @interface PreferencesTableViewController ()
-  <UITextFieldDelegate, StrappySessionOptionsTableViewControllerDelegate>
-@property (nonatomic, strong) UITextField *apiEndpointField;
-@property (nonatomic, strong) UITextField *apiTokenField;
+  <StrappySessionOptionsTableViewControllerDelegate>
+@property (nonatomic, strong) NSArray *accounts;
 @property (nonatomic, copy) StrappySessionOptions *defaultSessionOptions;
 @property (nonatomic, assign) BOOL defaultSessionOptionsLoaded;
-@property (nonatomic, assign) BOOL authenticationDirty;
-- (UITextField *)makeFieldSecure:(BOOL)secure placeholder:(NSString *)placeholder;
-- (void)loadAuthenticationFields;
-- (BOOL)saveAuthenticationIfNeeded;
-- (BOOL)saveAuthentication;
 - (void)showMessage:(NSString *)message title:(NSString *)title;
 - (void)showError:(NSError *)error title:(NSString *)title;
-- (void)fieldChanged:(id)sender;
+- (void)reloadAccounts;
+- (void)providerAccountsDidChange:(NSNotification *)notification;
 - (void)longRunningPreferenceWorkDidChange:(NSNotification *)notification;
-- (void)chatGPTAuthenticationDidChange:(NSNotification *)notification;
-- (NSInteger)chatGPTRowCount;
-- (UITableViewCell *)chatGPTCellForRow:(NSInteger)row;
-- (void)selectChatGPTRow:(NSInteger)row;
 - (void)doneAction:(id)sender;
 @end
 
@@ -126,15 +100,7 @@ enum {
 - (void)viewDidLoad
 {
   [super viewDidLoad];
-
-  [self setApiEndpointField:
-    [self makeFieldSecure:NO
-              placeholder:NSLocalizedString(
-                @"https://openrouter.ai/api/v1/responses", nil)]];
-  [self setApiTokenField:
-    [self makeFieldSecure:YES
-              placeholder:NSLocalizedString(@"Paste API token", nil)]];
-  [self loadAuthenticationFields];
+  [self reloadAccounts];
 
   [[self navigationItem] setRightBarButtonItem:
     [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
@@ -165,11 +131,9 @@ enum {
          object:nil];
   [[NSNotificationCenter defaultCenter]
     addObserver:self
-       selector:@selector(chatGPTAuthenticationDidChange:)
-           name:StrappyAuthenticationDidChangeNotification
-         object:[StrappyAuthentication sharedAuthentication]];
-  [[StrappyAuthentication sharedAuthentication]
-    refreshChatGPTCredentialsIfNeeded];
+       selector:@selector(providerAccountsDidChange:)
+           name:StrappyProviderAccountsDidChangeNotification
+         object:nil];
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -178,8 +142,7 @@ enum {
   [self setDefaultSessionOptions:nil];
   [self setDefaultSessionOptionsLoaded:NO];
   [[self navigationController] setToolbarHidden:YES animated:animated];
-  [[StrappyAuthentication sharedAuthentication]
-    refreshChatGPTCredentialsIfNeeded];
+  [self reloadAccounts];
 }
 
 - (void)showMessage:(NSString *)message title:(NSString *)title
@@ -205,46 +168,26 @@ enum {
   [self showMessage:message title:title];
 }
 
-- (UITextField *)makeFieldSecure:(BOOL)secure placeholder:(NSString *)placeholder
+- (void)reloadAccounts
 {
-  UITextField *field;
+  NSArray *accounts;
+  NSError *error;
 
-  field = [[UITextField alloc] initWithFrame:CGRectZero];
-  [field setPlaceholder:placeholder];
-  [field setSecureTextEntry:secure];
-  [field setDelegate:self];
-  [field setAutocorrectionType:UITextAutocorrectionTypeNo];
-  [field setAutocapitalizationType:UITextAutocapitalizationTypeNone];
-  [field setClearButtonMode:UITextFieldViewModeWhileEditing];
-  [field setContentVerticalAlignment:UIControlContentVerticalAlignmentCenter];
-  [field setReturnKeyType:secure ? UIReturnKeyDone : UIReturnKeyNext];
-  [field setKeyboardType:secure ? UIKeyboardTypeDefault : UIKeyboardTypeURL];
-  [field addTarget:self
-            action:@selector(fieldChanged:)
-  forControlEvents:UIControlEventEditingChanged];
-  return field;
-}
-
-- (void)loadAuthenticationFields
-{
-  NSString *endpoint;
-  NSString *token;
-
-  endpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
-  if ([endpoint length] == 0U) {
-    endpoint = [StrappyKeychain defaultAPIEndpoint];
+  error = nil;
+  accounts = [StrappySession verifiedProviderAccountCatalogWithError:&error];
+  if (![accounts isKindOfClass:[NSArray class]]) {
+    [self setAccounts:[NSArray array]];
+    [self showError:error title:NSLocalizedString(@"Could Not Load Accounts", nil)];
+  } else {
+    [self setAccounts:accounts];
   }
-  token = [[StrappyKeychain sharedKeychain] apiToken];
-
-  [[self apiEndpointField] setText:(endpoint != nil) ? endpoint : @""];
-  [[self apiTokenField] setText:(token != nil) ? token : @""];
-  [self setAuthenticationDirty:NO];
+  [[self tableView] reloadData];
 }
 
-- (void)fieldChanged:(id)sender
+- (void)providerAccountsDidChange:(NSNotification *)notification
 {
-  (void)sender;
-  [self setAuthenticationDirty:YES];
+  (void)notification;
+  [self reloadAccounts];
 }
 
 - (void)longRunningPreferenceWorkDidChange:(NSNotification *)notification
@@ -253,231 +196,29 @@ enum {
   [[self tableView] reloadData];
 }
 
-- (void)chatGPTAuthenticationDidChange:(NSNotification *)notification
-{
-  NSIndexSet *sections;
-
-  (void)notification;
-  sections = [NSIndexSet indexSetWithIndex:
-    (NSUInteger)kStrappyPreferencesSectionChatGPT];
-  [[self tableView] reloadSections:sections
-                 withRowAnimation:UITableViewRowAnimationFade];
-}
-
-- (NSInteger)chatGPTRowCount
-{
-  StrappyAuthentication *authentication;
-  StrappyAuthenticationState state;
-
-  authentication = [StrappyAuthentication sharedAuthentication];
-  state = [authentication state];
-  if (state == StrappyAuthenticationStateAwaitingUser) {
-    return 5;
-  }
-  if ((state == StrappyAuthenticationStateError) &&
-      [authentication hasStoredCredentials]) {
-    return 3;
-  }
-  return 2;
-}
-
-- (UITableViewCell *)chatGPTCellForRow:(NSInteger)row
-{
-  StrappyAuthentication *authentication;
-  StrappyAuthenticationState state;
-  UITableViewCell *cell;
-
-  authentication = [StrappyAuthentication sharedAuthentication];
-  state = [authentication state];
-  if (row == 0) {
-    NSString *status;
-
-    cell = [[UITableViewCell alloc]
-      initWithStyle:UITableViewCellStyleSubtitle
-      reuseIdentifier:nil];
-    [[cell textLabel] setText:NSLocalizedString(@"Status", nil)];
-    [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-    if (![StrappyAuthentication isChatGPTProviderEnabled]) {
-      status = NSLocalizedString(
-        @"Disabled by the experimental provider kill switch", nil);
-    } else if (state == StrappyAuthenticationStateRequestingCode) {
-      status = NSLocalizedString(@"Requesting a device code…", nil);
-    } else if (state == StrappyAuthenticationStateAwaitingUser) {
-      status = NSLocalizedString(@"Waiting for browser approval", nil);
-    } else if (state == StrappyAuthenticationStateSignedIn) {
-      status = NSLocalizedString(@"Signed in", nil);
-    } else if (state == StrappyAuthenticationStateRefreshing) {
-      status = NSLocalizedString(@"Refreshing credentials…", nil);
-    } else if (state == StrappyAuthenticationStateError) {
-      status = [authentication errorMessage];
-      if ([status length] == 0U) {
-        status = NSLocalizedString(@"Authentication failed.", nil);
-      }
-    } else if (state == StrappyAuthenticationStateCancelled) {
-      status = NSLocalizedString(@"Sign-in cancelled", nil);
-    } else {
-      status = NSLocalizedString(@"Not signed in", nil);
-    }
-    [[cell detailTextLabel] setText:status];
-    [[cell detailTextLabel] setNumberOfLines:2];
-    return cell;
-  }
-
-  cell = [[UITableViewCell alloc]
-    initWithStyle:UITableViewCellStyleValue1
-    reuseIdentifier:nil];
-  [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
-  if (state == StrappyAuthenticationStateAwaitingUser) {
-    if (row == 1) {
-      [[cell textLabel] setText:NSLocalizedString(@"Code", nil)];
-      [[cell detailTextLabel] setText:[authentication userCode]];
-      [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-    } else if (row == 2) {
-      [[cell textLabel] setText:NSLocalizedString(@"Copy Code", nil)];
-    } else if (row == 3) {
-      [[cell textLabel] setText:NSLocalizedString(@"Open Browser", nil)];
-    } else {
-      [[cell textLabel] setText:NSLocalizedString(@"Cancel", nil)];
-      [[cell textLabel] setTextColor:[UIColor redColor]];
-    }
-  } else if (state == StrappyAuthenticationStateRequestingCode) {
-    [[cell textLabel] setText:NSLocalizedString(@"Cancel", nil)];
-    [[cell textLabel] setTextColor:[UIColor redColor]];
-  } else if ((state == StrappyAuthenticationStateSignedIn) ||
-             (state == StrappyAuthenticationStateRefreshing)) {
-    [[cell textLabel] setText:NSLocalizedString(@"Sign Out", nil)];
-    [[cell textLabel] setTextColor:[UIColor redColor]];
-  } else if ((state == StrappyAuthenticationStateError) &&
-             [authentication hasStoredCredentials]) {
-    if (row == 1) {
-      [[cell textLabel] setText:NSLocalizedString(@"Retry Refresh", nil)];
-    } else {
-      [[cell textLabel] setText:NSLocalizedString(@"Sign Out", nil)];
-      [[cell textLabel] setTextColor:[UIColor redColor]];
-    }
-  } else {
-    [[cell textLabel] setText:NSLocalizedString(@"Sign In with ChatGPT", nil)];
-  }
-  if (![StrappyAuthentication isChatGPTProviderEnabled]) {
-    [[cell textLabel] setTextColor:[UIColor grayColor]];
-    [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-  }
-  return cell;
-}
-
-- (void)selectChatGPTRow:(NSInteger)row
-{
-  StrappyAuthentication *authentication;
-  StrappyAuthenticationState state;
-
-  if (row == 0) {
-    return;
-  }
-  if (![StrappyAuthentication isChatGPTProviderEnabled]) {
-    return;
-  }
-  authentication = [StrappyAuthentication sharedAuthentication];
-  state = [authentication state];
-  if (state == StrappyAuthenticationStateAwaitingUser) {
-    if (row == 1) {
-      return;
-    }
-    if (row == 2) {
-      NSString *code;
-
-      code = [authentication userCode];
-      if ([code length] > 0U) {
-        [[UIPasteboard generalPasteboard] setString:code];
-        [self showMessage:NSLocalizedString(
-          @"The device code was copied to the clipboard.", nil)
-                    title:NSLocalizedString(@"Code Copied", nil)];
-      }
-      return;
-    }
-    if (row == 3) {
-      NSURL *URL;
-      UIApplication *application;
-
-      URL = [NSURL URLWithString:[authentication verificationURL]];
-      application = [UIApplication sharedApplication];
-      if ((URL == nil) || ![application canOpenURL:URL] ||
-          ![application openURL:URL]) {
-        [self showMessage:NSLocalizedString(
-          @"The ChatGPT sign-in page could not be opened.", nil)
-                    title:NSLocalizedString(@"Could Not Open Browser", nil)];
-      }
-      return;
-    }
-    [authentication cancelChatGPTDeviceLogin];
-    return;
-  }
-  if (state == StrappyAuthenticationStateRequestingCode) {
-    [authentication cancelChatGPTDeviceLogin];
-    return;
-  }
-  if ((state == StrappyAuthenticationStateSignedIn) ||
-      (state == StrappyAuthenticationStateRefreshing)) {
-    (void)[authentication signOutChatGPT];
-    return;
-  }
-  if ((state == StrappyAuthenticationStateError) &&
-      [authentication hasStoredCredentials]) {
-    if (row == 1) {
-      (void)[authentication refreshChatGPTCredentialsIfNeeded];
-    } else {
-      (void)[authentication signOutChatGPT];
-    }
-    return;
-  }
-  (void)[authentication startChatGPTDeviceLogin];
-}
-
 - (void)doneAction:(id)sender
 {
   (void)sender;
   [[self view] endEditing:YES];
-  if (![self saveAuthenticationIfNeeded]) {
-    return;
-  }
   [self XP_dismissViewControllerAnimated:YES];
 }
 
-- (BOOL)saveAuthenticationIfNeeded
-{
-  if (![self authenticationDirty]) {
-    return YES;
-  }
-  return [self saveAuthentication];
-}
-
-- (BOOL)saveAuthentication
-{
-  NSString *endpoint;
-  NSString *token;
-
-  endpoint = StrappyPreferencesTrimmedString([[self apiEndpointField] text]);
-  token = StrappyPreferencesTrimmedString([[self apiTokenField] text]);
-  if (([endpoint length] == 0U) || ([token length] == 0U)) {
-    [self showMessage:NSLocalizedString(
-      @"API endpoint and token are required.", nil)
-                title:NSLocalizedString(@"Credentials Required", nil)];
-    return NO;
-  }
-
-  if (![[StrappyKeychain sharedKeychain] saveAPIEndpoint:endpoint token:token]) {
-    [self showMessage:NSLocalizedString(
-      @"The keychain refused the write.", nil)
-                title:NSLocalizedString(@"Could Not Save Credentials", nil)];
-    return NO;
-  }
-
-  [[self apiEndpointField] setText:endpoint];
-  [[self apiTokenField] setText:token];
-  [self setAuthenticationDirty:NO];
-  return YES;
-}
-
 #pragma mark - StrappySessionOptionsTableViewControllerDelegate
+
+- (NSArray *)currentProviderAccounts
+{
+  NSError *error;
+  NSArray *accounts;
+
+  error = nil;
+  accounts = [StrappySession providerAccountCatalogWithError:&error];
+  if (![accounts isKindOfClass:[NSArray class]]) {
+    [self showError:error
+              title:NSLocalizedString(@"Could Not Load Accounts", nil)];
+    return [NSArray array];
+  }
+  return accounts;
+}
 
 - (NSArray *)currentAllowedModels
 {
@@ -552,20 +293,6 @@ enum {
   [[self navigationController] popToViewController:self animated:animated];
 }
 
-#pragma mark - UITextFieldDelegate
-
-- (BOOL)textFieldShouldReturn:(UITextField *)textField
-{
-  if (textField == [self apiEndpointField]) {
-    [[self apiTokenField] becomeFirstResponder];
-    return NO;
-  }
-
-  [textField resignFirstResponder];
-  [self saveAuthenticationIfNeeded];
-  return NO;
-}
-
 #pragma mark - UITableViewDataSource
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
@@ -578,11 +305,8 @@ enum {
  numberOfRowsInSection:(NSInteger)section
 {
   (void)tableView;
-  if (section == kStrappyPreferencesSectionOpenRouter) {
-    return kStrappyAuthRowCount;
-  }
-  if (section == kStrappyPreferencesSectionChatGPT) {
-    return [self chatGPTRowCount];
+  if (section == kStrappyPreferencesSectionAccounts) {
+    return (NSInteger)[[self accounts] count] + 1;
   }
   if (section == kStrappyPreferencesSectionPanes) {
     return kStrappyPaneRowCount;
@@ -594,11 +318,8 @@ enum {
 titleForHeaderInSection:(NSInteger)section
 {
   (void)tableView;
-  if (section == kStrappyPreferencesSectionOpenRouter) {
-    return NSLocalizedString(@"OpenRouter", nil);
-  }
-  if (section == kStrappyPreferencesSectionChatGPT) {
-    return NSLocalizedString(@"ChatGPT (Experimental)", nil);
+  if (section == kStrappyPreferencesSectionAccounts) {
+    return NSLocalizedString(@"Accounts", nil);
   }
   if (section == kStrappyPreferencesSectionPanes) {
     return NSLocalizedString(@"Preferences", nil);
@@ -610,13 +331,7 @@ titleForHeaderInSection:(NSInteger)section
 titleForFooterInSection:(NSInteger)section
 {
   (void)tableView;
-  if (section == kStrappyPreferencesSectionChatGPT) {
-    return NSLocalizedString(
-      @"Uses the experimental Codex device flow. Access and refresh tokens are "
-       "stored together in the Keychain and refreshed automatically. "
-       "Device-code login must be enabled for your ChatGPT account or "
-       "workspace.", nil);
-  }
+  (void)section;
   return nil;
 }
 
@@ -624,23 +339,36 @@ titleForFooterInSection:(NSInteger)section
          cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
   UITableViewCell *cell;
-  UITextField *field;
+  if ([indexPath section] == kStrappyPreferencesSectionAccounts) {
+    NSDictionary *account;
+    NSString *provider;
 
-  if ([indexPath section] == kStrappyPreferencesSectionOpenRouter) {
-    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
                                   reuseIdentifier:nil];
-    [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-    field = ([indexPath row] == kStrappyAuthRowEndpoint)
-      ? [self apiEndpointField]
-      : [self apiTokenField];
-    [field setFrame:CGRectInset([[cell contentView] bounds], 15.0f, 0.0f)];
-    [field setAutoresizingMask:
-      UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight];
-    [[cell contentView] addSubview:field];
+    [cell setAccessoryType:UITableViewCellAccessoryDisclosureIndicator];
+    if ((NSUInteger)[indexPath row] == [[self accounts] count]) {
+      [[cell textLabel] setText:NSLocalizedString(@"Add Account", nil)];
+      [[cell detailTextLabel] setText:NSLocalizedString(
+        @"OpenRouter, ChatGPT, or another Responses provider", nil)];
+      return cell;
+    }
+    account = [[self accounts] objectAtIndex:(NSUInteger)[indexPath row]];
+    provider = StrappyPreferencesModelStringForRow(account, @"provider_id");
+    [[cell textLabel] setText:StrappyPreferencesModelStringForRow(account,
+      @"name")];
+    if ([provider isEqualToString:@"openrouter"]) {
+      [[cell detailTextLabel] setText:@"OpenRouter"];
+    } else if ([provider isEqualToString:@"openai_chatgpt"]) {
+      [[cell detailTextLabel] setText:@"ChatGPT"];
+    } else {
+      [[cell detailTextLabel] setText:NSLocalizedString(@"Other", nil)];
+    }
+    if (![[account objectForKey:@"available"] boolValue]) {
+      [[cell detailTextLabel] setText:[NSString stringWithFormat:
+        NSLocalizedString(@"%@ — setup required", nil),
+        [[cell detailTextLabel] text]]];
+    }
     return cell;
-  }
-  if ([indexPath section] == kStrappyPreferencesSectionChatGPT) {
-    return [self chatGPTCellForRow:[indexPath row]];
   }
 
   cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
@@ -672,17 +400,6 @@ titleForFooterInSection:(NSInteger)section
 
 #pragma mark - UITableViewDelegate
 
-- (CGFloat)tableView:(UITableView *)tableView
-heightForRowAtIndexPath:(NSIndexPath *)indexPath
-{
-  (void)tableView;
-  if (([indexPath section] == kStrappyPreferencesSectionChatGPT) &&
-      ([indexPath row] == 0)) {
-    return 60.0f;
-  }
-  return 44.0f;
-}
-
 - (void)tableView:(UITableView *)tableView
 didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
@@ -690,11 +407,18 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
-  if ([indexPath section] == kStrappyPreferencesSectionOpenRouter) {
-    return;
-  }
-  if ([indexPath section] == kStrappyPreferencesSectionChatGPT) {
-    [self selectChatGPTRow:[indexPath row]];
+  if ([indexPath section] == kStrappyPreferencesSectionAccounts) {
+    if ((NSUInteger)[indexPath row] == [[self accounts] count]) {
+      controller = [[StrappyProviderPickerTableViewController alloc] init];
+    } else {
+      NSDictionary *account;
+
+      account = [[self accounts] objectAtIndex:(NSUInteger)[indexPath row]];
+      controller = [[StrappyAccountTableViewController alloc]
+        initWithProviderAccountIdentifier:
+          StrappyPreferencesModelStringForRow(account, @"id")];
+    }
+    [[self navigationController] pushViewController:controller animated:YES];
     return;
   }
 
@@ -729,8 +453,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 - (void)dealloc
 {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [[self apiEndpointField] setDelegate:nil];
-  [[self apiTokenField] setDelegate:nil];
 }
 
 @end

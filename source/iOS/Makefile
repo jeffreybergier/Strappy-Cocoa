@@ -2,6 +2,7 @@
 APP_NAME = Strappy
 SOURCES = main.m AppDelegate.m StrappyRootCoordinator.m \
           StrappyAuthentication.m \
+          StrappyAccountTableViewController.m \
           StrappyAppearance.m \
           SessionListViewController.m PreferencesTableViewController.m \
           MessageListViewController.m PromptSendViewController.m \
@@ -12,6 +13,7 @@ SOURCES = main.m AppDelegate.m StrappyRootCoordinator.m \
           StrappyPreferencesStatusToolbarView.m \
           StrappyPreferencesWhitelistTableViewController.m \
           StrappyPreferencesModelWhitelistTableViewController.m \
+          StrappyModelProvidersTableViewController.m \
           StrappyPreferencesDatabaseWhitelistTableViewController.m \
           StrappyPreferencesDatabaseStudyViewController.m \
           StrappyPreferencesSystemPromptsTableViewController.m \
