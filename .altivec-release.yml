@@ -27,5 +27,8 @@ targets:
     build:
       - make clean
       - make release DEB_VERSION="$(altivec-release current)"
-    artifact: source/iOS/build-release/Strappy.deb
-    asset_name: Strappy-{version}-iOS.deb
+    artifacts:
+      - path: source/iOS/build-release/Strappy-rootful.deb
+        asset_name: Strappy-{version}-iOS-rootful.deb
+      - path: source/iOS/build-release/Strappy-rootless.deb
+        asset_name: Strappy-{version}-iOS-rootless.deb

@@ -145,17 +145,39 @@ jobs:
         run: |
           set -euo pipefail
           mac_asset="dist/Strappy-${RELEASE_VERSION}-macOS.zip"
-          ios_asset="dist/Strappy-${RELEASE_VERSION}-iOS.deb"
+          ios_rootful_asset="dist/Strappy-${RELEASE_VERSION}-iOS-rootful.deb"
+          ios_rootless_asset="dist/Strappy-${RELEASE_VERSION}-iOS-rootless.deb"
           test -s "$mac_asset"
-          test -s "$ios_asset"
+          test -s "$ios_rootful_asset"
+          test -s "$ios_rootless_asset"
           unzip -t "$mac_asset" >/dev/null
-          dpkg-deb --info "$ios_asset" >/dev/null
-          package_version="$(dpkg-deb -f "$ios_asset" Version)"
-          if [[ "$package_version" != "$RELEASE_VERSION" ]]; then
-            echo "Debian package version ${package_version} does not match release version ${RELEASE_VERSION}." >&2
-            exit 1
-          fi
-          sha256sum "$mac_asset" "$ios_asset"
+          for ios_asset in "$ios_rootful_asset" "$ios_rootless_asset"; do
+            dpkg-deb --info "$ios_asset" >/dev/null
+            package_version="$(dpkg-deb -f "$ios_asset" Version)"
+            if [[ "$package_version" != "$RELEASE_VERSION" ]]; then
+              echo "Debian package version ${package_version} does not match release version ${RELEASE_VERSION}: ${ios_asset}." >&2
+              exit 1
+            fi
+            package_architecture="$(dpkg-deb -f "$ios_asset" Architecture)"
+            if [[ "$package_architecture" != "all" ]]; then
+              echo "Debian package architecture must be all, found ${package_architecture}: ${ios_asset}." >&2
+              exit 1
+            fi
+          done
+
+          validation_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$validation_dir"' EXIT
+          dpkg-deb -x "$ios_rootful_asset" "$validation_dir/rootful"
+          dpkg-deb -x "$ios_rootless_asset" "$validation_dir/rootless"
+          rootful_binary="$validation_dir/rootful/Applications/Strappy.app/Strappy"
+          rootless_binary="$validation_dir/rootless/var/jb/Applications/Strappy.app/Strappy"
+          test -x "$rootful_binary"
+          test -x "$rootless_binary"
+          test ! -e "$validation_dir/rootful/var/jb/Applications/Strappy.app"
+          test ! -e "$validation_dir/rootless/Applications/Strappy.app"
+          cmp "$rootful_binary" "$rootless_binary"
+
+          sha256sum "$mac_asset" "$ios_rootful_asset" "$ios_rootless_asset"
 
       - name: Create or update GitHub release
         env:
