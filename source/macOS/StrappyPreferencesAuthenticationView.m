@@ -13,11 +13,24 @@
 
 static const CGFloat kStrappyAccountsSidebarWidth = 218.0;
 static const CGFloat kStrappyAccountsMinimumSidebarWidth = 190.0;
-static const CGFloat kStrappyAccountsHeaderHeight = 62.0;
 static const CGFloat kStrappyAccountsRowHeight = 54.0;
 static const CGFloat kStrappyProviderRowHeight = 70.0;
 static const CGFloat kStrappyAccountsControlHeight = 24.0;
-static const CGFloat kStrappyAccountsInset = 24.0;
+static const CGFloat kStrappyAccountsInset = 16.0;
+static NSString * const kStrappyAccountsAddRowKey = @"add_account";
+
+static NSDictionary *StrappyAccountsAddRow(void)
+{
+  static NSDictionary *row = nil;
+
+  if (row == nil) {
+    row = [[NSDictionary alloc] initWithObjectsAndKeys:
+      NSLocalizedString(@"Add Account", nil), @"name",
+      [NSNumber numberWithBool:YES], kStrappyAccountsAddRowKey,
+      nil];
+  }
+  return row;
+}
 
 static NSString *StrappyAccountsProviderDisplayName(NSString *provider)
 {
@@ -138,24 +151,6 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   return button;
 }
 
-@interface StrappyAccountsTableView : NSTableView
-@end
-
-@implementation StrappyAccountsTableView
-
-- (void)mouseDown:(NSEvent *)event
-{
-  NSPoint point;
-
-  point = [self convertPoint:[event locationInWindow] fromView:nil];
-  if ([self rowAtPoint:point] < 0) {
-    [self deselectAll:self];
-  }
-  [super mouseDown:event];
-}
-
-@end
-
 @interface StrappyAccountsDividerView : NSView
 @end
 
@@ -180,6 +175,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   NSDictionary *account;
   NSString *name;
   NSString *provider;
+  BOOL addsAccount;
   BOOL selected;
   NSColor *primaryColor;
   NSColor *secondaryColor;
@@ -194,12 +190,14 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   }
   name = [account objectForKey:@"name"];
   provider = [account objectForKey:@"provider_id"];
+  addsAccount = [[account objectForKey:kStrappyAccountsAddRowKey] boolValue];
   selected = [self isHighlighted];
   primaryColor = selected ? [NSColor alternateSelectedControlTextColor] :
     [NSColor controlTextColor];
   secondaryColor = selected ? [NSColor alternateSelectedControlTextColor] :
     [NSColor disabledControlTextColor];
-  icon = [AIFontAwesome imageForIcon:StrappyAccountsProviderIcon(provider)
+  icon = [AIFontAwesome imageForIcon:(addsAccount ? AIFACirclePlus :
+                                      StrappyAccountsProviderIcon(provider))
                                 style:AIFontAwesomeStyleSolid
                              iconSize:20.0
                            canvasSize:26.0
@@ -210,7 +208,8 @@ static NSButton *StrappyAccountsButton(NSRect frame,
                         26.0);
   StrappyAccountsDrawTintedImage(icon, iconRect, primaryColor);
   nameRect = NSMakeRect(NSMinX(frame) + 42.0,
-                        NSMinY(frame) + 10.0,
+                        NSMinY(frame) + (addsAccount ?
+                          ((NSHeight(frame) - 18.0) / 2.0) : 10.0),
                         NSWidth(frame) - 50.0,
                         18.0);
   providerRect = NSMakeRect(NSMinX(frame) + 42.0,
@@ -221,10 +220,12 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     withAttributes:StrappyAccountsTextAttributes(
       [NSFont boldSystemFontOfSize:12.0], primaryColor,
       NSLineBreakByTruncatingTail)];
-  [StrappyAccountsProviderDisplayName(provider) drawInRect:providerRect
-    withAttributes:StrappyAccountsTextAttributes(
-      [NSFont systemFontOfSize:10.0], secondaryColor,
-      NSLineBreakByTruncatingTail)];
+  if (!addsAccount) {
+    [StrappyAccountsProviderDisplayName(provider) drawInRect:providerRect
+      withAttributes:StrappyAccountsTextAttributes(
+        [NSFont systemFontOfSize:10.0], secondaryColor,
+        NSLineBreakByTruncatingTail)];
+  }
 }
 
 @end
@@ -302,6 +303,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
 - (NSInteger)rowForAccountIdentifier:(NSString *)identifier;
 - (void)selectAccountIdentifier:(NSString *)identifier;
 - (void)clearRightPane;
+- (void)configureKeyViewLoopForProvider:(NSString *)provider;
 - (void)showProviderChooser;
 - (void)showSelectedAccount;
 - (void)showError:(NSError *)error title:(NSString *)title;
@@ -345,30 +347,21 @@ static NSButton *StrappyAccountsButton(NSRect frame,
 
 - (void)buildView
 {
-  NSTextField *introduction;
   NSTableColumn *column;
   StrappyAccountsDividerView *divider;
-
-  introduction = StrappyAccountsLabel(
-    NSZeroRect,
-    NSLocalizedString(@"Accounts connect Strappy to AI providers.", nil),
-    [NSFont systemFontOfSize:11.0]);
-  [[introduction cell] setWraps:YES];
-  [self addSubview:introduction];
-  introductionLabel_ = introduction;
 
   accountScrollView_ = [[NSScrollView alloc] initWithFrame:NSZeroRect];
   [accountScrollView_ setHasVerticalScroller:YES];
   [accountScrollView_ setHasHorizontalScroller:NO];
   [accountScrollView_ setAutohidesScrollers:YES];
-  [accountScrollView_ setBorderType:NSBezelBorder];
-  accountTableView_ = [[StrappyAccountsTableView alloc] initWithFrame:NSZeroRect];
+  [accountScrollView_ setBorderType:NSNoBorder];
+  accountTableView_ = [[NSTableView alloc] initWithFrame:NSZeroRect];
   [accountTableView_ setDataSource:self];
   [accountTableView_ setDelegate:self];
   [accountTableView_ setHeaderView:nil];
   [accountTableView_ setRowHeight:kStrappyAccountsRowHeight];
   [accountTableView_ setAllowsMultipleSelection:NO];
-  [accountTableView_ setAllowsEmptySelection:YES];
+  [accountTableView_ setAllowsEmptySelection:NO];
   [accountTableView_ setUsesAlternatingRowBackgroundColors:NO];
   [accountTableView_ XP_setSourceListStyle];
   column = [[[NSTableColumn alloc] initWithIdentifier:@"account"] autorelease];
@@ -404,16 +397,10 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   if (NSWidth(bounds) < 560.0) {
     sidebarWidth = kStrappyAccountsMinimumSidebarWidth;
   }
-  [introductionLabel_ setFrame:NSMakeRect(12.0,
-                                    NSHeight(bounds) -
-                                      kStrappyAccountsHeaderHeight + 8.0,
-                                    sidebarWidth - 24.0,
-                                    kStrappyAccountsHeaderHeight - 16.0)];
   [accountScrollView_ setFrame:NSMakeRect(0.0,
                                           0.0,
                                           sidebarWidth,
-                                          NSHeight(bounds) -
-                                            kStrappyAccountsHeaderHeight)];
+                                          NSHeight(bounds))];
   [dividerView_ setFrame:NSMakeRect(sidebarWidth, 0.0, 1.0,
                                     NSHeight(bounds))];
   [rightPaneView_ setFrame:NSMakeRect(sidebarWidth + 1.0,
@@ -426,7 +413,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView
 {
   if (tableView == accountTableView_) {
-    return (NSInteger)[accounts_ count];
+    return (NSInteger)[accounts_ count] + 1;
   }
   if (tableView == providerTableView_) {
     return (NSInteger)[providers_ count];
@@ -441,6 +428,10 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   NSArray *rows;
 
   (void)tableColumn;
+  if ((tableView == accountTableView_) &&
+      (row == (NSInteger)[accounts_ count])) {
+    return StrappyAccountsAddRow();
+  }
   rows = (tableView == accountTableView_) ? accounts_ : providers_;
   if ((row < 0) || (row >= (NSInteger)[rows count])) {
     return nil;
@@ -459,7 +450,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     provider = [providers_ objectAtIndex:(NSUInteger)row];
     return [[provider objectForKey:@"available"] boolValue] ? YES : NO;
   }
-  return ((row >= 0) && (row < (NSInteger)[accounts_ count])) ? YES : NO;
+  return ((row >= 0) && (row <= (NSInteger)[accounts_ count])) ? YES : NO;
 }
 
 - (void)tableViewSelectionDidChange:(NSNotification *)notification
@@ -562,7 +553,9 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   } else {
     [selectedAccountIdentifier_ release];
     selectedAccountIdentifier_ = nil;
-    [accountTableView_ deselectAll:self];
+    [accountTableView_ selectRowIndexes:
+      [NSIndexSet indexSetWithIndex:[accounts_ count]]
+                      byExtendingSelection:NO];
   }
   suppressSelectionNotification_ = NO;
   if (row >= 0) {
@@ -586,7 +579,10 @@ static NSButton *StrappyAccountsButton(NSRect frame,
                       byExtendingSelection:NO];
     [accountTableView_ scrollRowToVisible:row];
   } else {
-    [accountTableView_ deselectAll:self];
+    [accountTableView_ selectRowIndexes:
+      [NSIndexSet indexSetWithIndex:[accounts_ count]]
+                      byExtendingSelection:NO];
+    [accountTableView_ scrollRowToVisible:(NSInteger)[accounts_ count]];
   }
   suppressSelectionNotification_ = NO;
   if (row >= 0) {
@@ -601,6 +597,18 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   NSArray *subviews;
   NSUInteger index;
 
+  if (accountNameField_ != nil) {
+    [[NSNotificationCenter defaultCenter]
+      removeObserver:self
+                name:NSControlTextDidBeginEditingNotification
+              object:accountNameField_];
+  }
+  if (tokenField_ != nil) {
+    [[NSNotificationCenter defaultCenter]
+      removeObserver:self
+                name:NSControlTextDidBeginEditingNotification
+              object:tokenField_];
+  }
   subviews = [[rightPaneView_ subviews] copy];
   for (index = 0U; index < [subviews count]; index++) {
     [[subviews objectAtIndex:index] removeFromSuperview];
@@ -610,7 +618,6 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   accountNameField_ = nil;
   endpointField_ = nil;
   tokenField_ = nil;
-  statusLabel_ = nil;
   saveButton_ = nil;
   deleteButton_ = nil;
   chatGPTStatusLabel_ = nil;
@@ -619,6 +626,24 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   chatGPTActionButton_ = nil;
   chatGPTCopyButton_ = nil;
   chatGPTOpenButton_ = nil;
+}
+
+- (void)configureKeyViewLoopForProvider:(NSString *)provider
+{
+  [accountTableView_ setNextKeyView:(providerTableView_ != nil) ?
+    (NSView *)providerTableView_ : (NSView *)accountNameField_];
+  if (providerTableView_ != nil) {
+    [providerTableView_ setNextKeyView:accountTableView_];
+  } else if ([provider isEqualToString:@"openrouter"]) {
+    [accountNameField_ setNextKeyView:tokenField_];
+    [tokenField_ setNextKeyView:accountTableView_];
+  } else if ([provider isEqualToString:@"other"]) {
+    [accountNameField_ setNextKeyView:endpointField_];
+    [endpointField_ setNextKeyView:tokenField_];
+    [tokenField_ setNextKeyView:accountTableView_];
+  } else {
+    [accountNameField_ setNextKeyView:accountTableView_];
+  }
 }
 
 - (void)showProviderChooser
@@ -688,6 +713,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   [instruction setAlignment:XPTextAlignmentCenter];
   [instruction setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
   [rightPaneView_ addSubview:instruction];
+  [self configureKeyViewLoopForProvider:nil];
 }
 
 - (void)showSelectedAccount
@@ -735,6 +761,11 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   [accountNameField_ setStringValue:[account objectForKey:@"name"]];
   [accountNameField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
   [rightPaneView_ addSubview:accountNameField_];
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(controlTextDidBeginEditing:)
+           name:NSControlTextDidBeginEditingNotification
+         object:accountNameField_];
   top -= 40.0;
 
   if ([provider isEqualToString:@"openrouter"]) {
@@ -756,18 +787,14 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     [tokenField_ setStringValue:(token != nil) ? token : @""];
     [[tokenField_ cell] setPlaceholderString:
       NSLocalizedString(@"Paste API key", nil)];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(controlTextDidBeginEditing:)
+             name:NSControlTextDidBeginEditingNotification
+           object:tokenField_];
     [tokenField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
     [rightPaneView_ addSubview:tokenField_];
-    top -= 28.0;
-    statusLabel_ = StrappyAccountsLabel(
-      NSMakeRect(kStrappyAccountsInset, top, width - 100.0, 18.0),
-      ([token length] > 0U) ?
-        NSLocalizedString(@"API key is available.", nil) :
-        NSLocalizedString(@"Not configured.", nil),
-      [NSFont systemFontOfSize:11.0]);
-    [statusLabel_ setTextColor:[NSColor disabledControlTextColor]];
-    [statusLabel_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
-    [rightPaneView_ addSubview:statusLabel_];
+    top -= 32.0;
     saveButton_ = StrappyAccountsButton(
       NSMakeRect(NSWidth(bounds) - kStrappyAccountsInset - 88.0,
                  top - 3.0,
@@ -776,6 +803,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
       NSLocalizedString(@"Save", nil), self, @selector(saveAccount:));
     [saveButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
     [saveButton_ setKeyEquivalent:@"\r"];
+    [saveButton_ setEnabled:NO];
     [rightPaneView_ addSubview:saveButton_];
   } else if ([provider isEqualToString:@"other"]) {
     label = StrappyAccountsLabel(
@@ -812,16 +840,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     [tokenField_ setStringValue:(token != nil) ? token : @""];
     [tokenField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
     [rightPaneView_ addSubview:tokenField_];
-    top -= 29.0;
-    statusLabel_ = StrappyAccountsLabel(
-      NSMakeRect(kStrappyAccountsInset, top, width - 100.0, 18.0),
-      ([[account objectForKey:@"responses_endpoint"] length] > 0U) ?
-        NSLocalizedString(@"Endpoint is configured.", nil) :
-        NSLocalizedString(@"Not configured.", nil),
-      [NSFont systemFontOfSize:11.0]);
-    [statusLabel_ setTextColor:[NSColor disabledControlTextColor]];
-    [statusLabel_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
-    [rightPaneView_ addSubview:statusLabel_];
+    top -= 32.0;
     saveButton_ = StrappyAccountsButton(
       NSMakeRect(NSWidth(bounds) - kStrappyAccountsInset - 88.0,
                  top - 3.0,
@@ -833,12 +852,14 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     [rightPaneView_ addSubview:saveButton_];
   } else {
     saveButton_ = StrappyAccountsButton(
-      NSMakeRect(NSWidth(bounds) - kStrappyAccountsInset - 100.0,
+      NSMakeRect(NSWidth(bounds) - kStrappyAccountsInset - 88.0,
                  top,
-                 100.0,
+                 88.0,
                  kStrappyAccountsControlHeight),
-      NSLocalizedString(@"Save Name", nil), self, @selector(saveAccount:));
+      NSLocalizedString(@"Save", nil), self, @selector(saveAccount:));
     [saveButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
+    [saveButton_ setKeyEquivalent:@"\r"];
+    [saveButton_ setEnabled:NO];
     [rightPaneView_ addSubview:saveButton_];
     top -= 38.0;
     chatGPTStatusLabel_ = StrappyAccountsLabel(
@@ -908,6 +929,18 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   [deleteButton_ setAutoresizingMask:NSViewMaxXMargin | NSViewMaxYMargin];
   [deleteButton_ setEnabled:![StrappySession hasInFlightSessions]];
   [rightPaneView_ addSubview:deleteButton_];
+  [self configureKeyViewLoopForProvider:provider];
+}
+
+- (void)controlTextDidBeginEditing:(NSNotification *)notification
+{
+  id field;
+
+  field = [notification object];
+  if (((field == tokenField_) || (field == accountNameField_)) &&
+      (saveButton_ != nil)) {
+    [saveButton_ setEnabled:YES];
+  }
 }
 
 - (void)showError:(NSError *)error title:(NSString *)title
@@ -1008,7 +1041,6 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     return;
   }
   [self reloadAccountsPreservingSelection];
-  [statusLabel_ setStringValue:NSLocalizedString(@"Account saved.", nil)];
 }
 
 - (void)deleteAccount:(id)sender

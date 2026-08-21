@@ -640,16 +640,16 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
   contentView = [[self window] contentView];
   bounds = [contentView bounds];
-  contentPaneView_ =
-    [[NSView alloc] initWithFrame:NSInsetRect(bounds,
-      kStrappyPreferencesWindowEdgeInset,
-      kStrappyPreferencesWindowEdgeInset)];
+  contentPaneView_ = [[NSView alloc] initWithFrame:bounds];
   [contentPaneView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
 
-  paneFrame = [contentPaneView_ bounds];
+  paneFrame = NSInsetRect([contentPaneView_ bounds],
+    kStrappyPreferencesWindowEdgeInset,
+    kStrappyPreferencesWindowEdgeInset);
 
   authenticationPaneView_ =
-    [[StrappyPreferencesAuthenticationView alloc] initWithFrame:paneFrame
+    [[StrappyPreferencesAuthenticationView alloc]
+      initWithFrame:[contentPaneView_ bounds]
                                                          target:self];
 
   sessionDefaultsController_ =
@@ -764,6 +764,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)selectPreferencePaneWithIdentifier:(NSString *)identifier
 {
   NSView *paneView;
+  NSRect paneFrame;
   NSArray *subviews;
   NSUInteger index;
 
@@ -798,7 +799,14 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
   [subviews release];
 
-  [paneView setFrame:[contentPaneView_ bounds]];
+  paneFrame = [contentPaneView_ bounds];
+  if (![identifier
+        isEqualToString:kStrappyPreferencesToolbarAuthentication]) {
+    paneFrame = NSInsetRect(paneFrame,
+      kStrappyPreferencesWindowEdgeInset,
+      kStrappyPreferencesWindowEdgeInset);
+  }
+  [paneView setFrame:paneFrame];
   [paneView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   [contentPaneView_ addSubview:paneView];
   if ([identifier

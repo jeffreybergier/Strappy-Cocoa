@@ -19,6 +19,7 @@ typedef struct strappy_session_record {
   char *response;
   char *model;
   char *model_name;
+  char *provider_account_id;
   char *assistant_set_id;
   char *created_at;
   char *last_activity_at;

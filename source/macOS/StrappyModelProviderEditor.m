@@ -11,6 +11,11 @@ enum {
   kStrappyOtherModelDeleteSegment = 1
 };
 
+static const CGFloat kStrappyEditorWidth = 700.0;
+static const CGFloat kStrappyEditorHeight = 440.0;
+static const CGFloat kStrappyEditorSidebarWidth = 190.0;
+static const CGFloat kStrappyEditorInset = 16.0;
+
 static NSString *StrappyEditorString(NSDictionary *row, NSString *key)
 {
   id value;
@@ -146,6 +151,20 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   return column;
 }
 
+@interface StrappyEditorDividerView : NSView
+@end
+
+@implementation StrappyEditorDividerView
+
+- (void)drawRect:(NSRect)dirtyRect
+{
+  (void)dirtyRect;
+  [[NSColor gridColor] set];
+  NSRectFill([self bounds]);
+}
+
+@end
+
 @interface StrappyModelProviderEditor ()
 - (void)reloadCatalog;
 - (void)showSelectedProvider;
@@ -184,6 +203,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   NSView *contentView;
   NSScrollView *providerScrollView;
   NSTableColumn *providerColumn;
+  StrappyEditorDividerView *divider;
   NSButton *closeButton;
 
   if ((self = [super init])) {
@@ -193,7 +213,9 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     bundledChatGPTModels_ = [[NSArray alloc] init];
     otherModels_ = [[NSArray alloc] init];
     sheet_ = [[NSPanel alloc]
-      initWithContentRect:NSMakeRect(0.0, 0.0, 700.0, 440.0)
+      initWithContentRect:NSMakeRect(0.0, 0.0,
+                                     kStrappyEditorWidth,
+                                     kStrappyEditorHeight)
                 styleMask:XPWindowStyleMaskTitled
                   backing:NSBackingStoreBuffered
                     defer:NO];
@@ -202,8 +224,10 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     contentView = [sheet_ contentView];
 
     providerScrollView = [[[NSScrollView alloc]
-      initWithFrame:NSMakeRect(16.0, 56.0, 170.0, 364.0)] autorelease];
-    [providerScrollView setBorderType:NSBezelBorder];
+      initWithFrame:NSMakeRect(0.0, 0.0,
+                               kStrappyEditorSidebarWidth,
+                               kStrappyEditorHeight)] autorelease];
+    [providerScrollView setBorderType:NSNoBorder];
     [providerScrollView setHasVerticalScroller:YES];
     providerTableView_ = [[NSTableView alloc]
       initWithFrame:[[providerScrollView contentView] bounds]];
@@ -213,13 +237,25 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     [providerTableView_ setHeaderView:nil];
     [providerTableView_ setDataSource:self];
     [providerTableView_ setDelegate:self];
+    [providerTableView_ setAllowsMultipleSelection:NO];
+    [providerTableView_ setAllowsEmptySelection:NO];
+    [providerTableView_ XP_setSourceListStyle];
     [providerScrollView setDocumentView:providerTableView_];
     [contentView addSubview:providerScrollView];
 
-    detailView_ = [[NSView alloc] initWithFrame:NSMakeRect(202.0, 56.0,
-                                                           482.0, 364.0)];
+    divider = [[[StrappyEditorDividerView alloc] initWithFrame:NSMakeRect(
+      kStrappyEditorSidebarWidth, 0.0, 1.0, kStrappyEditorHeight)] autorelease];
+    [contentView addSubview:divider];
+
+    detailView_ = [[NSView alloc] initWithFrame:NSMakeRect(
+      kStrappyEditorSidebarWidth + 1.0,
+      0.0,
+      kStrappyEditorWidth - kStrappyEditorSidebarWidth - 1.0,
+      kStrappyEditorHeight)];
     [contentView addSubview:detailView_];
-    closeButton = StrappyEditorButton(NSMakeRect(604.0, 14.0, 80.0, 28.0),
+    closeButton = StrappyEditorButton(NSMakeRect(
+      kStrappyEditorWidth - kStrappyEditorInset - 80.0,
+      14.0, 80.0, 28.0),
       NSLocalizedString(@"Done", nil), self, @selector(close:));
     [contentView addSubview:closeButton];
 
@@ -306,7 +342,12 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 
 - (void)showSelectedProvider
 {
+  NSRect bounds;
+  CGFloat width;
+
   [self clearDetailView];
+  bounds = [detailView_ bounds];
+  width = NSWidth(bounds) - (2.0 * kStrappyEditorInset);
   if ([selectedProviderIdentifier_ isEqualToString:@"openrouter"]) {
     [self showOpenRouter];
   } else if ([selectedProviderIdentifier_ isEqualToString:@"openai_chatgpt"]) {
@@ -314,25 +355,41 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   } else if ([selectedProviderIdentifier_ isEqualToString:@"other"]) {
     [self showOther];
   } else {
-    [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(0.0, 330.0,
-      470.0, 22.0), selectedProviderIdentifier_, XPFontTextStyleBoldBody)];
-    [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(0.0, 296.0,
-      470.0, 34.0), NSLocalizedString(@"This provider does not expose model catalog controls.", nil), XPFontTextStyleBody)];
+    [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(
+      kStrappyEditorInset, NSHeight(bounds) - 38.0, width, 22.0),
+      selectedProviderIdentifier_, XPFontTextStyleBoldBody)];
+    [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(
+      kStrappyEditorInset, NSHeight(bounds) - 76.0, width, 34.0),
+      NSLocalizedString(
+        @"This provider does not expose model catalog controls.", nil),
+      XPFontTextStyleBody)];
   }
 }
 
 - (void)showOpenRouter
 {
-  [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(0.0, 330.0, 470.0,
-    22.0), @"OpenRouter", XPFontTextStyleBoldBody)];
-  [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(0.0, 282.0, 470.0,
-    44.0), NSLocalizedString(@"Fetch the latest model catalog for the configured OpenRouter account. Existing whitelist choices are preserved.", nil), XPFontTextStyleBody)];
-  fetchButton_ = StrappyEditorButton(NSMakeRect(0.0, 240.0, 112.0, 28.0),
+  NSRect bounds;
+  CGFloat width;
+
+  bounds = [detailView_ bounds];
+  width = NSWidth(bounds) - (2.0 * kStrappyEditorInset);
+  [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(
+    kStrappyEditorInset, NSHeight(bounds) - 38.0, width, 22.0),
+    @"OpenRouter", XPFontTextStyleBoldBody)];
+  [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(
+    kStrappyEditorInset, NSHeight(bounds) - 90.0, width, 44.0),
+    NSLocalizedString(
+      @"Fetch the latest model catalog for the configured OpenRouter account. Existing whitelist choices are preserved.",
+      nil), XPFontTextStyleBody)];
+  fetchButton_ = StrappyEditorButton(NSMakeRect(
+    kStrappyEditorInset, NSHeight(bounds) - 132.0, 112.0, 28.0),
     NSLocalizedString(@"Fetch Models", nil), self,
     @selector(fetchOpenRouterModels:));
   [detailView_ addSubview:fetchButton_];
   progressIndicator_ = [[[NSProgressIndicator alloc]
-    initWithFrame:NSMakeRect(124.0, 245.0, 18.0, 18.0)] autorelease];
+    initWithFrame:NSMakeRect(kStrappyEditorInset + 124.0,
+                             NSHeight(bounds) - 127.0,
+                             18.0, 18.0)] autorelease];
   [progressIndicator_ setStyle:XPProgressIndicatorStyleSpinning];
   [progressIndicator_ setIndeterminate:YES];
   [progressIndicator_ setDisplayedWhenStopped:NO];
@@ -373,14 +430,25 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 
 - (void)showEditableModelsForProviderWithTitle:(NSString *)title
 {
+  NSRect bounds;
+  CGFloat width;
   NSScrollView *scrollView;
 
-  [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(0.0, 330.0, 470.0,
-    22.0), title, XPFontTextStyleBoldBody)];
-  [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(0.0, 302.0, 470.0,
-    24.0), NSLocalizedString(@"Only Model ID is required. Existing model edits save automatically.", nil), XPFontTextStyleBody)];
+  bounds = [detailView_ bounds];
+  width = NSWidth(bounds) - (2.0 * kStrappyEditorInset);
+  [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(
+    kStrappyEditorInset, NSHeight(bounds) - 38.0, width, 22.0),
+    title, XPFontTextStyleBoldBody)];
+  [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(
+    kStrappyEditorInset, NSHeight(bounds) - 66.0, width, 24.0),
+    NSLocalizedString(
+      @"Only Model ID is required. Existing model edits save automatically.",
+      nil), XPFontTextStyleBody)];
   scrollView = [[[NSScrollView alloc]
-    initWithFrame:NSMakeRect(0.0, 42.0, 480.0, 248.0)] autorelease];
+    initWithFrame:NSMakeRect(kStrappyEditorInset,
+                             56.0,
+                             width,
+                             NSHeight(bounds) - 134.0)] autorelease];
   [scrollView setBorderType:NSBezelBorder];
   [scrollView setHasVerticalScroller:YES];
   [scrollView setHasHorizontalScroller:YES];
@@ -413,7 +481,8 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   [detailView_ addSubview:scrollView];
 
   otherModelActionsSegmented_ = [[[NSSegmentedControl alloc]
-    initWithFrame:NSMakeRect(0.0, 4.0, 168.0, 28.0)] autorelease];
+    initWithFrame:NSMakeRect(kStrappyEditorInset, 14.0, 168.0, 28.0)]
+    autorelease];
   [otherModelActionsSegmented_ setSegmentCount:2];
   [[otherModelActionsSegmented_ cell]
     setTrackingMode:NSSegmentSwitchTrackingMomentary];
@@ -800,7 +869,9 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   }
   if ((draftOtherModel_ == nil) ||
       ([StrappyEditorString(draftOtherModel_, @"wire_model_id") length] == 0U)) {
-    NSBeep();
+    [self showErrorMessage:NSLocalizedString(
+      @"Enter a Model ID before saving.", nil)
+                      title:NSLocalizedString(@"Model ID Is Required", nil)];
     return;
   }
   error = nil;

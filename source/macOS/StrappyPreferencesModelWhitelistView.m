@@ -129,9 +129,10 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
   [editButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
   [editButton_ setBezelStyle:XPBezelStyleRounded];
   [editButton_ setButtonType:XPButtonTypeMomentaryLight];
-  [editButton_ setTitle:NSLocalizedString(@"Edit", nil)];
+  [editButton_ setTitle:NSLocalizedString(@"Fetch", nil)];
   [editButton_ setToolTip:
-    NSLocalizedString(@"Edit the model catalogs for each provider.", nil)];
+    NSLocalizedString(@"Fetch or edit the model catalogs for each provider.",
+                      nil)];
   [editButton_ setTarget:target];
   [editButton_ setAction:@selector(editModelProviders:)];
   [view addSubview:editButton_];

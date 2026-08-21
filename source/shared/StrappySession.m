@@ -1581,6 +1581,7 @@ static BOOL StrappySessionRecordFromOptions(
   NSString *response;
   NSString *model;
   NSString *modelName;
+  NSString *providerAccountIdentifier;
   NSString *webProvider;
   NSString *assistantSetIdentifier;
   NSString *createdAt;
@@ -1606,6 +1607,8 @@ static BOOL StrappySessionRecordFromOptions(
   response = [StrappySession stringFromCStringOrEmpty:record->response];
   model = [StrappySession stringFromCStringOrEmpty:record->model];
   modelName = [StrappySession stringFromCStringOrEmpty:record->model_name];
+  providerAccountIdentifier =
+    [StrappySession stringFromCStringOrEmpty:record->provider_account_id];
   assistantSetIdentifier =
     [StrappySession stringFromCStringOrEmpty:record->assistant_set_id];
   createdAt = [StrappySession stringFromCStringOrEmpty:record->created_at];
@@ -1619,6 +1622,7 @@ static BOOL StrappySessionRecordFromOptions(
     response, @"response",
     model, @"model",
     modelName, @"model_name",
+    providerAccountIdentifier, @"provider_account_id",
     assistantSetIdentifier, @"assistant_set_id",
     httpStatus, @"http_status",
     webProvider, @"web_provider",

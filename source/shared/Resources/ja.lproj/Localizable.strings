@@ -96,6 +96,8 @@
 "Choose an Account" = "アカウントを選択";
 "No Accounts Available" = "利用可能なアカウントがありません";
 "Fetch Models" = "モデルを取得";
+"Fetch" = "取得";
+"Fetch or edit the model catalogs for each provider." = "各プロバイダのモデルカタログを取得または編集します。";
 "Refresh the OpenRouter model list." = "OpenRouter のモデル一覧を更新します。";
 "Use" = "使用";
 "Default" = "既定";
@@ -405,6 +407,7 @@
 "Accounts" = "アカウント";
 "Accounts connect Strappy to AI providers." = "アカウントを使ってStrappyをAIプロバイダーに接続します。";
 "Add an Account" = "アカウントを追加";
+"Add Account" = "アカウントを追加";
 "Bearer Token (Optional)" = "Bearerトークン（任意）";
 "ChatGPT authentication failed." = "ChatGPTの認証に失敗しました。";
 "ChatGPT sign-in was cancelled." = "ChatGPTへのサインインをキャンセルしました。";

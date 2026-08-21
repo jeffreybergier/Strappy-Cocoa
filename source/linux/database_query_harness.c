@@ -9727,6 +9727,75 @@ static int harness_run_empty_session_storage_tests(const harness_context *contex
 
   return 1;
 }
+static int harness_switch_default_account_model(
+  const char *database_path,
+  const char *fallback_working_directory,
+  const char *account_id,
+  const char *model_id)
+{
+  strappy_session_options options;
+  strappy_session_options saved;
+  strappy_session_option_mask actual_changed_fields;
+  char *persisted_account_id;
+  char *persisted_model_id;
+  char *error;
+  int ok;
+
+  strappy_session_options_init(&options);
+  strappy_session_options_init(&saved);
+  persisted_account_id = NULL;
+  persisted_model_id = NULL;
+  error = NULL;
+  ok = strappy_db_load_default_session_options(
+    database_path, fallback_working_directory, &options, &error);
+  if (ok) {
+    free(options.provider_account_id);
+    free(options.model_id);
+    options.provider_account_id = strdup(account_id);
+    options.model_id = strdup(model_id);
+    ok = (options.provider_account_id != NULL) &&
+      (options.model_id != NULL);
+  }
+  actual_changed_fields = 0U;
+  if (ok) {
+    ok = strappy_db_update_default_session_options(
+      database_path,
+      fallback_working_directory,
+      &options,
+      STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT | STRAPPY_SESSION_OPTION_MODEL,
+      &saved,
+      &actual_changed_fields,
+      &error);
+  }
+  if (ok) {
+    ok = (actual_changed_fields ==
+          (STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT |
+           STRAPPY_SESSION_OPTION_MODEL)) &&
+      (saved.provider_account_id != NULL) &&
+      (strcmp(saved.provider_account_id, account_id) == 0) &&
+      (saved.model_id != NULL) &&
+      (strcmp(saved.model_id, model_id) == 0) &&
+      strappy_db_get_default_account_model(
+        database_path,
+        &persisted_account_id,
+        &persisted_model_id,
+        &error) &&
+      (strcmp(persisted_account_id, account_id) == 0) &&
+      (strcmp(persisted_model_id, model_id) == 0);
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "Default account/model switch did not persist atomically: %s\n",
+            (error != NULL) ? error : "snapshot mismatch");
+  }
+  free(persisted_account_id);
+  free(persisted_model_id);
+  strappy_free_string(error);
+  strappy_session_options_destroy(&saved);
+  strappy_session_options_destroy(&options);
+  return ok;
+}
+
 static int harness_run_bundled_model_catalog_tests(
   const harness_context *context)
 {
@@ -9919,6 +9988,15 @@ static int harness_run_bundled_model_catalog_tests(
          3LL,
          "updated bundled catalog revision");
   if (!ok) {
+    harness_unlink_sqlite_files(database_path);
+    return 0;
+  }
+
+  if (!harness_switch_default_account_model(
+        database_path,
+        context->temp_dir,
+        STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT,
+        selected_model_id)) {
     harness_unlink_sqlite_files(database_path);
     return 0;
   }
@@ -11895,6 +11973,7 @@ static int harness_run_multi_account_database_tests(
   strappy_manual_model_input input;
   strappy_session_options options;
   strappy_session_options saved_options;
+  strappy_session_record session_record;
   strappy_model_route_record route;
   strappy_provider_account_record account;
   strappy_session_option_mask changed_fields;
@@ -11910,6 +11989,7 @@ static int harness_run_multi_account_database_tests(
   session_id=0LL;
   strappy_session_options_init(&options);
   strappy_session_options_init(&saved_options);
+  strappy_session_record_init(&session_record);
   strappy_model_route_record_init(&route);
   strappy_provider_account_record_init(&account);
   memset(oversized_name, 'x', sizeof(oversized_name) - 1U);
@@ -12052,7 +12132,12 @@ static int harness_run_multi_account_database_tests(
         &saved_options,&changed_fields,&error) &&
       (changed_fields==STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT) &&
       (strcmp(saved_options.provider_account_id,other_one)==0) &&
-      (strcmp(saved_options.model_id,manual_one)==0);
+      (strcmp(saved_options.model_id,manual_one)==0) &&
+      strappy_db_load_session_list_record(
+        path,session_id,&session_record,&error) &&
+      (session_record.provider_account_id != NULL) &&
+      (strcmp(session_record.provider_account_id,other_one)==0);
+    strappy_session_record_destroy(&session_record);
   }
   input.display_name="Manual One Updated";
   if (ok) ok = strappy_db_update_manual_model(path,"other",&input,&error) &&
@@ -12084,6 +12169,7 @@ static int harness_run_multi_account_database_tests(
   free(default_account); free(default_model);
   strappy_provider_account_record_destroy(&account);
   strappy_model_route_record_destroy(&route);
+  strappy_session_record_destroy(&session_record);
   strappy_session_options_destroy(&saved_options);
   strappy_session_options_destroy(&options);
   strappy_free_string(error); harness_unlink_sqlite_files(path);

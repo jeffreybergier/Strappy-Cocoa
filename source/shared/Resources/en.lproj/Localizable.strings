@@ -96,6 +96,8 @@
 "Choose an Account" = "Choose an Account";
 "No Accounts Available" = "No Accounts Available";
 "Fetch Models" = "Fetch Models";
+"Fetch" = "Fetch";
+"Fetch or edit the model catalogs for each provider." = "Fetch or edit the model catalogs for each provider.";
 "Refresh the OpenRouter model list." = "Refresh the OpenRouter model list.";
 "Use" = "Use";
 "Default" = "Default";
@@ -405,6 +407,7 @@
 "Accounts" = "Accounts";
 "Accounts connect Strappy to AI providers." = "Accounts connect Strappy to AI providers.";
 "Add an Account" = "Add an Account";
+"Add Account" = "Add Account";
 "Bearer Token (Optional)" = "Bearer Token (Optional)";
 "ChatGPT authentication failed." = "ChatGPT authentication failed.";
 "ChatGPT sign-in was cancelled." = "ChatGPT sign-in was cancelled.";

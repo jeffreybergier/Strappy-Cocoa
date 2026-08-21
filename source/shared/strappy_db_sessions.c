@@ -79,6 +79,7 @@ void strappy_session_record_init(strappy_session_record *record)
   record->response = NULL;
   record->model = NULL;
   record->model_name = NULL;
+  record->provider_account_id = NULL;
   record->assistant_set_id = NULL;
   record->created_at = NULL;
   record->last_activity_at = NULL;
@@ -103,6 +104,7 @@ void strappy_session_record_destroy(strappy_session_record *record)
   free(record->response);
   free(record->model);
   free(record->model_name);
+  free(record->provider_account_id);
   free(record->assistant_set_id);
   free(record->created_at);
   free(record->last_activity_at);
@@ -173,6 +175,7 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   char *response;
   char *model;
   char *model_name;
+  char *provider_account_id;
   char *assistant_set_id;
   char *created_at;
   char *last_activity_at;
@@ -209,18 +212,21 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   response = strappy_db_column_string(stmt, 3);
   model = strappy_db_column_string(stmt, 4);
   model_name = strappy_db_column_string(stmt, 5);
+  provider_account_id = strappy_db_column_string(stmt, 17);
   assistant_set_id = strappy_db_column_string(stmt, 14);
   created_at = strappy_db_column_string(stmt, 7);
   last_activity_at = strappy_db_column_string(stmt, 8);
 
   if ((name == NULL) || (prompt == NULL) || (response == NULL) ||
       (model == NULL) || (model_name == NULL) || (created_at == NULL) ||
-      (last_activity_at == NULL) || (assistant_set_id == NULL)) {
+      (last_activity_at == NULL) || (provider_account_id == NULL) ||
+      (assistant_set_id == NULL)) {
     free(name);
     free(prompt);
     free(response);
     free(model);
     free(model_name);
+    free(provider_account_id);
     free(assistant_set_id);
     free(created_at);
     free(last_activity_at);
@@ -233,6 +239,7 @@ static int strappy_db_assign_record_from_statement(strappy_session_record *recor
   record->response = response;
   record->model = model;
   record->model_name = model_name;
+  record->provider_account_id = provider_account_id;
   record->assistant_set_id = assistant_set_id;
   record->created_at = created_at;
   record->last_activity_at = last_activity_at;
@@ -973,7 +980,8 @@ int strappy_db_list_sessions(const char *db_path,
     STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
-    STRAPPY_DB_SESSION_ANSWER_QUALITY_ENABLED_SQL " "
+    STRAPPY_DB_SESSION_ANSWER_QUALITY_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_EFFECTIVE_ACCOUNT_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " "
     "ORDER BY " STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL " DESC, s.id DESC;";
@@ -1091,7 +1099,8 @@ int strappy_db_load_session(const char *db_path,
     STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
-    STRAPPY_DB_SESSION_ANSWER_QUALITY_ENABLED_SQL " "
+    STRAPPY_DB_SESSION_ANSWER_QUALITY_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_EFFECTIVE_ACCOUNT_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " WHERE s.id = ?;";
   sqlite3 *db;
@@ -1185,7 +1194,8 @@ int strappy_db_load_session_list_record(const char *db_path,
     STRAPPY_DB_SESSION_ROUND_LIMIT_SQL ", "
     STRAPPY_DB_SESSION_ASSISTANT_SET_SQL ", "
     STRAPPY_DB_SESSION_WEB_SEARCH_ENABLED_SQL ", "
-    STRAPPY_DB_SESSION_ANSWER_QUALITY_ENABLED_SQL " "
+    STRAPPY_DB_SESSION_ANSWER_QUALITY_ENABLED_SQL ", "
+    STRAPPY_DB_SESSION_EFFECTIVE_ACCOUNT_SQL " "
     "FROM sessions s LEFT JOIN models m ON m.id = "
       STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " WHERE s.id = ?;";
   sqlite3 *db;
@@ -1820,6 +1830,46 @@ static int strappy_db_copy_account_default_model(sqlite3 *db,
                       "The selected account has no active allowed model.");
     return 0;
   }
+  return 1;
+}
+
+static int strappy_db_save_default_account_model(
+  sqlite3 *db,
+  const char *account_id,
+  const char *model_id,
+  long long now_ms,
+  char **error_out)
+{
+  sqlite3_stmt *stmt;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(
+    db,
+    "UPDATE app_preferences SET default_model_id=?, "
+    "default_provider_account_id=?, updated_at_ms=? WHERE id=1;",
+    -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 2, account_id, -1, SQLITE_TRANSIENT);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_int64(stmt, 3, (sqlite3_int64)now_ms);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  if ((rc != SQLITE_DONE) || (sqlite3_changes(db) != 1)) {
+    strappy_set_formatted_error(
+      error_out,
+      "Could not save the default account and model: %s",
+      sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
   return 1;
 }
 
@@ -2529,11 +2579,11 @@ int strappy_db_update_default_session_options(
   ok = 1;
   if ((actual_changed_fields & (STRAPPY_SESSION_OPTION_MODEL |
                                 STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT)) != 0U) {
-    ok = strappy_db_upsert_app_setting(
+    ok = strappy_db_save_default_account_model(
       db,
-      STRAPPY_DB_DEFAULT_MODEL_KEY,
+      merged.provider_account_id,
       merged.model_id,
-      "default model",
+      now_ms,
       error_out);
     if (ok) {
       ok = strappy_db_set_model_allowed_in_db(db,

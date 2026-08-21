@@ -7,7 +7,6 @@
  @private
   NSScrollView *accountScrollView_;
   NSTableView *accountTableView_;
-  NSView *introductionLabel_;
   NSView *dividerView_;
   NSView *rightPaneView_;
   NSArray *accounts_;
@@ -20,7 +19,6 @@
   NSTextField *accountNameField_;
   NSTextField *endpointField_;
   NSSecureTextField *tokenField_;
-  NSTextField *statusLabel_;
   NSButton *saveButton_;
   NSButton *deleteButton_;
 

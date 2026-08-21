@@ -7,7 +7,7 @@
 static const CGFloat kStrappyInspectorInset = 12.0;
 static const CGFloat kStrappyInspectorGap = 8.0;
 static const CGFloat kStrappyInspectorControlHeight = 24.0;
-static const CGFloat kStrappyInspectorDocumentHeight = 526.0;
+static const CGFloat kStrappyInspectorDocumentHeight = 564.0;
 static const CGFloat kStrappyDefaultsModelBoxHeight = 164.0;
 static const CGFloat kStrappyDefaultsBottomBoxMinimumHeight = 126.0;
 static const CGFloat kStrappyDefaultsStatusHeight = 20.0;
@@ -331,6 +331,7 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
 - (void)layoutDefaultsViews;
 - (StrappySessionOptions *)currentOptions;
 - (BOOL)canEditOptions;
+- (BOOL)canChangeAccount;
 - (void)populateAccountPopUpWithOptions:(StrappySessionOptions *)options;
 - (void)populateModelPopUpWithOptions:(StrappySessionOptions *)options;
 - (void)populateAssistantSegmentsWithOptions:(StrappySessionOptions *)options;
@@ -476,7 +477,6 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   [accountLabel_ setAutoresizingMask:NSViewWidthSizable];
   [modelLabel_ setAutoresizingMask:NSViewWidthSizable];
   [assistantLabel_ setAutoresizingMask:NSViewWidthSizable];
-  [accountLabel_ setHidden:!editsSessionDefaults_];
   [documentView_ addSubview:accountLabel_];
   [documentView_ addSubview:modelLabel_];
   [documentView_ addSubview:assistantLabel_];
@@ -494,7 +494,6 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   [accountPopUpButton_ setTarget:self];
   [accountPopUpButton_ setAction:@selector(accountChanged:)];
   [accountPopUpButton_ setAutoresizingMask:NSViewWidthSizable];
-  [accountPopUpButton_ setHidden:!editsSessionDefaults_];
   [documentView_ addSubview:accountPopUpButton_];
 
   modelPopUpButton_ = [[NSPopUpButton alloc] initWithFrame:NSZeroRect
@@ -628,35 +627,45 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   [statusLabel_ setFrame:NSMakeRect(contentX, 31.0, contentWidth, 28.0)];
 
   y = 66.0;
-  [modelAssistantBox_ setFrame:NSMakeRect(contentX, y, contentWidth, 126.0)];
+  [modelAssistantBox_ setFrame:NSMakeRect(contentX, y, contentWidth, 164.0)];
+  [accountLabel_ setFrame:NSMakeRect(contentX + 15.0,
+                                    y + 21.0,
+                                    contentWidth - 30.0,
+                                    16.0)];
+  [accountPopUpButton_ setFrame:NSMakeRect(contentX + 12.0,
+                                           y + 36.0,
+                                           contentWidth - 24.0,
+                                           kStrappyInspectorControlHeight)];
   [modelLabel_ setFrame:NSMakeRect(contentX + 15.0,
-                                  y + 21.0,
+                                  y + 68.0,
                                   contentWidth - 30.0,
                                   16.0)];
-  [modelPopUpButton_ setFrame:NSMakeRect(contentX + 12.0,
-                                         y + 36.0,
-                                         contentWidth - 24.0,
-                                         kStrappyInspectorControlHeight)];
+  [modelPopUpButton_ setFrame:NSMakeRect(
+    contentX + 12.0,
+    y + 83.0,
+    contentWidth - 24.0,
+    kStrappyInspectorControlHeight)];
   [assistantLabel_ setFrame:NSMakeRect(contentX + 15.0,
-                                      y + 68.0,
+                                      y + 115.0,
                                       contentWidth - 30.0,
                                       16.0)];
   [assistantSegmentedControl_ setFrame:NSMakeRect(
     contentX + 12.0,
-    y + 83.0,
+    y + 130.0,
     contentWidth - 24.0,
     kStrappyInspectorControlHeight)];
   StrappyInspectorDistributeAssistantSegmentWidths(
     assistantSegmentedControl_);
 
-  y += 126.0 + kStrappyInspectorGap;
+  y += 164.0 + kStrappyInspectorGap;
   [toolsBox_ setFrame:NSMakeRect(contentX, y, contentWidth, 88.0)];
   [webSearchButton_ setFrame:NSMakeRect(contentX + 12.0,
                                         y + 26.0,
                                         contentWidth - 24.0,
                                         20.0)];
   [bashButton_ setFrame:NSMakeRect(contentX + 12.0,
-                                   y + 51.0,
+                                   y + ([webSearchButton_ isHidden] ?
+                                     26.0 : 51.0),
                                    contentWidth - 24.0,
                                    20.0)];
 
@@ -905,6 +914,18 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   return YES;
 }
 
+- (BOOL)canChangeAccount
+{
+  if (![self canEditOptions]) {
+    return NO;
+  }
+  if (editsSessionDefaults_) {
+    return YES;
+  }
+  return ([[[session_ cachedSummary] objectForKey:@"prompt"] length] == 0U) ?
+    YES : NO;
+}
+
 - (void)reloadOptions
 {
   StrappySessionOptions *options;
@@ -1013,9 +1034,6 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   NSUInteger index;
   NSUInteger validCount;
 
-  if (!editsSessionDefaults_) {
-    return;
-  }
   accounts = [StrappySession providerAccountCatalogWithError:nil];
   models = [StrappySession allowedModelCatalogWithError:nil];
   if (![accounts isKindOfClass:[NSArray class]]) {
@@ -1082,10 +1100,8 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   NSMenuItem *selectedItem;
   NSUInteger index;
   NSUInteger validCount;
-  NSString *lastAccountIdentifier;
   NSString *selectedAccountIdentifier;
   NSString *selectedProviderIdentifier;
-  BOOL sessionAccountLocked;
 
   models = [StrappySession allowedModelCatalogWithError:nil];
   if (![models isKindOfClass:[NSArray class]]) {
@@ -1099,20 +1115,15 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   [modelPopUpButton_ removeAllItems];
   selectedItem = nil;
   validCount = 0U;
-  lastAccountIdentifier = @"";
   selectedAccountIdentifier = [options providerAccountIdentifier];
   selectedProviderIdentifier = StrappyInspectorStringForRow(
     StrappyInspectorAccountForIdentifier(
       [StrappySession providerAccountCatalogWithError:nil],
       selectedAccountIdentifier), @"provider_id");
-  sessionAccountLocked = !editsSessionDefaults_ &&
-    ([[[session_ cachedSummary] objectForKey:@"prompt"] length] > 0U) &&
-    ([selectedAccountIdentifier length] > 0U);
   for (index = 0U; index < [models count]; index++) {
     NSDictionary *row;
     NSString *identifier;
-    NSString *accountIdentifier;
-    NSString *accountName;
+    NSString *providerIdentifier;
     NSMenuItem *item;
 
     row = [models objectAtIndex:index];
@@ -1120,30 +1131,14 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
     if ([identifier length] == 0U) {
       continue;
     }
-    accountIdentifier = StrappyInspectorStringForRow(row, @"provider_id");
-    if (editsSessionDefaults_ &&
-        ![accountIdentifier isEqualToString:selectedProviderIdentifier]) {
+    providerIdentifier = StrappyInspectorStringForRow(row, @"provider_id");
+    if (![providerIdentifier isEqualToString:selectedProviderIdentifier]) {
       continue;
-    }
-    accountName =
-      StrappyInspectorStringForRow(row, @"provider_name");
-    if (!editsSessionDefaults_ &&
-        ![accountIdentifier isEqualToString:lastAccountIdentifier]) {
-      if ([lastAccountIdentifier length] > 0U) {
-        [[modelPopUpButton_ menu] addItem:[NSMenuItem separatorItem]];
-      }
-      [modelPopUpButton_ addItemWithTitle:([accountName length] > 0U) ?
-        accountName : accountIdentifier];
-      item = [modelPopUpButton_ lastItem];
-      [item setEnabled:NO];
-      lastAccountIdentifier = accountIdentifier;
     }
     [modelPopUpButton_ addItemWithTitle:StrappyInspectorModelTitle(row)];
     item = [modelPopUpButton_ lastItem];
     [item setRepresentedObject:identifier];
-    if (!StrappyInspectorModelIsSignedIn(row, selectedAccountIdentifier) ||
-        (sessionAccountLocked &&
-         ![accountIdentifier isEqualToString:selectedProviderIdentifier])) {
+    if (!StrappyInspectorModelIsSignedIn(row, selectedAccountIdentifier)) {
       [item setEnabled:NO];
     } else {
       validCount++;
@@ -1294,23 +1289,25 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
     @"local_functions_enabled",
     YES);
   providerIdentifier = [self selectedProviderIdentifier];
-  supportsWebSearch = !editsSessionDefaults_ ||
-    [providerIdentifier isEqualToString:@"openrouter"] ||
+  supportsWebSearch = [providerIdentifier isEqualToString:@"openrouter"] ||
     [providerIdentifier isEqualToString:@"openai_chatgpt"];
-  supportsSearchProvider = !editsSessionDefaults_ ||
+  supportsSearchProvider =
     [providerIdentifier isEqualToString:@"openrouter"];
   [webSearchButton_ setHidden:!supportsWebSearch];
+  [toolsBox_ setTitle:NSLocalizedString(supportsWebSearch ?
+    @"Tools & Search" : @"Tools", nil)];
   if (editsSessionDefaults_) {
-    [toolsBox_ setTitle:NSLocalizedString(supportsWebSearch ?
-      @"Tools & Search" : @"Tools", nil)];
     [searchProviderLabel_ setHidden:!supportsSearchProvider];
+    [searchProviderPopUpButton_ setHidden:!supportsSearchProvider];
+  } else {
+    [searchProviderBox_ setHidden:!supportsSearchProvider];
     [searchProviderPopUpButton_ setHidden:!supportsSearchProvider];
   }
   providerEnabled = enabled &&
     hostedToolsEnabled &&
     supportsSearchProvider &&
-    (!editsSessionDefaults_ || [options webSearchEnabled]);
-  [accountPopUpButton_ setEnabled:editsSessionDefaults_ && enabled &&
+    [options webSearchEnabled];
+  [accountPopUpButton_ setEnabled:[self canChangeAccount] &&
     StrappyInspectorPopUpHasEnabledChoice(accountPopUpButton_)];
   [modelPopUpButton_ setEnabled:
     (enabled && StrappyInspectorPopUpHasEnabledChoice(modelPopUpButton_))];
@@ -1337,9 +1334,7 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   NSDictionary *account;
   NSString *accountIdentifier;
 
-  accountIdentifier = editsSessionDefaults_ ?
-    [[accountPopUpButton_ selectedItem] representedObject] :
-    [[self currentOptions] providerAccountIdentifier];
+  accountIdentifier = [[accountPopUpButton_ selectedItem] representedObject];
   accounts = [StrappySession providerAccountCatalogWithError:nil];
   account = StrappyInspectorAccountForIdentifier(accounts,
                                                   accountIdentifier);
@@ -1389,6 +1384,7 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
 {
   NSString *identifier;
   StrappySessionOptions *options;
+  StrappySessionOptionMask changedFields;
 
   (void)sender;
   identifier = [[modelPopUpButton_ selectedItem] representedObject];
@@ -1399,7 +1395,11 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   }
   options = [[self currentOptions] copy];
   [options setModelIdentifier:identifier];
-  (void)[self saveOptions:options changedFields:StrappySessionOptionModel];
+  changedFields = StrappySessionOptionModel;
+  if ([[options providerAccountIdentifier] length] > 0U) {
+    changedFields |= StrappySessionOptionProviderAccount;
+  }
+  (void)[self saveOptions:options changedFields:changedFields];
   [options release];
 }
 
@@ -1415,6 +1415,10 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   StrappySessionOptionMask changedFields;
 
   (void)sender;
+  if (![self canChangeAccount]) {
+    [self reloadOptions];
+    return;
+  }
   accountIdentifier = [[accountPopUpButton_ selectedItem]
     representedObject];
   accounts = [StrappySession providerAccountCatalogWithError:nil];
