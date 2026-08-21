@@ -366,6 +366,7 @@ typedef struct strappy_model_route_record {
   char *responses_endpoint;
   char *wire_model_id;
   char *billing_kind;
+  long long max_output_tokens;
   int reasoning_enabled;
   int local_functions_enabled;
   int hosted_tools_enabled;
@@ -380,6 +381,7 @@ typedef struct strappy_provider_account_record {
   char *display_name;
   char *lifecycle_state;
   char *responses_endpoint;
+  long long max_output_tokens;
   long long created_at_ms;
   long long updated_at_ms;
   long long last_used_at_ms;
@@ -475,6 +477,7 @@ int strappy_db_update_provider_account(const char *db_path,
                                        const char *account_id,
                                        const char *display_name,
                                        const char *responses_endpoint,
+                                       long long max_output_tokens,
                                        char **error_out);
 int strappy_db_archive_provider_account(const char *db_path,
                                         const char *account_id,

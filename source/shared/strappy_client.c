@@ -883,17 +883,22 @@ int strappy_client_send_provider_responses_json_with_transport(
   token = (bearer_token != NULL) ? bearer_token :
     ((config != NULL) ? config->api_token : NULL);
   token_is_present = (token != NULL) && (token[0] != '\0');
+  if (token_is_present &&
+      !strappy_client_header_value_is_safe(token, 2U * 1024U * 1024U)) {
+    strappy_set_error(
+      error_out,
+      "Responses bearer credential contains an unsupported control character.");
+    return 0;
+  }
   if ((config == NULL) || (request_json == NULL) ||
       (request_json[0] == '\0') || (config->api_endpoint == NULL) ||
       (config->api_endpoint[0] == '\0') ||
       (definition == NULL) || !strappy_provider_is_available(definition) ||
       ((response_transport != STRAPPY_RESPONSES_RESPONSE_TRANSPORT_JSON) &&
        (response_transport != STRAPPY_RESPONSES_RESPONSE_TRANSPORT_SSE)) ||
-      ((!token_is_present &&
-        (definition->credential_kind !=
-         STRAPPY_PROVIDER_CREDENTIAL_OPTIONAL_BEARER)) ||
-       (token_is_present &&
-        !strappy_client_header_value_is_safe(token, 2U * 1024U * 1024U))) ||
+      (!token_is_present &&
+       (definition->credential_kind !=
+        STRAPPY_PROVIDER_CREDENTIAL_OPTIONAL_BEARER)) ||
       (uses_chatgpt_headers &&
        !strappy_client_header_value_is_safe(chatgpt_account_id, 512U)) ||
       ((session_request_id != NULL) &&

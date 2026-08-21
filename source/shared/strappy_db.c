@@ -396,6 +396,8 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
       "CHECK(lifecycle_state IN ('active','archived')) ,"
     "responses_endpoint TEXT "
       "CHECK(responses_endpoint IS NULL OR length(responses_endpoint) > 0),"
+    "max_output_tokens INTEGER "
+      "CHECK(max_output_tokens IS NULL OR max_output_tokens > 0),"
     "created_at_ms INTEGER NOT NULL,"
     "updated_at_ms INTEGER NOT NULL,"
     "last_used_at_ms INTEGER"
@@ -1073,6 +1075,46 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
                          schema_sql[schema_index],
                          "Could not create semantic database schema",
                          error_out)) {
+      return 0;
+    }
+  }
+  {
+    sqlite3_stmt *column_stmt;
+    int column_rc;
+    int has_max_output_tokens;
+
+    column_stmt = NULL;
+    has_max_output_tokens = 0;
+    column_rc = sqlite3_prepare_v2(
+      db, "PRAGMA table_info(provider_accounts);", -1, &column_stmt, NULL);
+    if (column_rc == SQLITE_OK) {
+      column_rc = sqlite3_step(column_stmt);
+    }
+    while (column_rc == SQLITE_ROW) {
+      const unsigned char *column_name;
+
+      column_name = sqlite3_column_text(column_stmt, 1);
+      if ((column_name != NULL) &&
+          (strcmp((const char *)column_name, "max_output_tokens") == 0)) {
+        has_max_output_tokens = 1;
+      }
+      column_rc = sqlite3_step(column_stmt);
+    }
+    sqlite3_finalize(column_stmt);
+    if (column_rc != SQLITE_DONE) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not inspect provider accounts: %s",
+                                  sqlite3_errmsg(db));
+      return 0;
+    }
+    if (!has_max_output_tokens &&
+        !strappy_db_exec(
+          db,
+          "ALTER TABLE provider_accounts ADD COLUMN max_output_tokens "
+            "INTEGER CHECK(max_output_tokens IS NULL OR "
+              "max_output_tokens > 0);",
+          "Could not add provider account output limit",
+          error_out)) {
       return 0;
     }
   }

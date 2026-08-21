@@ -121,12 +121,14 @@ enum {
 + (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath;
 + (NSString *)sessionsDatabasePath;
 + (BOOL)initializeSessionStoreWithError:(NSError **)error;
++ (BOOL)prepareProviderCredentialsWithError:(NSError **)error;
 + (NSString *)designatedProviderAccountIdentifierForProviderIdentifier:
                 (NSString *)providerIdentifier
                                                                error:
                 (NSError **)error;
 + (NSArray *)providerCatalog;
 + (NSArray *)providerAccountCatalogWithError:(NSError **)error;
++ (NSArray *)verifiedProviderAccountCatalogWithError:(NSError **)error;
 + (NSDictionary *)createProviderAccountForProviderIdentifier:
                     (NSString *)providerIdentifier
                                                         error:
@@ -134,6 +136,7 @@ enum {
 + (BOOL)updateProviderAccountIdentifier:(NSString *)providerAccountIdentifier
                             displayName:(NSString *)displayName
                       responsesEndpoint:(NSString *)responsesEndpoint
+                        maxOutputTokens:(long long)maxOutputTokens
                                   error:(NSError **)error;
 + (BOOL)archiveProviderAccountIdentifier:(NSString *)providerAccountIdentifier
                                     error:(NSError **)error;

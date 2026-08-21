@@ -421,6 +421,8 @@
 "Delete Account…" = "Delete Account…";
 "Endpoint and optional bearer token" = "Endpoint and optional bearer token";
 "Endpoint is configured." = "Endpoint is configured.";
+"Limit maximum output tokens" = "Limit maximum output tokens";
+"Maximum Output Tokens Must Be a Positive Integer" = "Maximum Output Tokens Must Be a Positive Integer";
 "Not configured." = "Not configured.";
 "Not signed in to ChatGPT." = "Not signed in to ChatGPT.";
 "Paste API key" = "Paste API key";

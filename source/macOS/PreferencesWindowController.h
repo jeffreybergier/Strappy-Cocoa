@@ -47,6 +47,10 @@
   BOOL                 scanning_;
   BOOL                 refreshingModels_;
   BOOL                 noAvailableModelAccounts_;
+  BOOL                 modelCatalogDirty_;
+  BOOL                 databaseCatalogDirty_;
+  BOOL                 databaseStudyDirty_;
+  BOOL                 updatingModelWhitelist_;
 }
 
 - (id)init;

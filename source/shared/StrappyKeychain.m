@@ -122,6 +122,28 @@ static NSMutableDictionary *StrappyKeychainMutableCredential(
     [[credential mutableCopy] autorelease] : nil;
 }
 
+static NSString *StrappyKeychainNormalizedBearerToken(NSString *token)
+{
+  NSMutableString *normalized;
+  NSUInteger index;
+
+  if (![token isKindOfClass:[NSString class]]) {
+    return @"";
+  }
+  normalized = [NSMutableString stringWithCapacity:[token length]];
+  for (index = 0U; index < [token length]; index++) {
+    unichar character;
+
+    character = [token characterAtIndex:index];
+    if ((character < 0x20U) || (character == 0x7fU)) {
+      continue;
+    }
+    [normalized appendFormat:@"%C", character];
+  }
+  return [normalized stringByTrimmingCharactersInSet:
+    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+
 static NSString *StrappyEnvironmentValueOrNil(NSString *name)
 {
   const char *value;
@@ -277,6 +299,7 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
   id version;
   id kind;
   id token;
+  NSString *normalizedToken;
 
   service = StrappyKeychainServiceForProvider(providerIdentifier);
   if ((service == nil) || ([providerAccountIdentifier length] == 0U)) {
@@ -292,15 +315,16 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
   version = [credential objectForKey:kStrappyChatGPTFormatVersionKey];
   kind = [credential objectForKey:kStrappyCredentialKindKey];
   token = [credential objectForKey:kStrappyBearerTokenKey];
+  normalizedToken = StrappyKeychainNormalizedBearerToken(token);
   if (![version isKindOfClass:[NSNumber class]] ||
       ([version XP_integerValue] !=
         kStrappyBearerCredentialFormatVersion) ||
       ![kind isEqual:@"api_token"] ||
-      ![token isKindOfClass:[NSString class]] || ([token length] == 0U)) {
+      ([normalizedToken length] == 0U)) {
     return NO;
   }
   if (bearerToken != NULL) {
-    *bearerToken = [[token copy] autorelease];
+    *bearerToken = [[normalizedToken copy] autorelease];
   }
   return YES;
 }
@@ -310,12 +334,14 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
 providerAccountIdentifier:(NSString *)providerAccountIdentifier
 {
   NSString *service;
+  NSString *normalizedToken;
   NSMutableDictionary *credential;
   NSData *data;
 
   service = StrappyKeychainServiceForProvider(providerIdentifier);
+  normalizedToken = StrappyKeychainNormalizedBearerToken(bearerToken);
   if ((service == nil) || ([providerAccountIdentifier length] == 0U) ||
-      ([bearerToken length] == 0U) ||
+      ([normalizedToken length] == 0U) ||
       [providerIdentifier isEqualToString:@"openai_chatgpt"]) {
     return NO;
   }
@@ -328,7 +354,7 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
     (XPInteger)kStrappyBearerCredentialFormatVersion]
                  forKey:kStrappyChatGPTFormatVersionKey];
   [credential setObject:@"api_token" forKey:kStrappyCredentialKindKey];
-  [credential setObject:bearerToken forKey:kStrappyBearerTokenKey];
+  [credential setObject:normalizedToken forKey:kStrappyBearerTokenKey];
   data = StrappyKeychainPropertyListData(credential);
   if ((data == nil) ||
       ![XPKeychain setGenericPasswordData:data service:service

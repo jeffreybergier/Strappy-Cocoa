@@ -34,10 +34,14 @@
   NSPopUpButton *searchProviderPopUpButton_;
   StrappySession *session_;
   StrappySessionOptions *defaultOptions_;
+  NSArray *accountRows_;
+  NSArray *modelRows_;
   NSString *statusText_;
   BOOL editsSessionDefaults_;
   BOOL layingOut_;
   BOOL reloading_;
+  BOOL catalogsDirty_;
+  BOOL savingOptions_;
 }
 
 - (id)init;

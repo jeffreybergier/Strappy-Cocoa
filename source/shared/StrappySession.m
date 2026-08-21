@@ -204,9 +204,12 @@ static int StrappySessionCopyChatGPTCredentials(
       credentialLockForProviderIdentifier:providerIdentifier
       providerAccountIdentifier:providerAccountIdentifier];
     @synchronized(credentialLock) {
-      if ([keychain loadBearerToken:&bearerToken
-              forProviderIdentifier:providerIdentifier
-          providerAccountIdentifier:providerAccountIdentifier]) {
+      BOOL loaded;
+
+      loaded = [keychain loadBearerToken:&bearerToken
+                   forProviderIdentifier:providerIdentifier
+               providerAccountIdentifier:providerAccountIdentifier];
+      if (loaded) {
         *accessTokenOut = strappy_string_duplicate([bearerToken UTF8String]);
         if (*accessTokenOut != NULL) {
           return 1;
@@ -227,11 +230,24 @@ static int StrappySessionCopyChatGPTCredentials(
       credentialLockForProviderIdentifier:@"openai_chatgpt"
       providerAccountIdentifier:providerAccountIdentifier];
   @synchronized(credentialLock) {
-    if (![keychain loadChatGPTAccessToken:&accessToken
-                              refreshToken:&refreshToken
-                         accountIdentifier:&accountIdentifier
-                      expiresAtMilliseconds:&expiresAtMilliseconds
-                 providerAccountIdentifier:providerAccountIdentifier]) {
+    BOOL loaded;
+
+    loaded = [keychain loadChatGPTAccessToken:&accessToken
+                                  refreshToken:&refreshToken
+                             accountIdentifier:&accountIdentifier
+                          expiresAtMilliseconds:&expiresAtMilliseconds
+                     providerAccountIdentifier:providerAccountIdentifier];
+    if (!loaded &&
+        [keychain
+          migrateLegacyChatGPTCredentialToProviderAccountIdentifier:
+            providerAccountIdentifier]) {
+      loaded = [keychain loadChatGPTAccessToken:&accessToken
+                                    refreshToken:&refreshToken
+                               accountIdentifier:&accountIdentifier
+                            expiresAtMilliseconds:&expiresAtMilliseconds
+                       providerAccountIdentifier:providerAccountIdentifier];
+    }
+    if (!loaded) {
       strappy_set_error(errorOut, "Sign in to ChatGPT before sending a prompt.");
     } else {
       credentialReady = YES;
@@ -382,6 +398,11 @@ static NSString *StrappySessionStringFromCString(char *value)
 }
 
 @interface StrappySession ()
++ (BOOL)initializeSessionStoreAndPrepareCredentials:(BOOL)prepareCredentials
+                                               error:(NSError **)error;
++ (NSArray *)providerAccountCatalogVerifyingCredentials:
+               (BOOL)verifyCredentials
+                                                   error:(NSError **)error;
 + (NSMutableDictionary *)inFlightSessions;
 + (void)registerInFlightSession:(StrappySession *)session;
 + (void)unregisterInFlightSession:(StrappySession *)session;
@@ -2169,6 +2190,39 @@ static BOOL StrappySessionRecordFromOptions(
 
 + (BOOL)initializeSessionStoreWithError:(NSError **)error
 {
+  return [self initializeSessionStoreAndPrepareCredentials:NO error:error];
+}
+
++ (BOOL)prepareProviderCredentialsWithError:(NSError **)error
+{
+  static BOOL credentialsPrepared = NO;
+  BOOL ok;
+  BOOL didPrepare;
+
+  didPrepare = NO;
+  @synchronized(self) {
+    if (credentialsPrepared) {
+      return YES;
+    }
+    ok = [self initializeSessionStoreAndPrepareCredentials:YES error:error];
+    if (ok) {
+      credentialsPrepared = YES;
+      didPrepare = YES;
+    }
+  }
+  if (didPrepare) {
+    [[NSNotificationCenter defaultCenter]
+      postNotificationName:StrappyProviderAccountsDidChangeNotification
+                    object:self
+                  userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                    @"prepared", @"action", nil]];
+  }
+  return ok;
+}
+
++ (BOOL)initializeSessionStoreAndPrepareCredentials:(BOOL)prepareCredentials
+                                               error:(NSError **)error
+{
   NSString *databasePath;
   char *strappyError;
   int ok;
@@ -2182,7 +2236,7 @@ static BOOL StrappySessionRecordFromOptions(
   strappyError = NULL;
   ok = strappy_session_initialize_store([databasePath UTF8String],
                                         &strappyError);
-  if (ok) {
+  if (ok && prepareCredentials) {
     static const char *providerIDs[] = {
       STRAPPY_PROVIDER_OPENROUTER,
       STRAPPY_PROVIDER_OPENAI_CHATGPT
@@ -2295,7 +2349,8 @@ static BOOL StrappySessionRecordFromOptions(
           [databasePath fileSystemRepresentation],
           existingAccounts.records[0].account_id,
           existingAccounts.records[0].display_name,
-          [legacyEndpoint UTF8String], &strappyError);
+          [legacyEndpoint UTF8String],
+          existingAccounts.records[0].max_output_tokens, &strappyError);
       }
       if (ok && (existingAccounts.count > 0U)) {
         size_t existingIndex;
@@ -2430,6 +2485,8 @@ static BOOL StrappySessionRecordFromOptions(
     displayName, @"name",
     lifecycleState, @"lifecycle_state",
     responsesEndpoint, @"responses_endpoint",
+    [NSNumber numberWithLongLong:record->max_output_tokens],
+      @"max_output_tokens",
     [NSNumber numberWithLongLong:record->created_at_ms], @"created_at_ms",
     [NSNumber numberWithLongLong:record->updated_at_ms], @"updated_at_ms",
     [NSNumber numberWithBool:(record->has_last_used_at_ms ? YES : NO)],
@@ -2479,6 +2536,18 @@ static BOOL StrappySessionRecordFromOptions(
 
 + (NSArray *)providerAccountCatalogWithError:(NSError **)error
 {
+  return [self providerAccountCatalogVerifyingCredentials:NO error:error];
+}
+
++ (NSArray *)verifiedProviderAccountCatalogWithError:(NSError **)error
+{
+  return [self providerAccountCatalogVerifyingCredentials:YES error:error];
+}
+
++ (NSArray *)providerAccountCatalogVerifyingCredentials:
+               (BOOL)verifyCredentials
+                                                   error:(NSError **)error
+{
   NSString *databasePath;
   strappy_provider_account_record_list list;
   char *strappyError;
@@ -2504,8 +2573,6 @@ static BOOL StrappySessionRecordFromOptions(
     NSString *accountIdentifier;
     NSString *providerIdentifier;
     NSString *responsesEndpoint;
-    StrappyKeychain *keychain;
-    NSObject *credentialLock;
     BOOL available;
 
     account = [StrappySession dictionaryFromProviderAccountRecord:
@@ -2514,27 +2581,32 @@ static BOOL StrappySessionRecordFromOptions(
       accountIdentifier = [account objectForKey:@"id"];
       providerIdentifier = [account objectForKey:@"provider_id"];
       responsesEndpoint = [account objectForKey:@"responses_endpoint"];
-      keychain = [StrappyKeychain sharedKeychain];
-      available = NO;
+      available = YES;
       if ([providerIdentifier isEqualToString:@"other"]) {
         available = [responsesEndpoint length] > 0U;
-      } else if ([providerIdentifier isEqualToString:@"openrouter"]) {
+      } else if ([providerIdentifier isEqualToString:@"openai_chatgpt"] &&
+                 !strappy_provider_chatgpt_is_enabled()) {
+        available = NO;
+      }
+      if (available && verifyCredentials &&
+          ![providerIdentifier isEqualToString:@"other"]) {
+        StrappyKeychain *keychain;
+        NSObject *credentialLock;
+
+        keychain = [StrappyKeychain sharedKeychain];
         credentialLock = [keychain
           credentialLockForProviderIdentifier:providerIdentifier
           providerAccountIdentifier:accountIdentifier];
         @synchronized(credentialLock) {
-          available = [keychain
-            hasBearerTokenForProviderIdentifier:providerIdentifier
-            providerAccountIdentifier:accountIdentifier];
-        }
-      } else if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) {
-        credentialLock = [keychain
-          credentialLockForProviderIdentifier:providerIdentifier
-          providerAccountIdentifier:accountIdentifier];
-        @synchronized(credentialLock) {
-          available = [keychain
-            hasChatGPTCredentialsForProviderAccountIdentifier:
-              accountIdentifier];
+          if ([providerIdentifier isEqualToString:@"openrouter"]) {
+            available = [keychain
+              hasBearerTokenForProviderIdentifier:providerIdentifier
+              providerAccountIdentifier:accountIdentifier];
+          } else {
+            available = [keychain
+              hasChatGPTCredentialsForProviderAccountIdentifier:
+                accountIdentifier];
+          }
         }
       }
       availableAccount = [[account mutableCopy] autorelease];
@@ -2690,6 +2762,7 @@ static BOOL StrappySessionRecordFromOptions(
 + (BOOL)updateProviderAccountIdentifier:(NSString *)providerAccountIdentifier
                             displayName:(NSString *)displayName
                       responsesEndpoint:(NSString *)responsesEndpoint
+                        maxOutputTokens:(long long)maxOutputTokens
                                   error:(NSError **)error
 {
   NSString *databasePath;
@@ -2707,7 +2780,7 @@ static BOOL StrappySessionRecordFromOptions(
   trimmedEndpoint = [responsesEndpoint stringByTrimmingCharactersInSet:
     [NSCharacterSet whitespaceAndNewlineCharacterSet]];
   if (([providerAccountIdentifier length] == 0U) ||
-      ([trimmedName length] == 0U)) {
+      ([trimmedName length] == 0U) || (maxOutputTokens < 0LL)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:
         "Provider account update is incomplete."];
@@ -2751,7 +2824,8 @@ static BOOL StrappySessionRecordFromOptions(
   if (!strappy_db_update_provider_account(
         [databasePath fileSystemRepresentation],
         [providerAccountIdentifier UTF8String], [trimmedName UTF8String],
-        StrappySessionOptionalCString(trimmedEndpoint), &strappyError)) {
+        StrappySessionOptionalCString(trimmedEndpoint), maxOutputTokens,
+        &strappyError)) {
     @synchronized(credentialLock) {
       (void)[keychain saveDisplayName:previousName
                forProviderIdentifier:providerIdentifier
@@ -3752,7 +3826,7 @@ static BOOL StrappySessionRecordFromOptions(
     }
   }
 
-  accounts = [StrappySession providerAccountCatalogWithError:error];
+  accounts = [StrappySession verifiedProviderAccountCatalogWithError:error];
   if (accounts == nil) {
     return NO;
   }
@@ -5136,6 +5210,7 @@ static BOOL StrappySessionRecordFromOptions(
   strappy_session_record record;
   NSDictionary *session;
   StrappySessionResponsesContext responsesContext;
+  strappy_model_route_record route;
 
   if ((prompt == nil) || ([prompt length] == 0U)) {
     if (error != nil) {
@@ -5178,7 +5253,6 @@ static BOOL StrappySessionRecordFromOptions(
                                                         error:error]) {
     return nil;
   }
-
   memset(&responsesContext, 0, sizeof(responsesContext));
   responsesContext.session = self;
   responsesContext.context = [context retain];
@@ -5208,8 +5282,20 @@ static BOOL StrappySessionRecordFromOptions(
           (renderContextError != NULL) ? renderContextError : "unknown error");
   }
   strappy_session_free_string(renderContextError);
-  apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
-  apiToken = [[StrappyKeychain sharedKeychain] apiToken];
+  apiEndpoint = nil;
+  apiToken = nil;
+  strappy_model_route_record_init(&route);
+  if (strappy_db_get_session_model_route(
+        [databasePath fileSystemRepresentation], sessionId, &route, NULL) &&
+      (route.provider_id != NULL) &&
+      (strcmp(route.provider_id, STRAPPY_PROVIDER_OPENROUTER) == 0) &&
+      (route.provider_account_id != NULL) &&
+      (strcmp(route.provider_account_id,
+              STRAPPY_PROVIDER_ACCOUNT_OPENROUTER) == 0)) {
+    apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
+    apiToken = [[StrappyKeychain sharedKeychain] apiToken];
+  }
+  strappy_model_route_record_destroy(&route);
 
   strappy_session_record_init(&record);
   strappyError = NULL;

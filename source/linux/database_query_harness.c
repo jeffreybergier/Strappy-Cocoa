@@ -12001,10 +12001,11 @@ static int harness_run_multi_account_database_tests(
     strappy_db_create_provider_account(path,"openai_chatgpt","Same Name",NULL,&chat_two,&error) &&
     strappy_db_create_provider_account(path,"openrouter","Same Name",NULL,&router_two,&error) &&
     strappy_db_update_provider_account(
-      path,router_two,"\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E \xF0\x9F\x8C\x88",NULL,&error) &&
+      path,router_two,"\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E \xF0\x9F\x8C\x88",NULL,14286LL,&error) &&
     strappy_db_get_provider_account(path,router_two,&account,&error) &&
     (strcmp(account.display_name,
             "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E \xF0\x9F\x8C\x88") == 0) &&
+    (account.max_output_tokens == 14286LL) &&
     strappy_model_catalog_import_bundled_models(HARNESS_RESOURCE_DIR,path,&error) &&
     strappy_db_create_provider_account(path,"openai_chatgpt","Later",NULL,&chat_three,&error) &&
     harness_expect_catalog_integer(path,
@@ -12018,7 +12019,7 @@ static int harness_run_multi_account_database_tests(
     harness_expect_catalog_integer(path,
       "SELECT COUNT(*) FROM models WHERE wire_model_id='shared/model' AND catalog_active=1;",
       1LL,"single provider-owned remote model") &&
-    strappy_db_update_provider_account(path,chat_two,"Renamed",NULL,&error);
+    strappy_db_update_provider_account(path,chat_two,"Renamed",NULL,0LL,&error);
   strappy_provider_account_record_destroy(&account);
   if (ok) {
     char *rejected_account;
@@ -12062,7 +12063,7 @@ static int harness_run_multi_account_database_tests(
       strappy_db_get_provider_account(path,other_incomplete,&account,&error) &&
       (account.responses_endpoint == NULL) &&
       !strappy_db_update_provider_account(
-        path,other_incomplete,"Unconfigured",NULL,&error) &&
+        path,other_incomplete,"Unconfigured",NULL,0LL,&error) &&
       (error != NULL) &&
       (strstr(error,"requires a Responses endpoint") != NULL);
     strappy_provider_account_record_destroy(&account);
@@ -12072,7 +12073,9 @@ static int harness_run_multi_account_database_tests(
       path,other_incomplete,&error);
   }
   if (ok) ok = strappy_db_create_provider_account(path,"other","Local","https://one.example/v1/responses",&other_one,&error) &&
-    strappy_db_create_provider_account(path,"other","Local","https://two.example/v1/responses",&other_two,&error);
+    strappy_db_create_provider_account(path,"other","Local","https://two.example/v1/responses",&other_two,&error) &&
+    strappy_db_update_provider_account(path,other_two,"Local",
+      "https://two.example/v1/responses",8192LL,&error);
   memset(&input,0,sizeof(input));
   input.wire_model_id="manual"; input.display_name=NULL;
   input.context_window_tokens=8192LL; input.max_output_tokens=2048LL;
@@ -12119,6 +12122,7 @@ static int harness_run_multi_account_database_tests(
     strappy_db_get_session_model_route(path,session_id,&route,&error) &&
     (route.responses_endpoint != NULL) &&
     (strcmp(route.responses_endpoint,"https://two.example/v1/responses")==0) &&
+    (route.max_output_tokens==8192LL) &&
     (strcmp(route.billing_kind,"unknown")==0) &&
     route.local_functions_enabled && !route.hosted_tools_enabled;
   strappy_model_route_record_destroy(&route);

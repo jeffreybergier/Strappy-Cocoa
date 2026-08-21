@@ -2522,7 +2522,8 @@ static int strappy_db_semantic_finish_response_call(
   char **error_out)
 {
   static const char *update_attempt_sql =
-    "UPDATE http_attempts SET state = ?, started_at_ms = ?, "
+    "UPDATE http_attempts SET state = ?, "
+    "started_at_ms = COALESCE(NULLIF(?, 0), started_at_ms), "
     "completed_at_ms = ?, http_status = ?, curl_code = ?, "
     "retry_after_seconds = ?, request_bytes = ?, response_bytes = ?, "
     "name_lookup_us = ?, connect_us = ?, start_transfer_us = ?, total_us = ?, "
@@ -5324,7 +5325,8 @@ static int strappy_db_semantic_list_response_timeline(
     "1 AS group_phase, 0 AS attempt_phase, -1 AS item_index, "
     "a.method, a.endpoint, ar.provider_status, a.transport_error, "
     "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason, "
-    "r.model_id, 0 AS can_include_in_context, t.ordinal, "
+    "COALESCE((SELECT wire_model_id FROM models WHERE id=r.model_id), "
+      "r.model_id), 0 AS can_include_in_context, t.ordinal, "
     "CASE WHEN r.wall_duration_ms IS NOT NULL THEN "
       "CASE WHEN NOT EXISTS (SELECT 1 FROM http_attempts a2 "
         "WHERE a2.request_id = r.id "
@@ -5370,7 +5372,8 @@ static int strappy_db_semantic_list_response_timeline(
       "2147483647), "
     "a.method, a.endpoint, ar.provider_status, a.transport_error, "
     "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason, "
-    "r.model_id, 0, t.ordinal, NULL "
+    "COALESCE((SELECT wire_model_id FROM models WHERE id=r.model_id), "
+      "r.model_id), 0, t.ordinal, NULL "
     "FROM answer_quality_audits q "
     "JOIN http_attempts a ON a.id = q.response_attempt_id "
     "JOIN model_requests r ON r.id = a.request_id "
@@ -5387,7 +5390,8 @@ static int strappy_db_semantic_list_response_timeline(
     "1, 1, i.source_item_index, "
     "a.method, a.endpoint, ar.provider_status, a.transport_error, "
     "COALESCE(ar.error_message, ar.parse_error), ar.incomplete_reason, "
-    "r.model_id, CASE WHEN i.include_in_context = 1 OR (" \
+    "COALESCE((SELECT wire_model_id FROM models WHERE id=r.model_id), "
+      "r.model_id), CASE WHEN i.include_in_context = 1 OR (" \
       STRAPPY_DB_CONTEXT_ELIGIBLE_ATTEMPT_SQL \
     ") THEN 1 ELSE 0 END, t.ordinal, NULL "
     "FROM conversation_items i "

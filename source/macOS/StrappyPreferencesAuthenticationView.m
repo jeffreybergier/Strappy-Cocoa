@@ -5,6 +5,9 @@
 #import "StrappyKeychain.h"
 #import "StrappySession.h"
 
+#include <errno.h>
+#include <stdlib.h>
+
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
   #define StrappyAccountsPasteboardStringType NSPasteboardTypeString
 #else
@@ -307,6 +310,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
 - (void)showProviderChooser;
 - (void)showSelectedAccount;
 - (void)showError:(NSError *)error title:(NSString *)title;
+- (void)toggleMaxOutputTokens:(id)sender;
 - (void)saveAccount:(id)sender;
 - (void)deleteAccount:(id)sender;
 - (void)deleteAccountAlertDidEnd:(NSAlert *)alert
@@ -535,7 +539,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   NSInteger row;
 
   error = nil;
-  accounts = [StrappySession providerAccountCatalogWithError:&error];
+  accounts = [StrappySession verifiedProviderAccountCatalogWithError:&error];
   if (accounts == nil) {
     accounts = [NSArray array];
     [self showError:error
@@ -603,11 +607,23 @@ static NSButton *StrappyAccountsButton(NSRect frame,
                 name:NSControlTextDidBeginEditingNotification
               object:accountNameField_];
   }
+  if (endpointField_ != nil) {
+    [[NSNotificationCenter defaultCenter]
+      removeObserver:self
+                name:NSControlTextDidBeginEditingNotification
+              object:endpointField_];
+  }
   if (tokenField_ != nil) {
     [[NSNotificationCenter defaultCenter]
       removeObserver:self
                 name:NSControlTextDidBeginEditingNotification
               object:tokenField_];
+  }
+  if (maxOutputTokensField_ != nil) {
+    [[NSNotificationCenter defaultCenter]
+      removeObserver:self
+                name:NSControlTextDidBeginEditingNotification
+              object:maxOutputTokensField_];
   }
   subviews = [[rightPaneView_ subviews] copy];
   for (index = 0U; index < [subviews count]; index++) {
@@ -618,6 +634,8 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   accountNameField_ = nil;
   endpointField_ = nil;
   tokenField_ = nil;
+  maxOutputTokensButton_ = nil;
+  maxOutputTokensField_ = nil;
   saveButton_ = nil;
   deleteButton_ = nil;
   chatGPTStatusLabel_ = nil;
@@ -636,11 +654,15 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     [providerTableView_ setNextKeyView:accountTableView_];
   } else if ([provider isEqualToString:@"openrouter"]) {
     [accountNameField_ setNextKeyView:tokenField_];
-    [tokenField_ setNextKeyView:accountTableView_];
+    [tokenField_ setNextKeyView:maxOutputTokensButton_];
+    [maxOutputTokensButton_ setNextKeyView:maxOutputTokensField_];
+    [maxOutputTokensField_ setNextKeyView:accountTableView_];
   } else if ([provider isEqualToString:@"other"]) {
     [accountNameField_ setNextKeyView:endpointField_];
     [endpointField_ setNextKeyView:tokenField_];
-    [tokenField_ setNextKeyView:accountTableView_];
+    [tokenField_ setNextKeyView:maxOutputTokensButton_];
+    [maxOutputTokensButton_ setNextKeyView:maxOutputTokensField_];
+    [maxOutputTokensField_ setNextKeyView:accountTableView_];
   } else {
     [accountNameField_ setNextKeyView:accountTableView_];
   }
@@ -727,6 +749,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   CGFloat top;
   NSTextField *label;
   NSTextField *title;
+  long long maxOutputTokens;
 
   account = [self selectedAccount];
   if (account == nil) {
@@ -736,6 +759,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   [self clearRightPane];
   provider = [account objectForKey:@"provider_id"];
   providerName = StrappyAccountsProviderDisplayName(provider);
+  maxOutputTokens = [[account objectForKey:@"max_output_tokens"] longLongValue];
   bounds = [rightPaneView_ bounds];
   width = MAX(120.0, NSWidth(bounds) - (2.0 * kStrappyAccountsInset));
   top = NSHeight(bounds) - 42.0;
@@ -794,6 +818,35 @@ static NSButton *StrappyAccountsButton(NSRect frame,
            object:tokenField_];
     [tokenField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
     [rightPaneView_ addSubview:tokenField_];
+    top -= 38.0;
+    maxOutputTokensButton_ = [[[NSButton alloc] initWithFrame:NSMakeRect(
+      kStrappyAccountsInset, top, MAX(40.0, width - 122.0),
+      kStrappyAccountsControlHeight)] autorelease];
+    [maxOutputTokensButton_ setButtonType:XPButtonTypeSwitch];
+    [maxOutputTokensButton_ setTitle:
+      NSLocalizedString(@"Limit maximum output tokens", nil)];
+    [maxOutputTokensButton_ setTarget:self];
+    [maxOutputTokensButton_ setAction:@selector(toggleMaxOutputTokens:)];
+    [maxOutputTokensButton_ setState:(maxOutputTokens > 0LL) ?
+      XPControlStateValueOn : XPControlStateValueOff];
+    [maxOutputTokensButton_ setAutoresizingMask:NSViewWidthSizable |
+      NSViewMinYMargin];
+    [rightPaneView_ addSubview:maxOutputTokensButton_];
+    maxOutputTokensField_ = [[[NSTextField alloc] initWithFrame:NSMakeRect(
+      NSWidth(bounds) - kStrappyAccountsInset - 112.0, top, 112.0,
+      kStrappyAccountsControlHeight)] autorelease];
+    [maxOutputTokensField_ setStringValue:(maxOutputTokens > 0LL) ?
+      [NSString stringWithFormat:@"%lld", maxOutputTokens] : @""];
+    [[maxOutputTokensField_ cell] setPlaceholderString:@"14286"];
+    [maxOutputTokensField_ setEnabled:(maxOutputTokens > 0LL)];
+    [maxOutputTokensField_ setAutoresizingMask:NSViewMinXMargin |
+      NSViewMinYMargin];
+    [rightPaneView_ addSubview:maxOutputTokensField_];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(controlTextDidBeginEditing:)
+             name:NSControlTextDidBeginEditingNotification
+           object:maxOutputTokensField_];
     top -= 32.0;
     saveButton_ = StrappyAccountsButton(
       NSMakeRect(NSWidth(bounds) - kStrappyAccountsInset - 88.0,
@@ -821,6 +874,11 @@ static NSButton *StrappyAccountsButton(NSRect frame,
       NSLocalizedString(@"https://example.com/v1/responses", nil)];
     [endpointField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
     [rightPaneView_ addSubview:endpointField_];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(controlTextDidBeginEditing:)
+             name:NSControlTextDidBeginEditingNotification
+           object:endpointField_];
     top -= 40.0;
     label = StrappyAccountsLabel(
       NSMakeRect(kStrappyAccountsInset, top, width, 16.0),
@@ -840,6 +898,40 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     [tokenField_ setStringValue:(token != nil) ? token : @""];
     [tokenField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
     [rightPaneView_ addSubview:tokenField_];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(controlTextDidBeginEditing:)
+             name:NSControlTextDidBeginEditingNotification
+           object:tokenField_];
+    top -= 38.0;
+    maxOutputTokensButton_ = [[[NSButton alloc] initWithFrame:NSMakeRect(
+      kStrappyAccountsInset, top, MAX(40.0, width - 122.0),
+      kStrappyAccountsControlHeight)] autorelease];
+    [maxOutputTokensButton_ setButtonType:XPButtonTypeSwitch];
+    [maxOutputTokensButton_ setTitle:
+      NSLocalizedString(@"Limit maximum output tokens", nil)];
+    [maxOutputTokensButton_ setTarget:self];
+    [maxOutputTokensButton_ setAction:@selector(toggleMaxOutputTokens:)];
+    [maxOutputTokensButton_ setState:(maxOutputTokens > 0LL) ?
+      XPControlStateValueOn : XPControlStateValueOff];
+    [maxOutputTokensButton_ setAutoresizingMask:NSViewWidthSizable |
+      NSViewMinYMargin];
+    [rightPaneView_ addSubview:maxOutputTokensButton_];
+    maxOutputTokensField_ = [[[NSTextField alloc] initWithFrame:NSMakeRect(
+      NSWidth(bounds) - kStrappyAccountsInset - 112.0, top, 112.0,
+      kStrappyAccountsControlHeight)] autorelease];
+    [maxOutputTokensField_ setStringValue:(maxOutputTokens > 0LL) ?
+      [NSString stringWithFormat:@"%lld", maxOutputTokens] : @""];
+    [[maxOutputTokensField_ cell] setPlaceholderString:@"14286"];
+    [maxOutputTokensField_ setEnabled:(maxOutputTokens > 0LL)];
+    [maxOutputTokensField_ setAutoresizingMask:NSViewMinXMargin |
+      NSViewMinYMargin];
+    [rightPaneView_ addSubview:maxOutputTokensField_];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(controlTextDidBeginEditing:)
+             name:NSControlTextDidBeginEditingNotification
+           object:maxOutputTokensField_];
     top -= 32.0;
     saveButton_ = StrappyAccountsButton(
       NSMakeRect(NSWidth(bounds) - kStrappyAccountsInset - 88.0,
@@ -849,6 +941,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
       NSLocalizedString(@"Save", nil), self, @selector(saveAccount:));
     [saveButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
     [saveButton_ setKeyEquivalent:@"\r"];
+    [saveButton_ setEnabled:NO];
     [rightPaneView_ addSubview:saveButton_];
   } else {
     saveButton_ = StrappyAccountsButton(
@@ -937,10 +1030,24 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   id field;
 
   field = [notification object];
-  if (((field == tokenField_) || (field == accountNameField_)) &&
+  if (((field == tokenField_) || (field == accountNameField_) ||
+       (field == endpointField_) || (field == maxOutputTokensField_)) &&
       (saveButton_ != nil)) {
     [saveButton_ setEnabled:YES];
   }
+}
+
+- (void)toggleMaxOutputTokens:(id)sender
+{
+  BOOL enabled;
+
+  (void)sender;
+  enabled = [maxOutputTokensButton_ state] == XPControlStateValueOn;
+  [maxOutputTokensField_ setEnabled:enabled];
+  if (enabled) {
+    [[self window] makeFirstResponder:maxOutputTokensField_];
+  }
+  [saveButton_ setEnabled:YES];
 }
 
 - (void)showError:(NSError *)error title:(NSString *)title
@@ -975,6 +1082,10 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   NSString *name;
   NSString *endpoint;
   NSString *token;
+  NSString *maxOutputText;
+  const char *maxOutputUTF8;
+  char *maxOutputEnd;
+  long long maxOutputTokens;
   NSError *error;
   StrappyKeychain *keychain;
   NSObject *credentialLock;
@@ -992,6 +1103,26 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   token = (tokenField_ != nil) ? [[tokenField_ stringValue]
     stringByTrimmingCharactersInSet:
       [NSCharacterSet whitespaceAndNewlineCharacterSet]] : @"";
+  maxOutputTokens = 0LL;
+  maxOutputText = @"";
+  if ((maxOutputTokensButton_ != nil) &&
+      ([maxOutputTokensButton_ state] == XPControlStateValueOn)) {
+    maxOutputText = [[maxOutputTokensField_ stringValue]
+      stringByTrimmingCharactersInSet:
+        [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    maxOutputUTF8 = [maxOutputText UTF8String];
+    maxOutputEnd = NULL;
+    errno = 0;
+    maxOutputTokens = (maxOutputUTF8 != NULL) ?
+      strtoll(maxOutputUTF8, &maxOutputEnd, 10) : 0LL;
+    if (([maxOutputText length] == 0U) || (errno == ERANGE) ||
+        (maxOutputEnd == maxOutputUTF8) || (maxOutputEnd == NULL) ||
+        (*maxOutputEnd != '\0') || (maxOutputTokens <= 0LL)) {
+      [self showError:nil title:NSLocalizedString(
+        @"Maximum Output Tokens Must Be a Positive Integer", nil)];
+      return;
+    }
+  }
   if ([name length] == 0U) {
     [self showError:nil
               title:NSLocalizedString(@"Account Name Is Required", nil)];
@@ -1012,6 +1143,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
         updateProviderAccountIdentifier:selectedAccountIdentifier_
                             displayName:name
                       responsesEndpoint:endpoint
+                        maxOutputTokens:maxOutputTokens
                                   error:&error]) {
     [self showError:error
               title:NSLocalizedString(@"Could Not Save Account", nil)];

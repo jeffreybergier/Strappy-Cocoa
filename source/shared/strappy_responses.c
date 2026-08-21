@@ -1515,6 +1515,7 @@ static char *strappy_responses_build_request_json(
   const char *tools_json,
   int parallel_tool_calls,
   int reasoning_enabled,
+  long long max_output_tokens,
   const strappy_response_item_raw_record_list *history,
   const strappy_responses_owned_items *new_items,
   long *new_input_start_index_out,
@@ -1523,6 +1524,7 @@ static char *strappy_responses_build_request_json(
   const strappy_provider_definition *definition;
   strappy_responses_buffer buffer;
   char round_text[64];
+  char max_output_text[64];
   char *model_json;
   char *instructions_json;
   char *session_key;
@@ -1549,6 +1551,15 @@ static char *strappy_responses_build_request_json(
   if ((written < 0) || ((size_t)written >= sizeof(round_text))) {
     strappy_set_error(error_out, "Responses round number is invalid.");
     return NULL;
+  }
+  if (max_output_tokens > 0LL) {
+    written = snprintf(max_output_text, sizeof(max_output_text), "%lld",
+                       max_output_tokens);
+    if ((written < 0) || ((size_t)written >= sizeof(max_output_text))) {
+      strappy_set_error(error_out,
+                        "Responses maximum output token limit is invalid.");
+      return NULL;
+    }
   }
   model_json = strappy_responses_json_string(config->api_model);
   instructions_json = strappy_responses_json_string(instructions);
@@ -1604,6 +1615,10 @@ static char *strappy_responses_build_request_json(
   }
   ok = ok &&
        strappy_responses_buffer_append_string(&buffer, instructions_json) &&
+       ((max_output_tokens <= 0LL) ||
+        (strappy_responses_buffer_append_string(
+           &buffer, ",\"max_output_tokens\":") &&
+         strappy_responses_buffer_append_string(&buffer, max_output_text))) &&
        strappy_responses_buffer_append_string(&buffer, ",\"input\":[");
   free(model_json);
   free(instructions_json);
@@ -1695,6 +1710,7 @@ typedef struct strappy_responses_runtime {
   int local_functions_enabled;
   int hosted_tools_enabled;
   long round_limit;
+  long long max_output_tokens;
 } strappy_responses_runtime;
 
 static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
@@ -1725,6 +1741,7 @@ static void strappy_responses_runtime_init(strappy_responses_runtime *runtime)
   runtime->local_functions_enabled = 1;
   runtime->hosted_tools_enabled = 1;
   runtime->round_limit = STRAPPY_SESSION_DEFAULT_ROUND_LIMIT;
+  runtime->max_output_tokens = 0LL;
 }
 
 static void strappy_responses_runtime_destroy(
@@ -2015,6 +2032,7 @@ static int strappy_responses_prepare_runtime(
   runtime->reasoning_enabled = route.reasoning_enabled;
   runtime->local_functions_enabled = route.local_functions_enabled;
   runtime->hosted_tools_enabled = route.hosted_tools_enabled;
+  runtime->max_output_tokens = route.max_output_tokens;
   route.model_id = NULL;
   route.provider_account_id = NULL;
   route.provider_id = NULL;
@@ -3106,6 +3124,20 @@ static int strappy_responses_send_round(
       callback,
       callback_data,
       error_out);
+    if (http.started_at_ms <= 0LL) {
+      http.started_at_ms = strappy_responses_now_ms();
+    }
+    if (http.completed_at_ms <= 0LL) {
+      http.completed_at_ms = strappy_responses_now_ms();
+    }
+    if (!client_ok && (http.transport_error == NULL)) {
+      const char *client_error;
+
+      client_error = ((error_out != NULL) && (*error_out != NULL) &&
+                      ((*error_out)[0] != '\0')) ?
+        *error_out : "Responses client failed before sending the request.";
+      http.transport_error = strappy_string_duplicate(client_error);
+    }
     analyze_ok = (client_ok && !http.cancelled) ?
       strappy_responses_analyze_json(http.response_json,
                                      &analysis,
@@ -3524,6 +3556,7 @@ static char *strappy_responses_send_prompt_for_session_and_store_internal(
       runtime.tools_json,
       runtime.parallel_tool_calls,
       runtime.reasoning_enabled,
+      runtime.max_output_tokens,
       &history,
       &new_items,
       &new_input_start_index,

@@ -421,6 +421,8 @@
 "Delete Account…" = "アカウントを削除…";
 "Endpoint and optional bearer token" = "エンドポイントと任意のBearerトークン";
 "Endpoint is configured." = "エンドポイントは設定済みです。";
+"Limit maximum output tokens" = "最大出力トークン数を制限";
+"Maximum Output Tokens Must Be a Positive Integer" = "最大出力トークン数には正の整数を入力してください";
 "Not configured." = "未設定です。";
 "Not signed in to ChatGPT." = "ChatGPTにサインインしていません。";
 "Paste API key" = "APIキーを貼り付け";

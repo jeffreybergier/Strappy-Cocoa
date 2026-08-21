@@ -1,7 +1,6 @@
 #import "AppDelegate.h"
 #import "PreferencesWindowController.h"
 #import "SessionWindowController.h"
-#import "StrappyAuthentication.h"
 #import "StrappySession.h"
 #import <AltivecCore/AltivecCore.h>
 
@@ -67,8 +66,6 @@ static NSString *StrappyPromptCompletionNotificationBody(
     [StrappySession bootstrapProcessWithCACertPath:cacert];
   }
   (void)[StrappySession initializeSessionStoreWithError:NULL];
-  [[StrappyAuthentication sharedAuthentication]
-    refreshChatGPTCredentialsIfNeeded];
   [[NSNotificationCenter defaultCenter]
     addObserver:self
        selector:@selector(strappySessionPromptDidStart:)
@@ -80,13 +77,6 @@ static NSString *StrappyPromptCompletionNotificationBody(
            name:StrappySessionPromptDidFinishNotification
          object:nil];
   [self showMainWindow];
-}
-
-- (void)applicationDidBecomeActive:(NSNotification *)notification
-{
-  (void)notification;
-  [[StrappyAuthentication sharedAuthentication]
-    refreshChatGPTCredentialsIfNeeded];
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender
@@ -119,6 +109,7 @@ static NSString *StrappyPromptCompletionNotificationBody(
 - (void)showPreferencesWindow:(id)sender
 {
   (void)sender;
+  (void)[StrappySession prepareProviderCredentialsWithError:NULL];
   if (_preferencesWindowController == nil) {
     _preferencesWindowController = [[PreferencesWindowController alloc] init];
   }

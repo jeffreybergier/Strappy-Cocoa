@@ -19,6 +19,8 @@
   NSTextField *accountNameField_;
   NSTextField *endpointField_;
   NSSecureTextField *tokenField_;
+  NSButton *maxOutputTokensButton_;
+  NSTextField *maxOutputTokensField_;
   NSButton *saveButton_;
   NSButton *deleteButton_;
 

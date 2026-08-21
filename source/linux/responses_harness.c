@@ -3359,6 +3359,7 @@ static int harness_run_answer_quality_server(int listener_fd)
   root = cJSON_Parse(body);
   free(body);
   ok = cJSON_IsObject(root) &&
+    (cJSON_GetObjectItem(root, "max_output_tokens") == NULL) &&
     harness_request_base_is_valid(root,
                                   "Report answer quality",
                                   &session_key,
@@ -3401,6 +3402,7 @@ static int harness_run_answer_quality_disabled_server(int listener_fd)
   char *session_key;
   char *prompt_group;
   cJSON *root;
+  cJSON *max_output_tokens;
   int client_fd;
   int ok;
 
@@ -3412,7 +3414,11 @@ static int harness_run_answer_quality_disabled_server(int listener_fd)
   }
   root = cJSON_Parse(body);
   free(body);
+  max_output_tokens = cJSON_IsObject(root) ?
+    cJSON_GetObjectItem(root, "max_output_tokens") : NULL;
   ok = cJSON_IsObject(root) &&
+    cJSON_IsNumber(max_output_tokens) &&
+    (max_output_tokens->valuedouble == 14286.0) &&
     harness_request_base_is_valid_with_answer_quality(
       root,
       "Skip answer quality",
@@ -4977,11 +4983,27 @@ static int harness_test_answer_quality_disabled(void)
                                     session_id,
                                     &options,
                                     &error) &&
-    !options.answer_quality_enabled &&
-    harness_start_server(HARNESS_RESPONSES_SERVER_ANSWER_QUALITY_DISABLED,
-                         endpoint,
-                         sizeof(endpoint),
-                         &server_pid);
+    !options.answer_quality_enabled;
+  db = NULL;
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = sqlite3_exec(
+      db,
+      "UPDATE provider_accounts SET max_output_tokens=14286 "
+      "WHERE provider_id='openrouter';",
+      NULL, NULL, NULL) == SQLITE_OK;
+  } else if (ok) {
+    ok = 0;
+  }
+  if (db != NULL) {
+    sqlite3_close(db);
+    db = NULL;
+  }
+  if (ok) {
+    ok = harness_start_server(HARNESS_RESPONSES_SERVER_ANSWER_QUALITY_DISABLED,
+                              endpoint,
+                              sizeof(endpoint),
+                              &server_pid);
+  }
   if (!ok) {
     fprintf(stderr,
             "Could not prepare answer-quality-disabled integration test: "
@@ -8738,7 +8760,7 @@ static int harness_test_ledger(void)
     (strstr(timeline.records[1].metadata_json, "\"usage\"") != NULL) &&
     (strstr(timeline.records[1].metadata_json, "http_status") == NULL) &&
     (strstr(timeline.records[1].content,
-            "Model: " STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER) != NULL) &&
+            "Model: " STRAPPY_CONFIG_DEFAULT_API_MODEL) != NULL) &&
     (strstr(timeline.records[1].content,
             "Request: POST https://openrouter.ai/api/v1/responses") != NULL) &&
     (strstr(timeline.records[1].content, "HTTP 200") == NULL) &&

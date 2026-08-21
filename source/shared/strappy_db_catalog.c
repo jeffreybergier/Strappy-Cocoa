@@ -278,6 +278,7 @@ void strappy_model_route_record_init(strappy_model_route_record *record)
   record->responses_endpoint = NULL;
   record->wire_model_id = NULL;
   record->billing_kind = NULL;
+  record->max_output_tokens = 0LL;
   record->reasoning_enabled = 1;
   record->local_functions_enabled = 1;
   record->hosted_tools_enabled = 1;
@@ -395,11 +396,12 @@ static int strappy_db_read_account(sqlite3_stmt *stmt,
   record->display_name = strappy_db_column_string(stmt, 2);
   record->lifecycle_state = strappy_db_column_string(stmt, 3);
   record->responses_endpoint = strappy_db_column_string(stmt, 4);
-  record->created_at_ms = (long long)sqlite3_column_int64(stmt, 5);
-  record->updated_at_ms = (long long)sqlite3_column_int64(stmt, 6);
-  record->has_last_used_at_ms = sqlite3_column_type(stmt, 7) != SQLITE_NULL;
+  record->max_output_tokens = (long long)sqlite3_column_int64(stmt, 5);
+  record->created_at_ms = (long long)sqlite3_column_int64(stmt, 6);
+  record->updated_at_ms = (long long)sqlite3_column_int64(stmt, 7);
+  record->has_last_used_at_ms = sqlite3_column_type(stmt, 8) != SQLITE_NULL;
   record->last_used_at_ms = record->has_last_used_at_ms ?
-    (long long)sqlite3_column_int64(stmt, 7) : 0LL;
+    (long long)sqlite3_column_int64(stmt, 8) : 0LL;
   if ((record->account_id == NULL) || (record->provider_id == NULL) ||
       (record->display_name == NULL) || (record->lifecycle_state == NULL)) {
     strappy_provider_account_record_destroy(record);
@@ -570,7 +572,8 @@ int strappy_db_list_provider_accounts(
 {
   static const char *sql =
     "SELECT id, provider_id, display_name, lifecycle_state, "
-    "responses_endpoint, created_at_ms, updated_at_ms, last_used_at_ms "
+    "responses_endpoint, max_output_tokens, created_at_ms, updated_at_ms, "
+    "last_used_at_ms "
     "FROM provider_accounts WHERE (? IS NULL OR provider_id = ?) "
     "AND (? = 1 OR lifecycle_state = 'active') "
     "ORDER BY created_at_ms, id;";
@@ -641,10 +644,19 @@ int strappy_db_get_provider_account(const char *db_path, const char *account_id,
 int strappy_db_update_provider_account(const char *db_path, const char *account_id,
                                        const char *display_name,
                                        const char *responses_endpoint,
+                                       long long max_output_tokens,
                                        char **error_out)
 {
   sqlite3 *db; sqlite3_stmt *stmt; strappy_provider_account_record current; int rc; int changed;
   if (!strappy_db_get_provider_account(db_path, account_id, &current, error_out)) return 0;
+  if ((max_output_tokens < 0LL) ||
+      ((max_output_tokens > 0LL) &&
+       (strcmp(current.provider_id, STRAPPY_PROVIDER_OPENROUTER) != 0) &&
+       (strcmp(current.provider_id, STRAPPY_PROVIDER_OTHER) != 0))) {
+    strappy_provider_account_record_destroy(&current);
+    strappy_set_error(error_out, "Provider account output limit is invalid.");
+    return 0;
+  }
   if (!strappy_db_validate_account_metadata(current.provider_id, display_name,
                                              responses_endpoint, 0, NULL,
                                              error_out)) {
@@ -654,12 +666,16 @@ int strappy_db_update_provider_account(const char *db_path, const char *account_
   if (!strappy_db_open(db_path, &db, error_out)) return 0;
   if (!strappy_db_ensure_schema(db, error_out)) { strappy_db_release(db); return 0; }
   stmt = NULL; rc = sqlite3_prepare_v2(db,
-    "UPDATE provider_accounts SET display_name=?, responses_endpoint=?, updated_at_ms=? WHERE id=?;",
+    "UPDATE provider_accounts SET display_name=?, responses_endpoint=?, "
+    "max_output_tokens=?, updated_at_ms=? WHERE id=?;",
     -1, &stmt, NULL);
   if ((rc == SQLITE_OK) && (sqlite3_bind_text(stmt,1,display_name,-1,SQLITE_TRANSIENT)==SQLITE_OK) &&
       ((responses_endpoint != NULL) ? (sqlite3_bind_text(stmt,2,responses_endpoint,-1,SQLITE_TRANSIENT)==SQLITE_OK) : (sqlite3_bind_null(stmt,2)==SQLITE_OK)) &&
-      (sqlite3_bind_int64(stmt,3,(sqlite3_int64)strappy_db_now_ms())==SQLITE_OK) &&
-      (sqlite3_bind_text(stmt,4,account_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
+      ((max_output_tokens > 0LL) ?
+       (sqlite3_bind_int64(stmt,3,(sqlite3_int64)max_output_tokens)==SQLITE_OK) :
+       (sqlite3_bind_null(stmt,3)==SQLITE_OK)) &&
+      (sqlite3_bind_int64(stmt,4,(sqlite3_int64)strappy_db_now_ms())==SQLITE_OK) &&
+      (sqlite3_bind_text(stmt,5,account_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
   changed=(rc==SQLITE_DONE)?sqlite3_changes(db):0;
   if (changed != 1) strappy_set_error(error_out,"Provider account could not be updated.");
   sqlite3_finalize(stmt); strappy_db_release(db); return changed==1;
@@ -5109,7 +5125,8 @@ int strappy_db_get_session_model_route(
       "COALESCE(mc.billing_kind, 'metered_api'), "
       "COALESCE(mc.reasoning_enabled, 1), "
       "COALESCE(mc.local_functions_enabled, 1), "
-      "COALESCE(mc.hosted_tools_enabled, 1) "
+      "COALESCE(mc.hosted_tools_enabled, 1), "
+      "COALESCE(a.max_output_tokens, 0) "
     "FROM sessions s JOIN models m ON m.id = "
       "COALESCE(NULLIF(s.model_id, ''), "
         STRAPPY_DB_DEFAULT_MODEL_SQL ") "
@@ -5179,6 +5196,7 @@ int strappy_db_get_session_model_route(
   route->reasoning_enabled = sqlite3_column_int(stmt, 6) ? 1 : 0;
   route->local_functions_enabled = sqlite3_column_int(stmt, 7) ? 1 : 0;
   route->hosted_tools_enabled = sqlite3_column_int(stmt, 8) ? 1 : 0;
+  route->max_output_tokens = (long long)sqlite3_column_int64(stmt, 9);
   sqlite3_finalize(stmt);
   strappy_db_release(db);
   if ((route->model_id == NULL) ||

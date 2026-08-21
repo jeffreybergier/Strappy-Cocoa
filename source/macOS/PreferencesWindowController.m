@@ -584,6 +584,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     databaseRows_ = [[NSArray alloc] init];
     allDatabaseStudyRows_ = [[NSArray alloc] init];
     databaseStudyRows_ = [[NSArray alloc] init];
+    modelCatalogDirty_ = YES;
+    databaseCatalogDirty_ = YES;
+    databaseStudyDirty_ = YES;
     databaseStudyDateFormatter_ = [[NSDateFormatter alloc] init];
     [databaseStudyDateFormatter_
       setFormatterBehavior:NSDateFormatterBehavior10_4];
@@ -623,9 +626,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     [self buildContentView];
     [self loadSystemPrompt];
     [self setModelCatalogRefreshing:[StrappySession isModelCatalogRefreshInFlight]];
-    [self loadOpenRouterModels];
     [self setScanning:NO];
-    [self loadCatalogedDatabases];
   }
 
   [window release];
@@ -706,8 +707,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
        selector:@selector(databaseStudySearchTextDidChange:)
            name:NSControlTextDidChangeNotification
          object:databaseStudySearchField_];
-  [self loadDatabaseStudy];
-
   systemPromptsPaneView_ =
     [[StrappyPreferencesSystemPromptsView alloc] initWithFrame:paneFrame];
   systemPromptTextView_ = [[systemPromptsPaneView_ textView] retain];
@@ -779,12 +778,19 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
                isEqualToString:kStrappyPreferencesToolbarSessionDefaults]) {
     paneView = [sessionDefaultsController_ view];
   } else if ([identifier isEqualToString:kStrappyPreferencesToolbarModels]) {
-    [self loadOpenRouterModels];
+    if (modelCatalogDirty_) {
+      [self loadOpenRouterModels];
+    }
     paneView = modelWhitelistView_;
   } else if ([identifier isEqualToString:kStrappyPreferencesToolbarDatabases]) {
+    if (databaseCatalogDirty_) {
+      [self loadCatalogedDatabases];
+    }
     paneView = databaseWhitelistView_;
   } else if ([identifier isEqualToString:kStrappyPreferencesToolbarStudy]) {
-    [self loadDatabaseStudy];
+    if (databaseStudyDirty_) {
+      [self loadDatabaseStudy];
+    }
     paneView = databaseStudyPaneView_;
   } else if ([identifier isEqualToString:kStrappyPreferencesToolbarPrompts]) {
     paneView = systemPromptsPaneView_;
@@ -910,7 +916,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
   identifier = [[[self window] toolbar] selectedItemIdentifier];
-  if ([identifier isEqualToString:kStrappyPreferencesToolbarStudy]) {
+  if ([identifier isEqualToString:kStrappyPreferencesToolbarStudy] &&
+      databaseStudyDirty_) {
     [self loadDatabaseStudy];
   }
 }
@@ -925,7 +932,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
-  [self loadDatabaseStudy];
+  databaseStudyDirty_ = YES;
+  if ([[[[self window] toolbar] selectedItemIdentifier]
+        isEqualToString:kStrappyPreferencesToolbarStudy]) {
+    [self loadDatabaseStudy];
+  }
   errorMessage = [userInfo objectForKey:@"error"];
   if ([errorMessage isKindOfClass:[NSString class]] &&
       ([errorMessage length] > 0U)) {
@@ -963,6 +974,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
+  databaseStudyDirty_ = NO;
   [allDatabaseStudyRows_ release];
   allDatabaseStudyRows_ = [rows copy];
   [self updateDatabaseStudyProgress];
@@ -1612,6 +1624,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   error = nil;
   rows = [StrappySession modelCatalogWithError:&error];
   if (rows != nil) {
+    modelCatalogDirty_ = NO;
     noAvailableModelAccounts_ = NO;
     [allModelRows_ release];
     allModelRows_ = [StrappyPreparedModelRowsForRows(rows) copy];
@@ -1816,7 +1829,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
   [modelProviderEditor_ autorelease];
   modelProviderEditor_ = nil;
-  [self loadOpenRouterModels];
+  if (modelCatalogDirty_ &&
+      [[[[self window] toolbar] selectedItemIdentifier]
+        isEqualToString:kStrappyPreferencesToolbarModels]) {
+    [self loadOpenRouterModels];
+  }
 }
 
 - (void)refreshModels:(id)sender
@@ -1877,7 +1894,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
-  [self loadOpenRouterModels];
+  if (modelCatalogDirty_ &&
+      [[[[self window] toolbar] selectedItemIdentifier]
+        isEqualToString:kStrappyPreferencesToolbarModels]) {
+    [self loadOpenRouterModels];
+  }
   count = [userInfo objectForKey:@"model_count"];
   if (([self currentModelSearchText] == nil) &&
       [count isKindOfClass:[NSNumber class]]) {
@@ -1889,8 +1910,17 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)modelCatalogDidChange:(NSNotification *)notification
 {
+  NSString *identifier;
+
   (void)notification;
-  [self loadOpenRouterModels];
+  modelCatalogDirty_ = YES;
+  if (updatingModelWhitelist_) {
+    return;
+  }
+  identifier = [[[self window] toolbar] selectedItemIdentifier];
+  if ([identifier isEqualToString:kStrappyPreferencesToolbarModels]) {
+    [self loadOpenRouterModels];
+  }
 }
 
 - (NSString *)currentDatabaseSearchText
@@ -2000,6 +2030,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   error = nil;
   rows = [[FileScanner sharedScanner] catalogedSQLiteDatabasesWithError:&error];
   if (rows != nil) {
+    databaseCatalogDirty_ = NO;
     [allDatabaseRows_ release];
     allDatabaseRows_ = [rows copy];
     [self applyDatabaseRows];
@@ -2015,11 +2046,18 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 {
   NSArray *rows;
   NSArray *selectedPaths;
+  NSString *identifier;
 
+  databaseCatalogDirty_ = YES;
   rows = [[notification userInfo] objectForKey:@"rows"];
   if (![rows isKindOfClass:[NSArray class]]) {
     return;
   }
+  identifier = [[[self window] toolbar] selectedItemIdentifier];
+  if (![identifier isEqualToString:kStrappyPreferencesToolbarDatabases]) {
+    return;
+  }
+  databaseCatalogDirty_ = NO;
   selectedPaths = [self selectedDatabaseTableRowPaths];
   [allDatabaseRows_ release];
   allDatabaseRows_ = [rows copy];
@@ -2270,6 +2308,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
+  updatingModelWhitelist_ = YES;
   for (rowIndex = [selectedRows firstIndex];
        rowIndex != NSNotFound;
        rowIndex = [selectedRows indexGreaterThanIndex:rowIndex]) {
@@ -2291,6 +2330,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
         ![StrappySession setModelAllowed:shouldAllow
                       forModelIdentifier:modelId
                                    error:&error]) {
+      updatingModelWhitelist_ = NO;
       [self loadOpenRouterModels];
       [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
         error,
@@ -2299,6 +2339,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     }
   }
 
+  updatingModelWhitelist_ = NO;
   [self loadOpenRouterModels];
 }
 
@@ -2695,10 +2736,12 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
     modelId = StrappyStringForModelRow(model, @"id");
     error = nil;
+    updatingModelWhitelist_ = YES;
     if (([modelId length] == 0U) ||
         ![StrappySession setModelAllowed:checked
                       forModelIdentifier:modelId
                                    error:&error]) {
+      updatingModelWhitelist_ = NO;
       [modelTableView_ reloadData];
       [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
         error,
@@ -2706,6 +2749,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
       return;
     }
 
+    updatingModelWhitelist_ = NO;
     [self loadOpenRouterModels];
     return;
   }
