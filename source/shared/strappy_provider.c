@@ -225,7 +225,7 @@ static const strappy_provider_definition strappy_provider_registry[] = {
   {
     STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT,
     STRAPPY_PROVIDER_OPENAI_CHATGPT,
-    "ChatGPT (Codex)",
+    "ChatGPT",
     STRAPPY_PROVIDER_CREDENTIAL_OAUTH_DEVICE,
     STRAPPY_PROVIDER_OPENAI_CHATGPT_RESPONSES_ENDPOINT,
     0,

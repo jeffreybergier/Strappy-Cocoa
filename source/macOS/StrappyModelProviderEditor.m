@@ -152,6 +152,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 - (void)showOpenRouter;
 - (void)showChatGPT;
 - (void)showOther;
+- (void)showEditableModelsForProviderWithTitle:(NSString *)title;
 - (void)clearDetailView;
 - (void)close:(id)sender;
 - (void)fetchOpenRouterModels:(id)sender;
@@ -169,6 +170,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 - (void)reloadOtherModels;
 - (void)updateOtherModelActions;
 - (NSDictionary *)otherModelAtRow:(NSInteger)row;
+- (BOOL)otherModelIsBuiltIn:(NSDictionary *)model;
 - (BOOL)otherRowIsDraft:(NSInteger)row;
 - (BOOL)saveOtherModel:(NSDictionary *)model
               creating:(BOOL)creating
@@ -188,7 +190,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     target_ = target;
     providers_ = [[NSArray alloc] init];
     models_ = [[NSArray alloc] init];
-    chatGPTModels_ = [[NSArray alloc] init];
+    bundledChatGPTModels_ = [[NSArray alloc] init];
     otherModels_ = [[NSArray alloc] init];
     sheet_ = [[NSPanel alloc]
       initWithContentRect:NSMakeRect(0.0, 0.0, 700.0, 440.0)
@@ -271,8 +273,8 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   providers_ = [providers copy];
   [models_ release];
   models_ = [models copy];
-  [chatGPTModels_ release];
-  chatGPTModels_ = [bundledChatGPTModels copy];
+  [bundledChatGPTModels_ release];
+  bundledChatGPTModels_ = [bundledChatGPTModels copy];
 
   [providerTableView_ reloadData];
   if (([selectedProviderIdentifier_ length] == 0U) &&
@@ -296,7 +298,6 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     [[subviews objectAtIndex:index] removeFromSuperview];
   }
   [subviews release];
-  chatGPTTableView_ = nil;
   otherTableView_ = nil;
   fetchButton_ = nil;
   otherModelActionsSegmented_ = nil;
@@ -341,27 +342,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 
 - (void)showChatGPT
 {
-  NSScrollView *scrollView;
-
-  [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(0.0, 330.0, 470.0,
-    22.0), @"ChatGPT", XPFontTextStyleBoldBody)];
-  [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(0.0, 302.0, 470.0,
-    24.0), NSLocalizedString(@"Built-in model list", nil), XPFontTextStyleBody)];
-  scrollView = [[[NSScrollView alloc]
-    initWithFrame:NSMakeRect(0.0, 0.0, 480.0, 294.0)] autorelease];
-  [scrollView setBorderType:NSBezelBorder];
-  [scrollView setHasVerticalScroller:YES];
-  [scrollView setHasHorizontalScroller:YES];
-  chatGPTTableView_ = [[[NSTableView alloc]
-    initWithFrame:[[scrollView contentView] bounds]] autorelease];
-  [chatGPTTableView_ addTableColumn:StrappyEditorTextColumn(@"name", @"Model",
-                                                            190.0, NO)];
-  [chatGPTTableView_ addTableColumn:StrappyEditorTextColumn(@"wire_model_id",
-    @"Model ID", 255.0, NO)];
-  [chatGPTTableView_ setDataSource:self];
-  [chatGPTTableView_ setDelegate:self];
-  [scrollView setDocumentView:chatGPTTableView_];
-  [detailView_ addSubview:scrollView];
+  [self showEditableModelsForProviderWithTitle:@"ChatGPT"];
 }
 
 - (void)reloadOtherModels
@@ -374,7 +355,8 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     NSDictionary *model;
 
     model = [models_ objectAtIndex:index];
-    if ([[model objectForKey:@"provider_id"] isEqualToString:@"other"]) {
+    if ([[model objectForKey:@"provider_id"]
+          isEqualToString:selectedProviderIdentifier_]) {
       [rows addObject:model];
     }
   }
@@ -386,10 +368,15 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 
 - (void)showOther
 {
+  [self showEditableModelsForProviderWithTitle:NSLocalizedString(@"Other", nil)];
+}
+
+- (void)showEditableModelsForProviderWithTitle:(NSString *)title
+{
   NSScrollView *scrollView;
 
   [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(0.0, 330.0, 470.0,
-    22.0), NSLocalizedString(@"Other", nil), XPFontTextStyleBoldBody)];
+    22.0), title, XPFontTextStyleBoldBody)];
   [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(0.0, 302.0, 470.0,
     24.0), NSLocalizedString(@"Only Model ID is required. Existing model edits save automatically.", nil), XPFontTextStyleBody)];
   scrollView = [[[NSScrollView alloc]
@@ -461,8 +448,9 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   [otherModelActionsSegmented_ setEnabled:YES
                               forSegment:kStrappyOtherModelPrimarySegment];
   row = [otherTableView_ selectedRow];
-  canDelete = ([self otherModelAtRow:row] != nil) ||
-    [self otherRowIsDraft:row];
+  canDelete = [self otherRowIsDraft:row] ||
+    (([self otherModelAtRow:row] != nil) &&
+     ![self otherModelIsBuiltIn:[self otherModelAtRow:row]]);
   [otherModelActionsSegmented_ setEnabled:canDelete
                               forSegment:kStrappyOtherModelDeleteSegment];
 }
@@ -471,9 +459,6 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 {
   if (tableView == providerTableView_) {
     return (NSInteger)[providers_ count];
-  }
-  if (tableView == chatGPTTableView_) {
-    return (NSInteger)[chatGPTModels_ count];
   }
   if (tableView == otherTableView_) {
     return (NSInteger)[otherModels_ count] +
@@ -496,11 +481,8 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     return StrappyEditorString([providers_ objectAtIndex:(NSUInteger)row],
                                @"name");
   }
-  item = (tableView == chatGPTTableView_) ?
-    ((row >= 0) && (row < (NSInteger)[chatGPTModels_ count]) ?
-      [chatGPTModels_ objectAtIndex:(NSUInteger)row] : nil) :
-    ([self otherRowIsDraft:row] ? draftOtherModel_ :
-      [self otherModelAtRow:row]);
+  item = [self otherRowIsDraft:row] ? draftOtherModel_ :
+    [self otherModelAtRow:row];
   identifier = [tableColumn identifier];
   if ([identifier isEqualToString:@"name"] ||
       [identifier isEqualToString:@"wire_model_id"]) {
@@ -539,6 +521,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   return (tableView == otherTableView_) &&
     ([self otherRowIsDraft:row] ||
      (([self otherModelAtRow:row] != nil) &&
+      ![self otherModelIsBuiltIn:[self otherModelAtRow:row]] &&
       ![[tableColumn identifier] isEqualToString:@"wire_model_id"]));
 }
 
@@ -561,7 +544,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   }
   draft = [self otherRowIsDraft:row];
   model = draft ? draftOtherModel_ : [self otherModelAtRow:row];
-  if (model == nil) {
+  if ((model == nil) || (!draft && [self otherModelIsBuiltIn:model])) {
     return;
   }
   identifier = [tableColumn identifier];
@@ -630,9 +613,17 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   row = [tableView selectedRow];
   if (tableView == providerTableView_) {
     if ((row >= 0) && (row < (NSInteger)[providers_ count])) {
+      NSString *providerIdentifier;
+
+      providerIdentifier = [[providers_ objectAtIndex:(NSUInteger)row]
+        objectForKey:@"id"];
+      if ((draftOtherModel_ != nil) &&
+          ![providerIdentifier isEqualToString:selectedProviderIdentifier_]) {
+        [draftOtherModel_ release];
+        draftOtherModel_ = nil;
+      }
       [selectedProviderIdentifier_ release];
-      selectedProviderIdentifier_ =
-        [[[providers_ objectAtIndex:(NSUInteger)row] objectForKey:@"id"] copy];
+      selectedProviderIdentifier_ = [providerIdentifier copy];
       [self showSelectedProvider];
     }
   } else if (tableView == otherTableView_) {
@@ -687,7 +678,8 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     return NO;
   }
   if (creating) {
-    return [StrappySession createManualModelForProviderIdentifier:@"other"
+    return [StrappySession
+      createManualModelForProviderIdentifier:selectedProviderIdentifier_
       wireModelID:StrappyEditorString(model, @"wire_model_id")
       displayName:StrappyEditorString(model, @"name")
       contextWindowTokens:[[model objectForKey:@"context_length"] longLongValue]
@@ -702,7 +694,8 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
       cacheWritePricePerToken:cacheWritePrice
       error:error] != nil;
   }
-  return [StrappySession updateManualModelForProviderIdentifier:@"other"
+  return [StrappySession
+    updateManualModelForProviderIdentifier:selectedProviderIdentifier_
     wireModelID:StrappyEditorString(model, @"wire_model_id")
     displayName:StrappyEditorString(model, @"name")
     contextWindowTokens:[[model objectForKey:@"context_length"] longLongValue]
@@ -724,6 +717,25 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     return nil;
   }
   return [otherModels_ objectAtIndex:(NSUInteger)row];
+}
+
+- (BOOL)otherModelIsBuiltIn:(NSDictionary *)model
+{
+  NSString *wireModelID;
+  NSUInteger index;
+
+  if (![selectedProviderIdentifier_ isEqualToString:@"openai_chatgpt"] ||
+      (model == nil)) {
+    return NO;
+  }
+  wireModelID = StrappyEditorString(model, @"wire_model_id");
+  for (index = 0U; index < [bundledChatGPTModels_ count]; index++) {
+    if ([wireModelID isEqualToString:StrappyEditorString(
+          [bundledChatGPTModels_ objectAtIndex:index], @"wire_model_id")]) {
+      return YES;
+    }
+  }
+  return NO;
 }
 
 - (void)addOtherModel:(id)sender
@@ -816,12 +828,13 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     return;
   }
   model = [self otherModelAtRow:[otherTableView_ selectedRow]];
-  if (model == nil) {
+  if ((model == nil) || [self otherModelIsBuiltIn:model]) {
     NSBeep();
     return;
   }
   error = nil;
-  if (![StrappySession archiveManualModelForProviderIdentifier:@"other"
+  if (![StrappySession
+      archiveManualModelForProviderIdentifier:selectedProviderIdentifier_
       wireModelID:StrappyEditorString(model, @"wire_model_id") error:&error]) {
     [self showError:error title:NSLocalizedString(@"Could Not Delete Model", nil)];
   } else {
@@ -853,7 +866,8 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 - (void)modelCatalogDidChange:(NSNotification *)notification
 {
   (void)notification;
-  if ([selectedProviderIdentifier_ isEqualToString:@"other"]) {
+  if ([selectedProviderIdentifier_ isEqualToString:@"other"] ||
+      [selectedProviderIdentifier_ isEqualToString:@"openai_chatgpt"]) {
     return;
   }
   [self performSelector:@selector(reloadCatalogAfterNotification:)
@@ -863,7 +877,8 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 - (void)reloadCatalogAfterNotification:(id)ignored
 {
   (void)ignored;
-  if ([selectedProviderIdentifier_ isEqualToString:@"other"]) {
+  if ([selectedProviderIdentifier_ isEqualToString:@"other"] ||
+      [selectedProviderIdentifier_ isEqualToString:@"openai_chatgpt"]) {
     return;
   }
   [self reloadCatalog];
@@ -929,8 +944,6 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [providerTableView_ setDataSource:nil];
   [providerTableView_ setDelegate:nil];
-  [chatGPTTableView_ setDataSource:nil];
-  [chatGPTTableView_ setDelegate:nil];
   [otherTableView_ setDataSource:nil];
   [otherTableView_ setDelegate:nil];
   [sheet_ release];
@@ -938,7 +951,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   [detailView_ release];
   [providers_ release];
   [models_ release];
-  [chatGPTModels_ release];
+  [bundledChatGPTModels_ release];
   [otherModels_ release];
   [draftOtherModel_ release];
   [selectedProviderIdentifier_ release];

@@ -3551,6 +3551,24 @@ static int strappy_db_bundled_import_model(sqlite3 *db,
   if (model_id == NULL) {
     return 0;
   }
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db,
+    "SELECT 1 FROM manual_model_overrides WHERE model_id=?;",-1,&stmt,NULL);
+  if ((rc==SQLITE_OK)&&
+      (sqlite3_bind_text(stmt,1,model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) {
+    rc=sqlite3_step(stmt);
+  }
+  sqlite3_finalize(stmt);
+  if (rc==SQLITE_ROW) {
+    free(model_id);
+    return 1;
+  }
+  if (rc!=SQLITE_DONE) {
+    strappy_set_formatted_error(error_out,
+      "Could not check bundled model override: %s",sqlite3_errmsg(db));
+    free(model_id);
+    return 0;
+  }
   display_name =
     cJSON_GetObjectItemCaseSensitive(model, "display_name")->valuestring;
   billing_kind =
@@ -3855,7 +3873,8 @@ static int strappy_db_import_bundled_models_json_for_provider(
   }
   stmt = NULL;
   rc = sqlite3_prepare_v2(db,
-    "UPDATE models SET catalog_active = 0 WHERE provider_id = ?;",
+    "UPDATE models SET catalog_active = 0 WHERE provider_id = ? AND id NOT IN "
+      "(SELECT model_id FROM manual_model_overrides);",
     -1, &stmt, NULL);
   if ((rc == SQLITE_OK) &&
       (sqlite3_bind_text(stmt, 1, provider_id, -1,
@@ -3964,6 +3983,7 @@ static int strappy_db_save_manual_model(const char *db_path,
   sqlite3 *db;
   sqlite3_stmt *stmt;
   const char *display_name;
+  const char *identity_sql;
   char *model_id;
   int rc;
   int ok;
@@ -3978,7 +3998,8 @@ static int strappy_db_save_manual_model(const char *db_path,
   prices[2] = (input != NULL) ? input->pricing_input_cache_read : NULL;
   prices[3] = (input != NULL) ? input->pricing_input_cache_write : NULL;
   if ((provider_id == NULL) ||
-      (strcmp(provider_id, STRAPPY_PROVIDER_OTHER) != 0) ||
+      ((strcmp(provider_id, STRAPPY_PROVIDER_OTHER) != 0) &&
+       (strcmp(provider_id, STRAPPY_PROVIDER_OPENAI_CHATGPT) != 0)) ||
       (input == NULL) || (input->wire_model_id == NULL) ||
       (input->wire_model_id[0] == '\0') || (strlen(input->wire_model_id) > 128U) ||
       ((input->display_name != NULL) &&
@@ -4012,7 +4033,12 @@ static int strappy_db_save_manual_model(const char *db_path,
   if (model_id == NULL) return 0;
   if (!strappy_db_open(db_path,&db,error_out)) { free(model_id); return 0; }
   if (!strappy_db_ensure_schema(db,error_out)) { strappy_db_release(db); free(model_id); return 0; }
-  stmt=NULL; rc=sqlite3_prepare_v2(db,"SELECT 1 FROM models WHERE id=? AND provider_id=?;",-1,&stmt,NULL);
+  identity_sql = (require_existing &&
+    (strcmp(provider_id,STRAPPY_PROVIDER_OPENAI_CHATGPT)==0)) ?
+    "SELECT 1 FROM models m JOIN manual_model_overrides o ON o.model_id=m.id "
+      "WHERE m.id=? AND m.provider_id=?;" :
+    "SELECT 1 FROM models WHERE id=? AND provider_id=?;";
+  stmt=NULL; rc=sqlite3_prepare_v2(db,identity_sql,-1,&stmt,NULL);
   if ((rc==SQLITE_OK)&&(sqlite3_bind_text(stmt,1,model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
       (sqlite3_bind_text(stmt,2,provider_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
   sqlite3_finalize(stmt);
@@ -4044,10 +4070,24 @@ static int strappy_db_save_manual_model(const char *db_path,
         (sqlite3_bind_text(stmt,8,input->wire_model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
     ok=(rc==SQLITE_DONE)&&(sqlite3_changes(db)==1); sqlite3_finalize(stmt); }
   if (ok) { stmt=NULL; rc=sqlite3_prepare_v2(db,
-    "INSERT OR REPLACE INTO model_capabilities (model_id,billing_kind,reasoning_enabled,local_functions_enabled,hosted_tools_enabled) VALUES (?,'unknown',?,?,0);",-1,&stmt,NULL);
+    "INSERT OR IGNORE INTO manual_model_overrides (model_id) VALUES (?);",
+    -1,&stmt,NULL);
+    if ((rc==SQLITE_OK)&&
+        (sqlite3_bind_text(stmt,1,model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
+    ok=rc==SQLITE_DONE; sqlite3_finalize(stmt); }
+  if (ok) { stmt=NULL; rc=sqlite3_prepare_v2(db,
+    "INSERT OR REPLACE INTO model_capabilities "
+    "(model_id,billing_kind,reasoning_enabled,local_functions_enabled,"
+    "hosted_tools_enabled) VALUES (?,?,?,?,COALESCE((SELECT "
+    "hosted_tools_enabled FROM model_capabilities WHERE model_id=?),0));",
+    -1,&stmt,NULL);
     if ((rc==SQLITE_OK)&&(sqlite3_bind_text(stmt,1,model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
-        (sqlite3_bind_int(stmt,2,input->reasoning_enabled?1:0)==SQLITE_OK)&&
-        (sqlite3_bind_int(stmt,3,input->local_functions_enabled?1:0)==SQLITE_OK)) rc=sqlite3_step(stmt);
+        (sqlite3_bind_text(stmt,2,
+          (strcmp(provider_id,STRAPPY_PROVIDER_OPENAI_CHATGPT)==0) ?
+            "chatgpt_plan" : "unknown",-1,SQLITE_STATIC)==SQLITE_OK)&&
+        (sqlite3_bind_int(stmt,3,input->reasoning_enabled?1:0)==SQLITE_OK)&&
+        (sqlite3_bind_int(stmt,4,input->local_functions_enabled?1:0)==SQLITE_OK)&&
+        (sqlite3_bind_text(stmt,5,model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
     ok=rc==SQLITE_DONE; sqlite3_finalize(stmt); }
   if (ok) { stmt=NULL; rc=sqlite3_prepare_v2(db,
     "DELETE FROM model_prices WHERE model_id=? AND price_kind IN "
@@ -4103,10 +4143,38 @@ int strappy_db_archive_manual_model(const char *db_path,
                                     char **error_out)
 {
   sqlite3 *db; sqlite3_stmt *stmt; int rc; int changed;
+  if ((provider_id==NULL)||
+      ((strcmp(provider_id,STRAPPY_PROVIDER_OTHER)!=0)&&
+       (strcmp(provider_id,STRAPPY_PROVIDER_OPENAI_CHATGPT)!=0))||
+      (wire_model_id==NULL)||(wire_model_id[0]=='\0')) {
+    strappy_set_error(error_out,"Manual model selection is invalid.");
+    return 0;
+  }
   if (!strappy_db_open(db_path,&db,error_out)) return 0;
   if (!strappy_db_ensure_schema(db,error_out)) { strappy_db_release(db); return 0; }
+  if (strcmp(provider_id,STRAPPY_PROVIDER_OPENAI_CHATGPT)==0) {
+    stmt=NULL; rc=sqlite3_prepare_v2(db,
+      "SELECT 1 FROM models m JOIN manual_model_overrides o ON o.model_id=m.id "
+      "WHERE m.provider_id=? AND m.wire_model_id=?;",-1,&stmt,NULL);
+    if ((rc==SQLITE_OK)&&
+        (sqlite3_bind_text(stmt,1,provider_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
+        (sqlite3_bind_text(stmt,2,wire_model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc!=SQLITE_ROW) { strappy_db_release(db); strappy_set_error(error_out,"Manual model was not found."); return 0; }
+  }
   stmt=NULL; rc=sqlite3_prepare_v2(db,
-    "UPDATE models SET catalog_active=0,last_seen_at_ms=? WHERE provider_id=? AND wire_model_id=? AND provider_id='other';",-1,&stmt,NULL);
+    "INSERT OR IGNORE INTO manual_model_overrides (model_id) "
+    "SELECT id FROM models WHERE provider_id=? AND wire_model_id=?;",
+    -1,&stmt,NULL);
+  if ((rc==SQLITE_OK)&&
+      (sqlite3_bind_text(stmt,1,provider_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
+      (sqlite3_bind_text(stmt,2,wire_model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+  if (rc!=SQLITE_DONE) { strappy_db_release(db); strappy_set_error(error_out,"Could not preserve manual model override."); return 0; }
+  stmt=NULL; rc=sqlite3_prepare_v2(db,
+    "UPDATE models SET catalog_active=0,last_seen_at_ms=? WHERE provider_id=? "
+    "AND wire_model_id=? AND provider_id IN ('other','openai_chatgpt');",
+    -1,&stmt,NULL);
   if ((rc==SQLITE_OK)&&(sqlite3_bind_int64(stmt,1,(sqlite3_int64)strappy_db_now_ms())==SQLITE_OK)&&
       (sqlite3_bind_text(stmt,2,provider_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
       (sqlite3_bind_text(stmt,3,wire_model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);

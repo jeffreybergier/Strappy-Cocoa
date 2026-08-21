@@ -10,11 +10,10 @@
   NSView               *detailView_;
   NSArray              *providers_;
   NSArray              *models_;
-  NSArray              *chatGPTModels_;
+  NSArray              *bundledChatGPTModels_;
   NSArray              *otherModels_;
   NSMutableDictionary  *draftOtherModel_;
   NSString             *selectedProviderIdentifier_;
-  NSTableView          *chatGPTTableView_;
   NSTableView          *otherTableView_;
   NSButton             *fetchButton_;
   NSSegmentedControl   *otherModelActionsSegmented_;

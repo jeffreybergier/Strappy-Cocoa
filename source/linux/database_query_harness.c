@@ -9766,6 +9766,8 @@ static int harness_run_bundled_model_catalog_tests(
   char database_path[1400];
   strappy_model_record_list list;
   strappy_model_route_record route;
+  strappy_manual_model_input manual_input;
+  char *manual_model_id;
   char *error;
   long long session_id;
   size_t index;
@@ -9781,6 +9783,15 @@ static int harness_run_bundled_model_catalog_tests(
   }
   harness_unlink_sqlite_files(database_path);
   error = NULL;
+  manual_model_id = NULL;
+  memset(&manual_input, 0, sizeof(manual_input));
+  manual_input.wire_model_id = "user-chatgpt-model";
+  manual_input.display_name = "User ChatGPT Model";
+  manual_input.context_window_tokens = 64000LL;
+  manual_input.max_output_tokens = 16000LL;
+  manual_input.reasoning_enabled = 1;
+  manual_input.image_input_enabled = 1;
+  manual_input.local_functions_enabled = 1;
   ok = strappy_db_initialize(database_path, &error) &&
     harness_restore_fixture_provider_accounts_at_path(database_path) &&
     strappy_model_catalog_import_bundled_models(HARNESS_RESOURCE_DIR,
@@ -9826,6 +9837,46 @@ static int harness_run_bundled_model_catalog_tests(
     return 0;
   }
 
+  manual_input.wire_model_id = "gpt-5.4";
+  if (strappy_db_update_manual_model(database_path,
+                                     STRAPPY_PROVIDER_OPENAI_CHATGPT,
+                                     &manual_input,
+                                     &error) ||
+      (error == NULL)) {
+    fprintf(stderr, "Bundled ChatGPT model was editable.\n");
+    strappy_free_string(error);
+    harness_unlink_sqlite_files(database_path);
+    return 0;
+  }
+  strappy_free_string(error);
+  error = NULL;
+  if (strappy_db_archive_manual_model(database_path,
+                                      STRAPPY_PROVIDER_OPENAI_CHATGPT,
+                                      "gpt-5.4",
+                                      &error) ||
+      (error == NULL)) {
+    fprintf(stderr, "Bundled ChatGPT model was deletable.\n");
+    strappy_free_string(error);
+    harness_unlink_sqlite_files(database_path);
+    return 0;
+  }
+  strappy_free_string(error);
+  error = NULL;
+  manual_input.wire_model_id = "user-chatgpt-model";
+
+  if (!strappy_db_create_manual_model(database_path,
+                                      STRAPPY_PROVIDER_OPENAI_CHATGPT,
+                                      &manual_input,
+                                      &manual_model_id,
+                                      &error)) {
+    fprintf(stderr,
+            "Could not create manual ChatGPT model: %s\n",
+            (error != NULL) ? error : "unknown");
+    strappy_free_string(error);
+    harness_unlink_sqlite_files(database_path);
+    return 0;
+  }
+
   if (!strappy_db_set_model_allowed(database_path,
                                     selected_model_id,
                                     1,
@@ -9845,8 +9896,15 @@ static int harness_run_bundled_model_catalog_tests(
          "SELECT COUNT(*) FROM models WHERE provider_id = "
            "'" STRAPPY_PROVIDER_OPENAI_CHATGPT
            "' AND catalog_active = 1;",
+         2LL,
+         "combined bundled and manual ChatGPT model count") &&
+       harness_expect_catalog_integer(
+         database_path,
+         "SELECT COUNT(*) FROM models WHERE provider_id = "
+           "'" STRAPPY_PROVIDER_OPENAI_CHATGPT "' AND wire_model_id = "
+           "'user-chatgpt-model' AND catalog_active = 1;",
          1LL,
-         "revision-scoped bundled model count") &&
+         "manual ChatGPT model preserved across bundled revision") &&
        harness_expect_catalog_integer(
          database_path,
          "SELECT COUNT(*) FROM model_preferences WHERE "
@@ -9944,6 +10002,7 @@ static int harness_run_bundled_model_catalog_tests(
             (error != NULL) ? error : "unknown");
   }
   strappy_free_string(error);
+  free(manual_model_id);
   harness_unlink_sqlite_files(database_path);
   return ok;
 }
