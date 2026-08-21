@@ -123,7 +123,7 @@ int strappy_provider_response_is_plan_limit(strappy_provider_kind provider,
                                             const char *error_type,
                                             const char *error_message);
 
-char *strappy_provider_model_identifier(const char *provider_account_id,
+char *strappy_provider_model_identifier(const char *provider_id,
                                         const char *wire_model_id,
                                         char **error_out);
 

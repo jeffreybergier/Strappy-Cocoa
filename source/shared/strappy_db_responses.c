@@ -1803,13 +1803,12 @@ static int strappy_db_semantic_begin_response_call(
   static const char *update_session_sql =
     "UPDATE sessions SET updated_at_ms = ? WHERE id = ?;";
   static const char *model_route_sql =
-    "SELECT m.wire_model_id FROM models m "
-    "WHERE m.id = ? AND m.provider_account_id = ? "
+    "SELECT m.wire_model_id FROM models m JOIN provider_accounts a "
+    "ON a.provider_id=m.provider_id WHERE m.id = ? AND a.id = ? "
       "AND m.catalog_active = 1 AND "
       "(m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL " OR "
       "EXISTS (SELECT 1 FROM model_preferences mp "
-        "WHERE mp.provider_id = (SELECT a.provider_id "
-        "FROM provider_accounts a WHERE a.id = m.provider_account_id) "
+        "WHERE mp.provider_id = m.provider_id "
         "AND mp.wire_model_id = m.wire_model_id AND mp.allowed = 1));";
   sqlite3 *db;
   sqlite3_stmt *stmt;

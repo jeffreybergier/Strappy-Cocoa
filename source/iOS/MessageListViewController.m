@@ -825,7 +825,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   NSArray *models;
   NSDictionary *summary;
   StrappySessionOptions *options;
-  NSString *selectedIdentifier;
   NSString *selectedAccountIdentifier;
   NSMutableArray *filteredModels;
   NSUInteger index;
@@ -834,25 +833,29 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   if (![models isKindOfClass:[NSArray class]]) {
     return [NSArray array];
   }
-  /* Once a request has bound the conversation, do not offer models from a
-   * different provider account. The database remains the authoritative guard;
-   * this keeps the iOS chooser from presenting a selection it must reject. */
+  /* Once a request has bound the conversation, keep model choices on the
+   * selected account's provider. */
   summary = [[self session] cachedSummary];
   if ([StrappyStringForSessionSummary(summary, @"prompt") length] == 0U) {
     return models;
   }
   options = [[self session] optionsWithError:nil];
-  selectedIdentifier = [options modelIdentifier];
   selectedAccountIdentifier = @"";
-  for (index = 0U; index < [models count]; index++) {
-    NSDictionary *model;
+  {
+    NSArray *accounts;
+    NSUInteger accountIndex;
 
-    model = [models objectAtIndex:index];
-    if ([StrappyStringForSessionSummary(model, @"id")
-          isEqualToString:selectedIdentifier]) {
-      selectedAccountIdentifier =
-        StrappyStringForSessionSummary(model, @"provider_account_id");
-      break;
+    accounts = [StrappySession providerAccountCatalogWithError:nil];
+    for (accountIndex = 0U; accountIndex < [accounts count]; accountIndex++) {
+      NSDictionary *account;
+
+      account = [accounts objectAtIndex:accountIndex];
+      if ([StrappyStringForSessionSummary(account, @"id")
+            isEqualToString:[options providerAccountIdentifier]]) {
+        selectedAccountIdentifier =
+          StrappyStringForSessionSummary(account, @"provider_id");
+        break;
+      }
     }
   }
   if ([selectedAccountIdentifier length] == 0U) {
@@ -863,7 +866,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     NSDictionary *model;
 
     model = [models objectAtIndex:index];
-    if ([StrappyStringForSessionSummary(model, @"provider_account_id")
+    if ([StrappyStringForSessionSummary(model, @"provider_id")
           isEqualToString:selectedAccountIdentifier]) {
       [filteredModels addObject:model];
     }

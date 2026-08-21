@@ -192,8 +192,8 @@ static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
   leftRow = [left isKindOfClass:[NSDictionary class]] ? left : nil;
   rightRow = [right isKindOfClass:[NSDictionary class]] ? right : nil;
   result = StrappyCompareStrings(
-    StrappyStringForModelRow(leftRow, @"provider_account_name"),
-    StrappyStringForModelRow(rightRow, @"provider_account_name"));
+    StrappyStringForModelRow(leftRow, @"provider_name"),
+    StrappyStringForModelRow(rightRow, @"provider_name"));
   if (result != NSOrderedSame) {
     return result;
   }
@@ -230,7 +230,7 @@ static NSArray *StrappyModelAccountIdentifiersForRows(NSArray *rows)
     NSString *identifier;
 
     row = [rows objectAtIndex:index];
-    identifier = StrappyStringForModelRow(row, @"provider_account_id");
+    identifier = StrappyStringForModelRow(row, @"provider_id");
     if (([identifier length] > 0U) &&
         ![identifiers containsObject:identifier]) {
       [identifiers addObject:identifier];
@@ -250,7 +250,7 @@ static NSArray *StrappyModelRowsForAccount(NSArray *rows,
     NSDictionary *row;
 
     row = [rows objectAtIndex:index];
-    if ([StrappyStringForModelRow(row, @"provider_account_id")
+    if ([StrappyStringForModelRow(row, @"provider_id")
           isEqualToString:accountIdentifier]) {
       [accountRows addObject:row];
     }
@@ -523,8 +523,8 @@ static NSArray *StrappyModelRowsForAccount(NSArray *rows,
     return nil;
   }
   name = StrappyStringForModelRow([sectionRows objectAtIndex:0U],
-                                  @"provider_account_name");
-  return ([name length] > 0U) ? name : NSLocalizedString(@"Account", nil);
+                                  @"provider_name");
+  return ([name length] > 0U) ? name : NSLocalizedString(@"Provider", nil);
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView

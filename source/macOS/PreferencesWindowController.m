@@ -7,6 +7,7 @@
 #import "StrappyPreferencesDatabaseWhitelistView.h"
 #import "StrappyPreferencesDatabaseStudyView.h"
 #import "StrappyPreferencesModelWhitelistView.h"
+#import "StrappyModelProviderEditor.h"
 #import "StrappyPreferencesSystemPromptsView.h"
 #import "StrappySessionOptionsViewController.h"
 
@@ -458,56 +459,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   return preparedRows;
 }
 
-static NSArray *StrappyModelRowsForAvailableAccounts(NSArray *rows,
-                                                      NSArray *accounts)
-{
-  NSMutableSet *availableProviders;
-  NSMutableArray *availableRows;
-  NSUInteger index;
-
-  availableProviders = [NSMutableSet set];
-  for (index = 0U; index < [accounts count]; index++) {
-    NSDictionary *account;
-    NSString *providerIdentifier;
-
-    account = [accounts objectAtIndex:index];
-    if (![[account objectForKey:@"available"] boolValue]) {
-      continue;
-    }
-    providerIdentifier = [account objectForKey:@"provider_id"];
-    if ([providerIdentifier isKindOfClass:[NSString class]]) {
-      [availableProviders addObject:providerIdentifier];
-    }
-  }
-
-  availableRows = [NSMutableArray array];
-  for (index = 0U; index < [rows count]; index++) {
-    NSDictionary *row;
-
-    row = [rows objectAtIndex:index];
-    if ([availableProviders containsObject:
-          StrappyStringForModelRow(row, @"provider_id")]) {
-      [availableRows addObject:row];
-    }
-  }
-  return availableRows;
-}
-
-static BOOL StrappyAccountsContainAvailableModelAccount(NSArray *accounts)
-{
-  NSUInteger index;
-
-  for (index = 0U; index < [accounts count]; index++) {
-    NSDictionary *account;
-
-    account = [accounts objectAtIndex:index];
-    if ([[account objectForKey:@"available"] boolValue]) {
-      return YES;
-    }
-  }
-  return NO;
-}
-
 @interface PreferencesWindowController ()
 - (void)buildContentView;
 - (void)setupToolbar;
@@ -567,6 +518,7 @@ static BOOL StrappyAccountsContainAvailableModelAccount(NSArray *accounts)
 - (void)modelCatalogRefreshDidStart:(NSNotification *)notification;
 - (void)modelCatalogRefreshDidFinish:(NSNotification *)notification;
 - (void)modelCatalogDidChange:(NSNotification *)notification;
+- (void)modelProviderEditorDidClose:(id)editor;
 - (NSString *)currentDatabaseSearchText;
 - (NSArray *)databaseRows:(NSArray *)rows
   matchingSearchText:(NSString *)searchText;
@@ -710,7 +662,7 @@ static BOOL StrappyAccountsContainAvailableModelAccount(NSArray *accounts)
                                                        delegate:self];
   modelSearchField_ = [[modelWhitelistView_ searchField] retain];
   modelTableView_ = [[modelWhitelistView_ tableView] retain];
-  fetchModelsButton_ = [[modelWhitelistView_ fetchButton] retain];
+  editModelsButton_ = [[modelWhitelistView_ editButton] retain];
   modelProgressIndicator_ = [[modelWhitelistView_ progressIndicator] retain];
   modelStatusLabel_ = [[modelWhitelistView_ statusLabel] retain];
   [[NSNotificationCenter defaultCenter]
@@ -1647,24 +1599,14 @@ static BOOL StrappyAccountsContainAvailableModelAccount(NSArray *accounts)
 - (void)loadOpenRouterModels
 {
   NSError *error;
-  NSArray *accounts;
   NSArray *rows;
 
   error = nil;
   rows = [StrappySession modelCatalogWithError:&error];
   if (rows != nil) {
-    accounts = [StrappySession providerAccountCatalogWithError:&error];
-    if (accounts == nil) {
-      [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
-        error,
-        NSLocalizedString(@"Accounts could not be loaded.", nil))];
-      return;
-    }
-    noAvailableModelAccounts_ =
-      !StrappyAccountsContainAvailableModelAccount(accounts);
+    noAvailableModelAccounts_ = NO;
     [allModelRows_ release];
-    allModelRows_ = [StrappyPreparedModelRowsForRows(
-      StrappyModelRowsForAvailableAccounts(rows, accounts)) copy];
+    allModelRows_ = [StrappyPreparedModelRowsForRows(rows) copy];
     [self sortAllModelRows];
     [self applyModelRows];
     return;
@@ -1839,7 +1781,6 @@ static BOOL StrappyAccountsContainAvailableModelAccount(NSArray *accounts)
 - (void)setModelCatalogRefreshing:(BOOL)refreshing
 {
   refreshingModels_ = refreshing;
-  [fetchModelsButton_ setEnabled:(refreshingModels_ ? NO : YES)];
   if (refreshingModels_) {
     [modelProgressIndicator_ startAnimation:self];
     [modelStatusLabel_ setToolTip:nil];
@@ -1847,6 +1788,27 @@ static BOOL StrappyAccountsContainAvailableModelAccount(NSArray *accounts)
   } else {
     [modelProgressIndicator_ stopAnimation:self];
   }
+}
+
+- (void)editModelProviders:(id)sender
+{
+  (void)sender;
+  if (modelProviderEditor_ != nil) {
+    return;
+  }
+  modelProviderEditor_ = [[StrappyModelProviderEditor alloc]
+                           initWithTarget:self];
+  [modelProviderEditor_ beginSheetForWindow:[self window]];
+}
+
+- (void)modelProviderEditorDidClose:(id)editor
+{
+  if (editor != modelProviderEditor_) {
+    return;
+  }
+  [modelProviderEditor_ autorelease];
+  modelProviderEditor_ = nil;
+  [self loadOpenRouterModels];
 }
 
 - (void)refreshModels:(id)sender
@@ -2959,7 +2921,8 @@ static BOOL StrappyAccountsContainAvailableModelAccount(NSArray *accounts)
   [modelSearchField_ release];
   [modelTableView_ release];
   [modelWhitelistView_ release];
-  [fetchModelsButton_ release];
+  [editModelsButton_ release];
+  [modelProviderEditor_ release];
   [modelProgressIndicator_ release];
   [modelStatusLabel_ release];
   [systemPromptsPaneView_ release];

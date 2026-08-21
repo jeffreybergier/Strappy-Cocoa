@@ -116,16 +116,13 @@ static BOOL StrappyInspectorModelBoolean(NSDictionary *model,
   return [value isKindOfClass:[NSNumber class]] ? [value boolValue] : fallback;
 }
 
-static BOOL StrappyInspectorModelIsSignedIn(NSDictionary *model)
+static BOOL StrappyInspectorModelIsSignedIn(NSDictionary *model,
+                                             NSString *accountIdentifier)
 {
-  NSString *accountIdentifier;
-
   if (![StrappyInspectorStringForRow(model, @"provider_id")
         isEqualToString:@"openai_chatgpt"]) {
     return YES;
   }
-  accountIdentifier = StrappyInspectorStringForRow(
-    model, @"provider_account_id");
   return [StrappyAuthentication isChatGPTProviderEnabled] &&
     [[StrappyAuthentication
       authenticationForProviderAccountIdentifier:accountIdentifier]
@@ -135,15 +132,21 @@ static BOOL StrappyInspectorModelIsSignedIn(NSDictionary *model)
 static NSDictionary *StrappyInspectorFirstUsableModelForAccount(
     NSArray *models, NSString *accountIdentifier)
 {
+  NSArray *accounts;
+  NSDictionary *account;
+  NSString *providerIdentifier;
   NSUInteger index;
 
+  accounts = [StrappySession providerAccountCatalogWithError:nil];
+  account = StrappyInspectorAccountForIdentifier(accounts, accountIdentifier);
+  providerIdentifier = StrappyInspectorStringForRow(account, @"provider_id");
   for (index = 0U; index < [models count]; index++) {
     NSDictionary *model;
 
     model = [models objectAtIndex:index];
-    if ([StrappyInspectorStringForRow(model, @"provider_account_id")
-          isEqualToString:accountIdentifier] &&
-        StrappyInspectorModelIsSignedIn(model)) {
+    if ([StrappyInspectorStringForRow(model, @"provider_id")
+          isEqualToString:providerIdentifier] &&
+        StrappyInspectorModelIsSignedIn(model, accountIdentifier)) {
       return model;
     }
   }
@@ -1081,6 +1084,7 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   NSUInteger validCount;
   NSString *lastAccountIdentifier;
   NSString *selectedAccountIdentifier;
+  NSString *selectedProviderIdentifier;
   BOOL sessionAccountLocked;
 
   models = [StrappySession allowedModelCatalogWithError:nil];
@@ -1096,13 +1100,11 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   selectedItem = nil;
   validCount = 0U;
   lastAccountIdentifier = @"";
-  selectedAccountIdentifier = StrappyInspectorStringForRow(
-    StrappyInspectorModelForIdentifier(models, selectedIdentifier),
-    @"provider_account_id");
-  if (editsSessionDefaults_ &&
-      ([[options providerAccountIdentifier] length] > 0U)) {
-    selectedAccountIdentifier = [options providerAccountIdentifier];
-  }
+  selectedAccountIdentifier = [options providerAccountIdentifier];
+  selectedProviderIdentifier = StrappyInspectorStringForRow(
+    StrappyInspectorAccountForIdentifier(
+      [StrappySession providerAccountCatalogWithError:nil],
+      selectedAccountIdentifier), @"provider_id");
   sessionAccountLocked = !editsSessionDefaults_ &&
     ([[[session_ cachedSummary] objectForKey:@"prompt"] length] > 0U) &&
     ([selectedAccountIdentifier length] > 0U);
@@ -1118,14 +1120,13 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
     if ([identifier length] == 0U) {
       continue;
     }
-    accountIdentifier =
-      StrappyInspectorStringForRow(row, @"provider_account_id");
+    accountIdentifier = StrappyInspectorStringForRow(row, @"provider_id");
     if (editsSessionDefaults_ &&
-        ![accountIdentifier isEqualToString:selectedAccountIdentifier]) {
+        ![accountIdentifier isEqualToString:selectedProviderIdentifier]) {
       continue;
     }
     accountName =
-      StrappyInspectorStringForRow(row, @"provider_account_name");
+      StrappyInspectorStringForRow(row, @"provider_name");
     if (!editsSessionDefaults_ &&
         ![accountIdentifier isEqualToString:lastAccountIdentifier]) {
       if ([lastAccountIdentifier length] > 0U) {
@@ -1140,9 +1141,9 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
     [modelPopUpButton_ addItemWithTitle:StrappyInspectorModelTitle(row)];
     item = [modelPopUpButton_ lastItem];
     [item setRepresentedObject:identifier];
-    if (!StrappyInspectorModelIsSignedIn(row) ||
+    if (!StrappyInspectorModelIsSignedIn(row, selectedAccountIdentifier) ||
         (sessionAccountLocked &&
-         ![accountIdentifier isEqualToString:selectedAccountIdentifier])) {
+         ![accountIdentifier isEqualToString:selectedProviderIdentifier])) {
       [item setEnabled:NO];
     } else {
       validCount++;

@@ -9711,9 +9711,8 @@ static int harness_test_other_provider_accounts(void)
     strappy_db_create_provider_account(
       path,"other","Unauthenticated",endpoint_two,&account_two,&error) &&
     strappy_db_create_manual_model(
-      path,account_one,&model_input,&model_one,&error) &&
-    strappy_db_create_manual_model(
-      path,account_two,&model_input,&model_two,&error) &&
+      path,"other",&model_input,&model_one,&error) &&
+    ((model_two = strdup(model_one)) != NULL) &&
     strappy_db_set_model_allowed(path,model_one,1,&error) &&
     strappy_db_set_model_allowed(path,model_two,1,&error) &&
     strappy_db_set_default_account_model(path,account_one,model_one,&error) &&

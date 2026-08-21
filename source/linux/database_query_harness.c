@@ -660,7 +660,7 @@ static int harness_run_fresh_catalog_schema_tests(
            "database catalog columns") &&
          harness_expect_catalog_sql_ok(
            context->catalog_path,
-           "SELECT id, provider_account_id, wire_model_id, canonical_slug, "
+           "SELECT id, provider_id, wire_model_id, canonical_slug, "
            "hugging_face_id, name, description, "
            "context_length, created_at_s, architecture_modality, "
            "architecture_tokenizer, architecture_instruct_type, "
@@ -9762,7 +9762,7 @@ static int harness_run_bundled_model_catalog_tests(
       "\"models\":[]"
     "}";
   static const char *selected_model_id =
-    STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT ":gpt-5.4";
+    STRAPPY_PROVIDER_OPENAI_CHATGPT ":gpt-5.4";
   char database_path[1400];
   strappy_model_record_list list;
   strappy_model_route_record route;
@@ -9796,8 +9796,8 @@ static int harness_run_bundled_model_catalog_tests(
   }
   ok = harness_expect_catalog_integer(
          database_path,
-         "SELECT COUNT(*) FROM models WHERE provider_account_id = "
-           "'" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT
+         "SELECT COUNT(*) FROM models WHERE provider_id = "
+           "'" STRAPPY_PROVIDER_OPENAI_CHATGPT
            "' AND catalog_active = 1;",
          7LL,
          "initial bundled ChatGPT model count") &&
@@ -9816,7 +9816,7 @@ static int harness_run_bundled_model_catalog_tests(
        harness_expect_catalog_integer(
          database_path,
          "SELECT COUNT(*) FROM model_features WHERE "
-           "model_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT
+           "model_id = '" STRAPPY_PROVIDER_OPENAI_CHATGPT
              ":gpt-5.4' AND "
            "feature_kind = 'input_modality' AND feature_value = 'image';",
          1LL,
@@ -9842,8 +9842,8 @@ static int harness_run_bundled_model_catalog_tests(
   }
   ok = harness_expect_catalog_integer(
          database_path,
-         "SELECT COUNT(*) FROM models WHERE provider_account_id = "
-           "'" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT
+         "SELECT COUNT(*) FROM models WHERE provider_id = "
+           "'" STRAPPY_PROVIDER_OPENAI_CHATGPT
            "' AND catalog_active = 1;",
          1LL,
          "revision-scoped bundled model count") &&
@@ -9952,9 +9952,9 @@ static int harness_run_openrouter_model_catalog_tests(
   const harness_context *context)
 {
   static const char *gemma_model_id =
-    STRAPPY_PROVIDER_ACCOUNT_OPENROUTER ":google/gemma-4-31b-it";
+    STRAPPY_PROVIDER_OPENROUTER ":google/gemma-4-31b-it";
   static const char *openai_model_id =
-    STRAPPY_PROVIDER_ACCOUNT_OPENROUTER ":openai/gpt-4.1-mini";
+    STRAPPY_PROVIDER_OPENROUTER ":openai/gpt-4.1-mini";
   static const char *models_json =
     "{"
     "\"data\":["
@@ -10065,9 +10065,6 @@ static int harness_run_openrouter_model_catalog_tests(
       found_builtin_default = record->selected && record->allowed &&
         (record->wire_model_id != NULL) &&
         (strcmp(record->wire_model_id, STRAPPY_CONFIG_DEFAULT_API_MODEL) == 0) &&
-        (record->provider_account_id != NULL) &&
-        (strcmp(record->provider_account_id,
-                STRAPPY_PROVIDER_ACCOUNT_OPENROUTER) == 0) &&
         (record->provider_id != NULL) &&
         (strcmp(record->provider_id, STRAPPY_PROVIDER_OPENROUTER) == 0);
     }
@@ -10097,11 +10094,15 @@ static int harness_run_openrouter_model_catalog_tests(
     }
   }
   ok = (list.count == 3U) && found_builtin_default && found_gemma && found_openai;
-  strappy_model_record_list_destroy(&list);
   if (!ok) {
-    fprintf(stderr, "OpenRouter model rows did not match expected values.\n");
+    fprintf(stderr, "OpenRouter model rows did not match expected values "
+            "(count=%lu default=%d gemma=%d openai=%d).\n",
+            (unsigned long)list.count, found_builtin_default,
+            found_gemma, found_openai);
+    strappy_model_record_list_destroy(&list);
     return 0;
   }
+  strappy_model_record_list_destroy(&list);
 
   default_model = NULL;
   error = NULL;
@@ -10232,7 +10233,7 @@ static int harness_run_openrouter_model_catalog_tests(
   if (!harness_expect_catalog_integer(
         context->catalog_path,
         "SELECT COUNT(*) FROM model_features "
-        "WHERE model_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENROUTER
+        "WHERE model_id = '" STRAPPY_PROVIDER_OPENROUTER
           ":openai/gpt-4.1-mini' "
         "AND feature_kind = 'input_modality' AND feature_value = 'image';",
         1LL,
@@ -10240,7 +10241,7 @@ static int harness_run_openrouter_model_catalog_tests(
       !harness_expect_catalog_integer(
         context->catalog_path,
         "SELECT COUNT(*) FROM model_features "
-        "WHERE model_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENROUTER
+        "WHERE model_id = '" STRAPPY_PROVIDER_OPENROUTER
           ":google/gemma-4-31b-it' "
         "AND feature_kind = 'parameter' AND feature_value = 'tools';",
         1LL,
@@ -10248,7 +10249,7 @@ static int harness_run_openrouter_model_catalog_tests(
       !harness_expect_catalog_integer(
         context->catalog_path,
         "SELECT COUNT(*) FROM model_features "
-        "WHERE model_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENROUTER
+        "WHERE model_id = '" STRAPPY_PROVIDER_OPENROUTER
           ":google/gemma-4-31b-it' "
         "AND feature_kind = 'voice' AND feature_value = 'alloy';",
         1LL,
@@ -10588,7 +10589,7 @@ static int harness_run_openrouter_model_catalog_tests(
         context->catalog_path,
         "SELECT COUNT(*) FROM sessions WHERE id = "
         "(SELECT MAX(id) FROM sessions) AND "
-        "model_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENROUTER
+        "model_id = '" STRAPPY_PROVIDER_OPENROUTER
           ":google/gemma-4-31b-it';",
         1LL,
         "session model after Responses finalization")) {
@@ -10629,9 +10630,9 @@ static int harness_run_provider_account_routing_tests(
   const harness_context *context)
 {
   static const char *chatgpt_model_id =
-    STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT ":openai/gpt-4.1-mini";
+    STRAPPY_PROVIDER_OPENAI_CHATGPT ":openai/gpt-4.1-mini";
   static const char *openrouter_model_id =
-    STRAPPY_PROVIDER_ACCOUNT_OPENROUTER ":openai/gpt-4.1-mini";
+    STRAPPY_PROVIDER_OPENROUTER ":openai/gpt-4.1-mini";
   static const char *wire_model_id = "openai/gpt-4.1-mini";
   static const char *openrouter_refresh_json =
     "{\"data\":["
@@ -10682,10 +10683,10 @@ static int harness_run_provider_account_routing_tests(
     db,
     "PRAGMA foreign_keys = ON;"
     "INSERT INTO models "
-      "(id, provider_account_id, wire_model_id, name, catalog_active, "
+      "(id, provider_id, wire_model_id, name, catalog_active, "
        "last_seen_at_ms) VALUES "
-      "('" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT
-       ":openai/gpt-4.1-mini', '" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT "', "
+      "('" STRAPPY_PROVIDER_OPENAI_CHATGPT
+       ":openai/gpt-4.1-mini', '" STRAPPY_PROVIDER_OPENAI_CHATGPT "', "
        "'openai/gpt-4.1-mini', 'GPT 4.1 Mini (ChatGPT)', 1, 1);");
   sqlite3_close(db);
   if (!ok) {
@@ -10710,9 +10711,9 @@ static int harness_run_provider_account_routing_tests(
   if (!harness_expect_catalog_integer(
         context->catalog_path,
         "SELECT COUNT(*) FROM models WHERE "
-        "id = '" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT
+        "id = '" STRAPPY_PROVIDER_OPENAI_CHATGPT
           ":openai/gpt-4.1-mini' "
-        "AND provider_account_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT "' "
+        "AND provider_id = '" STRAPPY_PROVIDER_OPENAI_CHATGPT "' "
         "AND catalog_active = 1;",
         1LL,
         "ChatGPT model after OpenRouter refresh")) {
@@ -10744,9 +10745,6 @@ static int harness_run_provider_account_routing_tests(
     }
     if ((record->model_id != NULL) &&
         (strcmp(record->model_id, chatgpt_model_id) == 0) &&
-        (record->provider_account_id != NULL) &&
-        (strcmp(record->provider_account_id,
-                STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT) == 0) &&
         (record->provider_id != NULL) &&
         (strcmp(record->provider_id,
                 STRAPPY_PROVIDER_OPENAI_CHATGPT) == 0) &&
@@ -10755,9 +10753,8 @@ static int harness_run_provider_account_routing_tests(
     }
     if ((record->model_id != NULL) &&
         (strcmp(record->model_id, openrouter_model_id) == 0) &&
-        (record->provider_account_id != NULL) &&
-        (strcmp(record->provider_account_id,
-                STRAPPY_PROVIDER_ACCOUNT_OPENROUTER) == 0)) {
+        (record->provider_id != NULL) &&
+        (strcmp(record->provider_id, STRAPPY_PROVIDER_OPENROUTER) == 0)) {
       found_openrouter = 1;
     }
   }
@@ -10793,7 +10790,7 @@ static int harness_run_provider_account_routing_tests(
 
   error = NULL;
   qualified_model_id = strappy_provider_model_identifier(
-    STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT,
+    STRAPPY_PROVIDER_OPENAI_CHATGPT,
     wire_model_id,
     &error);
   openrouter_endpoint = strappy_provider_responses_endpoint(
@@ -10916,7 +10913,7 @@ static int harness_run_provider_account_routing_tests(
                "ON r.turn_id = t.id JOIN http_attempts a "
                "ON a.request_id = r.id WHERE s.id = %lld "
                "AND s.provider_account_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT "' "
-               "AND r.model_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT ":openai/gpt-4.1-mini' "
+               "AND r.model_id = '" STRAPPY_PROVIDER_OPENAI_CHATGPT ":openai/gpt-4.1-mini' "
                "AND r.provider_account_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT "' "
                "AND a.provider_account_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT "';",
                session_id) <= 0 ||
@@ -10989,7 +10986,7 @@ static int harness_run_provider_account_routing_tests(
                sizeof(sql),
                "SELECT COUNT(*) FROM sessions WHERE id = %lld "
                "AND model_id = "
-               "'" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT ":openai/gpt-4.1-mini' "
+               "'" STRAPPY_PROVIDER_OPENAI_CHATGPT ":openai/gpt-4.1-mini' "
                "AND provider_account_id = '" STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT "';",
                session_id) <= 0 ||
       !harness_expect_catalog_integer(
@@ -11872,19 +11869,16 @@ static int harness_run_multi_account_database_tests(
     strappy_model_catalog_import_bundled_models(HARNESS_RESOURCE_DIR,path,&error) &&
     strappy_db_create_provider_account(path,"openai_chatgpt","Later",NULL,&chat_three,&error) &&
     harness_expect_catalog_integer(path,
-      "SELECT COUNT(*) FROM models m JOIN provider_accounts a ON a.id=m.provider_account_id WHERE a.provider_id='openai_chatgpt' AND m.catalog_active=1;",
-      21LL,"three-account bundled model count") &&
+      "SELECT COUNT(*) FROM models WHERE provider_id='openai_chatgpt' AND catalog_active=1;",
+      7LL,"provider-owned bundled model count") &&
     harness_expect_catalog_integer(path,
       "SELECT COUNT(*) FROM bundled_model_catalogs WHERE provider_id='openai_chatgpt' AND catalog_revision=2;",
       1LL,"provider-level bundled revision") &&
-    harness_expect_catalog_integer(path,
-      "SELECT COUNT(*) FROM bundled_catalog_applications WHERE provider_id='openai_chatgpt' AND catalog_revision=2;",
-      3LL,"per-account bundled revision applications") &&
     strappy_db_save_account_models_json(path,router_one,catalog_one,&error) &&
     strappy_db_save_account_models_json(path,router_two,catalog_two,&error) &&
     harness_expect_catalog_integer(path,
       "SELECT COUNT(*) FROM models WHERE wire_model_id='shared/model' AND catalog_active=1;",
-      2LL,"duplicate wire model ids across accounts") &&
+      1LL,"single provider-owned remote model") &&
     strappy_db_update_provider_account(path,chat_two,"Renamed",NULL,&error);
   strappy_provider_account_record_destroy(&account);
   if (ok) {
@@ -11941,26 +11935,41 @@ static int harness_run_multi_account_database_tests(
   if (ok) ok = strappy_db_create_provider_account(path,"other","Local","https://one.example/v1/responses",&other_one,&error) &&
     strappy_db_create_provider_account(path,"other","Local","https://two.example/v1/responses",&other_two,&error);
   memset(&input,0,sizeof(input));
-  input.wire_model_id="manual"; input.display_name="Manual One";
+  input.wire_model_id="manual"; input.display_name=NULL;
   input.context_window_tokens=8192LL; input.max_output_tokens=2048LL;
   input.reasoning_enabled=1; input.local_functions_enabled=1;
-  if (ok) ok = strappy_db_create_manual_model(path,other_one,&input,&manual_one,&error);
+  input.image_input_enabled=1;
+  input.pricing_prompt="0.00000125";
+  if (ok) ok = strappy_db_create_manual_model(path,"other",&input,&manual_one,&error);
   input.display_name="Manual Two";
-  if (ok) ok = strappy_db_create_manual_model(path,other_two,&input,&manual_two,&error) &&
-    (strcmp(manual_one,manual_two)!=0) &&
+  if (ok) ok = strappy_db_update_manual_model(path,"other",&input,&error) &&
+    ((manual_two=strdup(manual_one)) != NULL) &&
+    harness_expect_catalog_integer(path,
+      "SELECT COUNT(*) FROM models WHERE wire_model_id='manual' "
+      "AND name IN ('manual','Manual Two');",
+      1LL,"provider-owned manual model") &&
+    harness_expect_catalog_integer(path,
+      "SELECT COUNT(*) FROM model_prices p JOIN models m ON m.id=p.model_id "
+      "WHERE m.wire_model_id='manual' AND p.price_kind='prompt' "
+      "AND p.price_decimal='0.00000125';",
+      1LL,"manual model optional input pricing") &&
+    harness_expect_catalog_integer(path,
+      "SELECT COUNT(*) FROM model_features f JOIN models m ON m.id=f.model_id "
+      "WHERE m.wire_model_id='manual' AND f.feature_kind='input_modality' "
+      "AND f.feature_value='image';",
+      1LL,"manual model optional image input") &&
     strappy_db_set_model_allowed(path,manual_one,1,&error) &&
     harness_expect_catalog_integer(path,
       "SELECT COUNT(*) FROM model_preferences WHERE provider_id='other' "
       "AND wire_model_id='manual' AND allowed=1;",
       1LL,"single provider-level manual model preference") &&
     harness_expect_catalog_integer(path,
-      "SELECT COUNT(*) FROM models m JOIN provider_accounts a "
-      "ON a.id=m.provider_account_id JOIN model_preferences p "
-      "ON p.provider_id=a.provider_id AND p.wire_model_id=m.wire_model_id "
-      "WHERE a.provider_id='other' AND m.wire_model_id='manual' "
+      "SELECT COUNT(*) FROM models m JOIN model_preferences p "
+      "ON p.provider_id=m.provider_id AND p.wire_model_id=m.wire_model_id "
+      "WHERE m.provider_id='other' AND m.wire_model_id='manual' "
       "AND p.allowed=1;",
-      2LL,"provider preference shared across account models") &&
-    !strappy_db_set_default_account_model(path,other_one,manual_two,NULL) &&
+      1LL,"provider preference for manual model") &&
+    strappy_db_set_default_account_model(path,other_one,manual_two,&error) &&
     strappy_db_set_default_account_model(path,other_two,manual_two,&error) &&
     strappy_db_get_default_account_model(path,&default_account,&default_model,&error) &&
     (strcmp(default_account,other_two)==0) && (strcmp(default_model,manual_two)==0) &&
@@ -11982,25 +11991,24 @@ static int harness_run_multi_account_database_tests(
       strappy_db_update_session_options(
         path,session_id,&options,STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT,
         &saved_options,&changed_fields,&error) &&
-      (changed_fields==(STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT |
-                       STRAPPY_SESSION_OPTION_MODEL)) &&
+      (changed_fields==STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT) &&
       (strcmp(saved_options.provider_account_id,other_one)==0) &&
       (strcmp(saved_options.model_id,manual_one)==0);
   }
   input.display_name="Manual One Updated";
-  if (ok) ok = strappy_db_update_manual_model(path,other_one,&input,&error) &&
-    strappy_db_archive_manual_model(path,other_one,"manual",&error) &&
+  if (ok) ok = strappy_db_update_manual_model(path,"other",&input,&error) &&
+    strappy_db_archive_manual_model(path,"other","manual",&error) &&
     harness_expect_catalog_integer(path,
       "SELECT COUNT(*) FROM models WHERE wire_model_id='manual' AND catalog_active=1;",
-      1LL,"isolated manual model archive") &&
+      0LL,"provider-owned manual model archive") &&
     strappy_db_archive_provider_account(path,other_one,&error) &&
     strappy_db_initialize(path,&error) &&
     harness_expect_catalog_integer(path,
       "SELECT COUNT(*) FROM provider_accounts WHERE lifecycle_state='archived' AND provider_id='other';",
       2LL,"archived accounts after restart") &&
     harness_expect_catalog_integer(path,
-      "SELECT COUNT(*) FROM models WHERE provider_account_id IN (SELECT id FROM provider_accounts WHERE lifecycle_state='archived');",
-      1LL,"archived account model preservation") &&
+      "SELECT COUNT(*) FROM models WHERE provider_id='other';",
+      1LL,"account-independent model preservation") &&
     harness_expect_catalog_integer(path,
       "SELECT COUNT(*) FROM sqlite_schema s JOIN pragma_table_info(s.name) p "
       "WHERE s.type='table' AND lower(p.name) IN "

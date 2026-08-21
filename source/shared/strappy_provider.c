@@ -411,37 +411,37 @@ int strappy_provider_response_is_plan_limit(strappy_provider_kind provider,
                                                    error_message);
 }
 
-char *strappy_provider_model_identifier(const char *provider_account_id,
+char *strappy_provider_model_identifier(const char *provider_id,
                                         const char *wire_model_id,
                                         char **error_out)
 {
-  size_t account_length;
+  size_t provider_length;
   size_t wire_length;
   char *identifier;
 
-  if ((provider_account_id == NULL) ||
-      (provider_account_id[0] == '\0') ||
+  if ((provider_id == NULL) ||
+      (provider_id[0] == '\0') ||
       (wire_model_id == NULL) || (wire_model_id[0] == '\0')) {
     strappy_set_error(error_out,
-                      "Provider account and wire model id are required.");
+                      "Provider and wire model id are required.");
     return NULL;
   }
-  account_length = strlen(provider_account_id);
+  provider_length = strlen(provider_id);
   wire_length = strlen(wire_model_id);
-  if (account_length > (((size_t)-1) - wire_length - 2U)) {
+  if (provider_length > (((size_t)-1) - wire_length - 2U)) {
     strappy_set_error(error_out, "Provider-qualified model id is too large.");
     return NULL;
   }
-  identifier = (char *)malloc(account_length + wire_length + 2U);
+  identifier = (char *)malloc(provider_length + wire_length + 2U);
   if (identifier == NULL) {
     strappy_set_error(error_out,
                       "Could not allocate provider-qualified model id.");
     return NULL;
   }
-  memcpy(identifier, provider_account_id, account_length);
-  identifier[account_length] = ':';
-  memcpy(identifier + account_length + 1U, wire_model_id, wire_length);
-  identifier[account_length + wire_length + 1U] = '\0';
+  memcpy(identifier, provider_id, provider_length);
+  identifier[provider_length] = ':';
+  memcpy(identifier + provider_length + 1U, wire_model_id, wire_length);
+  identifier[provider_length + wire_length + 1U] = '\0';
   return identifier;
 }
 

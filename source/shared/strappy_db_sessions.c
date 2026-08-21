@@ -14,8 +14,12 @@
 #define STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL \
   "COALESCE(s.model_id, " STRAPPY_DB_DEFAULT_MODEL_SQL ")"
 #define STRAPPY_DB_SESSION_EFFECTIVE_ACCOUNT_SQL \
-  "COALESCE(s.provider_account_id, (SELECT m.provider_account_id FROM models m " \
-  "WHERE m.id = " STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL "))"
+  "COALESCE(s.provider_account_id, (SELECT a.id FROM provider_accounts a " \
+  "JOIN models m ON m.provider_id=a.provider_id WHERE m.id = " \
+  STRAPPY_DB_SESSION_EFFECTIVE_MODEL_SQL " AND a.lifecycle_state='active' " \
+  "ORDER BY CASE WHEN a.id=(SELECT default_provider_account_id FROM " \
+  "app_preferences WHERE id=1) THEN 0 ELSE 1 END,a.last_used_at_ms DESC," \
+  "a.created_at_ms,a.id LIMIT 1))"
 #define STRAPPY_DB_SESSION_ASSISTANT_SET_SQL \
   "COALESCE((SELECT a.assistant_set_id FROM session_assistant_sets a " \
   "WHERE a.session_id = s.id), '" STRAPPY_ASSISTANT_SET_DEFAULT "')"
@@ -1261,7 +1265,9 @@ static int strappy_db_copy_default_session_options(
   char **error_out)
 {
   static const char *sql =
-    "SELECT " STRAPPY_DB_DEFAULT_MODEL_SQL ", "
+    "SELECT CASE WHEN (SELECT default_provider_account_id FROM "
+    "app_preferences WHERE id=1) IS NULL THEN NULL ELSE "
+    STRAPPY_DB_DEFAULT_MODEL_SQL " END, "
     "(SELECT default_provider_account_id FROM app_preferences WHERE id=1), "
     "assistant_set_id, web_provider, web_search_enabled, bash_enabled, "
     "limit_to_one_tool, round_limit, working_directory, "
@@ -1723,9 +1729,11 @@ static int strappy_db_copy_model_account(sqlite3 *db,
   stmt = NULL;
   rc = sqlite3_prepare_v2(
     db,
-    "SELECT m.provider_account_id FROM models m JOIN provider_accounts a "
-    "ON a.id=m.provider_account_id WHERE m.id=? AND m.catalog_active=1 "
-    "AND a.lifecycle_state='active';",
+    "SELECT a.id FROM models m JOIN provider_accounts a "
+    "ON a.provider_id=m.provider_id WHERE m.id=? AND m.catalog_active=1 "
+    "AND a.lifecycle_state='active' ORDER BY CASE WHEN a.id=(SELECT "
+    "default_provider_account_id FROM app_preferences WHERE id=1) THEN 0 "
+    "ELSE 1 END,a.last_used_at_ms DESC,a.created_at_ms,a.id LIMIT 1;",
     -1, &stmt, NULL);
   if (rc == SQLITE_OK) {
     rc = sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT);
@@ -1745,6 +1753,37 @@ static int strappy_db_copy_model_account(sqlite3 *db,
   return 1;
 }
 
+static int strappy_db_model_matches_account(sqlite3 *db,
+                                            const char *model_id,
+                                            const char *account_id,
+                                            int *matches_out,
+                                            char **error_out)
+{
+  sqlite3_stmt *stmt;
+  int rc;
+
+  *matches_out = 0;
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(
+    db,
+    "SELECT 1 FROM models m JOIN provider_accounts a "
+    "ON a.provider_id=m.provider_id WHERE m.id=? AND a.id=? "
+    "AND m.catalog_active=1 AND a.lifecycle_state='active';",
+    -1, &stmt, NULL);
+  if (rc == SQLITE_OK) rc = sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT);
+  if (rc == SQLITE_OK) rc = sqlite3_bind_text(stmt, 2, account_id, -1, SQLITE_TRANSIENT);
+  if (rc == SQLITE_OK) rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) *matches_out = 1;
+  sqlite3_finalize(stmt);
+  if ((rc != SQLITE_ROW) && (rc != SQLITE_DONE)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not validate model provider: %s",
+                                sqlite3_errmsg(db));
+    return 0;
+  }
+  return 1;
+}
+
 static int strappy_db_copy_account_default_model(sqlite3 *db,
                                                  const char *account_id,
                                                  char **model_id_out,
@@ -1758,9 +1797,9 @@ static int strappy_db_copy_account_default_model(sqlite3 *db,
   rc = sqlite3_prepare_v2(
     db,
     "SELECT m.id FROM models m JOIN provider_accounts a "
-    "ON a.id=m.provider_account_id LEFT JOIN model_preferences p "
+    "ON a.provider_id=m.provider_id LEFT JOIN model_preferences p "
     "ON p.provider_id=a.provider_id AND p.wire_model_id=m.wire_model_id "
-    "WHERE m.provider_account_id=? "
+    "WHERE a.id=? "
     "AND a.lifecycle_state='active' AND m.catalog_active=1 "
     "AND (p.allowed=1 OR m.id=(SELECT default_model_id FROM app_preferences "
     "WHERE id=1)) ORDER BY CASE WHEN m.id=(SELECT default_model_id "
@@ -2044,10 +2083,17 @@ int strappy_db_update_session_options(
             "Could not allocate the model's provider account.", error_out)) {
         goto rollback;
       }
-    } else if (strcmp(merged.provider_account_id, selected_account_id) != 0) {
-      strappy_set_error(error_out,
-                        "The selected model does not belong to the selected account.");
-      goto rollback;
+    } else {
+      int matches;
+      if (!strappy_db_model_matches_account(db, merged.model_id,
+                                            merged.provider_account_id,
+                                            &matches, error_out) || !matches) {
+        if ((error_out != NULL) && (*error_out == NULL)) {
+          strappy_set_error(error_out,
+                            "The selected model and account use different providers.");
+        }
+        goto rollback;
+      }
     }
   }
   if (((changed_fields & STRAPPY_SESSION_OPTION_ASSISTANT_SET) != 0U) &&
@@ -2137,10 +2183,17 @@ int strappy_db_update_session_options(
                                         &selected_account_id, error_out))) {
       goto rollback;
     }
-    if (strcmp(selected_account_id, merged.provider_account_id) != 0) {
-      strappy_set_error(error_out,
-                        "The selected model does not belong to the selected account.");
-      goto rollback;
+    {
+      int matches;
+      if (!strappy_db_model_matches_account(db, merged.model_id,
+                                            merged.provider_account_id,
+                                            &matches, error_out) || !matches) {
+        if ((error_out != NULL) && (*error_out == NULL)) {
+          strappy_set_error(error_out,
+                            "The selected model and account use different providers.");
+        }
+        goto rollback;
+      }
     }
     if (
         !strappy_db_model_is_effectively_allowed(db,
@@ -2373,10 +2426,17 @@ int strappy_db_update_default_session_options(
             "Could not allocate the default model account.", error_out)) {
         goto default_rollback;
       }
-    } else if (strcmp(merged.provider_account_id, selected_account_id) != 0) {
-      strappy_set_error(error_out,
-                        "The default model does not belong to the selected account.");
-      goto default_rollback;
+    } else {
+      int matches;
+      if (!strappy_db_model_matches_account(db, merged.model_id,
+                                            merged.provider_account_id,
+                                            &matches, error_out) || !matches) {
+        if ((error_out != NULL) && (*error_out == NULL)) {
+          strappy_set_error(error_out,
+                            "The default model and account use different providers.");
+        }
+        goto default_rollback;
+      }
     }
   }
   if (((changed_fields & STRAPPY_SESSION_OPTION_ASSISTANT_SET) != 0U) &&

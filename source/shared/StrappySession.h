@@ -156,6 +156,10 @@ enum {
                                        error:(NSError **)error;
 + (NSArray *)modelCatalogWithError:(NSError **)error;
 + (NSArray *)allowedModelCatalogWithError:(NSError **)error;
++ (NSArray *)bundledModelCatalogForProviderIdentifier:
+               (NSString *)providerIdentifier
+                                                 error:
+               (NSError **)error;
 + (NSArray *)openRouterModelCatalogMatchingSearchText:(NSString *)searchText
                                                 error:(NSError **)error;
 + (NSArray *)openRouterModelCatalogWithError:(NSError **)error;
@@ -180,6 +184,64 @@ enum {
 + (BOOL)setModelAllowed:(BOOL)allowed
      forModelIdentifier:(NSString *)modelIdentifier
                   error:(NSError **)error;
++ (NSString *)createManualModelForProviderIdentifier:
+                (NSString *)providerIdentifier
+                                                wireModelID:
+                (NSString *)wireModelID
+                                                displayName:
+                (NSString *)displayName
+                                         contextWindowTokens:
+                (long long)contextWindowTokens
+                                             maxOutputTokens:
+                (long long)maxOutputTokens
+                                           reasoningEnabled:
+                (BOOL)reasoningEnabled
+                                          imageInputEnabled:
+                (BOOL)imageInputEnabled
+                                      localFunctionsEnabled:
+                (BOOL)localFunctionsEnabled
+                                          inputPricePerToken:
+                (NSString *)inputPricePerToken
+                                         outputPricePerToken:
+                (NSString *)outputPricePerToken
+                                      cacheReadPricePerToken:
+                (NSString *)cacheReadPricePerToken
+                                     cacheWritePricePerToken:
+                (NSString *)cacheWritePricePerToken
+                                                       error:
+                (NSError **)error;
++ (BOOL)updateManualModelForProviderIdentifier:
+            (NSString *)providerIdentifier
+                                            wireModelID:
+            (NSString *)wireModelID
+                                            displayName:
+            (NSString *)displayName
+                                     contextWindowTokens:
+            (long long)contextWindowTokens
+                                         maxOutputTokens:
+            (long long)maxOutputTokens
+                                       reasoningEnabled:
+            (BOOL)reasoningEnabled
+                                      imageInputEnabled:
+            (BOOL)imageInputEnabled
+                                  localFunctionsEnabled:
+            (BOOL)localFunctionsEnabled
+                                      inputPricePerToken:
+            (NSString *)inputPricePerToken
+                                     outputPricePerToken:
+            (NSString *)outputPricePerToken
+                                  cacheReadPricePerToken:
+            (NSString *)cacheReadPricePerToken
+                                 cacheWritePricePerToken:
+            (NSString *)cacheWritePricePerToken
+                                                   error:
+            (NSError **)error;
++ (BOOL)archiveManualModelForProviderIdentifier:
+            (NSString *)providerIdentifier
+                                             wireModelID:
+            (NSString *)wireModelID
+                                                    error:
+            (NSError **)error;
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error;
 + (NSArray *)databaseStudyRowsWithError:(NSError **)error;
 + (BOOL)deleteDatabaseStudyValuesForDatabaseIdentifier:

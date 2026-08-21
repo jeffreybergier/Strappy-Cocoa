@@ -66,8 +66,7 @@ NSString *StrappyModelCellDetailText(NSDictionary *model)
   NSString *completionPrice;
 
   details = [NSMutableArray array];
-  accountName = StrappyModelCellStringForRow(model,
-                                              @"provider_account_name");
+  accountName = StrappyModelCellStringForRow(model, @"provider_name");
   if ([accountName length] > 0U) {
     [details addObject:accountName];
   }

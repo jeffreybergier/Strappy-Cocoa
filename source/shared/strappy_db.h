@@ -312,6 +312,7 @@ typedef struct strappy_model_record {
   char *billing_kind;
   int reasoning_enabled;
   int local_functions_enabled;
+  int image_input_enabled;
   int hosted_tools_enabled;
   char *canonical_slug;
   char *hugging_face_id;
@@ -396,6 +397,11 @@ typedef struct strappy_manual_model_input {
   long long max_output_tokens;
   int reasoning_enabled;
   int local_functions_enabled;
+  int image_input_enabled;
+  const char *pricing_prompt;
+  const char *pricing_completion;
+  const char *pricing_input_cache_read;
+  const char *pricing_input_cache_write;
 } strappy_manual_model_input;
 
 void strappy_session_record_init(strappy_session_record *record);
@@ -729,16 +735,16 @@ int strappy_db_import_bundled_models_json_for_account(
   const char *json,
   char **error_out);
 int strappy_db_create_manual_model(const char *db_path,
-                                   const char *provider_account_id,
+                                   const char *provider_id,
                                    const strappy_manual_model_input *input,
                                    char **model_id_out,
                                    char **error_out);
 int strappy_db_update_manual_model(const char *db_path,
-                                   const char *provider_account_id,
+                                   const char *provider_id,
                                    const strappy_manual_model_input *input,
                                    char **error_out);
 int strappy_db_archive_manual_model(const char *db_path,
-                                    const char *provider_account_id,
+                                    const char *provider_id,
                                     const char *wire_model_id,
                                     char **error_out);
 int strappy_db_list_models_matching(

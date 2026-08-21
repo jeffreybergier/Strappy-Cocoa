@@ -10,6 +10,7 @@
 #import "strappy_session.h"
 #import "strappy_study.h"
 #import "XPFoundation.h"
+#import "cJSON.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -388,6 +389,19 @@ static NSString *StrappySessionStringFromCString(char *value)
 + (NSArray *)messagesForSessionIdentifier:(NSNumber *)sessionIdentifier
                                     error:(NSError **)error;
 + (NSArray *)modelCatalogFromList:(const strappy_model_record_list *)list;
++ (BOOL)manualModelInput:(strappy_manual_model_input *)input
+             wireModelID:(NSString *)wireModelID
+             displayName:(NSString *)displayName
+      contextWindowTokens:(long long)contextWindowTokens
+          maxOutputTokens:(long long)maxOutputTokens
+        reasoningEnabled:(BOOL)reasoningEnabled
+       imageInputEnabled:(BOOL)imageInputEnabled
+   localFunctionsEnabled:(BOOL)localFunctionsEnabled
+       inputPricePerToken:(NSString *)inputPricePerToken
+      outputPricePerToken:(NSString *)outputPricePerToken
+   cacheReadPricePerToken:(NSString *)cacheReadPricePerToken
+  cacheWritePricePerToken:(NSString *)cacheWritePricePerToken
+                    error:(NSError **)error;
 + (NSDictionary *)dictionaryFromModelRecord:
     (const strappy_model_record *)record;
 + (NSDictionary *)dictionaryFromAssistantSetRecord:
@@ -1812,6 +1826,7 @@ static BOOL StrappySessionRecordFromOptions(
   NSString *modelId;
   NSString *providerAccountId;
   NSString *providerId;
+  NSString *providerName;
   NSString *providerAccountName;
   NSString *wireModelId;
   NSString *billingKind;
@@ -1850,6 +1865,25 @@ static BOOL StrappySessionRecordFromOptions(
   providerAccountId =
     [StrappySession stringFromCStringOrEmpty:record->provider_account_id];
   providerId = [StrappySession stringFromCStringOrEmpty:record->provider_id];
+  providerName = providerId;
+  {
+    NSArray *providers;
+    NSUInteger providerIndex;
+
+    providers = [StrappySession providerCatalog];
+    for (providerIndex = 0U; providerIndex < [providers count]; providerIndex++) {
+      NSDictionary *provider;
+
+      provider = [providers objectAtIndex:providerIndex];
+      if ([[provider objectForKey:@"id"] isEqualToString:providerId]) {
+        NSString *candidate;
+
+        candidate = [provider objectForKey:@"name"];
+        if ([candidate isKindOfClass:[NSString class]]) providerName = candidate;
+        break;
+      }
+    }
+  }
   providerAccountName =
     [StrappySession stringFromCStringOrEmpty:record->provider_account_name];
   wireModelId =
@@ -1908,6 +1942,7 @@ static BOOL StrappySessionRecordFromOptions(
     modelId, @"id",
     providerAccountId, @"provider_account_id",
     providerId, @"provider_id",
+    providerName, @"provider_name",
     providerAccountName, @"provider_account_name",
     wireModelId, @"wire_model_id",
     billingKind, @"billing_kind",
@@ -1917,6 +1952,8 @@ static BOOL StrappySessionRecordFromOptions(
       @"local_functions_enabled",
     [NSNumber numberWithBool:(record->hosted_tools_enabled ? YES : NO)],
       @"hosted_tools_enabled",
+    [NSNumber numberWithBool:(record->image_input_enabled ? YES : NO)],
+      @"image_input_enabled",
     canonicalSlug, @"canonical_slug",
     huggingFaceId, @"hugging_face_id",
     name, @"name",
@@ -2903,6 +2940,103 @@ static BOOL StrappySessionRecordFromOptions(
   return models;
 }
 
++ (NSArray *)bundledModelCatalogForProviderIdentifier:
+               (NSString *)providerIdentifier
+                                                 error:
+               (NSError **)error
+{
+  NSString *path;
+  NSData *data;
+  char *json;
+  cJSON *root;
+  cJSON *models;
+  NSMutableArray *result;
+  int count;
+  int index;
+
+  if (![providerIdentifier isKindOfClass:[NSString class]] ||
+      ([providerIdentifier length] == 0U)) {
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "Bundled model provider identifier is missing."];
+    }
+    return nil;
+  }
+  path = [[NSBundle mainBundle] pathForResource:@"BundledModels"
+                                         ofType:@"json"];
+  data = (path != nil) ? [NSData dataWithContentsOfFile:path] : nil;
+  if ((data == nil) || ([data length] == 0U) ||
+      ([data length] > (512U * 1024U))) {
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "Bundled model catalog could not be loaded."];
+    }
+    return nil;
+  }
+  json = (char *)malloc([data length] + 1U);
+  if (json == NULL) {
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "Could not allocate bundled model catalog."];
+    }
+    return nil;
+  }
+  memcpy(json, [data bytes], [data length]);
+  json[[data length]] = '\0';
+  root = cJSON_Parse(json);
+  free(json);
+  models = (root != NULL) ?
+    cJSON_GetObjectItemCaseSensitive(root, "models") : NULL;
+  if (!cJSON_IsArray(models)) {
+    cJSON_Delete(root);
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "Bundled model catalog is invalid."];
+    }
+    return nil;
+  }
+  result = [NSMutableArray array];
+  count = cJSON_GetArraySize(models);
+  for (index = 0; index < count; index++) {
+    cJSON *model;
+    cJSON *provider;
+    cJSON *wireModelID;
+    cJSON *displayName;
+    cJSON *active;
+    NSString *modelProviderIdentifier;
+    NSString *modelWireID;
+    NSString *modelDisplayName;
+
+    model = cJSON_GetArrayItem(models, index);
+    provider = cJSON_GetObjectItemCaseSensitive(model, "provider_id");
+    wireModelID = cJSON_GetObjectItemCaseSensitive(model, "wire_model_id");
+    displayName = cJSON_GetObjectItemCaseSensitive(model, "display_name");
+    active = cJSON_GetObjectItemCaseSensitive(model, "catalog_active");
+    if (!cJSON_IsString(provider) || (provider->valuestring == NULL) ||
+        !cJSON_IsString(wireModelID) || (wireModelID->valuestring == NULL) ||
+        !cJSON_IsString(displayName) || (displayName->valuestring == NULL) ||
+        !cJSON_IsTrue(active)) {
+      continue;
+    }
+    modelProviderIdentifier =
+      [NSString stringWithUTF8String:provider->valuestring];
+    if (![modelProviderIdentifier isEqualToString:providerIdentifier]) {
+      continue;
+    }
+    modelWireID = [NSString stringWithUTF8String:wireModelID->valuestring];
+    modelDisplayName = [NSString stringWithUTF8String:displayName->valuestring];
+    if ((modelWireID != nil) && (modelDisplayName != nil)) {
+      [result addObject:[NSDictionary dictionaryWithObjectsAndKeys:
+        modelProviderIdentifier, @"provider_id",
+        modelWireID, @"wire_model_id",
+        modelDisplayName, @"name",
+        nil]];
+    }
+  }
+  cJSON_Delete(root);
+  return result;
+}
+
 + (NSArray *)openRouterModelCatalogMatchingSearchText:(NSString *)searchText
                                                 error:(NSError **)error
 {
@@ -3329,6 +3463,266 @@ static BOOL StrappySessionRecordFromOptions(
   return [StrappySession setModelAllowed:allowed
                       forModelIdentifier:modelIdentifier
                                    error:error];
+}
+
++ (BOOL)manualModelInput:(strappy_manual_model_input *)input
+             wireModelID:(NSString *)wireModelID
+             displayName:(NSString *)displayName
+      contextWindowTokens:(long long)contextWindowTokens
+          maxOutputTokens:(long long)maxOutputTokens
+        reasoningEnabled:(BOOL)reasoningEnabled
+       imageInputEnabled:(BOOL)imageInputEnabled
+   localFunctionsEnabled:(BOOL)localFunctionsEnabled
+       inputPricePerToken:(NSString *)inputPricePerToken
+      outputPricePerToken:(NSString *)outputPricePerToken
+   cacheReadPricePerToken:(NSString *)cacheReadPricePerToken
+  cacheWritePricePerToken:(NSString *)cacheWritePricePerToken
+                    error:(NSError **)error
+{
+  NSArray *prices;
+  NSUInteger priceIndex;
+
+  if ((input == NULL) ||
+      ![wireModelID isKindOfClass:[NSString class]] ||
+      ((displayName != nil) &&
+       ![displayName isKindOfClass:[NSString class]]) ||
+      ([wireModelID length] == 0U) || ([wireModelID length] > 128U) ||
+      ([displayName length] > 160U) ||
+      (contextWindowTokens < 0LL) || (maxOutputTokens < 0LL)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:
+        "Manual model metadata is invalid."];
+    }
+    return NO;
+  }
+  prices = [NSArray arrayWithObjects:
+    (inputPricePerToken != nil) ? (id)inputPricePerToken : (id)[NSNull null],
+    (outputPricePerToken != nil) ? (id)outputPricePerToken : (id)[NSNull null],
+    (cacheReadPricePerToken != nil) ?
+      (id)cacheReadPricePerToken : (id)[NSNull null],
+    (cacheWritePricePerToken != nil) ?
+      (id)cacheWritePricePerToken : (id)[NSNull null],
+    nil];
+  for (priceIndex = 0U; priceIndex < [prices count]; priceIndex++) {
+    id price;
+
+    price = [prices objectAtIndex:priceIndex];
+    if (![price isKindOfClass:[NSNull class]] &&
+        (![price isKindOfClass:[NSString class]] ||
+         ([(NSString *)price length] > 64U))) {
+      if (error != nil) {
+        *error = [StrappySession errorFromCString:
+          "Manual model pricing is invalid."];
+      }
+      return NO;
+    }
+  }
+  input->wire_model_id = [wireModelID UTF8String];
+  input->display_name = ([displayName length] > 0U) ?
+    [displayName UTF8String] : NULL;
+  input->context_window_tokens = contextWindowTokens;
+  input->max_output_tokens = maxOutputTokens;
+  input->reasoning_enabled = reasoningEnabled ? 1 : 0;
+  input->image_input_enabled = imageInputEnabled ? 1 : 0;
+  input->local_functions_enabled = localFunctionsEnabled ? 1 : 0;
+  input->pricing_prompt = ([inputPricePerToken length] > 0U) ?
+    [inputPricePerToken UTF8String] : NULL;
+  input->pricing_completion = ([outputPricePerToken length] > 0U) ?
+    [outputPricePerToken UTF8String] : NULL;
+  input->pricing_input_cache_read = ([cacheReadPricePerToken length] > 0U) ?
+    [cacheReadPricePerToken UTF8String] : NULL;
+  input->pricing_input_cache_write = ([cacheWritePricePerToken length] > 0U) ?
+    [cacheWritePricePerToken UTF8String] : NULL;
+  return YES;
+}
+
++ (NSString *)createManualModelForProviderIdentifier:
+                (NSString *)providerIdentifier
+                                                wireModelID:
+                (NSString *)wireModelID
+                                                displayName:
+                (NSString *)displayName
+                                         contextWindowTokens:
+                (long long)contextWindowTokens
+                                             maxOutputTokens:
+                (long long)maxOutputTokens
+                                           reasoningEnabled:
+                (BOOL)reasoningEnabled
+                                          imageInputEnabled:
+                (BOOL)imageInputEnabled
+                                      localFunctionsEnabled:
+                (BOOL)localFunctionsEnabled
+                                          inputPricePerToken:
+                (NSString *)inputPricePerToken
+                                         outputPricePerToken:
+                (NSString *)outputPricePerToken
+                                      cacheReadPricePerToken:
+                (NSString *)cacheReadPricePerToken
+                                     cacheWritePricePerToken:
+                (NSString *)cacheWritePricePerToken
+                                                       error:
+                (NSError **)error
+{
+  NSString *databasePath;
+  NSString *modelIdentifier;
+  strappy_manual_model_input input;
+  char *modelID;
+  char *strappyError;
+
+  if (![providerIdentifier isKindOfClass:[NSString class]] ||
+      ([providerIdentifier length] == 0U) ||
+      ![self manualModelInput:&input
+                  wireModelID:wireModelID
+                  displayName:displayName
+           contextWindowTokens:contextWindowTokens
+               maxOutputTokens:maxOutputTokens
+             reasoningEnabled:reasoningEnabled
+            imageInputEnabled:imageInputEnabled
+        localFunctionsEnabled:localFunctionsEnabled
+            inputPricePerToken:inputPricePerToken
+           outputPricePerToken:outputPricePerToken
+        cacheReadPricePerToken:cacheReadPricePerToken
+       cacheWritePricePerToken:cacheWritePricePerToken
+                         error:error]) {
+    return nil;
+  }
+  databasePath = [self sessionsDatabasePath];
+  if (![self ensureSessionsDirectoryForDatabasePath:databasePath error:error]) {
+    return nil;
+  }
+  modelID = NULL;
+  strappyError = NULL;
+  if (!strappy_db_create_manual_model([databasePath fileSystemRepresentation],
+                                      [providerIdentifier UTF8String],
+                                      &input, &modelID, &strappyError)) {
+    if (error != nil) {
+      *error = [self errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return nil;
+  }
+  modelIdentifier = (modelID != NULL) ?
+    [NSString stringWithUTF8String:modelID] : nil;
+  strappy_session_free_string(modelID);
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionModelCatalogDidChangeNotification
+                  object:self
+                userInfo:(modelIdentifier != nil) ?
+      [NSDictionary dictionaryWithObjectsAndKeys:
+        modelIdentifier, @"model_id", @"created", @"action", nil] : nil];
+  return modelIdentifier;
+}
+
++ (BOOL)updateManualModelForProviderIdentifier:
+            (NSString *)providerIdentifier
+                                            wireModelID:
+            (NSString *)wireModelID
+                                            displayName:
+            (NSString *)displayName
+                                     contextWindowTokens:
+            (long long)contextWindowTokens
+                                         maxOutputTokens:
+            (long long)maxOutputTokens
+                                       reasoningEnabled:
+            (BOOL)reasoningEnabled
+                                      imageInputEnabled:
+            (BOOL)imageInputEnabled
+                                  localFunctionsEnabled:
+            (BOOL)localFunctionsEnabled
+                                      inputPricePerToken:
+            (NSString *)inputPricePerToken
+                                     outputPricePerToken:
+            (NSString *)outputPricePerToken
+                                  cacheReadPricePerToken:
+            (NSString *)cacheReadPricePerToken
+                                 cacheWritePricePerToken:
+            (NSString *)cacheWritePricePerToken
+                                                   error:
+            (NSError **)error
+{
+  NSString *databasePath;
+  strappy_manual_model_input input;
+  char *strappyError;
+
+  if (![providerIdentifier isKindOfClass:[NSString class]] ||
+      ([providerIdentifier length] == 0U) ||
+      ![self manualModelInput:&input
+                  wireModelID:wireModelID
+                  displayName:displayName
+           contextWindowTokens:contextWindowTokens
+               maxOutputTokens:maxOutputTokens
+             reasoningEnabled:reasoningEnabled
+            imageInputEnabled:imageInputEnabled
+        localFunctionsEnabled:localFunctionsEnabled
+            inputPricePerToken:inputPricePerToken
+           outputPricePerToken:outputPricePerToken
+        cacheReadPricePerToken:cacheReadPricePerToken
+       cacheWritePricePerToken:cacheWritePricePerToken
+                         error:error]) {
+    return NO;
+  }
+  databasePath = [self sessionsDatabasePath];
+  if (![self ensureSessionsDirectoryForDatabasePath:databasePath error:error]) {
+    return NO;
+  }
+  strappyError = NULL;
+  if (!strappy_db_update_manual_model([databasePath fileSystemRepresentation],
+                                      [providerIdentifier UTF8String],
+                                      &input, &strappyError)) {
+    if (error != nil) {
+      *error = [self errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return NO;
+  }
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionModelCatalogDidChangeNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  wireModelID, @"wire_model_id", @"updated", @"action", nil]];
+  return YES;
+}
+
++ (BOOL)archiveManualModelForProviderIdentifier:
+            (NSString *)providerIdentifier
+                                             wireModelID:
+            (NSString *)wireModelID
+                                                    error:
+            (NSError **)error
+{
+  NSString *databasePath;
+  char *strappyError;
+
+  if (![providerIdentifier isKindOfClass:[NSString class]] ||
+      ([providerIdentifier length] == 0U) ||
+      ![wireModelID isKindOfClass:[NSString class]] ||
+      ([wireModelID length] == 0U)) {
+    if (error != nil) {
+      *error = [self errorFromCString:"Manual model selection is invalid."];
+    }
+    return NO;
+  }
+  databasePath = [self sessionsDatabasePath];
+  if (![self ensureSessionsDirectoryForDatabasePath:databasePath error:error]) {
+    return NO;
+  }
+  strappyError = NULL;
+  if (!strappy_db_archive_manual_model([databasePath fileSystemRepresentation],
+                                       [providerIdentifier UTF8String],
+                                       [wireModelID UTF8String],
+                                       &strappyError)) {
+    if (error != nil) {
+      *error = [self errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return NO;
+  }
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionModelCatalogDidChangeNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  wireModelID, @"wire_model_id", @"archived", @"action", nil]];
+  return YES;
 }
 
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error

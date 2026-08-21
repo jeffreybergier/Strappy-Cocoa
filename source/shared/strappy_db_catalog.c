@@ -3,7 +3,9 @@
 #include "strappy_core.h"
 
 #include <cJSON.h>
+#include <errno.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -140,6 +142,7 @@ void strappy_model_record_init(strappy_model_record *record)
   record->billing_kind = NULL;
   record->reasoning_enabled = 1;
   record->local_functions_enabled = 1;
+  record->image_input_enabled = 0;
   record->hosted_tools_enabled = 1;
   record->canonical_slug = NULL;
   record->hugging_face_id = NULL;
@@ -406,63 +409,6 @@ static int strappy_db_read_account(sqlite3_stmt *stmt,
   return 1;
 }
 
-static int strappy_db_materialize_existing_bundled_catalog(
-  sqlite3 *db, const char *provider_account_id, char **error_out)
-{
-  char *sql;
-  int ok;
-  sql = sqlite3_mprintf(
-    "INSERT INTO models (id,provider_account_id,wire_model_id,canonical_slug,"
-    "hugging_face_id,name,description,context_length,created_at_s,"
-    "architecture_modality,architecture_tokenizer,architecture_instruct_type,"
-    "provider_context_length,provider_max_completion_tokens,"
-    "provider_is_moderated,knowledge_cutoff,expiration_date,details_url,"
-    "catalog_active,last_seen_at_ms) SELECT %Q||':'||wire_model_id,%Q,"
-    "wire_model_id,canonical_slug,hugging_face_id,name,description,context_length,"
-    "created_at_s,architecture_modality,architecture_tokenizer,"
-    "architecture_instruct_type,provider_context_length,"
-    "provider_max_completion_tokens,provider_is_moderated,knowledge_cutoff,"
-    "expiration_date,details_url,catalog_active,last_seen_at_ms FROM models "
-    "WHERE provider_account_id=(SELECT id FROM provider_accounts WHERE "
-    "provider_id='openai_chatgpt' AND id<>%Q ORDER BY created_at_ms,id LIMIT 1);"
-    "INSERT INTO model_capabilities SELECT tm.id,mc.billing_kind,"
-    "mc.reasoning_enabled,mc.local_functions_enabled,mc.hosted_tools_enabled "
-    "FROM model_capabilities mc JOIN models sm ON sm.id=mc.model_id "
-    "JOIN models tm ON tm.wire_model_id=sm.wire_model_id AND "
-    "tm.provider_account_id=%Q WHERE sm.provider_account_id=(SELECT id FROM "
-    "provider_accounts WHERE provider_id='openai_chatgpt' AND id<>%Q "
-    "ORDER BY created_at_ms,id LIMIT 1);"
-    "INSERT INTO model_features SELECT tm.id,mf.feature_kind,mf.feature_value "
-    "FROM model_features mf JOIN models sm ON sm.id=mf.model_id JOIN models tm "
-    "ON tm.wire_model_id=sm.wire_model_id AND tm.provider_account_id=%Q WHERE "
-    "sm.provider_account_id=(SELECT id FROM provider_accounts WHERE "
-    "provider_id='openai_chatgpt' AND id<>%Q ORDER BY created_at_ms,id LIMIT 1);"
-    "INSERT INTO model_hosted_tools SELECT tm.id,mh.tool_id FROM model_hosted_tools mh "
-    "JOIN models sm ON sm.id=mh.model_id JOIN models tm ON "
-    "tm.wire_model_id=sm.wire_model_id AND tm.provider_account_id=%Q WHERE "
-    "sm.provider_account_id=(SELECT id FROM provider_accounts WHERE "
-    "provider_id='openai_chatgpt' AND id<>%Q ORDER BY created_at_ms,id LIMIT 1);"
-    "INSERT INTO model_reasoning_overrides SELECT tm.id,mr.requested_level,mr.wire_level "
-    "FROM model_reasoning_overrides mr JOIN models sm ON sm.id=mr.model_id "
-    "JOIN models tm ON tm.wire_model_id=sm.wire_model_id AND tm.provider_account_id=%Q "
-    "WHERE sm.provider_account_id=(SELECT id FROM provider_accounts WHERE "
-    "provider_id='openai_chatgpt' AND id<>%Q ORDER BY created_at_ms,id LIMIT 1);"
-    "INSERT INTO bundled_catalog_applications SELECT provider_id,%Q,"
-    "catalog_revision,CAST(strftime('%%s','now') AS INTEGER)*1000 FROM "
-    "bundled_model_catalogs WHERE provider_id='openai_chatgpt';",
-    provider_account_id,provider_account_id,provider_account_id,
-    provider_account_id,provider_account_id,provider_account_id,
-    provider_account_id,provider_account_id,provider_account_id,
-    provider_account_id,provider_account_id,provider_account_id);
-  if (sql == NULL) {
-    strappy_set_error(error_out,"Could not allocate bundled account materialization.");
-    return 0;
-  }
-  ok = strappy_db_exec(db,sql,"Could not materialize bundled account catalog",error_out);
-  sqlite3_free(sql);
-  return ok;
-}
-
 int strappy_db_create_provider_account(const char *db_path,
                                        const char *provider_id,
                                        const char *display_name,
@@ -526,25 +472,18 @@ int strappy_db_create_provider_account(const char *db_path,
     sqlite3_finalize(stmt); strappy_db_release(db); return 0;
   }
   sqlite3_finalize(stmt);
-  if ((strcmp(provider_id, STRAPPY_PROVIDER_OPENAI_CHATGPT) == 0) &&
-      !strappy_db_materialize_existing_bundled_catalog(db, *account_id_out,
-                                                       error_out)) {
-    strappy_db_release(db); free(*account_id_out); *account_id_out=NULL; return 0;
-  }
   if (!strappy_db_exec(db, STRAPPY_DB_INSERT_BUILTIN_DEFAULT_MODEL_SQL,
                        "Could not create account default model", error_out) ||
       !strappy_db_exec(db,
         "UPDATE app_preferences SET default_model_id=COALESCE(default_model_id,"
-        STRAPPY_DB_DEFAULT_MODEL_SQL ", (SELECT m.id FROM models m JOIN "
-        "provider_accounts a ON a.id=m.provider_account_id WHERE "
-        "a.lifecycle_state='active' AND m.catalog_active=1 ORDER BY m.name,m.id "
-        "LIMIT 1)), default_provider_account_id="
-        "COALESCE(default_provider_account_id,(SELECT provider_account_id "
-        "FROM models WHERE id=COALESCE(default_model_id,"
-        STRAPPY_DB_DEFAULT_MODEL_SQL ", (SELECT m.id FROM models m JOIN "
-        "provider_accounts a ON a.id=m.provider_account_id WHERE "
-        "a.lifecycle_state='active' AND m.catalog_active=1 ORDER BY m.name,m.id "
-        "LIMIT 1)))) WHERE id=1;",
+        STRAPPY_DB_DEFAULT_MODEL_SQL ", (SELECT id FROM models WHERE "
+        "catalog_active=1 ORDER BY name,id LIMIT 1)), "
+        "default_provider_account_id=COALESCE(default_provider_account_id,"
+        "(SELECT a.id FROM provider_accounts a JOIN models m ON "
+        "m.provider_id=a.provider_id WHERE m.id=COALESCE(default_model_id,"
+        STRAPPY_DB_DEFAULT_MODEL_SQL ") AND a.lifecycle_state='active' "
+        "ORDER BY a.last_used_at_ms DESC,a.created_at_ms,a.id LIMIT 1)) "
+        "WHERE id=1;",
         "Could not initialize account defaults", error_out)) {
     strappy_db_release(db); free(*account_id_out); *account_id_out=NULL; return 0;
   }
@@ -604,27 +543,19 @@ int strappy_db_restore_provider_account(const char *db_path,
     strappy_db_release(db);
     return 0;
   }
-  if ((strcmp(provider_id, STRAPPY_PROVIDER_OPENAI_CHATGPT) == 0) &&
-      !strappy_db_materialize_existing_bundled_catalog(db, account_id,
-                                                       error_out)) {
-    strappy_db_release(db);
-    return 0;
-  }
   if (!strappy_db_exec(db, STRAPPY_DB_INSERT_BUILTIN_DEFAULT_MODEL_SQL,
                        "Could not create restored account default model",
                        error_out) ||
       !strappy_db_exec(db,
         "UPDATE app_preferences SET default_model_id=COALESCE(default_model_id,"
-        STRAPPY_DB_DEFAULT_MODEL_SQL ", (SELECT m.id FROM models m JOIN "
-        "provider_accounts a ON a.id=m.provider_account_id WHERE "
-        "a.lifecycle_state='active' AND m.catalog_active=1 ORDER BY m.name,m.id "
-        "LIMIT 1)), default_provider_account_id="
-        "COALESCE(default_provider_account_id,(SELECT provider_account_id "
-        "FROM models WHERE id=COALESCE(default_model_id,"
-        STRAPPY_DB_DEFAULT_MODEL_SQL ", (SELECT m.id FROM models m JOIN "
-        "provider_accounts a ON a.id=m.provider_account_id WHERE "
-        "a.lifecycle_state='active' AND m.catalog_active=1 ORDER BY m.name,m.id "
-        "LIMIT 1)))) WHERE id=1;",
+        STRAPPY_DB_DEFAULT_MODEL_SQL ", (SELECT id FROM models WHERE "
+        "catalog_active=1 ORDER BY name,id LIMIT 1)), "
+        "default_provider_account_id=COALESCE(default_provider_account_id,"
+        "(SELECT a.id FROM provider_accounts a JOIN models m ON "
+        "m.provider_id=a.provider_id WHERE m.id=COALESCE(default_model_id,"
+        STRAPPY_DB_DEFAULT_MODEL_SQL ") AND a.lifecycle_state='active' "
+        "ORDER BY a.last_used_at_ms DESC,a.created_at_ms,a.id LIMIT 1)) "
+        "WHERE id=1;",
         "Could not initialize restored account defaults", error_out)) {
     strappy_db_release(db);
     return 0;
@@ -1198,6 +1129,7 @@ static int strappy_db_assign_model_from_statement(
   record->reasoning_enabled = sqlite3_column_int(stmt, 39) ? 1 : 0;
   record->local_functions_enabled = sqlite3_column_int(stmt, 40) ? 1 : 0;
   record->hosted_tools_enabled = sqlite3_column_int(stmt, 41) ? 1 : 0;
+  record->image_input_enabled = sqlite3_column_int(stmt, 42) ? 1 : 0;
 
   if ((record->model_id == NULL) || (record->fetched_at == NULL) ||
       (record->provider_account_id == NULL) ||
@@ -2761,14 +2693,14 @@ static int strappy_db_semantic_insert_model_feature_array(
 }
 
 static int strappy_db_semantic_insert_model(sqlite3 *db,
-                                            const char *provider_account_id,
+                                            const char *provider_id,
                                             cJSON *model,
                                             long long now_ms,
                                             char **error_out)
 {
   static const char *insert_sql =
     "INSERT OR IGNORE INTO models "
-    "(id, provider_account_id, wire_model_id, name, catalog_active, "
+    "(id, provider_id, wire_model_id, name, catalog_active, "
     "last_seen_at_ms) VALUES (?, ?, ?, ?, 1, ?);";
   static const char *update_sql =
     "UPDATE models SET canonical_slug = ?, hugging_face_id = ?, name = ?, "
@@ -2778,7 +2710,7 @@ static int strappy_db_semantic_insert_model(sqlite3 *db,
     "provider_max_completion_tokens = ?, provider_is_moderated = ?, "
     "knowledge_cutoff = ?, expiration_date = ?, details_url = ?, "
     "catalog_active = 1, last_seen_at_ms = ? "
-    "WHERE id = ? AND provider_account_id = ? AND wire_model_id = ?;";
+    "WHERE id = ? AND provider_id = ? AND wire_model_id = ?;";
   static const char *clear_prices_sql =
     "DELETE FROM model_prices WHERE model_id = ?;";
   static const char *clear_features_sql =
@@ -2801,7 +2733,7 @@ static int strappy_db_semantic_insert_model(sqlite3 *db,
     return 0;
   }
   record.model_id = strappy_provider_model_identifier(
-    provider_account_id,
+    provider_id,
     record.wire_model_id,
     error_out);
   if (record.model_id == NULL) {
@@ -2868,7 +2800,7 @@ static int strappy_db_semantic_insert_model(sqlite3 *db,
   if ((rc != SQLITE_OK) ||
       (sqlite3_bind_text(stmt, 1, record.model_id, -1, SQLITE_TRANSIENT) != SQLITE_OK) ||
       (sqlite3_bind_text(stmt, 2,
-                         provider_account_id,
+                         provider_id,
                          -1,
                          SQLITE_STATIC) != SQLITE_OK) ||
       (sqlite3_bind_text(stmt, 3, record.wire_model_id, -1,
@@ -2924,7 +2856,7 @@ static int strappy_db_semantic_insert_model(sqlite3 *db,
        (sqlite3_bind_int64(stmt, 16, (sqlite3_int64)now_ms) == SQLITE_OK) &&
        (sqlite3_bind_text(stmt, 17, record.model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
       (sqlite3_bind_text(stmt, 18,
-                          provider_account_id,
+                          provider_id,
                           -1,
                           SQLITE_STATIC) == SQLITE_OK) &&
        (sqlite3_bind_text(stmt, 19, record.wire_model_id, -1,
@@ -3021,7 +2953,7 @@ static int strappy_db_semantic_insert_model(sqlite3 *db,
 }
 
 static int strappy_db_semantic_save_models(const char *db_path,
-                                           const char *provider_account_id,
+                                           const char *provider_id,
                                            const char *json,
                                            char **error_out)
 {
@@ -3033,8 +2965,8 @@ static int strappy_db_semantic_save_models(const char *db_path,
   int index;
   int ok;
 
-  if ((provider_account_id == NULL) || (provider_account_id[0] == '\0')) {
-    strappy_set_error(error_out, "OpenRouter account id is empty.");
+  if ((provider_id == NULL) || (provider_id[0] == '\0')) {
+    strappy_set_error(error_out, "Model provider id is empty.");
     return 0;
   }
   if ((json == NULL) || (json[0] == '\0')) {
@@ -3069,10 +3001,11 @@ static int strappy_db_semantic_save_models(const char *db_path,
   {
     sqlite3_stmt *stale_stmt = NULL;
     int stale_rc = sqlite3_prepare_v2(db,
-      "UPDATE models SET catalog_active = 0 WHERE provider_account_id = ?;",
+      "UPDATE models SET catalog_active = 0 WHERE provider_id = ? "
+      "AND id <> " STRAPPY_DB_DEFAULT_MODEL_SQL ";",
       -1, &stale_stmt, NULL);
     if ((stale_rc == SQLITE_OK) &&
-        (sqlite3_bind_text(stale_stmt, 1, provider_account_id, -1,
+        (sqlite3_bind_text(stale_stmt, 1, provider_id, -1,
                            SQLITE_TRANSIENT) == SQLITE_OK)) {
       stale_rc = sqlite3_step(stale_stmt);
     }
@@ -3085,22 +3018,22 @@ static int strappy_db_semantic_save_models(const char *db_path,
   count = cJSON_GetArraySize(data);
   for (index = 0; ok && (index < count); index++) {
     ok = strappy_db_semantic_insert_model(db,
-                                          provider_account_id,
+                                          provider_id,
                                           cJSON_GetArrayItem(data, index),
                                           now_ms,
                                           error_out);
   }
   if (ok) {
     char *default_model_id = strappy_provider_model_identifier(
-      provider_account_id, STRAPPY_CONFIG_DEFAULT_API_MODEL, error_out);
+      provider_id, STRAPPY_CONFIG_DEFAULT_API_MODEL, error_out);
     sqlite3_stmt *default_stmt = NULL;
     int default_rc = (default_model_id != NULL) ? sqlite3_prepare_v2(db,
-      "INSERT OR IGNORE INTO models (id, provider_account_id, wire_model_id, "
+      "INSERT OR IGNORE INTO models (id, provider_id, wire_model_id, "
       "name, description, catalog_active, last_seen_at_ms) "
       "VALUES (?, ?, ?, ?, ?, 1, ?);", -1, &default_stmt, NULL) : SQLITE_ERROR;
     if ((default_rc == SQLITE_OK) &&
         (sqlite3_bind_text(default_stmt,1,default_model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK) &&
-        (sqlite3_bind_text(default_stmt,2,provider_account_id,-1,SQLITE_TRANSIENT)==SQLITE_OK) &&
+        (sqlite3_bind_text(default_stmt,2,provider_id,-1,SQLITE_TRANSIENT)==SQLITE_OK) &&
         (sqlite3_bind_text(default_stmt,3,STRAPPY_CONFIG_DEFAULT_API_MODEL,-1,SQLITE_STATIC)==SQLITE_OK) &&
         (sqlite3_bind_text(default_stmt,4,STRAPPY_CONFIG_DEFAULT_API_MODEL,-1,SQLITE_STATIC)==SQLITE_OK) &&
         (sqlite3_bind_text(default_stmt,5,STRAPPY_DB_BUILTIN_DEFAULT_MODEL_DESCRIPTION,-1,SQLITE_STATIC)==SQLITE_OK) &&
@@ -3113,23 +3046,22 @@ static int strappy_db_semantic_save_models(const char *db_path,
     sqlite3_stmt *retain_stmt = NULL;
     int retain_rc = sqlite3_prepare_v2(db,
       "UPDATE models SET catalog_active=1,last_seen_at_ms=? WHERE "
-      "provider_account_id=? AND wire_model_id=?;",-1,&retain_stmt,NULL);
+      "provider_id=? AND wire_model_id=?;",-1,&retain_stmt,NULL);
     if ((retain_rc==SQLITE_OK) && (sqlite3_bind_int64(retain_stmt,1,(sqlite3_int64)now_ms)==SQLITE_OK) &&
-        (sqlite3_bind_text(retain_stmt,2,provider_account_id,-1,SQLITE_TRANSIENT)==SQLITE_OK) &&
+        (sqlite3_bind_text(retain_stmt,2,provider_id,-1,SQLITE_TRANSIENT)==SQLITE_OK) &&
         (sqlite3_bind_text(retain_stmt,3,STRAPPY_CONFIG_DEFAULT_API_MODEL,-1,SQLITE_STATIC)==SQLITE_OK)) retain_rc=sqlite3_step(retain_stmt);
     ok=retain_rc==SQLITE_DONE; sqlite3_finalize(retain_stmt);
   }
   if (ok) {
     char *default_model_id = strappy_provider_model_identifier(
-      provider_account_id, STRAPPY_CONFIG_DEFAULT_API_MODEL, error_out);
+      provider_id, STRAPPY_CONFIG_DEFAULT_API_MODEL, error_out);
     sqlite3_stmt *preference_stmt = NULL;
     int preference_rc = (default_model_id != NULL) ? sqlite3_prepare_v2(
       db,
       "INSERT OR IGNORE INTO model_preferences "
       "(provider_id, wire_model_id, allowed, updated_at_ms) "
-      "SELECT a.provider_id, m.wire_model_id, 1, ? "
-      "FROM models m JOIN provider_accounts a "
-      "ON a.id = m.provider_account_id WHERE m.id = ?;",
+      "SELECT m.provider_id, m.wire_model_id, 1, ? "
+      "FROM models m WHERE m.id = ?;",
       -1,
       &preference_stmt,
       NULL) : SQLITE_ERROR;
@@ -3157,15 +3089,14 @@ static int strappy_db_semantic_save_models(const char *db_path,
   }
   if (ok) {
     char *default_model_id = strappy_provider_model_identifier(
-      provider_account_id, STRAPPY_CONFIG_DEFAULT_API_MODEL, error_out);
+      provider_id, STRAPPY_CONFIG_DEFAULT_API_MODEL, error_out);
     sqlite3_stmt *preference_stmt = NULL;
     int preference_rc = (default_model_id != NULL) ? sqlite3_prepare_v2(
       db,
       "UPDATE model_preferences SET allowed = 1, "
       "updated_at_ms = ? WHERE allowed <> 1 AND provider_id = "
-      "(SELECT a.provider_id FROM models m "
-      "JOIN provider_accounts a ON a.id = m.provider_account_id "
-      "WHERE m.id = ?) AND wire_model_id = "
+      "(SELECT m.provider_id FROM models m WHERE m.id = ?) "
+      "AND wire_model_id = "
       "(SELECT m.wire_model_id FROM models m WHERE m.id = ?);",
       -1,
       &preference_stmt,
@@ -3212,12 +3143,8 @@ int strappy_db_save_openrouter_models_json(const char *db_path,
                                            const char *json,
                                            char **error_out)
 {
-  char *account_id = NULL;
-  int ok = strappy_db_get_designated_provider_account(
-    db_path, STRAPPY_PROVIDER_OPENROUTER, &account_id, error_out);
-  if (ok) ok = strappy_db_semantic_save_models(db_path, account_id, json, error_out);
-  free(account_id);
-  return ok;
+  return strappy_db_semantic_save_models(
+    db_path, STRAPPY_PROVIDER_OPENROUTER, json, error_out);
 }
 
 int strappy_db_save_account_models_json(const char *db_path,
@@ -3233,7 +3160,8 @@ int strappy_db_save_account_models_json(const char *db_path,
        (strcmp(account.lifecycle_state, STRAPPY_PROVIDER_ACCOUNT_ACTIVE) == 0);
   strappy_provider_account_record_destroy(&account);
   if (!ok) { strappy_set_error(error_out,"Catalog refresh requires an active OpenRouter account."); return 0; }
-  return strappy_db_semantic_save_models(db_path, provider_account_id, json, error_out);
+  return strappy_db_semantic_save_models(db_path, STRAPPY_PROVIDER_OPENROUTER,
+                                         json, error_out);
 }
 
 #define STRAPPY_BUNDLED_CATALOG_MAX_BYTES (512U * 1024U)
@@ -3567,14 +3495,14 @@ static int strappy_db_bundled_insert_pair(sqlite3 *db,
 }
 
 static int strappy_db_bundled_import_model(sqlite3 *db,
-                                            const char *provider_account_id,
+                                            const char *provider_id,
                                             cJSON *model,
                                             long long now_ms,
                                             char **error_out)
 {
   static const char *insert_sql =
     "INSERT OR IGNORE INTO models "
-    "(id, provider_account_id, wire_model_id, name, context_length, "
+    "(id, provider_id, wire_model_id, name, context_length, "
       "provider_context_length, provider_max_completion_tokens, "
       "catalog_active, last_seen_at_ms) "
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);";
@@ -3582,7 +3510,7 @@ static int strappy_db_bundled_import_model(sqlite3 *db,
     "UPDATE models SET name = ?, context_length = ?, "
       "provider_context_length = ?, provider_max_completion_tokens = ?, "
       "catalog_active = ?, last_seen_at_ms = ? "
-    "WHERE id = ? AND provider_account_id = ? AND wire_model_id = ?;";
+    "WHERE id = ? AND provider_id = ? AND wire_model_id = ?;";
   static const char *capabilities_sql =
     "INSERT INTO model_capabilities "
     "(model_id, billing_kind, reasoning_enabled, local_functions_enabled, "
@@ -3617,7 +3545,7 @@ static int strappy_db_bundled_import_model(sqlite3 *db,
   output_tokens = 0LL;
   wire_model_id =
     cJSON_GetObjectItemCaseSensitive(model, "wire_model_id")->valuestring;
-  model_id = strappy_provider_model_identifier(provider_account_id,
+  model_id = strappy_provider_model_identifier(provider_id,
                                                 wire_model_id,
                                                 error_out);
   if (model_id == NULL) {
@@ -3647,7 +3575,7 @@ static int strappy_db_bundled_import_model(sqlite3 *db,
   rc = sqlite3_prepare_v2(db, insert_sql, -1, &stmt, NULL);
   if ((rc == SQLITE_OK) &&
       (sqlite3_bind_text(stmt, 1, model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
-      (sqlite3_bind_text(stmt, 2, provider_account_id,
+      (sqlite3_bind_text(stmt, 2, provider_id,
                          -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
       (sqlite3_bind_text(stmt, 3, wire_model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
       (sqlite3_bind_text(stmt, 4, display_name, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
@@ -3677,7 +3605,7 @@ static int strappy_db_bundled_import_model(sqlite3 *db,
       (sqlite3_bind_int(stmt, 5, active) == SQLITE_OK) &&
       (sqlite3_bind_int64(stmt, 6, (sqlite3_int64)now_ms) == SQLITE_OK) &&
       (sqlite3_bind_text(stmt, 7, model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
-      (sqlite3_bind_text(stmt, 8, provider_account_id,
+      (sqlite3_bind_text(stmt, 8, provider_id,
                          -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
       (sqlite3_bind_text(stmt, 9, wire_model_id, -1, SQLITE_TRANSIENT) == SQLITE_OK)) {
     rc = sqlite3_step(stmt);
@@ -3773,9 +3701,9 @@ static int strappy_db_bundled_import_model(sqlite3 *db,
   return 1;
 }
 
-int strappy_db_import_bundled_models_json_for_account(
+static int strappy_db_import_bundled_models_json_for_provider(
   const char *db_path,
-  const char *provider_account_id,
+  const char *provider_id,
   const char *json,
   char **error_out)
 {
@@ -3807,18 +3735,10 @@ int strappy_db_import_bundled_models_json_for_account(
   int rc;
   int ok;
 
-  {
-    strappy_provider_account_record account;
-    if (!strappy_db_get_provider_account(db_path, provider_account_id,
-                                         &account, error_out)) return 0;
-    ok = (strcmp(account.provider_id, STRAPPY_PROVIDER_OPENAI_CHATGPT) == 0) &&
-      (strcmp(account.lifecycle_state, STRAPPY_PROVIDER_ACCOUNT_ACTIVE) == 0);
-    strappy_provider_account_record_destroy(&account);
-    if (!ok) {
-      strappy_set_error(error_out,
-                        "Bundled models require an active ChatGPT account.");
-      return 0;
-    }
+  if ((provider_id == NULL) ||
+      (strcmp(provider_id, STRAPPY_PROVIDER_OPENAI_CHATGPT) != 0)) {
+    strappy_set_error(error_out, "Bundled model provider is invalid.");
+    return 0;
   }
 
   if ((json == NULL) || (json[0] == '\0')) {
@@ -3899,14 +3819,13 @@ int strappy_db_import_bundled_models_json_for_account(
   stmt = NULL;
   rc = sqlite3_prepare_v2(
     db,
-    "SELECT catalog_revision FROM bundled_catalog_applications "
-      "WHERE provider_id = '" STRAPPY_PROVIDER_OPENAI_CHATGPT "' "
-      "AND provider_account_id = ?;",
+    "SELECT catalog_revision FROM bundled_model_catalogs "
+      "WHERE provider_id = ?;",
     -1,
     &stmt,
     NULL);
   if ((rc == SQLITE_OK) &&
-      (sqlite3_bind_text(stmt, 1, provider_account_id,
+      (sqlite3_bind_text(stmt, 1, provider_id,
                          -1, SQLITE_TRANSIENT) == SQLITE_OK)) {
     rc = sqlite3_step(stmt);
   }
@@ -3936,10 +3855,10 @@ int strappy_db_import_bundled_models_json_for_account(
   }
   stmt = NULL;
   rc = sqlite3_prepare_v2(db,
-    "UPDATE models SET catalog_active = 0 WHERE provider_account_id = ?;",
+    "UPDATE models SET catalog_active = 0 WHERE provider_id = ?;",
     -1, &stmt, NULL);
   if ((rc == SQLITE_OK) &&
-      (sqlite3_bind_text(stmt, 1, provider_account_id, -1,
+      (sqlite3_bind_text(stmt, 1, provider_id, -1,
                          SQLITE_TRANSIENT) == SQLITE_OK)) rc = sqlite3_step(stmt);
   ok = rc == SQLITE_DONE;
   if (!ok) strappy_set_formatted_error(error_out,
@@ -3948,7 +3867,7 @@ int strappy_db_import_bundled_models_json_for_account(
   now_ms = strappy_db_now_ms();
   for (index = 0; ok && (index < count); index++) {
     ok = strappy_db_bundled_import_model(db,
-                                         provider_account_id,
+                                         provider_id,
                                          cJSON_GetArrayItem(models, index),
                                          now_ms,
                                          error_out);
@@ -3975,22 +3894,6 @@ int strappy_db_import_bundled_models_json_for_account(
     sqlite3_finalize(stmt);
   }
   if (ok) {
-    stmt = NULL;
-    rc = sqlite3_prepare_v2(db,
-      "INSERT OR REPLACE INTO bundled_catalog_applications "
-      "(provider_id, provider_account_id, catalog_revision, applied_at_ms) "
-      "VALUES ('" STRAPPY_PROVIDER_OPENAI_CHATGPT "', ?, ?, ?);",
-      -1, &stmt, NULL);
-    if ((rc == SQLITE_OK) &&
-        (sqlite3_bind_text(stmt, 1, provider_account_id, -1, SQLITE_TRANSIENT) == SQLITE_OK) &&
-        (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)catalog_revision) == SQLITE_OK) &&
-        (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)now_ms) == SQLITE_OK)) rc = sqlite3_step(stmt);
-    ok = rc == SQLITE_DONE;
-    if (!ok) strappy_set_formatted_error(error_out,
-      "Could not record account catalog revision: %s", sqlite3_errmsg(db));
-    sqlite3_finalize(stmt);
-  }
-  if (ok) {
     ok = strappy_db_exec(db, "COMMIT;",
                          "Could not commit bundled catalog import", error_out);
   } else {
@@ -4006,17 +3909,8 @@ int strappy_db_import_bundled_models_json(const char *db_path,
                                           const char *json,
                                           char **error_out)
 {
-  strappy_provider_account_record_list accounts;
-  size_t index;
-  int ok;
-  if (!strappy_db_list_provider_accounts(db_path,
-        STRAPPY_PROVIDER_OPENAI_CHATGPT, 0, &accounts, error_out)) return 0;
-  ok = 1;
-  for (index = 0U; ok && (index < accounts.count); index++) {
-    ok = strappy_db_import_bundled_models_json_for_account(
-      db_path, accounts.records[index].account_id, json, error_out);
-  }
-  strappy_provider_account_record_list_destroy(&accounts);
+  int ok = strappy_db_import_bundled_models_json_for_provider(
+    db_path, STRAPPY_PROVIDER_OPENAI_CHATGPT, json, error_out);
   if (ok) {
     sqlite3 *db;
 
@@ -4024,14 +3918,8 @@ int strappy_db_import_bundled_models_json(const char *db_path,
     if (!strappy_db_ensure_schema(db, error_out) ||
         !strappy_db_exec(db,
           "UPDATE app_preferences SET default_model_id=COALESCE("
-          "default_model_id,(SELECT m.id FROM models m JOIN provider_accounts a "
-          "ON a.id=m.provider_account_id WHERE a.lifecycle_state='active' "
-          "AND m.catalog_active=1 ORDER BY m.name,m.id LIMIT 1)), "
-          "default_provider_account_id=COALESCE(default_provider_account_id,"
-          "(SELECT m.provider_account_id FROM models m WHERE m.id=COALESCE("
-          "default_model_id,(SELECT mm.id FROM models mm JOIN provider_accounts "
-          "aa ON aa.id=mm.provider_account_id WHERE aa.lifecycle_state='active' "
-          "AND mm.catalog_active=1 ORDER BY mm.name,mm.id LIMIT 1)))) WHERE id=1;",
+          "default_model_id,(SELECT m.id FROM models m WHERE "
+          "m.catalog_active=1 ORDER BY m.name,m.id LIMIT 1)) WHERE id=1;",
           "Could not initialize bundled model defaults", error_out)) {
       strappy_db_release(db);
       return 0;
@@ -4041,47 +3929,92 @@ int strappy_db_import_bundled_models_json(const char *db_path,
   return ok;
 }
 
+int strappy_db_import_bundled_models_json_for_account(
+  const char *db_path, const char *provider_account_id, const char *json,
+  char **error_out)
+{
+  strappy_provider_account_record account;
+  int ok;
+
+  if (!strappy_db_get_provider_account(db_path, provider_account_id,
+                                       &account, error_out)) return 0;
+  ok = (strcmp(account.provider_id, STRAPPY_PROVIDER_OPENAI_CHATGPT) == 0) &&
+    (strcmp(account.lifecycle_state, STRAPPY_PROVIDER_ACCOUNT_ACTIVE) == 0);
+  strappy_provider_account_record_destroy(&account);
+  if (!ok) {
+    strappy_set_error(error_out,
+                      "Bundled models require an active ChatGPT account.");
+    return 0;
+  }
+  return strappy_db_import_bundled_models_json(db_path, json, error_out);
+}
+
 static int strappy_db_save_manual_model(const char *db_path,
-                                        const char *provider_account_id,
+                                        const char *provider_id,
                                         const strappy_manual_model_input *input,
                                         int require_existing,
                                         char **model_id_out,
                                         char **error_out)
 {
   static const char *model_sql =
-    "INSERT OR IGNORE INTO models (id,provider_account_id,wire_model_id,name,"
+    "INSERT OR IGNORE INTO models (id,provider_id,wire_model_id,name,"
     "context_length,provider_context_length,provider_max_completion_tokens,"
     "catalog_active,last_seen_at_ms) VALUES (?,?,?,?,?,?,?,1,?) "
     ";";
   sqlite3 *db;
   sqlite3_stmt *stmt;
-  strappy_provider_account_record account;
+  const char *display_name;
   char *model_id;
   int rc;
   int ok;
-  if ((input == NULL) || (input->wire_model_id == NULL) ||
+  const char *prices[4];
+  static const char *price_kinds[4] = {
+    "prompt", "completion", "input_cache_read", "input_cache_write"
+  };
+  size_t price_index;
+
+  prices[0] = (input != NULL) ? input->pricing_prompt : NULL;
+  prices[1] = (input != NULL) ? input->pricing_completion : NULL;
+  prices[2] = (input != NULL) ? input->pricing_input_cache_read : NULL;
+  prices[3] = (input != NULL) ? input->pricing_input_cache_write : NULL;
+  if ((provider_id == NULL) ||
+      (strcmp(provider_id, STRAPPY_PROVIDER_OTHER) != 0) ||
+      (input == NULL) || (input->wire_model_id == NULL) ||
       (input->wire_model_id[0] == '\0') || (strlen(input->wire_model_id) > 128U) ||
-      (input->display_name == NULL) || (input->display_name[0] == '\0') ||
-      (strlen(input->display_name) > 160U) ||
+      ((input->display_name != NULL) &&
+       (strlen(input->display_name) > 160U)) ||
       (input->context_window_tokens < 0LL) ||
       (input->max_output_tokens < 0LL)) {
     strappy_set_error(error_out, "Manual model metadata is invalid."); return 0;
   }
-  if (!strappy_db_get_provider_account(db_path, provider_account_id,
-                                        &account, error_out)) return 0;
-  ok = (strcmp(account.provider_id, STRAPPY_PROVIDER_OTHER) == 0) &&
-       (strcmp(account.lifecycle_state, STRAPPY_PROVIDER_ACCOUNT_ACTIVE) == 0);
-  strappy_provider_account_record_destroy(&account);
-  if (!ok) { strappy_set_error(error_out,"Manual models require an active other account."); return 0; }
-  model_id = strappy_provider_model_identifier(provider_account_id,
+  for (price_index = 0U; price_index < 4U; price_index++) {
+    if ((prices[price_index] != NULL) && (prices[price_index][0] != '\0')) {
+      char *end;
+      double value;
+
+      errno = 0;
+      end = NULL;
+      value = strtod(prices[price_index], &end);
+      if ((errno == ERANGE) || (end == prices[price_index]) ||
+          (end == NULL) || (*end != '\0') || !isfinite(value) ||
+          (value < 0.0)) {
+        strappy_set_error(error_out, "Manual model pricing is invalid.");
+        return 0;
+      }
+    }
+  }
+  display_name = ((input->display_name != NULL) &&
+                  (input->display_name[0] != '\0')) ?
+    input->display_name : input->wire_model_id;
+  model_id = strappy_provider_model_identifier(provider_id,
                                                 input->wire_model_id,
                                                 error_out);
   if (model_id == NULL) return 0;
   if (!strappy_db_open(db_path,&db,error_out)) { free(model_id); return 0; }
   if (!strappy_db_ensure_schema(db,error_out)) { strappy_db_release(db); free(model_id); return 0; }
-  stmt=NULL; rc=sqlite3_prepare_v2(db,"SELECT 1 FROM models WHERE id=? AND provider_account_id=?;",-1,&stmt,NULL);
+  stmt=NULL; rc=sqlite3_prepare_v2(db,"SELECT 1 FROM models WHERE id=? AND provider_id=?;",-1,&stmt,NULL);
   if ((rc==SQLITE_OK)&&(sqlite3_bind_text(stmt,1,model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
-      (sqlite3_bind_text(stmt,2,provider_account_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
+      (sqlite3_bind_text(stmt,2,provider_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
   sqlite3_finalize(stmt);
   if (require_existing && (rc!=SQLITE_ROW)) { strappy_db_release(db); free(model_id); strappy_set_error(error_out,"Manual model was not found."); return 0; }
   if (!require_existing && (rc==SQLITE_ROW)) { strappy_db_release(db); free(model_id); strappy_set_error(error_out,"Manual model already exists."); return 0; }
@@ -4089,9 +4022,9 @@ static int strappy_db_save_manual_model(const char *db_path,
   if (!strappy_db_exec(db,"BEGIN IMMEDIATE;","Could not begin manual model write",error_out)) { strappy_db_release(db); free(model_id); return 0; }
   stmt=NULL; rc=sqlite3_prepare_v2(db,model_sql,-1,&stmt,NULL);
   if ((rc==SQLITE_OK)&&(sqlite3_bind_text(stmt,1,model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
-      (sqlite3_bind_text(stmt,2,provider_account_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
+      (sqlite3_bind_text(stmt,2,provider_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
       (sqlite3_bind_text(stmt,3,input->wire_model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
-      (sqlite3_bind_text(stmt,4,input->display_name,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
+      (sqlite3_bind_text(stmt,4,display_name,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
       (sqlite3_bind_int64(stmt,5,(sqlite3_int64)input->context_window_tokens)==SQLITE_OK)&&
       (sqlite3_bind_int64(stmt,6,(sqlite3_int64)input->context_window_tokens)==SQLITE_OK)&&
       (sqlite3_bind_int64(stmt,7,(sqlite3_int64)input->max_output_tokens)==SQLITE_OK)&&
@@ -4100,14 +4033,14 @@ static int strappy_db_save_manual_model(const char *db_path,
   if (ok) { stmt=NULL; rc=sqlite3_prepare_v2(db,
     "UPDATE models SET name=?,context_length=?,provider_context_length=?,"
     "provider_max_completion_tokens=?,catalog_active=1,last_seen_at_ms=? "
-    "WHERE id=? AND provider_account_id=? AND wire_model_id=?;",-1,&stmt,NULL);
-    if ((rc==SQLITE_OK)&&(sqlite3_bind_text(stmt,1,input->display_name,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
+    "WHERE id=? AND provider_id=? AND wire_model_id=?;",-1,&stmt,NULL);
+    if ((rc==SQLITE_OK)&&(sqlite3_bind_text(stmt,1,display_name,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
         (sqlite3_bind_int64(stmt,2,(sqlite3_int64)input->context_window_tokens)==SQLITE_OK)&&
         (sqlite3_bind_int64(stmt,3,(sqlite3_int64)input->context_window_tokens)==SQLITE_OK)&&
         (sqlite3_bind_int64(stmt,4,(sqlite3_int64)input->max_output_tokens)==SQLITE_OK)&&
         (sqlite3_bind_int64(stmt,5,(sqlite3_int64)strappy_db_now_ms())==SQLITE_OK)&&
         (sqlite3_bind_text(stmt,6,model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
-        (sqlite3_bind_text(stmt,7,provider_account_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
+        (sqlite3_bind_text(stmt,7,provider_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
         (sqlite3_bind_text(stmt,8,input->wire_model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
     ok=(rc==SQLITE_DONE)&&(sqlite3_changes(db)==1); sqlite3_finalize(stmt); }
   if (ok) { stmt=NULL; rc=sqlite3_prepare_v2(db,
@@ -4116,6 +4049,27 @@ static int strappy_db_save_manual_model(const char *db_path,
         (sqlite3_bind_int(stmt,2,input->reasoning_enabled?1:0)==SQLITE_OK)&&
         (sqlite3_bind_int(stmt,3,input->local_functions_enabled?1:0)==SQLITE_OK)) rc=sqlite3_step(stmt);
     ok=rc==SQLITE_DONE; sqlite3_finalize(stmt); }
+  if (ok) { stmt=NULL; rc=sqlite3_prepare_v2(db,
+    "DELETE FROM model_prices WHERE model_id=? AND price_kind IN "
+    "('prompt','completion','input_cache_read','input_cache_write');",
+    -1,&stmt,NULL);
+    if ((rc==SQLITE_OK)&&(sqlite3_bind_text(stmt,1,model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
+    ok=rc==SQLITE_DONE; sqlite3_finalize(stmt); }
+  if (ok) { stmt=NULL; rc=sqlite3_prepare_v2(db,
+    "DELETE FROM model_features WHERE model_id=? AND feature_kind='input_modality';",
+    -1,&stmt,NULL);
+    if ((rc==SQLITE_OK)&&(sqlite3_bind_text(stmt,1,model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
+    ok=rc==SQLITE_DONE; sqlite3_finalize(stmt); }
+  if (ok) ok = strappy_db_semantic_insert_model_feature_value(
+    db, model_id, "input_modality", "text", error_out);
+  if (ok && input->image_input_enabled) {
+    ok = strappy_db_semantic_insert_model_feature_value(
+      db, model_id, "input_modality", "image", error_out);
+  }
+  for (price_index = 0U; ok && (price_index < 4U); price_index++) {
+    ok = strappy_db_semantic_insert_model_price(db, model_id,
+      price_kinds[price_index], prices[price_index], error_out);
+  }
   if (ok) ok=strappy_db_exec(db,"COMMIT;","Could not commit manual model write",error_out);
   else (void)strappy_db_exec(db,"ROLLBACK;","Could not roll back manual model write",NULL);
   strappy_db_release(db);
@@ -4125,26 +4079,26 @@ static int strappy_db_save_manual_model(const char *db_path,
 }
 
 int strappy_db_create_manual_model(const char *db_path,
-                                   const char *provider_account_id,
+                                   const char *provider_id,
                                    const strappy_manual_model_input *input,
                                    char **model_id_out,
                                    char **error_out)
 {
   if (model_id_out == NULL) { strappy_set_error(error_out,"Manual model id output is missing."); return 0; }
   *model_id_out=NULL;
-  return strappy_db_save_manual_model(db_path,provider_account_id,input,0,model_id_out,error_out);
+  return strappy_db_save_manual_model(db_path,provider_id,input,0,model_id_out,error_out);
 }
 
 int strappy_db_update_manual_model(const char *db_path,
-                                   const char *provider_account_id,
+                                   const char *provider_id,
                                    const strappy_manual_model_input *input,
                                    char **error_out)
 {
-  return strappy_db_save_manual_model(db_path,provider_account_id,input,1,NULL,error_out);
+  return strappy_db_save_manual_model(db_path,provider_id,input,1,NULL,error_out);
 }
 
 int strappy_db_archive_manual_model(const char *db_path,
-                                    const char *provider_account_id,
+                                    const char *provider_id,
                                     const char *wire_model_id,
                                     char **error_out)
 {
@@ -4152,18 +4106,17 @@ int strappy_db_archive_manual_model(const char *db_path,
   if (!strappy_db_open(db_path,&db,error_out)) return 0;
   if (!strappy_db_ensure_schema(db,error_out)) { strappy_db_release(db); return 0; }
   stmt=NULL; rc=sqlite3_prepare_v2(db,
-    "UPDATE models SET catalog_active=0,last_seen_at_ms=? WHERE provider_account_id=? AND wire_model_id=? AND EXISTS (SELECT 1 FROM provider_accounts a WHERE a.id=? AND a.provider_id='other');",-1,&stmt,NULL);
+    "UPDATE models SET catalog_active=0,last_seen_at_ms=? WHERE provider_id=? AND wire_model_id=? AND provider_id='other';",-1,&stmt,NULL);
   if ((rc==SQLITE_OK)&&(sqlite3_bind_int64(stmt,1,(sqlite3_int64)strappy_db_now_ms())==SQLITE_OK)&&
-      (sqlite3_bind_text(stmt,2,provider_account_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
-      (sqlite3_bind_text(stmt,3,wire_model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
-      (sqlite3_bind_text(stmt,4,provider_account_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
+      (sqlite3_bind_text(stmt,2,provider_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
+      (sqlite3_bind_text(stmt,3,wire_model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
   changed=(rc==SQLITE_DONE)?sqlite3_changes(db):0; sqlite3_finalize(stmt); strappy_db_release(db);
   if (changed!=1) { strappy_set_error(error_out,"Manual model was not found."); return 0; }
   return 1;
 }
 
 static void strappy_db_filter_model_list(strappy_model_record_list *list,
-                                         const char *provider_account_id,
+                                         const char *provider_id,
                                          int allowed_only)
 {
   size_t read_index;
@@ -4177,10 +4130,9 @@ static void strappy_db_filter_model_list(strappy_model_record_list *list,
     int keep;
 
     keep = (!allowed_only || list->records[read_index].allowed) &&
-      ((provider_account_id == NULL) ||
-       ((list->records[read_index].provider_account_id != NULL) &&
-        (strcmp(list->records[read_index].provider_account_id,
-                provider_account_id) == 0)));
+      ((provider_id == NULL) ||
+       ((list->records[read_index].provider_id != NULL) &&
+        (strcmp(list->records[read_index].provider_id, provider_id) == 0)));
     if (keep) {
       if (write_index != read_index) {
         strappy_model_record_destroy(&list->records[write_index]);
@@ -4255,27 +4207,27 @@ static int strappy_db_semantic_list_models(
       " THEN 1 ELSE 0 END, "
     "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL
       " OR COALESCE(mp.allowed, 0) = 1 THEN 1 ELSE 0 END "
-    ", a.id, a.provider_id, a.display_name, m.wire_model_id, "
+    ", '', m.provider_id, '', m.wire_model_id, "
     "COALESCE(mc.billing_kind, 'metered_api'), "
     "COALESCE(mc.reasoning_enabled, 1), "
     "COALESCE(mc.local_functions_enabled, 1), "
-    "COALESCE(mc.hosted_tools_enabled, 1) "
-    "FROM models m JOIN provider_accounts a "
-      "ON a.id = m.provider_account_id "
+    "COALESCE(mc.hosted_tools_enabled, 1), "
+    "EXISTS (SELECT 1 FROM model_features mif WHERE mif.model_id=m.id "
+      "AND mif.feature_kind='input_modality' AND mif.feature_value='image') "
+    "FROM models m "
     "LEFT JOIN model_capabilities mc ON mc.model_id = m.id "
-    "LEFT JOIN model_preferences mp ON mp.provider_id = a.provider_id "
+    "LEFT JOIN model_preferences mp ON mp.provider_id = m.provider_id "
       "AND mp.wire_model_id = m.wire_model_id ";
   static const char *unfiltered_suffix =
-    "WHERE m.catalog_active = 1 AND a.lifecycle_state = 'active' "
-    "ORDER BY LOWER(a.display_name), "
+    "WHERE m.catalog_active = 1 "
+    "ORDER BY LOWER(m.provider_id), "
       "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL
       " THEN 0 ELSE 1 END, LOWER(m.name), m.id;";
   static const char *filtered_suffix =
-    "WHERE m.catalog_active = 1 AND a.lifecycle_state = 'active' AND ("
+    "WHERE m.catalog_active = 1 AND ("
     "m.id LIKE ?1 ESCAPE '\\' OR COALESCE(m.canonical_slug, '') LIKE ?1 ESCAPE '\\' "
     "OR m.wire_model_id LIKE ?1 ESCAPE '\\' "
-    "OR a.id LIKE ?1 ESCAPE '\\' OR a.provider_id LIKE ?1 ESCAPE '\\' "
-    "OR a.display_name LIKE ?1 ESCAPE '\\' "
+    "OR m.provider_id LIKE ?1 ESCAPE '\\' "
     "OR COALESCE(m.hugging_face_id, '') LIKE ?1 ESCAPE '\\' "
     "OR m.name LIKE ?1 ESCAPE '\\' OR COALESCE(m.description, '') LIKE ?1 ESCAPE '\\' "
     "OR COALESCE(m.architecture_modality, '') LIKE ?1 ESCAPE '\\' "
@@ -4285,7 +4237,7 @@ static int strappy_db_semantic_list_models(
       "AND f.feature_value LIKE ?1 ESCAPE '\\') "
     "OR EXISTS (SELECT 1 FROM model_prices p WHERE p.model_id = m.id "
       "AND p.price_decimal LIKE ?1 ESCAPE '\\')) "
-    "ORDER BY LOWER(a.display_name), "
+    "ORDER BY LOWER(m.provider_id), "
       "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL
       " THEN 0 ELSE 1 END, LOWER(m.name), m.id;";
   strappy_db_sql_buffer query;
@@ -4409,7 +4361,7 @@ int strappy_db_list_openrouter_models_matching(
     return 0;
   }
   strappy_db_filter_model_list(list,
-                               STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+                               STRAPPY_PROVIDER_OPENROUTER,
                                0);
   return 1;
 }
@@ -4448,11 +4400,24 @@ int strappy_db_list_models_for_account(
   const char *search_text, int allowed_only,
   strappy_model_record_list *list, char **error_out)
 {
+  strappy_provider_account_record account;
+  int ok;
+
   if ((provider_account_id == NULL) || (provider_account_id[0] == '\0')) {
     strappy_set_error(error_out,"Provider account id is empty."); return 0;
   }
-  if (!strappy_db_semantic_list_models(db_path,search_text,list,error_out)) return 0;
-  strappy_db_filter_model_list(list,provider_account_id,allowed_only ? 1 : 0);
+  if (!strappy_db_get_provider_account(db_path, provider_account_id,
+                                       &account, error_out)) return 0;
+  if (strcmp(account.lifecycle_state, STRAPPY_PROVIDER_ACCOUNT_ACTIVE) != 0) {
+    strappy_provider_account_record_destroy(&account);
+    strappy_set_error(error_out, "Provider account is archived.");
+    return 0;
+  }
+  ok = strappy_db_semantic_list_models(db_path,search_text,list,error_out);
+  if (ok) strappy_db_filter_model_list(list,account.provider_id,
+                                       allowed_only ? 1 : 0);
+  strappy_provider_account_record_destroy(&account);
+  if (!ok) return 0;
   return 1;
 }
 
@@ -4468,7 +4433,9 @@ int strappy_db_get_account_model_id(const char *db_path,
   if (!strappy_db_open(db_path,&db,error_out)) return 0;
   if (!strappy_db_ensure_schema(db,error_out)) { strappy_db_release(db); return 0; }
   stmt=NULL; rc=sqlite3_prepare_v2(db,
-    "SELECT id FROM models WHERE provider_account_id=? AND wire_model_id=? AND catalog_active=1;",-1,&stmt,NULL);
+    "SELECT m.id FROM models m JOIN provider_accounts a "
+    "ON a.provider_id=m.provider_id WHERE a.id=? AND a.lifecycle_state='active' "
+    "AND m.wire_model_id=? AND m.catalog_active=1;",-1,&stmt,NULL);
   if ((rc==SQLITE_OK)&&(sqlite3_bind_text(stmt,1,provider_account_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
       (sqlite3_bind_text(stmt,2,wire_model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
   if (rc==SQLITE_ROW) *model_id_out=strappy_db_column_string(stmt,0);
@@ -4527,9 +4494,9 @@ int strappy_db_model_matches_session_account(sqlite3 *db,
                                              char **error_out)
 {
   static const char *sql =
-    "SELECT CASE WHEN s.provider_account_id IS NULL "
-      "OR s.provider_account_id = m.provider_account_id THEN 1 ELSE 0 END "
-    "FROM sessions s JOIN models m ON m.id = ? WHERE s.id = ?;";
+    "SELECT CASE WHEN s.provider_account_id IS NULL OR a.provider_id=m.provider_id "
+      "THEN 1 ELSE 0 END FROM sessions s JOIN models m ON m.id=? "
+      "LEFT JOIN provider_accounts a ON a.id=s.provider_account_id WHERE s.id=?;";
   sqlite3_stmt *stmt;
   int rc;
   int matches;
@@ -4567,8 +4534,7 @@ int strappy_db_model_matches_session_account(sqlite3 *db,
   if (!matches) {
     strappy_set_error(
       error_out,
-      "This conversation is already bound to a different model account. "
-      "Create a new session to change accounts.");
+      "The selected model and conversation account use different providers.");
     return 0;
   }
   return 1;
@@ -4587,9 +4553,7 @@ int strappy_db_upsert_app_setting(sqlite3 *db,
   semantic_stmt = NULL;
   semantic_rc = sqlite3_prepare_v2(
     db,
-    "UPDATE app_preferences SET default_model_id = ?, "
-    "default_provider_account_id = (SELECT provider_account_id FROM models "
-    "WHERE id = ?), updated_at_ms = ? "
+    "UPDATE app_preferences SET default_model_id = ?, updated_at_ms = ? "
     "WHERE id = 1;",
     -1,
     &semantic_stmt,
@@ -4597,10 +4561,8 @@ int strappy_db_upsert_app_setting(sqlite3 *db,
   if ((semantic_rc != SQLITE_OK) ||
       (sqlite3_bind_text(semantic_stmt, 1, value, -1, SQLITE_TRANSIENT) !=
        SQLITE_OK) ||
-      (sqlite3_bind_text(semantic_stmt, 2, value, -1, SQLITE_TRANSIENT) !=
-       SQLITE_OK) ||
       (sqlite3_bind_int64(semantic_stmt,
-                          3,
+                          2,
                           (sqlite3_int64)strappy_db_now_ms()) != SQLITE_OK) ||
       (sqlite3_step(semantic_stmt) != SQLITE_DONE)) {
     strappy_set_formatted_error(error_out,
@@ -4679,9 +4641,8 @@ int strappy_db_model_is_effectively_allowed(sqlite3 *db,
 {
   static const char *sql =
     "SELECT CASE WHEN ? = " STRAPPY_DB_DEFAULT_MODEL_SQL
-    " OR EXISTS (SELECT 1 FROM models m JOIN provider_accounts a "
-    "ON a.id = m.provider_account_id JOIN model_preferences p "
-    "ON p.provider_id = a.provider_id "
+    " OR EXISTS (SELECT 1 FROM models m JOIN model_preferences p "
+    "ON p.provider_id = m.provider_id "
     "AND p.wire_model_id = m.wire_model_id "
     "WHERE m.id = ? AND p.allowed = 1) THEN 1 ELSE 0 END;";
   sqlite3_stmt *stmt;
@@ -4742,15 +4703,12 @@ int strappy_db_set_model_allowed_in_db(sqlite3 *db,
   static const char *sql =
     "INSERT OR REPLACE INTO model_preferences "
     "(provider_id, wire_model_id, allowed, updated_at_ms) "
-    "SELECT a.provider_id, m.wire_model_id, ?, ? "
-    "FROM models m JOIN provider_accounts a "
-    "ON a.id = m.provider_account_id WHERE m.id = ?;";
+    "SELECT m.provider_id, m.wire_model_id, ?, ? "
+    "FROM models m WHERE m.id = ?;";
   static const char *is_default_sql =
-    "SELECT EXISTS (SELECT 1 FROM models m JOIN provider_accounts a "
-    "ON a.id = m.provider_account_id JOIN models d "
+    "SELECT EXISTS (SELECT 1 FROM models m JOIN models d "
     "ON d.id = " STRAPPY_DB_DEFAULT_MODEL_SQL
-    " JOIN provider_accounts da ON da.id = d.provider_account_id "
-    "WHERE m.id = ? AND a.provider_id = da.provider_id "
+    " WHERE m.id = ? AND m.provider_id = d.provider_id "
     "AND m.wire_model_id = d.wire_model_id);";
   sqlite3_stmt *stmt;
   int rc;
@@ -4910,13 +4868,20 @@ int strappy_db_set_default_account_model(const char *db_path,
   if (!strappy_db_open(db_path,&db,error_out)) return 0;
   if (!strappy_db_ensure_schema(db,error_out)) { strappy_db_release(db); return 0; }
   stmt=NULL; rc=sqlite3_prepare_v2(db,
-    "SELECT 1 FROM models m JOIN provider_accounts a ON a.id=m.provider_account_id "
-    "WHERE m.id=? AND m.provider_account_id=? AND m.catalog_active=1 AND a.lifecycle_state='active';",-1,&stmt,NULL);
+    "SELECT 1 FROM models m JOIN provider_accounts a ON a.provider_id=m.provider_id "
+    "WHERE m.id=? AND a.id=? AND m.catalog_active=1 AND a.lifecycle_state='active';",-1,&stmt,NULL);
   if ((rc==SQLITE_OK)&&(sqlite3_bind_text(stmt,1,model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
       (sqlite3_bind_text(stmt,2,provider_account_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)) rc=sqlite3_step(stmt);
   sqlite3_finalize(stmt);
   if (rc!=SQLITE_ROW) { strappy_db_release(db); strappy_set_error(error_out,"Default account and model do not match an active route."); return 0; }
-  ok=strappy_db_upsert_app_setting(db,STRAPPY_DB_DEFAULT_MODEL_KEY,model_id,"default account model",error_out);
+  stmt=NULL; rc=sqlite3_prepare_v2(db,
+    "UPDATE app_preferences SET default_model_id=?,default_provider_account_id=?,"
+    "updated_at_ms=? WHERE id=1;",-1,&stmt,NULL);
+  if ((rc==SQLITE_OK)&&(sqlite3_bind_text(stmt,1,model_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
+      (sqlite3_bind_text(stmt,2,provider_account_id,-1,SQLITE_TRANSIENT)==SQLITE_OK)&&
+      (sqlite3_bind_int64(stmt,3,(sqlite3_int64)strappy_db_now_ms())==SQLITE_OK)) rc=sqlite3_step(stmt);
+  ok=rc==SQLITE_DONE; sqlite3_finalize(stmt);
+  if (!ok) strappy_set_formatted_error(error_out,"Could not save default account model: %s",sqlite3_errmsg(db));
   if (ok) ok=strappy_db_set_model_allowed_in_db(db,model_id,1,error_out);
   strappy_db_release(db); return ok;
 }
@@ -5080,15 +5045,15 @@ int strappy_db_get_session_model_route(
     "FROM sessions s JOIN models m ON m.id = "
       "COALESCE(NULLIF(s.model_id, ''), "
         STRAPPY_DB_DEFAULT_MODEL_SQL ") "
-    "JOIN provider_accounts a ON a.id = m.provider_account_id "
+    "JOIN provider_accounts a ON a.id = COALESCE(NULLIF(s.provider_account_id,''),"
+      "(SELECT default_provider_account_id FROM app_preferences WHERE id=1)) "
+      "AND a.provider_id=m.provider_id "
     "LEFT JOIN model_capabilities mc ON mc.model_id = m.id "
     "WHERE s.id = ? AND a.lifecycle_state = 'active' "
-      "AND (s.provider_account_id IS NULL OR "
-        "s.provider_account_id = m.provider_account_id) "
       "AND m.catalog_active = 1 AND "
       "(m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL " OR "
       "EXISTS (SELECT 1 FROM model_preferences mp "
-        "WHERE mp.provider_id = a.provider_id "
+        "WHERE mp.provider_id = m.provider_id "
         "AND mp.wire_model_id = m.wire_model_id AND mp.allowed = 1));";
   sqlite3 *db;
   sqlite3_stmt *stmt;

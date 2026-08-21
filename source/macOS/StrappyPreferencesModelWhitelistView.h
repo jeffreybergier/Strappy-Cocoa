@@ -2,13 +2,13 @@
 
 @interface StrappyPreferencesModelWhitelistView : StrappyPreferencesWhitelistView {
  @private
-  NSButton            *fetchButton_;
+  NSButton            *editButton_;
 }
 
 - (id)initWithFrame:(NSRect)frame
              target:(id)target
          dataSource:(id)dataSource
            delegate:(id)delegate;
-- (NSButton *)fetchButton;
+- (NSButton *)editButton;
 
 @end

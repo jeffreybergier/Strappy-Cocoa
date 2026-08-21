@@ -15,25 +15,23 @@
   "WHERE p.id = 1 " \
   "AND EXISTS (SELECT 1 FROM models dm " \
   "WHERE dm.id = p.default_model_id))," \
-  "(SELECT dm.id FROM models dm JOIN provider_accounts da " \
-  "ON da.id = dm.provider_account_id WHERE da.provider_id = '" \
-  STRAPPY_PROVIDER_OPENROUTER "' AND da.lifecycle_state = 'active' " \
+  "(SELECT dm.id FROM models dm " \
+  "WHERE dm.provider_id = '" STRAPPY_PROVIDER_OPENROUTER "' " \
   "AND dm.wire_model_id = '" STRAPPY_CONFIG_DEFAULT_API_MODEL "' " \
-  "ORDER BY da.created_at_ms, da.id LIMIT 1))"
+  "ORDER BY dm.name, dm.id LIMIT 1))"
 #define STRAPPY_DB_DEFAULT_SESSION_WEB_PROVIDER "auto"
 #define STRAPPY_DB_DEFAULT_SESSION_WEB_SEARCH_ENABLED "1"
 #define STRAPPY_DB_STRINGIFY_INNER(value) #value
 #define STRAPPY_DB_STRINGIFY(value) STRAPPY_DB_STRINGIFY_INNER(value)
 #define STRAPPY_DB_INSERT_BUILTIN_DEFAULT_MODEL_SQL \
   "INSERT OR IGNORE INTO models " \
-  "(id, provider_account_id, wire_model_id, name, description, " \
+  "(id, provider_id, wire_model_id, name, description, " \
   "catalog_active, last_seen_at_ms) " \
-  "SELECT a.id || ':' || '" STRAPPY_CONFIG_DEFAULT_API_MODEL "', a.id, '" \
+  "SELECT '" STRAPPY_PROVIDER_OPENROUTER ":" STRAPPY_CONFIG_DEFAULT_API_MODEL \
+  "', '" STRAPPY_PROVIDER_OPENROUTER "', '" \
   STRAPPY_CONFIG_DEFAULT_API_MODEL "', '" STRAPPY_CONFIG_DEFAULT_API_MODEL \
   "', '" STRAPPY_DB_BUILTIN_DEFAULT_MODEL_DESCRIPTION "', 1, " \
-  "CAST(strftime('%s','now') AS INTEGER) * 1000 FROM provider_accounts a " \
-  "WHERE a.provider_id = '" STRAPPY_PROVIDER_OPENROUTER "' " \
-  "AND a.lifecycle_state = 'active' ORDER BY a.created_at_ms, a.id LIMIT 1;"
+  "CAST(strftime('%s','now') AS INTEGER) * 1000;"
 
 typedef struct strappy_db_sql_buffer {
   char *data;

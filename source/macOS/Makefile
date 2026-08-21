@@ -5,6 +5,7 @@ SOURCES = main.m AppDelegate.m XPAppKit.m PreferencesWindowController.m \
           StrappyPreferencesWhitelistView.m \
           StrappyPreferencesAuthenticationView.m \
           StrappyPreferencesModelWhitelistView.m \
+          StrappyModelProviderEditor.m \
           StrappyPreferencesDatabaseWhitelistView.m \
           StrappyPreferencesDatabaseStudyView.m \
           StrappyPreferencesSystemPromptsView.m \

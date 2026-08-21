@@ -262,7 +262,7 @@ static void strappy_db_set_reset_required_error(char **error_out)
 static int strappy_db_validate_schema_identity(sqlite3 *db, char **error_out)
 {
   static const char expected[] =
-    "semantic-v1-provider-model-preferences-no-seeded-accounts";
+    "semantic-v1-provider-owned-models-no-seeded-accounts";
   sqlite3_stmt *stmt;
   const unsigned char *actual;
   int rc;
@@ -382,7 +382,7 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     ");"
     "INSERT OR IGNORE INTO schema_metadata "
     "(id, schema_name, created_at_ms) VALUES "
-    "(1, 'semantic-v1-provider-model-preferences-no-seeded-accounts', "
+    "(1, 'semantic-v1-provider-owned-models-no-seeded-accounts', "
       "CAST(strftime('%s','now') AS INTEGER) * 1000);"
 
     "CREATE TABLE IF NOT EXISTS provider_accounts ("
@@ -404,7 +404,10 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
       "ON provider_accounts(provider_id, lifecycle_state);"
     "CREATE TABLE IF NOT EXISTS models ("
     "id TEXT PRIMARY KEY,"
-    "provider_account_id TEXT NOT NULL,"
+    "provider_id TEXT NOT NULL CHECK(provider_id IN ('"
+      STRAPPY_PROVIDER_OPENROUTER "','"
+      STRAPPY_PROVIDER_OPENAI_CHATGPT "','"
+      STRAPPY_PROVIDER_OTHER "')) ,"
     "wire_model_id TEXT NOT NULL CHECK(length(wire_model_id) > 0),"
     "canonical_slug TEXT,"
     "hugging_face_id TEXT,"
@@ -427,12 +430,11 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "catalog_active INTEGER NOT NULL DEFAULT 1 "
       "CHECK(catalog_active IN (0,1)),"
     "last_seen_at_ms INTEGER NOT NULL,"
-    "UNIQUE(provider_account_id, wire_model_id),"
-    "UNIQUE(id, provider_account_id),"
-    "FOREIGN KEY(provider_account_id) REFERENCES provider_accounts(id)"
+    "UNIQUE(provider_id, wire_model_id),"
+    "UNIQUE(id, provider_id)"
     ");"
     "CREATE INDEX IF NOT EXISTS models_name_idx "
-      "ON models(provider_account_id, name, id);"
+      "ON models(provider_id, name, id);"
     "CREATE TABLE IF NOT EXISTS model_prices ("
     "model_id TEXT NOT NULL,"
     "price_kind TEXT NOT NULL,"
@@ -457,14 +459,6 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "catalog_source TEXT NOT NULL CHECK(length(catalog_source) > 0),"
     "imported_at_ms INTEGER NOT NULL,"
     "CHECK(provider_id = '" STRAPPY_PROVIDER_OPENAI_CHATGPT "')"
-    ");"
-    "CREATE TABLE IF NOT EXISTS bundled_catalog_applications ("
-    "provider_id TEXT NOT NULL,"
-    "provider_account_id TEXT NOT NULL,"
-    "catalog_revision INTEGER NOT NULL CHECK(catalog_revision > 0),"
-    "applied_at_ms INTEGER NOT NULL,"
-    "PRIMARY KEY(provider_id, provider_account_id),"
-    "FOREIGN KEY(provider_account_id) REFERENCES provider_accounts(id)"
     ");"
     "CREATE TABLE IF NOT EXISTS model_capabilities ("
     "model_id TEXT PRIMARY KEY,"
@@ -503,9 +497,7 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "default_provider_account_id TEXT,"
     "updated_at_ms INTEGER NOT NULL,"
     "FOREIGN KEY(default_model_id) REFERENCES models(id),"
-    "FOREIGN KEY(default_provider_account_id) REFERENCES provider_accounts(id),"
-    "FOREIGN KEY(default_model_id, default_provider_account_id) "
-      "REFERENCES models(id, provider_account_id)"
+    "FOREIGN KEY(default_provider_account_id) REFERENCES provider_accounts(id)"
     ");"
     "INSERT OR IGNORE INTO app_preferences (id, updated_at_ms) VALUES "
       "(1, CAST(strftime('%s','now') AS INTEGER) * 1000);";
@@ -545,9 +537,7 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "created_at_ms INTEGER NOT NULL,"
     "updated_at_ms INTEGER NOT NULL,"
     "FOREIGN KEY(model_id) REFERENCES models(id),"
-    "FOREIGN KEY(provider_account_id) REFERENCES provider_accounts(id),"
-    "FOREIGN KEY(model_id, provider_account_id) "
-      "REFERENCES models(id, provider_account_id)"
+    "FOREIGN KEY(provider_account_id) REFERENCES provider_accounts(id)"
     ");"
     "CREATE INDEX IF NOT EXISTS sessions_updated_idx "
       "ON sessions(updated_at_ms DESC, id DESC);"
@@ -659,8 +649,8 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "UNIQUE(id, provider_account_id),"
     "FOREIGN KEY(turn_id) REFERENCES turns(id) ON DELETE CASCADE,"
     "FOREIGN KEY(previous_request_id) REFERENCES model_requests(id),"
-    "FOREIGN KEY(model_id, provider_account_id) "
-      "REFERENCES models(id, provider_account_id),"
+    "FOREIGN KEY(model_id) REFERENCES models(id),"
+    "FOREIGN KEY(provider_account_id) REFERENCES provider_accounts(id),"
     "FOREIGN KEY(instruction_revision_id) REFERENCES instruction_revisions(id),"
     "FOREIGN KEY(toolset_revision_id) REFERENCES toolset_revisions(id)"
     ");"
@@ -1096,9 +1086,12 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
         "UPDATE app_preferences SET "
         "default_model_id=COALESCE(default_model_id," STRAPPY_DB_DEFAULT_MODEL_SQL "),"
         "default_provider_account_id=COALESCE(default_provider_account_id,"
-          "(SELECT provider_account_id FROM models WHERE id="
-            STRAPPY_DB_DEFAULT_MODEL_SQL ")) WHERE id=1;",
-        "Could not initialize account-scoped model defaults",
+          "(SELECT a.id FROM provider_accounts a JOIN models m "
+            "ON m.provider_id=a.provider_id WHERE m.id="
+            STRAPPY_DB_DEFAULT_MODEL_SQL " AND a.lifecycle_state='active' "
+            "ORDER BY a.last_used_at_ms DESC,a.created_at_ms,a.id LIMIT 1)) "
+        "WHERE id=1;",
+        "Could not initialize model and account defaults",
         error_out)) {
     return 0;
   }

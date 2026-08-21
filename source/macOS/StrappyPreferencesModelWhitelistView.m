@@ -3,7 +3,7 @@
 #import "XPAppKit.h"
 
 static const CGFloat kStrappyModelControlHeight = 24.0;
-static const CGFloat kStrappyModelFetchButtonWidth = 72.0;
+static const CGFloat kStrappyModelEditButtonWidth = 72.0;
 
 static NSString *StrappyModelWhitelistStringForRow(NSDictionary *row,
                                                    NSString *key)
@@ -108,33 +108,33 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
 
 - (CGFloat)topAccessoryTrailingControlWidth
 {
-  return kStrappyModelFetchButtonWidth;
+  return kStrappyModelEditButtonWidth;
 }
 
 - (void)configureTopAccessoryView:(NSView *)view target:(id)target
 {
   NSRect bounds;
   CGFloat controlY;
-  CGFloat fetchX;
+  CGFloat editX;
 
   bounds = [view bounds];
   controlY = NSMaxY(bounds) - kStrappyModelControlHeight;
-  fetchX = NSWidth(bounds) - kStrappyModelFetchButtonWidth;
+  editX = NSWidth(bounds) - kStrappyModelEditButtonWidth;
 
-  fetchButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(
-    fetchX,
+  editButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(
+    editX,
     controlY,
-    kStrappyModelFetchButtonWidth,
+    kStrappyModelEditButtonWidth,
     kStrappyModelControlHeight)];
-  [fetchButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
-  [fetchButton_ setBezelStyle:XPBezelStyleRounded];
-  [fetchButton_ setButtonType:XPButtonTypeMomentaryLight];
-  [fetchButton_ setTitle:NSLocalizedString(@"Fetch", nil)];
-  [fetchButton_ setToolTip:
-    NSLocalizedString(@"Fetch the latest OpenRouter model list.", nil)];
-  [fetchButton_ setTarget:target];
-  [fetchButton_ setAction:@selector(refreshModels:)];
-  [view addSubview:fetchButton_];
+  [editButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
+  [editButton_ setBezelStyle:XPBezelStyleRounded];
+  [editButton_ setButtonType:XPButtonTypeMomentaryLight];
+  [editButton_ setTitle:NSLocalizedString(@"Edit", nil)];
+  [editButton_ setToolTip:
+    NSLocalizedString(@"Edit the model catalogs for each provider.", nil)];
+  [editButton_ setTarget:target];
+  [editButton_ setAction:@selector(editModelProviders:)];
+  [view addSubview:editButton_];
 }
 
 - (void)addTableColumnsToTableView:(NSTableView *)tableView
@@ -348,14 +348,14 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
   return NSOrderedSame;
 }
 
-- (NSButton *)fetchButton
+- (NSButton *)editButton
 {
-  return fetchButton_;
+  return editButton_;
 }
 
 - (void)dealloc
 {
-  [fetchButton_ release];
+  [editButton_ release];
   [super dealloc];
 }
 
