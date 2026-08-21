@@ -17,10 +17,8 @@
   NSTableView          *chatGPTTableView_;
   NSTableView          *otherTableView_;
   NSButton             *fetchButton_;
-  NSButton             *saveButton_;
-  NSButton             *deleteButton_;
+  NSSegmentedControl   *otherModelActionsSegmented_;
   NSProgressIndicator  *progressIndicator_;
-  NSTextField          *statusLabel_;
 }
 
 - (id)initWithTarget:(id)target;

@@ -6,6 +6,11 @@
 #include <math.h>
 #include <stdlib.h>
 
+enum {
+  kStrappyOtherModelPrimarySegment = 0,
+  kStrappyOtherModelDeleteSegment = 1
+};
+
 static NSString *StrappyEditorString(NSDictionary *row, NSString *key)
 {
   id value;
@@ -153,13 +158,16 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 - (void)addOtherModel:(id)sender;
 - (void)saveOtherModelDraft:(id)sender;
 - (void)deleteOtherModel:(id)sender;
+- (void)otherModelActionClicked:(id)sender;
 - (void)modelCatalogDidChange:(NSNotification *)notification;
 - (void)reloadCatalogAfterNotification:(id)ignored;
 - (void)modelRefreshDidStart:(NSNotification *)notification;
 - (void)modelRefreshDidFinish:(NSNotification *)notification;
 - (void)setRefreshing:(BOOL)refreshing;
 - (void)showError:(NSError *)error title:(NSString *)title;
+- (void)showErrorMessage:(NSString *)message title:(NSString *)title;
 - (void)reloadOtherModels;
+- (void)updateOtherModelActions;
 - (NSDictionary *)otherModelAtRow:(NSInteger)row;
 - (BOOL)otherRowIsDraft:(NSInteger)row;
 - (BOOL)saveOtherModel:(NSDictionary *)model
@@ -291,10 +299,8 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   chatGPTTableView_ = nil;
   otherTableView_ = nil;
   fetchButton_ = nil;
-  saveButton_ = nil;
-  deleteButton_ = nil;
+  otherModelActionsSegmented_ = nil;
   progressIndicator_ = nil;
-  statusLabel_ = nil;
 }
 
 - (void)showSelectedProvider
@@ -328,10 +334,8 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     initWithFrame:NSMakeRect(124.0, 245.0, 18.0, 18.0)] autorelease];
   [progressIndicator_ setStyle:XPProgressIndicatorStyleSpinning];
   [progressIndicator_ setIndeterminate:YES];
+  [progressIndicator_ setDisplayedWhenStopped:NO];
   [detailView_ addSubview:progressIndicator_];
-  statusLabel_ = StrappyEditorLabel(NSMakeRect(150.0, 241.0, 320.0, 24.0),
-                                    @"", XPFontTextStyleSmallLabel);
-  [detailView_ addSubview:statusLabel_];
   [self setRefreshing:[StrappySession isModelCatalogRefreshInFlight]];
 }
 
@@ -377,20 +381,17 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   [otherModels_ release];
   otherModels_ = [rows copy];
   [otherTableView_ reloadData];
-  [saveButton_ setEnabled:(draftOtherModel_ != nil) &&
-    ([StrappyEditorString(draftOtherModel_, @"wire_model_id") length] > 0U)];
-  [deleteButton_ setEnabled:NO];
+  [self updateOtherModelActions];
 }
 
 - (void)showOther
 {
   NSScrollView *scrollView;
-  NSButton *addButton;
 
   [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(0.0, 330.0, 470.0,
     22.0), NSLocalizedString(@"Other", nil), XPFontTextStyleBoldBody)];
   [detailView_ addSubview:StrappyEditorLabel(NSMakeRect(0.0, 302.0, 470.0,
-    24.0), NSLocalizedString(@"Only Model ID is required. Double-click any cell to edit it, then click Save.", nil), XPFontTextStyleBody)];
+    24.0), NSLocalizedString(@"Only Model ID is required. Existing model edits save automatically.", nil), XPFontTextStyleBody)];
   scrollView = [[[NSScrollView alloc]
     initWithFrame:NSMakeRect(0.0, 42.0, 480.0, 248.0)] autorelease];
   [scrollView setBorderType:NSBezelBorder];
@@ -424,19 +425,46 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   [scrollView setDocumentView:otherTableView_];
   [detailView_ addSubview:scrollView];
 
-  addButton = StrappyEditorButton(NSMakeRect(0.0, 4.0, 80.0, 28.0),
-    NSLocalizedString(@"Add", nil), self, @selector(addOtherModel:));
-  [detailView_ addSubview:addButton];
-  saveButton_ = StrappyEditorButton(NSMakeRect(88.0, 4.0, 80.0, 28.0),
-    NSLocalizedString(@"Save", nil), self, @selector(saveOtherModelDraft:));
-  [saveButton_ setEnabled:(draftOtherModel_ != nil) &&
-    ([StrappyEditorString(draftOtherModel_, @"wire_model_id") length] > 0U)];
-  [detailView_ addSubview:saveButton_];
-  deleteButton_ = StrappyEditorButton(NSMakeRect(176.0, 4.0, 80.0, 28.0),
-    NSLocalizedString(@"Delete", nil), self, @selector(deleteOtherModel:));
-  [deleteButton_ setEnabled:NO];
-  [detailView_ addSubview:deleteButton_];
+  otherModelActionsSegmented_ = [[[NSSegmentedControl alloc]
+    initWithFrame:NSMakeRect(0.0, 4.0, 168.0, 28.0)] autorelease];
+  [otherModelActionsSegmented_ setSegmentCount:2];
+  [[otherModelActionsSegmented_ cell]
+    setTrackingMode:NSSegmentSwitchTrackingMomentary];
+  [otherModelActionsSegmented_ setWidth:84.0
+                             forSegment:kStrappyOtherModelPrimarySegment];
+  [otherModelActionsSegmented_ setWidth:84.0
+                             forSegment:kStrappyOtherModelDeleteSegment];
+  [otherModelActionsSegmented_ setLabel:NSLocalizedString(@"Delete", nil)
+                             forSegment:kStrappyOtherModelDeleteSegment];
+  [otherModelActionsSegmented_ setTarget:self];
+  [otherModelActionsSegmented_
+    setAction:@selector(otherModelActionClicked:)];
+  [detailView_ addSubview:otherModelActionsSegmented_];
   [self reloadOtherModels];
+}
+
+- (void)updateOtherModelActions
+{
+  NSInteger row;
+  NSString *primaryTitle;
+  BOOL hasDraft;
+  BOOL canDelete;
+
+  if (otherModelActionsSegmented_ == nil) {
+    return;
+  }
+  hasDraft = (draftOtherModel_ != nil);
+  primaryTitle = hasDraft ? NSLocalizedString(@"Save", nil) :
+    NSLocalizedString(@"Add", nil);
+  [otherModelActionsSegmented_
+    setLabel:primaryTitle forSegment:kStrappyOtherModelPrimarySegment];
+  [otherModelActionsSegmented_ setEnabled:YES
+                              forSegment:kStrappyOtherModelPrimarySegment];
+  row = [otherTableView_ selectedRow];
+  canDelete = ([self otherModelAtRow:row] != nil) ||
+    [self otherRowIsDraft:row];
+  [otherModelActionsSegmented_ setEnabled:canDelete
+                              forSegment:kStrappyOtherModelDeleteSegment];
 }
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView
@@ -571,8 +599,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   }
   if (draft) {
     [draftOtherModel_ setDictionary:updated];
-    [saveButton_ setEnabled:
-      ([StrappyEditorString(updated, @"wire_model_id") length] > 0U)];
+    [self updateOtherModelActions];
     return;
   }
   error = nil;
@@ -609,8 +636,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
       [self showSelectedProvider];
     }
   } else if (tableView == otherTableView_) {
-    [deleteButton_ setEnabled:(([self otherModelAtRow:row] != nil) ||
-                               [self otherRowIsDraft:row])];
+    [self updateOtherModelActions];
   }
 }
 
@@ -719,7 +745,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
       @"", @"pricing_input_cache_write",
       nil];
     [otherTableView_ reloadData];
-    [saveButton_ setEnabled:NO];
+    [self updateOtherModelActions];
   }
   row = (NSInteger)[otherModels_ count];
   [otherTableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)row]
@@ -728,11 +754,38 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   [otherTableView_ editColumn:0 row:row withEvent:nil select:YES];
 }
 
+- (void)otherModelActionClicked:(id)sender
+{
+  NSInteger segment;
+
+  if (![sender isKindOfClass:[NSSegmentedControl class]]) {
+    return;
+  }
+  segment = [(NSSegmentedControl *)sender selectedSegment];
+  if (segment == kStrappyOtherModelPrimarySegment) {
+    if (draftOtherModel_ != nil) {
+      [self saveOtherModelDraft:sender];
+    } else {
+      if (![sheet_ makeFirstResponder:otherTableView_]) {
+        NSBeep();
+        return;
+      }
+      [self addOtherModel:sender];
+    }
+  } else if (segment == kStrappyOtherModelDeleteSegment) {
+    [self deleteOtherModel:sender];
+  }
+}
+
 - (void)saveOtherModelDraft:(id)sender
 {
   NSError *error;
 
   (void)sender;
+  if (![sheet_ makeFirstResponder:otherTableView_]) {
+    NSBeep();
+    return;
+  }
   if ((draftOtherModel_ == nil) ||
       ([StrappyEditorString(draftOtherModel_, @"wire_model_id") length] == 0U)) {
     NSBeep();
@@ -745,7 +798,6 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   }
   [draftOtherModel_ release];
   draftOtherModel_ = nil;
-  [saveButton_ setEnabled:NO];
   [self reloadCatalog];
 }
 
@@ -755,12 +807,12 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   NSError *error;
 
   (void)sender;
+  [otherTableView_ abortEditing];
   if ([self otherRowIsDraft:[otherTableView_ selectedRow]]) {
     [draftOtherModel_ release];
     draftOtherModel_ = nil;
     [otherTableView_ reloadData];
-    [saveButton_ setEnabled:NO];
-    [deleteButton_ setEnabled:NO];
+    [self updateOtherModelActions];
     return;
   }
   model = [self otherModelAtRow:[otherTableView_ selectedRow]];
@@ -793,10 +845,8 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   [fetchButton_ setEnabled:refreshing ? NO : YES];
   if (refreshing) {
     [progressIndicator_ startAnimation:self];
-    [statusLabel_ setStringValue:NSLocalizedString(@"Fetching models...", nil)];
   } else {
     [progressIndicator_ stopAnimation:self];
-    [statusLabel_ setStringValue:@""];
   }
 }
 
@@ -832,25 +882,34 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   [self setRefreshing:NO];
   message = [[notification userInfo] objectForKey:@"error"];
   if ([message isKindOfClass:[NSString class]] && ([message length] > 0U)) {
-    [statusLabel_ setStringValue:message];
-    [statusLabel_ setToolTip:message];
+    [self showErrorMessage:message
+                     title:NSLocalizedString(@"Could Not Fetch Models", nil)];
   }
 }
 
 - (void)showError:(NSError *)error title:(NSString *)title
 {
-  NSAlert *alert;
   NSString *message;
 
   message = [error localizedDescription];
   if ([message length] == 0U) {
     message = NSLocalizedString(@"The model catalog could not be changed.", nil);
   }
+  [self showErrorMessage:message title:title];
+}
+
+- (void)showErrorMessage:(NSString *)message title:(NSString *)title
+{
+  NSAlert *alert;
+
   alert = [[[NSAlert alloc] init] autorelease];
   [alert setMessageText:title];
   [alert setInformativeText:message];
   [alert addButtonWithTitle:NSLocalizedString(@"OK", nil)];
-  [alert runModal];
+  [alert XP_beginSheetModalForWindow:sheet_
+                       modalDelegate:nil
+                      didEndSelector:NULL
+                         contextInfo:NULL];
 }
 
 - (void)close:(id)sender

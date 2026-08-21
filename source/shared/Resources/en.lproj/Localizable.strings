@@ -112,7 +112,6 @@
 "No matching models." = "No matching models.";
 "OK" = "OK";
 "Model list could not be loaded." = "Model list could not be loaded.";
-"Fetching models..." = "Fetching models...";
 "Model refresh could not start." = "Model refresh could not start.";
 "Could not fetch models" = "Could not fetch models";
 "Could not scan databases" = "Could not scan databases";
@@ -219,6 +218,7 @@
 "App Bundle" = "App Bundle";
 "App Library" = "App Library";
 "Application Support" = "Application Support";
+"Add" = "Add";
 "Capitalize" = "Capitalize";
 "Cache" = "Cache";
 "Check Document Now" = "Check Document Now";
@@ -232,6 +232,7 @@
 "Copy Title" = "Copy Title";
 "Correct Spelling Automatically" = "Correct Spelling Automatically";
 "Could Not Delete Chat" = "Could Not Delete Chat";
+"Could Not Fetch Models" = "Could Not Fetch Models";
 "Could not create session directory." = "Could not create session directory.";
 "Data Detectors" = "Data Detectors";
 "Database" = "Database";
@@ -267,12 +268,14 @@
 "New" = "New";
 "New Chat" = "New Chat";
 "No matching databases." = "No matching databases.";
+"Only Model ID is required. Existing model edits save automatically." = "Only Model ID is required. Existing model edits save automatically.";
 "Page Setup..." = "Page Setup...";
 "Paste and Match Style" = "Paste and Match Style";
 "Preferences..." = "Preferences...";
 "Print..." = "Print...";
 "Prompt is empty." = "Prompt is empty.";
 "This file is not a valid SQLite database." = "This file is not a valid SQLite database.";
+"The model catalog could not be changed." = "The model catalog could not be changed.";
 "Dismiss Keyboard" = "Dismiss Keyboard";
 "Prompt request is already running." = "Prompt request is already running.";
 "Prompts" = "Prompts";

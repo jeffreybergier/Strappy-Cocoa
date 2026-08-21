@@ -112,7 +112,6 @@
 "No matching models." = "一致するモデルはありません。";
 "OK" = "OK";
 "Model list could not be loaded." = "モデル一覧を読み込めませんでした。";
-"Fetching models..." = "モデルを取得中...";
 "Model refresh could not start." = "モデル更新を開始できませんでした。";
 "Could not fetch models" = "モデルを取得できませんでした";
 "Could not scan databases" = "データベースをスキャンできませんでした";
@@ -219,6 +218,7 @@
 "App Bundle" = "アプリバンドル";
 "App Library" = "アプリライブラリ";
 "Application Support" = "Application Support";
+"Add" = "追加";
 "Capitalize" = "語頭を大文字にする";
 "Cache" = "キャッシュ";
 "Check Document Now" = "今すぐ書類をチェック";
@@ -232,6 +232,7 @@
 "Copy Title" = "タイトルをコピー";
 "Correct Spelling Automatically" = "スペルを自動的に修正";
 "Could Not Delete Chat" = "チャットを削除できませんでした";
+"Could Not Fetch Models" = "モデルを取得できませんでした";
 "Could not create session directory." = "セッションディレクトリを作成できませんでした。";
 "Data Detectors" = "データ検出";
 "Database" = "データベース";
@@ -267,12 +268,14 @@
 "New" = "新規";
 "New Chat" = "新規チャット";
 "No matching databases." = "一致するデータベースはありません。";
+"Only Model ID is required. Existing model edits save automatically." = "モデル ID のみ必須です。既存モデルへの変更は自動的に保存されます。";
 "Page Setup..." = "ページ設定...";
 "Paste and Match Style" = "ペーストしてスタイルを合わせる";
 "Preferences..." = "環境設定...";
 "Print..." = "プリント...";
 "Prompt is empty." = "プロンプトが空です。";
 "This file is not a valid SQLite database." = "このファイルは有効な SQLite データベースではありません。";
+"The model catalog could not be changed." = "モデルカタログを変更できませんでした。";
 "Dismiss Keyboard" = "キーボードを閉じる";
 "Prompt request is already running." = "プロンプトリクエストはすでに実行中です。";
 "Prompts" = "プロンプト";
