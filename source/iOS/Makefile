@@ -51,17 +51,22 @@ EXTRA_BUNDLE_STEPS = @set -e; $(MAKE) -f Makefile $(FONTAWESOME_GENERATED); echo
 
 DEB_PACKAGE_ID ?= com.altivecintelligence.strappy
 # Keep package metadata aligned with the plist versions managed by the release
-# helper.
+# helper. Rootful and rootless packages use different installation prefixes,
+# while sharing the same universal armv7/arm64 app and architecture-independent
+# package metadata.
 DEB_VERSION ?= $(shell altivec-release current)
-DEB_ARCH ?= iphoneos-arm
+DEB_UNIVERSAL_ARCH ?= all
 DEB_SECTION ?= Applications
 DEB_PRIORITY ?= optional
 DEB_MAINTAINER ?= Altivec Intelligence <support@altivecintelligence.com>
 DEB_DESCRIPTION ?= OpenRouter assistant for jailbroken iOS devices.
 DEB_COMPRESSION ?= gzip
 DEB_APP_PROCESS ?= $(APP_NAME)
-DEB_STAGE = $(INT_DIR)/deb
-PHONE_DEB = $(BUILD_DIR)/$(APP_NAME).deb
+DEB_STAGE = $(INT_DIR)/deb-$(DEB_VARIANT)
+DEB_APP_DIR = $(DEB_STAGE)$(DEB_INSTALL_PREFIX)/Applications
+PHONE_DEB_ROOTFUL = $(BUILD_DIR)/$(APP_NAME)-rootful.deb
+PHONE_DEB_ROOTLESS = $(BUILD_DIR)/$(APP_NAME)-rootless.deb
+PHONE_DEBS = $(PHONE_DEB_ROOTFUL) $(PHONE_DEB_ROOTLESS)
 
 $(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
 	python3 $(FONTAWESOME_GENERATOR) --font-dir "$(FONTAWESOME_FONT_DIR)" --webview-map "$(FONTAWESOME_WEBVIEW_MAP)"
@@ -81,15 +86,28 @@ __deb: validate
 	  echo " [!] ERROR: Debian version $(DEB_VERSION) does not match configured app version $$configured_version"; \
 	  exit 1; \
 	fi
-	@echo "--- Building Phone $(DEB_BUILD_LABEL) Debian Package ($(OPT_FLAGS)) ---"
-	@$(MAKE) --no-print-directory $(PHONE_DEB) BUILD_DIR=$(BUILD_DIR) OPT_FLAGS=$(OPT_FLAGS)
+	@echo "--- Building Phone $(DEB_BUILD_LABEL) Debian Packages ($(OPT_FLAGS)) ---"
+	@$(MAKE) --no-print-directory $(PHONE_DEBS) BUILD_DIR=$(BUILD_DIR) OPT_FLAGS=$(OPT_FLAGS)
 
-$(PHONE_DEB): $(APP_BUNDLE)
-	@echo " [5/5] Packaging Debian archive..."
+$(PHONE_DEB_ROOTFUL): DEB_VARIANT = rootful
+$(PHONE_DEB_ROOTFUL): DEB_ARCH = $(DEB_UNIVERSAL_ARCH)
+$(PHONE_DEB_ROOTFUL): DEB_INSTALL_PREFIX =
+$(PHONE_DEB_ROOTLESS): DEB_VARIANT = rootless
+$(PHONE_DEB_ROOTLESS): DEB_ARCH = $(DEB_UNIVERSAL_ARCH)
+$(PHONE_DEB_ROOTLESS): DEB_INSTALL_PREFIX = /var/jb
+
+$(PHONE_DEBS): $(APP_BUNDLE)
+	@echo " [5/5] Packaging $(DEB_VARIANT) Debian archive..."
 	@rm -rf "$(DEB_STAGE)"
-	@mkdir -p "$(DEB_STAGE)/DEBIAN" "$(DEB_STAGE)/Applications"
-	@cp -R "$(APP_BUNDLE)" "$(DEB_STAGE)/Applications/"
-	@installed_size=$$(du -sk "$(DEB_STAGE)/Applications/$(APP_NAME).app" | awk '{print $$1}'); \
+	@mkdir -p "$(DEB_STAGE)/DEBIAN" "$(DEB_APP_DIR)"
+	@cp -R "$(APP_BUNDLE)" "$(DEB_APP_DIR)/"
+	@if [ "$(PHONE_LDID_SIGN)" = "1" ] || [ -n "$(PHONE_LDID_ENTITLEMENTS)" ]; then \
+		flags="-S"; \
+		if [ -n "$(PHONE_LDID_ENTITLEMENTS)" ]; then flags="-S$(PHONE_LDID_ENTITLEMENTS)"; fi; \
+		echo "  > ldid-signing staged $(APP_NAME).app bundle"; \
+		$(PHONE_LDID) "$$flags" "$(DEB_APP_DIR)/$(APP_NAME).app"; \
+	fi
+	@installed_size=$$(du -sk "$(DEB_APP_DIR)/$(APP_NAME).app" | awk '{print $$1}'); \
 	{ \
 	  echo "Package: $(DEB_PACKAGE_ID)"; \
 	  echo "Name: $(APP_NAME)"; \
@@ -112,6 +130,9 @@ $(PHONE_DEB): $(APP_BUNDLE)
 	  echo '      sleep 1'; \
 	  echo '      killall -9 $(DEB_APP_PROCESS) >/dev/null 2>&1 || true'; \
 	  echo '    fi'; \
+	  echo '    if command -v uicache >/dev/null 2>&1 && [ -d "$(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" ]; then'; \
+	  echo '      su mobile -c "uicache -u $(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" >/dev/null 2>&1 || uicache -u "$(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" >/dev/null 2>&1 || true'; \
+	  echo '    fi'; \
 	  echo '    ;;'; \
 	  echo 'esac'; \
 	  echo ''; \
@@ -128,6 +149,9 @@ $(PHONE_DEB): $(APP_BUNDLE)
 	  echo '      sleep 1'; \
 	  echo '      killall -9 $(DEB_APP_PROCESS) >/dev/null 2>&1 || true'; \
 	  echo '    fi'; \
+	  echo '    if [ "$$1" != upgrade ] && command -v uicache >/dev/null 2>&1 && [ -d "$(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" ]; then'; \
+	  echo '      su mobile -c "uicache -u $(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" >/dev/null 2>&1 || uicache -u "$(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" >/dev/null 2>&1 || true'; \
+	  echo '    fi'; \
 	  echo '    ;;'; \
 	  echo 'esac'; \
 	  echo ''; \
@@ -140,7 +164,7 @@ $(PHONE_DEB): $(APP_BUNDLE)
 	  echo 'case "$$1" in'; \
 	  echo '  configure)'; \
 	  echo '    if command -v uicache >/dev/null 2>&1; then'; \
-	  echo '      su mobile -c uicache >/dev/null 2>&1 || uicache >/dev/null 2>&1 || true'; \
+	  echo '      su mobile -c "uicache -p $(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" >/dev/null 2>&1 || uicache -p "$(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" >/dev/null 2>&1 || su mobile -c uicache >/dev/null 2>&1 || uicache >/dev/null 2>&1 || true'; \
 	  echo '    fi'; \
 	  echo '    ;;'; \
 	  echo 'esac'; \
@@ -150,7 +174,7 @@ $(PHONE_DEB): $(APP_BUNDLE)
 	@find "$(DEB_STAGE)" -type d -exec chmod 0755 {} \;
 	@find "$(DEB_STAGE)" -type f -exec chmod 0644 {} \;
 	@chmod 0755 "$(DEB_STAGE)/DEBIAN/preinst" "$(DEB_STAGE)/DEBIAN/prerm" "$(DEB_STAGE)/DEBIAN/postinst"
-	@chmod 0755 "$(DEB_STAGE)/Applications/$(APP_NAME).app/$(APP_NAME)"
+	@chmod 0755 "$(DEB_APP_DIR)/$(APP_NAME).app/$(APP_NAME)"
 	@fakeroot sh -c 'chown -R 0:0 "$$1" && dpkg-deb -Z"$$3" --build "$$1" "$$2"' sh "$(DEB_STAGE)" "$@" "$(DEB_COMPRESSION)"
 
 .PHONY: __deb

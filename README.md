@@ -177,14 +177,19 @@ Requires an [OpenRouter](https://openrouter.ai/) API token.
 
 1. [Jailbreak](https://ios.cfw.guide) your iPhone
 1. Install OpenSSH from the package manager
-1. Download `Strappy-X.Y.Z-iOS.deb` from
+1. Download `Strappy-X.Y.Z-iOS-rootful.deb` or
+   `Strappy-X.Y.Z-iOS-rootless.deb`, as appropriate for your jailbreak, from
    [Releases](https://github.com/jeffreybergier/Strappy-Cocoa/releases).
 1. Install it:
 
 ```sh
-scp Strappy-X.Y.Z-iOS.deb root@iphone-ip-address:~/strappy.deb
+scp Strappy-X.Y.Z-iOS-rootful.deb root@iphone-ip-address:~/strappy.deb
 ssh root@iphone-ip-address "dpkg -i ~/strappy.deb && rm ~/strappy.deb"
 ```
+
+Use the rootless package instead when `/var/jb` exists on the jailbroken
+device. Both packages contain the same universal armv7/arm64 executable; only
+the installation location differs.
 
 Depending on how new your computer is and how old your iPhone is, you may
 need to manually enable older RSA algorithms in order for SSH to connect:
@@ -193,7 +198,7 @@ need to manually enable older RSA algorithms in order for SSH to connect:
 scp -O \
   -o HostKeyAlgorithms=+ssh-rsa \
   -o PubkeyAcceptedAlgorithms=+ssh-rsa \
-  Strappy-X.Y.Z-iOS.deb \
+  Strappy-X.Y.Z-iOS-rootful.deb \
   root@iphone-ip-address:~/strappy.deb
 
 ssh \
@@ -257,7 +262,8 @@ docker compose run --rm make clean release
 
 Outputs:
 
-- `source/iOS/build-release/Strappy.deb`
+- `source/iOS/build-release/Strappy-rootful.deb` for rootful jailbreaks
+- `source/iOS/build-release/Strappy-rootless.deb` for rootless jailbreaks
 - `source/macOS/build-release/Strappy.zip`
 
 (Optional) Run the Linux-Based Tests for the C Backend:
