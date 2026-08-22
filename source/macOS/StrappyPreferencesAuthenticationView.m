@@ -43,7 +43,7 @@ static NSString *StrappyAccountsProviderDisplayName(NSString *provider)
   if ([provider isEqualToString:@"openai_chatgpt"]) {
     return @"ChatGPT";
   }
-  return NSLocalizedString(@"Other", nil);
+  return NSLocalizedString(@"Custom", nil);
 }
 
 static NSString *StrappyAccountsProviderSubtitle(NSString *provider)

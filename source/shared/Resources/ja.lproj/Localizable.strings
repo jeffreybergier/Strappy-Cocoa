@@ -417,6 +417,7 @@
 "Could Not Load Accounts" = "アカウントを読み込めませんでした";
 "Could Not Save Account" = "アカウントを保存できませんでした";
 "Could Not Save Credential" = "認証情報を保存できませんでした";
+"Custom" = "カスタム";
 "Delete Account" = "アカウントを削除";
 "Delete Account?" = "アカウントを削除しますか？";
 "Delete Account…" = "アカウントを削除…";

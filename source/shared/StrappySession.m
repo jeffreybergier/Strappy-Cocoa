@@ -2654,7 +2654,7 @@ static BOOL StrappySessionRecordFromOptions(
   } else if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) {
     baseName = @"ChatGPT";
   } else {
-    baseName = @"Other";
+    baseName = @"Custom";
   }
   candidate = baseName;
   suffix = 1U;

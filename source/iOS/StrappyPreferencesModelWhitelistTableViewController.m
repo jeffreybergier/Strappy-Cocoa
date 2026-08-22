@@ -144,7 +144,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
       [providerModel setObject:key forKey:@"provider_model_key"];
       if ([providerIdentifier isEqualToString:@"openrouter"]) providerName = @"OpenRouter";
       else if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) providerName = @"ChatGPT";
-      else providerName = NSLocalizedString(@"Other", nil);
+      else providerName = NSLocalizedString(@"Custom", nil);
       [providerModel setObject:providerName forKey:@"provider_name"];
       [rowsByProviderModel setObject:providerModel forKey:key];
       [providerModels addObject:providerModel];

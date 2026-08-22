@@ -160,7 +160,7 @@ static NSString *StrappyModelProviderDisplayName(NSString *providerId)
     return @"ChatGPT";
   }
   if ([providerId isEqualToString:@"other"]) {
-    return NSLocalizedString(@"Other", nil);
+    return NSLocalizedString(@"Custom", nil);
   }
   return ([providerId length] > 0U) ? providerId :
     NSLocalizedString(@"Other", nil);

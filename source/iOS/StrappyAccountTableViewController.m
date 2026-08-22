@@ -25,7 +25,7 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) {
     return @"ChatGPT";
   }
-  return NSLocalizedString(@"Other", nil);
+  return NSLocalizedString(@"Custom", nil);
 }
 
 @interface StrappyAccountTableViewController ()

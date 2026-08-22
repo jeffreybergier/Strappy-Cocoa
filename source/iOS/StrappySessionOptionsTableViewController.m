@@ -641,7 +641,7 @@ titleForHeaderInSection:(NSInteger)section
     } else if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) {
       [[cell detailTextLabel] setText:@"ChatGPT"];
     } else {
-      [[cell detailTextLabel] setText:NSLocalizedString(@"Other", nil)];
+      [[cell detailTextLabel] setText:NSLocalizedString(@"Custom", nil)];
     }
     [[cell textLabel] setTextColor:enabled ?
       [UIColor blackColor] : [UIColor grayColor]];

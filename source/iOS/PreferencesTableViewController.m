@@ -385,7 +385,7 @@ titleForFooterInSection:(NSInteger)section
     } else if ([provider isEqualToString:@"openai_chatgpt"]) {
       [[cell detailTextLabel] setText:@"ChatGPT"];
     } else {
-      [[cell detailTextLabel] setText:NSLocalizedString(@"Other", nil)];
+      [[cell detailTextLabel] setText:NSLocalizedString(@"Custom", nil)];
     }
     if (![[account objectForKey:@"available"] boolValue]) {
       [[cell detailTextLabel] setText:[NSString stringWithFormat:
@@ -439,7 +439,7 @@ titleForFooterInSection:(NSInteger)section
 destructiveButtonTitle:nil
  otherButtonTitles:NSLocalizedString(@"ChatGPT", nil),
                    NSLocalizedString(@"OpenRouter", nil),
-                   NSLocalizedString(@"Other", nil), nil];
+                   NSLocalizedString(@"Custom", nil), nil];
   [actionSheet setTag:kStrappyAddAccountActionSheetTag];
   tableView = [self tableView];
   [actionSheet showFromRect:[tableView rectForRowAtIndexPath:indexPath]

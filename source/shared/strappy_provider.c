@@ -268,7 +268,7 @@ static const strappy_provider_definition strappy_provider_registry[] = {
   {
     STRAPPY_PROVIDER_KIND_OTHER,
     STRAPPY_PROVIDER_OTHER,
-    "Other",
+    "Custom",
     STRAPPY_PROVIDER_CREDENTIAL_OPTIONAL_BEARER,
     NULL,
     1,

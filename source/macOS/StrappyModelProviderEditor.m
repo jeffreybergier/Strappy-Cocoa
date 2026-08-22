@@ -425,7 +425,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 
 - (void)showOther
 {
-  [self showEditableModelsForProviderWithTitle:NSLocalizedString(@"Other", nil)];
+  [self showEditableModelsForProviderWithTitle:NSLocalizedString(@"Custom", nil)];
 }
 
 - (void)showEditableModelsForProviderWithTitle:(NSString *)title

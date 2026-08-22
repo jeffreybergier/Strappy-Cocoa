@@ -45,6 +45,7 @@ int main(void)
   chatgpt = strappy_provider_find(STRAPPY_PROVIDER_OPENAI_CHATGPT);
   other = strappy_provider_find(STRAPPY_PROVIDER_OTHER);
   ok = ok && (openrouter != NULL) && (chatgpt != NULL) && (other != NULL) &&
+    (strcmp(other->display_name, "Custom") == 0) &&
     (strappy_provider_find("unknown") == NULL) &&
     (strappy_provider_for_kind(STRAPPY_PROVIDER_KIND_UNKNOWN) == NULL) &&
     !strappy_provider_parse("unknown", &parsed) &&
