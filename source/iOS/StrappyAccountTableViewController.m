@@ -4,6 +4,7 @@
 #import "StrappyAuthentication.h"
 #import "StrappyKeychain.h"
 #import "StrappySession.h"
+#import "XPUIKit.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -37,8 +38,10 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
 @property (nonatomic, strong) UITextField *maxOutputField;
 @property (nonatomic, strong) UISwitch *maxOutputSwitch;
 @property (nonatomic, assign) BOOL dirty;
+@property (nonatomic, assign) BOOL presentedModally;
 - (void)reloadAccount;
 - (void)authenticationDidChange:(NSNotification *)notification;
+- (void)cancelAction:(id)sender;
 - (void)saveAction:(id)sender;
 - (void)deleteAction;
 - (void)performChatGPTActionAtRow:(NSInteger)row;
@@ -48,8 +51,16 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
 
 - (id)initWithProviderAccountIdentifier:(NSString *)identifier
 {
+  return [self initWithProviderAccountIdentifier:identifier
+                                presentedModally:NO];
+}
+
+- (id)initWithProviderAccountIdentifier:(NSString *)identifier
+                       presentedModally:(BOOL)presentedModally
+{
   if ((self = [super initWithStyle:UITableViewStyleGrouped])) {
     [self setProviderAccountIdentifier:identifier];
+    [self setPresentedModally:presentedModally];
   }
   return self;
 }
@@ -89,6 +100,13 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   [[self navigationItem] setRightBarButtonItem:[[UIBarButtonItem alloc]
     initWithBarButtonSystemItem:UIBarButtonSystemItemSave target:self
     action:@selector(saveAction:)]];
+  if ([self presentedModally]) {
+    [[self navigationItem] setLeftBarButtonItem:[[UIBarButtonItem alloc]
+      initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self
+      action:@selector(cancelAction:)]];
+    [StrappyAppearance applyLegacyTintToBarButtonItem:
+      [[self navigationItem] leftBarButtonItem]];
+  }
   [StrappyAppearance applyLegacyTintToBarButtonItem:
     [[self navigationItem] rightBarButtonItem]];
   [[NSNotificationCenter defaultCenter] addObserver:self
@@ -205,6 +223,13 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   }
 }
 
+- (void)cancelAction:(id)sender
+{
+  (void)sender;
+  [[self view] endEditing:YES];
+  [self XP_dismissViewControllerAnimated:YES];
+}
+
 - (void)saveAction:(id)sender
 {
   NSString *identifier;
@@ -286,7 +311,11 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
     [self showError:nil title:NSLocalizedString(@"Could Not Save Credential", nil)];
     return;
   }
-  [self reloadAccount];
+  if ([self presentedModally]) {
+    [self XP_dismissViewControllerAnimated:YES];
+  } else {
+    [self reloadAccount];
+  }
 }
 
 - (void)authenticationDidChange:(NSNotification *)notification
@@ -487,8 +516,11 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
     }
     return [self fieldCell:[self maxOutputField]];
   }
-  [[cell textLabel] setText:NSLocalizedString(@"Delete Account…", nil)];
+  cell = [[UITableViewCell alloc]
+    initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+  [[cell textLabel] setText:NSLocalizedString(@"Delete Account", nil)];
   [[cell textLabel] setTextColor:[UIColor redColor]];
+  [[cell textLabel] XP_setTextAlignmentCenter];
   [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
   return cell;
 }
@@ -532,6 +564,8 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   if (![StrappySession archiveProviderAccountIdentifier:
       [self providerAccountIdentifier] error:&error]) {
     [self showError:error title:NSLocalizedString(@"Could Not Delete Account", nil)];
+  } else if ([self presentedModally]) {
+    [self XP_dismissViewControllerAnimated:YES];
   } else {
     [[self navigationController] popViewControllerAnimated:YES];
   }

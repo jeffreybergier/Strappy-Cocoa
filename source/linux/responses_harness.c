@@ -4500,6 +4500,8 @@ static int harness_run_other_generic_server(int listener_fd)
   cJSON *stream;
   cJSON *store;
   cJSON *tools;
+  cJSON *reasoning;
+  cJSON *summary;
   cJSON *input;
   cJSON *item;
   int client_fd;
@@ -4517,15 +4519,27 @@ static int harness_run_other_generic_server(int listener_fd)
   stream = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "stream") : NULL;
   store = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "store") : NULL;
   tools = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "tools") : NULL;
+  reasoning = cJSON_IsObject(root) ?
+    cJSON_GetObjectItem(root, "reasoning") : NULL;
+  summary = cJSON_IsObject(reasoning) ?
+    cJSON_GetObjectItem(reasoning, "summary") : NULL;
   exercise_local_function = (harness_expected_authorization != NULL) &&
     (harness_expected_authorization[0] != '\0');
   ok = cJSON_IsString(model) && (model->valuestring != NULL) &&
-    (strcmp(model->valuestring, "manual") == 0) &&
+    ((strcmp(model->valuestring, "manual") == 0) ||
+     (strcmp(model->valuestring, "manual-no-reasoning") == 0)) &&
     cJSON_IsFalse(stream) && cJSON_IsFalse(store) &&
     (cJSON_GetObjectItem(root, "session_id") == NULL) &&
     (cJSON_GetObjectItem(root, "metadata") == NULL) &&
     (cJSON_GetObjectItem(root, "include") == NULL) &&
-    (cJSON_GetObjectItem(root, "reasoning") == NULL) &&
+    (((strcmp(model->valuestring, "manual") == 0) &&
+      cJSON_IsObject(reasoning) && cJSON_IsString(summary) &&
+      (summary->valuestring != NULL) &&
+      (strcmp(summary->valuestring, "auto") == 0) &&
+      (cJSON_GetObjectItem(reasoning, "enabled") == NULL) &&
+      (cJSON_GetObjectItem(reasoning, "effort") == NULL)) ||
+     ((strcmp(model->valuestring, "manual-no-reasoning") == 0) &&
+      (reasoning == NULL))) &&
     (cJSON_GetObjectItem(root, "text") == NULL) &&
     cJSON_IsArray(tools) &&
     harness_has_tool_name(tools, STRAPPY_TOOL_SESSION_RENAME) &&
@@ -9726,6 +9740,7 @@ static int harness_test_other_provider_accounts(void)
   model_input.display_name = "Manual";
   model_input.context_window_tokens = 8192LL;
   model_input.max_output_tokens = 1024LL;
+  model_input.reasoning_enabled = 1;
   model_input.local_functions_enabled = 1;
   ok = ok && strappy_db_initialize(path, &error) &&
     strappy_db_create_provider_account(
@@ -9733,8 +9748,13 @@ static int harness_test_other_provider_accounts(void)
     strappy_db_create_provider_account(
       path,"other","Unauthenticated",endpoint_two,&account_two,&error) &&
     strappy_db_create_manual_model(
-      path,"other",&model_input,&model_one,&error) &&
-    ((model_two = strdup(model_one)) != NULL) &&
+      path,"other",&model_input,&model_one,&error);
+  model_input.wire_model_id = "manual-no-reasoning";
+  model_input.display_name = "Manual Without Reasoning";
+  model_input.reasoning_enabled = 0;
+  ok = ok &&
+    strappy_db_create_manual_model(
+      path,"other",&model_input,&model_two,&error) &&
     strappy_db_set_model_allowed(path,model_one,1,&error) &&
     strappy_db_set_model_allowed(path,model_two,1,&error) &&
     strappy_db_set_default_account_model(path,account_one,model_one,&error) &&

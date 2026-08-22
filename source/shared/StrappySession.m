@@ -2570,10 +2570,13 @@ static BOOL StrappySessionRecordFromOptions(
   for (index = 0U; index < list.count; index++) {
     NSDictionary *account;
     NSMutableDictionary *availableAccount;
+    const strappy_provider_definition *definition;
     NSString *accountIdentifier;
     NSString *providerIdentifier;
     NSString *responsesEndpoint;
+    unsigned int missingFields;
     BOOL available;
+    BOOL hasCredential;
 
     account = [StrappySession dictionaryFromProviderAccountRecord:
       &list.records[index]];
@@ -2581,15 +2584,13 @@ static BOOL StrappySessionRecordFromOptions(
       accountIdentifier = [account objectForKey:@"id"];
       providerIdentifier = [account objectForKey:@"provider_id"];
       responsesEndpoint = [account objectForKey:@"responses_endpoint"];
-      available = YES;
-      if ([providerIdentifier isEqualToString:@"other"]) {
-        available = [responsesEndpoint length] > 0U;
-      } else if ([providerIdentifier isEqualToString:@"openai_chatgpt"] &&
-                 !strappy_provider_chatgpt_is_enabled()) {
-        available = NO;
-      }
-      if (available && verifyCredentials &&
-          ![providerIdentifier isEqualToString:@"other"]) {
+      definition = strappy_provider_find([providerIdentifier UTF8String]);
+      available = (definition != NULL) &&
+        strappy_provider_is_available(definition);
+      hasCredential = (definition != NULL) &&
+        (definition->credential_kind ==
+          STRAPPY_PROVIDER_CREDENTIAL_OPTIONAL_BEARER);
+      if ((definition != NULL) && !hasCredential) {
         StrappyKeychain *keychain;
         NSObject *credentialLock;
 
@@ -2599,19 +2600,36 @@ static BOOL StrappySessionRecordFromOptions(
           providerAccountIdentifier:accountIdentifier];
         @synchronized(credentialLock) {
           if ([providerIdentifier isEqualToString:@"openrouter"]) {
-            available = [keychain
+            hasCredential = [keychain
               hasBearerTokenForProviderIdentifier:providerIdentifier
               providerAccountIdentifier:accountIdentifier];
           } else {
-            available = [keychain
+            hasCredential = [keychain
               hasChatGPTCredentialsForProviderAccountIdentifier:
                 accountIdentifier];
           }
         }
       }
+      missingFields = strappy_provider_account_missing_required_fields(
+        definition,
+        [[account objectForKey:@"name"] UTF8String],
+        [responsesEndpoint UTF8String],
+        hasCredential ? 1 : 0);
+      if ((missingFields & STRAPPY_PROVIDER_ACCOUNT_MISSING_ENDPOINT) != 0U) {
+        available = NO;
+      }
+      if (verifyCredentials &&
+          ((missingFields &
+            STRAPPY_PROVIDER_ACCOUNT_MISSING_CREDENTIAL) != 0U)) {
+        available = NO;
+      }
       availableAccount = [[account mutableCopy] autorelease];
       [availableAccount setObject:[NSNumber numberWithBool:available]
                            forKey:@"available"];
+      [availableAccount setObject:[NSNumber numberWithUnsignedInt:missingFields]
+                           forKey:@"missing_required_fields"];
+      [availableAccount setObject:[NSNumber numberWithBool:
+        (missingFields != 0U)] forKey:@"has_missing_required_fields"];
       [accounts addObject:availableAccount];
     }
   }

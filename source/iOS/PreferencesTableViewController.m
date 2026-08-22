@@ -1,5 +1,6 @@
 #import "PreferencesTableViewController.h"
 
+#import "AIFontAwesome.h"
 #import "FileScanner.h"
 #import "StrappyAccountTableViewController.h"
 #import "StrappyAppearance.h"
@@ -38,6 +39,21 @@ static NSString *StrappyPreferencesModelDisplayNameForRow(NSDictionary *row)
     ? modelIdentifier : NSLocalizedString(@"Model", nil);
 }
 
+static UIImage *StrappyPreferencesAccountProblemImage(void)
+{
+  static UIImage *image = nil;
+
+  if (image == nil) {
+    image = [AIFontAwesome imageForIcon:AIFACircleExclamation
+                                  style:AIFontAwesomeStyleSolid
+                               iconSize:18.0f
+                             canvasSize:24.0f
+                                  color:[StrappyAppearance primaryTintColor]
+                                  scale:0.0f];
+  }
+  return image;
+}
+
 static NSComparisonResult StrappyPreferencesCompareModelNameRows(
   id left,
   id right,
@@ -74,8 +90,12 @@ enum {
   kStrappyPaneRowCount
 };
 
+enum {
+  kStrappyAddAccountActionSheetTag = 9201
+};
+
 @interface PreferencesTableViewController ()
-  <StrappySessionOptionsTableViewControllerDelegate>
+  <StrappySessionOptionsTableViewControllerDelegate, UIActionSheetDelegate>
 @property (nonatomic, strong) NSArray *accounts;
 @property (nonatomic, copy) StrappySessionOptions *defaultSessionOptions;
 @property (nonatomic, assign) BOOL defaultSessionOptionsLoaded;
@@ -84,6 +104,7 @@ enum {
 - (void)reloadAccounts;
 - (void)providerAccountsDidChange:(NSNotification *)notification;
 - (void)longRunningPreferenceWorkDidChange:(NSNotification *)notification;
+- (void)showAddAccountActionSheetFromIndexPath:(NSIndexPath *)indexPath;
 - (void)doneAction:(id)sender;
 @end
 
@@ -343,15 +364,18 @@ titleForFooterInSection:(NSInteger)section
     NSDictionary *account;
     NSString *provider;
 
-    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
-                                  reuseIdentifier:nil];
-    [cell setAccessoryType:UITableViewCellAccessoryDisclosureIndicator];
     if ((NSUInteger)[indexPath row] == [[self accounts] count]) {
+      cell = [[UITableViewCell alloc]
+        initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
       [[cell textLabel] setText:NSLocalizedString(@"Add Account", nil)];
-      [[cell detailTextLabel] setText:NSLocalizedString(
-        @"OpenRouter, ChatGPT, or another Responses provider", nil)];
+      [[cell textLabel] setTextColor:[StrappyAppearance primaryTintColor]];
+      [[cell textLabel] XP_setTextAlignmentCenter];
+      [cell setAccessoryType:UITableViewCellAccessoryNone];
       return cell;
     }
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
+                                  reuseIdentifier:nil];
+    [cell setAccessoryType:UITableViewCellAccessoryNone];
     account = [[self accounts] objectAtIndex:(NSUInteger)[indexPath row]];
     provider = StrappyPreferencesModelStringForRow(account, @"provider_id");
     [[cell textLabel] setText:StrappyPreferencesModelStringForRow(account,
@@ -367,6 +391,9 @@ titleForFooterInSection:(NSInteger)section
       [[cell detailTextLabel] setText:[NSString stringWithFormat:
         NSLocalizedString(@"%@ — setup required", nil),
         [[cell detailTextLabel] text]]];
+    }
+    if ([[account objectForKey:@"has_missing_required_fields"] boolValue]) {
+      [[cell imageView] setImage:StrappyPreferencesAccountProblemImage()];
     }
     return cell;
   }
@@ -400,6 +427,77 @@ titleForFooterInSection:(NSInteger)section
 
 #pragma mark - UITableViewDelegate
 
+- (void)showAddAccountActionSheetFromIndexPath:(NSIndexPath *)indexPath
+{
+  UIActionSheet *actionSheet;
+  UITableView *tableView;
+
+  actionSheet = [[UIActionSheet alloc]
+    initWithTitle:nil
+          delegate:self
+ cancelButtonTitle:NSLocalizedString(@"Cancel", nil)
+destructiveButtonTitle:nil
+ otherButtonTitles:NSLocalizedString(@"ChatGPT", nil),
+                   NSLocalizedString(@"OpenRouter", nil),
+                   NSLocalizedString(@"Other", nil), nil];
+  [actionSheet setTag:kStrappyAddAccountActionSheetTag];
+  tableView = [self tableView];
+  [actionSheet showFromRect:[tableView rectForRowAtIndexPath:indexPath]
+                     inView:tableView
+                   animated:YES];
+}
+
+- (void)actionSheet:(UIActionSheet *)actionSheet
+didDismissWithButtonIndex:(NSInteger)buttonIndex
+{
+  NSInteger firstOtherButtonIndex;
+  NSString *providerIdentifier;
+  NSArray *providers;
+  NSUInteger providerIndex;
+  BOOL providerAvailable;
+  NSError *error;
+
+  if (([actionSheet tag] != kStrappyAddAccountActionSheetTag) ||
+      (buttonIndex == [actionSheet cancelButtonIndex])) {
+    return;
+  }
+  firstOtherButtonIndex = [actionSheet firstOtherButtonIndex];
+  if (buttonIndex == firstOtherButtonIndex) {
+    providerIdentifier = @"openai_chatgpt";
+  } else if (buttonIndex == (firstOtherButtonIndex + 1)) {
+    providerIdentifier = @"openrouter";
+  } else if (buttonIndex == (firstOtherButtonIndex + 2)) {
+    providerIdentifier = @"other";
+  } else {
+    return;
+  }
+
+  providers = [StrappySession providerCatalog];
+  providerAvailable = NO;
+  for (providerIndex = 0U; providerIndex < [providers count]; providerIndex++) {
+    NSDictionary *provider;
+
+    provider = [providers objectAtIndex:providerIndex];
+    if ([StrappyPreferencesModelStringForRow(provider, @"id")
+          isEqualToString:providerIdentifier]) {
+      providerAvailable = [[provider objectForKey:@"available"] boolValue];
+      break;
+    }
+  }
+  if (!providerAvailable) {
+    [self showMessage:NSLocalizedString(
+      @"This account type is not available in this build.", nil)
+                 title:NSLocalizedString(@"Could Not Add Account", nil)];
+    return;
+  }
+
+  error = nil;
+  if ([StrappySession createProviderAccountForProviderIdentifier:
+        providerIdentifier error:&error] == nil) {
+    [self showError:error title:NSLocalizedString(@"Could Not Add Account", nil)];
+  }
+}
+
 - (void)tableView:(UITableView *)tableView
 didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
@@ -409,17 +507,23 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
   if ([indexPath section] == kStrappyPreferencesSectionAccounts) {
     if ((NSUInteger)[indexPath row] == [[self accounts] count]) {
-      controller = [[StrappyProviderPickerTableViewController alloc] init];
+      [self showAddAccountActionSheetFromIndexPath:indexPath];
+      return;
     } else {
       NSDictionary *account;
+      StrappyAccountTableViewController *accountController;
+      UINavigationController *navigationController;
 
       account = [[self accounts] objectAtIndex:(NSUInteger)[indexPath row]];
-      controller = [[StrappyAccountTableViewController alloc]
+      accountController = [[StrappyAccountTableViewController alloc]
         initWithProviderAccountIdentifier:
-          StrappyPreferencesModelStringForRow(account, @"id")];
+          StrappyPreferencesModelStringForRow(account, @"id")
+                       presentedModally:YES];
+      navigationController = [[UINavigationController alloc]
+        initWithRootViewController:accountController];
+      [self XP_presentViewController:navigationController animated:YES];
+      return;
     }
-    [[self navigationController] pushViewController:controller animated:YES];
-    return;
   }
 
   controller = nil;

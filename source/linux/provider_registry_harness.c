@@ -65,6 +65,25 @@ int main(void)
     !strappy_provider_supports_hosted_tool(chatgpt,
                                           "openrouter:web_search");
 
+  ok = ok &&
+    (strappy_provider_account_missing_required_fields(
+      openrouter, "OpenRouter", NULL, 0) ==
+      STRAPPY_PROVIDER_ACCOUNT_MISSING_CREDENTIAL) &&
+    (strappy_provider_account_missing_required_fields(
+      openrouter, "OpenRouter", NULL, 1) == 0U) &&
+    (strappy_provider_account_missing_required_fields(
+      chatgpt, "ChatGPT", NULL, 0) ==
+      STRAPPY_PROVIDER_ACCOUNT_MISSING_CREDENTIAL) &&
+    (strappy_provider_account_missing_required_fields(
+      other, "Other", NULL, 0) ==
+      STRAPPY_PROVIDER_ACCOUNT_MISSING_ENDPOINT) &&
+    (strappy_provider_account_missing_required_fields(
+      other, "Other", "https://example.test/v1/responses", 0) == 0U) &&
+    (strappy_provider_account_missing_required_fields(
+      NULL, NULL, NULL, 0) ==
+      (STRAPPY_PROVIDER_ACCOUNT_MISSING_PROVIDER |
+       STRAPPY_PROVIDER_ACCOUNT_MISSING_DISPLAY_NAME));
+
   /* The minimal provider is intentionally manual and generic. Its operation
    * table must advertise neither a catalog operation nor hosted tools. */
   ok = ok &&

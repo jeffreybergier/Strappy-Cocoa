@@ -53,6 +53,34 @@ int strappy_provider_chatgpt_is_enabled(void)
 #endif
 }
 
+unsigned int strappy_provider_account_missing_required_fields(
+  const strappy_provider_definition *definition,
+  const char *display_name,
+  const char *responses_endpoint,
+  int has_credential)
+{
+  unsigned int missing_fields;
+
+  missing_fields = 0U;
+  if (definition == NULL) {
+    missing_fields |= STRAPPY_PROVIDER_ACCOUNT_MISSING_PROVIDER;
+  }
+  if ((display_name == NULL) || (display_name[0] == '\0')) {
+    missing_fields |= STRAPPY_PROVIDER_ACCOUNT_MISSING_DISPLAY_NAME;
+  }
+  if ((definition != NULL) && definition->requires_endpoint_override &&
+      ((responses_endpoint == NULL) || (responses_endpoint[0] == '\0'))) {
+    missing_fields |= STRAPPY_PROVIDER_ACCOUNT_MISSING_ENDPOINT;
+  }
+  if ((definition != NULL) &&
+      (definition->credential_kind !=
+        STRAPPY_PROVIDER_CREDENTIAL_OPTIONAL_BEARER) &&
+      !has_credential) {
+    missing_fields |= STRAPPY_PROVIDER_ACCOUNT_MISSING_CREDENTIAL;
+  }
+  return missing_fields;
+}
+
 static int strappy_provider_always_available(void)
 {
   return 1;

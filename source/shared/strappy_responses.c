@@ -1662,6 +1662,12 @@ static char *strappy_responses_build_request_json(
        &buffer,
        "\"reasoning\":{\"enabled\":true,\"summary\":\"auto\"},")) &&
     ((definition->request_profile !=
+       STRAPPY_PROVIDER_REQUEST_GENERIC_RESPONSES) ||
+     !reasoning_enabled ||
+     strappy_responses_buffer_append_string(
+       &buffer,
+       "\"reasoning\":{\"summary\":\"auto\"},")) &&
+    ((definition->request_profile !=
        STRAPPY_PROVIDER_REQUEST_CHATGPT_CODEX) ||
      strappy_responses_buffer_append_string(
        &buffer,

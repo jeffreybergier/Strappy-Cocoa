@@ -44,6 +44,13 @@ typedef enum strappy_provider_credential_kind {
   STRAPPY_PROVIDER_CREDENTIAL_OPTIONAL_BEARER = 3
 } strappy_provider_credential_kind;
 
+typedef enum strappy_provider_account_missing_field {
+  STRAPPY_PROVIDER_ACCOUNT_MISSING_PROVIDER = 1U << 0,
+  STRAPPY_PROVIDER_ACCOUNT_MISSING_DISPLAY_NAME = 1U << 1,
+  STRAPPY_PROVIDER_ACCOUNT_MISSING_ENDPOINT = 1U << 2,
+  STRAPPY_PROVIDER_ACCOUNT_MISSING_CREDENTIAL = 1U << 3
+} strappy_provider_account_missing_field;
+
 typedef enum strappy_provider_catalog_kind {
   STRAPPY_PROVIDER_CATALOG_REMOTE_ACCOUNT = 1,
   STRAPPY_PROVIDER_CATALOG_BUNDLED = 2,
@@ -113,6 +120,11 @@ int strappy_provider_parse(const char *name,
 const char *strappy_provider_display_name(strappy_provider_kind provider);
 int strappy_provider_is_available(const strappy_provider_definition *definition);
 int strappy_provider_chatgpt_is_enabled(void);
+unsigned int strappy_provider_account_missing_required_fields(
+  const strappy_provider_definition *definition,
+  const char *display_name,
+  const char *responses_endpoint,
+  int has_credential);
 int strappy_provider_has_catalog_operation(
   const strappy_provider_definition *definition);
 int strappy_provider_supports_hosted_tool(

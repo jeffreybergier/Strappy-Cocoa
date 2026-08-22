@@ -465,8 +465,11 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     145.0, YES)];
   [otherTableView_ addTableColumn:StrappyEditorCheckboxColumn(
     @"reasoning_enabled", @"Reasoning (Optional)", 130.0)];
+  /* Keep image_input_enabled in model drafts and persistence, but hide its
+   * column until Strappy supports image input or output.
   [otherTableView_ addTableColumn:StrappyEditorCheckboxColumn(
     @"image_input_enabled", @"Images (Optional)", 115.0)];
+   */
   [otherTableView_ addTableColumn:StrappyEditorTextColumn(@"pricing_prompt",
     @"Input $/1M (Optional)", 140.0, YES)];
   [otherTableView_ addTableColumn:StrappyEditorTextColumn(@"pricing_completion",
@@ -592,6 +595,35 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
      (([self otherModelAtRow:row] != nil) &&
       ![self otherModelIsBuiltIn:[self otherModelAtRow:row]] &&
       ![[tableColumn identifier] isEqualToString:@"wire_model_id"]));
+}
+
+- (BOOL)tableView:(NSTableView *)tableView shouldSelectRow:(NSInteger)row
+{
+  NSDictionary *model;
+
+  if (tableView != otherTableView_) {
+    return YES;
+  }
+  if ([self otherRowIsDraft:row]) {
+    return YES;
+  }
+  model = [self otherModelAtRow:row];
+  return ((model != nil) && ![self otherModelIsBuiltIn:model]) ? YES : NO;
+}
+
+- (void)tableView:(NSTableView *)tableView
+  willDisplayCell:(id)cell
+   forTableColumn:(NSTableColumn *)tableColumn
+              row:(NSInteger)row
+{
+  NSDictionary *model;
+
+  (void)tableColumn;
+  if (tableView != otherTableView_) {
+    return;
+  }
+  model = [self otherRowIsDraft:row] ? nil : [self otherModelAtRow:row];
+  [cell setEnabled:(model == nil) || ![self otherModelIsBuiltIn:model]];
 }
 
 - (void)tableView:(NSTableView *)tableView
@@ -818,7 +850,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
       @"", @"name",
       @"", @"context_length",
       @"", @"top_provider_max_completion_tokens",
-      [NSNumber numberWithBool:NO], @"reasoning_enabled",
+      [NSNumber numberWithBool:YES], @"reasoning_enabled",
       [NSNumber numberWithBool:NO], @"image_input_enabled",
       @"", @"pricing_prompt",
       @"", @"pricing_completion",

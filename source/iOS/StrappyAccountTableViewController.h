@@ -3,6 +3,8 @@
 @interface StrappyAccountTableViewController : UITableViewController
 
 - (id)initWithProviderAccountIdentifier:(NSString *)identifier;
+- (id)initWithProviderAccountIdentifier:(NSString *)identifier
+                       presentedModally:(BOOL)presentedModally;
 
 @end
 

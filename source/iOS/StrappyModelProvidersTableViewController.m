@@ -2,6 +2,7 @@
 
 #import "StrappyActivityAccessoryView.h"
 #import "StrappySession.h"
+#import "XPUIKit.h"
 
 #include <errno.h>
 #include <math.h>
@@ -19,7 +20,9 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
 @interface StrappyManualModelsTableViewController : UITableViewController
 @property (nonatomic, copy) NSString *providerIdentifier;
 @property (nonatomic, strong) NSArray *models;
+@property (nonatomic, strong) NSArray *bundledModels;
 - (id)initWithProviderIdentifier:(NSString *)providerIdentifier title:(NSString *)title;
+- (BOOL)isBuiltInModel:(NSDictionary *)model;
 @end
 
 @interface StrappyManualModelTableViewController : UITableViewController
@@ -31,6 +34,7 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
 @property (nonatomic, strong) UISwitch *imagesSwitch;
 @property (nonatomic, assign) BOOL builtIn;
 - (id)initWithProviderIdentifier:(NSString *)providerIdentifier model:(NSDictionary *)model;
+- (void)cancelModel:(id)sender;
 @end
 
 @interface StrappyModelProvidersTableViewController ()
@@ -89,12 +93,12 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
   NSString *providerIdentifier;
 
   cell = [tableView dequeueReusableCellWithIdentifier:identifier];
-  if (cell == nil) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:identifier];
+  if (cell == nil) cell = [[UITableViewCell alloc]
+    initWithStyle:UITableViewCellStyleDefault reuseIdentifier:identifier];
   provider = [[self providers] objectAtIndex:(NSUInteger)[indexPath row]];
   providerIdentifier = StrappyProviderModelString(provider, @"id");
   [[cell textLabel] setText:StrappyProviderModelString(provider, @"name")];
   if ([providerIdentifier isEqualToString:@"openrouter"]) {
-    [[cell detailTextLabel] setText:NSLocalizedString(@"Fetch the latest model catalog", nil)];
     if ([StrappySession isModelCatalogRefreshInFlight]) {
       [cell setAccessoryView:StrappyActivityAccessoryView([UIColor grayColor])];
       [cell setAccessoryType:UITableViewCellAccessoryNone];
@@ -103,12 +107,10 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
       [cell setAccessoryType:UITableViewCellAccessoryNone];
     }
   } else {
-    [[cell detailTextLabel] setText:NSLocalizedString(@"Add and edit provider models", nil)];
     [cell setAccessoryView:nil];
     [cell setAccessoryType:UITableViewCellAccessoryDisclosureIndicator];
   }
   [[cell textLabel] setEnabled:[[provider objectForKey:@"available"] boolValue]];
-  [[cell detailTextLabel] setEnabled:[[provider objectForKey:@"available"] boolValue]];
   return cell;
 }
 
@@ -188,10 +190,15 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
 - (void)reloadModels
 {
   NSArray *catalog;
+  NSArray *bundledModels;
   NSMutableArray *rows;
   NSUInteger index;
 
   catalog = [StrappySession modelCatalogWithError:nil];
+  bundledModels = [StrappySession bundledModelCatalogForProviderIdentifier:
+    [self providerIdentifier] error:nil];
+  [self setBundledModels:(bundledModels != nil) ? bundledModels :
+    [NSArray array]];
   rows = [NSMutableArray array];
   for (index = 0U; index < [catalog count]; index++) {
     NSDictionary *model;
@@ -203,13 +210,32 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
   [[self tableView] reloadData];
 }
 
+- (BOOL)isBuiltInModel:(NSDictionary *)model
+{
+  NSString *wireModelID;
+  NSUInteger index;
+
+  wireModelID = StrappyProviderModelString(model, @"wire_model_id");
+  for (index = 0U; index < [[self bundledModels] count]; index++) {
+    if ([wireModelID isEqualToString:StrappyProviderModelString(
+          [[self bundledModels] objectAtIndex:index], @"wire_model_id")]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 - (void)addModel:(id)sender
 {
+  StrappyManualModelTableViewController *editor;
+  UINavigationController *navigationController;
+
   (void)sender;
-  [[self navigationController] pushViewController:
-    [[StrappyManualModelTableViewController alloc]
-      initWithProviderIdentifier:[self providerIdentifier] model:nil]
-    animated:YES];
+  editor = [[StrappyManualModelTableViewController alloc]
+    initWithProviderIdentifier:[self providerIdentifier] model:nil];
+  navigationController = [[UINavigationController alloc]
+    initWithRootViewController:editor];
+  [self XP_presentViewController:navigationController animated:YES];
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
@@ -224,26 +250,47 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
   UITableViewCell *cell;
   NSDictionary *model;
   NSString *name;
+  BOOL builtIn;
 
   cell = [tableView dequeueReusableCellWithIdentifier:identifier];
   if (cell == nil) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:identifier];
   model = [[self models] objectAtIndex:(NSUInteger)[indexPath row]];
+  builtIn = [self isBuiltInModel:model];
   name = StrappyProviderModelString(model, @"name");
   [[cell textLabel] setText:([name length] > 0U) ? name : StrappyProviderModelString(model, @"wire_model_id")];
   [[cell detailTextLabel] setText:StrappyProviderModelString(model, @"wire_model_id")];
-  [cell setAccessoryType:UITableViewCellAccessoryDisclosureIndicator];
+  [[cell textLabel] setEnabled:!builtIn];
+  [[cell detailTextLabel] setEnabled:!builtIn];
+  [cell setSelectionStyle:builtIn ? UITableViewCellSelectionStyleNone :
+    UITableViewCellSelectionStyleBlue];
+  [cell setAccessoryType:UITableViewCellAccessoryNone];
   return cell;
+}
+
+- (NSIndexPath *)tableView:(UITableView *)tableView
+  willSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  NSDictionary *model;
+
+  (void)tableView;
+  model = [[self models] objectAtIndex:(NSUInteger)[indexPath row]];
+  return [self isBuiltInModel:model] ? nil : indexPath;
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
   NSDictionary *model;
+  StrappyManualModelTableViewController *editor;
+  UINavigationController *navigationController;
+
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
   model = [[self models] objectAtIndex:(NSUInteger)[indexPath row]];
-  [[self navigationController] pushViewController:
-    [[StrappyManualModelTableViewController alloc]
-      initWithProviderIdentifier:[self providerIdentifier] model:model]
-    animated:YES];
+  if ([self isBuiltInModel:model]) return;
+  editor = [[StrappyManualModelTableViewController alloc]
+    initWithProviderIdentifier:[self providerIdentifier] model:model];
+  navigationController = [[UINavigationController alloc]
+    initWithRootViewController:editor];
+  [self XP_presentViewController:navigationController animated:YES];
 }
 
 - (void)dealloc
@@ -275,6 +322,7 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
   [field setDelegate:self];
   [field setAutocorrectionType:UITextAutocorrectionTypeNo];
   [field setAutocapitalizationType:UITextAutocapitalizationTypeNone];
+  [field setContentVerticalAlignment:UIControlContentVerticalAlignmentCenter];
   [field setClearButtonMode:UITextFieldViewModeWhileEditing];
   return field;
 }
@@ -323,16 +371,26 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
       [[[self fields] objectAtIndex:fieldIndex] setEnabled:NO];
   }
   [self setReasoningSwitch:[[UISwitch alloc] initWithFrame:CGRectZero]];
-  [[self reasoningSwitch] setOn:[[model objectForKey:@"reasoning_enabled"] boolValue]];
+  [[self reasoningSwitch] setOn:creating ? YES :
+    [[model objectForKey:@"reasoning_enabled"] boolValue]];
   [[self reasoningSwitch] setEnabled:![self builtIn]];
   [self setImagesSwitch:[[UISwitch alloc] initWithFrame:CGRectZero]];
   [[self imagesSwitch] setOn:[[model objectForKey:@"image_input_enabled"] boolValue]];
   [[self imagesSwitch] setEnabled:![self builtIn]];
+  [[self navigationItem] setLeftBarButtonItem:[[UIBarButtonItem alloc]
+    initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self
+    action:@selector(cancelModel:)]];
   if (![self builtIn]) {
     [[self navigationItem] setRightBarButtonItem:[[UIBarButtonItem alloc]
       initWithBarButtonSystemItem:UIBarButtonSystemItemSave target:self
       action:@selector(saveModel:)]];
   }
+}
+
+- (void)cancelModel:(id)sender
+{
+  (void)sender;
+  [self XP_dismissViewControllerAnimated:YES];
 }
 
 - (NSString *)priceForFieldAtIndex:(NSUInteger)index valid:(BOOL *)valid
@@ -398,7 +456,7 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
       cacheReadPricePerToken:readPrice cacheWritePricePerToken:writePrice error:&error];
   }
   if (!success) { [self showMessage:[error localizedDescription] title:NSLocalizedString(@"Could Not Save Model", nil)]; return; }
-  [[self navigationController] popViewControllerAnimated:YES];
+  [self XP_dismissViewControllerAnimated:YES];
 }
 
 - (void)showMessage:(NSString *)message title:(NSString *)title
@@ -419,7 +477,9 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
 {
   (void)tableView;
   if (section == 0) return 8;
-  if (section == 1) return 2;
+  /* Keep image_input_enabled persisted, but hide its switch until Strappy
+   * supports image input or output. */
+  if (section == 1) return 1;
   return 1;
 }
 
@@ -470,7 +530,7 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
       wireModelID:StrappyProviderModelString([self model], @"wire_model_id") error:&error]) {
     [self showMessage:[error localizedDescription] title:NSLocalizedString(@"Could Not Delete Model", nil)];
   } else {
-    [[self navigationController] popViewControllerAnimated:YES];
+    [self XP_dismissViewControllerAnimated:YES];
   }
 }
 
