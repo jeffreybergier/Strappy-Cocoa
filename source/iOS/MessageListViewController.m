@@ -4,6 +4,7 @@
 #import "StrappyIdleTimerAssertion.h"
 #import "StrappySession.h"
 #import "XPUIKit.h"
+#import "XPWebView.h"
 
 static const NSTimeInterval kStrappyStreamEventFlushInterval = 0.3;
 static const CGFloat kStrappyInitialSendHeight = 44.0f;
@@ -183,11 +184,11 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     notificationName : @"UIApplicationNotification";
 }
 
-@interface MessageListViewController () <UIWebViewDelegate,
+@interface MessageListViewController () <XPWebViewDelegate,
                                           PromptSendViewControllerDelegate>
 @property (nonatomic, strong) StrappySession *session;
 @property (nonatomic, copy) NSString *htmlDirectoryPath;
-@property (nonatomic, strong) UIWebView *webView;
+@property (nonatomic, strong) XPWebView *webView;
 @property (nonatomic, strong) PromptSendViewController *sendBar;
 @property (nonatomic, copy) NSString *statusText;
 @property (nonatomic, strong) NSMutableString *pendingStreamJavaScript;
@@ -310,7 +311,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 {
   CGRect bounds;
   CGFloat barTop;
-  UIWebView *webView;
+  XPWebView *webView;
   PromptSendViewController *sendBar;
 
   [super viewDidLoad];
@@ -325,16 +326,15 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     barTop = 0.0f;
   }
 
-  webView =
-    [[UIWebView alloc] initWithFrame:CGRectMake(0.0f,
-                                                0.0f,
-                                                bounds.size.width,
-                                                barTop)];
+  webView = [[XPWebView alloc]
+    initWithFrame:CGRectMake(0.0f, 0.0f, bounds.size.width, barTop)
+    readAccessURL:[NSURL fileURLWithPath:
+      [[self htmlDirectoryPath] stringByAppendingString:@"/"]]];
   [webView setAutoresizingMask:UIViewAutoresizingFlexibleWidth |
                                UIViewAutoresizingFlexibleHeight];
   [webView setDelegate:self];
-  [webView XP_setBackgroundTransparent];
-  [[webView XP_scrollView] setDecelerationRate:UIScrollViewDecelerationRateNormal];
+  [webView setBackgroundTransparent];
+  [[webView scrollView] setDecelerationRate:UIScrollViewDecelerationRateNormal];
   [[self view] addSubview:webView];
   [self setWebView:webView];
   [self setWebViewScrollsToTop:YES];
@@ -433,7 +433,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
 - (void)prepareForRemoval
 {
-  UIWebView *webView;
+  XPWebView *webView;
   UIScrollView *scrollView;
 
   if ([self tearingDown]) {
@@ -449,7 +449,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [[self sendBar] setDelegate:nil];
 
   webView = [self webView];
-  scrollView = [webView XP_scrollView];
+  scrollView = [webView scrollView];
   [scrollView setScrollsToTop:NO];
   [scrollView setDelegate:nil];
   [webView setDelegate:nil];
@@ -642,7 +642,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
 
   if (resizeWebView) {
-    [[self webView] XP_setVisibleFrame:
+    [[self webView] setVisibleFrame:
       CGRectMake(0.0f, 0.0f, width, barTop)];
   }
 
@@ -664,7 +664,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 {
   UIScrollView *scrollView;
 
-  scrollView = [[self webView] XP_scrollView];
+  scrollView = [[self webView] scrollView];
   if (scrollsToTop && (scrollView != nil)) {
     StrappySetScrollsToTopOwnerInView([self view], scrollView);
   } else {
@@ -984,9 +984,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     return;
   }
 
-  [self setWebViewContentLoaded:YES];
-  [[self webView] loadRequest:
-    [NSURLRequest requestWithURL:[NSURL fileURLWithPath:path]]];
+  [self setWebViewContentLoaded:NO];
+  [[self webView] loadFileURL:[NSURL fileURLWithPath:path]];
 }
 
 - (NSString *)writeCurrentHTML
@@ -1220,7 +1219,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     [self flushPendingStreamEvents];
     javaScript = [self javaScriptForStreamEvent:event];
     if ([javaScript length] > 0U) {
-      [[self webView] stringByEvaluatingJavaScriptFromString:javaScript];
+      [[self webView] evaluateJavaScript:javaScript];
     }
     return;
   }
@@ -1374,7 +1373,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
         UIApplicationStateActive) {
       [self logLifecycleEvent:@"flushPendingStreamEvents non-active"];
     }
-    [[self webView] stringByEvaluatingJavaScriptFromString:batchJavaScript];
+    [[self webView] evaluateJavaScript:batchJavaScript];
   }
 }
 
@@ -1428,22 +1427,20 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   if ([batchJavaScript length] == 0U) {
     return NO;
   }
-  [[self webView] stringByEvaluatingJavaScriptFromString:batchJavaScript];
+  [[self webView] evaluateJavaScript:batchJavaScript];
   if ([nextCursor isKindOfClass:[NSString class]]) {
     [self setNewestRenderedTimelineCursor:nextCursor];
   }
   return YES;
 }
 
-- (BOOL)webView:(UIWebView *)webView
+- (BOOL)xpWebView:(XPWebView *)webView
 shouldStartLoadWithRequest:(NSURLRequest *)request
- navigationType:(UIWebViewNavigationType)navigationType
 {
   NSURL *url;
   NSString *scheme;
 
   (void)webView;
-  (void)navigationType;
   if ([self tearingDown]) {
     return NO;
   }
@@ -1487,7 +1484,7 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
                                          animated:YES];
     if ([javaScript length] > 0U) {
       [self flushPendingStreamEvents];
-      [[self webView] stringByEvaluatingJavaScriptFromString:javaScript];
+      [[self webView] evaluateJavaScript:javaScript];
       return;
     }
     [self reloadContent];
@@ -1503,15 +1500,31 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
               title:NSLocalizedString(@"Failed to Save Changes", nil)];
 }
 
-- (void)webViewDidFinishLoad:(UIWebView *)webView
+- (void)xpWebViewDidFinishLoad:(XPWebView *)webView
 {
   (void)webView;
   if ([self tearingDown]) {
     return;
   }
+  [self setWebViewContentLoaded:YES];
   [self logLifecycleEvent:@"webViewDidFinishLoad"];
-  [[self webView] XP_setBackgroundTransparent];
+  [[self webView] setBackgroundTransparent];
   [self setWebViewScrollsToTop:YES];
+}
+
+- (void)xpWebView:(XPWebView *)webView didFailLoadWithError:(NSError *)error
+{
+  (void)webView;
+  if ([self tearingDown]) {
+    return;
+  }
+  [self setWebViewContentLoaded:NO];
+  [self setWebViewReloadRequired:YES];
+  NSLog(@"Strappy WebView load failed for session %@: %@ (%@ %ld)",
+        [[[self session] sessionIdentifier] description],
+        [error localizedDescription],
+        [error domain],
+        (long)[error code]);
 }
 
 - (void)showError:(NSError *)error title:(NSString *)title
