@@ -1236,19 +1236,13 @@ static BOOL StrappySessionRecordFromOptions(
                 format:@"[StrappySession bootstrapProcessWithCACertPath:] caCertPath is required"];
   }
 
-  fontsPath = [[[NSBundle mainBundle] resourcePath]
-    stringByAppendingPathComponent:@"Fonts"];
-  if ([[NSProcessInfo processInfo] XP_platformFamily] ==
-      XPPlatformFamilyMacOS) {
-    /* WKWebView may only read files below AIWebViewController's read-access
-     * URL. Keep the web fonts beside session.html instead of pointing CSS at
-     * the app bundle, which is outside that subtree and may also be mounted
-     * at a transient App Translocation path. */
-    fontsPath = StrappyStageWebViewFonts();
-    if (fontsPath == nil) {
-      [NSException raise:NSInvalidArgumentException
-                  format:@"Could not stage Strappy WebView fonts."];
-    }
+  /* WKWebView may only read files below its read-access URL. Keep the web
+   * fonts beside the session HTML on every platform. Legacy WebViews can read
+   * the staged files as well, so this needs no platform or OS-version check. */
+  fontsPath = StrappyStageWebViewFonts();
+  if (fontsPath == nil) {
+    [NSException raise:NSInvalidArgumentException
+                format:@"Could not stage Strappy WebView fonts."];
   }
 
   strappyError = NULL;
