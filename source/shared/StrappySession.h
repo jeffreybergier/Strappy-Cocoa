@@ -158,6 +158,7 @@ enum {
 + (NSArray *)modelCatalogMatchingSearchText:(NSString *)searchText
                                        error:(NSError **)error;
 + (NSArray *)modelCatalogWithError:(NSError **)error;
++ (NSArray *)configuredProviderModelCatalogWithError:(NSError **)error;
 + (NSArray *)allowedModelCatalogWithError:(NSError **)error;
 + (NSArray *)bundledModelCatalogForProviderIdentifier:
                (NSString *)providerIdentifier

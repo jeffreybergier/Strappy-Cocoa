@@ -425,6 +425,8 @@
 "Limit Output Tokens" = "出力トークンを制限";
 "Maximum Output Tokens Must Be a Positive Integer" = "最大出力トークン数には正の整数を入力してください";
 "Not configured." = "未設定です。";
+"No Accounts Configured" = "アカウントが設定されていません";
+"No Models Available" = "利用可能なモデルがありません";
 "Not signed in to ChatGPT." = "ChatGPTにサインインしていません。";
 "Paste API key" = "APIキーを貼り付け";
 "Refreshing ChatGPT credentials…" = "ChatGPTの認証情報を更新中…";

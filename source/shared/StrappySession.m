@@ -3005,6 +3005,36 @@ static BOOL StrappySessionRecordFromOptions(
   return [StrappySession modelCatalogMatchingSearchText:nil error:error];
 }
 
++ (NSArray *)configuredProviderModelCatalogWithError:(NSError **)error
+{
+  NSString *databasePath;
+  strappy_model_record_list list;
+  NSArray *models;
+  char *strappyError;
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+
+  strappy_model_record_list_init(&list);
+  strappyError = NULL;
+  if (!strappy_session_list_models_for_configured_providers(
+        [databasePath UTF8String], &list, &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    strappy_model_record_list_destroy(&list);
+    return nil;
+  }
+
+  models = [StrappySession modelCatalogFromList:&list];
+  strappy_model_record_list_destroy(&list);
+  return models;
+}
+
 + (NSArray *)allowedModelCatalogWithError:(NSError **)error
 {
   NSString *databasePath;

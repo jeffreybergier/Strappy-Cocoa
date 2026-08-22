@@ -425,6 +425,8 @@
 "Limit Output Tokens" = "Limit Output Tokens";
 "Maximum Output Tokens Must Be a Positive Integer" = "Maximum Output Tokens Must Be a Positive Integer";
 "Not configured." = "Not configured.";
+"No Accounts Configured" = "No Accounts Configured";
+"No Models Available" = "No Models Available";
 "Not signed in to ChatGPT." = "Not signed in to ChatGPT.";
 "Paste API key" = "Paste API key";
 "Refreshing ChatGPT credentials…" = "Refreshing ChatGPT credentials…";

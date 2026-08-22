@@ -138,6 +138,16 @@ int strappy_session_list_models_matching(
                                          error_out);
 }
 
+int strappy_session_list_models_for_configured_providers(
+  const char *db_path,
+  strappy_model_record_list *list,
+  char **error_out)
+{
+  return strappy_db_list_models_for_configured_providers(db_path,
+                                                          list,
+                                                          error_out);
+}
+
 int strappy_session_list_allowed_models(
   const char *db_path,
   strappy_model_record_list *list,

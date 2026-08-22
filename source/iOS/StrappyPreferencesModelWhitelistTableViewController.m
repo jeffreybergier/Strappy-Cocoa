@@ -316,6 +316,7 @@ static NSArray *StrappyModelRowsForAccount(NSArray *rows,
 }
 
 @interface StrappyPreferencesModelWhitelistTableViewController ()
+@property (nonatomic, assign) BOOL hasConfiguredAccounts;
 @property (nonatomic, assign) BOOL refreshingModels;
 @property (nonatomic, strong) UIBarButtonItem *updateButton;
 @end
@@ -360,12 +361,25 @@ static NSArray *StrappyModelRowsForAccount(NSArray *rows,
        selector:@selector(modelCatalogDidChange:)
            name:StrappySessionModelCatalogDidChangeNotification
          object:nil];
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(providerAccountsDidChange:)
+           name:StrappyProviderAccountsDidChangeNotification
+         object:nil];
   [self setRefreshingModels:[StrappySession isModelCatalogRefreshInFlight]];
 }
 
 - (NSArray *)loadAllRowsWithError:(NSError **)error
 {
-  return [StrappySession modelCatalogWithError:error];
+  NSArray *accounts;
+
+  accounts = [StrappySession providerAccountCatalogWithError:error];
+  if (accounts == nil) {
+    [self setHasConfiguredAccounts:NO];
+    return nil;
+  }
+  [self setHasConfiguredAccounts:([accounts count] > 0U) ? YES : NO];
+  return [StrappySession configuredProviderModelCatalogWithError:error];
 }
 
 - (NSArray *)preparedRowsForRows:(NSArray *)rows
@@ -448,6 +462,18 @@ static NSArray *StrappyModelRowsForAccount(NSArray *rows,
   return nil;
 }
 
+- (NSString *)statusText
+{
+  if (![self working] && ([[self statusMessage] length] == 0U) &&
+      ([[self currentSearchText] length] == 0U) &&
+      ([[self allRows] count] == 0U)) {
+    return [self hasConfiguredAccounts] ?
+      NSLocalizedString(@"No Models Available", nil) :
+      NSLocalizedString(@"No Accounts Configured", nil);
+  }
+  return [super statusText];
+}
+
 - (BOOL)showsStatusToolbarActionButton
 {
   return NO;
@@ -509,6 +535,12 @@ static NSArray *StrappyModelRowsForAccount(NSArray *rows,
 }
 
 - (void)modelCatalogDidChange:(NSNotification *)notification
+{
+  (void)notification;
+  [self reloadRows];
+}
+
+- (void)providerAccountsDidChange:(NSNotification *)notification
 {
   (void)notification;
   [self reloadRows];

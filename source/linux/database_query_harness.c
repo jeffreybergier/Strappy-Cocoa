@@ -10085,6 +10085,130 @@ static int harness_run_bundled_model_catalog_tests(
   return ok;
 }
 
+static int harness_run_configured_provider_model_catalog_tests(
+  const harness_context *context)
+{
+  char database_path[1200];
+  strappy_model_record_list all_models;
+  strappy_model_record_list configured_models;
+  strappy_manual_model_input manual_input;
+  char *openrouter_account_id;
+  char *other_account_id;
+  char *manual_model_id;
+  char *error;
+  size_t all_count;
+  size_t openrouter_count;
+  size_t other_count;
+  size_t index;
+  int ok;
+
+  if ((context == NULL) ||
+      !harness_join_path(database_path,
+                         sizeof(database_path),
+                         context->temp_dir,
+                         "configured-provider-models.sqlite")) {
+    return 0;
+  }
+  harness_unlink_sqlite_files(database_path);
+  openrouter_account_id = NULL;
+  other_account_id = NULL;
+  manual_model_id = NULL;
+  error = NULL;
+  memset(&manual_input, 0, sizeof(manual_input));
+  manual_input.wire_model_id = "manual-model";
+  manual_input.display_name = "Manual Model";
+  manual_input.context_window_tokens = 8192LL;
+  manual_input.max_output_tokens = 2048LL;
+  manual_input.reasoning_enabled = 1;
+  manual_input.local_functions_enabled = 1;
+  strappy_model_record_list_init(&all_models);
+  strappy_model_record_list_init(&configured_models);
+  ok = strappy_db_initialize(database_path, &error) &&
+    strappy_db_create_manual_model(database_path, STRAPPY_PROVIDER_OTHER,
+                                   &manual_input, &manual_model_id, &error) &&
+    strappy_db_list_models(database_path, &all_models, &error) &&
+    (all_models.count > 0U);
+  all_count = all_models.count;
+  openrouter_count = 0U;
+  other_count = 0U;
+  for (index = 0U; index < all_models.count; index++) {
+    if ((all_models.records[index].provider_id != NULL) &&
+        (strcmp(all_models.records[index].provider_id,
+                STRAPPY_PROVIDER_OPENROUTER) == 0)) {
+      openrouter_count++;
+    } else if ((all_models.records[index].provider_id != NULL) &&
+               (strcmp(all_models.records[index].provider_id,
+                       STRAPPY_PROVIDER_OTHER) == 0)) {
+      other_count++;
+    }
+  }
+  ok = ok && (openrouter_count > 0U) && (other_count == 1U);
+  strappy_model_record_list_destroy(&all_models);
+  if (ok) {
+    ok = strappy_db_list_models_for_configured_providers(
+      database_path, &configured_models, &error) &&
+      (configured_models.count == 0U);
+  }
+  strappy_model_record_list_destroy(&configured_models);
+  if (ok) {
+    ok = strappy_db_create_provider_account(
+      database_path, STRAPPY_PROVIDER_OPENROUTER, "OpenRouter", NULL,
+      &openrouter_account_id, &error);
+  }
+  strappy_model_record_list_init(&configured_models);
+  if (ok) {
+    ok = strappy_db_list_models_for_configured_providers(
+      database_path, &configured_models, &error) &&
+      (configured_models.count == openrouter_count);
+  }
+  strappy_model_record_list_destroy(&configured_models);
+  if (ok) {
+    ok = strappy_db_create_provider_account(
+      database_path, STRAPPY_PROVIDER_OTHER, "Other",
+      "https://example.com/v1/responses", &other_account_id, &error);
+  }
+  strappy_model_record_list_init(&configured_models);
+  if (ok) {
+    ok = strappy_db_list_models_for_configured_providers(
+      database_path, &configured_models, &error) &&
+      (configured_models.count == all_count);
+  }
+  strappy_model_record_list_destroy(&configured_models);
+  if (ok) {
+    ok = strappy_db_archive_provider_account(database_path,
+                                              openrouter_account_id,
+                                              &error);
+  }
+  strappy_model_record_list_init(&configured_models);
+  if (ok) {
+    ok = strappy_db_list_models_for_configured_providers(
+      database_path, &configured_models, &error) &&
+      (configured_models.count == other_count);
+  }
+  strappy_model_record_list_destroy(&configured_models);
+  if (ok) {
+    ok = strappy_db_archive_provider_account(database_path, other_account_id,
+                                              &error);
+  }
+  strappy_model_record_list_init(&configured_models);
+  if (ok) {
+    ok = strappy_db_list_models_for_configured_providers(
+      database_path, &configured_models, &error) &&
+      (configured_models.count == 0U);
+  }
+  strappy_model_record_list_destroy(&configured_models);
+  if (!ok) {
+    fprintf(stderr, "Configured-provider model catalog test failed: %s\n",
+            (error != NULL) ? error : "unexpected model count");
+  }
+  free(openrouter_account_id);
+  free(other_account_id);
+  free(manual_model_id);
+  strappy_free_string(error);
+  harness_unlink_sqlite_files(database_path);
+  return ok;
+}
+
 static int harness_run_openrouter_model_catalog_tests(
   const harness_context *context)
 {
@@ -12214,6 +12338,7 @@ int main(void)
        harness_run_session_options_tests(&context) &&
        harness_run_empty_session_storage_tests(&context) &&
        harness_run_bundled_model_catalog_tests(&context) &&
+       harness_run_configured_provider_model_catalog_tests(&context) &&
        harness_run_openrouter_model_catalog_tests(&context) &&
        harness_run_provider_account_routing_tests(&context) &&
        harness_run_multi_account_database_tests(&context) &&

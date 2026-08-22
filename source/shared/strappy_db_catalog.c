@@ -4257,6 +4257,7 @@ int strappy_db_list_allowed_openrouter_models(
 static int strappy_db_semantic_list_models(
   const char *db_path,
   const char *search_text,
+  int configured_providers_only,
   strappy_openrouter_model_record_list *list,
   char **error_out)
 {
@@ -4307,6 +4308,13 @@ static int strappy_db_semantic_list_models(
     "ORDER BY LOWER(m.provider_id), "
       "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL
       " THEN 0 ELSE 1 END, LOWER(m.name), m.id;";
+  static const char *configured_unfiltered_suffix =
+    "WHERE m.catalog_active = 1 AND EXISTS ("
+      "SELECT 1 FROM provider_accounts a WHERE a.provider_id=m.provider_id "
+      "AND a.lifecycle_state='active') "
+    "ORDER BY LOWER(m.provider_id), "
+      "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL
+      " THEN 0 ELSE 1 END, LOWER(m.name), m.id;";
   static const char *filtered_suffix =
     "WHERE m.catalog_active = 1 AND ("
     "m.id LIKE ?1 ESCAPE '\\' OR COALESCE(m.canonical_slug, '') LIKE ?1 ESCAPE '\\' "
@@ -4337,7 +4345,8 @@ static int strappy_db_semantic_list_models(
   }
   strappy_openrouter_model_record_list_init(list);
   pattern = NULL;
-  suffix = unfiltered_suffix;
+  suffix = configured_providers_only ? configured_unfiltered_suffix :
+    unfiltered_suffix;
   if ((search_text != NULL) && (search_text[0] != '\0')) {
     pattern = strappy_db_like_pattern_for_search(search_text, error_out);
     if (pattern == NULL) {
@@ -4440,6 +4449,7 @@ int strappy_db_list_openrouter_models_matching(
 {
   if (!strappy_db_semantic_list_models(db_path,
                                        search_text,
+                                       0,
                                        list,
                                        error_out)) {
     return 0;
@@ -4457,6 +4467,19 @@ int strappy_db_list_models_matching(const char *db_path,
 {
   return strappy_db_semantic_list_models(db_path,
                                          search_text,
+                                         0,
+                                         list,
+                                         error_out);
+}
+
+int strappy_db_list_models_for_configured_providers(
+  const char *db_path,
+  strappy_model_record_list *list,
+  char **error_out)
+{
+  return strappy_db_semantic_list_models(db_path,
+                                         NULL,
+                                         1,
                                          list,
                                          error_out);
 }
@@ -4497,7 +4520,7 @@ int strappy_db_list_models_for_account(
     strappy_set_error(error_out, "Provider account is archived.");
     return 0;
   }
-  ok = strappy_db_semantic_list_models(db_path,search_text,list,error_out);
+  ok = strappy_db_semantic_list_models(db_path,search_text,0,list,error_out);
   if (ok) strappy_db_filter_model_list(list,account.provider_id,
                                        allowed_only ? 1 : 0);
   strappy_provider_account_record_destroy(&account);

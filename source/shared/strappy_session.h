@@ -26,6 +26,10 @@ int strappy_session_list_models_matching(
   const char *search_text,
   strappy_model_record_list *list,
   char **error_out);
+int strappy_session_list_models_for_configured_providers(
+  const char *db_path,
+  strappy_model_record_list *list,
+  char **error_out);
 int strappy_session_list_allowed_models(const char *db_path,
                                         strappy_model_record_list *list,
                                         char **error_out);

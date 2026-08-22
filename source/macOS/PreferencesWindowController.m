@@ -518,6 +518,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)modelCatalogRefreshDidStart:(NSNotification *)notification;
 - (void)modelCatalogRefreshDidFinish:(NSNotification *)notification;
 - (void)modelCatalogDidChange:(NSNotification *)notification;
+- (void)providerAccountsDidChange:(NSNotification *)notification;
 - (void)modelProviderEditorDidClose:(id)editor;
 - (NSString *)currentDatabaseSearchText;
 - (NSArray *)databaseRows:(NSArray *)rows
@@ -607,6 +608,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
       addObserver:self
          selector:@selector(modelCatalogDidChange:)
              name:StrappySessionModelCatalogDidChangeNotification
+           object:nil];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(providerAccountsDidChange:)
+             name:StrappyProviderAccountsDidChangeNotification
            object:nil];
     [[NSNotificationCenter defaultCenter]
       addObserver:self
@@ -1589,10 +1595,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   } else if (count == 0U) {
     if (noAvailableModelAccounts_) {
       [modelStatusLabel_ setStringValue:
-        NSLocalizedString(@"No accounts configured.", nil)];
+        NSLocalizedString(@"No Accounts Configured", nil)];
     } else {
       [modelStatusLabel_ setStringValue:
-        NSLocalizedString(@"No models have been fetched yet.", nil)];
+        NSLocalizedString(@"No Models Available", nil)];
     }
   } else if (count == 1U) {
     [modelStatusLabel_ setStringValue:
@@ -1618,14 +1624,22 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)loadOpenRouterModels
 {
+  NSArray *accounts;
   NSError *error;
   NSArray *rows;
 
   error = nil;
-  rows = [StrappySession modelCatalogWithError:&error];
+  accounts = [StrappySession providerAccountCatalogWithError:&error];
+  if (accounts == nil) {
+    [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
+      error,
+      NSLocalizedString(@"Account list could not be loaded.", nil))];
+    return;
+  }
+  rows = [StrappySession configuredProviderModelCatalogWithError:&error];
   if (rows != nil) {
     modelCatalogDirty_ = NO;
-    noAvailableModelAccounts_ = NO;
+    noAvailableModelAccounts_ = ([accounts count] == 0U) ? YES : NO;
     [allModelRows_ release];
     allModelRows_ = [StrappyPreparedModelRowsForRows(rows) copy];
     [self sortAllModelRows];
@@ -1883,7 +1897,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 {
   NSDictionary *userInfo;
   NSString *errorMessage;
-  NSNumber *count;
 
   userInfo = [notification userInfo];
   errorMessage = [userInfo objectForKey:@"error"];
@@ -1894,17 +1907,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
-  if (modelCatalogDirty_ &&
-      [[[[self window] toolbar] selectedItemIdentifier]
+  if ([[[[self window] toolbar] selectedItemIdentifier]
         isEqualToString:kStrappyPreferencesToolbarModels]) {
     [self loadOpenRouterModels];
-  }
-  count = [userInfo objectForKey:@"model_count"];
-  if (([self currentModelSearchText] == nil) &&
-      [count isKindOfClass:[NSNumber class]]) {
-    [modelStatusLabel_ setStringValue:
-      [NSString stringWithFormat:NSLocalizedString(@"%lu models available.", nil),
-        (unsigned long)[count XP_unsignedIntegerValue]]];
   }
 }
 
@@ -1917,6 +1922,18 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   if (updatingModelWhitelist_) {
     return;
   }
+  identifier = [[[self window] toolbar] selectedItemIdentifier];
+  if ([identifier isEqualToString:kStrappyPreferencesToolbarModels]) {
+    [self loadOpenRouterModels];
+  }
+}
+
+- (void)providerAccountsDidChange:(NSNotification *)notification
+{
+  NSString *identifier;
+
+  (void)notification;
+  modelCatalogDirty_ = YES;
   identifier = [[[self window] toolbar] selectedItemIdentifier];
   if ([identifier isEqualToString:kStrappyPreferencesToolbarModels]) {
     [self loadOpenRouterModels];
