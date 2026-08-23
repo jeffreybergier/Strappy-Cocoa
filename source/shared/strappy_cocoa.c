@@ -1,22 +1,63 @@
+#if !defined(__APPLE__)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "strappy_cocoa.h"
 
 #include "strappy_core.h"
 
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
+#include <mach/mach_time.h>
 #else
 #include <time.h>
 #endif
 
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 #define STRAPPY_COCOA_UNIX_MIN_SECONDS (-62167219200LL)
 #define STRAPPY_COCOA_UNIX_MAX_SECONDS 253402300799LL
 #define STRAPPY_COCOA_APPLE_EPOCH_OFFSET 978307200LL
 #define STRAPPY_COCOA_MAX_INFO_PLIST_BYTES (1024U * 1024U)
+
+long long strappy_cocoa_monotonic_milliseconds(void)
+{
+#ifdef __APPLE__
+  mach_timebase_info_data_t timebase;
+  uint64_t absolute;
+  long double milliseconds;
+
+  if ((mach_timebase_info(&timebase) == KERN_SUCCESS) &&
+      (timebase.denom != 0U)) {
+    absolute = mach_absolute_time();
+    milliseconds = ((long double)absolute * (long double)timebase.numer) /
+      ((long double)timebase.denom * 1000000.0L);
+    return (milliseconds >= (long double)LLONG_MAX) ?
+      LLONG_MAX : (long long)milliseconds;
+  }
+#else
+  struct timespec value;
+
+  if (clock_gettime(CLOCK_MONOTONIC, &value) == 0) {
+    return ((long long)value.tv_sec * 1000LL) +
+      ((long long)value.tv_nsec / 1000000LL);
+  }
+#endif
+  {
+    struct timeval value;
+
+    if (gettimeofday(&value, NULL) != 0) {
+      return 0LL;
+    }
+    return ((long long)value.tv_sec * 1000LL) +
+      ((long long)value.tv_usec / 1000LL);
+  }
+}
 
 static int strappy_cocoa_string_has_value(const char *value)
 {

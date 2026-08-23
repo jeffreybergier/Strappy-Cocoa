@@ -135,6 +135,15 @@ int strappy_provider_response_is_plan_limit(strappy_provider_kind provider,
                                             const char *error_type,
                                             const char *error_message);
 
+/* Strict, locale-independent parsing for provider configuration entered by
+ * platform UIs. Empty optional integers map to zero. Prices are entered as
+ * dollars per million tokens and normalized to the per-token decimal stored
+ * by the model catalog. */
+int strappy_provider_parse_optional_positive_integer(const char *text,
+                                                      long long *value_out);
+int strappy_provider_price_per_million_to_per_token(const char *text,
+                                                     char **price_out);
+
 char *strappy_provider_model_identifier(const char *provider_id,
                                         const char *wire_model_id,
                                         char **error_out);

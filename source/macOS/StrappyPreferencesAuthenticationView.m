@@ -2,17 +2,7 @@
 
 #import "AIFontAwesome.h"
 #import "StrappyAuthentication.h"
-#import "StrappyKeychain.h"
 #import "StrappySession.h"
-
-#include <errno.h>
-#include <stdlib.h>
-
-#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
-  #define StrappyAccountsPasteboardStringType NSPasteboardTypeString
-#else
-  #define StrappyAccountsPasteboardStringType NSStringPboardType
-#endif
 
 static const CGFloat kStrappyAccountsSidebarWidth = 218.0;
 static const CGFloat kStrappyAccountsMinimumSidebarWidth = 190.0;
@@ -804,10 +794,8 @@ static NSButton *StrappyAccountsButton(NSRect frame,
       kStrappyAccountsInset, top, width, kStrappyAccountsControlHeight)]
       autorelease];
     token = nil;
-    [[StrappyKeychain sharedKeychain]
-      loadBearerToken:&token
-      forProviderIdentifier:provider
-      providerAccountIdentifier:selectedAccountIdentifier_];
+    token = [StrappySession bearerTokenForProviderAccountIdentifier:
+      selectedAccountIdentifier_ error:nil];
     [tokenField_ setStringValue:(token != nil) ? token : @""];
     [[tokenField_ cell] setPlaceholderString:
       NSLocalizedString(@"Paste API key", nil)];
@@ -891,10 +879,8 @@ static NSButton *StrappyAccountsButton(NSRect frame,
       kStrappyAccountsInset, top, width, kStrappyAccountsControlHeight)]
       autorelease];
     token = nil;
-    [[StrappyKeychain sharedKeychain]
-      loadBearerToken:&token
-      forProviderIdentifier:provider
-      providerAccountIdentifier:selectedAccountIdentifier_];
+    token = [StrappySession bearerTokenForProviderAccountIdentifier:
+      selectedAccountIdentifier_ error:nil];
     [tokenField_ setStringValue:(token != nil) ? token : @""];
     [tokenField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
     [rightPaneView_ addSubview:tokenField_];
@@ -1083,13 +1069,8 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   NSString *endpoint;
   NSString *token;
   NSString *maxOutputText;
-  const char *maxOutputUTF8;
-  char *maxOutputEnd;
   long long maxOutputTokens;
   NSError *error;
-  StrappyKeychain *keychain;
-  NSObject *credentialLock;
-  BOOL credentialSaved;
 
   (void)sender;
   account = [self selectedAccount];
@@ -1104,20 +1085,14 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     stringByTrimmingCharactersInSet:
       [NSCharacterSet whitespaceAndNewlineCharacterSet]] : @"";
   maxOutputTokens = 0LL;
-  maxOutputText = @"";
   if ((maxOutputTokensButton_ != nil) &&
       ([maxOutputTokensButton_ state] == XPControlStateValueOn)) {
     maxOutputText = [[maxOutputTokensField_ stringValue]
       stringByTrimmingCharactersInSet:
         [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    maxOutputUTF8 = [maxOutputText UTF8String];
-    maxOutputEnd = NULL;
-    errno = 0;
-    maxOutputTokens = (maxOutputUTF8 != NULL) ?
-      strtoll(maxOutputUTF8, &maxOutputEnd, 10) : 0LL;
-    if (([maxOutputText length] == 0U) || (errno == ERANGE) ||
-        (maxOutputEnd == maxOutputUTF8) || (maxOutputEnd == NULL) ||
-        (*maxOutputEnd != '\0') || (maxOutputTokens <= 0LL)) {
+    if (![StrappySession parseOptionalPositiveIntegerText:maxOutputText
+                                                    value:&maxOutputTokens] ||
+        (maxOutputTokens <= 0LL)) {
       [self showError:nil title:NSLocalizedString(
         @"Maximum Output Tokens Must Be a Positive Integer", nil)];
       return;
@@ -1144,32 +1119,10 @@ static NSButton *StrappyAccountsButton(NSRect frame,
                             displayName:name
                       responsesEndpoint:endpoint
                         maxOutputTokens:maxOutputTokens
+                            bearerToken:token
                                   error:&error]) {
     [self showError:error
               title:NSLocalizedString(@"Could Not Save Account", nil)];
-    return;
-  }
-  credentialSaved = YES;
-  if (![provider isEqualToString:@"openai_chatgpt"]) {
-    keychain = [StrappyKeychain sharedKeychain];
-    credentialLock = [keychain
-      credentialLockForProviderIdentifier:provider
-      providerAccountIdentifier:selectedAccountIdentifier_];
-    @synchronized(credentialLock) {
-      if ([token length] > 0U) {
-        credentialSaved = [keychain saveBearerToken:token
-          forProviderIdentifier:provider
-          providerAccountIdentifier:selectedAccountIdentifier_];
-      } else {
-        credentialSaved = [keychain
-          deleteBearerTokenForProviderIdentifier:provider
-          providerAccountIdentifier:selectedAccountIdentifier_];
-      }
-    }
-  }
-  if (!credentialSaved) {
-    [self showError:nil
-              title:NSLocalizedString(@"Could Not Save Credential", nil)];
     return;
   }
   [self reloadAccountsPreservingSelection];
@@ -1233,6 +1186,8 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     [accountIdentifier release];
     return;
   }
+  [StrappyAuthentication
+    forgetAuthenticationForProviderAccountIdentifier:accountIdentifier];
   [accountIdentifier release];
   [selectedAccountIdentifier_ release];
   selectedAccountIdentifier_ = nil;
@@ -1371,8 +1326,8 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   }
   pasteboard = [NSPasteboard generalPasteboard];
   [pasteboard declareTypes:[NSArray arrayWithObject:
-    StrappyAccountsPasteboardStringType] owner:nil];
-  [pasteboard setString:code forType:StrappyAccountsPasteboardStringType];
+    XPPasteboardStringType] owner:nil];
+  [pasteboard setString:code forType:XPPasteboardStringType];
 }
 
 - (void)openChatGPTVerificationURL:(id)sender

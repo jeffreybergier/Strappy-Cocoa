@@ -3,6 +3,9 @@
 #include "strappy_core.h"
 
 #include <ctype.h>
+#include <errno.h>
+#include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -36,6 +39,62 @@ static int strappy_provider_ascii_contains_case_insensitive(
     }
   }
   return 0;
+}
+
+int strappy_provider_parse_optional_positive_integer(const char *text,
+                                                      long long *value_out)
+{
+  char *end;
+  long long value;
+
+  if (value_out == NULL) {
+    return 0;
+  }
+  *value_out = 0LL;
+  if ((text == NULL) || (text[0] == '\0')) {
+    return 1;
+  }
+  errno = 0;
+  end = NULL;
+  value = strtoll(text, &end, 10);
+  if ((errno == ERANGE) || (end == text) || (end == NULL) ||
+      (*end != '\0') || (value <= 0LL)) {
+    return 0;
+  }
+  *value_out = value;
+  return 1;
+}
+
+int strappy_provider_price_per_million_to_per_token(const char *text,
+                                                     char **price_out)
+{
+  char buffer[64];
+  char *end;
+  double price_per_million;
+  int written;
+
+  if (price_out == NULL) {
+    return 0;
+  }
+  *price_out = NULL;
+  if ((text == NULL) || (text[0] == '\0')) {
+    return 1;
+  }
+  errno = 0;
+  end = NULL;
+  price_per_million = strtod(text, &end);
+  if ((errno == ERANGE) || (end == text) || (end == NULL) ||
+      (*end != '\0') || !isfinite(price_per_million) ||
+      (price_per_million < 0.0)) {
+    return 0;
+  }
+  written = snprintf(buffer, sizeof(buffer), "%.17g",
+                     price_per_million / 1000000.0);
+  if ((written <= 0) || ((size_t)written >= sizeof(buffer))) {
+    return 0;
+  }
+  *price_out = strappy_string_duplicate(buffer);
+  return *price_out != NULL;
 }
 
 int strappy_provider_chatgpt_is_enabled(void)

@@ -6,8 +6,9 @@
 
 CC := clang
 NODE ?= node
-CJSON_DIR ?= /altivec/libs/core/third_party/cJSON
-FONTAWESOME_FONT_DIR ?= /altivec/libs/cocoa/build-phone/Resources/Fonts
+ALTIVEC_ROOT ?= /altivec
+CJSON_DIR ?= $(ALTIVEC_ROOT)/libs/core/third_party/cJSON
+FONTAWESOME_FONT_DIR ?= $(ALTIVEC_ROOT)/libs/cocoa/build-phone/Resources/Fonts
 SHARED_DIR := ../shared
 STRAPPY_INFO_PLIST_PATH ?= $(abspath ../macOS/Info.plist)
 BUILD_DIR := build-linux

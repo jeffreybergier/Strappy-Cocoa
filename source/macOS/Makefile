@@ -49,8 +49,10 @@ BUNDLE_FONT_DIRS = $(ALTIVECCOCOA_DIR)/Resources/Fonts
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
 EXTRA_BUNDLE_STEPS = @set -e; $(MAKE) -f Makefile $(FONTAWESOME_GENERATED); echo "  > copying shared resources"; for resource in $(SHARED_RESOURCES); do cp "$$resource" "$@/Contents/Resources/"; done
 
-# Import common Mac build engine.
-include /altivec/altivec_common_mac.mk
+# Import common Mac build engine. CI mounts the toolchain at /altivec, while
+# local checkouts can override ALTIVEC_ROOT without requiring a root symlink.
+ALTIVEC_ROOT ?= /altivec
+include $(ALTIVEC_ROOT)/altivec_common_mac.mk
 
 $(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
 	python3 $(FONTAWESOME_GENERATOR) --font-dir "$(FONTAWESOME_FONT_DIR)" --webview-map "$(FONTAWESOME_WEBVIEW_MAP)"

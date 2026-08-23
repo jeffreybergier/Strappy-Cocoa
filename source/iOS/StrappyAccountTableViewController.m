@@ -2,12 +2,8 @@
 
 #import "StrappyAppearance.h"
 #import "StrappyAuthentication.h"
-#import "StrappyKeychain.h"
 #import "StrappySession.h"
 #import "XPUIKit.h"
-
-#include <errno.h>
-#include <stdlib.h>
 
 static NSString *StrappyAccountString(NSDictionary *row, NSString *key)
 {
@@ -158,9 +154,8 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
     @"responses_endpoint")];
   token = nil;
   if (![provider isEqualToString:@"openai_chatgpt"]) {
-    (void)[[StrappyKeychain sharedKeychain] loadBearerToken:&token
-      forProviderIdentifier:provider
-      providerAccountIdentifier:[self providerAccountIdentifier]];
+    token = [StrappySession bearerTokenForProviderAccountIdentifier:
+      [self providerAccountIdentifier] error:nil];
   }
   [[self tokenField] setText:(token != nil) ? token : @""];
   maximum = [[account objectForKey:@"max_output_tokens"] longLongValue];
@@ -238,11 +233,8 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   NSString *endpoint;
   NSString *token;
   NSString *maximumText;
-  const char *maximumBytes;
-  char *maximumEnd;
   long long maximum;
   NSError *error;
-  BOOL credentialSaved;
 
   (void)sender;
   identifier = [self providerAccountIdentifier];
@@ -258,14 +250,9 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
     maximumText = [[[self maxOutputField] text]
       stringByTrimmingCharactersInSet:
         [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    maximumBytes = [maximumText UTF8String];
-    maximumEnd = NULL;
-    errno = 0;
-    maximum = (maximumBytes != NULL) ?
-      strtoll(maximumBytes, &maximumEnd, 10) : 0LL;
-    if (([maximumText length] == 0U) || (errno == ERANGE) ||
-        (maximumEnd == maximumBytes) || (maximumEnd == NULL) ||
-        (*maximumEnd != '\0') || (maximum <= 0LL)) {
+    if (![StrappySession parseOptionalPositiveIntegerText:maximumText
+                                                    value:&maximum] ||
+        (maximum <= 0LL)) {
       [self showError:nil title:NSLocalizedString(
         @"Maximum Output Tokens Must Be a Positive Integer", nil)];
       return;
@@ -287,28 +274,8 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   error = nil;
   if (![StrappySession updateProviderAccountIdentifier:identifier
     displayName:name responsesEndpoint:endpoint maxOutputTokens:maximum
-    error:&error]) {
+    bearerToken:token error:&error]) {
     [self showError:error title:NSLocalizedString(@"Could Not Save Account", nil)];
-    return;
-  }
-  credentialSaved = YES;
-  if (![provider isEqualToString:@"openai_chatgpt"]) {
-    StrappyKeychain *keychain;
-    NSObject *credentialLock;
-
-    keychain = [StrappyKeychain sharedKeychain];
-    credentialLock = [keychain credentialLockForProviderIdentifier:provider
-      providerAccountIdentifier:identifier];
-    @synchronized(credentialLock) {
-      credentialSaved = ([token length] > 0U) ?
-        [keychain saveBearerToken:token forProviderIdentifier:provider
-          providerAccountIdentifier:identifier] :
-        [keychain deleteBearerTokenForProviderIdentifier:provider
-          providerAccountIdentifier:identifier];
-    }
-  }
-  if (!credentialSaved) {
-    [self showError:nil title:NSLocalizedString(@"Could Not Save Credential", nil)];
     return;
   }
   if ([self presentedModally]) {
@@ -565,8 +532,12 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
       [self providerAccountIdentifier] error:&error]) {
     [self showError:error title:NSLocalizedString(@"Could Not Delete Account", nil)];
   } else if ([self presentedModally]) {
+    [StrappyAuthentication forgetAuthenticationForProviderAccountIdentifier:
+      [self providerAccountIdentifier]];
     [self XP_dismissViewControllerAnimated:YES];
   } else {
+    [StrappyAuthentication forgetAuthenticationForProviderAccountIdentifier:
+      [self providerAccountIdentifier]];
     [[self navigationController] popViewControllerAnimated:YES];
   }
 }

@@ -12,8 +12,6 @@ extern NSString * const StrappyKeychainDidChangeNotification;
 }
 
 + (StrappyKeychain *)sharedKeychain;
-+ (NSString *)defaultAPIEndpoint;
-
 - (NSString *)apiEndpoint;
 - (NSString *)apiToken;
 - (BOOL)hasAPICredentials;

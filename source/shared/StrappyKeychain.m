@@ -2,8 +2,6 @@
 
 #import "XPFoundation.h"
 #import "XPKeychain.h"
-#include "strappy_config.h"
-#include "strappy_openai_oauth.h"
 
 #include <stdlib.h>
 
@@ -31,8 +29,7 @@ static NSString * const kStrappyCredentialKindKey = @"credential_kind";
 static NSString * const kStrappyDisplayNameKey = @"display_name";
 
 enum {
-  kStrappyChatGPTCredentialFormatVersion =
-    STRAPPY_OPENAI_OAUTH_CREDENTIAL_FORMAT_VERSION,
+  kStrappyChatGPTCredentialFormatVersion = 1,
   kStrappyBearerCredentialFormatVersion = 1,
   kStrappyChatGPTCredentialMaximumBytes = 2 * 1024 * 1024
 };
@@ -173,11 +170,6 @@ static NSString *StrappyEnvironmentValueOrNil(NSString *name)
     instance = [[StrappyKeychain alloc] init];
   }
   return instance;
-}
-
-+ (NSString *)defaultAPIEndpoint
-{
-  return [NSString stringWithUTF8String:STRAPPY_CONFIG_DEFAULT_API_ENDPOINT];
 }
 
 - (void)loadIfNeeded

@@ -115,7 +115,6 @@ static NSString *StrappyPromptCompletionNotificationBody(
     cacert = [AltivecCore certPath];
     NSParameterAssert(cacert);
     [StrappySession bootstrapProcessWithCACertPath:cacert];
-    [StrappyAuthentication bootstrapProcessWithCACertPath:cacert];
   }
 
   [AIFontAwesome registerBundledFonts];

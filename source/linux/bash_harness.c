@@ -1,4 +1,4 @@
-#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
 
 #include "strappy_bash.h"
 #include "strappy_db.h"
@@ -276,6 +276,7 @@ static void harness_unlink_database(const char *catalog_path)
 static int harness_run(void)
 {
   char temp_dir[1024];
+  char resolved_temp_dir[1024];
   char catalog_path[1200];
   char pid_path[1200];
   char expected_cwd[1100];
@@ -320,6 +321,15 @@ static int harness_run(void)
       (mkdtemp(temp_dir) == NULL)) {
     perror("Could not create bash harness directory");
     return 0;
+  }
+  if (realpath(temp_dir, resolved_temp_dir) == NULL) {
+    perror("Could not resolve bash harness directory");
+    goto cleanup;
+  }
+  written = snprintf(temp_dir, sizeof(temp_dir), "%s", resolved_temp_dir);
+  if ((written <= 0) || ((size_t)written >= sizeof(temp_dir))) {
+    fprintf(stderr, "Resolved bash harness directory is too long.\n");
+    goto cleanup;
   }
   written = snprintf(catalog_path,
                      sizeof(catalog_path),

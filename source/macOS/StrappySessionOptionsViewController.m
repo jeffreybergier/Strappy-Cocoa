@@ -2,7 +2,6 @@
 
 #import "StrappyAuthentication.h"
 #import "XPAppKit.h"
-#include <math.h>
 
 static const CGFloat kStrappyInspectorInset = 12.0;
 static const CGFloat kStrappyInspectorGap = 8.0;
@@ -210,7 +209,7 @@ static void StrappyInspectorDistributeAssistantSegmentWidths(
     return;
   }
 
-  baseWidth = floor(availableWidth / (CGFloat)count);
+  baseWidth = availableWidth / (CGFloat)count;
   usedWidth = 0.0;
   for (index = 0; index < count; index++) {
     CGFloat width;

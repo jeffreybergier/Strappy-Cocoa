@@ -3,9 +3,23 @@
 #import <QuartzCore/QuartzCore.h>
 
 #import "XPUIKit.h"
-#import "strappy_palette.h"
 
 static const CGFloat kStrappyLegacyGroupedCellCornerRadius = 10.0f;
+static const CGFloat kStrappyPrimaryTintRed = 142.0f;
+static const CGFloat kStrappyPrimaryTintGreen = 27.0f;
+static const CGFloat kStrappyPrimaryTintBlue = 207.0f;
+static const CGFloat kStrappyDarkTintRed = 114.0f;
+static const CGFloat kStrappyDarkTintGreen = 22.0f;
+static const CGFloat kStrappyDarkTintBlue = 166.0f;
+static const CGFloat kStrappyMutedPurpleRed = 137.0f;
+static const CGFloat kStrappyMutedPurpleGreen = 102.0f;
+static const CGFloat kStrappyMutedPurpleBlue = 154.0f;
+static const CGFloat kStrappyLightPurpleRed = 216.0f;
+static const CGFloat kStrappyLightPurpleGreen = 194.0f;
+static const CGFloat kStrappyLightPurpleBlue = 229.0f;
+static const CGFloat kStrappySectionHeaderTintRed = 149.4166667f;
+static const CGFloat kStrappySectionHeaderTintGreen = 138.8583333f;
+static const CGFloat kStrappySectionHeaderTintBlue = 153.9416667f;
 
 @interface StrappyLegacySelectionBackgroundView : UIView {
  @private
@@ -168,41 +182,41 @@ static UIRectCorner StrappyLegacySelectionRoundedCornersForView(
 
 + (UIColor *)primaryTintColor
 {
-  return [UIColor colorWithRed:(STRAPPY_PRIMARY_TINT_RED / 255.0f)
-                         green:(STRAPPY_PRIMARY_TINT_GREEN / 255.0f)
-                          blue:(STRAPPY_PRIMARY_TINT_BLUE / 255.0f)
+  return [UIColor colorWithRed:(kStrappyPrimaryTintRed / 255.0f)
+                         green:(kStrappyPrimaryTintGreen / 255.0f)
+                          blue:(kStrappyPrimaryTintBlue / 255.0f)
                          alpha:1.0f];
 }
 
 + (UIColor *)highlightedPrimaryTintColor
 {
-  return [UIColor colorWithRed:(STRAPPY_DARK_TINT_RED / 255.0f)
-                         green:(STRAPPY_DARK_TINT_GREEN / 255.0f)
-                          blue:(STRAPPY_DARK_TINT_BLUE / 255.0f)
+  return [UIColor colorWithRed:(kStrappyDarkTintRed / 255.0f)
+                         green:(kStrappyDarkTintGreen / 255.0f)
+                          blue:(kStrappyDarkTintBlue / 255.0f)
                          alpha:1.0f];
 }
 
 + (UIColor *)legacyBarTintColor
 {
-  return [UIColor colorWithRed:(STRAPPY_MUTED_PURPLE_RED / 255.0f)
-                         green:(STRAPPY_MUTED_PURPLE_GREEN / 255.0f)
-                          blue:(STRAPPY_MUTED_PURPLE_BLUE / 255.0f)
+  return [UIColor colorWithRed:(kStrappyMutedPurpleRed / 255.0f)
+                         green:(kStrappyMutedPurpleGreen / 255.0f)
+                          blue:(kStrappyMutedPurpleBlue / 255.0f)
                          alpha:1.0f];
 }
 
 + (UIColor *)modernBarBackgroundColor
 {
-  return [UIColor colorWithRed:(STRAPPY_LIGHT_PURPLE_RED / 255.0f)
-                         green:(STRAPPY_LIGHT_PURPLE_GREEN / 255.0f)
-                          blue:(STRAPPY_LIGHT_PURPLE_BLUE / 255.0f)
+  return [UIColor colorWithRed:(kStrappyLightPurpleRed / 255.0f)
+                         green:(kStrappyLightPurpleGreen / 255.0f)
+                          blue:(kStrappyLightPurpleBlue / 255.0f)
                          alpha:1.0f];
 }
 
 + (UIColor *)tableSectionHeaderTintColor
 {
-  return [UIColor colorWithRed:(STRAPPY_SECTION_HEADER_TINT_RED / 255.0f)
-                         green:(STRAPPY_SECTION_HEADER_TINT_GREEN / 255.0f)
-                          blue:(STRAPPY_SECTION_HEADER_TINT_BLUE / 255.0f)
+  return [UIColor colorWithRed:(kStrappySectionHeaderTintRed / 255.0f)
+                         green:(kStrappySectionHeaderTintGreen / 255.0f)
+                          blue:(kStrappySectionHeaderTintBlue / 255.0f)
                          alpha:1.0f];
 }
 

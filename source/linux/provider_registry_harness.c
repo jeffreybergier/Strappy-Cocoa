@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../shared/strappy_core.h"
 #include "../shared/strappy_provider.h"
 
 static int harness_definition_is_complete(
@@ -30,12 +31,18 @@ int main(void)
   const strappy_provider_definition *other;
   strappy_provider_kind parsed;
   char *endpoint;
+  char *price;
   char *error;
+  long long integer_value;
   size_t index;
   int ok;
 
   error = NULL;
+  price = NULL;
+  strappy_secure_free_string(NULL);
+  strappy_secure_free_string(strappy_string_duplicate("credential"));
   ok = (strappy_provider_count() == 3U) &&
+    (strappy_unix_milliseconds() > 0LL) &&
     strappy_provider_registry_is_complete(&error);
   for (index = 0U; ok && (index < strappy_provider_count()); index++) {
     ok = harness_definition_is_complete(strappy_provider_at(index));
@@ -85,6 +92,28 @@ int main(void)
       (STRAPPY_PROVIDER_ACCOUNT_MISSING_PROVIDER |
        STRAPPY_PROVIDER_ACCOUNT_MISSING_DISPLAY_NAME));
 
+  ok = ok &&
+    strappy_provider_parse_optional_positive_integer("", &integer_value) &&
+    (integer_value == 0LL) &&
+    strappy_provider_parse_optional_positive_integer("14286", &integer_value) &&
+    (integer_value == 14286LL) &&
+    !strappy_provider_parse_optional_positive_integer("0", &integer_value) &&
+    !strappy_provider_parse_optional_positive_integer("12x", &integer_value) &&
+    !strappy_provider_parse_optional_positive_integer("9223372036854775808",
+                                                       &integer_value) &&
+    strappy_provider_price_per_million_to_per_token("1.25", &price) &&
+    (price != NULL) && (strcmp(price, "1.2500000000000001e-06") == 0);
+  free(price);
+  price = NULL;
+  ok = ok &&
+    strappy_provider_price_per_million_to_per_token("", &price) &&
+    (price == NULL) &&
+    !strappy_provider_price_per_million_to_per_token("-1", &price) &&
+    !strappy_provider_price_per_million_to_per_token("nan", &price) &&
+    !strappy_provider_price_per_million_to_per_token("1 USD", &price);
+  free(price);
+  price = NULL;
+
   /* The minimal provider is intentionally manual and generic. Its operation
    * table must advertise neither a catalog operation nor hosted tools. */
   ok = ok &&
@@ -112,6 +141,7 @@ int main(void)
                                                              &error);
   ok = ok && (endpoint == NULL) && (error != NULL);
   free(error);
+  free(price);
   error = NULL;
   for (index = 0U;
        ok && (index < (sizeof(invalid_other_endpoints) /

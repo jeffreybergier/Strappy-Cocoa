@@ -2,10 +2,6 @@
 
 #import "StrappySession.h"
 
-#include <errno.h>
-#include <math.h>
-#include <stdlib.h>
-
 enum {
   kStrappyOtherModelPrimarySegment = 0,
   kStrappyOtherModelDeleteSegment = 1
@@ -55,33 +51,13 @@ static NSString *StrappyEditorPricePerMillion(NSDictionary *row,
 static NSString *StrappyEditorPricePerToken(id value, BOOL *valid)
 {
   NSString *text;
-  const char *bytes;
-  char *end;
-  double perMillion;
 
-  if (valid != NULL) {
-    *valid = YES;
-  }
   text = [value isKindOfClass:[NSString class]] ?
     [(NSString *)value stringByTrimmingCharactersInSet:
       [NSCharacterSet whitespaceAndNewlineCharacterSet]] :
     ([value respondsToSelector:@selector(stringValue)] ?
       [value stringValue] : @"");
-  if ([text length] == 0U) {
-    return nil;
-  }
-  bytes = [text UTF8String];
-  errno = 0;
-  end = NULL;
-  perMillion = strtod(bytes, &end);
-  if ((errno == ERANGE) || (end == bytes) || (end == NULL) ||
-      (*end != '\0') || !isfinite(perMillion) || (perMillion < 0.0)) {
-    if (valid != NULL) {
-      *valid = NO;
-    }
-    return nil;
-  }
-  return [NSString stringWithFormat:@"%.17g", perMillion / 1000000.0];
+  return [StrappySession pricePerTokenForPricePerMillionText:text valid:valid];
 }
 
 static NSTextField *StrappyEditorLabel(NSRect frame, NSString *text,

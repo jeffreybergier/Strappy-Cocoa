@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.h>
+#import "StrappySession.h"
 
 extern NSString * const StrappyAuthenticationDidChangeNotification;
 
@@ -12,7 +12,8 @@ typedef enum StrappyAuthenticationState {
   StrappyAuthenticationStateCancelled
 } StrappyAuthenticationState;
 
-@interface StrappyAuthentication : NSObject {
+@interface StrappyAuthentication : NSObject
+    <StrappyChatGPTAuthorizationObserver> {
  @private
   StrappyAuthenticationState state_;
   NSString *verificationURL_;
@@ -26,6 +27,8 @@ typedef enum StrappyAuthenticationState {
 
 + (StrappyAuthentication *)sharedAuthentication;
 + (StrappyAuthentication *)authenticationForProviderAccountIdentifier:
+  (NSString *)providerAccountIdentifier;
++ (void)forgetAuthenticationForProviderAccountIdentifier:
   (NSString *)providerAccountIdentifier;
 + (BOOL)isChatGPTProviderEnabled;
 - (StrappyAuthenticationState)state;

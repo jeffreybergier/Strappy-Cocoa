@@ -78,7 +78,8 @@ VALIDATE_PATHS = . $(SHARED_DIR)
 # The common Phone engine also exposes IPA packaging targets. Keep that engine
 # private so Strappy's public build targets only produce Debian packages.
 ifeq ($(STRAPPY_PHONE_INTERNAL_BUILD),1)
-include /altivec/altivec_common_phone.mk
+ALTIVEC_ROOT ?= /altivec
+include $(ALTIVEC_ROOT)/altivec_common_phone.mk
 
 $(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
 	python3 $(FONTAWESOME_GENERATOR) --font-dir "$(FONTAWESOME_FONT_DIR)" --webview-map "$(FONTAWESOME_WEBVIEW_MAP)"

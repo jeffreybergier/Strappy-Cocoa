@@ -62,6 +62,7 @@
   #define XPButtonTypeMomentaryLight NSButtonTypeMomentaryLight
   #define XPButtonTypeSwitch         NSButtonTypeSwitch
   #define XPProgressIndicatorStyleSpinning NSProgressIndicatorStyleSpinning
+  #define XPPasteboardStringType     NSPasteboardTypeString
 #elif defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 1050
   #define XPBezelStyleRounded        NSRoundedBezelStyle
   #define XPBezelStyleTexturedSquare NSTexturedSquareBezelStyle
@@ -69,6 +70,7 @@
   #define XPButtonTypeMomentaryLight NSMomentaryLightButton
   #define XPButtonTypeSwitch         NSSwitchButton
   #define XPProgressIndicatorStyleSpinning NSProgressIndicatorSpinningStyle
+  #define XPPasteboardStringType     NSStringPboardType
 #else
   #define XPBezelStyleRounded        NSRoundedBezelStyle
   #define XPBezelStyleTexturedSquare NSTexturedSquareBezelStyle
@@ -76,6 +78,7 @@
   #define XPButtonTypeMomentaryLight NSMomentaryLightButton
   #define XPButtonTypeSwitch         NSSwitchButton
   #define XPProgressIndicatorStyleSpinning NSProgressIndicatorSpinningStyle
+  #define XPPasteboardStringType     NSStringPboardType
 #endif
 
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 1050

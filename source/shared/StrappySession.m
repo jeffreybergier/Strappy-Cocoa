@@ -14,7 +14,24 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
+
+typedef struct StrappyChatGPTAuthorizationCancellationContext {
+  id<StrappyChatGPTAuthorizationObserver> observer;
+  id context;
+} StrappyChatGPTAuthorizationCancellationContext;
+
+static int StrappyChatGPTAuthorizationShouldCancel(void *userData)
+{
+  StrappyChatGPTAuthorizationCancellationContext *context;
+
+  context = (StrappyChatGPTAuthorizationCancellationContext *)userData;
+  if ((context == NULL) || (context->observer == nil)) {
+    return 1;
+  }
+  return [context->observer
+    strappyChatGPTAuthorizationShouldCancelWithContext:context->context] ?
+    1 : 0;
+}
 
 static NSString *StrappyStageWebViewFonts(void)
 {
@@ -127,34 +144,6 @@ const NSUInteger StrappySessionMaximumLimit =
 static NSMutableDictionary *StrappySessionInFlightSessions = nil;
 static BOOL StrappySessionModelCatalogRefreshInFlight = NO;
 
-static void StrappySessionSecureFreeCString(char *value)
-{
-  volatile unsigned char *bytes;
-  size_t length;
-
-  if (value == NULL) {
-    return;
-  }
-  bytes = (volatile unsigned char *)value;
-  length = strlen(value);
-  while (length > 0U) {
-    *bytes++ = 0U;
-    length--;
-  }
-  free(value);
-}
-
-static long long StrappySessionNowMilliseconds(void)
-{
-  struct timeval now;
-
-  if ((gettimeofday(&now, NULL) != 0) || (now.tv_sec < 0)) {
-    return 0LL;
-  }
-  return ((long long)now.tv_sec * 1000LL) +
-    ((long long)now.tv_usec / 1000LL);
-}
-
 static int StrappySessionCopyChatGPTCredentials(
   const char *providerID,
   const char *providerAccountID,
@@ -251,7 +240,7 @@ static int StrappySessionCopyChatGPTCredentials(
       strappy_set_error(errorOut, "Sign in to ChatGPT before sending a prompt.");
     } else {
       credentialReady = YES;
-      nowMilliseconds = StrappySessionNowMilliseconds();
+      nowMilliseconds = strappy_unix_milliseconds();
       if (forceRefresh || (nowMilliseconds <= 0LL) ||
           ((expiresAtMilliseconds - nowMilliseconds) <=
            refreshLeewayMilliseconds)) {
@@ -308,8 +297,8 @@ static int StrappySessionCopyChatGPTCredentials(
         *accountIdentifierOut =
           strappy_string_duplicate([accountIdentifier UTF8String]);
         if ((*accessTokenOut == NULL) || (*accountIdentifierOut == NULL)) {
-          StrappySessionSecureFreeCString(*accessTokenOut);
-          StrappySessionSecureFreeCString(*accountIdentifierOut);
+          strappy_secure_free_string(*accessTokenOut);
+          strappy_secure_free_string(*accountIdentifierOut);
           *accessTokenOut = NULL;
           *accountIdentifierOut = NULL;
           strappy_set_error(errorOut,
@@ -2214,6 +2203,210 @@ static BOOL StrappySessionRecordFromOptions(
   return ok;
 }
 
++ (BOOL)isChatGPTProviderEnabled
+{
+  return strappy_provider_chatgpt_is_enabled() ? YES : NO;
+}
+
++ (long long)currentTimestampMilliseconds
+{
+  return strappy_unix_milliseconds();
+}
+
++ (NSString *)performChatGPTDeviceAuthorizationForProviderAccountIdentifier:
+                (NSString *)providerAccountIdentifier
+                observer:(id<StrappyChatGPTAuthorizationObserver>)observer
+                context:(id)operationContext
+                error:(NSError **)error
+{
+  StrappyChatGPTAuthorizationCancellationContext cancellationContext;
+  strappy_openai_oauth_configuration configuration;
+  strappy_openai_oauth_device device;
+  strappy_openai_oauth_credentials credentials;
+  StrappyKeychain *keychain;
+  NSObject *credentialLock;
+  NSString *verificationURL;
+  NSString *userCode;
+  NSString *accessToken;
+  NSString *refreshToken;
+  NSString *accountIdentifier;
+  char *strappyError;
+  int ok;
+
+  if (([providerAccountIdentifier length] == 0U) || (observer == nil)) {
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "ChatGPT authorization inputs are incomplete."];
+    }
+    return nil;
+  }
+  cancellationContext.observer = observer;
+  cancellationContext.context = operationContext;
+  strappy_openai_oauth_default_configuration(&configuration);
+  strappy_openai_oauth_device_init(&device);
+  strappy_openai_oauth_credentials_init(&credentials);
+  strappyError = NULL;
+  ok = strappy_openai_oauth_start_device_authorization(
+    &configuration, &device, StrappyChatGPTAuthorizationShouldCancel,
+    &cancellationContext, &strappyError);
+  if (ok) {
+    verificationURL = [NSString stringWithUTF8String:
+      configuration.verification_url];
+    userCode = [NSString stringWithUTF8String:device.user_code];
+    if ((verificationURL == nil) || (userCode == nil)) {
+      ok = 0;
+      strappy_set_error(&strappyError,
+                        "ChatGPT authorization response is invalid.");
+    } else {
+      [observer
+        strappyChatGPTAuthorizationDidReceiveVerificationURL:verificationURL
+                                                     userCode:userCode
+                                                      context:operationContext];
+    }
+  }
+  if (ok && !StrappyChatGPTAuthorizationShouldCancel(&cancellationContext)) {
+    ok = strappy_openai_oauth_complete_device_authorization(
+      &configuration, &device, &credentials,
+      StrappyChatGPTAuthorizationShouldCancel, &cancellationContext,
+      &strappyError);
+  } else {
+    ok = 0;
+  }
+  accountIdentifier = nil;
+  if (ok) {
+    accessToken = [NSString stringWithUTF8String:credentials.access_token];
+    refreshToken = [NSString stringWithUTF8String:credentials.refresh_token];
+    accountIdentifier = [NSString stringWithUTF8String:credentials.account_id];
+    keychain = [StrappyKeychain sharedKeychain];
+    credentialLock = [keychain
+      credentialLockForProviderIdentifier:@"openai_chatgpt"
+      providerAccountIdentifier:providerAccountIdentifier];
+    @synchronized(credentialLock) {
+      if ((accessToken == nil) || (refreshToken == nil) ||
+          (accountIdentifier == nil) ||
+          StrappyChatGPTAuthorizationShouldCancel(&cancellationContext) ||
+          ![keychain saveChatGPTAccessToken:accessToken
+                                refreshToken:refreshToken
+                           accountIdentifier:accountIdentifier
+                        expiresAtMilliseconds:
+                          credentials.expires_at_milliseconds
+                   providerAccountIdentifier:providerAccountIdentifier]) {
+        accountIdentifier = nil;
+      }
+    }
+    if (accountIdentifier == nil) {
+      ok = 0;
+      strappy_set_error(&strappyError,
+                        "The Keychain refused the ChatGPT credential write.");
+    }
+  }
+  if (!ok && (error != nil)) {
+    *error = [self errorFromCString:(strappyError != NULL) ? strappyError :
+      "ChatGPT sign-in failed."];
+  }
+  strappy_free_string(strappyError);
+  strappy_openai_oauth_credentials_destroy(&credentials);
+  strappy_openai_oauth_device_destroy(&device);
+  return accountIdentifier;
+}
+
++ (NSString *)refreshChatGPTCredentialsForProviderAccountIdentifier:
+                (NSString *)providerAccountIdentifier
+                expectedAccountIdentifier:(NSString *)expectedAccountIdentifier
+                observer:(id<StrappyChatGPTAuthorizationObserver>)observer
+                context:(id)operationContext
+                error:(NSError **)error
+{
+  StrappyChatGPTAuthorizationCancellationContext cancellationContext;
+  strappy_openai_oauth_configuration configuration;
+  strappy_openai_oauth_credentials credentials;
+  StrappyKeychain *keychain;
+  NSObject *credentialLock;
+  NSString *currentRefreshToken;
+  NSString *currentAccountIdentifier;
+  NSString *accessToken;
+  NSString *nextRefreshToken;
+  NSString *accountIdentifier;
+  char *strappyError;
+  int ok;
+
+  if (([providerAccountIdentifier length] == 0U) ||
+      ([expectedAccountIdentifier length] == 0U) || (observer == nil)) {
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "ChatGPT refresh inputs are incomplete."];
+    }
+    return nil;
+  }
+  cancellationContext.observer = observer;
+  cancellationContext.context = operationContext;
+  strappy_openai_oauth_default_configuration(&configuration);
+  strappy_openai_oauth_credentials_init(&credentials);
+  keychain = [StrappyKeychain sharedKeychain];
+  credentialLock = [keychain
+    credentialLockForProviderIdentifier:@"openai_chatgpt"
+    providerAccountIdentifier:providerAccountIdentifier];
+  currentRefreshToken = nil;
+  currentAccountIdentifier = nil;
+  accountIdentifier = nil;
+  strappyError = NULL;
+  ok = 0;
+  @synchronized(credentialLock) {
+    if (![keychain loadChatGPTAccessToken:NULL
+                                refreshToken:&currentRefreshToken
+                           accountIdentifier:&currentAccountIdentifier
+                        expiresAtMilliseconds:NULL
+                   providerAccountIdentifier:providerAccountIdentifier]) {
+      strappy_set_error(&strappyError,
+                        "Stored ChatGPT credentials are unavailable.");
+    } else if (![currentAccountIdentifier
+                 isEqualToString:expectedAccountIdentifier]) {
+      strappy_set_error(&strappyError,
+                        "The refreshed ChatGPT credential changed accounts.");
+    } else {
+      ok = strappy_openai_oauth_refresh_credentials(
+        &configuration, [currentRefreshToken UTF8String], &credentials,
+        StrappyChatGPTAuthorizationShouldCancel, &cancellationContext,
+        &strappyError);
+      if (ok) {
+        accessToken = [NSString stringWithUTF8String:credentials.access_token];
+        nextRefreshToken = [NSString stringWithUTF8String:
+          credentials.refresh_token];
+        accountIdentifier = [NSString stringWithUTF8String:
+          credentials.account_id];
+        if ((accountIdentifier == nil) ||
+            ![accountIdentifier isEqualToString:expectedAccountIdentifier]) {
+          accountIdentifier = nil;
+          ok = 0;
+          strappy_set_error(&strappyError,
+            "The refreshed ChatGPT credential changed accounts.");
+        } else if ((accessToken == nil) || (nextRefreshToken == nil) ||
+                   StrappyChatGPTAuthorizationShouldCancel(
+                     &cancellationContext) ||
+                   ![keychain saveChatGPTAccessToken:accessToken
+                                          refreshToken:nextRefreshToken
+                                     accountIdentifier:accountIdentifier
+                                  expiresAtMilliseconds:
+                                    credentials.expires_at_milliseconds
+                             providerAccountIdentifier:
+                               providerAccountIdentifier]) {
+          accountIdentifier = nil;
+          ok = 0;
+          strappy_set_error(&strappyError,
+            "The Keychain refused the refreshed ChatGPT credential write.");
+        }
+      }
+    }
+  }
+  if (!ok && (error != nil)) {
+    *error = [self errorFromCString:(strappyError != NULL) ? strappyError :
+      "ChatGPT credential refresh failed."];
+  }
+  strappy_free_string(strappyError);
+  strappy_openai_oauth_credentials_destroy(&credentials);
+  return accountIdentifier;
+}
+
 + (BOOL)initializeSessionStoreAndPrepareCredentials:(BOOL)prepareCredentials
                                                error:(NSError **)error
 {
@@ -2538,6 +2731,37 @@ static BOOL StrappySessionRecordFromOptions(
   return [self providerAccountCatalogVerifyingCredentials:YES error:error];
 }
 
++ (BOOL)parseOptionalPositiveIntegerText:(NSString *)text
+                                   value:(long long *)value
+{
+  if (![text isKindOfClass:[NSString class]]) {
+    text = @"";
+  }
+  return strappy_provider_parse_optional_positive_integer(
+    [text UTF8String], value) ? YES : NO;
+}
+
++ (NSString *)pricePerTokenForPricePerMillionText:(NSString *)text
+                                             valid:(BOOL *)valid
+{
+  char *price;
+  NSString *result;
+  int ok;
+
+  if (![text isKindOfClass:[NSString class]]) {
+    text = @"";
+  }
+  price = NULL;
+  ok = strappy_provider_price_per_million_to_per_token(
+    [text UTF8String], &price);
+  if (valid != NULL) {
+    *valid = ok ? YES : NO;
+  }
+  result = (price != NULL) ? [NSString stringWithUTF8String:price] : nil;
+  strappy_free_string(price);
+  return result;
+}
+
 + (NSArray *)providerAccountCatalogVerifyingCredentials:
                (BOOL)verifyCredentials
                                                    error:(NSError **)error
@@ -2860,6 +3084,148 @@ static BOOL StrappySessionRecordFromOptions(
                   @"updated", @"action",
                   nil]];
   return YES;
+}
+
++ (NSString *)bearerTokenForProviderAccountIdentifier:
+                (NSString *)providerAccountIdentifier
+                                                  error:(NSError **)error
+{
+  NSString *databasePath;
+  strappy_provider_account_record record;
+  NSString *providerIdentifier;
+  NSString *token;
+  StrappyKeychain *keychain;
+  NSObject *credentialLock;
+  char *strappyError;
+
+  if ([providerAccountIdentifier length] == 0U) {
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "Provider account identifier is missing."];
+    }
+    return nil;
+  }
+  databasePath = [self sessionsDatabasePath];
+  strappy_provider_account_record_init(&record);
+  strappyError = NULL;
+  if (!strappy_db_get_provider_account([databasePath fileSystemRepresentation],
+                                       [providerAccountIdentifier UTF8String],
+                                       &record, &strappyError)) {
+    if (error != nil) {
+      *error = [self errorFromCString:strappyError];
+    }
+    strappy_provider_account_record_destroy(&record);
+    strappy_free_string(strappyError);
+    return nil;
+  }
+  providerIdentifier = [NSString stringWithUTF8String:record.provider_id];
+  strappy_provider_account_record_destroy(&record);
+  strappy_free_string(strappyError);
+  keychain = [StrappyKeychain sharedKeychain];
+  credentialLock = [keychain
+    credentialLockForProviderIdentifier:providerIdentifier
+    providerAccountIdentifier:providerAccountIdentifier];
+  token = nil;
+  @synchronized(credentialLock) {
+    (void)[keychain loadBearerToken:&token
+      forProviderIdentifier:providerIdentifier
+      providerAccountIdentifier:providerAccountIdentifier];
+  }
+  return token;
+}
+
++ (BOOL)updateProviderAccountIdentifier:(NSString *)providerAccountIdentifier
+                            displayName:(NSString *)displayName
+                      responsesEndpoint:(NSString *)responsesEndpoint
+                        maxOutputTokens:(long long)maxOutputTokens
+                            bearerToken:(NSString *)bearerToken
+                                  error:(NSError **)error
+{
+  NSString *databasePath;
+  strappy_provider_account_record record;
+  NSString *providerIdentifier;
+  NSString *trimmedToken;
+  NSString *previousToken;
+  StrappyKeychain *keychain;
+  NSObject *credentialLock;
+  char *strappyError;
+  BOOL credentialSaved;
+  BOOL hadPreviousToken;
+
+  databasePath = [self sessionsDatabasePath];
+  strappy_provider_account_record_init(&record);
+  strappyError = NULL;
+  if (!strappy_db_get_provider_account([databasePath fileSystemRepresentation],
+                                       [providerAccountIdentifier UTF8String],
+                                       &record, &strappyError)) {
+    if (error != nil) {
+      *error = [self errorFromCString:strappyError];
+    }
+    strappy_provider_account_record_destroy(&record);
+    strappy_free_string(strappyError);
+    return NO;
+  }
+  providerIdentifier = [NSString stringWithUTF8String:record.provider_id];
+  strappy_provider_account_record_destroy(&record);
+  strappy_free_string(strappyError);
+  if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) {
+    return [self updateProviderAccountIdentifier:providerAccountIdentifier
+                                     displayName:displayName
+                               responsesEndpoint:responsesEndpoint
+                                 maxOutputTokens:maxOutputTokens
+                                           error:error];
+  }
+  trimmedToken = [bearerToken stringByTrimmingCharactersInSet:
+    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([providerIdentifier isEqualToString:@"openrouter"] &&
+      ([trimmedToken length] == 0U)) {
+    if (error != nil) {
+      *error = [self errorFromCString:"OpenRouter API key is required."];
+    }
+    return NO;
+  }
+  keychain = [StrappyKeychain sharedKeychain];
+  credentialLock = [keychain
+    credentialLockForProviderIdentifier:providerIdentifier
+    providerAccountIdentifier:providerAccountIdentifier];
+  previousToken = nil;
+  @synchronized(credentialLock) {
+    hadPreviousToken = [keychain loadBearerToken:&previousToken
+      forProviderIdentifier:providerIdentifier
+      providerAccountIdentifier:providerAccountIdentifier];
+    credentialSaved = ([trimmedToken length] > 0U) ?
+      [keychain saveBearerToken:trimmedToken
+          forProviderIdentifier:providerIdentifier
+          providerAccountIdentifier:providerAccountIdentifier] :
+      [keychain deleteBearerTokenForProviderIdentifier:providerIdentifier
+          providerAccountIdentifier:providerAccountIdentifier];
+  }
+  if (!credentialSaved) {
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "The Keychain refused the provider credential write."];
+    }
+    return NO;
+  }
+  if ([self updateProviderAccountIdentifier:providerAccountIdentifier
+                                displayName:displayName
+                          responsesEndpoint:responsesEndpoint
+                            maxOutputTokens:maxOutputTokens
+                                      error:error]) {
+    return YES;
+  }
+  @synchronized(credentialLock) {
+    if (hadPreviousToken) {
+      (void)[keychain saveBearerToken:previousToken
+        forProviderIdentifier:providerIdentifier
+        providerAccountIdentifier:providerAccountIdentifier];
+    } else {
+      (void)[keychain deleteBearerTokenForProviderIdentifier:
+        providerIdentifier
+        providerAccountIdentifier:providerAccountIdentifier];
+    }
+  }
+  return NO;
 }
 
 + (BOOL)archiveProviderAccountIdentifier:(NSString *)providerAccountIdentifier

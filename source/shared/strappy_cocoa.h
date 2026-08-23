@@ -16,6 +16,7 @@ typedef enum strappy_cocoa_timestamp_unit {
   STRAPPY_COCOA_TIMESTAMP_UNIT_APPLE_NANOSECONDS = 8
 } strappy_cocoa_timestamp_unit;
 
+long long strappy_cocoa_monotonic_milliseconds(void);
 char *strappy_cocoa_copy_localized_string(const char *key,
                                            char **error_out);
 char *strappy_cocoa_copy_app_version(char **error_out);

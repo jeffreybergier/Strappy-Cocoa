@@ -29,6 +29,16 @@ typedef enum StrappyWebViewPalette {
   StrappyWebViewPaletteNeutral
 } StrappyWebViewPalette;
 
+@protocol StrappyChatGPTAuthorizationObserver <NSObject>
+- (BOOL)strappyChatGPTAuthorizationShouldCancelWithContext:(id)context;
+- (void)strappyChatGPTAuthorizationDidReceiveVerificationURL:
+          (NSString *)verificationURL
+                                                       userCode:
+          (NSString *)userCode
+                                                        context:
+          (id)context;
+@end
+
 enum {
   StrappySessionOptionModel = 1U << 0,
   StrappySessionOptionAssistantSet = 1U << 1,
@@ -122,6 +132,19 @@ enum {
 + (NSString *)sessionsDatabasePath;
 + (BOOL)initializeSessionStoreWithError:(NSError **)error;
 + (BOOL)prepareProviderCredentialsWithError:(NSError **)error;
++ (BOOL)isChatGPTProviderEnabled;
++ (long long)currentTimestampMilliseconds;
++ (NSString *)performChatGPTDeviceAuthorizationForProviderAccountIdentifier:
+                (NSString *)providerAccountIdentifier
+                observer:(id<StrappyChatGPTAuthorizationObserver>)observer
+                context:(id)context
+                error:(NSError **)error;
++ (NSString *)refreshChatGPTCredentialsForProviderAccountIdentifier:
+                (NSString *)providerAccountIdentifier
+                expectedAccountIdentifier:(NSString *)expectedAccountIdentifier
+                observer:(id<StrappyChatGPTAuthorizationObserver>)observer
+                context:(id)context
+                error:(NSError **)error;
 + (NSString *)designatedProviderAccountIdentifierForProviderIdentifier:
                 (NSString *)providerIdentifier
                                                                error:
@@ -129,6 +152,10 @@ enum {
 + (NSArray *)providerCatalog;
 + (NSArray *)providerAccountCatalogWithError:(NSError **)error;
 + (NSArray *)verifiedProviderAccountCatalogWithError:(NSError **)error;
++ (BOOL)parseOptionalPositiveIntegerText:(NSString *)text
+                                   value:(long long *)value;
++ (NSString *)pricePerTokenForPricePerMillionText:(NSString *)text
+                                             valid:(BOOL *)valid;
 + (NSDictionary *)createProviderAccountForProviderIdentifier:
                     (NSString *)providerIdentifier
                                                         error:
@@ -137,6 +164,15 @@ enum {
                             displayName:(NSString *)displayName
                       responsesEndpoint:(NSString *)responsesEndpoint
                         maxOutputTokens:(long long)maxOutputTokens
+                                  error:(NSError **)error;
++ (NSString *)bearerTokenForProviderAccountIdentifier:
+                (NSString *)providerAccountIdentifier
+                                                  error:(NSError **)error;
++ (BOOL)updateProviderAccountIdentifier:(NSString *)providerAccountIdentifier
+                            displayName:(NSString *)displayName
+                      responsesEndpoint:(NSString *)responsesEndpoint
+                        maxOutputTokens:(long long)maxOutputTokens
+                            bearerToken:(NSString *)bearerToken
                                   error:(NSError **)error;
 + (BOOL)archiveProviderAccountIdentifier:(NSString *)providerAccountIdentifier
                                     error:(NSError **)error;

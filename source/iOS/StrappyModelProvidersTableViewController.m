@@ -4,10 +4,6 @@
 #import "StrappySession.h"
 #import "XPUIKit.h"
 
-#include <errno.h>
-#include <math.h>
-#include <stdlib.h>
-
 static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
 {
   id value;
@@ -396,22 +392,9 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
 - (NSString *)priceForFieldAtIndex:(NSUInteger)index valid:(BOOL *)valid
 {
   NSString *text;
-  const char *bytes;
-  char *end;
-  double value;
   text = [[[[self fields] objectAtIndex:index] text]
     stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if ([text length] == 0U) return nil;
-  bytes = [text UTF8String];
-  end = NULL;
-  errno = 0;
-  value = strtod(bytes, &end);
-  if ((errno == ERANGE) || (end == bytes) || (end == NULL) ||
-      (*end != '\0') || !isfinite(value) || (value < 0.0)) {
-    *valid = NO;
-    return nil;
-  }
-  return [NSString stringWithFormat:@"%.17g", value / 1000000.0];
+  return [StrappySession pricePerTokenForPricePerMillionText:text valid:valid];
 }
 
 - (void)saveModel:(id)sender

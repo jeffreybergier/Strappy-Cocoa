@@ -12235,6 +12235,7 @@ static int harness_run_multi_account_database_tests(
       "WHERE m.provider_id='other' AND m.wire_model_id='manual' "
       "AND p.allowed=1;",
       1LL,"provider preference for manual model") &&
+    strappy_db_mark_provider_account_used(path,other_one,12345LL,&error) &&
     strappy_db_set_default_account_model(path,other_one,manual_two,&error) &&
     strappy_db_set_default_account_model(path,other_two,manual_two,&error) &&
     strappy_db_get_default_account_model(path,&default_account,&default_model,&error) &&
@@ -12250,6 +12251,32 @@ static int harness_run_multi_account_database_tests(
     (strcmp(route.billing_kind,"unknown")==0) &&
     route.local_functions_enabled && !route.hosted_tools_enabled;
   strappy_model_route_record_destroy(&route);
+  if (ok) {
+    char *account_model;
+    char *plain_default_model;
+    strappy_model_record_list account_models;
+
+    account_model = NULL;
+    plain_default_model = NULL;
+    strappy_model_record_list_init(&account_models);
+    ok = strappy_db_get_account_model_id(
+           path,other_one,"manual",&account_model,&error) &&
+      (strcmp(account_model,manual_one)==0) &&
+      strappy_db_list_models_for_account(
+        path,other_one,"Manual Two",1,&account_models,&error) &&
+      (account_models.count==1U) &&
+      (strcmp(account_models.records[0].model_id,manual_one)==0) &&
+      strappy_db_set_default_model(path,manual_one,&error) &&
+      strappy_db_get_default_model(path,&plain_default_model,&error) &&
+      (strcmp(plain_default_model,manual_one)==0) &&
+      strappy_db_get_provider_account(path,other_one,&account,&error) &&
+      account.has_last_used_at_ms && (account.last_used_at_ms==12345LL) &&
+      strappy_db_set_default_account_model(path,other_two,manual_two,&error);
+    free(account_model);
+    free(plain_default_model);
+    strappy_model_record_list_destroy(&account_models);
+    strappy_provider_account_record_destroy(&account);
+  }
   if (ok) {
     free(options.provider_account_id);
     options.provider_account_id=strdup(other_one);
