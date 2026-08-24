@@ -338,6 +338,7 @@
 "Text Replacement" = "Text Replacement";
 "The chat could not be deleted." = "The chat could not be deleted.";
 "Thinking" = "Thinking";
+"Encrypted" = "Encrypted";
 "%@ (Selected)" = "%@ (Selected)";
 "An unknown error occurred." = "An unknown error occurred.";
 "This will permanently delete \"%@\" and all of its messages. This cannot be undone." = "This will permanently delete \"%@\" and all of its messages. This cannot be undone.";

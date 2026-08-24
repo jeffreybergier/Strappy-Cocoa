@@ -8547,6 +8547,9 @@ static int harness_test_ledger(void)
     "\"status\":\"completed\",\"encrypted_content\":\"encrypted\","
     "\"format\":\"test-v1\",\"signature\":\"sig-test\","
     "\"summary\":[{\"type\":\"summary_text\",\"text\":\"Plan\"}]},"
+    "{\"type\":\"reasoning\",\"id\":\"rs-encrypted\","
+    "\"status\":\"completed\",\"encrypted_content\":\"opaque\","
+    "\"format\":\"encrypted-v1\"},"
     "{\"type\":\"function_call\",\"id\":\"fc-test\","
     "\"call_id\":\"call-test\",\"name\":\"database_list\","
     "\"namespace\":\"local\",\"arguments\":\"{}\","
@@ -8688,7 +8691,7 @@ static int harness_test_ledger(void)
   ok = harness_verify_call_columns(db, request_json, response_json) &&
     harness_query_int(db,
                       "SELECT COUNT(*) FROM conversation_items;",
-                      &value) && (value == 6LL) &&
+                      &value) && (value == 7LL) &&
     harness_query_int(db,
                       "SELECT COUNT(*) FROM item_text_parts;",
                       &value) && (value == 3LL) &&
@@ -8705,6 +8708,11 @@ static int harness_test_ledger(void)
                       "SELECT COUNT(*) FROM reasoning_items WHERE "
                       "provider_format='test-v1' AND "
                       "provider_signature='sig-test';",
+                      &value) && (value == 1LL) &&
+    harness_query_int(db,
+                      "SELECT COUNT(*) FROM reasoning_items WHERE "
+                      "encrypted_content='opaque' AND "
+                      "provider_format='encrypted-v1';",
                       &value) && (value == 1LL) &&
     harness_query_int(db,
                       "SELECT COUNT(*) FROM web_searches w "
@@ -8733,7 +8741,7 @@ static int harness_test_ledger(void)
                                                 session_id,
                                                 &context,
                                                 &error) &&
-    (context.count == 6U);
+    (context.count == 7U);
   strappy_response_item_raw_record_list_destroy(&context);
   if (!ok) {
     fprintf(stderr, "Canonical Responses items failed: %s\n", error);
@@ -8747,7 +8755,7 @@ static int harness_test_ledger(void)
                                          &timeline,
                                          &error) &&
     harness_verify_timeline_hierarchy(&timeline, 0) &&
-    (timeline.count == 7U) &&
+    (timeline.count == 8U) &&
     (strcmp(timeline.records[0].role, "user") == 0) &&
     (strcmp(timeline.records[0].direction, "request") == 0) &&
     timeline.records[0].can_include_in_context &&
@@ -8783,33 +8791,37 @@ static int harness_test_ledger(void)
     timeline.records[2].can_include_in_context &&
     (strcmp(timeline.records[2].direction, "response") == 0) &&
     (timeline.records[2].http_attempt_id == call_id) &&
-    (strcmp(timeline.records[3].role, "api_function_call") == 0) &&
+    (strcmp(timeline.records[3].role, "api_reasoning") == 0) &&
     timeline.records[3].can_include_in_context &&
     (strcmp(timeline.records[3].direction, "response") == 0) &&
-    (strcmp(timeline.records[4].role, "api_item") == 0) &&
+    timeline.records[3].reasoning_encrypted &&
+    (strcmp(timeline.records[4].role, "api_function_call") == 0) &&
     timeline.records[4].can_include_in_context &&
-    (strcmp(timeline.records[4].kind,
-            STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) &&
-    (strcmp(timeline.records[4].response_item_action_json,
-            "{\"type\":\"search\",\"query\":\"Strappy Cocoa\","
-            "\"sources\":[{\"type\":\"url\","
-            "\"url\":\"https://example.com/search\"}]}") == 0) &&
+    (strcmp(timeline.records[4].direction, "response") == 0) &&
     (strcmp(timeline.records[5].role, "api_item") == 0) &&
     timeline.records[5].can_include_in_context &&
     (strcmp(timeline.records[5].kind,
-            STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0) &&
-    (strcmp(timeline.records[5].response_item_url,
-            "https://example.com/article") == 0) &&
-    (strcmp(timeline.records[5].response_item_title,
-            "Example Article") == 0) &&
-    (strcmp(timeline.records[5].response_item_status, "completed") == 0) &&
-    (strcmp(timeline.records[5].response_item_http_status, "200") == 0) &&
-    (strstr(timeline.records[5].response_item_title,
-            "Fetched page body") == NULL) &&
-    (strcmp(timeline.records[6].role, "assistant") == 0) &&
+            STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) &&
+    (strcmp(timeline.records[5].response_item_action_json,
+            "{\"type\":\"search\",\"query\":\"Strappy Cocoa\","
+            "\"sources\":[{\"type\":\"url\","
+            "\"url\":\"https://example.com/search\"}]}") == 0) &&
+    (strcmp(timeline.records[6].role, "api_item") == 0) &&
     timeline.records[6].can_include_in_context &&
-    (strcmp(timeline.records[6].direction, "response") == 0) &&
-    (strcmp(timeline.records[6].content, "Done") == 0);
+    (strcmp(timeline.records[6].kind,
+            STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0) &&
+    (strcmp(timeline.records[6].response_item_url,
+            "https://example.com/article") == 0) &&
+    (strcmp(timeline.records[6].response_item_title,
+            "Example Article") == 0) &&
+    (strcmp(timeline.records[6].response_item_status, "completed") == 0) &&
+    (strcmp(timeline.records[6].response_item_http_status, "200") == 0) &&
+    (strstr(timeline.records[6].response_item_title,
+            "Fetched page body") == NULL) &&
+    (strcmp(timeline.records[7].role, "assistant") == 0) &&
+    timeline.records[7].can_include_in_context &&
+    (strcmp(timeline.records[7].direction, "response") == 0) &&
+    (strcmp(timeline.records[7].content, "Done") == 0);
   if (!ok) {
     size_t timeline_index;
 
@@ -8851,7 +8863,7 @@ static int harness_test_ledger(void)
                                       session_id,
                                       model_request_id,
                                       0U,
-                                      6U,
+                                      7U,
                                       0U,
                                       &error) &&
     strappy_session_update_model_request_include_in_context(path,
@@ -8862,9 +8874,9 @@ static int harness_test_ledger(void)
     harness_context_selection_matches(path,
                                       session_id,
                                       model_request_id,
-                                      6U,
-                                      6U,
-                                      6U,
+                                      7U,
+                                      7U,
+                                      7U,
                                       &error);
   if (!ok) {
     fprintf(stderr,

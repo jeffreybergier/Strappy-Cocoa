@@ -883,6 +883,7 @@ static void strappy_session_webview_message_from_record(
   message->request_endpoint = record->request_endpoint;
   message->text = record->content;
   message->reasoning = record->reasoning;
+  message->reasoning_encrypted = record->reasoning_encrypted;
   message->metadata_json = record->metadata_json;
   message->render_state_json = record->render_state_json;
   message->created_at = record->created_at;

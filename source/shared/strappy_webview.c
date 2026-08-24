@@ -110,6 +110,7 @@ typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_HARNESS,
   STRAPPY_WEBVIEW_LABEL_DEVELOPER,
   STRAPPY_WEBVIEW_LABEL_THINKING,
+  STRAPPY_WEBVIEW_LABEL_ENCRYPTED,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_TOOLS,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_SERVING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_HYDRATING,
@@ -161,6 +162,7 @@ static const char * const g_strappy_webview_label_keys[
   "Harness",
   "Harness",
   "Thinking",
+  "Encrypted",
   "[fa:gears] Grinding",
   "[fa:bell-concierge] Serving",
   "[fa:martini-glass] Hydrating",
@@ -223,6 +225,7 @@ static void strappy_webview_assign_localized_labels(
   labels->harness = values[STRAPPY_WEBVIEW_LABEL_HARNESS];
   labels->developer = values[STRAPPY_WEBVIEW_LABEL_DEVELOPER];
   labels->thinking = values[STRAPPY_WEBVIEW_LABEL_THINKING];
+  labels->encrypted = values[STRAPPY_WEBVIEW_LABEL_ENCRYPTED];
   labels->processing_tools =
     values[STRAPPY_WEBVIEW_LABEL_PROCESSING_TOOLS];
   for (index = 0U;
@@ -977,6 +980,17 @@ static const char *strappy_webview_thinking_label(
     return labels->thinking;
   }
   return "Thinking";
+}
+
+static const char *strappy_webview_encrypted_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->encrypted != NULL) &&
+      (labels->encrypted[0] != '\0')) {
+    return labels->encrypted;
+  }
+  return "Encrypted";
 }
 
 static const char *strappy_webview_processing_waiting_label(
@@ -4085,6 +4099,9 @@ static char *strappy_webview_message_html_with_display_registry(
   role = ((message != NULL) && (message->role != NULL) &&
           (message->role[0] != '\0')) ? message->role : "assistant";
   text = (message != NULL) ? strappy_webview_string_or_empty(message->text) : "";
+  if ((message != NULL) && message->reasoning_encrypted) {
+    text = strappy_webview_encrypted_label(labels);
+  }
   reasoning = (message != NULL) ?
     strappy_webview_string_or_empty(message->reasoning) : "";
   created_at = (message != NULL) ?

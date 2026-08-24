@@ -73,6 +73,7 @@ void strappy_session_message_record_init(strappy_session_message_record *record)
   record->render_state_json = NULL;
   record->message_json = NULL;
   record->reasoning = NULL;
+  record->reasoning_encrypted = 0;
   record->message_key = NULL;
   record->target_message_key = NULL;
   record->direction = NULL;
@@ -438,7 +439,9 @@ static int strappy_db_response_append_citation_sources(
   return 1;
 }
 
-static char *strappy_db_response_item_display_text(cJSON *item)
+static char *strappy_db_response_item_display_text(
+  cJSON *item,
+  int *reasoning_encrypted_out)
 {
   strappy_db_sql_buffer buffer;
   cJSON *type;
@@ -453,6 +456,9 @@ static char *strappy_db_response_item_display_text(cJSON *item)
   size_t index;
 
   memset(&buffer, 0, sizeof(buffer));
+  if (reasoning_encrypted_out != NULL) {
+    *reasoning_encrypted_out = 0;
+  }
   if (cJSON_IsString(item) && (item->valuestring != NULL)) {
     return strappy_string_duplicate(item->valuestring);
   }
@@ -481,6 +487,11 @@ static char *strappy_db_response_item_display_text(cJSON *item)
                                                    "content")) {
       strappy_db_sql_buffer_destroy(&buffer);
       return NULL;
+    }
+    if ((buffer.length == 0U) &&
+        cJSON_IsString(cJSON_GetObjectItem(item, "encrypted_content")) &&
+        (reasoning_encrypted_out != NULL)) {
+      *reasoning_encrypted_out = 1;
     }
   } else if ((strcmp(type_text, "function_call") == 0) ||
              (strcmp(type_text, "custom_tool_call") == 0)) {
@@ -5211,7 +5222,8 @@ static int strappy_db_semantic_populate_timeline_item(
     strappy_db_semantic_json_string(item, "type"));
   record->render_role = strappy_string_duplicate(role);
   record->role = strappy_string_duplicate(role);
-  record->content = strappy_db_response_item_display_text(item);
+  record->content = strappy_db_response_item_display_text(
+    item, &record->reasoning_encrypted);
   record->message_json = cJSON_PrintUnformatted(item);
   record->direction = strappy_db_column_string(stmt, 6);
   record->message_key = strappy_db_response_timeline_key(

@@ -1681,6 +1681,7 @@ static BOOL StrappySessionRecordFromOptions(
   NSNumber *httpStatus;
   NSNumber *includeInContext;
   NSNumber *isError;
+  NSNumber *reasoningEncrypted;
   NSNumber *promptIndex;
   NSNumber *roundIndex;
   NSNumber *attemptIndex;
@@ -1741,6 +1742,8 @@ static BOOL StrappySessionRecordFromOptions(
   httpStatus = [NSNumber numberWithLong:record->http_status];
   includeInContext = [NSNumber numberWithBool:(record->include_in_context ? YES : NO)];
   isError = [NSNumber numberWithBool:(record->is_error ? YES : NO)];
+  reasoningEncrypted = [NSNumber numberWithBool:
+    (record->reasoning_encrypted ? YES : NO)];
   turnKey = [StrappySession stringFromCStringOrEmpty:record->turn_key];
   promptGroupKey =
     [StrappySession stringFromCStringOrEmpty:record->prompt_group_key];
@@ -1807,6 +1810,7 @@ static BOOL StrappySessionRecordFromOptions(
     renderStateJSON, @"render_state_json",
     messageJSON, @"message_json",
     reasoning, @"reasoning",
+    reasoningEncrypted, @"reasoning_encrypted",
     messageKey, @"message_key",
     targetMessageKey, @"target_message_key",
     direction, @"direction",

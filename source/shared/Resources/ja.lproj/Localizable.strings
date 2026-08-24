@@ -338,6 +338,7 @@
 "Text Replacement" = "テキスト置換";
 "The chat could not be deleted." = "チャットを削除できませんでした。";
 "Thinking" = "思考中";
+"Encrypted" = "暗号化済み";
 "%@ (Selected)" = "%@（選択中）";
 "An unknown error occurred." = "不明なエラーが発生しました。";
 "This will permanently delete \"%@\" and all of its messages. This cannot be undone." = "「%@」とそのすべてのメッセージを完全に削除します。この操作は取り消せません。";

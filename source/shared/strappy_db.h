@@ -115,6 +115,7 @@ typedef struct strappy_session_message_record {
   char *render_state_json;
   char *message_json;
   char *reasoning;
+  int reasoning_encrypted;
   char *message_key;
   char *target_message_key;
   char *direction;

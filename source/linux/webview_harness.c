@@ -101,6 +101,7 @@ static int harness_check_localized_labels(void)
        harness_expect_equal(labels->harness, "Harness") &&
        harness_expect_equal(labels->developer, "Harness") &&
        harness_expect_equal(labels->thinking, "Thinking") &&
+       harness_expect_equal(labels->encrypted, "Encrypted") &&
        harness_expect_equal(labels->processing_tools,
                             "[fa:gears] Grinding") &&
        harness_expect_equal(labels->processing_autoscroll_on,
@@ -2821,6 +2822,7 @@ static int harness_check_responses_items(void)
   char *call_html;
   char *reasoning_html;
   char *secondary_reasoning_html;
+  char *encrypted_reasoning_html;
   char *request_reasoning_html;
   char *function_html;
   char *confirm_function_html;
@@ -2844,6 +2846,7 @@ static int harness_check_responses_items(void)
   labels.tool_call = "Localized Tool Request";
   labels.tool_result = "Localized Tool Response";
   labels.thinking = "Localized Thinking";
+  labels.encrypted = "Localized Encrypted";
   labels.included_in_future_context =
     "Localized Included in Future Context";
   labels.answer_quality = "Localized Answer Quality";
@@ -2907,6 +2910,12 @@ static int harness_check_responses_items(void)
   secondary_reasoning_html =
     strappy_webview_message_html(&message, &labels, NULL, NULL);
 
+  message.element_id = "response-reasoning-3";
+  message.text = "reasoning";
+  message.reasoning_encrypted = 1;
+  encrypted_reasoning_html =
+    strappy_webview_message_html(&message, &labels, NULL, NULL);
+
   message.element_id = "request-reasoning-1";
   message.round_id = 4LL;
   message.api_call_id = 0LL;
@@ -2914,6 +2923,7 @@ static int harness_check_responses_items(void)
   message.attempt_number = 0L;
   message.direction = "request";
   message.text = "Retained prior reasoning.";
+  message.reasoning_encrypted = 0;
   request_reasoning_html =
     strappy_webview_message_html(&message, &labels, NULL, NULL);
 
@@ -3278,6 +3288,16 @@ static int harness_check_responses_items(void)
        harness_expect_not_contains(secondary_reasoning_html,
                                    "tool-card-open") &&
        harness_expect_contains(
+         encrypted_reasoning_html,
+         "class=\"tool-card-summary\">Localized Thinking: "
+         "Localized Encrypted</span>") &&
+       harness_expect_contains(
+         encrypted_reasoning_html,
+         "class=\"tool-card-body api-reasoning-body\">"
+         "Localized Encrypted</div>") &&
+       harness_expect_not_contains(encrypted_reasoning_html,
+                                   "Thinking: reasoning") &&
+       harness_expect_contains(
          request_reasoning_html,
          "id=\"request-reasoning-1\" class=\"row api_reasoning\"") &&
        harness_expect_contains(request_reasoning_html,
@@ -3625,6 +3645,7 @@ static int harness_check_responses_items(void)
   strappy_webview_free(confirm_function_html);
   strappy_webview_free(function_html);
   strappy_webview_free(request_reasoning_html);
+  strappy_webview_free(encrypted_reasoning_html);
   strappy_webview_free(secondary_reasoning_html);
   strappy_webview_free(reasoning_html);
   strappy_webview_free(call_html);
