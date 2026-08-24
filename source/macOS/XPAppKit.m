@@ -1,5 +1,7 @@
 #import "XPAppKit.h"
 
+#include <dlfcn.h>
+
 static NSInvocation *XPAppKitInvocation(id target, SEL selector)
 {
   NSMethodSignature *signature;
@@ -144,6 +146,27 @@ static id XPAppKitInvokeObjectObject(id target, SEL selector, id objectValue)
   return result;
 }
 
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && \
+    MAC_OS_X_VERSION_MAX_ALLOWED >= 101000
+static void XPAppKitInvokeAlertDidEnd(id delegate,
+                                      SEL selector,
+                                      NSAlert *alert,
+                                      NSInteger returnCode,
+                                      void *contextInfo)
+{
+  NSInvocation *invocation;
+
+  invocation = XPAppKitInvocation(delegate, selector);
+  if (invocation == nil) {
+    return;
+  }
+  [invocation setArgument:&alert atIndex:2];
+  [invocation setArgument:&returnCode atIndex:3];
+  [invocation setArgument:&contextInfo atIndex:4];
+  [invocation invoke];
+}
+#endif
+
 static NSPrintOperation *XPAppKitPrintOperationForTarget(id target)
 {
   NSPrintInfo *printInfo;
@@ -179,6 +202,43 @@ static id XPAppKitLegacyWebFrameViewForView(NSView *view)
 }
 
 @implementation NSWindow (XPAppKit)
+
+- (void)XP_beginSheet:(NSWindow *)sheet
+{
+  SEL selector;
+  NSInvocation *invocation;
+  id application;
+  id delegate;
+  SEL didEndSelector;
+  void *contextInfo;
+
+  if (sheet == nil) {
+    return;
+  }
+
+  selector = @selector(beginSheet:completionHandler:);
+  if ([self respondsToSelector:selector]) {
+    [self performSelector:selector withObject:sheet withObject:nil];
+    return;
+  }
+
+  application = NSApp;
+  selector =
+    @selector(beginSheet:modalForWindow:modalDelegate:didEndSelector:contextInfo:);
+  invocation = XPAppKitInvocation(application, selector);
+  if (invocation == nil) {
+    return;
+  }
+  delegate = nil;
+  didEndSelector = NULL;
+  contextInfo = NULL;
+  [invocation setArgument:&sheet atIndex:2];
+  [invocation setArgument:&self atIndex:3];
+  [invocation setArgument:&delegate atIndex:4];
+  [invocation setArgument:&didEndSelector atIndex:5];
+  [invocation setArgument:&contextInfo atIndex:6];
+  [invocation invoke];
+}
 
 - (CGFloat)XP_titlebarHeight
 {
@@ -486,17 +546,42 @@ static id XPAppKitLegacyWebFrameViewForView(NSView *view)
                      didEndSelector:(SEL)didEndSelector
                         contextInfo:(void *)contextInfo
 {
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  SEL selector;
+  NSInvocation *invocation;
+
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && \
+    MAC_OS_X_VERSION_MAX_ALLOWED >= 101000
+  selector = @selector(beginSheetModalForWindow:completionHandler:);
+  if ([self respondsToSelector:selector]) {
+    void (^completionHandler)(NSModalResponse);
+
+    completionHandler = ^(NSModalResponse returnCode) {
+      if ((delegate != nil) && (didEndSelector != NULL)) {
+        XPAppKitInvokeAlertDidEnd(delegate,
+                                 didEndSelector,
+                                 self,
+                                 returnCode,
+                                 contextInfo);
+      }
+    };
+    [self performSelector:selector
+               withObject:window
+               withObject:completionHandler];
+    return;
+  }
 #endif
-  [self beginSheetModalForWindow:window
-                   modalDelegate:delegate
-                  didEndSelector:didEndSelector
-                     contextInfo:contextInfo];
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
+
+  selector =
+    @selector(beginSheetModalForWindow:modalDelegate:didEndSelector:contextInfo:);
+  invocation = XPAppKitInvocation(self, selector);
+  if (invocation == nil) {
+    return;
+  }
+  [invocation setArgument:&window atIndex:2];
+  [invocation setArgument:&delegate atIndex:3];
+  [invocation setArgument:&didEndSelector atIndex:4];
+  [invocation setArgument:&contextInfo atIndex:5];
+  [invocation invoke];
 }
 
 @end
@@ -576,15 +661,16 @@ static id XPAppKitLegacyWebFrameViewForView(NSView *view)
                       withObject:body];
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && \
     MAC_OS_X_VERSION_MAX_ALLOWED >= 1080
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-  [notification performSelector:@selector(setSoundName:)
-                      withObject:NSUserNotificationDefaultSoundName];
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+  {
+    NSString **defaultSoundName;
+
+    defaultSoundName = (NSString **)dlsym(RTLD_DEFAULT,
+                                          "NSUserNotificationDefaultSoundName");
+    if ((defaultSoundName != NULL) && (*defaultSoundName != nil)) {
+      [notification performSelector:@selector(setSoundName:)
+                          withObject:*defaultSoundName];
+    }
+  }
 #endif
   [center performSelector:@selector(deliverNotification:)
                withObject:notification];

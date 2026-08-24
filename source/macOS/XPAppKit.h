@@ -125,6 +125,7 @@
 #endif
 
 @interface NSWindow (XPAppKit)
+- (void)XP_beginSheet:(NSWindow *)sheet;
 - (void)XP_setToolbarPreferenceStyle;
 - (CGFloat)XP_titlebarHeight;
 - (CGFloat)XP_backingScaleFactor;

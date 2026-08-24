@@ -451,10 +451,6 @@ static int strappy_cocoa_parse_fixed_digits(const char **cursor_in_out,
   return 1;
 }
 
-#if defined(__APPLE__) && defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
 /*
  * These Core Foundation Gregorian utilities preserve ISO 8601's proleptic
  * Gregorian calendar and astronomical year zero on every supported Apple OS.
@@ -471,8 +467,16 @@ static int strappy_cocoa_calendar_components_to_unix_seconds(
   char **error_out)
 {
 #ifdef __APPLE__
+#if defined(__clang__)
+#pragma clang diagnostic push
+/* Deviation Record: Approved by Jeff on 2026/08/24: Using legacy CoreFoundation functions for date calculations. */
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
   CFGregorianDate calendar_date;
   CFGregorianDate normalized_date;
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
   CFTimeZoneRef time_zone;
   CFAbsoluteTime absolute_time;
   double unix_seconds;
@@ -491,9 +495,17 @@ static int strappy_cocoa_calendar_components_to_unix_seconds(
   calendar_date.hour = (SInt8)hour;
   calendar_date.minute = (SInt8)minute;
   calendar_date.second = (double)second;
+#if defined(__clang__)
+#pragma clang diagnostic push
+/* Deviation Record: Approved by Jeff on 2026/08/24: Using legacy CoreFoundation functions for date calculations. */
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
   absolute_time = CFGregorianDateGetAbsoluteTime(calendar_date, time_zone);
   /* A component round trip rejects normalized dates such as February 30. */
   normalized_date = CFAbsoluteTimeGetGregorianDate(absolute_time, time_zone);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
   CFRelease(time_zone);
 
   if ((normalized_date.year != calendar_date.year) ||
@@ -559,9 +571,6 @@ static int strappy_cocoa_calendar_components_to_unix_seconds(
 #endif
   return 1;
 }
-#if defined(__APPLE__) && defined(__clang__)
-#pragma clang diagnostic pop
-#endif
 
 static int strappy_cocoa_parse_iso8601_value(const char *iso8601,
                                              long long *unix_seconds_out,
@@ -1147,16 +1156,13 @@ int strappy_cocoa_copy_container_info(const char *container_path,
   CFDictionaryRef profile_info;
   CFDictionaryRef validation_info;
   CFPropertyListRef property_list;
-  CFDataRef data;
   CFURLRef url;
-  CFStringRef property_error;
   char *bundle_path;
   char *creator;
   char *identifier;
   char *metadata_path;
   size_t container_length;
   size_t metadata_length;
-  SInt32 resource_error;
 
   if ((identifier_out == NULL) || (creator_out == NULL) ||
       (bundle_path_out == NULL)) {
@@ -1196,33 +1202,63 @@ int strappy_cocoa_copy_container_info(const char *container_path,
   if (url == NULL) {
     return 1;
   }
-  data = NULL;
-  resource_error = 0;
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-  if (!CFURLCreateDataAndPropertiesFromResource(kCFAllocatorDefault,
-                                                 url,
-                                                 &data,
-                                                 NULL,
-                                                 NULL,
-                                                 &resource_error)) {
-    CFRelease(url);
-    return 1;
+#if (defined(MAC_OS_X_VERSION_MAX_ALLOWED) && \
+     MAC_OS_X_VERSION_MAX_ALLOWED >= 1060) || \
+    defined(__IPHONE_OS_VERSION_MAX_ALLOWED)
+  {
+    CFErrorRef property_error;
+    CFPropertyListFormat property_format;
+    CFReadStreamRef stream;
+
+    stream = CFReadStreamCreateWithFile(kCFAllocatorDefault, url);
+    if ((stream == NULL) || !CFReadStreamOpen(stream)) {
+      if (stream != NULL) {
+        CFRelease(stream);
+      }
+      CFRelease(url);
+      return 1;
+    }
+    property_error = NULL;
+    property_list = CFPropertyListCreateWithStream(kCFAllocatorDefault,
+                                                    stream,
+                                                    0,
+                                                    kCFPropertyListImmutable,
+                                                    &property_format,
+                                                    &property_error);
+    CFReadStreamClose(stream);
+    CFRelease(stream);
+    if (property_error != NULL) {
+      CFRelease(property_error);
+    }
   }
-  property_error = NULL;
-  property_list = CFPropertyListCreateFromXMLData(kCFAllocatorDefault,
-                                                   data,
-                                                   kCFPropertyListImmutable,
-                                                   &property_error);
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
-  if (property_error != NULL) {
-    CFRelease(property_error);
+#else
+  {
+    CFDataRef data;
+    CFStringRef property_error;
+    SInt32 resource_error;
+
+    data = NULL;
+    resource_error = 0;
+    if (!CFURLCreateDataAndPropertiesFromResource(kCFAllocatorDefault,
+                                                   url,
+                                                   &data,
+                                                   NULL,
+                                                   NULL,
+                                                   &resource_error)) {
+      CFRelease(url);
+      return 1;
+    }
+    property_error = NULL;
+    property_list = CFPropertyListCreateFromXMLData(kCFAllocatorDefault,
+                                                     data,
+                                                     kCFPropertyListImmutable,
+                                                     &property_error);
+    if (property_error != NULL) {
+      CFRelease(property_error);
+    }
+    CFRelease(data);
   }
-  CFRelease(data);
+#endif
   CFRelease(url);
   if ((property_list == NULL) ||
       (CFGetTypeID(property_list) != CFDictionaryGetTypeID())) {
@@ -1278,23 +1314,35 @@ int strappy_cocoa_copy_container_info(const char *container_path,
   return 1;
 }
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
 static char *strappy_cocoa_copy_base_iso8601_timestamp(
   long long unix_seconds,
   char **error_out)
 {
   char buffer[32];
+#if defined(__clang__)
+#pragma clang diagnostic push
+/* Deviation Record: Approved by Jeff on 2026/08/24: Using legacy CoreFoundation functions for date calculations. */
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
   CFGregorianDate utc_date;
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
   CFAbsoluteTime absolute_time;
   int written;
 
   absolute_time =
     (CFAbsoluteTime)((double)unix_seconds -
                      kCFAbsoluteTimeIntervalSince1970);
+#if defined(__clang__)
+#pragma clang diagnostic push
+/* Deviation Record: Approved by Jeff on 2026/08/24: Using legacy CoreFoundation functions for date calculations. */
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
   utc_date = CFAbsoluteTimeGetGregorianDate(absolute_time, NULL);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
   written = snprintf(buffer,
                      sizeof(buffer),
                      "%04ld-%02d-%02dT%02d:%02d:%02dZ",
@@ -1310,9 +1358,6 @@ static char *strappy_cocoa_copy_base_iso8601_timestamp(
   }
   return strappy_string_duplicate(buffer);
 }
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
 #else
 static char *strappy_cocoa_copy_file_contents(const char *path,
                                                char **error_out)

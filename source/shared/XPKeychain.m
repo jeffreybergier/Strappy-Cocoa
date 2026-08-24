@@ -304,11 +304,6 @@ static NSString *xpkc_iosProtoForScheme(NSString *scheme)
 
 #else
 
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-
 static SecProtocolType xpkc_macProtoForScheme(NSString *scheme)
 {
   if ([scheme isEqualToString:@"http"]) {
@@ -658,6 +653,53 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
 
 + (NSArray *)genericPasswordAccountsForService:(NSString *)service
 {
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
+  NSMutableDictionary *query;
+  CFTypeRef matches;
+  NSArray *rows;
+  NSMutableArray *accounts;
+  OSStatus status;
+  id row;
+
+  if ([service length] == 0U) {
+    return [NSArray array];
+  }
+
+  query = [NSMutableDictionary dictionary];
+  [query setObject:(id)kSecClassGenericPassword forKey:(id)kSecClass];
+  [query setObject:service forKey:(id)kSecAttrService];
+  [query setObject:(id)kCFBooleanTrue forKey:(id)kSecReturnAttributes];
+  [query setObject:(id)kSecMatchLimitAll forKey:(id)kSecMatchLimit];
+  matches = NULL;
+  status = SecItemCopyMatching((CFDictionaryRef)query, &matches);
+  if (status == errSecItemNotFound) {
+    return [NSArray array];
+  }
+  if ((status != errSecSuccess) || (matches == NULL)) {
+    NSLog(@"XPKeychain.genericPasswordAccounts status=%d service=%@",
+          (int)status,
+          service);
+    if (matches != NULL) {
+      CFRelease(matches);
+    }
+    return [NSArray array];
+  }
+
+  rows = (CFGetTypeID(matches) == CFArrayGetTypeID()) ?
+    (NSArray *)matches : [NSArray arrayWithObject:(id)matches];
+  accounts = [NSMutableArray array];
+  for (row in rows) {
+    NSString *account;
+
+    account = [row isKindOfClass:[NSDictionary class]] ?
+      [row objectForKey:(id)kSecAttrAccount] : nil;
+    if (([account length] > 0U) && ![accounts containsObject:account]) {
+      [accounts addObject:account];
+    }
+  }
+  CFRelease(matches);
+  return accounts;
+#else
   const char *serviceCString;
   size_t serviceLength;
   SecKeychainAttribute searchAttribute;
@@ -736,6 +778,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
   }
   CFRelease(search);
   return accounts;
+#endif
 }
 
 + (BOOL)deleteGenericPasswordForService:(NSString *)service
@@ -885,9 +928,5 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
 }
 
 @end
-
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
 
 #endif

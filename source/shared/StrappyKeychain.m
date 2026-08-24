@@ -50,22 +50,11 @@ static NSString *StrappyKeychainServiceForProvider(NSString *provider)
 
 static NSData *StrappyKeychainPropertyListData(NSDictionary *propertyList)
 {
-  NSString *errorDescription;
   NSData *data;
 
-  errorDescription = nil;
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
   data = [NSPropertyListSerialization
-    dataFromPropertyList:propertyList
-                  format:NSPropertyListBinaryFormat_v1_0
-        errorDescription:&errorDescription];
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-  [errorDescription release];
+    XP_dataWithPropertyList:propertyList
+                     format:NSPropertyListBinaryFormat_v1_0];
   if ([data length] > (NSUInteger)kStrappyChatGPTCredentialMaximumBytes) {
     return nil;
   }
@@ -74,7 +63,6 @@ static NSData *StrappyKeychainPropertyListData(NSDictionary *propertyList)
 
 static NSDictionary *StrappyKeychainPropertyListFromData(NSData *data)
 {
-  NSString *errorDescription;
   NSPropertyListFormat format;
   id propertyList;
 
@@ -82,21 +70,11 @@ static NSDictionary *StrappyKeychainPropertyListFromData(NSData *data)
       ([data length] > (NSUInteger)kStrappyChatGPTCredentialMaximumBytes)) {
     return nil;
   }
-  errorDescription = nil;
   format = NSPropertyListOpenStepFormat;
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
   propertyList = [NSPropertyListSerialization
-    propertyListFromData:data
-         mutabilityOption:NSPropertyListImmutable
-                   format:&format
-         errorDescription:&errorDescription];
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-  [errorDescription release];
+    XP_propertyListWithData:data
+                     options:(XPUInteger)NSPropertyListImmutable
+                      format:&format];
   return ([propertyList isKindOfClass:[NSDictionary class]] &&
           (format == NSPropertyListBinaryFormat_v1_0)) ? propertyList : nil;
 }

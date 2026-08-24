@@ -254,15 +254,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   if ((window == nil) || (sheet_ == nil)) {
     return;
   }
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-  [NSApp beginSheet:sheet_ modalForWindow:window modalDelegate:nil
-      didEndSelector:NULL contextInfo:NULL];
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
+  [window XP_beginSheet:sheet_];
 }
 
 - (void)reloadCatalog

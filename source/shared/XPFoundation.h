@@ -40,6 +40,19 @@ typedef enum XPPlatformFamily {
 
 @end
 
+@interface NSPropertyListSerialization (XPFoundation)
+
+/* The NSError-based property-list APIs arrived after Tiger. These helpers
+ * dispatch to them where present and retain the legacy string-error selectors
+ * as a runtime fallback for macOS 10.4 and 10.5. */
++ (NSData *)XP_dataWithPropertyList:(id)propertyList
+                              format:(NSPropertyListFormat)format;
++ (id)XP_propertyListWithData:(NSData *)data
+                       options:(XPUInteger)options
+                        format:(NSPropertyListFormat *)format;
+
+@end
+
 @interface NSNumber (XPFoundation)
 
 /* NSNumber's NSInteger/NSUInteger convenience selectors are newer than the

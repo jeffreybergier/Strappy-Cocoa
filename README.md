@@ -120,13 +120,9 @@ just what is required to make an app work on a 20 year old version of Mac OS X.
   conversion, -Wfloat-conversion, -Wimplicit-function-declaration, -Wobjc-
   method-access, -Wunguarded-availability, -Wno-unused-command-line-argument,
   and -Wno-semicolon-before-method-body.
-- iOS Clang shared sources: the same flags, plus -Wno-conversion, -Wno-sign-
-  conversion, -Wno-float-conversion, -Wno-strict-prototypes, and -Wno-newline-
-  eof.
+- iOS Clang shared sources: the same flags.
 - Modern macOS Clang sources: -Wall, -Wextra, -Wsign-conversion, -Wfloat-
-  conversion, -Wno-semicolon-before-method-body, -Wno-conversion, -Wno-sign-
-  conversion, -Wno-float-conversion, -Wno-strict-prototypes, and -Wno-newline-
-  eof.
+  conversion, and -Wno-semicolon-before-method-body.
 - Legacy macOS GCC sources: -Wall and -Wextra.
 - Linux Clang test suite: -Wall, -Wextra, -Wconversion, -Wsign-conversion, and
   -Wfloat-conversion.

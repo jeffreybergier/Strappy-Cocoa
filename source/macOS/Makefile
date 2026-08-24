@@ -59,5 +59,6 @@ $(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
 
 MAC_FLAGS += $(EXTRA_FLAGS)
 MAC_LIBS += -framework Security
-CLANG_EXTRA_WARNINGS += -Wno-conversion -Wno-sign-conversion -Wno-float-conversion -Wno-strict-prototypes -Wno-newline-eof
+MAC_ANALYZE_SOURCE_FLAGS += -fblocks
+$(INT_DIR)/x64/XPAppKit.o $(INT_DIR)/arm/XPAppKit.o: MAC_FLAGS += -fblocks
 VALIDATE_PATHS = . $(SHARED_DIR)
