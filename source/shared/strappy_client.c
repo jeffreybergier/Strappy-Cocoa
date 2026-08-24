@@ -188,6 +188,72 @@ static int strappy_client_ensure_curl_initialized(char **error_out)
   return 1;
 }
 
+static int strappy_client_require_https(CURL *curl,
+                                        const char *url,
+                                        char **error_out)
+{
+  CURLcode code;
+#if defined(STRAPPY_ENABLE_LOOPBACK_HTTP_TESTS)
+  int is_loopback_test;
+
+  is_loopback_test = (url != NULL) &&
+    (strncmp(url, "http://127.0.0.1:", 17U) == 0);
+#else
+  (void)url;
+#endif
+
+#if LIBCURL_VERSION_NUM >= 0x075500
+#if defined(STRAPPY_ENABLE_LOOPBACK_HTTP_TESTS)
+  code = curl_easy_setopt(curl,
+                          CURLOPT_PROTOCOLS_STR,
+                          is_loopback_test ? "http,https" : "https");
+#else
+  code = curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "https");
+#endif
+  if (code == CURLE_OK) {
+#if defined(STRAPPY_ENABLE_LOOPBACK_HTTP_TESTS)
+    code = curl_easy_setopt(curl,
+                            CURLOPT_REDIR_PROTOCOLS_STR,
+                            is_loopback_test ? "http,https" : "https");
+#else
+    code = curl_easy_setopt(curl,
+                            CURLOPT_REDIR_PROTOCOLS_STR,
+                            "https");
+#endif
+  }
+#else
+#if defined(STRAPPY_ENABLE_LOOPBACK_HTTP_TESTS)
+  code = curl_easy_setopt(curl,
+                          CURLOPT_PROTOCOLS,
+                          is_loopback_test ?
+                            (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS) :
+                            (long)CURLPROTO_HTTPS);
+#else
+  code = curl_easy_setopt(curl, CURLOPT_PROTOCOLS, (long)CURLPROTO_HTTPS);
+#endif
+  if (code == CURLE_OK) {
+#if defined(STRAPPY_ENABLE_LOOPBACK_HTTP_TESTS)
+    code = curl_easy_setopt(curl,
+                            CURLOPT_REDIR_PROTOCOLS,
+                            is_loopback_test ?
+                              (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS) :
+                              (long)CURLPROTO_HTTPS);
+#else
+    code = curl_easy_setopt(curl,
+                            CURLOPT_REDIR_PROTOCOLS,
+                            (long)CURLPROTO_HTTPS);
+#endif
+  }
+#endif
+  if (code != CURLE_OK) {
+    strappy_set_formatted_error(error_out,
+                                "Could not require HTTPS for curl: %s",
+                                curl_easy_strerror(code));
+    return 0;
+  }
+  return 1;
+}
+
 int strappy_client_set_cainfo(const char *path, char **error_out)
 {
   char *copy;
@@ -476,6 +542,13 @@ int strappy_client_fetch_openrouter_user_models_json(
     strappy_client_destroy_headers(headers);
     free(url);
     strappy_set_error(error_out, "Could not create curl handle.");
+    return 0;
+  }
+  if (!strappy_client_require_https(curl, url, error_out)) {
+    curl_easy_cleanup(curl);
+    free(user_agent);
+    strappy_client_destroy_headers(headers);
+    free(url);
     return 0;
   }
 
@@ -1005,6 +1078,13 @@ int strappy_client_send_provider_responses_json_with_transport(
     strappy_client_destroy_headers(headers);
     free(url);
     strappy_set_error(error_out, "Could not create Responses curl handle.");
+    return 0;
+  }
+  if (!strappy_client_require_https(curl, url, error_out)) {
+    curl_easy_cleanup(curl);
+    free(user_agent);
+    strappy_client_destroy_headers(headers);
+    free(url);
     return 0;
   }
 

@@ -145,7 +145,7 @@ static int strappy_provider_always_available(void)
   return 1;
 }
 
-static int strappy_provider_url_is_absolute_http(const char *endpoint)
+static int strappy_provider_url_is_absolute_https(const char *endpoint)
 {
   const char *authority;
   const char *cursor;
@@ -155,8 +155,10 @@ static int strappy_provider_url_is_absolute_http(const char *endpoint)
   }
   if (strncmp(endpoint, "https://", 8U) == 0) {
     authority = endpoint + 8U;
-  } else if (strncmp(endpoint, "http://", 7U) == 0) {
+#if defined(STRAPPY_ENABLE_LOOPBACK_HTTP_TESTS)
+  } else if (strncmp(endpoint, "http://127.0.0.1:", 17U) == 0) {
     authority = endpoint + 7U;
+#endif
   } else {
     return 0;
   }
@@ -179,9 +181,10 @@ static int strappy_provider_validate_configurable_endpoint(
   int is_override,
   char **error_out)
 {
-  if ((definition == NULL) || !strappy_provider_url_is_absolute_http(endpoint)) {
+  if ((definition == NULL) ||
+      !strappy_provider_url_is_absolute_https(endpoint)) {
     strappy_set_error(error_out,
-                      "Provider endpoint must be an absolute HTTP or HTTPS URL.");
+                      "Provider endpoint must be an absolute HTTPS URL.");
     return 0;
   }
   if (is_override && !definition->allows_endpoint_override) {

@@ -22,6 +22,7 @@ int main(void)
 {
   static const char *invalid_other_endpoints[] = {
     "relative/responses",
+    "http://example.test/responses",
     "ftp://example.test/responses",
     "https:///responses",
     "https://example.test/line\nbreak"

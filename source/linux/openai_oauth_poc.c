@@ -334,16 +334,45 @@ static int poc_add_header(struct curl_slist **headers, const char *value)
   return 1;
 }
 
-static void poc_configure_tls(CURL *curl)
+static int poc_configure_tls(CURL *curl)
 {
   const char *cainfo;
+  CURLcode code;
 
-  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-  cainfo = getenv("STRAPPY_OAUTH_CAINFO");
-  if ((cainfo != NULL) && (cainfo[0] != '\0')) {
-    curl_easy_setopt(curl, CURLOPT_CAINFO, cainfo);
+#if LIBCURL_VERSION_NUM >= 0x075500
+  code = curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "https");
+  if (code == CURLE_OK) {
+    code = curl_easy_setopt(curl,
+                            CURLOPT_REDIR_PROTOCOLS_STR,
+                            "https");
   }
+#else
+  code = curl_easy_setopt(curl, CURLOPT_PROTOCOLS, (long)CURLPROTO_HTTPS);
+  if (code == CURLE_OK) {
+    code = curl_easy_setopt(curl,
+                            CURLOPT_REDIR_PROTOCOLS,
+                            (long)CURLPROTO_HTTPS);
+  }
+#endif
+  if (code == CURLE_OK) {
+    code = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+  }
+  if (code == CURLE_OK) {
+    code = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+  }
+  cainfo = getenv("STRAPPY_OAUTH_CAINFO");
+  if ((code == CURLE_OK) &&
+      (cainfo != NULL) &&
+      (cainfo[0] != '\0')) {
+    code = curl_easy_setopt(curl, CURLOPT_CAINFO, cainfo);
+  }
+  if (code != CURLE_OK) {
+    fprintf(stderr,
+            "Could not configure HTTPS: %s\n",
+            curl_easy_strerror(code));
+    return 0;
+  }
+  return 1;
 }
 
 static char *poc_copy_user_agent(void)
@@ -433,7 +462,13 @@ static int poc_http_post(const char *url,
   curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION,
                    poc_http_progress_callback);
 #endif
-  poc_configure_tls(curl);
+  if (!poc_configure_tls(curl)) {
+    curl_easy_cleanup(curl);
+    free(user_agent);
+    curl_slist_free_all(headers);
+    poc_http_response_destroy(response);
+    return 0;
+  }
 
   code = curl_easy_perform(curl);
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response->status);
@@ -1662,7 +1697,13 @@ static int poc_send_luna_prompt(const poc_credentials *credentials)
                    poc_sse_progress_callback);
 #endif
   curl_easy_setopt(curl, CURLOPT_XFERINFODATA, (void *)&context);
-  poc_configure_tls(curl);
+  if (!poc_configure_tls(curl)) {
+    curl_easy_cleanup(curl);
+    free(user_agent);
+    curl_slist_free_all(headers);
+    poc_sse_context_destroy(&context);
+    return 0;
+  }
 
   code = curl_easy_perform(curl);
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
